@@ -1,16 +1,16 @@
 use std::sync::{Arc, RwLock};
 
 use talos_auth::{
-    AuthScope, AuthService, CloudLoginCancelRequest, CloudLoginService, CloudLoginStartRequest,
-    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, CloudSessionCache,
-    CloudSessionCacheEntry, CloudSessionCacheManager, CloudSessionUserSnapshot, RequestIdentity,
-    UserDto, UserService,
+    AuthService, CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginService,
+    CloudLoginStartRequest, CloudLoginStartResponse, CloudLoginStatusRequest,
+    CloudLoginStatusResponse, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
+    RequestIdentity, UserDto, UserService,
 };
 use talos_config::TalosPaths;
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
     AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, AuthSessionReadResponse,
-    AuthSessionSnapshot, AuthSessionStoreRequest, AuthSessionUserSnapshot, UserCurrentRequest,
+    AuthSessionSnapshot, AuthSessionUserSnapshot, UserCurrentRequest,
 };
 
 use crate::access::Actor;
@@ -89,13 +89,6 @@ impl AccountService {
         Ok(self.cloud_session_read()?.session_cache.clone())
     }
 
-    pub fn read_cached_access_token(&self, now_ms: i64) -> TalosResult<Option<String>> {
-        Ok(self
-            .cloud_session_cache()?
-            .read_candidate(now_ms)?
-            .map(|entry| entry.access_token))
-    }
-
     pub fn record_verified_access_token_use(&self, token: &str, now_ms: i64) -> TalosResult<()> {
         self.cloud_session_cache()?
             .record_verified_token_use(token, now_ms)
@@ -136,8 +129,9 @@ impl AccountService {
     pub async fn start_cloud_login(
         &self,
         request: CloudLoginStartRequest,
+        persistence: CloudLoginPersistence,
     ) -> TalosResult<CloudLoginStartResponse> {
-        self.cloud_login()?.start(request).await
+        self.cloud_login()?.start(request, persistence).await
     }
 
     pub async fn cloud_login_status(
@@ -165,26 +159,6 @@ impl AccountService {
             })
             .map(auth_session_snapshot_from_cache_entry);
         Ok(AuthSessionReadResponse { session })
-    }
-
-    pub fn store_auth_session(
-        &self,
-        actor: &Actor,
-        request: AuthSessionStoreRequest,
-    ) -> TalosResult<()> {
-        let actor_token = actor.access_token.as_deref().ok_or_else(|| {
-            TalosError::AuthError(
-                "cloud session store requires verified cloud actor credentials".to_string(),
-            )
-        })?;
-        if actor_token != request.session.access_token {
-            return Err(TalosError::AuthError(
-                "cloud session token does not match actor credentials".to_string(),
-            ));
-        }
-        let entry =
-            auth_session_cache_entry_from_snapshot(request.session, CloudSessionCache::now_ms())?;
-        self.cloud_session_cache()?.store_verified_session(&entry)
     }
 
     pub fn clear_auth_session(&self, _request: AuthSessionClearRequest) -> TalosResult<()> {
@@ -220,7 +194,6 @@ fn request_identity(actor: &Actor) -> RequestIdentity {
             .clone()
             .or_else(|| Some(actor.user_id.clone())),
         role: actor.role,
-        scopes: Vec::<AuthScope>::new(),
         auth_disabled: false,
         access_token: actor.access_token.clone(),
     }
@@ -241,34 +214,4 @@ fn auth_session_snapshot_from_cache_entry(entry: CloudSessionCacheEntry) -> Auth
             role: entry.user.role,
         },
     }
-}
-
-fn auth_session_cache_entry_from_snapshot(
-    snapshot: AuthSessionSnapshot,
-    last_used_at_ms: i64,
-) -> TalosResult<CloudSessionCacheEntry> {
-    Ok(CloudSessionCacheEntry {
-        schema_version: snapshot.schema_version,
-        cloud_api_base_url: snapshot.cloud_api_base_url,
-        access_token: snapshot.access_token,
-        token_type: snapshot.token_type,
-        expires_at_ms: parse_optional_i64(snapshot.expires_at_ms.as_deref(), "expires_at_ms")?,
-        last_used_at_ms,
-        user: CloudSessionUserSnapshot {
-            user_id: snapshot.user.user_id,
-            username: snapshot.user.username,
-            email: snapshot.user.email,
-            role: snapshot.user.role,
-        },
-    })
-}
-
-fn parse_optional_i64(value: Option<&str>, field: &str) -> TalosResult<Option<i64>> {
-    value.map(|value| parse_i64(value, field)).transpose()
-}
-
-fn parse_i64(value: &str, field: &str) -> TalosResult<i64> {
-    value
-        .parse::<i64>()
-        .map_err(|err| TalosError::ValidationError(format!("invalid cloud session {field}: {err}")))
 }

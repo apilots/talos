@@ -185,7 +185,7 @@ async fn login_with_cloud(
             CloudLoginStatusResponse::Pending { interval_ms } => {
                 tokio::time::sleep(Duration::from_millis(interval_ms.max(500))).await;
             }
-            CloudLoginStatusResponse::Authenticated { user } => {
+            CloudLoginStatusResponse::Authenticated { user, .. } => {
                 println!("Authenticated as {}", user.username);
                 return Ok(());
             }

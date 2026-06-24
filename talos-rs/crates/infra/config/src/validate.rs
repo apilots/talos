@@ -423,12 +423,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "gateway.port must be > 0".to_string(),
         ));
     }
-    if config.gateway.auth_cache.ttl_seconds == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "gateway.auth_cache.ttl_seconds must be > 0".to_string(),
-        ));
-    }
-
     if config.gateway.auth && config.cloud.api_base_url.trim().is_empty() {
         return Err(TalosError::InvalidConfiguration(
             "cloud.api_base_url must not be empty when gateway.auth=true".to_string(),

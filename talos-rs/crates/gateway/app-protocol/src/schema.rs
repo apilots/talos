@@ -296,8 +296,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::CloudLoginCancelResponse>());
     output.push_str(&export::<talos_types::AuthSessionReadRequest>());
     output.push_str(&export::<talos_types::AuthSessionReadResponse>());
-    output.push_str(&export::<talos_types::AuthSessionStoreRequest>());
-    output.push_str(&export::<talos_types::AuthSessionStoreResponse>());
     output.push_str(&export::<talos_types::AuthSessionClearRequest>());
     output.push_str(&export::<talos_types::AuthSessionClearResponse>());
     output.push_str(&export::<talos_types::AuthSessionSnapshot>());
@@ -307,7 +305,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::MemorySearchRequest>());
     output.push_str(&export::<talos_auth::UserRole>());
     output.push_str(&export::<talos_auth::UserDto>());
-    output.push_str(&export::<talos_auth::Capabilities>());
     output.push_str(&export::<talos_types::OptionalProjectIdPatch>());
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());

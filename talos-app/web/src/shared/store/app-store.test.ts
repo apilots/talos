@@ -23,6 +23,15 @@ describe("app store persistence", () => {
     });
     useAppStore.setState((state) => ({
       ...state,
+      connection: {
+        serverUrl: "http://localhost:8080",
+        authToken: "",
+        authStatus: "unknown",
+        authRole: "user",
+        authUsername: "Anonymous",
+        userId: "anonymous",
+        runtimeMode: "local",
+      },
       streams: {},
       transientStatuses: {},
     }));
@@ -42,6 +51,60 @@ describe("app store persistence", () => {
 
     expect(persisted.state).not.toHaveProperty("streams");
     expect(persisted.state).not.toHaveProperty("transientStatuses");
+  });
+
+  it("does not persist browser auth token or user snapshot", () => {
+    useAppStore.getState().setConnection({
+      authToken: "cloud-token",
+      authStatus: "authenticated",
+      authRole: "admin",
+      authUsername: "ada",
+      userId: "user-1",
+      serverUrl: "http://127.0.0.1:8080",
+    });
+
+    const raw = storage.get("talos-web-ui");
+    expect(raw).toBeTruthy();
+    const persisted = JSON.parse(raw ?? "{}") as {
+      state?: { connection?: Record<string, unknown> };
+    };
+
+    expect(persisted.state?.connection).toEqual({
+      serverUrl: "http://127.0.0.1:8080",
+      runtimeMode: "local",
+    });
+  });
+
+  it("drops previously persisted browser auth token during rehydration", async () => {
+    storage.set(
+      "talos-web-ui",
+      JSON.stringify({
+        state: {
+          connection: {
+            serverUrl: "http://127.0.0.1:8080",
+            authToken: "old-token",
+            authStatus: "authenticated",
+            authRole: "admin",
+            authUsername: "ada",
+            userId: "user-1",
+            runtimeMode: "local",
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    await useAppStore.persist.rehydrate();
+
+    expect(useAppStore.getState().connection).toMatchObject({
+      serverUrl: "http://127.0.0.1:8080",
+      authToken: "",
+      authStatus: "unknown",
+      authRole: "user",
+      authUsername: "Anonymous",
+      userId: "anonymous",
+      runtimeMode: "local",
+    });
   });
 
   it("drops previously persisted transient chat runtime state during rehydration", async () => {

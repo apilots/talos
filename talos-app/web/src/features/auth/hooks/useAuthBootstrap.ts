@@ -6,7 +6,6 @@ import {
   getCurrentUserWithToken,
   getGatewayHealth,
   readDesktopCloudSession,
-  storeDesktopCloudSession,
 } from "../api";
 import { useConnectionSettings } from "@/features/connection";
 
@@ -46,21 +45,16 @@ export function useAuthBootstrap() {
           return;
         }
         let restoredToken = "";
-        let restoredCloudApiBaseUrl = "";
         if (!connection.authToken) {
           const session = await readDesktopCloudSession();
           if (session?.access_token) {
             restoredToken = session.access_token;
-            restoredCloudApiBaseUrl = session.cloud_api_base_url;
           }
         }
         const authToken = restoredToken || connection.authToken;
         const user = authToken ? await getCurrentUserWithToken(authToken) : await getCurrentUser();
         if (canceled) {
           return;
-        }
-        if (restoredToken) {
-          void storeDesktopCloudSession(restoredToken, restoredCloudApiBaseUrl, user);
         }
         attemptedKeyRef.current = `${connection.serverUrl}::${restoredToken || connection.authToken || "__anonymous__"}`;
         setConnection({

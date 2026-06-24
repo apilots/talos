@@ -6,8 +6,6 @@ fn test_default_config() {
     assert_eq!(config.agent.name, "talos");
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
-    assert!(config.gateway.auth_cache.enabled);
-    assert_eq!(config.gateway.auth_cache.ttl_seconds, 300);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
     assert!(config.storage.connection_string.ends_with("/data/talos.db"));
     assert_eq!(
@@ -382,18 +380,6 @@ models:
 "#;
 
     assert!(serde_yaml::from_str::<ProviderConfig>(yaml).is_err());
-}
-
-#[test]
-fn test_validate_runtime_rejects_zero_auth_cache_ttl() {
-    let mut config = Config::default();
-    config.gateway.auth_cache.ttl_seconds = 0;
-    config.llm.provider = "ollama".to_string();
-    config.llm.model = "qwen-max".to_string();
-    config.agent.model = "qwen-max".to_string();
-    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
-
-    assert!(config.validate_runtime().is_err());
 }
 
 #[test]

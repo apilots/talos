@@ -48,10 +48,10 @@ pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, ChannelConfig, ChannelsConfig, DmPolicy, DmScope,
-    GatewayAuthCacheConfig, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig,
-    ModelCostConfig, ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig,
-    ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
-    TelegramMode, TelegramTopicConfig, ThinkingFormat,
+    GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig, ModelCostConfig,
+    ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig, ReasoningEffort,
+    TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig, TelegramMode,
+    TelegramTopicConfig, ThinkingFormat,
 };
 pub use domains::plugins::{
     PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,

@@ -1,13 +1,13 @@
 use talos_auth::{
-    CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
-    CloudLoginStatusRequest, CloudLoginStatusResponse,
+    CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginStartRequest,
+    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
-    AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,
-    AuthSessionStoreResponse, CloudLoginCancelResponse, UserCurrentRequest, UserCurrentResponse,
+    AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, UserCurrentRequest,
+    UserCurrentResponse,
 };
 
 use crate::service_gateway::ServiceGateway;
@@ -29,8 +29,12 @@ impl ServiceGateway {
         &self,
         _actor: &Actor,
         request: CloudLoginStartRequest,
+        persistence: CloudLoginPersistence,
     ) -> TalosResult<CloudLoginStartResponse> {
-        self.service.account.start_cloud_login(request).await
+        self.service
+            .account
+            .start_cloud_login(request, persistence)
+            .await
     }
 
     pub(crate) async fn cloud_login_status(
@@ -56,15 +60,6 @@ impl ServiceGateway {
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
         self.service.account.read_auth_session(actor, request)
-    }
-
-    pub(crate) async fn store_auth_session(
-        &self,
-        actor: &Actor,
-        request: AuthSessionStoreRequest,
-    ) -> TalosResult<AuthSessionStoreResponse> {
-        self.service.account.store_auth_session(actor, request)?;
-        Ok(AuthSessionStoreResponse { success: true })
     }
 
     pub(crate) async fn clear_auth_session(

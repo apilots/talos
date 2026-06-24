@@ -63,13 +63,16 @@ export const useAppStore = create<AppState>()(
           fileItems: mergeById(currentState.fileItems, typedState?.fileItems),
           connection: {
             ...currentState.connection,
-            ...typedState?.connection,
+            serverUrl: typedState?.connection?.serverUrl ?? currentState.connection.serverUrl,
             runtimeMode: normalizeRuntimeMode(typedState?.connection?.runtimeMode),
           },
         };
       },
       partialize: (state) => ({
-        connection: state.connection,
+        connection: {
+          serverUrl: state.connection.serverUrl,
+          runtimeMode: state.connection.runtimeMode,
+        },
         uiTheme: state.uiTheme,
         locale: state.locale,
         sidebarOpen: state.sidebarOpen,

@@ -60,7 +60,7 @@ async fn login_with_cloud(client: &mut AppServerClient) -> Result<(), Box<dyn st
                 let _ = std::io::stderr().flush();
                 tokio::time::sleep(Duration::from_millis(interval_ms.max(500))).await;
             }
-            CloudLoginStatusResponse::Authenticated { user } => {
+            CloudLoginStatusResponse::Authenticated { user, .. } => {
                 eprintln!(
                     "\rAuthenticated as {}. Starting Talos TUI...",
                     user.username

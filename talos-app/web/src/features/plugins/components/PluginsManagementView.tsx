@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Plugin, PluginSearchRefreshPolicy } from "@talos/sdk-browser";
 
@@ -24,6 +24,7 @@ interface PluginsManagementViewProps {
   catalogLabel: string;
   emptyInstalledDescription: string;
   installedLabel: string;
+  introSection?: ReactNode;
   kind: PluginKindFilter;
   query: string;
   refreshVersion: number;
@@ -33,6 +34,7 @@ export function PluginsManagementView({
   catalogLabel,
   emptyInstalledDescription,
   installedLabel,
+  introSection,
   kind,
   query,
   refreshVersion,
@@ -91,6 +93,7 @@ export function PluginsManagementView({
         emptyInstalledDescription={emptyInstalledDescription}
         installedLabel={installedLabel}
         installedPlugins={installedPlugins}
+        introSection={introSection}
         loading={installedPluginsQuery.isLoading || marketplaceQuery.isLoading}
         marketplacePlugins={marketplacePlugins}
         onDisable={(plugin) => void runPluginAction(plugin, disablePlugin)}

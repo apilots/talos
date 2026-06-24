@@ -11,7 +11,6 @@ const getGatewayHealthMock = vi.fn();
 const getCurrentUserMock = vi.fn();
 const getCurrentUserWithTokenMock = vi.fn();
 const readDesktopCloudSessionMock = vi.fn();
-const storeDesktopCloudSessionMock = vi.fn();
 const clearDesktopCloudSessionMock = vi.fn();
 
 vi.mock("../api", () => ({
@@ -20,8 +19,6 @@ vi.mock("../api", () => ({
   getCurrentUserWithToken: (token: string) => getCurrentUserWithTokenMock(token),
   getGatewayHealth: () => getGatewayHealthMock(),
   readDesktopCloudSession: () => readDesktopCloudSessionMock(),
-  storeDesktopCloudSession: (token: string, cloudUrl: string, user: unknown) =>
-    storeDesktopCloudSessionMock(token, cloudUrl, user),
 }));
 
 describe("useAuthBootstrap", () => {
@@ -34,7 +31,6 @@ describe("useAuthBootstrap", () => {
     getCurrentUserMock.mockReset();
     getCurrentUserWithTokenMock.mockReset();
     readDesktopCloudSessionMock.mockReset();
-    storeDesktopCloudSessionMock.mockReset();
     clearDesktopCloudSessionMock.mockReset();
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
@@ -62,7 +58,7 @@ describe("useAuthBootstrap", () => {
     }));
   });
 
-  it("touches desktop cloud session cache after restored token passes user verification", async () => {
+  it("restores desktop cloud session cache after token passes user verification", async () => {
     const user = {
       user_id: "user-1",
       username: "ada",
@@ -87,11 +83,7 @@ describe("useAuthBootstrap", () => {
     renderHook(() => useAuthBootstrap());
 
     await waitFor(() => {
-      expect(storeDesktopCloudSessionMock).toHaveBeenCalledWith(
-        "cached-token",
-        "http://127.0.0.1:8787",
-        user,
-      );
+      expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
     });
     expect(getCurrentUserWithTokenMock).toHaveBeenCalledWith("cached-token");
     expect(getCurrentUserMock).not.toHaveBeenCalled();
@@ -99,7 +91,7 @@ describe("useAuthBootstrap", () => {
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 
-  it("restores browser auth from the server-side cloud session cache", async () => {
+  it("verifies an in-memory browser bearer token", async () => {
     const user = {
       user_id: "user-2",
       username: "linus",
@@ -109,21 +101,23 @@ describe("useAuthBootstrap", () => {
       created_at: 0,
       updated_at: 0,
     };
+    useAppStore.getState().setConnection({ authToken: "memory-token" });
     getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
     readDesktopCloudSessionMock.mockResolvedValue(null);
-    getCurrentUserMock.mockResolvedValue(user);
+    getCurrentUserWithTokenMock.mockResolvedValue(user);
 
     renderHook(() => useAuthBootstrap());
 
     await waitFor(() => {
       expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
     });
-    expect(getCurrentUserMock).toHaveBeenCalledTimes(1);
-    expect(getCurrentUserWithTokenMock).not.toHaveBeenCalled();
+    expect(getCurrentUserWithTokenMock).toHaveBeenCalledWith("memory-token");
+    expect(getCurrentUserMock).not.toHaveBeenCalled();
+    expect(readDesktopCloudSessionMock).not.toHaveBeenCalled();
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 
-  it("marks the connection unauthenticated when the server-side session cache is missing", async () => {
+  it("marks the connection unauthenticated when bearer verification fails", async () => {
     getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
     readDesktopCloudSessionMock.mockResolvedValue(null);
     getCurrentUserMock.mockRejectedValue(new Error("401 Unauthorized"));

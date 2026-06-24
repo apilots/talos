@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 use std::sync::Arc;
-use talos_auth::{
-    AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
-};
+use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
@@ -154,20 +152,18 @@ impl LlmProvider for TestLlmProvider {
 
 #[async_trait]
 impl AuthService for TestAuthService {
-    async fn register(&self, _input: RegisterRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError("not available".to_string()))
-    }
-
-    async fn login(&self, _input: LoginRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError("not available".to_string()))
-    }
-
     async fn logout(&self, _actor: &RequestIdentity) -> TalosResult<()> {
         Ok(())
     }
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
-        Ok(RequestIdentity::mock_admin(token).with_access_token(token))
+        Ok(RequestIdentity {
+            user_id: token.to_string(),
+            username: None,
+            role: talos_auth::UserRole::User,
+            auth_disabled: false,
+            access_token: Some(token.to_string()),
+        })
     }
 }
 

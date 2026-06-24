@@ -3,10 +3,10 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use cloud_sdk_rs::cloud_types::{
-    AuthResponseDto, CapabilitiesDto, CurrentUserDto, DeviceClientKindDto,
-    DeviceLoginCancelRequestDto, DeviceLoginPollRequestDto, DeviceLoginPollResponseDto,
-    DeviceLoginStartRequestDto, IntrospectionRequestDto, IntrospectionResponseDto, LoginRequestDto,
-    LogoutResponseDto, RegisterRequestDto, UserRoleDto, UserStatusDto,
+    AuthResponseDto, CurrentUserDto, DeviceClientKindDto, DeviceLoginCancelRequestDto,
+    DeviceLoginPollRequestDto, DeviceLoginPollResponseDto, DeviceLoginStartRequestDto,
+    IntrospectionRequestDto, IntrospectionResponseDto, LogoutResponseDto, UserRoleDto,
+    UserStatusDto,
 };
 use cloud_sdk_rs::{CloudSdkError, TalosCloudClient};
 use schemars::JsonSchema;
@@ -15,9 +15,8 @@ use talos_error::{TalosError, TalosResult};
 use ts_rs::TS;
 
 use crate::{
-    AuthResponse, AuthScope, AuthService, Capabilities, CloudSessionCache, CloudSessionCacheEntry,
-    CloudSessionCacheManager, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserRole,
-    UserService,
+    AuthResponse, AuthService, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
+    RequestIdentity, UserDto, UserRole, UserService,
 };
 
 #[derive(Debug, Clone)]
@@ -52,6 +51,12 @@ pub enum CloudLoginClientKind {
     Cli,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CloudLoginPersistence {
+    None,
+    LocalCache,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct CloudLoginStartResponse {
     pub login_id: String,
@@ -82,6 +87,8 @@ pub enum CloudLoginStatusResponse {
     },
     Authenticated {
         user: UserDto,
+        access_token: String,
+        token_type: String,
     },
     Denied,
     Expired,
@@ -90,6 +97,7 @@ pub enum CloudLoginStatusResponse {
 #[derive(Debug, Clone)]
 struct PendingCloudLogin {
     device_code: String,
+    persistence: CloudLoginPersistence,
     expires_at_ms: i64,
 }
 
@@ -120,6 +128,7 @@ impl CloudLoginService {
     pub async fn start(
         &self,
         request: CloudLoginStartRequest,
+        persistence: CloudLoginPersistence,
     ) -> TalosResult<CloudLoginStartResponse> {
         self.cleanup_expired_pending(CloudSessionCache::now_ms())?;
         let response = self
@@ -139,6 +148,7 @@ impl CloudLoginService {
                 response.session_id.clone(),
                 PendingCloudLogin {
                     device_code: response.device_code,
+                    persistence,
                     expires_at_ms: response.expires_at_ms,
                 },
             );
@@ -185,17 +195,23 @@ impl CloudLoginService {
                     .remove(&request.login_id);
                 let auth_response = map_auth_response(auth);
                 let user = auth_response.user.clone();
-                let entry = CloudSessionCacheEntry::from_auth_response(
-                    self.cloud_api_base_url.clone(),
-                    &auth_response,
-                    CloudSessionCache::now_ms(),
-                );
-                self.session_cache
-                    .store_verified_session(&entry)
-                    .map_err(|err| {
-                        TalosError::StorageError(format!("store cloud login session: {err}"))
-                    })?;
-                Ok(CloudLoginStatusResponse::Authenticated { user })
+                if should_store_cloud_session(pending.persistence) {
+                    let entry = CloudSessionCacheEntry::from_auth_response(
+                        self.cloud_api_base_url.clone(),
+                        &auth_response,
+                        CloudSessionCache::now_ms(),
+                    );
+                    self.session_cache
+                        .store_verified_session(&entry)
+                        .map_err(|err| {
+                            TalosError::StorageError(format!("store cloud login session: {err}"))
+                        })?;
+                }
+                Ok(CloudLoginStatusResponse::Authenticated {
+                    user,
+                    access_token: auth_response.access_token,
+                    token_type: auth_response.token_type,
+                })
             }
             DeviceLoginPollResponseDto::Denied => {
                 self.remove_pending(&request.login_id)?;
@@ -262,43 +278,12 @@ fn cleanup_expired_pending_locked(pending: &mut HashMap<String, PendingCloudLogi
     pending.retain(|_, login| login.expires_at_ms > now_ms);
 }
 
+fn should_store_cloud_session(persistence: CloudLoginPersistence) -> bool {
+    matches!(persistence, CloudLoginPersistence::LocalCache)
+}
+
 #[async_trait]
 impl AuthService for CloudAuthService {
-    async fn register(&self, input: RegisterRequest) -> TalosResult<AuthResponse> {
-        let email = input.email.ok_or_else(|| {
-            TalosError::ValidationError("email is required for cloud registration".to_string())
-        })?;
-        let username = input.username;
-        let password = input.password;
-        self.client
-            .register(RegisterRequestDto {
-                email,
-                username: username.clone(),
-                password: password.clone(),
-            })
-            .await
-            .map_err(map_cloud_error)?;
-        self.client
-            .login(LoginRequestDto {
-                identifier: username,
-                password,
-            })
-            .await
-            .map(map_auth_response)
-            .map_err(map_cloud_error)
-    }
-
-    async fn login(&self, input: LoginRequest) -> TalosResult<AuthResponse> {
-        self.client
-            .login(LoginRequestDto {
-                identifier: input.username,
-                password: input.password,
-            })
-            .await
-            .map(map_auth_response)
-            .map_err(map_cloud_error)
-    }
-
     async fn logout(&self, actor: &RequestIdentity) -> TalosResult<()> {
         let Some(token) = bearer_from_actor(actor) else {
             return Ok(());
@@ -370,18 +355,10 @@ fn map_identity(
     if !entitlement.can_use {
         return Err(TalosError::AuthorizationDenied);
     }
-    let capabilities = response.capabilities.ok_or_else(|| {
-        TalosError::AuthError("cloud introspection missing capabilities".to_string())
-    })?;
     Ok(RequestIdentity {
         user_id: user.user_id,
         username: user.username,
         role: map_role(user.role),
-        scopes: capabilities
-            .scopes
-            .iter()
-            .map(|scope| AuthScope::from_str(scope))
-            .collect::<TalosResult<Vec<_>>>()?,
         auth_disabled: false,
         access_token: Some(raw_token.to_string()),
     })
@@ -393,7 +370,6 @@ fn map_auth_response(response: AuthResponseDto) -> AuthResponse {
         token_type: response.token_type,
         expires_at: response.expires_at_ms.max(0) as u64,
         user: map_user(response.user),
-        capabilities: map_capabilities(response.capabilities),
     }
 }
 
@@ -406,18 +382,6 @@ fn map_user(user: CurrentUserDto) -> UserDto {
         disabled: user.disabled,
         created_at: user.created_at_ms,
         updated_at: user.updated_at_ms,
-    }
-}
-
-fn map_capabilities(value: CapabilitiesDto) -> Capabilities {
-    Capabilities {
-        is_admin: value.is_admin,
-        role: map_role(value.role),
-        scopes: value
-            .scopes
-            .into_iter()
-            .filter(|scope| AuthScope::from_str(scope).is_ok())
-            .collect(),
     }
 }
 
@@ -448,6 +412,7 @@ mod tests {
             "login-1".to_string(),
             PendingCloudLogin {
                 device_code: "device-1".to_string(),
+                persistence: CloudLoginPersistence::None,
                 expires_at_ms: now_ms - 1,
             },
         );
@@ -471,6 +436,7 @@ mod tests {
                 "active".to_string(),
                 PendingCloudLogin {
                     device_code: "device-active".to_string(),
+                    persistence: CloudLoginPersistence::None,
                     expires_at_ms: now_ms + 60_000,
                 },
             ),
@@ -478,6 +444,7 @@ mod tests {
                 "expired".to_string(),
                 PendingCloudLogin {
                     device_code: "device-expired".to_string(),
+                    persistence: CloudLoginPersistence::None,
                     expires_at_ms: now_ms - 1,
                 },
             ),
@@ -489,6 +456,14 @@ mod tests {
         let pending = service.pending.lock().expect("lock pending");
         assert!(pending.contains_key("active"));
         assert!(!pending.contains_key("expired"));
+    }
+
+    #[test]
+    fn local_persistence_stores_cloud_session_cache() {
+        assert!(!should_store_cloud_session(CloudLoginPersistence::None));
+        assert!(should_store_cloud_session(
+            CloudLoginPersistence::LocalCache
+        ));
     }
 }
 

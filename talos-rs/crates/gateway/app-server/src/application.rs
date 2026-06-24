@@ -436,7 +436,7 @@ impl AppServerApplication for TalosApplicationAdapter {
             }
             ClientRequestParams::AuthLoginStart(params) => to_value(
                 self.gateway
-                    .start_cloud_login(actor, params)
+                    .start_cloud_login(actor, params, talos_auth::CloudLoginPersistence::LocalCache)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
@@ -460,14 +460,6 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
-            ClientRequestParams::AuthSessionStore(params) => {
-                let response = self
-                    .gateway
-                    .store_auth_session(actor, params)
-                    .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
-                to_value(response)
-            }
             ClientRequestParams::AuthSessionClear(params) => {
                 let response = self
                     .gateway

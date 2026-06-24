@@ -165,8 +165,6 @@ export function ProjectsPage() {
             <div className="grid gap-4 p-5 md:grid-cols-2">
               {filteredProjects.map((project) => (
                 <ProjectRow
-                  deleteDisabled={(project.sessionCount ?? 0) > 0}
-                  deleteDisabledReason={t("projects:deleteProjectDisabledHint")}
                   deleteLabel={
                     deleteProject.isPending && deleteProject.variables === project.id
                       ? t("projects:deletingProject")

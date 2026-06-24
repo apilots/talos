@@ -1,4 +1,5 @@
 import type { Plugin } from "@talos/sdk-browser";
+import type { ReactNode } from "react";
 
 import { InstalledPluginRow } from "./InstalledPluginRow";
 import { MarketplacePluginRow } from "./MarketplacePluginRow";
@@ -10,6 +11,7 @@ interface PluginManagementPanelProps {
   emptyInstalledDescription: string;
   installedLabel?: string;
   installedPlugins: Plugin[];
+  introSection?: ReactNode;
   loading: boolean;
   marketplacePlugins: Plugin[];
   warnings: string[];
@@ -27,6 +29,7 @@ export function PluginManagementPanel({
   emptyInstalledDescription,
   installedLabel = "Installed extensions",
   installedPlugins,
+  introSection,
   loading,
   marketplacePlugins,
   onDisable,
@@ -48,6 +51,7 @@ export function PluginManagementPanel({
           {warnings[0]}
         </div>
       ) : null}
+      {introSection}
       <section>
         <h2 className="mb-3 text-sm font-semibold text-ink">{installedLabel}</h2>
         {installedPlugins.length === 0 ? (

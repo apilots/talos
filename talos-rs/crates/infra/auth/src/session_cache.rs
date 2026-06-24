@@ -321,7 +321,7 @@ mod tests {
                 user_id: "user-1".to_string(),
                 username: "ada".to_string(),
                 email: Some("ada@example.com".to_string()),
-                role: UserRole::Admin,
+                role: UserRole::User,
             },
         }
     }

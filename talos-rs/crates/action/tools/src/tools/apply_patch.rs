@@ -21,7 +21,7 @@ impl Tool for ApplyPatchTool {
     }
 
     fn description(&self) -> &str {
-        "Apply a multi-file patch to the local filesystem.\n\nUsage:\n- The patch parameter must contain a patch starting with `*** Begin Patch` and ending with `*** End Patch`.\n- Supports `*** Add File:`, `*** Update File:`, `*** Delete File:`, and `*** Move to:` operations.\n- Update, delete, and move operations require the target file to have been read in the current session.\n- Use this tool for coordinated multi-file edits; use Edit for small exact replacements."
+        "Apply a multi-file patch to the local filesystem.\n\nUsage:\n- The patch parameter must contain a patch starting with `*** Begin Patch` and ending with `*** End Patch`.\n- Add-file content lines must start with `+` directly after the `*** Add File:` line.\n- Do not use `---`, `+++`, or markdown code fences inside the patch text.\n- Example add-file patch:\n*** Begin Patch\n*** Add File: notes/example.txt\n+first line\n+second line\n*** End Patch\n- Supports `*** Add File:`, `*** Update File:`, `*** Delete File:`, and `*** Move to:` operations.\n- Update, delete, and move operations require the target file to have been read in the current session.\n- Use this tool for coordinated multi-file edits; use Edit for small exact replacements."
     }
 
     fn parameters_schema(&self) -> Option<Value> {
@@ -31,7 +31,7 @@ impl Tool for ApplyPatchTool {
             "properties": {
                 "patch": {
                     "type": "string",
-                    "description": "Patch text using Begin Patch / End Patch markers."
+                    "description": "Patch text using Begin Patch / End Patch markers. For add-file patches, every content line must start with '+'."
                 }
             }
         }))

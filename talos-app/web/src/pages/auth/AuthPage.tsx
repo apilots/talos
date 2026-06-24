@@ -4,7 +4,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   getCloudLoginStatus,
-  readDesktopCloudSession,
   redirectToExternalUrl,
   startCloudLogin,
 } from "@/features/auth";
@@ -53,10 +52,9 @@ export function AuthPage() {
           return;
         }
         if (response.status === "authenticated") {
-          const session = await readDesktopCloudSession();
           if (canceled) return;
           setConnection({
-            authToken: session?.access_token ?? "",
+            authToken: response.access_token,
             authStatus: "authenticated",
             authUsername: response.user.username,
             authRole: response.user.role,

@@ -14,8 +14,6 @@ const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
-const smokeUsername = process.env.TALOS_DESKTOP_SMOKE_USERNAME ?? "admin";
-const smokePassword = process.env.TALOS_DESKTOP_SMOKE_PASSWORD ?? "admin@123";
 const smokePrompt = `Talos desktop smoke ${timestamp()} - reply exactly ok.`;
 const createdSessionIds = [];
 let cdp;
@@ -84,14 +82,10 @@ try {
   if (serverInfo?.auth_enabled === true) {
     await waitForExpression(
       cdp,
-      "Boolean(document.querySelector('#auth-username')) || Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))",
+      "Array.from(document.querySelectorAll('button')).some((button) => (button.textContent || '').includes('Talos Cloud'))",
       30_000,
     );
-    const loginVisible = await evaluate(cdp, "Boolean(document.querySelector('#auth-username'))");
-    if (loginVisible) {
-      await completeAuth(cdp);
-    }
-    await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
+    throw new Error("Desktop smoke does not automate Talos Cloud browser login. Run this smoke with gateway.auth=false or validate auth manually.");
   }
 
   await evaluate(
@@ -142,11 +136,7 @@ try {
   assert(skillCount > 0, "skills.list returned no discoverable skills.");
   assert(skillSuggestionCount > 0, "skills.suggest returned no discoverable skills.");
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
-  if (serverInfo.auth_enabled) {
-    assert(account?.username === smokeUsername, `desktop login did not return the smoke user: ${JSON.stringify(account)}`);
-  } else {
-    assert(account?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
-  }
+  assert(account?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
   assert(adminVisible === false, "Admin navigation should not be rendered in Talos.");
 
   await evaluate(cdp, "location.hash = '#/'; undefined");
@@ -415,15 +405,6 @@ async function waitForEvaluate(cdp, expression, timeoutMs) {
   throw new Error(`Timed out evaluating expression: ${expression}\n${errorMessage(lastError)}`);
 }
 
-async function waitForExpressionOrTimeout(cdp, expression, timeoutMs) {
-  try {
-    await waitForExpression(cdp, expression, timeoutMs);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function evaluate(cdp, expression) {
   const result = await cdp.call("Runtime.evaluate", {
     expression,
@@ -455,49 +436,6 @@ async function setInputValue(cdp, selector, value) {
       return true;
     })()`,
   );
-}
-
-async function completeAuth(cdp) {
-  await clickAuthMode(cdp, "register");
-  await setInputValue(cdp, "#auth-username", smokeUsername);
-  await setInputValue(cdp, "#auth-email", `${smokeUsername}@example.local`);
-  await setInputValue(cdp, "#auth-password", smokePassword);
-  await submitAuthForm(cdp);
-
-  const registered = await waitForExpressionOrTimeout(
-    cdp,
-    "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))",
-    5_000,
-  );
-  if (registered) {
-    return;
-  }
-
-  await clickAuthMode(cdp, "login");
-  await setInputValue(cdp, "#auth-username", smokeUsername);
-  await setInputValue(cdp, "#auth-password", smokePassword);
-  await submitAuthForm(cdp);
-}
-
-async function clickAuthMode(cdp, mode) {
-  const clicked = await evaluate(
-    cdp,
-    `(() => {
-      const mode = ${JSON.stringify(mode)};
-      const expected = mode === "register" ? "register" : "login";
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) =>
-        (candidate.textContent || "").trim().toLowerCase().includes(expected)
-      );
-      if (!button) return false;
-      button.click();
-      return true;
-    })()`,
-  );
-  assert(clicked, `Auth mode button not found: ${mode}`);
-}
-
-async function submitAuthForm(cdp) {
-  await evaluate(cdp, "document.querySelector('form button[type=\"submit\"]')?.click(); undefined");
 }
 
 async function clickAnchorByHash(cdp, hash) {

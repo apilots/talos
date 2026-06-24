@@ -1,41 +1,41 @@
 use async_trait::async_trait;
 use talos_auth::{
-    CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
-    CloudLoginStatusRequest, CloudLoginStatusResponse,
+    CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginStartRequest,
+    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
-    AuthSessionReadRequest, AuthSessionReadResponse, AuthSessionStoreRequest,
-    AuthSessionStoreResponse, CloudLoginCancelResponse, ConfigDeleteRequest, ConfigDeleteResponse,
-    ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse,
-    ConfigUpdateRequest, ConfigUpdateResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
-    FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
-    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse,
-    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
-    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
-    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
-    ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest,
-    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
-    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
-    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsListRequest,
-    SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
-    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
-    StartTurnRequest, StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
+    ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
+    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, FsDirectoryCreateRequest,
+    FsDirectoryCreateResponse, FsDirectoryReadRequest, FsDirectoryReadResponse,
+    InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest, MemoryFileListResponse,
+    MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse,
+    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
+    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
+    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProjectCreateRequest,
+    ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest,
+    ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest,
+    ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse,
+    SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse,
+    SessionCloseRequest, SessionCloseResponse, SessionCompactRequest, SessionCompactResponse,
+    SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
+    SessionHistoryRequest, SessionHistoryResponse, SessionListRequest, SessionListResponse,
+    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
+    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
+    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
+    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 use crate::api::Gateway;
@@ -472,8 +472,9 @@ impl Gateway for ServiceGateway {
         &self,
         actor: &Actor,
         request: CloudLoginStartRequest,
+        persistence: CloudLoginPersistence,
     ) -> TalosResult<CloudLoginStartResponse> {
-        ServiceGateway::start_cloud_login(self, actor, request).await
+        ServiceGateway::start_cloud_login(self, actor, request, persistence).await
     }
 
     async fn cloud_login_status(
@@ -498,14 +499,6 @@ impl Gateway for ServiceGateway {
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
         ServiceGateway::read_auth_session(self, actor, request).await
-    }
-
-    async fn store_auth_session(
-        &self,
-        actor: &Actor,
-        request: AuthSessionStoreRequest,
-    ) -> TalosResult<AuthSessionStoreResponse> {
-        ServiceGateway::store_auth_session(self, actor, request).await
     }
 
     async fn clear_auth_session(

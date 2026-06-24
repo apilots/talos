@@ -80,8 +80,7 @@ fn actor_from_identity(identity: &RequestIdentity) -> Actor {
 mod tests {
     use super::*;
     use talos_auth::{
-        AuthResponse, CloudSessionCacheEntry, CloudSessionUserSnapshot, LoginRequest,
-        RegisterRequest, UserDto, UserRole, UserService,
+        CloudSessionCacheEntry, CloudSessionUserSnapshot, UserDto, UserRole, UserService,
     };
     use talos_error::{TalosError, TalosResult};
 
@@ -90,14 +89,6 @@ mod tests {
 
     #[async_trait]
     impl AuthService for FakeAuthService {
-        async fn register(&self, _input: RegisterRequest) -> TalosResult<AuthResponse> {
-            Err(TalosError::AuthError("not implemented".to_string()))
-        }
-
-        async fn login(&self, _input: LoginRequest) -> TalosResult<AuthResponse> {
-            Err(TalosError::AuthError("not implemented".to_string()))
-        }
-
         async fn logout(&self, _actor: &RequestIdentity) -> TalosResult<()> {
             Ok(())
         }
@@ -109,8 +100,7 @@ mod tests {
             Ok(RequestIdentity {
                 user_id: "user-1".to_string(),
                 username: Some("user-1".to_string()),
-                role: UserRole::Admin,
-                scopes: Vec::new(),
+                role: UserRole::User,
                 auth_disabled: false,
                 access_token: Some(token.to_string()),
             })
@@ -222,7 +212,7 @@ mod tests {
                 user_id: "user-1".to_string(),
                 username: "user-1".to_string(),
                 email: Some("user@example.com".to_string()),
-                role: UserRole::Admin,
+                role: UserRole::User,
             },
         }
     }

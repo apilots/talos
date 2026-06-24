@@ -7,20 +7,20 @@ use ts_rs::TS;
 use crate::errors::AppServerErrorBody;
 use crate::version::ProtocolVersion;
 use talos_types::{
-    AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, AuthSessionStoreRequest,
-    ConfigDeleteRequest, ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest,
-    EventUnsubscribeRequest, FsDirectoryCreateRequest, FsDirectoryReadRequest,
-    InterruptTurnRequest, MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest,
-    MemorySearchRequest, ModelListRequest, PluginDisableRequest, PluginEnableRequest,
-    PluginInstallRequest, PluginListRequest, PluginReadRequest, PluginSearchRequest,
-    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
-    PluginSourceRemoveRequest, PluginUninstallRequest, PluginUpdateRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest, ProjectReadRequest,
-    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
-    SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest, SessionGetRequest,
-    SessionHistoryRequest, SessionListRequest, SessionPatchRequest, StartTurnRequest,
-    SubmitToolResultRequest, SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest,
-    WorkspaceDocReadRequest, WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+    AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, ConfigDeleteRequest,
+    ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest, EventUnsubscribeRequest,
+    FsDirectoryCreateRequest, FsDirectoryReadRequest, InterruptTurnRequest, MemoryFileListRequest,
+    MemoryFileReadRequest, MemoryFileWriteRequest, MemorySearchRequest, ModelListRequest,
+    PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
+    PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
+    PluginUpdateRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectListRequest,
+    ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest,
+    SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
+    SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest, SessionListRequest,
+    SessionPatchRequest, StartTurnRequest, SubmitToolResultRequest, SubscribeTimelineRequest,
+    UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
+    WorkspaceInfoRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -157,8 +157,6 @@ pub enum ClientMethod {
     AuthLoginCancel,
     #[serde(rename = "auth.session.read")]
     AuthSessionRead,
-    #[serde(rename = "auth.session.store")]
-    AuthSessionStore,
     #[serde(rename = "auth.session.clear")]
     AuthSessionClear,
     #[serde(rename = "user.current")]
@@ -228,7 +226,6 @@ impl ClientMethod {
             Self::AuthLoginStatus => "auth.login.status",
             Self::AuthLoginCancel => "auth.login.cancel",
             Self::AuthSessionRead => "auth.session.read",
-            Self::AuthSessionStore => "auth.session.store",
             Self::AuthSessionClear => "auth.session.clear",
             Self::UserCurrent => "user.current",
             Self::MemorySearch => "memory.search",
@@ -305,7 +302,6 @@ impl FromStr for ClientMethod {
             "auth.login.status" => Ok(Self::AuthLoginStatus),
             "auth.login.cancel" => Ok(Self::AuthLoginCancel),
             "auth.session.read" => Ok(Self::AuthSessionRead),
-            "auth.session.store" => Ok(Self::AuthSessionStore),
             "auth.session.clear" => Ok(Self::AuthSessionClear),
             "user.current" => Ok(Self::UserCurrent),
             "memory.search" => Ok(Self::MemorySearch),
@@ -433,8 +429,6 @@ pub enum ClientRequestParams {
     AuthLoginCancel(talos_auth::CloudLoginCancelRequest),
     #[serde(rename = "auth.session.read")]
     AuthSessionRead(AuthSessionReadRequest),
-    #[serde(rename = "auth.session.store")]
-    AuthSessionStore(AuthSessionStoreRequest),
     #[serde(rename = "auth.session.clear")]
     AuthSessionClear(AuthSessionClearRequest),
     #[serde(rename = "user.current")]
@@ -582,9 +576,6 @@ impl ClientRequest {
             }
             ClientMethod::AuthSessionRead => {
                 ClientRequestParams::AuthSessionRead(decode(params_value)?)
-            }
-            ClientMethod::AuthSessionStore => {
-                ClientRequestParams::AuthSessionStore(decode(params_value)?)
             }
             ClientMethod::AuthSessionClear => {
                 ClientRequestParams::AuthSessionClear(decode(params_value)?)

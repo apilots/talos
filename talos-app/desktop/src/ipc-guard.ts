@@ -17,17 +17,6 @@ const llmConfigWriteParams = (params: unknown) =>
   isRecord(params.value) &&
   params.value.type === "llm" &&
   isRecord(params.value.value);
-const authSessionStoreParams = (params: unknown) =>
-  isRecord(params) &&
-  isRecord(params.session) &&
-  params.session.schema_version === 1 &&
-  hasString(params.session, "access_token") &&
-  hasString(params.session, "token_type") &&
-  hasString(params.session, "cloud_api_base_url") &&
-  hasString(params.session, "last_used_at_ms") &&
-  isRecord(params.session.user) &&
-  hasString(params.session.user, "user_id") &&
-  hasString(params.session.user, "username");
 const authLoginStartParams = (params: unknown) =>
   isRecord(params) &&
   hasString(params, "client_name") &&
@@ -102,7 +91,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "auth.logout": emptyParams,
   "auth.session.clear": emptyParams,
   "auth.session.read": emptyParams,
-  "auth.session.store": authSessionStoreParams,
   "config.get": emptyParams,
   "config.update": llmConfigWriteParams,
   "config.delete": (params) => hasString(params, "path"),

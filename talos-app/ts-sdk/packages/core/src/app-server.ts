@@ -30,8 +30,6 @@ import type {
   AuthLogoutResponse,
   AuthSessionClearResponse,
   AuthSessionReadResponse,
-  AuthSessionStoreRequest,
-  AuthSessionStoreResponse,
   CloudLoginCancelResponse,
   SessionCloseResponse,
   AgentWorkspaceInfo,
@@ -123,10 +121,6 @@ export class AppServerClient {
 
   readAuthSession(): Promise<AuthSessionReadResponse> {
     return this.transport.request("auth.session.read", {});
-  }
-
-  storeAuthSession(params: AuthSessionStoreRequest): Promise<AuthSessionStoreResponse> {
-    return this.transport.request("auth.session.store", params);
   }
 
   clearAuthSession(): Promise<AuthSessionClearResponse> {

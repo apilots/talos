@@ -10,8 +10,6 @@ interface ProjectRowProps {
   onSelect: () => void;
   onDelete: () => void;
   deleteLabel: string;
-  deleteDisabled?: boolean;
-  deleteDisabledReason?: string;
   deleting?: boolean;
 }
 
@@ -21,8 +19,6 @@ export function ProjectRow({
   onDelete,
   onSelect,
   deleteLabel,
-  deleteDisabled = false,
-  deleteDisabledReason,
   deleting = false,
 }: ProjectRowProps) {
   const unavailable = Boolean(project.status && project.status.state !== "available");
@@ -64,16 +60,14 @@ export function ProjectRow({
         aria-label={deleteLabel}
         className={cn(
           "absolute bottom-4 right-4 inline-flex h-9 items-center gap-1.5 rounded-[999px] px-3 text-sm transition",
-          deleteDisabled
-            ? "cursor-not-allowed border border-border/60 bg-background/78 text-muted/70 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
-            : "border border-danger/20 bg-card/92 text-danger opacity-0 shadow-[0_8px_24px_rgba(95,84,64,0.08)] hover:bg-danger/8 group-hover:opacity-100 group-focus-within:opacity-100",
+          "border border-danger/20 bg-card/92 text-danger opacity-0 shadow-[0_8px_24px_rgba(95,84,64,0.08)] hover:bg-danger/8 group-hover:opacity-100 group-focus-within:opacity-100",
         )}
-        disabled={deleteDisabled || deleting}
+        disabled={deleting}
         onClick={(event) => {
           event.stopPropagation();
           onDelete();
         }}
-        title={deleteDisabled ? deleteDisabledReason : deleteLabel}
+        title={deleteLabel}
         type="button"
       >
         <Trash2 size={14} />

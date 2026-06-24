@@ -190,11 +190,7 @@ impl AppServerClient {
             .request_typed("auth.session.read", AuthSessionReadRequest {})
             .await?;
         if let Some(session) = response.session {
-            self.actor_credentials = Some(ActorCredentials {
-                credential: ActorCredential::ExistingSessionToken {
-                    token: session.access_token,
-                },
-            });
+            self.actor_credentials = Some(existing_session_credentials(session.access_token));
             return Ok(true);
         }
         Ok(false)
@@ -232,10 +228,19 @@ impl AppServerClient {
                 },
             )
             .await?;
-        if matches!(response, CloudLoginStatusResponse::Authenticated { .. }) {
-            let _ = self.restore_cloud_session_candidate().await?;
-        }
+        self.apply_cloud_login_credentials(&response).await?;
         Ok(response)
+    }
+
+    async fn apply_cloud_login_credentials(
+        &mut self,
+        response: &CloudLoginStatusResponse,
+    ) -> TalosResult<()> {
+        let CloudLoginStatusResponse::Authenticated { access_token, .. } = response else {
+            return Ok(());
+        };
+        self.actor_credentials = Some(existing_session_credentials(access_token.clone()));
+        Ok(())
     }
 
     pub async fn cancel_cloud_login(
@@ -1167,6 +1172,12 @@ fn actor_credentials_for_method(
     }
 }
 
+fn existing_session_credentials(token: String) -> ActorCredentials {
+    ActorCredentials {
+        credential: ActorCredential::ExistingSessionToken { token },
+    }
+}
+
 #[cfg(test)]
 fn is_business_method(method: &str) -> bool {
     !matches!(
@@ -1176,7 +1187,6 @@ fn is_business_method(method: &str) -> bool {
             | "auth.login.status"
             | "auth.login.cancel"
             | "auth.session.read"
-            | "auth.session.store"
             | "auth.session.clear"
     )
 }
@@ -1258,13 +1268,44 @@ mod tests {
     fn touches_cached_session_only_for_business_methods() {
         assert!(!is_business_method("initialize"));
         assert!(!is_business_method("auth.session.read"));
-        assert!(!is_business_method("auth.session.store"));
         assert!(!is_business_method("auth.session.clear"));
         assert!(!is_business_method("auth.login.start"));
         assert!(!is_business_method("auth.login.status"));
         assert!(!is_business_method("auth.login.cancel"));
         assert!(is_business_method("user.current"));
         assert!(is_business_method("session.list"));
+    }
+
+    #[tokio::test]
+    async fn cloud_login_status_uses_returned_token_without_session_cache() {
+        let mut client = test_app_server_client(false);
+        let response = authenticated_login_response("web-token");
+
+        client
+            .apply_cloud_login_credentials(&response)
+            .await
+            .expect("returned token should be accepted");
+
+        assert_eq!(
+            client.actor_credentials,
+            Some(existing_session_credentials("web-token".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn cloud_login_status_uses_returned_token_with_session_cache_enabled() {
+        let mut client = test_app_server_client(true);
+        let response = authenticated_login_response("local-token");
+
+        client
+            .apply_cloud_login_credentials(&response)
+            .await
+            .expect("returned token should avoid local cache read during login");
+
+        assert_eq!(
+            client.actor_credentials,
+            Some(existing_session_credentials("local-token".to_string()))
+        );
     }
 
     #[test]
@@ -1334,6 +1375,38 @@ mod tests {
             turn_id: event.turn_id.clone(),
             message_id: event.message_id.clone(),
             event,
+        }
+    }
+
+    fn test_app_server_client(use_cloud_session_cache: bool) -> AppServerClient {
+        let (_events_tx, events) = mpsc::channel(1);
+        let (_notifications_tx, notifications) = mpsc::channel(1);
+        AppServerClient {
+            child: None,
+            stdin: None,
+            next_id: 1,
+            pending_responses: Arc::new(Mutex::new(HashMap::new())),
+            subscription_senders: Arc::new(Mutex::new(HashMap::new())),
+            events,
+            notifications,
+            actor_credentials: None,
+            use_cloud_session_cache,
+        }
+    }
+
+    fn authenticated_login_response(access_token: &str) -> CloudLoginStatusResponse {
+        CloudLoginStatusResponse::Authenticated {
+            user: talos_auth::UserDto {
+                user_id: "user-1".to_string(),
+                username: "ada".to_string(),
+                email: None,
+                role: talos_auth::UserRole::User,
+                disabled: false,
+                created_at: 0,
+                updated_at: 0,
+            },
+            token_type: "Bearer".to_string(),
+            access_token: access_token.to_string(),
         }
     }
 }

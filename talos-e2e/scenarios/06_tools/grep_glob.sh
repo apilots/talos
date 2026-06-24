@@ -106,7 +106,6 @@ except Exception:
 for item in data.get("output", []):
     if item.get("type") == "output_text":
         print(item.get("text", ""))
-        raise SystemExit(0)
 print(data.get("output_text", ""))
 PY
 }
@@ -122,7 +121,7 @@ if [[ -z "${glob_session_id}" ]]; then
 fi
 echo "CASE tool_glob_session_id PASS session_id=${glob_session_id}"
 
-glob_input="You must call tool 'Glob' exactly once with pattern docs/*.md. After the tool call, respond with exactly GLOB_OK:${GLOB_FILE}"
+glob_input="You must call tool 'Glob' exactly once with pattern docs/*.md. Do not write any visible text before calling the tool. After the tool result, the final visible answer must be exactly GLOB_OK:${GLOB_FILE}"
 glob_payload="$(build_payload "${glob_input}")"
 glob_json="$(send_message_response "${glob_session_id}" "${glob_payload}" "glob")"
 log_case_json "tool_glob" "${glob_payload}" "${glob_json}"
@@ -154,7 +153,7 @@ if [[ -z "${grep_session_id}" ]]; then
 fi
 echo "CASE tool_grep_session_id PASS session_id=${grep_session_id}"
 
-grep_input="You must call tool 'Grep' exactly once with pattern ${GREP_MARKER} and path src. After the tool call, respond with exactly GREP_OK:${GREP_FILE}"
+grep_input="You must call tool 'Grep' exactly once with pattern ${GREP_MARKER} and path src. Do not write any visible text before calling the tool. After the tool result, the final visible answer must be exactly GREP_OK:${GREP_FILE}"
 grep_payload="$(build_payload "${grep_input}")"
 grep_json="$(send_message_response "${grep_session_id}" "${grep_payload}" "grep")"
 log_case_json "tool_grep" "${grep_payload}" "${grep_json}"

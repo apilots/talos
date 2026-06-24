@@ -49,7 +49,6 @@ export function useSessionQueryInvalidation(sessionId: string) {
       await queryClient.invalidateQueries({
         queryKey: [...chatKeys.all, connectionKey, "projectSessions"],
       });
-      await queryClient.invalidateQueries({ queryKey: ["admin-sessions", connectionKey] });
       await queryClient.refetchQueries({
         queryKey: chatKeys.sessions(connectionKey),
         type: "active",

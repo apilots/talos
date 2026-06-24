@@ -12,7 +12,6 @@ import type {
   StartTurnResponse,
   SessionListRequest,
   SessionPatchRequest,
-  TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
   TimelineRecoveryResponse,
   WorkspaceDocKind,
@@ -122,7 +121,8 @@ export function createDesktopTalosClient(
           limit: query?.limit ?? null,
           offset: query?.offset ?? null,
         }),
-      get: (sessionId: string) => client.getSession({ session_id: sessionId }),
+      get: (request: Parameters<TalosWebClient["sessions"]["get"]>[0]) =>
+        client.getSession(request),
       patch: (request: SessionPatchRequest) =>
         client.patchSession({
           session_id: request.session_id,
@@ -130,61 +130,67 @@ export function createDesktopTalosClient(
           project_id: toProtocolProjectPatch(request.project_id),
           current_directory: toProtocolDirectoryPatch(request.current_directory),
         }),
-      close: (sessionId: string) =>
-        client.closeSession({ session_id: sessionId }),
-      delete: (sessionId: string) => client.deleteSession({ session_id: sessionId }),
-      cancel: (sessionId: string) => client.interruptTurn({ session_id: sessionId }),
-      compact: (sessionId: string) => client.compactSession({ session_id: sessionId }),
-      clear: (sessionId: string) => client.clearSession({ session_id: sessionId }),
-      activeTurn: (sessionId: string) =>
-        client.getActiveTurn({ session_id: sessionId }).then((response) => response.active_turn),
-      history: (sessionId: string): Promise<TalosSessionHistorySnapshot> =>
-        client.getSessionHistory({ session_id: sessionId }).then((response) => response.history),
+      close: (request: Parameters<TalosWebClient["sessions"]["close"]>[0]) =>
+        client.closeSession(request),
+      delete: (request: Parameters<TalosWebClient["sessions"]["delete"]>[0]) =>
+        client.deleteSession(request),
+      cancel: (request: Parameters<TalosWebClient["sessions"]["cancel"]>[0]) =>
+        client.interruptTurn(request),
+      compact: (request: Parameters<TalosWebClient["sessions"]["compact"]>[0]) =>
+        client.compactSession(request),
+      clear: (request: Parameters<TalosWebClient["sessions"]["clear"]>[0]) =>
+        client.clearSession(request),
+      activeTurn: (request: Parameters<TalosWebClient["sessions"]["activeTurn"]>[0]) =>
+        client.getActiveTurn(request),
+      history: (
+        request: Parameters<TalosWebClient["sessions"]["history"]>[0],
+      ) =>
+        client.getSessionHistory(request),
       recover: (
-        sessionId: string,
-        afterEventId?: string,
-        replayLimit?: number,
+        request: Parameters<TalosWebClient["sessions"]["recover"]>[0],
       ): Promise<TimelineRecoveryResponse> =>
         client.recoverSession({
-          session_id: sessionId,
-          after_event_id: afterEventId ?? null,
-          replay_limit: replayLimit ?? null,
+          session_id: request.session_id,
+          after_event_id: request.after_event_id ?? null,
+          replay_limit: request.replay_limit ?? null,
         }),
     },
     projects: {
       list: () => client.listProjects({}),
-      get: (projectId: string) => client.getProject({ project_id: projectId }),
+      get: (request: Parameters<TalosWebClient["projects"]["get"]>[0]) =>
+        client.getProject(request),
       create: (body: Parameters<TalosWebClient["projects"]["create"]>[0]) =>
         client.createProject(body),
       patch: (request: Parameters<TalosWebClient["projects"]["patch"]>[0]) =>
         client.patchProject(request),
-      delete: (projectId: string) => client.deleteProject({ project_id: projectId }),
+      delete: (request: Parameters<TalosWebClient["projects"]["delete"]>[0]) =>
+        client.deleteProject(request),
     },
     fs: {
       directory: {
         read: (query?: { path?: string | null }) =>
-          client.readFsDirectory({ path: query?.path ?? null }).then((response) => response.directory),
+          client.readFsDirectory({ path: query?.path ?? null }),
         create: (body: { parent: string; name: string }) =>
           client.createFsDirectory(body),
       },
     },
     memory: {
       list: (query?: MemoryFileListRequest) => client.listMemoryFiles(query?.limit ?? undefined),
-      get: (date: string) => client.readMemoryFile(date).then((response) => response.file),
+      get: (date: string) => client.readMemoryFile(date),
       put: (date: string, request: DocUpdateRequest) =>
         client
           .writeMemoryFile(date, request.content, expectedVersionToken(request))
-          .then((response) => response.file),
+          .then((response) => response),
       search: (query: MemorySearchQuery) => client.searchMemory(query.q, query.limit),
     },
     workspaceDocs: {
       info: () => client.getWorkspaceInfo(),
       list: () => client.listWorkspaceDocs(),
-      get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind).then((response) => response.doc),
+      get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
         client
           .writeWorkspaceDoc(kind, request.content, expectedVersionToken(request))
-          .then((response) => response.doc),
+          .then((response) => response),
     },
     skills: {
       list: (query?: Parameters<TalosWebClient["skills"]["list"]>[0]) => client.listSkills(query),

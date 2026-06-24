@@ -1,5 +1,4 @@
 import type {
-  Capabilities as ProtocolCapabilities,
   DocUpdateRequest as ProtocolDocUpdateRequest,
   ExpectedFileVersion as ProtocolExpectedFileVersion,
   MemoryFileDetail as ProtocolMemoryFileDetail,
@@ -129,8 +128,6 @@ export type {
   AuthSessionReadRequest,
   AuthSessionReadResponse,
   AuthSessionSnapshot,
-  AuthSessionStoreRequest,
-  AuthSessionStoreResponse,
   AuthSessionUserSnapshot,
   CloudLoginCancelResponse,
   Plugin,
@@ -269,7 +266,6 @@ export type TalosProvider = ProtocolTalosProvider;
 export type TalosContext = ProtocolTalosContext;
 
 export type UserRole = ProtocolUserRole;
-export type Capabilities = ProtocolCapabilities;
 export type UserDto = ProtocolUserDto;
 export type TalosUsage = ProtocolTalosUsage;
 

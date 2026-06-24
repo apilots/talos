@@ -29,8 +29,7 @@ use tracing::{error, info};
 
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 use self::auth_session::{
-    cancel_cloud_login_handler, clear_auth_session_handler, cloud_login_status_handler,
-    read_auth_session_handler, start_cloud_login_handler, store_auth_session_handler,
+    cancel_cloud_login_handler, cloud_login_status_handler, start_cloud_login_handler,
 };
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
@@ -172,12 +171,6 @@ impl HttpServer {
             .route("/v1/auth/login/start", post(start_cloud_login_handler))
             .route("/v1/auth/login/status", get(cloud_login_status_handler))
             .route("/v1/auth/login/cancel", post(cancel_cloud_login_handler))
-            .route(
-                "/v1/auth/session",
-                get(read_auth_session_handler)
-                    .post(store_auth_session_handler)
-                    .delete(clear_auth_session_handler),
-            )
             .route("/v1/user", get(current_user_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
             .route(

@@ -20,16 +20,6 @@ pub struct AuthSessionReadResponse {
     pub session: Option<AuthSessionSnapshot>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionStoreRequest {
-    pub session: AuthSessionSnapshot,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct AuthSessionStoreResponse {
-    pub success: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 pub struct AuthSessionClearRequest {}
 

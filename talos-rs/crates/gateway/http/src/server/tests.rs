@@ -6,9 +6,7 @@ use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use talos_auth::{
-    AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
-};
+use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
@@ -664,18 +662,6 @@ impl FakeAuthService {
 
 #[async_trait]
 impl AuthService for FakeAuthService {
-    async fn register(&self, _input: RegisterRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError(
-            "local auth is not available in tests".to_string(),
-        ))
-    }
-
-    async fn login(&self, _input: LoginRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError(
-            "local auth is not available in tests".to_string(),
-        ))
-    }
-
     async fn logout(&self, _actor: &RequestIdentity) -> TalosResult<()> {
         Ok(())
     }
@@ -684,7 +670,13 @@ impl AuthService for FakeAuthService {
         if token == "reject" {
             return Err(TalosError::AuthError("invalid token".to_string()));
         }
-        Ok(RequestIdentity::mock_admin(token).with_access_token(token))
+        Ok(RequestIdentity {
+            user_id: token.to_string(),
+            username: None,
+            role: talos_auth::UserRole::User,
+            auth_disabled: false,
+            access_token: Some(token.to_string()),
+        })
     }
 }
 
@@ -703,7 +695,13 @@ fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
 }
 
 fn test_auth() -> RequestIdentity {
-    RequestIdentity::mock_admin("static-token")
+    RequestIdentity {
+        user_id: "static-token".to_string(),
+        username: None,
+        role: talos_auth::UserRole::User,
+        auth_disabled: false,
+        access_token: None,
+    }
 }
 
 #[path = "tests/active_turn.rs"]

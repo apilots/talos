@@ -73,17 +73,24 @@ describe("ProjectsPage", () => {
     cleanup();
   });
 
-  it("disables delete for projects with bound sessions", () => {
+  it("allows deleting projects with bound sessions so the server can return a conflict", async () => {
+    const mutateAsync = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("confirm", vi.fn(() => true));
     useProjectsPageStateMock.mockReturnValue(buildProjectsPageState(2));
     useDeleteProjectMutationMock.mockReturnValue({
       isPending: false,
-      mutateAsync: vi.fn(),
+      mutateAsync,
       variables: undefined,
     });
 
     render(<ProjectsPage />);
 
-    expect(screen.getByRole("button", { name: "删除" })).toBeDisabled();
+    const deleteButton = screen.getByRole("button", { name: "删除" });
+    expect(deleteButton).toBeEnabled();
+
+    fireEvent.click(deleteButton);
+
+    expect(mutateAsync).toHaveBeenCalledWith("project-1");
   });
 
   it("shows a friendly conflict message when delete is rejected by the server", async () => {

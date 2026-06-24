@@ -15,24 +15,8 @@ pub struct GatewayConfig {
     /// Enable gateway auth checks.
     #[serde(default)]
     pub auth: bool,
-
-    /// User PAT support is part of auth middleware path and is enabled together with `auth`.
-    /// There is no separate on/off toggle currently for PATs.
-
-    /// Authentication cache settings for cloud token introspection.
-    #[serde(default)]
-    pub auth_cache: GatewayAuthCacheConfig,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayAuthCacheConfig {
-    /// Enable auth-related in-memory caches.
-    #[serde(default = "default_auth_cache_enabled")]
-    pub enabled: bool,
-
-    /// Cache TTL in seconds.
-    #[serde(default = "default_auth_cache_ttl_seconds")]
-    pub ttl_seconds: u64,
+    // User PAT support is part of auth middleware path and is enabled together with `auth`.
+    // There is no separate on/off toggle currently for PATs.
 }
 
 fn default_host() -> String {
@@ -43,30 +27,12 @@ fn default_port() -> u16 {
     18789
 }
 
-fn default_auth_cache_enabled() -> bool {
-    true
-}
-
-fn default_auth_cache_ttl_seconds() -> u64 {
-    300
-}
-
-impl Default for GatewayAuthCacheConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_auth_cache_enabled(),
-            ttl_seconds: default_auth_cache_ttl_seconds(),
-        }
-    }
-}
-
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
             host: default_host(),
             port: default_port(),
             auth: false,
-            auth_cache: GatewayAuthCacheConfig::default(),
         }
     }
 }

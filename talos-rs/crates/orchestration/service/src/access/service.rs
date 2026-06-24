@@ -380,7 +380,6 @@ mod tests {
     use async_trait::async_trait;
     use std::path::PathBuf;
     use std::sync::{Arc, Mutex};
-    use talos_auth::UserRole;
     use talos_coordinator::SessionRuntime;
     use talos_error::TalosResult;
     use talos_store::project::{ProjectRecord, ProjectStore};
@@ -736,35 +735,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regular_admin_route_is_still_scoped_to_actor() {
-        let store = Arc::new(RecordingSessionStore::with_records(vec![
-            record_for(
-                "admin-user",
-                "session-admin",
-                SessionConf::default(),
-                None,
-                None,
-            ),
-            record_for(
-                "other-user",
-                "session-other",
-                SessionConf::default(),
-                None,
-                None,
-            ),
-        ]));
-        let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
-
-        let sessions = access
-            .list_sessions(&Actor::regular("admin-user"), SessionListRequest::default())
-            .await
-            .expect("list should succeed");
-
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].context.session_id, "session-admin");
-    }
-
-    #[tokio::test]
     async fn delete_session_prepares_runtime_then_deletes_record() {
         let store = Arc::new(RecordingSessionStore::with_records(vec![record_for(
             "member-user",
@@ -791,44 +761,6 @@ mod tests {
             ["session-1"]
         );
         assert!(store.records.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn admin_role_metadata_does_not_expand_resource_scope() {
-        let store = Arc::new(RecordingSessionStore::with_records(vec![
-            record_for(
-                "admin-user",
-                "session-admin",
-                SessionConf::default(),
-                None,
-                None,
-            ),
-            record_for(
-                "other-user",
-                "session-other",
-                SessionConf::default(),
-                None,
-                None,
-            ),
-        ]));
-        let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
-        let admin_actor = Actor::regular("admin-user").with_role(UserRole::Admin);
-
-        let sessions = access
-            .list_sessions(&admin_actor, SessionListRequest::default())
-            .await
-            .expect("list should succeed");
-        let read_error = access
-            .get_session(&admin_actor, "session-other")
-            .await
-            .expect_err("admin role metadata should not reveal other user sessions");
-
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].context.session_id, "session-admin");
-        assert!(matches!(
-            read_error,
-            talos_error::TalosError::ResourceNotFound(_)
-        ));
     }
 
     #[tokio::test]
