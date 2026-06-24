@@ -143,10 +143,12 @@ async fn plugin_lifecycle_e2e(client: &mut AppServerClient) -> Result<PluginInst
             conflict_policy: PluginInstallConflictPolicy::Reject,
         })
         .await?;
-    if installed.install.exposed_mcp_servers.len() != 1 {
+    if installed.install.kind != PluginKind::McpServer
+        || installed.install.content_digest.file_count == 0
+    {
         return Err(anyhow!(
-            "installed MCP plugin exposed wrong servers: {:?}",
-            installed.install.exposed_mcp_servers
+            "installed MCP plugin returned wrong install record: {:?}",
+            installed.install
         ));
     }
 

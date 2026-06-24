@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use talos_error::{TalosError, TalosResult};
 use talos_fs::FileSystem;
 use talos_types::{
-    FileEntry, FileManifest, MarketplaceSource, MarketplaceSourceLocation, Plugin,
+    ContentDigest, ContentDigestAlgorithm, MarketplaceSource, MarketplaceSourceLocation, Plugin,
     PluginDefinition, PluginId, PluginInstall, PluginInstallConflictPolicy, PluginInstallId,
     PluginInstallSource, PluginKind, PluginUpdateConflictPolicy,
 };
@@ -31,6 +31,7 @@ pub(crate) struct UpdateActivation {
     pub plugin: Plugin,
     pub install: PluginInstall,
     backup_dir: Option<PathBuf>,
+    previous_installed_path: PathBuf,
 }
 
 pub(crate) struct UninstallActivation {
@@ -43,11 +44,16 @@ pub(crate) fn install_plugin(
     state: &PluginStateStore,
     candidate: InstallCandidate,
     conflict_policy: PluginInstallConflictPolicy,
+    enabled: bool,
 ) -> TalosResult<InstallActivation> {
     ensure_installable_plugin(&candidate.plugin)?;
     let install_id = install_id_for(&candidate.plugin.id);
-    let install_dir = state.install_dir(&install_id);
-    let backup_dir = state.install_backup_dir(&install_id);
+    let install_dir = final_install_dir(
+        state,
+        candidate.plugin.kind,
+        &candidate.plugin.metadata.name,
+    )?;
+    let backup_dir = state.transaction_backup_dir(&install_id);
     state.cleanup_install_temps()?;
     if backup_dir.exists() {
         remove_plugin_directory(&backup_dir, "clear plugin install backup dir")?;
@@ -66,11 +72,11 @@ pub(crate) fn install_plugin(
         false
     };
 
-    let temp_dir = state.install_temp_dir(&install_id);
+    let temp_dir = state.transaction_temp_dir(&install_id);
     if temp_dir.exists() {
         remove_plugin_directory(&temp_dir, "clear plugin install temp dir")?;
     }
-    let file_manifest = materialize_install_dir(state, &candidate, &install_id, &temp_dir)?;
+    let content_digest = materialize_install_dir(state, &candidate, &install_id, &temp_dir)?;
     if replace_existing {
         rename_plugin_path(
             &install_dir,
@@ -78,7 +84,7 @@ pub(crate) fn install_plugin(
             "stage existing plugin install for replace",
         )?;
     }
-    talos_fs::rename(&temp_dir, &install_dir).map_err(|err| {
+    rename_plugin_path(&temp_dir, &install_dir, "activate plugin install").map_err(|err| {
         let _ = if backup_dir.exists() {
             rename_plugin_path(&backup_dir, &install_dir, "restore plugin install backup")
         } else {
@@ -90,20 +96,17 @@ pub(crate) fn install_plugin(
         ))
     })?;
     let now_ms = Utc::now().timestamp_millis();
-    let exposed_skill_root = exposed_skill_root_for(&candidate.plugin, &install_dir);
-    let exposed_mcp_servers = exposed_mcp_servers_for(&candidate.plugin, &install_dir)?;
     let install = PluginInstall {
         id: install_id.clone(),
         plugin_id: candidate.plugin.id.clone(),
         kind: candidate.plugin.kind,
         name: candidate.plugin.metadata.name.clone(),
         installed_path: install_dir,
-        exposed_skill_root,
-        exposed_mcp_servers,
+        enabled,
         source: install_source(&candidate.source, &candidate.plugin),
+        content_digest,
         installed_at_ms: now_ms,
         updated_at_ms: now_ms,
-        file_manifest,
     };
     Ok(InstallActivation {
         install,
@@ -121,16 +124,16 @@ pub(crate) fn commit_install_activation(activation: &InstallActivation) -> Talos
 }
 
 pub(crate) fn rollback_install_activation(
-    state: &PluginStateStore,
+    _state: &PluginStateStore,
     activation: &InstallActivation,
 ) -> TalosResult<()> {
-    let install_dir = state.install_dir(&activation.install.id);
+    let install_dir = &activation.install.installed_path;
     if install_dir.exists() {
-        remove_plugin_directory(&install_dir, "remove failed plugin install")?;
+        remove_plugin_directory(install_dir, "remove failed plugin install")?;
     }
     if let Some(backup_dir) = &activation.backup_dir {
         if backup_dir.exists() {
-            rename_plugin_path(backup_dir, &install_dir, "restore plugin install backup")?;
+            rename_plugin_path(backup_dir, install_dir, "restore plugin install backup")?;
         }
     }
     Ok(())
@@ -163,22 +166,34 @@ pub(crate) fn update_plugin(
         }
     }
 
-    let install_dir = state.install_dir(&install.id);
-    let temp_dir = state.install_temp_dir(&install.id);
-    let backup_dir = state.install_backup_dir(&install.id);
+    let install_dir = final_install_dir(
+        state,
+        candidate.plugin.kind,
+        &candidate.plugin.metadata.name,
+    )?;
+    let temp_dir = state.transaction_temp_dir(&install.id);
+    let backup_dir = state.transaction_backup_dir(&install.id);
     if temp_dir.exists() {
         remove_plugin_directory(&temp_dir, "clear plugin update temp dir")?;
     }
     if backup_dir.exists() {
         remove_plugin_directory(&backup_dir, "clear plugin update backup dir")?;
     }
-    let file_manifest = materialize_install_dir(state, &candidate, &install.id, &temp_dir)?;
-    if install_dir.exists() {
-        rename_plugin_path(&install_dir, &backup_dir, "stage plugin install for update")?;
+    let content_digest = materialize_install_dir(state, &candidate, &install.id, &temp_dir)?;
+    if install.installed_path.exists() {
+        rename_plugin_path(
+            &install.installed_path,
+            &backup_dir,
+            "stage plugin install for update",
+        )?;
     }
-    talos_fs::rename(&temp_dir, &install_dir).map_err(|err| {
+    rename_plugin_path(&temp_dir, &install_dir, "activate plugin update").map_err(|err| {
         let _ = if backup_dir.exists() {
-            rename_plugin_path(&backup_dir, &install_dir, "restore plugin update backup")
+            rename_plugin_path(
+                &backup_dir,
+                &install.installed_path,
+                "restore plugin update backup",
+            )
         } else {
             Ok(())
         };
@@ -191,16 +206,16 @@ pub(crate) fn update_plugin(
     let mut updated = install.clone();
     updated.name = candidate.plugin.metadata.name.clone();
     updated.installed_path = install_dir.clone();
-    updated.exposed_skill_root = exposed_skill_root_for(&candidate.plugin, &install_dir);
-    updated.exposed_mcp_servers = exposed_mcp_servers_for(&candidate.plugin, &install_dir)?;
+    updated.enabled = enabled;
     updated.source = install_source(&candidate.source, &candidate.plugin);
     updated.updated_at_ms = Utc::now().timestamp_millis();
-    updated.file_manifest = file_manifest;
+    updated.content_digest = content_digest;
     let plugin = installed_plugin(candidate.plugin, &updated, enabled);
     Ok(UpdateActivation {
         plugin,
         install: updated,
         backup_dir: backup_dir.exists().then_some(backup_dir),
+        previous_installed_path: install.installed_path.clone(),
     })
 }
 
@@ -214,16 +229,22 @@ pub(crate) fn commit_update_activation(activation: &UpdateActivation) -> TalosRe
 }
 
 pub(crate) fn rollback_update_activation(
-    state: &PluginStateStore,
+    _state: &PluginStateStore,
     activation: &UpdateActivation,
 ) -> TalosResult<()> {
-    let install_dir = state.install_dir(&activation.install.id);
-    if install_dir.exists() {
-        remove_plugin_directory(&install_dir, "remove failed plugin update")?;
+    if activation.install.installed_path.exists() {
+        remove_plugin_directory(
+            &activation.install.installed_path,
+            "remove failed plugin update",
+        )?;
     }
     if let Some(backup_dir) = &activation.backup_dir {
         if backup_dir.exists() {
-            rename_plugin_path(backup_dir, &install_dir, "restore plugin update backup")?;
+            rename_plugin_path(
+                backup_dir,
+                &activation.previous_installed_path,
+                "restore plugin update backup",
+            )?;
         }
     }
     Ok(())
@@ -231,24 +252,24 @@ pub(crate) fn rollback_update_activation(
 
 pub(crate) fn stage_uninstall_plugin(
     state: &PluginStateStore,
-    install_id: &PluginInstallId,
+    install: &PluginInstall,
 ) -> TalosResult<UninstallActivation> {
-    let path = state.install_dir(install_id);
-    let trash_dir = state.install_trash_dir(install_id);
+    let path = install.installed_path.clone();
+    let trash_dir = state.transaction_trash_dir(&install.id);
     if trash_dir.exists() {
         remove_plugin_directory(&trash_dir, "clear plugin uninstall trash")?;
     }
     if !path.exists() {
         return Ok(UninstallActivation {
             removed_path: false,
-            install_id: install_id.clone(),
+            install_id: install.id.clone(),
             trash_dir,
         });
     }
     rename_plugin_path(&path, &trash_dir, "stage plugin uninstall")?;
     Ok(UninstallActivation {
         removed_path: true,
-        install_id: install_id.clone(),
+        install_id: install.id.clone(),
         trash_dir,
     })
 }
@@ -267,7 +288,16 @@ pub(crate) fn rollback_uninstall_activation(
     if !activation.removed_path || !activation.trash_dir.exists() {
         return Ok(());
     }
-    let install_dir = state.install_dir(&activation.install_id);
+    let install = state
+        .load_installs()?
+        .installs
+        .into_iter()
+        .find(|install| install.id == activation.install_id);
+    let Some(install) = install else {
+        remove_plugin_directory(&activation.trash_dir, "remove plugin uninstall trash")?;
+        return Ok(());
+    };
+    let install_dir = install.installed_path;
     if install_dir.exists() {
         remove_plugin_directory(&activation.trash_dir, "remove plugin uninstall trash")?;
         return Ok(());
@@ -371,6 +401,9 @@ fn create_plugin_directory(path: &Path, action: &str) -> TalosResult<()> {
 }
 
 fn rename_plugin_path(source: &Path, target: &Path, action: &str) -> TalosResult<()> {
+    if let Some(parent) = target.parent() {
+        create_plugin_directory(parent, "create plugin transaction parent")?;
+    }
     talos_fs::rename(source, target).map_err(|err| {
         TalosError::StorageError(format!(
             "failed to {action} `{}` to `{}`: {err}",
@@ -397,27 +430,22 @@ fn materialize_install_dir(
     candidate: &InstallCandidate,
     install_id: &PluginInstallId,
     install_dir: &Path,
-) -> TalosResult<FileManifest> {
+) -> TalosResult<ContentDigest> {
     let source_dir = plugin_source_dir(state, &candidate.source, &candidate.plugin)?;
-    let target_dir = installed_content_dir_for_kind(
-        candidate.plugin.kind,
-        install_dir,
-        &candidate.plugin.metadata.name,
-    )?;
-    create_plugin_directory(&target_dir, "create plugin install dir")?;
-    let manifest = copy_dir(&source_dir, &target_dir)?;
+    create_plugin_directory(install_dir, "create plugin install dir")?;
+    copy_dir(&source_dir, install_dir)?;
     let required_file = match candidate.plugin.kind {
         PluginKind::Skill => "SKILL.md",
         PluginKind::McpServer => "talos-mcp.json",
         PluginKind::Package | PluginKind::Feature => unreachable!("kind checked above"),
     };
-    if !target_dir.join(required_file).is_file() {
+    if !install_dir.join(required_file).is_file() {
         return Err(TalosError::StorageError(format!(
             "plugin install `{}` did not materialize {required_file}",
             install_id.0
         )));
     }
-    Ok(manifest)
+    content_digest_for_dir(install_dir)
 }
 
 fn install_source(source: &MarketplaceSource, plugin: &Plugin) -> PluginInstallSource {
@@ -437,116 +465,44 @@ fn install_source(source: &MarketplaceSource, plugin: &Plugin) -> PluginInstallS
     }
 }
 
-fn copy_dir(source: &Path, target: &Path) -> TalosResult<FileManifest> {
-    let mut files = Vec::new();
-    copy_dir_inner(source, source, target, &mut files)?;
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(FileManifest { files })
-}
-
-pub(crate) fn manifest_for_dir(root: &Path) -> TalosResult<FileManifest> {
-    if !root.exists() {
-        return Ok(FileManifest::default());
-    }
-    let mut files = Vec::new();
-    manifest_for_dir_inner(root, root, &mut files)?;
-    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-    Ok(FileManifest { files })
-}
-
-fn manifest_for_dir_inner(
-    root: &Path,
-    current: &Path,
-    files: &mut Vec<FileEntry>,
-) -> TalosResult<()> {
-    for entry in fs::read_dir(current).map_err(|err| {
-        TalosError::StorageError(format!("failed to read `{}`: {err}", current.display()))
-    })? {
-        let entry = entry.map_err(|err| {
-            TalosError::StorageError(format!(
-                "failed to read `{}` entry: {err}",
-                current.display()
-            ))
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|err| {
-            TalosError::StorageError(format!("failed to inspect `{}`: {err}", path.display()))
-        })?;
-        if file_type.is_dir() {
-            manifest_for_dir_inner(root, &path, files)?;
-        } else if file_type.is_file() {
-            let relative = path.strip_prefix(root).map_err(|err| {
-                TalosError::InternalError(format!(
-                    "failed to build plugin file manifest for `{}`: {err}",
-                    path.display()
-                ))
-            })?;
-            let bytes = fs::read(&path).map_err(|err| {
-                TalosError::StorageError(format!("failed to hash `{}`: {err}", path.display()))
-            })?;
-            files.push(FileEntry {
-                relative_path: relative.to_string_lossy().replace('\\', "/"),
-                sha256: sha256_hex(&bytes),
-                size_bytes: bytes.len() as u64,
-            });
-        }
-    }
-    Ok(())
-}
-
 fn has_local_changes(install: &PluginInstall) -> TalosResult<bool> {
-    let current = manifest_for_dir(&installed_content_dir(install)?)?;
-    Ok(current != install.file_manifest)
+    let current = content_digest_for_dir(&install.installed_path)?;
+    Ok(current != install.content_digest)
 }
 
-fn exposed_skill_root_for(plugin: &Plugin, install_dir: &Path) -> Option<PathBuf> {
-    (plugin.kind == PluginKind::Skill).then(|| install_dir.join("skills"))
-}
-
-fn exposed_mcp_servers_for(
-    plugin: &Plugin,
-    install_dir: &Path,
-) -> TalosResult<Vec<talos_types::McpServerDefinition>> {
-    let PluginDefinition::McpServer(mcp) = &plugin.definition else {
-        return Ok(Vec::new());
-    };
-    let mut server = mcp.server.clone();
-    let plugin_dir = install_dir.join("mcp").join(&plugin.metadata.name);
-    if let talos_types::McpTransportDefinition::Stdio { cwd, .. } = &mut server.transport {
-        let resolved = match cwd.take() {
-            Some(path) if path.is_absolute() => path,
-            Some(path) => plugin_dir.join(path),
-            None => plugin_dir,
-        };
-        *cwd = Some(resolved);
-    }
-    Ok(vec![server])
-}
-
-fn installed_content_dir(install: &PluginInstall) -> TalosResult<PathBuf> {
-    installed_content_dir_for_kind(install.kind, &install.installed_path, &install.name)
-}
-
-fn installed_content_dir_for_kind(
+fn final_install_dir(
+    state: &PluginStateStore,
     kind: PluginKind,
-    install_dir: &Path,
     name: &str,
 ) -> TalosResult<PathBuf> {
+    validate_install_name(name)?;
     match kind {
-        PluginKind::Skill => Ok(install_dir.join("skills").join(name)),
-        PluginKind::McpServer => Ok(install_dir.join("mcp").join(name)),
+        PluginKind::Skill => Ok(state.skill_installs_dir().join(name)),
+        PluginKind::McpServer => Ok(state.mcp_installs_dir().join(name)),
         PluginKind::Package | PluginKind::Feature => Err(TalosError::ValidationError(format!(
             "plugin kind `{kind:?}` is not installable"
         ))),
     }
 }
 
-fn copy_dir_inner(
-    root: &Path,
-    current: &Path,
-    target_root: &Path,
-    files: &mut Vec<FileEntry>,
-) -> TalosResult<()> {
+fn validate_install_name(name: &str) -> TalosResult<()> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err(TalosError::ValidationError(format!(
+            "invalid plugin install name `{name}`"
+        )));
+    }
+    Ok(())
+}
+
+fn copy_dir(source: &Path, target: &Path) -> TalosResult<()> {
+    copy_dir_inner(source, source, target)
+}
+
+fn copy_dir_inner(root: &Path, current: &Path, target_root: &Path) -> TalosResult<()> {
     for entry in fs::read_dir(current).map_err(|err| {
         TalosError::StorageError(format!("failed to read `{}`: {err}", current.display()))
     })? {
@@ -572,18 +528,78 @@ fn copy_dir_inner(
         let target_path = target_root.join(relative);
         if file_type.is_dir() {
             create_plugin_directory(&target_path, "create plugin install child dir")?;
-            copy_dir_inner(root, &source_path, target_root, files)?;
+            copy_dir_inner(root, &source_path, target_root)?;
         } else if file_type.is_file() {
             copy_plugin_file(&source_path, &target_path)?;
-            let bytes = fs::read(&target_path).map_err(|err| {
-                TalosError::StorageError(format!(
-                    "failed to hash `{}`: {err}",
-                    target_path.display()
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn content_digest_for_dir(root: &Path) -> TalosResult<ContentDigest> {
+    let mut files = Vec::new();
+    collect_digest_files(root, root, &mut files)?;
+    files.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+
+    let mut aggregate = Sha256::new();
+    let mut total_size_bytes = 0_u64;
+    for file in &files {
+        aggregate.update(file.relative_path.as_bytes());
+        aggregate.update(b"\0");
+        aggregate.update(file.size_bytes.to_le_bytes());
+        aggregate.update(b"\0");
+        aggregate.update(file.content_sha256.as_bytes());
+        aggregate.update(b"\0");
+        total_size_bytes += file.size_bytes;
+    }
+
+    Ok(ContentDigest {
+        algorithm: ContentDigestAlgorithm::Sha256,
+        value: format!("sha256:{}", short_hex(&aggregate.finalize())),
+        file_count: files.len() as u64,
+        total_size_bytes,
+    })
+}
+
+struct DigestFile {
+    relative_path: String,
+    content_sha256: String,
+    size_bytes: u64,
+}
+
+fn collect_digest_files(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<DigestFile>,
+) -> TalosResult<()> {
+    for entry in fs::read_dir(current).map_err(|err| {
+        TalosError::StorageError(format!("failed to read `{}`: {err}", current.display()))
+    })? {
+        let entry = entry.map_err(|err| {
+            TalosError::StorageError(format!(
+                "failed to read `{}` entry: {err}",
+                current.display()
+            ))
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|err| {
+            TalosError::StorageError(format!("failed to inspect `{}`: {err}", path.display()))
+        })?;
+        if file_type.is_dir() {
+            collect_digest_files(root, &path, files)?;
+        } else if file_type.is_file() {
+            let relative = path.strip_prefix(root).map_err(|err| {
+                TalosError::InternalError(format!(
+                    "failed to build plugin content digest path for `{}`: {err}",
+                    path.display()
                 ))
             })?;
-            files.push(FileEntry {
+            let bytes = fs::read(&path).map_err(|err| {
+                TalosError::StorageError(format!("failed to hash `{}`: {err}", path.display()))
+            })?;
+            files.push(DigestFile {
                 relative_path: relative.to_string_lossy().replace('\\', "/"),
-                sha256: sha256_hex(&bytes),
+                content_sha256: sha256_hex(&bytes),
                 size_bytes: bytes.len() as u64,
             });
         }

@@ -11,13 +11,11 @@ use crate::PluginStateStore;
 mod matchers;
 mod read;
 use matchers::{plugin_matches_list, plugin_matches_search};
-use std::collections::BTreeSet;
 use talos_config::{
     resolve_runtime_path, PluginRootKind as ConfigPluginRootKind, PluginsRuntimeConfig,
     SkillsRuntimeConfig,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_skills::PluginSkillStateKey;
 use talos_types::{
     Plugin, PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
     PluginInstall, PluginInstallRequest, PluginInstallResponse, PluginInstallTarget,
@@ -245,14 +243,13 @@ impl PluginManager {
     fn list_plugins_locked(&self, request: PluginListRequest) -> TalosResult<PluginListResponse> {
         self.state.cleanup_install_temps()?;
         let installs = self.state.load_installs()?.installs;
-        let warnings = self.orphan_install_warnings(&installs)?;
+        let warnings = Vec::new();
         let mut plugins = Vec::new();
         for install in installs {
             if request.kind.is_some_and(|kind| kind != install.kind) {
                 continue;
             }
-            let enabled = self.install_enabled(&install)?;
-            plugins.push(self.plugin_for_install(&install, enabled));
+            plugins.push(self.plugin_for_install(&install, install.enabled));
         }
         plugins.retain(|plugin| plugin_matches_list(plugin, &request));
         plugins.sort_by(|left, right| {
@@ -283,20 +280,17 @@ impl PluginManager {
                 plugin_id.0
             )));
         }
-        let activation = install_plugin(&self.state, candidate, request.conflict_policy)?;
+        let enabled = request.enable != Some(false);
+        let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
         let install = activation.install.clone();
         let previous_installs = self.state.load_installs()?;
         let mut installs = previous_installs.clone();
-        installs.installs.retain(|item| item.id != install.id);
+        installs
+            .installs
+            .retain(|item| item.id != install.id && item.installed_path != install.installed_path);
         installs.installs.push(install.clone());
-        let enabled = request.enable != Some(false);
         if let Err(err) = self.state.save_installs(&installs) {
             let _ = rollback_install_activation(&self.state, &activation);
-            return Err(err);
-        }
-        if let Err(err) = self.set_install_enabled(&install, enabled) {
-            let _ = rollback_install_activation(&self.state, &activation);
-            let _ = self.state.save_installs(&previous_installs);
             return Err(err);
         }
         if let Err(err) = commit_install_activation(&activation) {
@@ -313,7 +307,7 @@ impl PluginManager {
 
     fn update_locked(&self, request: PluginUpdateRequest) -> TalosResult<PluginUpdateResponse> {
         let install = self.install_by_id(&request.install_id)?;
-        let enabled = self.install_enabled(&install)?;
+        let enabled = install.enabled;
         let candidate = self.update_candidate(&install)?;
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
@@ -359,7 +353,6 @@ impl PluginManager {
     ) -> TalosResult<PluginUninstallResponse> {
         let mut installs = self.state.load_installs()?;
         let original_len = installs.installs.len();
-        let previous_installs = installs.clone();
         let removed_install = installs
             .installs
             .iter()
@@ -369,26 +362,19 @@ impl PluginManager {
             .installs
             .retain(|install| install.id != request.install_id);
         let removed_record = installs.installs.len() != original_len;
-        let previous_skill_state = if removed_install.is_some() {
-            Some(self.state.load_skill_state()?)
-        } else {
-            None
+        let activation = match removed_install.as_ref() {
+            Some(install) => stage_uninstall_plugin(&self.state, install)?,
+            None => {
+                return Ok(PluginUninstallResponse {
+                    install_id: request.install_id,
+                    uninstalled: false,
+                });
+            }
         };
-        let activation = stage_uninstall_plugin(&self.state, &request.install_id)?;
         if removed_record {
             if let Err(err) = self.state.save_installs(&installs) {
                 let _ = rollback_uninstall_activation(&self.state, &activation);
                 return Err(err);
-            }
-            if let Some(install) = removed_install {
-                if let Err(err) = self.set_install_enabled(&install, true) {
-                    let _ = rollback_uninstall_activation(&self.state, &activation);
-                    let _ = self.state.save_installs(&previous_installs);
-                    if let Some(previous_skill_state) = previous_skill_state {
-                        let _ = self.state.save_skill_state(&previous_skill_state);
-                    }
-                    return Err(err);
-                }
             }
         }
         commit_uninstall_activation(&activation)?;
@@ -404,8 +390,7 @@ impl PluginManager {
     }
 
     fn enable_locked(&self, request: PluginEnableRequest) -> TalosResult<PluginEnableResponse> {
-        let install = self.install_by_id(&request.install_id)?;
-        self.set_install_enabled(&install, true)?;
+        let install = self.set_install_enabled(&request.install_id, true)?;
         Ok(PluginEnableResponse {
             plugin: self.plugin_for_install(&install, true),
         })
@@ -417,8 +402,7 @@ impl PluginManager {
     }
 
     fn disable_locked(&self, request: PluginDisableRequest) -> TalosResult<PluginDisableResponse> {
-        let install = self.install_by_id(&request.install_id)?;
-        self.set_install_enabled(&install, false)?;
+        let install = self.set_install_enabled(&request.install_id, false)?;
         Ok(PluginDisableResponse {
             plugin: self.plugin_for_install(&install, false),
         })
@@ -491,12 +475,10 @@ impl PluginManager {
             self.state.cleanup_install_temps()?;
             let mut servers = Vec::new();
             for install in self.state.load_installs()?.installs {
-                if install.kind != talos_types::PluginKind::McpServer
-                    || !self.install_enabled(&install)?
-                {
+                if install.kind != talos_types::PluginKind::McpServer || !install.enabled {
                     continue;
                 }
-                servers.extend(installed_mcp_servers(&install));
+                servers.extend(installed_mcp_servers(&install)?);
             }
             servers.sort_by(|left, right| {
                 left.server
@@ -627,20 +609,23 @@ impl PluginManager {
         None
     }
 
-    fn install_enabled(&self, install: &PluginInstall) -> TalosResult<bool> {
-        let state = self.state.load_skill_state()?;
-        Ok(!state.is_disabled(Some(&install_state_key(install))))
-    }
-
-    fn set_install_enabled(&self, install: &PluginInstall, enabled: bool) -> TalosResult<()> {
-        let mut state = self.state.load_skill_state()?;
-        let key = install_state_key(install);
-        if enabled {
-            state.enable(&key);
-        } else {
-            state.disable(key);
-        }
-        self.state.save_skill_state(&state)
+    fn set_install_enabled(
+        &self,
+        install_id: &talos_types::PluginInstallId,
+        enabled: bool,
+    ) -> TalosResult<PluginInstall> {
+        let mut installs = self.state.load_installs()?;
+        let install = installs
+            .installs
+            .iter_mut()
+            .find(|install| &install.id == install_id)
+            .ok_or_else(|| {
+                TalosError::ResourceNotFound(format!("plugin install `{}` not found", install_id.0))
+            })?;
+        install.enabled = enabled;
+        let install = install.clone();
+        self.state.save_installs(&installs)?;
+        Ok(install)
     }
 
     fn merge_installed_statuses(&self, plugins: &mut [Plugin]) -> TalosResult<()> {
@@ -652,7 +637,7 @@ impl PluginManager {
             else {
                 continue;
             };
-            let enabled = self.install_enabled(install)?;
+            let enabled = install.enabled;
             if !install.installed_path.exists() {
                 plugin.status = PluginStatus::Conflict {
                     reason: talos_types::PluginConflictReason::TargetPathMissing,
@@ -711,57 +696,6 @@ impl PluginManager {
             source: refreshed.source,
         })
     }
-
-    fn orphan_install_warnings(
-        &self,
-        installs: &[PluginInstall],
-    ) -> TalosResult<Vec<PluginWarning>> {
-        let installs_dir = self.state.installs_dir();
-        if !installs_dir.exists() {
-            return Ok(Vec::new());
-        }
-        let known = installs
-            .iter()
-            .map(|install| install.id.0.as_str())
-            .collect::<BTreeSet<_>>();
-        let mut warnings = Vec::new();
-        for entry in std::fs::read_dir(&installs_dir).map_err(|err| {
-            TalosError::StorageError(format!(
-                "failed to read plugin installs dir `{}`: {err}",
-                installs_dir.display()
-            ))
-        })? {
-            let entry = entry.map_err(|err| {
-                TalosError::StorageError(format!(
-                    "failed to read plugin installs dir `{}` entry: {err}",
-                    installs_dir.display()
-                ))
-            })?;
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with(".tmp-")
-                || name.starts_with(".backup-")
-                || known.contains(name.as_str())
-            {
-                continue;
-            }
-            warnings.push(PluginWarning {
-                code: PluginWarningCode::OrphanInstallDirectory,
-                message: format!(
-                    "plugin install directory `{}` has no install record",
-                    path.display()
-                ),
-                kind: None,
-                source_id: None,
-                path: Some(path.to_string_lossy().to_string()),
-            });
-        }
-        warnings.sort_by(|left, right| left.path.cmp(&right.path));
-        Ok(warnings)
-    }
 }
 
 fn plugins_with_source_commit(mut plugins: Vec<Plugin>, commit: Option<String>) -> Vec<Plugin> {
@@ -769,13 +703,6 @@ fn plugins_with_source_commit(mut plugins: Vec<Plugin>, commit: Option<String>) 
         plugin.source_commit = commit.clone();
     }
     plugins
-}
-
-fn install_state_key(install: &PluginInstall) -> PluginSkillStateKey {
-    PluginSkillStateKey {
-        install_id: install.id.0.clone(),
-        relative_skill_md_path: "SKILL.md".into(),
-    }
 }
 
 fn install_source_id(install: &PluginInstall) -> Option<talos_types::MarketplaceSourceId> {

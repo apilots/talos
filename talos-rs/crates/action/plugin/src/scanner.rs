@@ -1,6 +1,6 @@
 mod discovery;
 mod materialize;
-mod mcp_manifest;
+pub(crate) mod mcp_manifest;
 mod skill_manifest;
 
 use crate::documents::relative_path;

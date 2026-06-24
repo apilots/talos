@@ -1,31 +1,36 @@
 use crate::documents::{mcp_manifest_document_ref, skill_document_ref};
+use crate::scanner::mcp_manifest::server_from_installed_mcp_manifest;
+use talos_error::TalosResult;
 use talos_types::{
     Plugin, PluginDefinition, PluginInstall, PluginInstallSource, PluginKind, PluginMetadata,
     PluginStatus,
 };
 
 pub(crate) fn installed_skill_root(install: &PluginInstall) -> Option<talos_skills::SkillRoot> {
-    install.exposed_skill_root.as_ref().map(|root| {
-        talos_skills::SkillRoot::plugin(root, install.plugin_id.0.clone(), install.id.0.clone())
+    (install.kind == PluginKind::Skill && install.enabled).then(|| {
+        talos_skills::SkillRoot::plugin(
+            install.installed_path.clone(),
+            install.plugin_id.0.clone(),
+            install.id.0.clone(),
+        )
     })
 }
 
 pub(crate) fn installed_mcp_servers(
     install: &PluginInstall,
-) -> Vec<talos_types::McpServerRuntimeDescriptor> {
-    install
-        .exposed_mcp_servers
-        .iter()
-        .cloned()
-        .map(|server| talos_types::McpServerRuntimeDescriptor {
-            server,
-            source: talos_types::McpServerSource::Plugin {
-                plugin_id: install.plugin_id.clone(),
-                install_id: install.id.clone(),
-                installed_path: install.installed_path.clone(),
-            },
-        })
-        .collect()
+) -> TalosResult<Vec<talos_types::McpServerRuntimeDescriptor>> {
+    if install.kind != PluginKind::McpServer || !install.enabled {
+        return Ok(Vec::new());
+    }
+    let server = server_from_installed_mcp_manifest(&install.installed_path)?;
+    Ok(vec![talos_types::McpServerRuntimeDescriptor {
+        server,
+        source: talos_types::McpServerSource::Plugin {
+            plugin_id: install.plugin_id.clone(),
+            install_id: install.id.clone(),
+            installed_path: install.installed_path.clone(),
+        },
+    }])
 }
 
 pub(crate) fn installed_plugin(
@@ -48,21 +53,17 @@ pub(crate) fn missing_plugin_from_install(install: &PluginInstall, enabled: bool
             skill_md_path: "SKILL.md".to_string(),
         }),
         PluginKind::McpServer => PluginDefinition::McpServer(talos_types::McpServerPlugin {
-            server: install
-                .exposed_mcp_servers
-                .first()
-                .cloned()
-                .unwrap_or_else(|| talos_types::McpServerDefinition {
-                    name: install.name.clone(),
-                    display_name: None,
-                    description: Some(install.name.clone()),
-                    transport: talos_types::McpTransportDefinition::Stdio {
-                        command: String::new(),
-                        args: Vec::new(),
-                        env: Default::default(),
-                        cwd: None,
-                    },
-                }),
+            server: talos_types::McpServerDefinition {
+                name: install.name.clone(),
+                display_name: None,
+                description: Some(install.name.clone()),
+                transport: talos_types::McpTransportDefinition::Stdio {
+                    command: String::new(),
+                    args: Vec::new(),
+                    env: Default::default(),
+                    cwd: None,
+                },
+            },
             manifest_path: "talos-mcp.json".to_string(),
         }),
         PluginKind::Package => PluginDefinition::Package(talos_types::PackagePlugin {

@@ -34,8 +34,7 @@ impl PluginManager {
             .iter()
             .find(|install| install.plugin_id == *plugin_id)
         {
-            let enabled = self.install_enabled(install)?;
-            return Ok(self.plugin_for_install(install, enabled));
+            return Ok(self.plugin_for_install(install, install.enabled));
         }
         Err(TalosError::ResourceNotFound(format!(
             "plugin `{}` not found",
@@ -138,11 +137,8 @@ fn relative_document_path(root: &Path, path: &Path) -> TalosResult<String> {
 
 fn installed_content_root(plugin: &Plugin, installed_path: &Path) -> TalosResult<PathBuf> {
     match plugin.kind {
-        talos_types::PluginKind::Skill => {
-            Ok(installed_path.join("skills").join(&plugin.metadata.name))
-        }
-        talos_types::PluginKind::McpServer => {
-            Ok(installed_path.join("mcp").join(&plugin.metadata.name))
+        talos_types::PluginKind::Skill | talos_types::PluginKind::McpServer => {
+            Ok(installed_path.to_path_buf())
         }
         other => Err(TalosError::ValidationError(format!(
             "plugin kind `{other:?}` has no readable document"

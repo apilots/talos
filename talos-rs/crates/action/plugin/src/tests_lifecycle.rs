@@ -10,7 +10,7 @@ use talos_types::{
     PluginInstallTarget, PluginKind, PluginListRequest, PluginListStatusFilter,
     PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
     PluginSourceAddRequest, PluginStatus, PluginUninstallRequest, PluginUpdateConflictPolicy,
-    PluginUpdateRequest, PluginWarningCode,
+    PluginUpdateRequest,
 };
 
 struct PluginFixture {
@@ -94,6 +94,10 @@ Use this skill to translate text.
         installed.plugin.status,
         PluginStatus::Installed { enabled: true, .. }
     ));
+    assert_eq!(
+        installed.install.installed_path,
+        temp.path().join("state").join("skills").join("translate")
+    );
     assert!(installed.install.installed_path.exists());
 
     let roots = fixture
@@ -127,7 +131,7 @@ Use this skill to translate text.
             .expect("skill roots should load"),
     )
     .expect("installed skill should load");
-    assert!(!snapshot.skills[0].enabled);
+    assert!(snapshot.skills.is_empty());
 
     let install_id = installed.install.id.clone();
     let enabled = fixture
@@ -237,8 +241,11 @@ fn installs_mcp_plugin_and_controls_runtime_capabilities() {
         })
         .expect("MCP plugin should install");
 
-    assert!(installed.install.exposed_skill_root.is_none());
-    assert_eq!(installed.install.exposed_mcp_servers.len(), 1);
+    assert_eq!(
+        installed.install.installed_path,
+        temp.path().join("state").join("mcp").join("playwright")
+    );
+    assert_eq!(installed.install.content_digest.file_count, 1);
     let servers = manager.mcp_servers().expect("MCP servers should list");
     assert_eq!(servers.len(), 1);
     assert_eq!(servers[0].server.name, "playwright");
@@ -296,12 +303,7 @@ Second version.
 "#,
     );
     std::fs::write(
-        installed
-            .install
-            .installed_path
-            .join("skills")
-            .join("writer")
-            .join("SKILL.md"),
+        installed.install.installed_path.join("SKILL.md"),
         "local change",
     )
     .expect("installed skill should be changed");
@@ -324,119 +326,10 @@ Second version.
             conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
         })
         .expect("local changes should be replaced");
-    assert_eq!(updated.install.file_manifest.files.len(), 1);
-    let contents = std::fs::read_to_string(
-        updated
-            .install
-            .installed_path
-            .join("skills")
-            .join("writer")
-            .join("SKILL.md"),
-    )
-    .expect("updated skill should exist");
+    assert_eq!(updated.install.content_digest.file_count, 1);
+    let contents = std::fs::read_to_string(updated.install.installed_path.join("SKILL.md"))
+        .expect("updated skill should exist");
     assert!(contents.contains("Second version."));
-}
-
-#[test]
-fn list_plugins_cleans_stale_transaction_dirs() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let state = PluginStateStore::new(temp.path().join("state"));
-    let stale_tmp = temp
-        .path()
-        .join("state")
-        .join("installs")
-        .join(".tmp-install_stale");
-    let stale_backup = temp
-        .path()
-        .join("state")
-        .join("installs")
-        .join(".backup-install_stale");
-    std::fs::create_dir_all(&stale_tmp).expect("tmp dir should be created");
-    std::fs::create_dir_all(&stale_backup).expect("backup dir should be created");
-    let manager = manager_with_state(state);
-
-    let listed = manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("plugins should list");
-
-    assert!(listed.plugins.is_empty());
-    assert!(!stale_tmp.exists());
-    assert!(!stale_backup.exists());
-}
-
-#[test]
-fn list_plugins_reports_orphan_install_dirs() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let state = PluginStateStore::new(temp.path().join("state"));
-    let orphan = state.installs_dir().join("install_orphan");
-    std::fs::create_dir_all(&orphan).expect("orphan dir should be created");
-    let manager = manager_with_state(state);
-
-    let listed = manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("plugins should list");
-
-    assert!(listed.plugins.is_empty());
-    assert_eq!(listed.warnings.len(), 1);
-    assert_eq!(
-        listed.warnings[0].code,
-        PluginWarningCode::OrphanInstallDirectory
-    );
-    assert!(orphan.exists());
-}
-
-#[test]
-fn install_replace_keeps_existing_install_when_materialize_fails() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let fixture = PluginFixture::new(
-        &temp,
-        "writer",
-        r#"---
-name: writer
-description: Write safely.
----
-
-First version.
-"#,
-    );
-    let installed = fixture.install(true);
-    let installed_skill_md = installed
-        .install
-        .installed_path
-        .join("skills")
-        .join("writer")
-        .join("SKILL.md");
-    assert!(installed_skill_md.exists());
-
-    std::fs::remove_file(fixture.skills.join("writer").join("SKILL.md"))
-        .expect("source skill should be broken");
-    let err = fixture
-        .manager
-        .install(PluginInstallRequest {
-            target: PluginInstallTarget::Plugin {
-                plugin_id: fixture.plugin_id.clone(),
-                expected_source_commit: None,
-            },
-            enable: Some(true),
-            conflict_policy: PluginInstallConflictPolicy::Replace,
-        })
-        .expect_err("replace should fail when new source cannot materialize");
-
-    assert!(matches!(err, TalosError::ResourceNotFound(_)));
-    assert!(installed_skill_md.exists());
-    let contents =
-        std::fs::read_to_string(installed_skill_md).expect("existing install should remain");
-    assert!(contents.contains("First version."));
 }
 
 #[test]
@@ -454,18 +347,18 @@ First version.
 "#,
     );
     let installed = fixture.install(true);
-    let installed_skill_md = installed
-        .install
-        .installed_path
+    let old_path = installed.install.installed_path.clone();
+    let new_path = temp
+        .path()
+        .join("state")
         .join("skills")
-        .join("writer")
-        .join("SKILL.md");
+        .join("writer-renamed");
 
     fixture.write_source_skill(
         "writer",
         r#"---
-name: writer
-description: Write safely.
+name: writer-renamed
+description: Write safely after rename.
 ---
 
 Second version.
@@ -482,13 +375,193 @@ Second version.
         .expect_err("update should fail when installs state cannot save");
 
     assert!(matches!(err, TalosError::StorageError(_)));
+    assert!(old_path.exists());
+    assert!(!new_path.exists());
     let contents =
-        std::fs::read_to_string(&installed_skill_md).expect("rolled back skill should exist");
+        std::fs::read_to_string(old_path.join("SKILL.md")).expect("rolled back skill should exist");
     assert!(contents.contains("First version."));
     assert!(!fixture
         .state
-        .install_backup_dir(&installed.install.id)
+        .transaction_backup_dir(&installed.install.id)
         .exists());
+}
+
+#[test]
+fn list_plugins_cleans_stale_transaction_dirs() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let state = PluginStateStore::new(temp.path().join("state"));
+    let stale_tmp = temp.path().join("state").join(".tmp").join("install_stale");
+    std::fs::create_dir_all(&stale_tmp).expect("tmp dir should be created");
+    let manager = manager_with_state(state);
+
+    let listed = manager
+        .list_plugins(PluginListRequest {
+            kind: None,
+            status: None,
+            source_id: None,
+            include_disabled: true,
+        })
+        .expect("plugins should list");
+
+    assert!(listed.plugins.is_empty());
+    assert!(!stale_tmp.exists());
+}
+
+#[test]
+fn install_handles_path_conflicts_and_materialization_failures() {
+    {
+        let temp = tempfile::tempdir().expect("temp dir should exist");
+        let repo = temp.path().join("repo");
+        let skills = repo.join("skills");
+        write_skill(
+            &skills,
+            "first",
+            r#"---
+name: shared-writer
+description: First shared writer.
+---
+
+First version.
+"#,
+        );
+        write_skill(
+            &skills,
+            "second",
+            r#"---
+name: shared-writer
+description: Second shared writer.
+---
+
+Second version.
+"#,
+        );
+        let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
+        let added = manager
+            .add_source(PluginSourceAddRequest {
+                source: MarketplaceSourceInput::LocalFolder {
+                    path: repo,
+                    sparse_paths: vec!["skills".to_string()],
+                },
+                refresh: true,
+            })
+            .expect("source should add");
+        assert_eq!(added.plugins.len(), 2);
+        let first = added
+            .plugins
+            .iter()
+            .find(|plugin| plugin.path_in_source.as_deref() == Some("skills/first"))
+            .expect("first plugin should exist")
+            .clone();
+        let second = added
+            .plugins
+            .iter()
+            .find(|plugin| plugin.path_in_source.as_deref() == Some("skills/second"))
+            .expect("second plugin should exist")
+            .clone();
+
+        manager
+            .install(PluginInstallRequest {
+                target: PluginInstallTarget::Plugin {
+                    plugin_id: first.id.clone(),
+                    expected_source_commit: None,
+                },
+                enable: Some(true),
+                conflict_policy: PluginInstallConflictPolicy::Reject,
+            })
+            .expect("first plugin should install");
+        manager
+            .install(PluginInstallRequest {
+                target: PluginInstallTarget::Plugin {
+                    plugin_id: second.id.clone(),
+                    expected_source_commit: None,
+                },
+                enable: Some(true),
+                conflict_policy: PluginInstallConflictPolicy::Replace,
+            })
+            .expect("second plugin should replace final path");
+
+        let installs = manager
+            .list_plugins(PluginListRequest {
+                kind: Some(PluginKind::Skill),
+                status: Some(PluginListStatusFilter::Installed),
+                source_id: Some(added.source.id),
+                include_disabled: true,
+            })
+            .expect("plugins should list");
+        assert_eq!(installs.plugins.len(), 1);
+        assert_eq!(installs.plugins[0].id, second.id);
+        let contents =
+            std::fs::read_to_string(temp.path().join("state/skills/shared-writer/SKILL.md"))
+                .expect("replacement skill should exist");
+        assert!(contents.contains("Second version."));
+    }
+
+    {
+        let temp = tempfile::tempdir().expect("temp dir should exist");
+        let fixture = PluginFixture::new(
+            &temp,
+            "escape",
+            r#"---
+name: ../escape
+description: Invalid install name.
+---
+
+Invalid skill.
+"#,
+        );
+        let err = fixture
+            .manager
+            .install(PluginInstallRequest {
+                target: PluginInstallTarget::Plugin {
+                    plugin_id: fixture.plugin_id.clone(),
+                    expected_source_commit: None,
+                },
+                enable: Some(true),
+                conflict_policy: PluginInstallConflictPolicy::Reject,
+            })
+            .expect_err("invalid skill install name should reject");
+
+        assert!(matches!(err, TalosError::ValidationError(_)));
+        assert!(!temp.path().join("state").join("escape").exists());
+    }
+
+    {
+        let temp = tempfile::tempdir().expect("temp dir should exist");
+        let fixture = PluginFixture::new(
+            &temp,
+            "writer",
+            r#"---
+name: writer
+description: Write safely.
+---
+
+First version.
+"#,
+        );
+        let installed = fixture.install(true);
+        let installed_skill_md = installed.install.installed_path.join("SKILL.md");
+        assert!(installed_skill_md.exists());
+
+        std::fs::remove_file(fixture.skills.join("writer").join("SKILL.md"))
+            .expect("source skill should be broken");
+        let err = fixture
+            .manager
+            .install(PluginInstallRequest {
+                target: PluginInstallTarget::Plugin {
+                    plugin_id: fixture.plugin_id.clone(),
+                    expected_source_commit: None,
+                },
+                enable: Some(true),
+                conflict_policy: PluginInstallConflictPolicy::Replace,
+            })
+            .expect_err("replace should fail when new source cannot materialize");
+
+        assert!(matches!(err, TalosError::ResourceNotFound(_)));
+        assert!(installed_skill_md.exists());
+        let contents =
+            std::fs::read_to_string(installed_skill_md).expect("existing install should remain");
+        assert!(contents.contains("First version."));
+    }
 }
 
 #[test]
@@ -526,175 +599,6 @@ Installed version.
         .any(|install| install.id == installed.install.id));
     assert!(!fixture
         .state
-        .install_trash_dir(&installed.install.id)
-        .exists());
-}
-
-#[test]
-fn cleanup_deletes_uninstall_trash_when_install_record_was_removed() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let fixture = PluginFixture::new(
-        &temp,
-        "writer",
-        r#"---
-name: writer
-description: Write safely.
----
-
-Installed version.
-"#,
-    );
-    let installed = fixture.install(true);
-    let mut installs = fixture.state.load_installs().expect("installs should load");
-    installs
-        .installs
-        .retain(|install| install.id != installed.install.id);
-    fixture
-        .state
-        .save_installs(&installs)
-        .expect("removed install record should save");
-    let trash_dir = fixture.state.install_trash_dir(&installed.install.id);
-    std::fs::rename(&installed.install.installed_path, &trash_dir)
-        .expect("install dir should be staged as trash");
-
-    let listed = fixture
-        .manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("list should clean crash remnant");
-
-    assert!(listed.plugins.is_empty());
-    assert!(!trash_dir.exists());
-    assert!(!installed.install.installed_path.exists());
-}
-
-#[test]
-fn cleanup_restores_backup_when_install_dir_does_not_match_state() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let fixture = PluginFixture::new(
-        &temp,
-        "writer",
-        r#"---
-name: writer
-description: Write safely.
----
-
-First version.
-"#,
-    );
-    let installed = fixture.install(true);
-    let backup_dir = fixture.state.install_backup_dir(&installed.install.id);
-    std::fs::rename(&installed.install.installed_path, &backup_dir)
-        .expect("old install should be staged as backup");
-    let current_skill = installed
-        .install
-        .installed_path
-        .join("skills")
-        .join("writer");
-    std::fs::create_dir_all(&current_skill).expect("new install skill dir should exist");
-    std::fs::write(
-        current_skill.join("SKILL.md"),
-        "---\nname: writer\ndescription: Write safely.\n---\n\nSecond version.\n",
-    )
-    .expect("new unmatched install should exist");
-
-    fixture
-        .manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("list should clean crash remnant");
-
-    let contents = std::fs::read_to_string(
-        installed
-            .install
-            .installed_path
-            .join("skills")
-            .join("writer")
-            .join("SKILL.md"),
-    )
-    .expect("restored install should exist");
-    assert!(contents.contains("First version."));
-    assert!(!backup_dir.exists());
-}
-
-#[test]
-fn cleanup_deletes_backup_when_install_dir_matches_state() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let fixture = PluginFixture::new(
-        &temp,
-        "writer",
-        r#"---
-name: writer
-description: Write safely.
----
-
-Current version.
-"#,
-    );
-    let installed = fixture.install(true);
-    let backup_dir = fixture.state.install_backup_dir(&installed.install.id);
-    let backup_skill = backup_dir.join("skills").join("writer");
-    std::fs::create_dir_all(&backup_skill).expect("backup skill dir should exist");
-    std::fs::write(backup_skill.join("SKILL.md"), "stale backup")
-        .expect("backup file should exist");
-
-    fixture
-        .manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("list should clean crash remnant");
-
-    assert!(!backup_dir.exists());
-    assert!(installed.install.installed_path.exists());
-}
-
-#[test]
-fn uninstall_rolls_back_installs_record_when_skill_state_save_fails() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let fixture = PluginFixture::new(
-        &temp,
-        "writer",
-        r#"---
-name: writer
-description: Write safely.
----
-
-Installed version.
-"#,
-    );
-    let installed = fixture.install(false);
-
-    fixture.state.fail_next_save_skill_state();
-    let err = fixture
-        .manager
-        .uninstall(PluginUninstallRequest {
-            install_id: installed.install.id.clone(),
-        })
-        .expect_err("uninstall should fail when skill state cannot save");
-
-    assert!(matches!(err, TalosError::StorageError(_)));
-    assert!(installed.install.installed_path.exists());
-    assert!(fixture
-        .state
-        .load_installs()
-        .expect("installs should load")
-        .installs
-        .iter()
-        .any(|install| install.id == installed.install.id));
-    assert!(!fixture
-        .state
-        .install_trash_dir(&installed.install.id)
+        .transaction_trash_dir(&installed.install.id)
         .exists());
 }

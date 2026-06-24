@@ -255,8 +255,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::PluginInstall>());
     output.push_str(&export::<talos_types::PluginInstallId>());
     output.push_str(&export::<talos_types::PluginInstallSource>());
-    output.push_str(&export::<talos_types::FileManifest>());
-    output.push_str(&export::<talos_types::FileEntry>());
+    output.push_str(&export::<talos_types::ContentDigest>());
+    output.push_str(&export::<talos_types::ContentDigestAlgorithm>());
     output.push_str(&export::<talos_types::PluginDefinition>());
     output.push_str(&export::<talos_types::SkillPlugin>());
     output.push_str(&export::<talos_types::McpServerPlugin>());

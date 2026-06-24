@@ -404,15 +404,15 @@ export type PluginKind = "skill" | "mcp_server" | "package" | "feature";
 
 export type PluginStatus = { "status": "not_installed" } | { "status": "installed", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "update_available", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, latest_commit: string, enabled: boolean, } | { "status": "source_missing", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "conflict", reason: PluginConflictReason, };
 
-export type PluginInstall = { id: PluginInstallId, plugin_id: PluginId, kind: PluginKind, name: string, installed_path: string, exposed_skill_root: string | null, exposed_mcp_servers: Array<McpServerDefinition>, source: PluginInstallSource, installed_at_ms: number, updated_at_ms: number, file_manifest: FileManifest, };
+export type PluginInstall = { id: PluginInstallId, plugin_id: PluginId, kind: PluginKind, name: string, installed_path: string, enabled: boolean, source: PluginInstallSource, content_digest: ContentDigest, installed_at_ms: number, updated_at_ms: number, };
 
 export type PluginInstallId = string;
 
 export type PluginInstallSource = { "kind": "marketplace", source_id: MarketplaceSourceId, url: string, reference: string, commit: string, path_in_source: string, } | { "kind": "local_path", source_id: MarketplaceSourceId, path: string, path_in_source: string, } | { "kind": "manual" };
 
-export type FileManifest = { files: Array<FileEntry>, };
+export type ContentDigest = { algorithm: ContentDigestAlgorithm, value: string, file_count: number, total_size_bytes: number, };
 
-export type FileEntry = { relative_path: string, sha256: string, size_bytes: number, };
+export type ContentDigestAlgorithm = "sha256";
 
 export type PluginDefinition = { "kind": "skill", "plugin": SkillPlugin } | { "kind": "mcp_server", "plugin": McpServerPlugin } | { "kind": "package", "plugin": PackagePlugin } | { "kind": "feature", "plugin": FeaturePlugin };
 
