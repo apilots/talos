@@ -11,7 +11,18 @@ void i18n.use(initReactI18next).init({
     escapeValue: false,
   },
   defaultNS: "common",
-  ns: ["common", "sidebar", "chat", "projects", "memory", "files", "settings", "auth", "workspaceDocs"],
+  ns: [
+    "common",
+    "sidebar",
+    "chat",
+    "projects",
+    "memory",
+    "files",
+    "settings",
+    "auth",
+    "workspaceDocs",
+    "plugins",
+  ],
 });
 
 export { i18n };

@@ -8,7 +8,6 @@ import { createJSONStorage } from "zustand/middleware";
 import "@/shared/i18n/setup";
 import {
   getCloudLoginStatus,
-  readDesktopCloudSession,
   redirectToExternalUrl,
   startCloudLogin,
 } from "@/features/auth";
@@ -17,13 +16,11 @@ import { AuthPage } from "./AuthPage";
 
 vi.mock("@/features/auth", () => ({
   getCloudLoginStatus: vi.fn(),
-  readDesktopCloudSession: vi.fn(),
   redirectToExternalUrl: vi.fn(),
   startCloudLogin: vi.fn(),
 }));
 
 const getCloudLoginStatusMock = vi.mocked(getCloudLoginStatus);
-const readDesktopCloudSessionMock = vi.mocked(readDesktopCloudSession);
 const startCloudLoginMock = vi.mocked(startCloudLogin);
 const redirectToExternalUrlMock = vi.mocked(redirectToExternalUrl);
 
@@ -51,6 +48,8 @@ describe("AuthPage", () => {
     });
     getCloudLoginStatusMock.mockResolvedValue({
       status: "authenticated",
+      access_token: "web-token",
+      token_type: "Bearer",
       user: {
         user_id: "user-1",
         username: "xiliu",
@@ -61,7 +60,6 @@ describe("AuthPage", () => {
         updated_at: 0,
       },
     });
-    readDesktopCloudSessionMock.mockResolvedValue(null);
     redirectToExternalUrlMock.mockReset();
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
@@ -124,7 +122,7 @@ describe("AuthPage", () => {
     await waitFor(() => expect(getCloudLoginStatusMock).toHaveBeenCalledWith("dls_1"));
     await waitFor(() => expect(useAppStore.getState().connection.authStatus).toBe("authenticated"));
     expect(useAppStore.getState().connection.authUsername).toBe("xiliu");
-    expect(useAppStore.getState().connection.authToken).toBe("");
+    expect(useAppStore.getState().connection.authToken).toBe("web-token");
     expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1);
   });
 

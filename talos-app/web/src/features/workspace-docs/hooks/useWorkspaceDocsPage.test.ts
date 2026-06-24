@@ -45,21 +45,25 @@ describe("useWorkspaceDocsPage", () => {
     vi.clearAllMocks();
 
     getWorkspaceDoc.mockImplementation(async (kind: string) => ({
-      kind,
-      path: `${kind.toUpperCase()}.md`,
-      exists: true,
-      content: `# ${kind}`,
-      updated_at: 1776393847462,
-      version_token: `${kind}-token`,
+      doc: {
+        kind,
+        path: `${kind.toUpperCase()}.md`,
+        exists: true,
+        content: `# ${kind}`,
+        updated_at: 1776393847462,
+        version_token: `${kind}-token`,
+      },
     }));
 
     putWorkspaceDoc.mockImplementation(async (kind: string, request: { content: string }) => ({
-      kind,
-      path: `${kind.toUpperCase()}.md`,
-      exists: true,
-      content: request.content,
-      updated_at: 1776393847462,
-      version_token: `${kind}-next-token`,
+      doc: {
+        kind,
+        path: `${kind.toUpperCase()}.md`,
+        exists: true,
+        content: request.content,
+        updated_at: 1776393847462,
+        version_token: `${kind}-next-token`,
+      },
     }));
   });
 

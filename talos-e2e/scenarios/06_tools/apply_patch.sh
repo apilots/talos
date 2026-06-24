@@ -93,7 +93,6 @@ except Exception:
 for item in data.get("output", []):
     if item.get("type") == "output_text":
         print(item.get("text", ""))
-        raise SystemExit(0)
 print(data.get("output_text", ""))
 PY
 }
@@ -109,7 +108,19 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE apply_patch_session_id PASS session_id=${session_id}"
 
-apply_patch_input="You must call tool 'ApplyPatch' exactly once to add notes/apply_patch_target.txt with exactly one line: ${PATCH_MARKER}. After the tool call, respond with exactly APPLY_PATCH_OK:${PATCH_MARKER}"
+apply_patch_input="$(cat <<EOF
+You must call tool 'ApplyPatch' exactly once to add notes/apply_patch_target.txt with exactly one line: ${PATCH_MARKER}.
+
+Use this exact patch argument:
+*** Begin Patch
+*** Add File: notes/apply_patch_target.txt
++${PATCH_MARKER}
+*** End Patch
+
+Do not write any visible text before calling the tool. After the tool returns, the final visible answer must be exactly:
+APPLY_PATCH_OK:${PATCH_MARKER}
+EOF
+)"
 apply_patch_payload="$(build_payload "${apply_patch_input}")"
 apply_patch_json="$(send_message_response "${session_id}" "${apply_patch_payload}" "apply_patch")"
 log_case_json "tool_apply_patch" "${apply_patch_payload}" "${apply_patch_json}"

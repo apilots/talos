@@ -11,16 +11,16 @@ use talos_app_protocol::jsonrpc::{
     JsonRpcResponse, RequestId,
 };
 use talos_app_protocol::requests::{
-    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, EventSubscribeResponse,
-    EventUnsubscribeResponse, InitializeResponse, ServerInfo,
+    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, InitializeResponse,
+    ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
-use talos_application_service::{
-    Actor, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
+use talos_service::{
+    Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
+use talos_types::EventUnsubscribeResponse;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
-use uuid::Uuid;
 
 use crate::application::{AppServerApplication, ProtocolResult};
 use crate::auth::ActorCredentialValidator;
@@ -139,7 +139,7 @@ where
 
     // Keep subscriptions alive while background drains run so final turn events can still be
     // forwarded. After the drain boundary, abort them explicitly; idle subscriptions wait on
-    // the application-service stream and would otherwise keep stdio shutdown from completing.
+    // the TalosService stream and would otherwise keep stdio shutdown from completing.
     for (_, task) in state.subscription_tasks {
         task.abort();
         let _ = task.await;
@@ -265,26 +265,18 @@ async fn handle_request(
             };
             match app.subscribe_timeline_events(&actor, params).await {
                 Ok(source) => {
-                    let subscription_id = format!("sub_{}", Uuid::new_v4().simple());
-                    let response = EventSubscribeResponse {
-                        subscription_id: subscription_id.clone(),
-                        session_id: source.session_id.clone(),
-                        high_water_mark_event_id: source
-                            .high_water_mark_event_id
-                            .as_ref()
-                            .map(|value| value.to_string()),
-                    };
+                    let subscription_id = source.response.subscription_id.clone();
                     send_result(
                         outgoing_tx.clone(),
                         id,
-                        serde_json::to_value(response).map_err(|error| {
+                        serde_json::to_value(&source.response).map_err(|error| {
                             AppServerErrorBody::invalid_request(error.to_string())
                         }),
                     )
                     .await?;
                     let task = spawn_subscription(
                         subscription_id.clone(),
-                        source,
+                        source.subscription,
                         outgoing_tx,
                         config.subscription_capacity,
                     );
@@ -402,7 +394,7 @@ async fn resolve_request_actor(
 
 fn spawn_subscription(
     subscription_id: String,
-    mut source: crate::application::SubscriptionSource,
+    mut source: TimelineSubscription,
     outgoing_tx: mpsc::Sender<OutgoingMessage>,
     _subscription_capacity: usize,
 ) -> tokio::task::JoinHandle<()> {
@@ -574,8 +566,8 @@ mod tests {
     use async_trait::async_trait;
     use serde_json::json;
     use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
-    use talos_app_protocol::requests::{ActorCredentials, EventSubscribeParams};
-    use talos_application_service::{
+    use talos_app_protocol::requests::ActorCredentials;
+    use talos_service::{
         Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
         TimelineSubscriptionMessage,
     };
@@ -583,6 +575,7 @@ mod tests {
         TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
         TalosTurnStartedEvent, TimelineEventEnvelope,
     };
+    use talos_types::SubscribeTimelineRequest;
     use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::sync::{broadcast, mpsc};
 
@@ -631,25 +624,36 @@ mod tests {
         async fn subscribe_timeline_events(
             &self,
             _actor: &Actor,
-            params: EventSubscribeParams,
+            params: SubscribeTimelineRequest,
         ) -> ProtocolResult<SubscriptionSource> {
             let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
             match live_tx {
                 Some(_live_tx) => {
                     let (_tx, events) = mpsc::channel(16);
-                    self.stream_txs.lock().expect("stream tx lock").push(_tx);
+                    let subscription_id = {
+                        let mut stream_txs = self.stream_txs.lock().expect("stream tx lock");
+                        let subscription_id = format!("sub_mock_{}", stream_txs.len() + 1);
+                        stream_txs.push(_tx);
+                        subscription_id
+                    };
                     Ok(SubscriptionSource {
-                        session_id: params.session_id,
-                        high_water_mark_event_id: None,
-                        replay: EventReplay {
-                            events: Vec::new(),
+                        response: talos_types::SubscribeTimelineResponse {
+                            subscription_id,
+                            session_id: params.session_id.clone(),
                             high_water_mark_event_id: None,
-                            last_replay_seq: 0,
-                            cursor_status:
-                                talos_application_service::TimelineCursorStatus::FromBeginning,
                         },
-                        events,
-                        has_live_turn: false,
+                        subscription: talos_service::TimelineSubscription {
+                            session_id: params.session_id,
+                            high_water_mark_event_id: None,
+                            replay: EventReplay {
+                                events: Vec::new(),
+                                high_water_mark_event_id: None,
+                                last_replay_seq: 0,
+                                cursor_status: talos_service::TimelineCursorStatus::FromBeginning,
+                            },
+                            events,
+                            has_live_turn: false,
+                        },
                     })
                 }
                 None => Err(AppServerErrorBody::method_not_found("event.subscribe")),
@@ -757,7 +761,7 @@ mod tests {
         assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
         assert_eq!(
             app.dispatched.lock().expect("dispatch lock").as_slice(),
-            &["session.read"]
+            &["session.get"]
         );
     }
 
@@ -851,7 +855,7 @@ mod tests {
         assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
         assert_eq!(
             app.dispatched.lock().expect("dispatch lock").as_slice(),
-            &["session.read"]
+            &["session.get"]
         );
         assert_eq!(
             app.dispatched_actors
@@ -1223,7 +1227,7 @@ mod tests {
             json!({
                 "jsonrpc": "2.0",
                 "id": 2,
-                "method": "session.read",
+                "method": "session.get",
                 "params": { "session_id": "s1" }
             })
         )
@@ -1235,7 +1239,7 @@ mod tests {
             json!({
                 "jsonrpc": "2.0",
                 "id": 2,
-                "method": "session.read",
+                "method": "session.get",
                 "actor_credentials": {
                     "credential": {
                         "type": "existing_session_token",
@@ -1268,10 +1272,8 @@ mod tests {
                 "method": "turn.start",
                 "params": {
                     "session_id": "s1",
-                    "request": {
-                        "input": [{ "type": "text", "text": "hello" }],
-                        "workspace_id": null
-                    },
+                    "input": [{ "type": "text", "text": "hello" }],
+                    "workspace_id": null,
                     "client_request_id": "request-1"
                 }
             })

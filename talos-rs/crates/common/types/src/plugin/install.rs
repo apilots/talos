@@ -11,11 +11,13 @@ pub struct PluginInstall {
     pub kind: PluginKind,
     pub name: String,
     pub installed_path: PathBuf,
-    pub exposed_skill_root: Option<PathBuf>,
+    pub enabled: bool,
     pub source: PluginInstallSource,
+    pub content_digest: ContentDigest,
+    #[ts(type = "number")]
     pub installed_at_ms: i64,
+    #[ts(type = "number")]
     pub updated_at_ms: i64,
-    pub file_manifest: FileManifest,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -36,14 +38,18 @@ pub enum PluginInstallSource {
     Manual,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
-pub struct FileManifest {
-    pub files: Vec<FileEntry>,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct ContentDigest {
+    pub algorithm: ContentDigestAlgorithm,
+    pub value: String,
+    #[ts(type = "number")]
+    pub file_count: u64,
+    #[ts(type = "number")]
+    pub total_size_bytes: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-pub struct FileEntry {
-    pub relative_path: String,
-    pub sha256: String,
-    pub size_bytes: u64,
+#[serde(rename_all = "snake_case")]
+pub enum ContentDigestAlgorithm {
+    Sha256,
 }

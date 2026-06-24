@@ -19,7 +19,7 @@ use talos_memory::{
     SessionTranscriptHeader, SessionTranscriptMapper, SessionTranscriptRecord,
     SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
 };
-use talos_types::talos::TalosJsonValue;
+use talos_types::talos::DynamicToolArguments;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -87,7 +87,7 @@ pub struct KernelTranscriptAuthPayload {
 pub struct KernelTranscriptDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
-    pub arguments: TalosJsonValue,
+    pub arguments: DynamicToolArguments,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

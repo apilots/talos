@@ -1,4 +1,5 @@
 import { Filter, Search } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface PluginCatalogSearchProps {
   query: string;
@@ -6,6 +7,8 @@ interface PluginCatalogSearchProps {
 }
 
 export function PluginCatalogSearch({ query, onQueryChange }: PluginCatalogSearchProps) {
+  const { t } = useTranslation("plugins");
+
   return (
     <div className="mt-5 flex items-center gap-2">
       <div className="relative flex-1">
@@ -16,7 +19,7 @@ export function PluginCatalogSearch({ query, onQueryChange }: PluginCatalogSearc
         <input
           className="h-11 w-full rounded-full border border-border/80 bg-card pl-10 pr-4 text-sm outline-none transition placeholder:text-muted focus:border-brand/45"
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Search plugins and skills"
+          placeholder={t("searchPlaceholder")}
           value={query}
         />
       </div>

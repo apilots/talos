@@ -20,9 +20,9 @@ export type ToolErrorData = { tool_name: string, reason: string, };
 
 export type ConfigErrorData = { path: string, reason: string, };
 
-export type ClientMethod = "initialize" | "session.list" | "session.read" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.read" | "config.value.write" | "config.batch.write" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skills.list" | "skills.refresh" | "skills.suggest" | "skills.read" | "skills.resolve" | "plugin.source.list" | "plugin.source.add" | "plugin.source.refresh" | "plugin.source.remove" | "plugin.search" | "plugin.list" | "plugin.install" | "plugin.update" | "plugin.uninstall" | "plugin.enable" | "plugin.disable" | "app.list" | "tool.list" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.store" | "auth.session.clear" | "user.current" | "memory.search";
+export type ClientMethod = "initialize" | "session.list" | "session.get" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.get" | "config.update" | "config.delete" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skills.list" | "skills.refresh" | "skills.suggest" | "skills.read" | "skills.resolve" | "plugin.source.list" | "plugin.source.add" | "plugin.source.refresh" | "plugin.source.remove" | "plugin.search" | "plugin.list" | "plugin.read" | "plugin.install" | "plugin.update" | "plugin.uninstall" | "plugin.enable" | "plugin.disable" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.clear" | "user.current" | "memory.search";
 
-export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.list", "params": SessionListParams } | { "method": "session.read", "params": SessionReadParams } | { "method": "session.patch", "params": SessionPatchParams } | { "method": "session.delete", "params": SessionDeleteParams } | { "method": "session.close", "params": SessionCloseParams } | { "method": "session.compact", "params": SessionCompactParams } | { "method": "session.clear", "params": SessionClearParams } | { "method": "session.active_turn", "params": SessionActiveTurnParams } | { "method": "session.history", "params": SessionHistoryParams } | { "method": "session.recover", "params": TimelineRecoveryParams } | { "method": "project.create", "params": ProjectCreateParams } | { "method": "project.list", "params": ProjectListParams } | { "method": "project.read", "params": ProjectReadParams } | { "method": "project.patch", "params": ProjectPatchParams } | { "method": "project.delete", "params": ProjectDeleteParams } | { "method": "fs.directory.read", "params": FsDirectoryReadParams } | { "method": "fs.directory.create", "params": FsDirectoryCreateParams } | { "method": "turn.start", "params": TurnStartParams } | { "method": "turn.interrupt", "params": TurnInterruptParams } | { "method": "turn.retry", "params": TurnRetryParams } | { "method": "event.subscribe", "params": EventSubscribeParams } | { "method": "event.unsubscribe", "params": EventUnsubscribeParams } | { "method": "tool.dynamic_result.submit", "params": ToolDynamicResultSubmitParams } | { "method": "model.list", "params": ModelListParams } | { "method": "config.read", "params": ConfigReadParams } | { "method": "config.value.write", "params": ConfigValueWriteParams } | { "method": "config.batch.write", "params": ConfigBatchWriteParams } | { "method": "config.reload", "params": ConfigReloadParams } | { "method": "memory.file.list", "params": MemoryFileListParams } | { "method": "memory.file.read", "params": MemoryFileReadParams } | { "method": "memory.file.write", "params": MemoryFileWriteParams } | { "method": "workspace.doc.list", "params": WorkspaceDocListParams } | { "method": "workspace.doc.read", "params": WorkspaceDocReadParams } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteParams } | { "method": "workspace.info", "params": WorkspaceInfoParams } | { "method": "skills.list", "params": SkillsListRequest } | { "method": "skills.refresh", "params": SkillsRefreshRequest } | { "method": "skills.suggest", "params": SkillsSuggestRequest } | { "method": "skills.read", "params": SkillsReadRequest } | { "method": "skills.resolve", "params": SkillsResolveRequest } | { "method": "plugin.source.list", "params": PluginSourceListRequest } | { "method": "plugin.source.add", "params": PluginSourceAddRequest } | { "method": "plugin.source.refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin.source.remove", "params": PluginSourceRemoveRequest } | { "method": "plugin.search", "params": PluginSearchRequest } | { "method": "plugin.list", "params": PluginListRequest } | { "method": "plugin.install", "params": PluginInstallRequest } | { "method": "plugin.update", "params": PluginUpdateRequest } | { "method": "plugin.uninstall", "params": PluginUninstallRequest } | { "method": "plugin.enable", "params": PluginEnableRequest } | { "method": "plugin.disable", "params": PluginDisableRequest } | { "method": "app.list", "params": AppListParams } | { "method": "tool.list", "params": ToolListParams } | { "method": "auth.logout", "params": AuthLogoutParams } | { "method": "auth.login.start", "params": CloudLoginStartRequest } | { "method": "auth.login.status", "params": CloudLoginStatusRequest } | { "method": "auth.login.cancel", "params": CloudLoginCancelRequest } | { "method": "auth.session.read", "params": AuthSessionReadParams } | { "method": "auth.session.store", "params": AuthSessionStoreParams } | { "method": "auth.session.clear", "params": AuthSessionClearParams } | { "method": "user.current", "params": UserCurrentParams } | { "method": "memory.search", "params": MemorySearchParams };
+export type ClientRequestParams = { "method": "initialize", "params": InitializeParams } | { "method": "session.list", "params": SessionListRequest } | { "method": "session.get", "params": SessionGetRequest } | { "method": "session.patch", "params": SessionPatchRequest } | { "method": "session.delete", "params": SessionDeleteRequest } | { "method": "session.close", "params": SessionCloseRequest } | { "method": "session.compact", "params": SessionCompactRequest } | { "method": "session.clear", "params": SessionClearRequest } | { "method": "session.active_turn", "params": SessionActiveTurnRequest } | { "method": "session.history", "params": SessionHistoryRequest } | { "method": "session.recover", "params": RecoverTimelineRequest } | { "method": "project.create", "params": ProjectCreateRequest } | { "method": "project.list", "params": ProjectListRequest } | { "method": "project.read", "params": ProjectReadRequest } | { "method": "project.patch", "params": ProjectPatchRequest } | { "method": "project.delete", "params": ProjectDeleteRequest } | { "method": "fs.directory.read", "params": FsDirectoryReadRequest } | { "method": "fs.directory.create", "params": FsDirectoryCreateRequest } | { "method": "turn.start", "params": StartTurnRequest } | { "method": "turn.interrupt", "params": InterruptTurnRequest } | { "method": "turn.retry", "params": RetryTurnRequest } | { "method": "event.subscribe", "params": SubscribeTimelineRequest } | { "method": "event.unsubscribe", "params": EventUnsubscribeRequest } | { "method": "tool.dynamic_result.submit", "params": SubmitToolResultRequest } | { "method": "model.list", "params": ModelListRequest } | { "method": "config.get", "params": ConfigGetRequest } | { "method": "config.update", "params": ConfigUpdateRequest } | { "method": "config.delete", "params": ConfigDeleteRequest } | { "method": "config.reload", "params": ConfigReloadRequest } | { "method": "memory.file.list", "params": MemoryFileListRequest } | { "method": "memory.file.read", "params": MemoryFileReadRequest } | { "method": "memory.file.write", "params": MemoryFileWriteRequest } | { "method": "workspace.doc.list", "params": WorkspaceDocListRequest } | { "method": "workspace.doc.read", "params": WorkspaceDocReadRequest } | { "method": "workspace.doc.write", "params": WorkspaceDocWriteRequest } | { "method": "workspace.info", "params": WorkspaceInfoRequest } | { "method": "skills.list", "params": SkillsListRequest } | { "method": "skills.refresh", "params": SkillsRefreshRequest } | { "method": "skills.suggest", "params": SkillsSuggestRequest } | { "method": "skills.read", "params": SkillsReadRequest } | { "method": "skills.resolve", "params": SkillsResolveRequest } | { "method": "plugin.source.list", "params": PluginSourceListRequest } | { "method": "plugin.source.add", "params": PluginSourceAddRequest } | { "method": "plugin.source.refresh", "params": PluginSourceRefreshRequest } | { "method": "plugin.source.remove", "params": PluginSourceRemoveRequest } | { "method": "plugin.search", "params": PluginSearchRequest } | { "method": "plugin.list", "params": PluginListRequest } | { "method": "plugin.read", "params": PluginReadRequest } | { "method": "plugin.install", "params": PluginInstallRequest } | { "method": "plugin.update", "params": PluginUpdateRequest } | { "method": "plugin.uninstall", "params": PluginUninstallRequest } | { "method": "plugin.enable", "params": PluginEnableRequest } | { "method": "plugin.disable", "params": PluginDisableRequest } | { "method": "auth.logout", "params": AuthLogoutRequest } | { "method": "auth.login.start", "params": CloudLoginStartRequest } | { "method": "auth.login.status", "params": CloudLoginStatusRequest } | { "method": "auth.login.cancel", "params": CloudLoginCancelRequest } | { "method": "auth.session.read", "params": AuthSessionReadRequest } | { "method": "auth.session.clear", "params": AuthSessionClearRequest } | { "method": "user.current", "params": UserCurrentRequest } | { "method": "memory.search", "params": MemorySearchRequest };
 
 export type ClientRequest = { method: ClientMethod, params: ClientRequestParams, };
 
@@ -40,57 +40,99 @@ export type ActorCredentials = { credential: ActorCredential, };
 
 export type ActorCredential = { "type": "existing_session_token", token: string, };
 
-export type SessionListParams = { project_id: string | null, limit: number | null, offset: number | null, };
+export type SessionListRequest = { project_id: string | null, limit: number | null, offset: number | null, };
 
-export type SessionReadParams = { session_id: string, };
+export type SessionListResponse = { sessions: Array<SessionInfo>, };
 
-export type SessionPatchParams = { session_id: string, project_id: OptionalStringPatch | null, current_directory: OptionalPathPatch | null, model: string | null, };
+export type SessionGetRequest = { session_id: string, };
 
-export type SessionDeleteParams = { session_id: string, };
+export type SessionGetResponse = { session: SessionInfo, };
 
-export type SessionCloseParams = { session_id: string, };
+export type SessionPatchRequest = { session_id: string, conf: SessionConf | null, project_id: OptionalProjectIdPatch | null, current_directory: OptionalCurrentDirectoryPatch | null, };
 
-export type SessionCompactParams = { session_id: string, };
+export type SessionUpdateResponse = { session: SessionInfo, };
 
-export type SessionClearParams = { session_id: string, };
+export type SessionDeleteRequest = { session_id: string, };
 
-export type SessionActiveTurnParams = { session_id: string, };
+export type SessionDeleteResponse = { success: boolean, };
 
-export type SessionHistoryParams = { session_id: string, };
+export type SessionCloseRequest = { session_id: string, };
 
-export type SessionHistorySnapshot = { session_id: string, messages: Array<SessionHistoryMessage>, generated_at_ms: bigint, last_stable_event_id: string | null, };
+export type SessionCloseResponse = { success: boolean, };
+
+export type SessionCompactRequest = { session_id: string, };
+
+export type SessionCompactResponse = { session: SessionInfo, };
+
+export type SessionClearRequest = { session_id: string, };
+
+export type SessionClearResponse = { session: SessionInfo, };
+
+export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model: string, created_at: number, last_activity: number, message_count: number, usage: TalosUsage, project_id?: string, current_directory?: string, };
+
+export type SessionActiveTurnRequest = { session_id: string, };
+
+export type SessionActiveTurnResponse = { active_turn: TimelineActiveTurnSnapshot, };
+
+export type SessionHistoryRequest = { session_id: string, };
+
+export type SessionHistoryResponse = { history: SessionHistorySnapshot, };
+
+export type SessionHistorySnapshot = { session_id: string, messages: Array<SessionHistoryMessage>, generated_at_ms: number, last_stable_event_id: string | null, };
 
 export type SessionHistoryMessage = { message_id: string, turn_id: string, items: Array<TalosTimelineItem>, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
 
-export type TimelineRecoveryParams = { session_id: string, after_event_id: string | null, replay_limit: number | null, };
-
 export type TimelineRecoverySnapshot = { replay: TimelineReplay, active_turn: TimelineActiveTurnSnapshot, };
 
-export type TimelineReplay = { events: Array<TimelineEventEnvelope>, high_water_mark_event_id: string | null, last_replay_seq: bigint, cursor_status: TimelineCursorStatus, };
+export type TimelineRecoveryResponse = { snapshot: TimelineRecoverySnapshot, };
+
+export type TimelineReplay = { events: Array<TimelineEventEnvelope>, high_water_mark_event_id: string | null, last_replay_seq: number, cursor_status: TimelineCursorStatus, };
 
 export type TimelineCursorStatus = "current" | "from_beginning";
 
-export type TimelineActiveTurnSnapshot = { session_id: string, turn_id: string | null, message_id: string | null, status: TimelineActiveTurnStatus, last_event_id: string | null, pending_user_action: TimelinePendingUserAction | null, updated_at: bigint, };
+export type TimelineActiveTurnSnapshot = { session_id: string, turn_id: string | null, message_id: string | null, status: TimelineActiveTurnStatus, last_event_id: string | null, pending_user_action: TimelinePendingUserAction | null, updated_at: number, };
 
 export type TimelineActiveTurnStatus = "running" | "waiting_user_action" | "cancelling" | "completed" | "failed";
 
 export type TimelinePendingUserAction = { "type": "dynamic_tool_result" } & TimelinePendingDynamicToolResult;
 
-export type TimelinePendingDynamicToolResult = { item_id: string | null, call_id: string, tool_name: string, };
+export type TimelinePendingDynamicToolResult = { item_id?: string, call_id: string, tool_name: string, };
 
-export type ProjectCreateParams = { name: string, directory: string, };
+export type ProjectCreateRequest = { name: string, directory: string, };
 
-export type ProjectListParams = Record<string, never>;
+export type ProjectCreateResponse = { project: ProjectInfo, };
 
-export type ProjectReadParams = { project_id: string, };
+export type ProjectListRequest = Record<string, never>;
 
-export type ProjectPatchParams = { project_id: string, name: string | null, };
+export type ProjectListResponse = { projects: Array<ProjectInfo>, };
 
-export type ProjectDeleteParams = { project_id: string, };
+export type ProjectReadRequest = { project_id: string, };
 
-export type FsDirectoryReadParams = { path: string | null, };
+export type ProjectReadResponse = { project: ProjectInfo, };
 
-export type FsDirectoryCreateParams = { parent: string, name: string, };
+export type ProjectPatchRequest = { project_id: string, name?: string, };
+
+export type ProjectPatchResponse = { project: ProjectInfo, };
+
+export type ProjectDeleteRequest = { project_id: string, };
+
+export type ProjectDeleteResponse = { success: boolean, };
+
+export type ProjectInfo = { project_id: string, name: string, directory: string, status: ProjectStatus, created_at: number, updated_at: number, session_count: number, };
+
+export type ProjectStatus = { state: ProjectStatusState, reason: ProjectUnavailableReason | null, };
+
+export type ProjectStatusState = "available" | "missing" | "not_directory" | "permission_denied";
+
+export type ProjectUnavailableReason = "path_not_found" | "not_directory" | "permission_denied";
+
+export type ProjectPatch = { name?: string, };
+
+export type FsDirectoryReadRequest = { path: string | null, };
+
+export type FsDirectoryReadResponse = { directory: FsDirectorySnapshot, };
+
+export type FsDirectoryCreateRequest = { parent: string, name: string, };
 
 export type FsDirectorySnapshot = { path: string, parent: string | null, entries: Array<FsDirectoryEntry>, readable: boolean, writable: boolean, };
 
@@ -100,11 +142,29 @@ export type FsEntryKind = "directory";
 
 export type FsDirectoryCreateResponse = { path: string, };
 
-export type TurnStartParams = { session_id: string, request: TalosMessageRequest, client_request_id: string | null, };
+export type StartTurnRequest = { session_id: string, input: Array<TalosInputItem>, workspace_id?: string, context?: TalosContext, model?: string, project_id?: string, current_directory?: string, client_request_id?: string, };
 
-export type TalosMessageRequest = { input: Array<TalosInputItem>, workspace_id: string | null, context: TalosContext | null, model: string | null, project_id: string | null, current_directory: string | null, };
+export type StartTurnResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: TurnCommandStatus, };
 
-export type TalosMessageRetryRequest = { input: Array<TalosInputItem>, workspace_id: string | null, client_message_id: string, retry_of_message_id: string, };
+export type RetryTurnRequest = { session_id: string, input: Array<TalosInputItem>, workspace_id?: string, client_message_id: string, retry_of_message_id: string, };
+
+export type RetryTurnResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: TurnCommandStatus, };
+
+export type InterruptTurnRequest = { session_id: string, };
+
+export type InterruptTurnResponse = { success: boolean, };
+
+export type SubmitToolResultRequest = { session_id: string, call_id: string, tool_name: string, output: string, success: boolean, };
+
+export type SubmitToolResultResponse = { success: boolean, };
+
+export type SubscribeTimelineRequest = { session_id: string, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
+
+export type SubscribeTimelineResponse = { subscription_id: string, session_id: string, high_water_mark_event_id: string | null, };
+
+export type RecoverTimelineRequest = { session_id: string, after_event_id: string | null, replay_limit: number | null, };
+
+export type TurnCommandStatus = "pending" | "accepted" | "failed" | "failed_no_first_event";
 
 export type TalosContext = { source_type: TalosSourceType, provider: TalosProvider, user_id: string, message_id: string, trace_id: string, channel_id: string | null, thread_id: string | null, project_root: string | null, environment: TalosSessionEnvironment | null, };
 
@@ -118,49 +178,107 @@ export type TalosConnectionMode = "embedded" | "remote";
 
 export type TalosInputItem = { "type": "text", text: string, } | { "type": "skill_selection", name: string, path: string, } | { "type": "image", url: string, mime_type: string | null, } | { "type": "file", url: string | null, file_id: string | null, mime_type: string | null, } | { "type": "voice", url: string | null, data_base64: string | null, mime_type: string | null, } | { "type": "video", url: string | null, mime_type: string | null, };
 
-export type MessageCommandStatus = "pending" | "accepted" | "failed" | "failed_no_first_event";
+export type TalosOutputItem = { "type": "user_input", text: string, } | { "type": "reasoning", text: string, } | { "type": "execution_summary", text: string, } | { "type": "output_text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: ToolArguments, } | { "type": "tool_result", call_id: string, tool_name: string, content: Array<TalosContentItem>, is_error: boolean, };
 
-export type TurnStartResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: MessageCommandStatus, };
+export type TalosReasoning = { text: string, };
 
-export type TurnInterruptParams = { session_id: string, };
-
-export type TurnRetryParams = { session_id: string, request: TalosMessageRetryRequest, };
-
-export type EventSubscribeParams = { session_id: string, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
-
-export type EventSubscribeResponse = { subscription_id: string, session_id: string, high_water_mark_event_id: string | null, };
-
-export type EventUnsubscribeParams = { subscription_id: string, };
+export type EventUnsubscribeRequest = { subscription_id: string, };
 
 export type EventUnsubscribeResponse = { subscription_id: string, unsubscribed: boolean, };
 
-export type ToolDynamicResultSubmitParams = { session_id: string, call_id: string, tool_name: string, output: string, success: boolean, };
+export type ModelListRequest = Record<string, never>;
 
-export type ModelListParams = Record<string, never>;
+export type ModelListResponse = { models: Array<ModelInfo>, };
 
-export type ConfigReadParams = Record<string, never>;
+export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
 
-export type ConfigValueWriteParams = { path: string, value: string, };
+export type LlmConfig = { provider: string, model: string, anthropic: LlmProviderConfig, openai: LlmProviderConfig, bailian: LlmProviderConfig, ollama: LlmProviderConfig, openrouter: LlmProviderConfig, };
 
-export type ConfigBatchWriteParams = { entries: Array<ConfigValueWriteParams>, };
+export type LlmProviderConfig = { api_key?: string, base_url?: string, enabled: boolean, protocol?: LlmProtocol, models: Array<LlmModelConfig>, };
 
-export type ConfigReloadParams = Record<string, never>;
+export type LlmModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
 
-export type MemoryFileListParams = { limit: number | null, };
+export type LlmProtocol = "chat" | "responses" | "messages";
 
-export type MemoryFileReadParams = { path: string, };
+export type LlmReasoningEffort = "low" | "medium" | "high" | "xhigh";
 
-export type MemoryFileWriteParams = { path: string, content: string, expected_version: string | null, };
+export type LlmModelSpeed = "standard" | "fast";
 
-export type WorkspaceDocListParams = Record<string, never>;
+export type LlmModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
-export type WorkspaceDocReadParams = { kind: string, };
+export type LlmModelCost = { input: number, output: number, cache_read: number, cache_write: number, };
 
-export type WorkspaceDocWriteParams = { kind: string, content: string, expected_version: string | null, };
+export type LlmModelCompat = { thinking_format?: LlmThinkingFormat, };
 
-export type WorkspaceInfoParams = Record<string, never>;
+export type LlmThinkingFormat = "open_ai" | "anthropic" | "qwen";
 
-export type WorkspaceInfoResponse = { user_id: string, username: string | null, base_workspace_dir: string, user_workspace_dir: string, };
+export type ConfigGetRequest = { path?: string, };
+
+export type ConfigGetResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, };
+
+export type ConfigUpdateRequest = { path: string, value: ConfigValue, };
+
+export type ConfigUpdateResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, };
+
+export type ConfigDeleteRequest = { path: string, };
+
+export type ConfigDeleteResponse = { success: boolean, };
+
+export type ConfigReloadRequest = Record<string, never>;
+
+export type ConfigReloadResponse = { success: boolean, };
+
+export type ConfigValue = { "type": "llm", "value": LlmConfig };
+
+export type ModelReadiness = { ready: boolean, provider: string, model: string, issues: Array<string>, };
+
+export type ProviderKeyStatus = { api_key_configured: boolean, };
+
+export type ExpectedFileVersion = { "mode": "must_not_exist" } | { "mode": "match", version_token: string, };
+
+export type DocUpdateRequest = { content: string, base_version: ExpectedFileVersion, };
+
+export type MemoryFileListRequest = { limit?: number, before_date?: string, date_from?: string, date_to?: string, };
+
+export type MemoryFileListResponse = { data: Array<MemoryFileSummary>, };
+
+export type MemoryFileReadRequest = { path: string, };
+
+export type MemoryFileReadResponse = { file: MemoryFileDetail, };
+
+export type MemoryFileWriteRequest = { path: string, content: string, expected_version?: string, };
+
+export type MemoryFileWriteResponse = { file: MemoryFileDetail, };
+
+export type MemoryFileSummary = { date: string, path: string, section_count: number, updated_at: number | null, version_token: string, };
+
+export type MemoryFileDetail = { date: string, path: string, section_count: number, content: string, updated_at: number | null, version_token: string, };
+
+export type MemorySearchResult = { path: string, snippet: string, start_line: number, end_line: number, };
+
+export type MemorySearchResponse = { results: Array<MemorySearchResult>, };
+
+export type WorkspaceDocListRequest = Record<string, never>;
+
+export type WorkspaceDocListResponse = { data: Array<WorkspaceDocSummary>, };
+
+export type WorkspaceDocReadRequest = { kind: WorkspaceDocKind, };
+
+export type WorkspaceDocReadResponse = { doc: WorkspaceDocInfo, };
+
+export type WorkspaceDocWriteRequest = { kind: WorkspaceDocKind, content: string, expected_version?: string, };
+
+export type WorkspaceDocWriteResponse = { doc: WorkspaceDocInfo, };
+
+export type WorkspaceInfoRequest = Record<string, never>;
+
+export type WorkspaceInfoResponse = { user_id: string, username?: string, base_workspace_dir: string, user_workspace_dir: string, };
+
+export type WorkspaceDocKind = "soul" | "identity" | "user" | "heartbeat" | "memory";
+
+export type WorkspaceDocSummary = { kind: WorkspaceDocKind, path: string, exists: boolean, updated_at: number | null, version_token: string | null, };
+
+export type WorkspaceDocInfo = { kind: WorkspaceDocKind, path: string, exists: boolean, content: string, updated_at: number | null, version_token: string | null, };
 
 export type SkillsListRequest = { include_disabled: boolean, };
 
@@ -168,33 +286,35 @@ export type SkillsRefreshRequest = Record<string, never>;
 
 export type SkillsSuggestRequest = { query: string, limit: number | null, };
 
-export type SkillsReadRequest = { selector: ProtocolSkillSelector, };
+export type SkillsReadRequest = { selector: SkillSelector, };
 
-export type SkillsResolveRequest = { text: string, selected: Array<ProtocolSkillSelector>, };
+export type SkillsResolveRequest = { text: string, selected: Array<SkillSelector>, };
 
-export type ProtocolSkillSelector = { name: string | null, path: string | null, };
+export type SkillSelector = { name: string | null, path: string | null, };
 
-export type ProtocolSkillScope = "project" | "plugin" | "external" | "system";
+export type SkillScope = "project" | "plugin" | "external" | "system";
 
-export type ProtocolSkillMetadata = { display_name: string | null, icon: string | null, author: string | null, version: string | null, argument_hint: string | null, };
+export type SkillMetadata = { display_name: string | null, icon: string | null, author: string | null, version: string | null, argument_hint: string | null, };
 
-export type ProtocolSkillSummary = { name: string, description: string, short_description: string | null, root: string, path: string, scope: ProtocolSkillScope, source_plugin: string | null, source_install: string | null, enabled: boolean, read_only: boolean, metadata: ProtocolSkillMetadata | null, };
+export type SkillSummary = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, enabled: boolean, read_only: boolean, metadata: SkillMetadata | null, };
 
-export type ProtocolSkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: ProtocolSkillScope, source_plugin: string | null, source_install: string | null, };
+export type SkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, };
 
-export type ProtocolSkillLoadError = { root: string, path: string | null, message: string, };
+export type SkillLoadError = { root: string, path: string | null, message: string, };
 
-export type ProtocolSkillDocument = { summary: ProtocolSkillSummary, contents: string, };
+export type SkillDocument = { summary: SkillSummary, contents: string, };
 
-export type ProtocolSkillWarning = { code: string, message: string, };
+export type SkillWarning = { code: string, message: string, };
 
-export type SkillsListResponse = { data: Array<ProtocolSkillSummary>, errors: Array<ProtocolSkillLoadError>, };
+export type SkillsListResponse = { data: Array<SkillSummary>, errors: Array<SkillLoadError>, };
 
-export type SkillsSuggestResponse = { data: Array<ProtocolSkillSuggestion>, };
+export type SkillsReadResponse = { document: SkillDocument, };
 
-export type SkillsResolveResponse = { data: Array<ProtocolSkillSummary>, warnings: Array<ProtocolSkillWarning>, };
+export type SkillsSuggestResponse = { data: Array<SkillSuggestion>, };
 
-export type PluginSourceListRequest = { include_disabled: boolean, };
+export type SkillsResolveResponse = { data: Array<SkillSummary>, warnings: Array<SkillWarning>, };
+
+export type PluginSourceListRequest = Record<string, never>;
 
 export type PluginSourceListResponse = { sources: Array<MarketplaceSource>, };
 
@@ -224,6 +344,18 @@ export type PluginListResponse = { plugins: Array<Plugin>, warnings: Array<Plugi
 
 export type PluginListStatusFilter = "installed" | "disabled" | "update_available" | "source_missing" | "conflict";
 
+export type PluginReadRequest = { plugin_id: PluginId, };
+
+export type PluginReadResponse = { plugin: Plugin, documents: Array<PluginDocument>, };
+
+export type PluginDocument = { role: PluginDocumentRole, path: string, title: string, media_type: PluginDocumentMediaType, contents: string, };
+
+export type PluginDocumentRef = { role: PluginDocumentRole, path: string, title: string, media_type: PluginDocumentMediaType, };
+
+export type PluginDocumentRole = "primary" | "readme" | "manifest";
+
+export type PluginDocumentMediaType = "markdown" | "json" | "text";
+
 export type PluginInstallRequest = { target: PluginInstallTarget, enable: boolean | null, conflict_policy: PluginInstallConflictPolicy, };
 
 export type PluginInstallResponse = { plugin: Plugin, install: PluginInstall, };
@@ -250,7 +382,7 @@ export type PluginDisableRequest = { install_id: PluginInstallId, };
 
 export type PluginDisableResponse = { plugin: Plugin, };
 
-export type MarketplaceSource = { id: MarketplaceSourceId, source_type: MarketplaceSourceType, kind: MarketplaceSourceKind, display_name: string, enabled: boolean, location: MarketplaceSourceLocation, sparse_paths: Array<string>, last_checked_commit: string | null, last_checked_at_ms: bigint | null, created_at_ms: bigint, updated_at_ms: bigint, };
+export type MarketplaceSource = { id: MarketplaceSourceId, source_type: MarketplaceSourceType, kind: MarketplaceSourceKind, display_name: string, location: MarketplaceSourceLocation, sparse_paths: Array<string>, last_checked_commit: string | null, last_checked_at_ms: number | null, created_at_ms: number, updated_at_ms: number, };
 
 export type MarketplaceSourceId = string;
 
@@ -262,7 +394,9 @@ export type MarketplaceSourceKind = "git" | "local_folder";
 
 export type MarketplaceSourceLocation = { "kind": "git", url: string, reference: string, } | { "kind": "local_folder", path: string, };
 
-export type Plugin = { id: PluginId, kind: PluginKind, name: string, description: string, source_id: MarketplaceSourceId | null, path_in_source: string | null, source_commit: string | null, status: PluginStatus, definition: PluginDefinition, warnings: Array<PluginWarning>, };
+export type Plugin = { id: PluginId, kind: PluginKind, metadata: PluginMetadata, documents: Array<PluginDocumentRef>, source_id: MarketplaceSourceId | null, path_in_source: string | null, source_commit: string | null, status: PluginStatus, definition: PluginDefinition, warnings: Array<PluginWarning>, };
+
+export type PluginMetadata = { name: string, display_name: string | null, description: string, short_description: string | null, icon: string | null, license: string | null, };
 
 export type PluginId = string;
 
@@ -270,23 +404,53 @@ export type PluginKind = "skill" | "mcp_server" | "package" | "feature";
 
 export type PluginStatus = { "status": "not_installed" } | { "status": "installed", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "update_available", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, latest_commit: string, enabled: boolean, } | { "status": "source_missing", install_id: PluginInstallId, installed_path: string, installed_commit: string | null, enabled: boolean, } | { "status": "conflict", reason: PluginConflictReason, };
 
-export type PluginInstall = { id: PluginInstallId, plugin_id: PluginId, kind: PluginKind, name: string, installed_path: string, exposed_skill_root: string | null, source: PluginInstallSource, installed_at_ms: bigint, updated_at_ms: bigint, file_manifest: FileManifest, };
+export type PluginInstall = { id: PluginInstallId, plugin_id: PluginId, kind: PluginKind, name: string, installed_path: string, enabled: boolean, source: PluginInstallSource, content_digest: ContentDigest, installed_at_ms: number, updated_at_ms: number, };
 
 export type PluginInstallId = string;
 
 export type PluginInstallSource = { "kind": "marketplace", source_id: MarketplaceSourceId, url: string, reference: string, commit: string, path_in_source: string, } | { "kind": "local_path", source_id: MarketplaceSourceId, path: string, path_in_source: string, } | { "kind": "manual" };
 
-export type FileManifest = { files: Array<FileEntry>, };
+export type ContentDigest = { algorithm: ContentDigestAlgorithm, value: string, file_count: number, total_size_bytes: number, };
 
-export type FileEntry = { relative_path: string, sha256: string, size_bytes: bigint, };
+export type ContentDigestAlgorithm = "sha256";
 
 export type PluginDefinition = { "kind": "skill", "plugin": SkillPlugin } | { "kind": "mcp_server", "plugin": McpServerPlugin } | { "kind": "package", "plugin": PackagePlugin } | { "kind": "feature", "plugin": FeaturePlugin };
 
-export type SkillPlugin = { manifest: SkillManifest, skill_md_path: string, };
+export type SkillPlugin = { skill_md_path: string, };
 
-export type McpServerPlugin = { name: string, transport: McpServerTransportKind, manifest_path: string, };
+export type McpServerPlugin = { server: McpServerDefinition, manifest_path: string, };
 
-export type McpServerTransportKind = "stdio" | "http" | "sse";
+export type McpServerDefinition = { name: string, display_name: string | null, description: string | null, transport: McpTransportDefinition, };
+
+export type McpTransportDefinition = { "type": "stdio", command: string, args: Array<string>, env: { [key in string]?: string }, cwd: string | null, } | { "type": "streamable_http", url: string, headers: { [key in string]?: string }, };
+
+export type McpTransportKind = "stdio" | "streamable_http";
+
+export type McpServerRuntimeDescriptor = { server: McpServerDefinition, source: McpServerSource, };
+
+export type McpServerSource = { "kind": "config" } | { "kind": "plugin", plugin_id: PluginId, install_id: PluginInstallId, installed_path: string, };
+
+export type McpServerSnapshot = { server: McpServerDefinition, source: McpServerSource, status: McpServerStatus, tools: Array<McpToolDescriptor>, resources: Array<McpResourceDescriptor>, resource_templates: Array<McpResourceTemplateDescriptor>, };
+
+export type McpServerStatus = { "status": "not_started" } | { "status": "starting" } | { "status": "ready" } | { "status": "failed", message: string, } | { "status": "disabled" };
+
+export type McpToolDescriptor = { server_name: string, name: string, title: string | null, description: string | null, input_schema: unknown, annotations: unknown | null, };
+
+export type McpResourceDescriptor = { server_name: string, uri: string, name: string | null, description: string | null, mime_type: string | null, };
+
+export type McpResourceTemplateDescriptor = { server_name: string, uri_template: string, name: string | null, description: string | null, mime_type: string | null, };
+
+export type McpCallToolRequest = { server_name: string, tool_name: string, arguments: unknown, };
+
+export type McpCallToolResponse = { content: Array<McpContent>, is_error: boolean, structured_content: unknown | null, };
+
+export type McpContent = { "type": "text", text: string, } | { "type": "image", data: string, mime_type: string, } | { "type": "resource", resource: McpResourceContents, } | { "type": "unknown", raw: unknown, };
+
+export type McpResourceContents = { "type": "text", uri: string, mime_type: string | null, text: string, } | { "type": "blob", uri: string, mime_type: string | null, blob: string, } | { "type": "unknown", raw: unknown, };
+
+export type McpReadResourceRequest = { server_name: string, uri: string, };
+
+export type McpReadResourceResponse = { contents: Array<McpResourceContents>, };
 
 export type PackagePlugin = { name: string, package_kind: PackageKind, manifest_path: string, };
 
@@ -302,65 +466,69 @@ export type SkillManifestMetadata = { display_name: string | null, icon: string 
 
 export type PluginWarning = { code: PluginWarningCode, message: string, kind: PluginKind | null, source_id: MarketplaceSourceId | null, path: string | null, };
 
-export type PluginWarningCode = "invalid_manifest" | "missing_required_field" | "unsupported_plugin_kind" | "nested_plugin" | "path_escaped_source" | "invalid_source_layout" | "orphan_install_directory";
+export type PluginWarningCode = "invalid_manifest" | "missing_required_field" | "unsupported_plugin_kind" | "nested_plugin" | "path_escaped_source" | "invalid_source_layout" | "orphan_install_directory" | "source_refresh_failed";
 
 export type PluginConflictReason = "same_name_different_source" | "target_path_exists" | "target_path_missing" | "local_changes_detected" | "unsupported_kind";
 
-export type AppListParams = Record<string, never>;
+export type AuthLogoutRequest = Record<string, never>;
 
-export type ToolListParams = Record<string, never>;
-
-export type AuthLogoutParams = Record<string, never>;
+export type AuthLogoutResponse = { success: boolean, };
 
 export type CloudLoginClientKind = "web" | "desktop" | "tui" | "cli";
 
 export type CloudLoginStartRequest = { client_name: string, client_kind: CloudLoginClientKind, };
 
-export type CloudLoginStartResponse = { login_id: string, login_url: string, user_code: string, expires_at_ms: bigint, interval_ms: bigint, };
+export type CloudLoginStartResponse = { login_id: string, login_url: string, user_code: string, expires_at_ms: number, interval_ms: number, };
 
 export type CloudLoginStatusRequest = { login_id: string, };
 
-export type CloudLoginStatusResponse = { "status": "pending", interval_ms: bigint, } | { "status": "authenticated", user: UserDto, } | { "status": "denied" } | { "status": "expired" };
+export type CloudLoginStatusResponse = { "status": "pending", interval_ms: number, } | { "status": "authenticated", user: UserDto, access_token: string, token_type: string, } | { "status": "denied" } | { "status": "expired" };
 
 export type CloudLoginCancelRequest = { login_id: string, };
 
-export type AuthSessionReadParams = Record<string, never>;
+export type CloudLoginCancelResponse = { success: boolean, };
+
+export type AuthSessionReadRequest = Record<string, never>;
 
 export type AuthSessionReadResponse = { session: AuthSessionSnapshot | null, };
 
-export type AuthSessionStoreParams = { session: AuthSessionSnapshot, };
+export type AuthSessionClearRequest = Record<string, never>;
 
-export type AuthSessionClearParams = Record<string, never>;
+export type AuthSessionClearResponse = { success: boolean, };
 
 export type AuthSessionSnapshot = { schema_version: number, cloud_api_base_url: string, access_token: string, token_type: string, expires_at_ms: string | null, last_used_at_ms: string, user: AuthSessionUserSnapshot, };
 
 export type AuthSessionUserSnapshot = { user_id: string, username: string, email: string | null, role: UserRole, };
 
-export type UserCurrentParams = Record<string, never>;
+export type UserCurrentRequest = Record<string, never>;
 
-export type MemorySearchParams = { query: string, limit: number | null, };
+export type UserCurrentResponse = { user: UserDto, };
+
+export type MemorySearchRequest = { query: string, limit?: number, date_from?: string, date_to?: string, };
 
 export type UserRole = "user" | "admin";
 
-export type UserDto = { user_id: string, username: string, email: string | null, role: UserRole, disabled: boolean, created_at: bigint, updated_at: bigint, };
+export type UserDto = { user_id: string, username: string, email: string | null, role: UserRole, disabled: boolean, created_at: number, updated_at: number, };
 
-export type Capabilities = { is_admin: boolean, role: UserRole, scopes: Array<string>, };
+export type OptionalProjectIdPatch = { "type": "set", project_id: string, } | { "type": "clear" };
 
-export type OptionalStringPatch = { "type": "set", value: string, } | { "type": "clear" };
+export type OptionalCurrentDirectoryPatch = { "type": "set", path: string, } | { "type": "clear" };
 
-export type OptionalPathPatch = { "type": "set", path: string, } | { "type": "clear" };
+export type SessionConf = { agent: SessionAgentConf | null, };
+
+export type SessionAgentConf = { model: string | null, };
 
 export type ProtocolTalosContext = { source_type: string, provider: string, channel_id: string, thread_id: string | null, message_id: string, trace_id: string, };
 
-export type TalosTimelineEvent = { event_seq: bigint | null, event_id: string | null, created_at_ms: bigint | null, event_type: TalosTimelineEventType, turn_id: string, message_id: string, session_id: string, sequence: bigint, payload: TalosTimelineEventPayload, };
+export type TalosTimelineEvent = { event_seq: number | null, event_id: string | null, created_at_ms: number | null, event_type: TalosTimelineEventType, turn_id: string, message_id: string, session_id: string, sequence: number, payload: TalosTimelineEventPayload, };
 
-export type TimelineEventEnvelope = { event_id: string, event_seq: bigint, created_at_ms: bigint, session_id: string, turn_id: string, message_id: string, event: TalosTimelineEvent, };
+export type TimelineEventEnvelope = { event_id: string, event_seq: number, created_at_ms: number, session_id: string, turn_id: string, message_id: string, event: TalosTimelineEvent, };
 
 export type TalosTimelineEventType = "turn_started" | "item_started" | "item_delta" | "item_completed" | "assistant_text_committed" | "turn_metrics" | "turn_completed" | "turn_error";
 
 export type TalosTimelineEventPayload = { "type": "turn_started" } & TalosTurnStartedEvent | { "type": "item_started" } & TalosItemStartedEvent | { "type": "item_delta" } & TalosItemDeltaEvent | { "type": "item_completed" } & TalosItemCompletedEvent | { "type": "assistant_text_committed" } & TalosAssistantTextCommittedEvent | { "type": "turn_metrics" } & TalosTurnMetricsEvent | { "type": "turn_completed" } & TalosTurnCompletedEvent | { "type": "turn_error" } & TalosTurnErrorEvent;
 
-export type TalosTimelineItem = { item_id: string, parent_item_id: string | null, kind: TalosTimelineItemKind, phase: TalosTimelinePhase, status: TalosTimelineItemStatus, title: string | null, started_at_ms: bigint, completed_at_ms: bigint | null, content: TalosTimelineContent, };
+export type TalosTimelineItem = { item_id: string, parent_item_id: string | null, kind: TalosTimelineItemKind, phase: TalosTimelinePhase, status: TalosTimelineItemStatus, title: string | null, started_at_ms: number, completed_at_ms: number | null, content: TalosTimelineContent, };
 
 export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text" | "tool_call" | "execution_summary" | "system_notice";
 
@@ -372,31 +540,37 @@ export type TalosTimelineNoticeLevel = "info" | "warning" | "error";
 
 export type TalosTimelineContent = { "type": "empty" } | { "type": "text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: string, progress: Array<TalosToolProgressEntry>, result: TalosToolResult | null, } | { "type": "execution_summary", summary: string, } | { "type": "system_notice", level: TalosTimelineNoticeLevel, message: string, };
 
-export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: TalosJsonValue, } | { "type": "status", status: TalosTimelineItemStatus, };
+export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: DynamicToolArguments, } | { "type": "status", status: TalosTimelineItemStatus, };
 
-export type TalosToolProgressEntry = { progress_kind: TalosToolProgressKind, text: string, timestamp_ms: bigint, };
+export type TalosToolProgressEntry = { progress_kind: TalosToolProgressKind, text: string, timestamp_ms: number, };
 
 export type TalosToolResult = { content: Array<TalosContentItem>, is_error: boolean, };
 
-export type TalosTurnStartedEvent = { request_id: string, turn_id: string, started_at_ms: bigint, };
+export type TalosTurnStartedEvent = { request_id: string, turn_id: string, started_at_ms: number, };
 
 export type TalosItemStartedEvent = { request_id: string, turn_id: string, item: TalosTimelineItem, };
 
 export type TalosItemDeltaEvent = { request_id: string, turn_id: string, item_id: string, delta: TalosTimelineDelta, };
 
-export type TalosItemCompletedEvent = { request_id: string, turn_id: string, item_id: string, status: TalosTimelineItemStatus, completed_at_ms: bigint, final_content: TalosTimelineContent | null, };
+export type TalosItemCompletedEvent = { request_id: string, turn_id: string, item_id: string, status: TalosTimelineItemStatus, completed_at_ms: number, final_content: TalosTimelineContent | null, };
 
 export type TalosAssistantTextCommittedEvent = { request_id: string, turn_id: string, item_id: string, phase: TalosTimelinePhase, };
 
 export type TalosTurnMetricsEvent = { request_id: string, turn_id: string, metrics: TurnExecutionMetrics, };
 
-export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: bigint, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
+export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
 
-export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, failed_at_ms: bigint, };
+export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, failed_at_ms: number, };
 
-export type TalosJsonValue = { value: unknown, };
+export type JsonContentValue = { value: unknown, };
 
-export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: TalosJsonValue, } | { "type": "file_read", path: string, offset: number, limit: number, total_lines: number, content: string, truncated: boolean, } | { "type": "diff", files: Array<TalosToolFileDiff>, } | { "type": "search_results", query: string | null, matches: Array<TalosToolSearchMatch>, offset: number, limit: number, total_matches: number | null, more_available: boolean, partial: boolean, } | { "type": "bash_output", session_id: bigint | null, status: TalosToolTaskStatus, exit_code: number | null, stdout: string, stderr: string, truncated: boolean, elapsed_ms: bigint | null, } | { "type": "web_reference", url: string, title: string | null, citation_id: string | null, snippet: string | null, source_domain: string | null, published_at: string | null, provider_rank: number | null, } | { "type": "artifact_ref", artifact_id: string, mime_type: string | null, label: string | null, } | { "type": "mcp_resource_ref", server: string, uri: string, mime_type: string | null, } | { "type": "progress", message: string, elapsed_ms: bigint | null, };
+export type ToolArguments = { value: unknown, };
+
+export type DynamicToolArguments = { value: unknown, };
+
+export type ToolExecutionResult = { value: unknown, };
+
+export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: JsonContentValue, } | { "type": "file_read", path: string, offset: number, limit: number, total_lines: number, content: string, truncated: boolean, } | { "type": "diff", files: Array<TalosToolFileDiff>, } | { "type": "search_results", query: string | null, matches: Array<TalosToolSearchMatch>, offset: number, limit: number, total_matches: number | null, more_available: boolean, partial: boolean, } | { "type": "bash_output", session_id: number | null, status: TalosToolTaskStatus, exit_code: number | null, stdout: string, stderr: string, truncated: boolean, elapsed_ms: number | null, } | { "type": "web_reference", url: string, title: string | null, citation_id: string | null, snippet: string | null, source_domain: string | null, published_at: string | null, provider_rank: number | null, } | { "type": "artifact_ref", artifact_id: string, mime_type: string | null, label: string | null, } | { "type": "mcp_resource_ref", server: string, uri: string, mime_type: string | null, } | { "type": "progress", message: string, elapsed_ms: number | null, };
 
 export type TalosToolTaskStatus = "queued" | "running" | "completed" | "failed" | "timed_out" | "cancelled";
 
@@ -408,11 +582,11 @@ export type TalosToolDiffLine = { "kind": "context", text: string, } | { "kind":
 
 export type TalosToolSearchMatch = { path: string, line: number, column: number | null, text: string, before: Array<string>, after: Array<string>, };
 
-export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens: number | null, cache_read_input_tokens: number | null, };
+export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens?: number | null, cache_read_input_tokens?: number | null, };
 
-export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TalosUsage, duration_ms: bigint | null, };
+export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TalosUsage, duration_ms: number | null, };
 
-export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "before_model_callback_stopped" | "after_model_callback_stopped" | "cancelled";
+export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "cancelled";
 
 export type TalosToolProgressKind = "status" | "stdout" | "stderr";
 
@@ -445,4 +619,3 @@ export type JsonRpcNotification = { jsonrpc: string, method: string, params: unk
 export type JsonRpcErrorResponse = { jsonrpc: string, id: RequestId | null, error: AppServerErrorBody, };
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcResponse | JsonRpcNotification | JsonRpcErrorResponse;
-

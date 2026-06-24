@@ -6,7 +6,7 @@ import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guar
 describe("desktop IPC guard", () => {
   it("allows ordinary desktop renderer methods with valid params", () => {
     expect(() =>
-      assertDesktopRendererInvoke("session.read", { session_id: "session-1" }),
+      assertDesktopRendererInvoke("session.get", { session_id: "session-1" }),
     ).not.toThrow();
     expect(() =>
       assertDesktopRendererInvoke("session.history", { session_id: "session-1" }),
@@ -36,15 +36,18 @@ describe("desktop IPC guard", () => {
     expect(isDesktopRendererMethod(removedMethod)).toBe(false);
     expect(isDesktopRendererMethod("admin.user.list")).toBe(false);
     expect(isDesktopRendererMethod("account.get")).toBe(false);
-    expect(isDesktopRendererMethod("config.read")).toBe(true);
+    expect(isDesktopRendererMethod("app.list")).toBe(false);
+    expect(isDesktopRendererMethod("tool.execute")).toBe(false);
+    expect(isDesktopRendererMethod("tool.list")).toBe(false);
+    expect(isDesktopRendererMethod("config.get")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);
     expect(() => assertDesktopRendererInvoke(removedMethod, {})).toThrow();
-    expect(() => assertDesktopRendererInvoke("config.value.write", {
+    expect(() => assertDesktopRendererInvoke("config.update", {
       path: "llm",
-      value: "{}",
+      value: { type: "llm", value: {} },
     })).not.toThrow();
-    expect(() => assertDesktopRendererInvoke("config.batch.write", {
-      entries: [{ path: "llm", value: "{}" }],
+    expect(() => assertDesktopRendererInvoke("config.delete", {
+      path: "llm",
     })).not.toThrow();
   });
 
@@ -64,42 +67,11 @@ describe("desktop IPC guard", () => {
 
     expect(isDesktopRendererMethod("user.token.create")).toBe(false);
     expect(result.actorCredentials?.credential.type).toBe("existing_session_token");
-    expect(isDesktopRendererMethod("auth.login")).toBe(false);
-    expect(isDesktopRendererMethod("auth.register")).toBe(false);
   });
 
-  it("allows desktop cloud session cache methods with validated shapes", () => {
+  it("allows desktop cloud session cache read and clear methods", () => {
     expect(() => assertDesktopRendererInvoke("auth.session.read", {})).not.toThrow();
     expect(() => assertDesktopRendererInvoke("auth.session.clear", {})).not.toThrow();
-    expect(() =>
-      assertDesktopRendererInvoke(
-        "auth.session.store",
-        {
-          session: {
-            schema_version: 1,
-            cloud_api_base_url: "http://127.0.0.1:8787",
-            access_token: "token-1",
-            token_type: "Bearer",
-            expires_at_ms: null,
-            last_used_at_ms: Date.now().toString(),
-            user: {
-              user_id: "user-1",
-              username: "ada",
-              email: "ada@example.com",
-              role: "admin",
-            },
-          },
-        },
-        {
-          actorCredentials: {
-            credential: {
-              type: "existing_session_token",
-              token: "token-1",
-            },
-          },
-        },
-      ),
-    ).not.toThrow();
   });
 
   it("rejects renderer attempts to pass unsupported actor credentials", () => {
@@ -121,15 +93,15 @@ describe("desktop IPC guard", () => {
 
   it("rejects initialize and unsupported config writes from renderer", () => {
     expect(isDesktopRendererMethod("initialize")).toBe(false);
-    expect(() => assertDesktopRendererInvoke("config.value.write", {
+    expect(() => assertDesktopRendererInvoke("config.update", {
       path: "storage",
-      value: "{}",
-    })).toThrow("Invalid desktop renderer params for method: config.value.write");
+      value: { type: "llm", value: {} },
+    })).toThrow("Invalid desktop renderer params for method: config.update");
   });
 
   it("rejects malformed params before they reach app-server", () => {
-    expect(() => assertDesktopRendererInvoke("session.read", {})).toThrow(
-      "Invalid desktop renderer params for method: session.read",
+    expect(() => assertDesktopRendererInvoke("session.get", {})).toThrow(
+      "Invalid desktop renderer params for method: session.get",
     );
     expect(isDesktopRendererMethod("unsupported.method")).toBe(false);
     expect(() =>

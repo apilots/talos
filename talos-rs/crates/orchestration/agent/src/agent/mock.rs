@@ -1,7 +1,7 @@
 use super::AgentHarness;
 use crate::{
-    service::{OrchestratorExecution, OrchestratorRequest},
-    AgentOrchestrator,
+    service::{AgentRequest, AgentResponse},
+    Agent,
 };
 use async_trait::async_trait;
 use std::time::Duration;
@@ -23,15 +23,15 @@ impl MockAgent {
 }
 
 #[async_trait]
-impl AgentOrchestrator for MockAgent {
+impl Agent for MockAgent {
     fn id(&self) -> &str {
         "mock"
     }
 
-    async fn run(&self, request: OrchestratorRequest) -> TalosResult<OrchestratorExecution> {
+    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
         let input = AgentHarness::extract_text_input(&request.input);
         let output = format!("Mock response to: {}", input);
-        Ok(OrchestratorExecution {
+        Ok(AgentResponse {
             output_text: output,
             output_items: vec![TalosOutputItem::OutputText {
                 text: "Mock response".to_string(),
@@ -47,7 +47,7 @@ impl AgentOrchestrator for MockAgent {
 
     async fn run_stream(
         &self,
-        request: OrchestratorRequest,
+        request: AgentRequest,
     ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
         let turn_id = request
             .turn_id
@@ -55,7 +55,7 @@ impl AgentOrchestrator for MockAgent {
             .unwrap_or_else(|| format!("turn_{}", Uuid::new_v4().simple()));
         let message_id = request.session.context.message_id.clone();
         let session_id = request.session.context.session_id.clone();
-        let execution = AgentOrchestrator::run(self, request).await?;
+        let execution = Agent::run(self, request).await?;
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {

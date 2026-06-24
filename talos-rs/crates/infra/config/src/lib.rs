@@ -48,10 +48,10 @@ pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, ChannelConfig, ChannelsConfig, DmPolicy, DmScope,
-    GatewayAuthCacheConfig, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig,
-    ModelCostConfig, ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig,
-    ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
-    TelegramMode, TelegramTopicConfig, ThinkingFormat,
+    GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig, ModelCostConfig,
+    ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig, ReasoningEffort,
+    TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig, TelegramMode,
+    TelegramTopicConfig, ThinkingFormat,
 };
 pub use domains::plugins::{
     PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,
@@ -214,7 +214,9 @@ impl Config {
     /// Load configuration.
     ///
     /// Lookup path:
-    /// 1. `<talos_home>/conf/talos.yaml`
+    /// 1. Explicit path passed by caller
+    /// 2. `TALOS_CONFIG`
+    /// 3. `<talos_home>/conf/talos.yaml`
     pub fn load() -> TalosResult<Self> {
         loader::load_config()
     }
@@ -232,6 +234,11 @@ impl Config {
     /// 获取配置文件路径
     pub fn default_path() -> PathBuf {
         loader::default_config_path()
+    }
+
+    /// Return the config path that the loader will use for the current process.
+    pub fn source_path() -> PathBuf {
+        loader::config_source_path(None)
     }
 
     #[cfg(test)]

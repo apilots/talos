@@ -1,14 +1,16 @@
 import type { HttpAdapter, StreamAdapter } from "./adapters";
 import type {
   DocUpdateRequest,
+  ConfigGetResponse,
+  ConfigUpdateResponse,
   LlmConfig,
-  LlmConfigRead,
-  MemoryFileDetail,
-  MemoryFileListParams,
-  MemoryFileSummary,
-  MemorySearchParams,
-  MemorySearchResult,
-  ModelInfo,
+  MemoryFileListRequest,
+  MemoryFileListResponse,
+  MemoryFileReadResponse,
+  MemoryFileWriteResponse,
+  MemorySearchQuery,
+  MemorySearchResponse,
+  ModelListResponse,
   PluginDisableRequest,
   PluginDisableResponse,
   PluginEnableRequest,
@@ -17,6 +19,8 @@ import type {
   PluginInstallResponse,
   PluginListRequest,
   PluginListResponse,
+  PluginReadRequest,
+  PluginReadResponse,
   PluginSearchRequest,
   PluginSearchResponse,
   PluginSourceAddRequest,
@@ -31,50 +35,64 @@ import type {
   PluginUpdateResponse,
   PluginUninstallRequest,
   PluginUninstallResponse,
-  UserDto,
+  UserCurrentResponse,
+  FsDirectoryCreateRequest,
   FsDirectoryCreateResponse,
-  FsDirectorySnapshot,
+  FsDirectoryReadRequest,
+  FsDirectoryReadResponse,
+  ProjectCreateRequest,
+  ProjectCreateResponse,
+  ProjectDeleteRequest,
+  ProjectDeleteResponse,
+  ProjectListResponse,
+  ProjectListRequest,
   ProjectPatch,
-  ProjectRecord,
-  ProtocolSkillDocument,
+  ProjectPatchRequest,
+  ProjectPatchResponse,
+  ProjectReadRequest,
+  ProjectReadResponse,
+  SessionActiveTurnRequest,
   SkillsListRequest,
   SkillsListResponse,
   SkillsReadRequest,
+  SkillsReadResponse,
   SkillsRefreshRequest,
   SkillsResolveRequest,
   SkillsResolveResponse,
   SkillsSuggestRequest,
   SkillsSuggestResponse,
-  SessionQuery,
-  SessionUpdate,
-  TalosUsage,
+  SessionPatchRequest,
+  SessionClearRequest,
+  SessionCompactResponse,
+  SessionCompactRequest,
+  SessionClearResponse,
+  SessionCloseRequest,
+  SessionCloseResponse,
+  SessionDeleteRequest,
+  SessionDeleteResponse,
+  SessionGetRequest,
+  SessionGetResponse,
+  SessionActiveTurnResponse,
+  SessionHistoryRequest,
+  SessionHistoryResponse,
+  SessionListRequest,
+  SessionListResponse,
+  SessionUpdateResponse,
+  InterruptTurnResponse,
+  InterruptTurnRequest,
+  RetryTurnRequest,
+  RecoverTimelineRequest,
+  StartTurnRequest,
+  StartTurnResponse,
   TimelineEventEnvelope,
-  TalosActiveTurn,
-  TalosSessionHistorySnapshot,
-  TalosMessageAck,
-  TalosMessageRequest,
-  TalosMessageRetryRequest,
-  TalosSession,
-  TalosTurnExecutionMetrics,
-  TimelineRecoverySnapshot,
-  WorkspaceDocDetail,
+  RetryTurnResponse,
+  TimelineRecoveryResponse,
   WorkspaceDocKind,
-  WorkspaceDocSummary,
+  WorkspaceDocListResponse,
+  WorkspaceDocReadResponse,
+  WorkspaceDocWriteResponse,
   AgentWorkspaceInfo,
 } from "./types";
-
-interface ListResponse<T> {
-  data: T[];
-}
-
-interface AckResponse {
-  success: boolean;
-}
-
-interface CreateProjectRequest {
-  name: string;
-  directory: string;
-}
 
 interface RequestControlOptions {
   signal?: AbortSignal;
@@ -97,7 +115,7 @@ export class TalosClient {
     }
     const params = new URLSearchParams();
     for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         params.set(key, String(value));
       }
     }
@@ -114,17 +132,17 @@ export class TalosClient {
   };
 
   user = {
-    current: async (): Promise<UserDto> => {
-      return this.http.request<UserDto>(this.url("/v1/user"));
+    current: async (): Promise<UserCurrentResponse> => {
+      return this.http.request<UserCurrentResponse>(this.url("/v1/user"));
     },
   };
 
   llm = {
-    get: (): Promise<LlmConfigRead> => {
-      return this.http.request<LlmConfigRead>(this.url("/v1/llm"));
+    get: (): Promise<ConfigGetResponse> => {
+      return this.http.request<ConfigGetResponse>(this.url("/v1/llm"));
     },
-    update: (config: LlmConfig): Promise<LlmConfigRead> => {
-      return this.http.request<LlmConfigRead>(this.url("/v1/llm"), {
+    update: (config: LlmConfig): Promise<ConfigUpdateResponse> => {
+      return this.http.request<ConfigUpdateResponse>(this.url("/v1/llm"), {
         method: "PUT",
         body: JSON.stringify(config),
       });
@@ -132,10 +150,8 @@ export class TalosClient {
   };
 
   models = {
-    list: async (): Promise<ModelInfo[]> => {
-      const response = await this.http.request<ListResponse<ModelInfo>>(this.url("/v1/models"));
-      return response.data;
-    },
+    list: (): Promise<ModelListResponse> =>
+      this.http.request<ModelListResponse>(this.url("/v1/models")),
   };
 
   skills = {
@@ -147,8 +163,8 @@ export class TalosClient {
       }),
     suggest: (query: SkillsSuggestRequest): Promise<SkillsSuggestResponse> =>
       this.http.request<SkillsSuggestResponse>(this.urlWithQuery("/v1/skills/suggest", query)),
-    read: (request: SkillsReadRequest): Promise<ProtocolSkillDocument> =>
-      this.http.request<ProtocolSkillDocument>(this.url("/v1/skills/read"), {
+    read: (request: SkillsReadRequest): Promise<SkillsReadResponse> =>
+      this.http.request<SkillsReadResponse>(this.url("/v1/skills/read"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
@@ -167,6 +183,11 @@ export class TalosClient {
       }),
     list: (request: PluginListRequest): Promise<PluginListResponse> =>
       this.http.request<PluginListResponse>(this.url("/v1/plugin/list"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    read: (request: PluginReadRequest): Promise<PluginReadResponse> =>
+      this.http.request<PluginReadResponse>(this.url("/v1/plugin/read"), {
         method: "POST",
         body: JSON.stringify(request),
       }),
@@ -194,9 +215,9 @@ export class TalosClient {
       this.http.request<PluginDisableResponse>(this.url("/v1/plugin/disable"), {
         method: "POST",
         body: JSON.stringify(request),
-      }),
+    }),
     sources: {
-      list: (query: PluginSourceListRequest = { include_disabled: false }): Promise<PluginSourceListResponse> =>
+      list: (query: PluginSourceListRequest = {}): Promise<PluginSourceListResponse> =>
         this.http.request<PluginSourceListResponse>(this.urlWithQuery("/v1/plugin/sources", query)),
       add: (request: PluginSourceAddRequest): Promise<PluginSourceAddResponse> =>
         this.http.request<PluginSourceAddResponse>(this.url("/v1/plugin/sources"), {
@@ -217,112 +238,133 @@ export class TalosClient {
   };
 
   sessions = {
-    list: async (query?: SessionQuery): Promise<TalosSession[]> => {
-      const response = await this.http.request<ListResponse<TalosSession>>(
-        this.urlWithQuery("/v1/sessions", query),
-      );
-      return response.data;
-    },
-    get: (sessionId: string) =>
-      this.http.request<TalosSession>(this.url(`/v1/sessions/${sessionId}`)),
-    patch: async (sessionId: string, update: SessionUpdate): Promise<void> => {
-      const response = await this.http.request<AckResponse>(this.url(`/v1/sessions/${sessionId}`), {
+    list: (query?: SessionListRequest): Promise<SessionListResponse> =>
+      this.http.request<SessionListResponse>(this.urlWithQuery("/v1/sessions", query)),
+    get: (request: SessionGetRequest): Promise<SessionGetResponse> =>
+      this.http.request<SessionGetResponse>(this.url(`/v1/sessions/${request.session_id}`)),
+    getById: (sessionId: string): Promise<SessionGetResponse> =>
+      this.sessions.get({ session_id: sessionId }),
+    patch: (request: SessionPatchRequest): Promise<SessionUpdateResponse> =>
+      this.http.request<SessionUpdateResponse>(this.url(`/v1/sessions/${request.session_id}`), {
         method: "PATCH",
-        body: JSON.stringify(update),
-      });
-      if (!response.success) {
-        throw new Error("Session patch did not succeed.");
-      }
-    },
-    close: async (sessionId: string): Promise<void> => {
-      const response = await this.http.request<AckResponse>(this.url(`/v1/sessions/${sessionId}/close`), {
+        body: JSON.stringify(request),
+      }),
+    close: async (request: SessionCloseRequest): Promise<SessionCloseResponse> => {
+      const response = await this.http.request<SessionCloseResponse>(this.url(`/v1/sessions/${request.session_id}/close`), {
         method: "POST",
       });
       if (!response.success) {
         throw new Error("Session close did not succeed.");
       }
+      return response;
     },
-    delete: async (sessionId: string): Promise<void> => {
-      const response = await this.http.request<AckResponse>(this.url(`/v1/sessions/${sessionId}`), {
+    closeById: (sessionId: string): Promise<SessionCloseResponse> =>
+      this.sessions.close({ session_id: sessionId }),
+    delete: async (request: SessionDeleteRequest): Promise<SessionDeleteResponse> => {
+      const response = await this.http.request<SessionDeleteResponse>(this.url(`/v1/sessions/${request.session_id}`), {
         method: "DELETE",
       });
       if (!response.success) {
         throw new Error("Session delete did not succeed.");
       }
+      return response;
     },
-    cancel: async (sessionId: string): Promise<void> => {
-      const response = await this.http.request<AckResponse>(
-        this.url(`/v1/sessions/${sessionId}/cancel`),
-        { method: "POST" },
+    deleteById: (sessionId: string): Promise<SessionDeleteResponse> =>
+      this.sessions.delete({ session_id: sessionId }),
+    cancel: async (request: InterruptTurnRequest): Promise<InterruptTurnResponse> => {
+      const response = await this.http.request<InterruptTurnResponse>(
+        this.url("/v1/turns/interrupt"),
+        {
+          method: "POST",
+          body: JSON.stringify(request),
+        },
       );
       if (!response.success) {
         throw new Error("Session cancel did not succeed.");
       }
+      return response;
     },
-    compact: (sessionId: string) =>
-      this.http.request<TalosSession>(this.url(`/v1/sessions/${sessionId}/compact`), {
+    cancelById: (sessionId: string): Promise<InterruptTurnResponse> =>
+      this.sessions.cancel({ session_id: sessionId }),
+    compact: (request: SessionCompactRequest) =>
+      this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${request.session_id}/compact`), {
         method: "POST",
       }),
-    clear: (sessionId: string) =>
-      this.http.request<TalosSession>(this.url(`/v1/sessions/${sessionId}/clear`), {
+    compactById: (sessionId: string): Promise<SessionCompactResponse> =>
+      this.sessions.compact({ session_id: sessionId }),
+    clear: (request: SessionClearRequest) =>
+      this.http.request<SessionClearResponse>(this.url(`/v1/sessions/${request.session_id}/clear`), {
         method: "POST",
       }),
-    activeTurn: (sessionId: string) =>
-      this.http.request<TalosActiveTurn>(this.url(`/v1/sessions/${sessionId}/active-turn`)),
-    history: async (sessionId: string): Promise<TalosSessionHistorySnapshot> => {
-      const response = await this.http.request<TalosSessionHistorySnapshot>(
-        this.url(`/v1/sessions/${sessionId}/history`),
+    clearById: (sessionId: string): Promise<SessionClearResponse> =>
+      this.sessions.clear({ session_id: sessionId }),
+    activeTurn: (request: SessionActiveTurnRequest) =>
+      this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.session_id}/active-turn`)),
+    activeTurnById: (sessionId: string): Promise<SessionActiveTurnResponse> =>
+      this.sessions.activeTurn({ session_id: sessionId }),
+    history: async (request: SessionHistoryRequest): Promise<SessionHistoryResponse> => {
+      return this.http.request<SessionHistoryResponse>(
+        this.url(`/v1/sessions/${request.session_id}/history`),
       );
-      return normalizeSessionHistorySnapshot(response);
     },
-    recover: async (
+    historyById: (sessionId: string): Promise<SessionHistoryResponse> =>
+      this.sessions.history({ session_id: sessionId }),
+    recover: async (request: RecoverTimelineRequest): Promise<TimelineRecoveryResponse> => {
+      return this.http.request<TimelineRecoveryResponse>(
+        this.urlWithQuery(`/v1/sessions/${request.session_id}/recovery`, {
+          after_event_id: request.after_event_id ?? undefined,
+          limit: request.replay_limit ?? undefined,
+        }),
+      );
+    },
+    recoverById: (
       sessionId: string,
       afterEventId?: string,
       replayLimit?: number,
-    ): Promise<TimelineRecoverySnapshot> => {
-      const response = await this.http.request<TimelineRecoverySnapshot>(
-        this.urlWithQuery(`/v1/sessions/${sessionId}/recovery`, {
-          after_event_id: afterEventId,
-          limit: replayLimit,
-        }),
-      );
-      return normalizeTimelineRecoverySnapshot(response);
-    },
+    ): Promise<TimelineRecoveryResponse> =>
+      this.sessions.recover({
+        session_id: sessionId,
+        after_event_id: afterEventId ?? null,
+        replay_limit: replayLimit ?? null,
+      }),
   };
 
   projects = {
-    list: async (): Promise<ProjectRecord[]> => {
-      const response = await this.http.request<ListResponse<ProjectRecord>>(this.url("/v1/projects"));
-      return response.data;
-    },
-    get: (projectId: string) =>
-      this.http.request<ProjectRecord>(this.url(`/v1/projects/${projectId}`)),
-    create: (body: CreateProjectRequest) =>
-      this.http.request<ProjectRecord>(this.url("/v1/projects"), {
+    list: (_request: ProjectListRequest = {}): Promise<ProjectListResponse> =>
+      this.http.request<ProjectListResponse>(this.url("/v1/projects")),
+    get: (request: ProjectReadRequest): Promise<ProjectReadResponse> =>
+      this.http.request<ProjectReadResponse>(this.url(`/v1/projects/${request.project_id}`)),
+    getById: (projectId: string): Promise<ProjectReadResponse> =>
+      this.projects.get({ project_id: projectId }),
+    create: (body: ProjectCreateRequest): Promise<ProjectCreateResponse> =>
+      this.http.request<ProjectCreateResponse>(this.url("/v1/projects"), {
         method: "POST",
         body: JSON.stringify(body),
       }),
-    patch: (projectId: string, patch: ProjectPatch) =>
-      this.http.request<ProjectRecord>(this.url(`/v1/projects/${projectId}`), {
+    patch: (request: ProjectPatchRequest): Promise<ProjectPatchResponse> =>
+      this.http.request<ProjectPatchResponse>(this.url(`/v1/projects/${request.project_id}`), {
         method: "PATCH",
-        body: JSON.stringify(patch),
+        body: JSON.stringify(request),
       }),
-    delete: async (projectId: string): Promise<void> => {
-      await this.http.request<void>(this.url(`/v1/projects/${projectId}`), {
+    patchById: (projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> =>
+      this.projects.patch({ project_id: projectId, name: patch.name }),
+    delete: (request: ProjectDeleteRequest): Promise<ProjectDeleteResponse> =>
+      this.http.request<ProjectDeleteResponse>(this.url(`/v1/projects/${request.project_id}`), {
         method: "DELETE",
-      });
-    },
+      }),
+    deleteById: (projectId: string): Promise<ProjectDeleteResponse> =>
+      this.projects.delete({ project_id: projectId }),
   };
 
   fs = {
     directory: {
-      read: (query?: { path?: string | null }): Promise<FsDirectorySnapshot> =>
-        this.http.request<FsDirectorySnapshot>(
+      read: (query: FsDirectoryReadRequest = { path: null }): Promise<FsDirectoryReadResponse> =>
+        this.http.request<FsDirectoryReadResponse>(
           this.urlWithQuery("/v1/fs/directory", {
             path: query?.path ?? undefined,
           }),
         ),
-      create: (body: { parent: string; name: string }): Promise<FsDirectoryCreateResponse> =>
+      create: (body: FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> =>
         this.http.request<FsDirectoryCreateResponse>(this.url("/v1/fs/directory"), {
           method: "POST",
           body: JSON.stringify(body),
@@ -331,80 +373,70 @@ export class TalosClient {
   };
 
   memory = {
-    list: async (query?: MemoryFileListParams): Promise<MemoryFileSummary[]> => {
-      const response = await this.http.request<ListResponse<MemoryFileSummary>>(
+    list: (query?: MemoryFileListRequest): Promise<MemoryFileListResponse> =>
+      this.http.request<MemoryFileListResponse>(
         this.urlWithQuery("/v1/memory/files", query),
-      );
-      return response.data;
-    },
+      ),
     get: (date: string) =>
-      this.http.request<MemoryFileDetail>(this.url(`/v1/memory/files/${date}`)),
+      this.http.request<MemoryFileReadResponse>(this.url(`/v1/memory/files/${date}`)),
     put: (date: string, request: DocUpdateRequest) =>
-      this.http.request<MemoryFileDetail>(this.url(`/v1/memory/files/${date}`), {
+      this.http.request<MemoryFileWriteResponse>(this.url(`/v1/memory/files/${date}`), {
         method: "PUT",
         body: JSON.stringify(request),
       }),
     search: async (
-      query: MemorySearchParams,
+      query: MemorySearchQuery,
       options?: RequestControlOptions,
-    ): Promise<MemorySearchResult[]> => {
+    ): Promise<MemorySearchResponse> => {
       const requestOptions = options?.signal ? { signal: options.signal } : undefined;
       const url = this.urlWithQuery("/v1/memory/search", query);
-      const response = requestOptions
-        ? await this.http.request<ListResponse<MemorySearchResult>>(url, requestOptions)
-        : await this.http.request<ListResponse<MemorySearchResult>>(url);
-      return response.data;
+      return requestOptions
+        ? await this.http.request<MemorySearchResponse>(url, requestOptions)
+        : await this.http.request<MemorySearchResponse>(url);
     },
   };
 
   workspaceDocs = {
     info: () =>
       this.http.request<AgentWorkspaceInfo>(this.url("/v1/workspace/info")),
-    list: async (): Promise<WorkspaceDocSummary[]> => {
-      const response = await this.http.request<ListResponse<WorkspaceDocSummary>>(
-        this.url("/v1/workspace/docs"),
-      );
-      return response.data;
-    },
+    list: (): Promise<WorkspaceDocListResponse> =>
+      this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
     get: (kind: WorkspaceDocKind) =>
-      this.http.request<WorkspaceDocDetail>(this.url(`/v1/workspace/docs/${kind}`)),
+      this.http.request<WorkspaceDocReadResponse>(this.url(`/v1/workspace/docs/${kind}`)),
     put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
-      this.http.request<WorkspaceDocDetail>(this.url(`/v1/workspace/docs/${kind}`), {
+      this.http.request<WorkspaceDocWriteResponse>(this.url(`/v1/workspace/docs/${kind}`), {
         method: "PUT",
         body: JSON.stringify(request),
       }),
   };
 
   turns = {
-    start: (sessionId: string, request: TalosMessageRequest) =>
-      this.turns.startWithIdempotencyKey(sessionId, request, createIdempotencyKey()),
+    start: (request: StartTurnRequest) =>
+      this.turns.startWithIdempotencyKey(request, request.client_request_id ?? createIdempotencyKey()),
     startWithIdempotencyKey: (
-      sessionId: string,
-      request: TalosMessageRequest,
+      request: StartTurnRequest,
       idempotencyKey: string,
     ) =>
-      this.http.request<TalosMessageAck>(this.url(`/v1/sessions/${sessionId}/messages`), {
+      this.http.request<StartTurnResponse>(this.url("/v1/turns/start"), {
         method: "POST",
         headers: {
           "idempotency-key": idempotencyKey,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify({
+          ...request,
+          client_request_id: idempotencyKey,
+        }),
       }),
     retryWithIdempotencyKey: (
-      sessionId: string,
-      request: TalosMessageRetryRequest,
-      idempotencyKey: string,
+      request: RetryTurnRequest,
+      _idempotencyKey: string,
     ) =>
-      this.http.request<TalosMessageAck>(this.url(`/v1/sessions/${sessionId}/message-attempts`), {
+      this.http.request<RetryTurnResponse>(this.url("/v1/turns/retry"), {
         method: "POST",
-        headers: {
-          "idempotency-key": idempotencyKey,
-        },
         body: JSON.stringify(request),
       }),
-    retry: (sessionId: string, request: TalosMessageRetryRequest) =>
+    retry: (request: RetryTurnRequest) =>
       this.turns.retryWithIdempotencyKey(
-        sessionId,
         request,
         `retry_${request.client_message_id}_${request.retry_of_message_id}`,
       ),
@@ -475,30 +507,31 @@ export class TalosClient {
       }
     },
     startEvents: async (
-      sessionId: string,
-      request: TalosMessageRequest,
+      request: StartTurnRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
-      const ack = await this.turns.start(sessionId, request);
+      const ack = await this.turns.start({
+        ...request,
+        client_request_id: request.client_request_id ?? createIdempotencyKey(),
+      });
       if (!ack.message_id) {
         throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
       }
 
-      await this.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+      await this.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
     },
     retryEvents: async (
-      sessionId: string,
-      request: TalosMessageRetryRequest,
+      request: RetryTurnRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
-      const ack = await this.turns.retry(sessionId, request);
+      const ack = await this.turns.retry(request);
       if (!ack.message_id) {
         throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
       }
 
-      await this.turns.eventsForMessage(sessionId, ack.message_id, onEvent, signal);
+      await this.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
     },
   };
 
@@ -512,123 +545,7 @@ function createIdempotencyKey() {
 }
 
 function normalizeTimelineEnvelope(value: unknown): TimelineEventEnvelope {
-  const envelope = value as TimelineEventEnvelope;
-  const event = envelope.event;
-  return {
-    ...envelope,
-    event_seq: Number(envelope.event_seq),
-    created_at_ms: Number(envelope.created_at_ms),
-    event: {
-      ...event,
-      event_seq: event.event_seq == null ? event.event_seq : Number(event.event_seq),
-      created_at_ms: event.created_at_ms == null ? event.created_at_ms : Number(event.created_at_ms),
-      sequence: Number(event.sequence),
-      payload: normalizeTimelinePayload(event.payload),
-    },
-  };
-}
-
-function normalizeTimelinePayload(
-  payload: TimelineEventEnvelope["event"]["payload"],
-): TimelineEventEnvelope["event"]["payload"] {
-  if (payload.type === "turn_metrics") {
-    return {
-      ...payload,
-      metrics: normalizeTurnExecutionMetrics(payload.metrics)!,
-    };
-  }
-  if (payload.type === "turn_completed") {
-    return {
-      ...payload,
-      completed_at_ms: Number(payload.completed_at_ms),
-      usage: normalizeUsage(payload.usage),
-      metrics: normalizeTurnExecutionMetrics(payload.metrics),
-    };
-  }
-  return payload;
-}
-
-function normalizeTimelineRecoverySnapshot(
-  snapshot: TimelineRecoverySnapshot,
-): TimelineRecoverySnapshot {
-  return {
-    ...snapshot,
-    replay: {
-      ...snapshot.replay,
-      events: snapshot.replay.events.map((event) => normalizeTimelineEnvelope(event)),
-      last_replay_seq: Number(snapshot.replay.last_replay_seq),
-    },
-    active_turn: {
-      ...snapshot.active_turn,
-      updated_at: Number(snapshot.active_turn.updated_at),
-    },
-  };
-}
-
-function normalizeSessionHistorySnapshot(
-  snapshot: TalosSessionHistorySnapshot,
-): TalosSessionHistorySnapshot {
-  return {
-    ...snapshot,
-    generated_at_ms: Number(snapshot.generated_at_ms),
-    messages: snapshot.messages.map((message) => ({
-      ...message,
-      items: message.items.map((item) => ({
-        ...item,
-        started_at_ms: Number(item.started_at_ms),
-        completed_at_ms:
-          item.completed_at_ms == null ? item.completed_at_ms : Number(item.completed_at_ms),
-      })),
-      usage: {
-        ...normalizeUsage(message.usage),
-      },
-      metrics: normalizeTurnExecutionMetrics(message.metrics),
-    })),
-  };
-}
-
-function normalizeTurnExecutionMetrics(
-  metrics: ({
-    model_rounds: bigint | number;
-    tool_calls: bigint | number;
-    tool_successes: bigint | number;
-    tool_errors: bigint | number;
-    stop_reason: TalosTurnExecutionMetrics["stop_reason"];
-    usage: TalosUsage;
-    duration_ms: bigint | number | null;
-  }) | null,
-): TalosTurnExecutionMetrics | null {
-  if (metrics == null) {
-    return null;
-  }
-  return {
-    ...metrics,
-    model_rounds: Number(metrics.model_rounds),
-    tool_calls: Number(metrics.tool_calls),
-    tool_successes: Number(metrics.tool_successes),
-    tool_errors: Number(metrics.tool_errors),
-    duration_ms: metrics.duration_ms == null ? metrics.duration_ms : Number(metrics.duration_ms),
-    usage: {
-      ...normalizeUsage(metrics.usage),
-    },
-  };
-}
-
-function normalizeUsage(usage: TalosUsage): TalosUsage {
-  return {
-    ...usage,
-    input_tokens: Number(usage.input_tokens),
-    output_tokens: Number(usage.output_tokens),
-    total_tokens: Number(usage.total_tokens),
-    cache_creation_input_tokens:
-      usage.cache_creation_input_tokens == null
-        ? usage.cache_creation_input_tokens
-        : Number(usage.cache_creation_input_tokens),
-    cache_read_input_tokens:
-      usage.cache_read_input_tokens == null
-        ? usage.cache_read_input_tokens
-        : Number(usage.cache_read_input_tokens),
-  };
+  return value as TimelineEventEnvelope;
 }
 
 function isTerminalTimelineEvent(envelope: TimelineEventEnvelope): boolean {

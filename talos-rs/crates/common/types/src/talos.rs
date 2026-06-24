@@ -34,8 +34,6 @@ pub enum StopReason {
     ToolRoundLimit,
     WaitingDynamicInput,
     TransferUnresolved,
-    BeforeModelCallbackStopped,
-    AfterModelCallbackStopped,
     Cancelled,
 }
 
@@ -83,6 +81,72 @@ impl std::fmt::Display for TalosJsonValue {
         write!(f, "{}", self.value)
     }
 }
+
+macro_rules! semantic_json_value {
+    ($name:ident) => {
+        #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+        pub struct $name {
+            #[schemars(schema_with = "crate::schema::json_value_schema")]
+            #[ts(type = "unknown")]
+            value: serde_json::Value,
+        }
+
+        impl $name {
+            pub fn new(value: serde_json::Value) -> Self {
+                Self { value }
+            }
+
+            pub fn into_inner(self) -> serde_json::Value {
+                self.value
+            }
+
+            pub fn as_inner(&self) -> &serde_json::Value {
+                &self.value
+            }
+        }
+
+        impl Default for $name {
+            fn default() -> Self {
+                Self::new(serde_json::Value::Null)
+            }
+        }
+
+        impl From<serde_json::Value> for $name {
+            fn from(value: serde_json::Value) -> Self {
+                Self::new(value)
+            }
+        }
+
+        impl From<TalosJsonValue> for $name {
+            fn from(value: TalosJsonValue) -> Self {
+                Self::new(value.into_inner())
+            }
+        }
+
+        impl From<$name> for serde_json::Value {
+            fn from(value: $name) -> Self {
+                value.into_inner()
+            }
+        }
+
+        impl From<$name> for TalosJsonValue {
+            fn from(value: $name) -> Self {
+                TalosJsonValue::new(value.into_inner())
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.value)
+            }
+        }
+    };
+}
+
+semantic_json_value!(JsonContentValue);
+semantic_json_value!(ToolArguments);
+semantic_json_value!(DynamicToolArguments);
+semantic_json_value!(ToolExecutionResult);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosSessionEnvironment {
@@ -337,7 +401,7 @@ pub enum TalosContentItem {
         text: String,
     },
     Json {
-        value: TalosJsonValue,
+        value: JsonContentValue,
     },
     FileRead {
         path: String,
@@ -363,6 +427,7 @@ pub enum TalosContentItem {
     },
     BashOutput {
         #[serde(default)]
+        #[ts(type = "number | null")]
         session_id: Option<i64>,
         status: TalosToolTaskStatus,
         #[serde(default)]
@@ -371,6 +436,7 @@ pub enum TalosContentItem {
         stderr: String,
         truncated: bool,
         #[serde(default)]
+        #[ts(type = "number | null")]
         elapsed_ms: Option<u64>,
     },
     WebReference {
@@ -404,6 +470,7 @@ pub enum TalosContentItem {
     Progress {
         message: String,
         #[serde(default)]
+        #[ts(type = "number | null")]
         elapsed_ms: Option<u64>,
     },
 }
@@ -555,7 +622,7 @@ impl TalosContentItem {
 }
 
 /// Talos message output item.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TalosOutputItem {
     UserInput {
@@ -573,7 +640,7 @@ pub enum TalosOutputItem {
     ToolCall {
         call_id: String,
         name: String,
-        arguments: TalosJsonValue,
+        arguments: ToolArguments,
     },
     ToolResult {
         call_id: String,
@@ -585,35 +652,9 @@ pub enum TalosOutputItem {
 }
 
 /// Reasoning block exposed to clients.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct TalosReasoning {
     pub text: String,
-}
-
-/// Talos message request payload for session interactions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TalosMessageRequest {
-    pub input: Vec<TalosInputItem>,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    #[serde(default)]
-    pub context: Option<TalosContext>,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
-    pub current_directory: Option<PathBuf>,
-}
-
-/// Talos retry request payload for session interactions.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TalosMessageRetryRequest {
-    pub input: Vec<TalosInputItem>,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    pub client_message_id: String,
-    pub retry_of_message_id: String,
 }
 
 /// Token usage values.
@@ -623,8 +664,12 @@ pub struct TalosUsage {
     pub output_tokens: u32,
     pub total_tokens: u32,
     #[serde(default)]
+    #[ts(optional)]
+    #[ts(type = "number | null")]
     pub cache_creation_input_tokens: Option<u32>,
     #[serde(default)]
+    #[ts(optional)]
+    #[ts(type = "number | null")]
     pub cache_read_input_tokens: Option<u32>,
 }
 
@@ -652,6 +697,7 @@ pub struct TurnExecutionMetrics {
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub duration_ms: Option<u64>,
 }
 
@@ -662,20 +708,6 @@ fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
         (None, Some(right)) => Some(right),
         (None, None) => None,
     }
-}
-
-/// Talos response shape returned by session interaction APIs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TalosMessageResponse {
-    pub request_id: String,
-    pub message_id: String,
-    pub session_id: String,
-    pub model: String,
-    pub output: Vec<TalosOutputItem>,
-    #[serde(default)]
-    pub reasoning: Vec<TalosReasoning>,
-    pub stop_reason: StopReason,
-    pub usage: TalosUsage,
 }
 
 /// Timeline stream event lifecycle type.
@@ -740,6 +772,7 @@ pub enum TalosTimelineNoticeLevel {
 pub struct TalosToolProgressEntry {
     pub progress_kind: TalosToolProgressKind,
     pub text: String,
+    #[ts(type = "number")]
     pub timestamp_ms: u64,
 }
 
@@ -796,7 +829,7 @@ pub enum TalosTimelineDelta {
     ToolDynamicRequest {
         call_id: String,
         tool_name: String,
-        arguments: TalosJsonValue,
+        arguments: DynamicToolArguments,
     },
     Status {
         status: TalosTimelineItemStatus,
@@ -813,8 +846,10 @@ pub struct TalosTimelineItem {
     pub status: TalosTimelineItemStatus,
     #[serde(default)]
     pub title: Option<String>,
+    #[ts(type = "number")]
     pub started_at_ms: u64,
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub completed_at_ms: Option<u64>,
     pub content: TalosTimelineContent,
 }
@@ -823,6 +858,7 @@ pub struct TalosTimelineItem {
 pub struct TalosTurnStartedEvent {
     pub request_id: String,
     pub turn_id: String,
+    #[ts(type = "number")]
     pub started_at_ms: u64,
 }
 
@@ -847,6 +883,7 @@ pub struct TalosItemCompletedEvent {
     pub turn_id: String,
     pub item_id: String,
     pub status: TalosTimelineItemStatus,
+    #[ts(type = "number")]
     pub completed_at_ms: u64,
     #[serde(default)]
     pub final_content: Option<TalosTimelineContent>,
@@ -871,6 +908,7 @@ pub struct TalosTurnMetricsEvent {
 pub struct TalosTurnCompletedEvent {
     pub request_id: String,
     pub turn_id: String,
+    #[ts(type = "number")]
     pub completed_at_ms: u64,
     pub stop_reason: StopReason,
     pub usage: TalosUsage,
@@ -883,6 +921,7 @@ pub struct TalosTurnErrorEvent {
     pub request_id: String,
     pub turn_id: String,
     pub error: String,
+    #[ts(type = "number")]
     pub failed_at_ms: u64,
 }
 
@@ -903,15 +942,18 @@ pub enum TalosTimelineEventPayload {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct TalosTimelineEvent {
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub event_seq: Option<i64>,
     #[serde(default)]
     pub event_id: Option<String>,
     #[serde(default)]
+    #[ts(type = "number | null")]
     pub created_at_ms: Option<i64>,
     pub event_type: TalosTimelineEventType,
     pub turn_id: String,
     pub message_id: String,
     pub session_id: String,
+    #[ts(type = "number")]
     pub sequence: u64,
     pub payload: TalosTimelineEventPayload,
 }
@@ -920,7 +962,9 @@ pub struct TalosTimelineEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct TimelineEventEnvelope {
     pub event_id: String,
+    #[ts(type = "number")]
     pub event_seq: i64,
+    #[ts(type = "number")]
     pub created_at_ms: i64,
     pub session_id: String,
     pub turn_id: String,
@@ -947,6 +991,7 @@ impl TimelineEventEnvelope {
 pub struct SessionHistorySnapshot {
     pub session_id: String,
     pub messages: Vec<SessionHistoryMessage>,
+    #[ts(type = "number")]
     pub generated_at_ms: i64,
     #[serde(default)]
     pub last_stable_event_id: Option<String>,

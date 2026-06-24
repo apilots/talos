@@ -183,7 +183,8 @@ try:
 except Exception as e:
     print(f"CASE session_recovery FAIL parse_error={e}")
     sys.exit(1)
-events = data.get("replay", {}).get("events", [])
+snapshot = data.get("snapshot", data)
+events = snapshot.get("replay", {}).get("events", [])
 has_user_input = False
 has_final_answer = False
 assistant_items = {}

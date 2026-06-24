@@ -14,7 +14,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 import { createFsDirectory, readFsDirectory, suggestSkills } from "../api";
 import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/features/projects/components/ProjectDirectoryDialog";
@@ -25,8 +25,9 @@ import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domai
 import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
+import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
 import type {
-  ProjectRecord,
+  ProjectView,
   ReasoningLevel,
   RuntimeMode,
   SessionInputHistory,
@@ -35,8 +36,8 @@ import type {
 interface ChatComposerProps {
   draft: string;
   onDraftChange: (value: string) => void;
-  onSend: (skills: ProtocolSkillSuggestion[]) => Promise<void> | void;
-  initialSelectedSkills?: ProtocolSkillSuggestion[];
+  onSend: (skills: SkillSuggestion[]) => Promise<void> | void;
+  initialSelectedSkills?: SkillSuggestion[];
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
@@ -45,7 +46,7 @@ interface ChatComposerProps {
   models: Array<{ id: string; name: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
-  projects: ProjectRecord[];
+  projects: ProjectView[];
   activeProjectId: string;
   onProjectChange: (projectId: string) => void;
   onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
@@ -59,7 +60,7 @@ interface ChatComposerProps {
 }
 
 const EMPTY_INPUT_HISTORY_ITEMS: InputHistoryNavigationItem[] = [];
-const EMPTY_SELECTED_SKILLS: ProtocolSkillSuggestion[] = [];
+const EMPTY_SELECTED_SKILLS: SkillSuggestion[] = [];
 
 interface InputHistoryNavigationItem {
   key: string;
@@ -69,7 +70,7 @@ interface InputHistoryNavigationItem {
 type ProjectPickerMode = "list" | "add_menu" | "existing" | "create";
 type ProjectMenuMode = Exclude<ProjectPickerMode, "existing" | "create">;
 
-function projectStatusUnavailable(project: ProjectRecord) {
+function projectStatusUnavailable(project: ProjectView) {
   return Boolean(project.status && project.status.state !== "available");
 }
 
@@ -105,10 +106,12 @@ export function ChatComposer({
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectMode, setProjectMode] = useState<ProjectMenuMode>("list");
-  const [skillSuggestions, setSkillSuggestions] = useState<ProtocolSkillSuggestion[]>([]);
-  const [selectedSkills, setSelectedSkills] = useState<ProtocolSkillSuggestion[]>(initialSelectedSkills);
+  const [skillSuggestions, setSkillSuggestions] = useState<SkillSuggestion[]>([]);
+  const [selectedSkills, setSelectedSkills] = useState<SkillSuggestion[]>(initialSelectedSkills);
   const [skillSuggestionIndex, setSkillSuggestionIndex] = useState(0);
+  const [skillCursorIndex, setSkillCursorIndex] = useState(() => draft.length);
   const [directoryDialogMode, setDirectoryDialogMode] = useState<ProjectDirectoryDialogMode | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const projectTriggerRef = useRef<HTMLButtonElement>(null);
   const projectPickerRef = useRef<HTMLDivElement>(null);
   const historyIndexRef = useRef<number | null>(null);
@@ -169,7 +172,7 @@ export function ChatComposer({
   }, [activeInputHistoryKey]);
 
   useEffect(() => {
-    const trigger = activeSkillTrigger(draft);
+    const trigger = activeSkillTrigger(draft, Math.min(skillCursorIndex, draft.length));
     if (!trigger) {
       setSkillSuggestions([]);
       setSkillSuggestionIndex(0);
@@ -197,7 +200,7 @@ export function ChatComposer({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [draft]);
+  }, [draft, skillCursorIndex]);
 
   useEffect(() => {
     setSelectedSkills(initialSelectedSkills);
@@ -225,8 +228,11 @@ export function ChatComposer({
   const sendButtonDisabled = isBusy ? false : Boolean(disabled || draft.trim().length === 0);
   const sendButtonLabel = isBusy ? t("common:stopResponse") : t("chat:send");
 
-  const moveCursorToEnd = (textarea: HTMLTextAreaElement, value: string) => {
-    const applySelection = () => textarea.setSelectionRange(value.length, value.length);
+  const moveCursorToPosition = (textarea: HTMLTextAreaElement, cursorIndex: number) => {
+    const applySelection = () => {
+      textarea.setSelectionRange(cursorIndex, cursorIndex);
+      setSkillCursorIndex(cursorIndex);
+    };
     if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(applySelection);
       return;
@@ -236,7 +242,7 @@ export function ChatComposer({
 
   const setDraftFromHistory = (textarea: HTMLTextAreaElement, value: string) => {
     onDraftChange(value);
-    moveCursorToEnd(textarea, value);
+    moveCursorToPosition(textarea, value.length);
   };
 
   const canUseInputHistory = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -307,12 +313,14 @@ export function ChatComposer({
     return onSend(skills);
   };
 
-  const selectSkill = (skill: ProtocolSkillSuggestion, textarea?: HTMLTextAreaElement | null) => {
-    const trigger = activeSkillTrigger(draft);
+  const selectSkill = (skill: SkillSuggestion, textarea?: HTMLTextAreaElement | null) => {
+    const cursorIndex =
+      textarea && document.activeElement === textarea ? textarea.selectionStart : skillCursorIndex;
+    const trigger = activeSkillTrigger(draft, cursorIndex);
     if (!trigger) {
       return;
     }
-    const nextDraft = `${draft.slice(0, trigger.start)}$${skill.name} ${draft.slice(trigger.end)}`;
+    const next = replaceSkillTrigger(draft, trigger, skill.name);
     setSelectedSkills((skills) => {
       if (skills.some((item) => item.path === skill.path)) {
         return skills;
@@ -320,9 +328,9 @@ export function ChatComposer({
       return [...skills, skill];
     });
     setSkillSuggestions([]);
-    onDraftChange(nextDraft);
+    onDraftChange(next.value);
     if (textarea) {
-      moveCursorToEnd(textarea, nextDraft);
+      moveCursorToPosition(textarea, next.cursorIndex);
     }
   };
 
@@ -420,8 +428,10 @@ export function ChatComposer({
             disabled={disabled}
             onChange={(event) => {
               resetInputHistoryNavigation();
+              setSkillCursorIndex(event.currentTarget.selectionStart);
               onDraftChange(event.target.value);
             }}
+            onClick={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
             onKeyDown={(event) => {
               if (skillSuggestions.length > 0) {
                 if (event.key === "ArrowDown") {
@@ -455,12 +465,14 @@ export function ChatComposer({
               }
               handleInputHistoryKeyDown(event);
             }}
+            onKeyUp={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
             placeholder={t("chat:askTalos")}
+            ref={textareaRef}
             value={draft}
           />
           <SkillSuggestionsPopover
             onHover={setSkillSuggestionIndex}
-            onSelect={(skill) => selectSkill(skill)}
+            onSelect={(skill) => selectSkill(skill, textareaRef.current)}
             selectedIndex={skillSuggestionIndex}
             suggestions={skillSuggestions}
           />
@@ -681,19 +693,6 @@ export function ChatComposer({
     </div>
   );
 }
-
-function activeSkillTrigger(value: string): { start: number; end: number; query: string } | null {
-  const match = /(^|\s)\$([A-Za-z0-9_.-]*)$/.exec(value);
-  if (!match || match.index === undefined) {
-    return null;
-  }
-  return {
-    start: match.index + match[1].length,
-    end: value.length,
-    query: match[2] ?? "",
-  };
-}
-
 
 function buildInputHistoryNavigationItems(inputHistory: SessionInputHistory | undefined) {
   if (!inputHistory) {

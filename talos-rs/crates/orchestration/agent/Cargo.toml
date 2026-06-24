@@ -13,7 +13,6 @@ talos-memory = { workspace = true }
 talos-skills = { workspace = true }
 talos-tools = { workspace = true }
 talos-tools-policy = { workspace = true }
-talos-session-store = { path = "../session-store" }
 talos-agent-kernel = { path = "../agent-kernel" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

@@ -1,7 +1,4 @@
-use crate::{
-    ExecutionBranch, InvocationPluginManager, InvocationSession, KernelTranscriptService,
-    KernelWarning,
-};
+use crate::{ExecutionBranch, InvocationSession, KernelTranscriptService, KernelWarning};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -390,8 +387,6 @@ pub enum StopReason {
     ToolRoundLimit,
     WaitingDynamicInput,
     TransferUnresolved,
-    BeforeModelCallbackStopped,
-    AfterModelCallbackStopped,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -421,8 +416,6 @@ pub struct InvocationContext {
     #[serde(default)]
     pub limits: InvocationLimits,
     pub events: Vec<KernelEvent>,
-    #[serde(skip, default = "crate::default_plugin_manager")]
-    pub plugin_manager: std::sync::Arc<InvocationPluginManager>,
     #[serde(skip, default)]
     pub transcript_service: Option<std::sync::Arc<dyn KernelTranscriptService>>,
     #[serde(skip)]
@@ -633,7 +626,6 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
-            plugin_manager: crate::default_plugin_manager(),
             transcript_service: None,
             stream_tx: None,
         };

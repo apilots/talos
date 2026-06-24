@@ -6,6 +6,7 @@ members = [
     "crates/common/llm/anthropic",
     "crates/common/llm/bailian",
     "crates/common/llm/openai",
+    "crates/common/fs",
     "crates/common/prompt",
     "crates/common/types",
     # Infra
@@ -19,6 +20,7 @@ members = [
     # Cognition
     "crates/cognition/memory",
     # Action
+    "crates/action/mcp",
     "crates/action/plugin",
     "crates/action/skills",
     "crates/action/tools",
@@ -27,10 +29,10 @@ members = [
     # Orchestration
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent",
-    "crates/orchestration/session-store",
+    "crates/orchestration/store",
+    "crates/orchestration/service",
     "crates/orchestration/router",
     "crates/orchestration/coordinator",
-    "crates/orchestration/application-service",
     # Gateway
     "crates/gateway/core",
     "crates/gateway/http",
@@ -87,6 +89,7 @@ redis = "0.24"
 # Networking
 futures-util = "0.3"
 fs4 = "1"
+atomic-write-file = "0.3"
 wait-timeout = "0.2"
 
 # Utils
@@ -99,11 +102,14 @@ moka = { version = "0.12", features = ["sync"] }
 
 # HTTP Client for tests
 reqwest = { version = "0.11", features = ["json"] }
+rmcp = { version = "1.7.0", default-features = false }
 cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 
 # Internal crates
 talos-error = { path = "crates/infra/error" }
+talos-fs = { path = "crates/common/fs" }
 talos-types = { path = "crates/common/types" }
+talos-mcp = { path = "crates/action/mcp" }
 talos-plugin = { path = "crates/action/plugin" }
 talos-skills = { path = "crates/action/skills" }
 talos-tools = { path = "crates/action/tools" }
@@ -115,6 +121,8 @@ talos-gateway = { path = "crates/gateway/core" }
 talos-app-protocol = { path = "crates/gateway/app-protocol" }
 talos-app-server = { path = "crates/gateway/app-server" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
+talos-store = { path = "crates/orchestration/store" }
+talos-service = { path = "crates/orchestration/service" }
 talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }
@@ -126,4 +134,3 @@ talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-base = { path = "crates/app/talos-base" }
-talos-application-service = { path = "crates/orchestration/application-service" }

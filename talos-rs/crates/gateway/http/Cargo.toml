@@ -5,13 +5,12 @@ edition = "2021"
 
 [dependencies]
 talos-gateway = { path = "../core" }
-talos-application-service = { workspace = true }
+talos-service = { workspace = true }
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 talos-auth = { path = "../../infra/auth" }
 talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
-talos-session-store = { path = "../../orchestration/session-store" }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
 axum = { version = "0.7", features = ["macros"] }
@@ -29,5 +28,7 @@ async-trait = "0.1"
 
 [dev-dependencies]
 talos-app-server = { workspace = true }
+talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
+talos-store = { workspace = true }
 tempfile = "3"

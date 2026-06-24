@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
-import type { WorkspaceDocDetail, WorkspaceDocKind } from "@talos/sdk-browser";
+import type { WorkspaceDocInfo, WorkspaceDocKind } from "@talos/sdk-browser";
 
 import { useConnectionKey } from "@/features/chat";
 import { getTalosClient } from "@/shared/api/client";
 
 const DOC_KINDS: WorkspaceDocKind[] = ["soul", "identity", "user", "heartbeat", "memory"];
 
-function emptyDoc(kind: WorkspaceDocKind): WorkspaceDocDetail {
+function emptyDoc(kind: WorkspaceDocKind): WorkspaceDocInfo {
   return {
     kind,
     path: `${kind.toUpperCase()}.md`,
@@ -40,7 +40,10 @@ export function useWorkspaceDocsPage() {
 
   const docDetailQuery = useQuery({
     queryKey: ["talos", connectionKey, "workspace-doc", selectedDocKind],
-    queryFn: () => getTalosClient().workspaceDocs.get(selectedDocKind),
+    queryFn: async () => {
+      const response = await getTalosClient().workspaceDocs.get(selectedDocKind);
+      return response.doc;
+    },
     refetchOnWindowFocus: false,
   });
 
@@ -54,10 +57,11 @@ export function useWorkspaceDocsPage() {
       const baseVersion = detail.version_token
         ? { mode: "match" as const, version_token: detail.version_token }
         : { mode: "must_not_exist" as const };
-      return getTalosClient().workspaceDocs.put(selectedDocKind, {
+      const response = await getTalosClient().workspaceDocs.put(selectedDocKind, {
         content: docDraft,
         base_version: baseVersion,
       });
+      return response.doc;
     },
     onSuccess: async (detail) => {
       queryClient.setQueryData(["talos", connectionKey, "workspace-doc", detail.kind], detail);

@@ -4,9 +4,8 @@ export type {
   TalosTimelineItemStatus,
   TalosTimelinePhase,
   TalosPendingUserAction,
-  TalosMessageResponse,
   TalosOutputItem,
-  TalosSession,
+  SessionInfo,
   TalosToolProgressKind,
   TalosTurnExecutionMetrics,
 } from "@talos/sdk-browser";

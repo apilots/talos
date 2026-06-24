@@ -85,9 +85,9 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE get_missing_workspace_doc FAIL status=${status} body=${body}"
   exit 1
 fi
-doc_exists="$(json_get "${body}" "exists")"
+doc_exists="$(json_get "${body}" "doc.exists")"
 doc_exists="$(printf '%s' "${doc_exists}" | tr '[:upper:]' '[:lower:]')"
-doc_content="$(json_get "${body}" "content")"
+doc_content="$(json_get "${body}" "doc.content")"
 if [[ "${doc_exists}" != "false" || -n "${doc_content}" ]]; then
   echo "CASE get_missing_workspace_doc FAIL exists=${doc_exists} content=${doc_content}"
   exit 1
@@ -110,8 +110,8 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE create_workspace_doc FAIL status=${status} body=${body}"
   exit 1
 fi
-doc_version_token="$(json_get "${body}" "version_token")"
-doc_exists="$(json_get "${body}" "exists")"
+doc_version_token="$(json_get "${body}" "doc.version_token")"
+doc_exists="$(json_get "${body}" "doc.exists")"
 doc_exists="$(printf '%s' "${doc_exists}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${doc_exists}" != "true" || -z "${doc_version_token}" || ! -f "${SOUL_FILE}" ]]; then
   echo "CASE create_workspace_doc FAIL exists=${doc_exists} version=${doc_version_token} path=${SOUL_FILE}"
@@ -172,7 +172,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE create_memory_file FAIL status=${status} body=${body}"
   exit 1
 fi
-memory_version_token="$(json_get "${body}" "version_token")"
+memory_version_token="$(json_get "${body}" "file.version_token")"
 if [[ -z "${memory_version_token}" || ! -f "${MEMORY_FILE}" ]]; then
   echo "CASE create_memory_file FAIL version=${memory_version_token} path=${MEMORY_FILE}"
   exit 1
@@ -233,7 +233,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE search_memory_files FAIL status=${status} body=${body}"
   exit 1
 fi
-search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("results", [])))' <<< "${body}")"
 echo "CASE search_memory_files PASS hits=${search_hit_count}"
 
 stale_memory_payload="$(python3 - <<PY

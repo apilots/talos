@@ -24,7 +24,8 @@ export async function logoutUser(): Promise<void> {
 }
 
 export async function getCurrentUser(): Promise<UserDto> {
-  return getTalosClient().user.current();
+  const response = await getTalosClient().user.current();
+  return response.user;
 }
 
 export async function getCurrentUserWithToken(accessToken: string): Promise<UserDto> {
@@ -33,7 +34,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
     if (!bridge) {
       throw new Error("Desktop runtime bridge is not available.");
     }
-    return bridge.invoke<UserDto>(
+    const response = await bridge.invoke<AppProtocol.UserCurrentResponse>(
       "user.current",
       {},
       {
@@ -45,6 +46,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
         },
       },
     );
+    return response.user;
   }
 
   const { serverUrl } = getConnectionSettings();
@@ -57,7 +59,8 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
-  return response.json() as Promise<UserDto>;
+  const payload = await response.json() as AppProtocol.UserCurrentResponse;
+  return payload.user;
 }
 
 export async function getGatewayHealth(): Promise<HealthResponse> {
@@ -107,7 +110,12 @@ export interface CloudLoginStartResponse {
 
 export type CloudLoginStatusResponse =
   | { status: "pending"; interval_ms: number }
-  | { status: "authenticated"; user: UserDto }
+  | {
+      status: "authenticated";
+      user: UserDto;
+      access_token: string;
+      token_type: string;
+    }
   | { status: "denied" }
   | { status: "expired" };
 
@@ -179,67 +187,6 @@ export async function readDesktopCloudSession(): Promise<AppProtocol.AuthSession
     {},
   );
   return response.session ?? null;
-}
-
-export async function storeDesktopCloudSession(
-  accessToken: string,
-  cloudApiBaseUrl: string,
-  user: UserDto,
-): Promise<void> {
-  const session = buildCloudSessionSnapshot(accessToken, cloudApiBaseUrl, user);
-  if (!isDesktopRuntime()) {
-    const { serverUrl } = getConnectionSettings();
-    const response = await fetch(new URL("/v1/auth/session", serverUrl).toString(), {
-      method: "POST",
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ session }),
-    });
-    if (!response.ok) {
-      throw new Error(`${response.status} ${response.statusText}`);
-    }
-    return;
-  }
-  const bridge = getDesktopBridge();
-  if (!bridge) {
-    return;
-  }
-  await bridge.invoke(
-    "auth.session.store",
-    { session },
-    {
-      actorCredentials: {
-        credential: {
-          type: "existing_session_token",
-          token: accessToken,
-        },
-      },
-    },
-  );
-}
-
-function buildCloudSessionSnapshot(
-  accessToken: string,
-  cloudApiBaseUrl: string,
-  user: UserDto,
-): AppProtocol.AuthSessionSnapshot {
-  return {
-    schema_version: 1,
-    cloud_api_base_url: cloudApiBaseUrl,
-    access_token: accessToken,
-    token_type: "Bearer",
-    expires_at_ms: null,
-    last_used_at_ms: Date.now().toString(),
-    user: {
-      user_id: user.user_id,
-      username: user.username,
-      email: user.email ?? null,
-      role: user.role,
-    },
-  };
 }
 
 export async function clearDesktopCloudSession(): Promise<void> {

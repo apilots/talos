@@ -234,23 +234,23 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
     app.cursor_index = 1;
     app.show_skill_autocomplete = true;
     app.skill_suggestions = vec![
-        ProtocolSkillSuggestion {
+        SkillSuggestion {
             name: "browser".to_string(),
             description: "Control the in-app browser with Codex".to_string(),
             short_description: None,
             root: PathBuf::from("/tmp/skills/browser"),
             path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
-            scope: talos_sdk::ProtocolSkillScope::Plugin,
+            scope: talos_sdk::SkillScope::Plugin,
             source_plugin: Some("browser".to_string()),
             source_install: Some("install_browser".to_string()),
         },
-        ProtocolSkillSuggestion {
+        SkillSuggestion {
             name: "web-design-guidelines".to_string(),
             description: "Review UI code for Web Interface Guidelines compliance".to_string(),
             short_description: None,
             root: PathBuf::from("/tmp/skills/web-design-guidelines"),
             path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
-            scope: talos_sdk::ProtocolSkillScope::External,
+            scope: talos_sdk::SkillScope::External,
             source_plugin: None,
             source_install: None,
         },
@@ -276,40 +276,92 @@ async fn test_skill_autocomplete_keyboard_selects_structured_skill() {
 }
 
 #[tokio::test]
+async fn test_skill_autocomplete_inserts_body_selection_with_spacing() {
+    let mut app = create_app_server_app();
+    app.input_buffer = "please use $br now".to_string();
+    app.cursor_index = 14;
+    app.show_skill_autocomplete = true;
+    app.skill_suggestions = vec![SkillSuggestion {
+        name: "browser".to_string(),
+        description: "Control the in-app browser with Codex".to_string(),
+        short_description: None,
+        root: PathBuf::from("/tmp/skills/browser"),
+        path: PathBuf::from("/tmp/skills/browser/SKILL.md"),
+        scope: talos_sdk::SkillScope::Plugin,
+        source_plugin: Some("browser".to_string()),
+        source_install: Some("install_browser".to_string()),
+    }];
+
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.input_buffer, "please use $browser now");
+    assert_eq!(app.cursor_index, 20);
+    assert_eq!(app.selected_skills.len(), 1);
+    assert_eq!(app.selected_skills[0].name, "browser");
+}
+
+#[tokio::test]
+async fn test_skill_autocomplete_allows_query_chars_k_and_j() {
+    let mut app = create_app_server_app();
+    app.input_buffer = "$find-s".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+    app.show_skill_autocomplete = true;
+    app.skill_suggestions = vec![SkillSuggestion {
+        name: "find-skills".to_string(),
+        description: "Find installable skills".to_string(),
+        short_description: None,
+        root: PathBuf::from("/tmp/skills/find-skills"),
+        path: PathBuf::from("/tmp/skills/find-skills/SKILL.md"),
+        scope: talos_sdk::SkillScope::External,
+        source_plugin: None,
+        source_install: None,
+    }];
+
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+    let _ = app
+        .handle_input(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.input_buffer, "$find-skills");
+}
+
+#[tokio::test]
 async fn test_history_enter_switches_session() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
 
-    let mut config = talos_types::TalosConfig::default();
-    config.llm.model = "claude-3".to_string();
-    app.history_sessions = vec![TalosSession {
+    app.history_sessions = vec![SessionInfo {
+        id: "hist-sess-1".to_string(),
         title: "Fix tui paste".to_string(),
         user_id: "u".to_string(),
-        context: talos_types::SessionContext {
-            session_id: "hist-sess-1".to_string(),
-            workspace_id: None,
-            source_type: talos_types::talos::TalosSourceType::Http,
-            provider: talos_types::talos::TalosProvider::Sdk,
-            user_id: "u".to_string(),
-            message_id: "m".to_string(),
-            trace_id: "t".to_string(),
-            channel_id: None,
-            thread_id: None,
-            project_id: None,
-            current_directory: None,
-            project_root: None,
-            environment: None,
-        },
-        conf: talos_sdk::SessionConf::default(),
+        source_type: talos_types::talos::TalosSourceType::Http,
+        provider: talos_types::talos::TalosProvider::Sdk,
+        model: "claude-3".to_string(),
+        created_at: 0,
+        last_activity: 0,
+        message_count: 3,
+        usage: talos_types::talos::TalosUsage::default(),
         project_id: None,
         current_directory: None,
-        config,
-        state: talos_types::SessionState {
-            created_at: 0,
-            last_activity: 0,
-            message_count: 3,
-            usage: talos_types::talos::TalosUsage::default(),
-        },
     }];
     app.current_state = AppState::History;
     app.history_selected = 0;

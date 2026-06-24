@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{Agent, AgentHarness, AgentRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let response = agent
-        .run(OrchestratorRequest {
+        .run(AgentRequest {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
                 user_id: "demo-user".to_string(),

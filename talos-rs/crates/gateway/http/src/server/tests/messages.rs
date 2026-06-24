@@ -1,55 +1,22 @@
 use super::*;
 
 #[tokio::test]
-async fn test_submit_message_command_returns_async_ack() {
-    let event_store = Arc::new(RecordingEventStore::default());
-    let state = test_state_with_event_store(false, event_store.clone());
-
-    let request = TalosMessageRequest {
-        input: vec![TalosInputItem::Text {
-            text: "hello".to_string(),
-        }],
-        workspace_id: None,
-        context: None,
-        model: None,
-        project_id: None,
-        current_directory: None,
-    };
-
-    let result = submit_message_command(
-        state,
-        test_auth(),
-        HeaderMap::new(),
-        "mock-session".to_string(),
-        request,
-    )
-    .await
-    .expect("message should be processed");
-
-    assert_eq!(result.session_id, "mock-session");
-    assert_eq!(result.message_id.as_deref(), Some("msg_mock"));
-    assert_eq!(result.status, IdempotencyStatus::Accepted);
-    assert!(result.turn_id.starts_with("turn_"));
-
-    let recorded = event_store.events.lock().unwrap().clone();
-    assert!(!recorded.is_empty());
-    assert_eq!(recorded[0].event_type, TalosTimelineEventType::TurnStarted);
-    assert_eq!(recorded[0].message_id, "msg_mock");
-}
-
-#[tokio::test]
-async fn test_session_message_handler_reuses_idempotent_ack() {
+async fn test_start_turn_handler_reuses_idempotent_response() {
     let event_store = Arc::new(RecordingEventStore::default());
     let state = test_state_with_event_store(false, event_store.clone());
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/messages",
-            post(session_message_handler),
-        )
+        .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
     let body = serde_json::json!({
-        "input": [{ "type": "text", "text": "hello" }]
+        "session_id": "mock-session",
+        "input": [{ "type": "text", "text": "hello" }],
+        "workspace_id": null,
+        "context": null,
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": "idem-1"
     })
     .to_string();
 
@@ -58,7 +25,7 @@ async fn test_session_message_handler_reuses_idempotent_ack() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/messages")
+                .uri("/v1/turns/start")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "idem-1")
                 .body(Body::from(body.clone()))
@@ -80,7 +47,7 @@ async fn test_session_message_handler_reuses_idempotent_ack() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/messages")
+                .uri("/v1/turns/start")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "idem-1")
                 .body(Body::from(body))
@@ -102,17 +69,63 @@ async fn test_session_message_handler_reuses_idempotent_ack() {
 }
 
 #[tokio::test]
-async fn test_session_message_handler_rejects_empty_input_before_session_creation() {
-    let state = test_state_with_event_store(false, Arc::new(RecordingEventStore::default()));
+async fn test_start_turn_handler_accepts_shared_request() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let state = test_state_with_event_store(false, event_store.clone());
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/messages",
-            post(session_message_handler),
-        )
+        .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
     let body = serde_json::json!({
+        "session_id": "mock-session",
+        "input": [{ "type": "text", "text": "hello" }],
+        "workspace_id": null,
+        "context": null,
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": "idem-start-1"
+    })
+    .to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/turns/start")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "idem-start-1")
+                .body(Body::from(body))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be json");
+    assert_eq!(payload["session_id"], "mock-session");
+    assert_eq!(payload["message_id"], "msg_mock");
+
+    let recorded = event_store.events.lock().unwrap().clone();
+    assert!(!recorded.is_empty());
+    assert_eq!(recorded[0].event_type, TalosTimelineEventType::TurnStarted);
+    assert_eq!(recorded[0].message_id, "msg_mock");
+}
+
+#[tokio::test]
+async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
+    let state = test_state_with_event_store(false, Arc::new(RecordingEventStore::default()));
+    let app = Router::new()
+        .route("/v1/turns/start", post(start_turn_handler))
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+    let body = serde_json::json!({
+        "session_id": "empty-input-session",
         "input": [],
+        "workspace_id": null,
         "context": {
             "source_type": "http",
             "provider": "http",
@@ -121,7 +134,11 @@ async fn test_session_message_handler_rejects_empty_input_before_session_creatio
             "thread_id": null,
             "message_id": "msg-empty-input",
             "trace_id": "trace-empty-input"
-        }
+        },
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": null
     })
     .to_string();
 
@@ -129,7 +146,7 @@ async fn test_session_message_handler_rejects_empty_input_before_session_creatio
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/empty-input-session/messages")
+                .uri("/v1/turns/start")
                 .header("content-type", "application/json")
                 .body(Body::from(body))
                 .expect("request should build"),
@@ -148,23 +165,34 @@ async fn test_session_message_handler_rejects_empty_input_before_session_creatio
 }
 
 #[tokio::test]
-async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
+async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
     let event_store = Arc::new(RecordingEventStore::default());
     let state = test_state_with_event_store(false, event_store);
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/messages",
-            post(session_message_handler),
-        )
+        .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
 
     let first_body = serde_json::json!({
-        "input": [{ "type": "text", "text": "hello" }]
+        "session_id": "mock-session",
+        "input": [{ "type": "text", "text": "hello" }],
+        "workspace_id": null,
+        "context": null,
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": "idem-conflict"
     })
     .to_string();
     let second_body = serde_json::json!({
-        "input": [{ "type": "text", "text": "different" }]
+        "session_id": "mock-session",
+        "input": [{ "type": "text", "text": "different" }],
+        "workspace_id": null,
+        "context": null,
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": "idem-conflict"
     })
     .to_string();
 
@@ -173,7 +201,7 @@ async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/messages")
+                .uri("/v1/turns/start")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "idem-conflict")
                 .body(Body::from(first_body))
@@ -187,7 +215,7 @@ async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/messages")
+                .uri("/v1/turns/start")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "idem-conflict")
                 .body(Body::from(second_body))
@@ -200,7 +228,7 @@ async fn test_session_message_handler_rejects_idempotency_hash_conflict() {
 }
 
 #[tokio::test]
-async fn test_submit_message_command_timeout_stores_failed_idempotency() {
+async fn test_start_turn_handler_timeout_stores_failed_idempotency() {
     let event_store = Arc::new(RecordingEventStore::default());
     let mut config = test_config();
     config.agent.kernel.timeline_events.first_event_timeout_ms = 1;
@@ -210,45 +238,61 @@ async fn test_submit_message_command_timeout_stores_failed_idempotency() {
         event_store,
         config,
     );
-    let request = TalosMessageRequest {
-        input: vec![TalosInputItem::Text {
-            text: "hello".to_string(),
-        }],
-        workspace_id: None,
-        context: None,
-        model: None,
-        project_id: None,
-        current_directory: None,
-    };
-    let mut headers = HeaderMap::new();
-    headers.insert("idempotency-key", "timeout-key".parse().unwrap());
+    let app = Router::new()
+        .route("/v1/turns/start", post(start_turn_handler))
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+    let body = serde_json::json!({
+        "session_id": "mock-session",
+        "input": [{ "type": "text", "text": "hello" }],
+        "workspace_id": null,
+        "context": null,
+        "model": null,
+        "project_id": null,
+        "current_directory": null,
+        "client_request_id": "timeout-key"
+    })
+    .to_string();
 
-    let err = submit_message_command(
-        state.clone(),
-        test_auth(),
-        headers.clone(),
-        "mock-session".to_string(),
-        request.clone(),
-    )
-    .await
-    .expect_err("first request should timeout");
-    assert_eq!(err.into_response().status(), StatusCode::GATEWAY_TIMEOUT);
+    let first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/turns/start")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "timeout-key")
+                .body(Body::from(body.clone()))
+                .expect("first request should build"),
+        )
+        .await
+        .expect("first request should return timeout");
+    assert_eq!(first.status(), StatusCode::GATEWAY_TIMEOUT);
 
-    let retry = submit_message_command(
-        state,
-        test_auth(),
-        headers,
-        "mock-session".to_string(),
-        request,
-    )
-    .await
-    .expect("retry should return failed terminal ack");
-    assert_eq!(retry.status, IdempotencyStatus::FailedNoFirstEvent);
-    assert!(retry.message_id.is_some());
+    let retry = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/turns/start")
+                .header("content-type", "application/json")
+                .header("idempotency-key", "timeout-key")
+                .body(Body::from(body))
+                .expect("retry request should build"),
+        )
+        .await
+        .expect("retry should return failed terminal response");
+    assert_eq!(retry.status(), StatusCode::ACCEPTED);
+    let retry_body = axum::body::to_bytes(retry.into_body(), usize::MAX)
+        .await
+        .expect("retry body should be readable");
+    let retry_payload: Value =
+        serde_json::from_slice(&retry_body).expect("retry payload should be json");
+    assert_eq!(retry_payload["status"], "failed_no_first_event");
+    assert!(retry_payload["message_id"].is_string());
 }
 
 #[tokio::test]
-async fn test_retry_message_attempt_rejects_running_active_turn() {
+async fn test_retry_turn_rejects_running_active_turn() {
     let event_store = Arc::new(RecordingEventStore::default());
     event_store.active_turns.lock().unwrap().insert(
         "mock-session".to_string(),
@@ -264,10 +308,7 @@ async fn test_retry_message_attempt_rejects_running_active_turn() {
     );
     let state = test_state_with_event_store(false, event_store);
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/message-attempts",
-            post(retry_message_attempt_handler),
-        )
+        .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
 
@@ -275,10 +316,11 @@ async fn test_retry_message_attempt_rejects_running_active_turn() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/message-attempts")
+                .uri("/v1/turns/retry")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::json!({
+                        "session_id": "mock-session",
                         "client_message_id": "client-1",
                         "retry_of_message_id": "msg-running",
                         "input": [{"type": "text", "text": "retry"}],
@@ -300,7 +342,7 @@ async fn test_retry_message_attempt_rejects_running_active_turn() {
 }
 
 #[tokio::test]
-async fn test_retry_message_attempt_rejects_completed_active_turn() {
+async fn test_retry_turn_rejects_completed_active_turn() {
     let event_store = Arc::new(RecordingEventStore::default());
     event_store.active_turns.lock().unwrap().insert(
         "mock-session".to_string(),
@@ -316,10 +358,7 @@ async fn test_retry_message_attempt_rejects_completed_active_turn() {
     );
     let state = test_state_with_event_store(false, event_store);
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/message-attempts",
-            post(retry_message_attempt_handler),
-        )
+        .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
 
@@ -327,10 +366,11 @@ async fn test_retry_message_attempt_rejects_completed_active_turn() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/message-attempts")
+                .uri("/v1/turns/retry")
                 .header("content-type", "application/json")
                 .body(Body::from(
                     serde_json::json!({
+                        "session_id": "mock-session",
                         "client_message_id": "client-1",
                         "retry_of_message_id": "msg-completed",
                         "input": [{"type": "text", "text": "retry"}],
@@ -352,7 +392,7 @@ async fn test_retry_message_attempt_rejects_completed_active_turn() {
 }
 
 #[tokio::test]
-async fn test_retry_message_attempt_allows_failed_active_turn() {
+async fn test_retry_turn_allows_failed_active_turn() {
     let event_store = Arc::new(RecordingEventStore::default());
     event_store.active_turns.lock().unwrap().insert(
         "mock-session".to_string(),
@@ -368,15 +408,13 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
     );
     let state = test_state_with_event_store(false, event_store);
     let app = Router::new()
-        .route(
-            "/v1/sessions/:session_id/message-attempts",
-            post(retry_message_attempt_handler),
-        )
+        .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
         .with_state(state);
 
     let request_body = serde_json::json!({
-        "client_message_id": "client-1",
+        "session_id": "mock-session",
+                        "client_message_id": "client-1",
         "retry_of_message_id": "msg-failed",
         "input": [{"type": "text", "text": "retry"}],
         "workspace_id": null
@@ -388,7 +426,7 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/message-attempts")
+                .uri("/v1/turns/retry")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "retry-attempt-1")
                 .body(Body::from(request_body.clone()))
@@ -400,7 +438,7 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
     assert_eq!(resp.status(), StatusCode::ACCEPTED);
     let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
         .await
-        .expect("ack body should be readable");
+        .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
     assert_eq!(payload["message_id"], "msg_mock");
     assert_eq!(payload["status"], "accepted");
@@ -409,7 +447,7 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/v1/sessions/mock-session/message-attempts")
+                .uri("/v1/turns/retry")
                 .header("content-type", "application/json")
                 .header("idempotency-key", "ignored-client-key")
                 .body(Body::from(request_body))
@@ -421,9 +459,68 @@ async fn test_retry_message_attempt_allows_failed_active_turn() {
     assert_eq!(retry_resp.status(), StatusCode::ACCEPTED);
     let retry_body = axum::body::to_bytes(retry_resp.into_body(), usize::MAX)
         .await
-        .expect("retry ack body should be readable");
+        .expect("retry response body should be readable");
     let retry_payload: Value =
         serde_json::from_slice(&retry_body).expect("retry payload should be valid json");
     assert_eq!(retry_payload["turn_id"], payload["turn_id"]);
     assert_eq!(retry_payload["message_id"], payload["message_id"]);
+}
+
+#[tokio::test]
+async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-dynamic".to_string(),
+            message_id: Some("msg-dynamic".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(TimelineEventId::from_seq(9)),
+            pending_user_action: Some(PendingUserAction::DynamicToolResult(
+                PendingDynamicToolResult {
+                    item_id: Some("tool-dynamic".to_string()),
+                    call_id: "call-1".to_string(),
+                    tool_name: "Tool".to_string(),
+                },
+            )),
+            updated_at: 125,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store);
+    let app = Router::new()
+        .route(
+            "/v1/tools/dynamic-results/submit",
+            post(submit_dynamic_tool_result_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/tools/dynamic-results/submit")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "session_id": "mock-session",
+                        "call_id": "call-1",
+                        "tool_name": "Tool",
+                        "output": "done",
+                        "success": true
+                    })
+                    .to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["success"], true);
 }

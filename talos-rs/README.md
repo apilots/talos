@@ -17,7 +17,10 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 - **LLM Providers**: Support for Anthropic, OpenAI, Bailian, and Ollama-compatible endpoints
 
 ### Action Layer
-- **Tool System**: Built-in tools (read, write, edit, exec, web_search)
+- **Tool System**: Built-in tools plus deferred discovery through `tool_search`
+- **Plugin Lifecycle**: Unified install, enable, disable, update, and uninstall flow for Skills and MCP server plugins
+- **Skills**: Prompt-injected instruction bundles managed through the plugin system
+- **MCP Runtime**: `rmcp`-based MCP client runtime exposed to the model as on-demand external tools
 - **Tool Policy**: Allow/deny list policies for tool access control
 - **Sandbox Execution**: Isolated execution environments for security
 
@@ -28,9 +31,10 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 - **Coordination**: Multi-agent coordination and management
 
 ### Gateway Layer
-- **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/sessions/{id}/messages`)
+- **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/turns/start`)
 - **App Server**: Local JSON-RPC over stdio JSONL for CLI, TUI, and Desktop
-- **Application Service**: Shared service layer used by HTTP and app-server adapters
+- **Application Service**: Shared service layer used by HTTP, app-server, SDK, and WebUI adapters
+- **Plugin API**: Shared API surface for plugin source, lifecycle, search, read, and MCP/Skill detail flows
 - **Authentication Middleware**: Bearer token validation
 
 ### Perception Layer
@@ -127,13 +131,15 @@ Start a chat with a client supplied session id:
 ```bash
 SESSION_ID="sess_$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
 
-curl -X POST "http://localhost:8080/v1/sessions/${SESSION_ID}/messages" \
+curl -X POST "http://localhost:8080/v1/turns/start" \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{
+    "session_id": "'"${SESSION_ID}"'",
     "input": [
       { "type": "text", "text": "Hello, how are you?" }
     ],
+    "workspace_id": null,
     "context": {
       "source_type": "http",
       "provider": "http",
@@ -143,19 +149,29 @@ curl -X POST "http://localhost:8080/v1/sessions/${SESSION_ID}/messages" \
       "message_id": "msg-start-1",
       "trace_id": "trace-start-1"
     },
-    "model": "gpt-4o-mini"
+    "model": "gpt-4o-mini",
+    "project_id": null,
+    "current_directory": null,
+    "client_request_id": null
   }'
 ```
 
 Send another message inside an existing session:
 ```bash
-curl -X POST http://localhost:8080/v1/sessions/<session_id>/messages \
+curl -X POST http://localhost:8080/v1/turns/start \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer your-token-here" \
   -d '{
+    "session_id": "<session_id>",
     "input": [
       { "type": "text", "text": "Hello, how are you?" }
-    ]
+    ],
+    "workspace_id": null,
+    "context": null,
+    "model": null,
+    "project_id": null,
+    "current_directory": null,
+    "client_request_id": null
   }'
 ```
 
@@ -205,14 +221,15 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 ## 📁 Project Structure
 
 - `crates/common/` - Shared utilities and LLM abstractions
+- `crates/common/fs/` - Shared filesystem helper for atomic writes, directory operations, and file locks
 - `crates/infra/` - Infrastructure components (config, logging, storage, auth)
 - `crates/perception/` - Channel integrations
 - `crates/cognition/` - Memory-related services
-- `crates/action/` - Tools, policy, sandbox execution
-- `crates/orchestration/` - Agent coordination, kernel, sessions, routing, and application services
+- `crates/action/` - Tools, MCP runtime, Skills, Plugin lifecycle, policy, and sandbox execution
+- `crates/orchestration/` - Agent coordination, kernel, store, routing, and service facade
 - `crates/gateway/` - HTTP gateway, app-server JSON-RPC adapter, and protocol types
 - `crates/app/talos-base/` - Shared runtime base used by `app-server` and `talos-server`
-- `crates/orchestration/application-service/` - Shared application services used by protocol adapters
+- `crates/orchestration/service/` - Shared `TalosService` facade and business services used by protocol adapters
 - `apps/sdk/` - Rust SDK package (`talos-sdk`)
 - `bin/app-server/` - App Server binary
 - `bin/talos-server/` - HTTP/WebUI Server binary

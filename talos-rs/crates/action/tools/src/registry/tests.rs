@@ -17,6 +17,7 @@ struct ValidationGateTool {
 struct PermissionGateTool {
     executes: Arc<AtomicUsize>,
 }
+struct FakeMcpHandler;
 
 fn assert_tagged_validation_error(
     error: TalosError,
@@ -140,6 +141,27 @@ impl Tool for PermissionGateTool {
     }
 }
 
+#[async_trait]
+impl ToolHandler for FakeMcpHandler {
+    fn kind(&self) -> ToolSource {
+        ToolSource::Mcp
+    }
+
+    fn matches(&self, _invocation: &ToolInvocation) -> bool {
+        true
+    }
+
+    async fn handle(
+        &self,
+        _invocation: ToolInvocation,
+        _context: ToolDispatchContext,
+    ) -> TalosResult<ToolDispatchOutcome> {
+        Ok(ToolDispatchOutcome::executed(
+            ToolOutputPayload::success_text("mcp ok"),
+        ))
+    }
+}
+
 #[tokio::test]
 async fn test_registry_register_and_execute() {
     let registry = ToolRegistry::new();
@@ -206,6 +228,41 @@ async fn test_registry_policy_allowed_tool() {
 
     assert!(!result.is_error());
     assert_eq!(result.content(), "hello");
+}
+
+#[tokio::test]
+async fn test_mcp_tools_bypass_static_allow_list() {
+    let policy = ToolPolicy::allow_list(vec!["Read"]);
+    let registry = ToolRegistry::new_with_policy(policy);
+    let tool_name = "mcp__playwright__browser_navigate";
+    let spec = RegisteredToolSpec::new(
+        ToolDefinition::new(tool_name, "MCP browser navigation", Some(json!({}))),
+        ToolSource::Mcp,
+        crate::spec::ToolPayloadKind::Mcp,
+        crate::spec::ToolParallelism::ParallelSafe,
+        false,
+        default_governance_for_source(ToolSource::Mcp),
+    );
+    registry.register_handler(tool_name, spec, Arc::new(FakeMcpHandler));
+
+    assert!(registry
+        .list_allowed_tool_names()
+        .contains(&tool_name.to_string()));
+    assert!(registry.is_tool_available(tool_name));
+
+    let invocation = registry
+        .build_function_invocation(
+            "call-mcp",
+            tool_name,
+            json!({ "url": "https://news.ycombinator.com/news" }),
+        )
+        .expect("MCP invocation should route through the registry");
+    let result = registry
+        .execute_invocation_with_context(invocation, ToolContext::default())
+        .await
+        .expect("MCP source tools should bypass static allow-list");
+
+    assert_eq!(result.content(), "mcp ok");
 }
 
 #[tokio::test]
@@ -516,29 +573,27 @@ fn test_request_time_selection_activates_memory_tools_only_for_memory_requests()
     assert!(memory_names.contains(&"MemoryGet".to_string()));
 }
 
-#[test]
-fn test_request_time_selection_includes_tool_search_for_deferred_tools() {
+#[tokio::test]
+async fn test_external_dynamic_tools_require_tool_search_activation() {
     use crate::spec::{
         default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
-        ToolSource, ToolVisibility,
+        ToolSource,
     };
     use talos_llm_provider::ToolDefinition;
 
     let registry = ToolRegistry::new();
     registry.register(Arc::new(ToolSearchTool));
-    registry.register_external_dynamic_tool(
-        RegisteredToolSpec::new(
-            ToolDefinition::new("deferred_greet", "Greet the user", None),
-            ToolSource::Dynamic,
-            ToolPayloadKind::Function,
-            ToolParallelism::ParallelSafe,
-            false,
-            default_governance_for_source(ToolSource::Dynamic),
-        )
-        .with_visibility(ToolVisibility::Deferred),
-    );
+    registry.register_external_dynamic_tool(RegisteredToolSpec::new(
+        ToolDefinition::new("deferred_greet", "Greet the user", None),
+        ToolSource::Dynamic,
+        ToolPayloadKind::Function,
+        ToolParallelism::ParallelSafe,
+        false,
+        default_governance_for_source(ToolSource::Dynamic),
+    ));
 
-    let request = ToolSelectionRequest::default().with_session_id("session-selection");
+    let session_id = "session-selection";
+    let request = ToolSelectionRequest::default().with_session_id(session_id);
     let names = registry
         .get_tool_definitions_for_request(&request)
         .into_iter()
@@ -546,10 +601,87 @@ fn test_request_time_selection_includes_tool_search_for_deferred_tools() {
         .collect::<Vec<_>>();
 
     assert!(names.contains(&"ToolSearch".to_string()));
+    assert!(!names.contains(&"deferred_greet".to_string()));
+
+    let context = registry.build_context(session_id, "user-1", None);
+    let invocation = registry
+        .build_function_invocation(
+            "call-search",
+            "ToolSearch",
+            json!({ "query": "deferred_greet" }),
+        )
+        .expect("tool search invocation should build");
+    registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("tool search should activate the dynamic tool");
+
+    let activated_names = registry
+        .get_tool_definitions_for_request(&request)
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    assert!(activated_names.contains(&"deferred_greet".to_string()));
+}
+
+#[tokio::test]
+async fn test_mcp_tools_require_tool_search_activation() {
+    use crate::spec::{
+        default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
+        ToolSource,
+    };
+    use talos_llm_provider::ToolDefinition;
+
+    let registry = ToolRegistry::new();
+    registry.register(Arc::new(ToolSearchTool));
+    let tool_name = "mcp__playwright__browser_navigate";
+    let spec = RegisteredToolSpec::new(
+        ToolDefinition::new(
+            tool_name,
+            "Navigate a browser through Playwright MCP",
+            Some(json!({ "type": "object" })),
+        ),
+        ToolSource::Mcp,
+        ToolPayloadKind::Mcp,
+        ToolParallelism::ParallelSafe,
+        false,
+        default_governance_for_source(ToolSource::Mcp),
+    );
+    registry.register_handler(tool_name, spec, Arc::new(FakeMcpHandler));
+
+    let session_id = "session-mcp-selection";
+    let request = ToolSelectionRequest::default().with_session_id(session_id);
+    let names = registry
+        .get_tool_definitions_for_request(&request)
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"ToolSearch".to_string()));
+    assert!(!names.contains(&tool_name.to_string()));
+
+    let context = registry.build_context(session_id, "user-1", None);
+    let invocation = registry
+        .build_function_invocation(
+            "call-search",
+            "ToolSearch",
+            json!({ "query": "playwright" }),
+        )
+        .expect("tool search invocation should build");
+    registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("tool search should activate the MCP tool");
+
+    let activated_names = registry
+        .get_tool_definitions_for_request(&request)
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<Vec<_>>();
+    assert!(activated_names.contains(&tool_name.to_string()));
 }
 
 #[test]
-fn test_register_dynamic_tool_appears_in_catalog() {
+fn test_register_dynamic_tool_stays_in_catalog_but_not_default_model_context() {
     use crate::handlers::dynamic::DynamicToolFn;
     use crate::output::ToolOutputPayload;
     use crate::spec::{
@@ -572,9 +704,10 @@ fn test_register_dynamic_tool_appears_in_catalog() {
     });
     registry.register_dynamic_tool(spec, func);
 
-    // The tool is registered in the catalog even if the default policy doesn't list it.
+    // External tools are searchable catalog entries, but they are not loaded into model context
+    // until ToolSearch activates them for a session.
     let defs = registry.get_tool_definitions();
-    assert!(defs.iter().any(|d| d.name == "dynamic_greet"));
+    assert!(!defs.iter().any(|d| d.name == "dynamic_greet"));
     assert!(registry
         .list_tool_names()
         .contains(&"dynamic_greet".to_string()));

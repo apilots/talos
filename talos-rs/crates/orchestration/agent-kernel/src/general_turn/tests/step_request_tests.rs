@@ -17,6 +17,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current user input")],
         tool_definitions: Vec::new(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {
             mode: PromptMode::Full,
             included_sections: Vec::new(),
@@ -34,7 +35,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
     };
     let state = GeneralTurnLoopState::new(&prepared);
 
-    let sequential_request = build_general_turn_step_request(&prepared, &state, false);
+    let sequential_request = build_general_turn_step_request(&prepared, &state, Vec::new(), false);
     assert!(!sequential_request.parallel_tool_calls);
     assert_eq!(sequential_request.messages.len(), 1);
     assert_eq!(sequential_request.messages[0].content, "current user input");
@@ -46,7 +47,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
     );
     assert_eq!(sequential_chat_request.speed, Some(ModelSpeed::Fast));
 
-    let parallel_request = build_general_turn_step_request(&prepared, &state, true);
+    let parallel_request = build_general_turn_step_request(&prepared, &state, Vec::new(), true);
     assert!(parallel_request.parallel_tool_calls);
     assert_eq!(parallel_request.speed, ModelSpeed::Fast);
 }

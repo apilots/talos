@@ -482,8 +482,8 @@ pub struct PluginInstall {
     pub installed_path: PathBuf,
     pub exposed_skill_root: Option<PathBuf>,
     pub source: PluginInstallSource,
-    pub installed_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    pub installed_at_ms: i64,
+    pub updated_at_ms: i64,
     pub file_manifest: FileManifest,
 }
 
@@ -496,7 +496,9 @@ pub enum PluginInstallSource {
         path_in_source: String,
     },
     LocalPath {
+        source_id: MarketplaceSourceId,
         path: PathBuf,
+        path_in_source: String,
     },
     Manual,
 }
@@ -604,6 +606,7 @@ plugin.source.refresh
 plugin.source.remove
 
 plugin.list
+plugin.read
 plugin.search
 
 plugin.install
@@ -622,6 +625,7 @@ API 清单：
 | `plugin.source.refresh` | `PluginSourceRefreshRequest` | `PluginSourceRefreshResponse` | 刷新 source scan cache |
 | `plugin.source.remove` | `PluginSourceRemoveRequest` | `PluginSourceRemoveResponse` | 移除 source，不删除 installs |
 | `plugin.list` | `PluginListRequest` | `PluginListResponse` | 列出本地已管理 plugins |
+| `plugin.read` | `PluginReadRequest` | `PluginReadResponse` | 读取 plugin 文档内容，例如 skill plugin 的 `SKILL.md` |
 | `plugin.search` | `PluginSearchRequest` | `PluginSearchResponse` | 从 sources 搜索 plugins |
 | `plugin.install` | `PluginInstallRequest` | `PluginInstallResponse` | 安装 plugin |
 | `plugin.update` | `PluginUpdateRequest` | `PluginUpdateResponse` | 更新 installed plugin |
@@ -632,9 +636,7 @@ API 清单：
 Request / Response：
 
 ```rust
-pub struct PluginSourceListRequest {
-    pub include_disabled: bool,
-}
+pub struct PluginSourceListRequest {}
 
 pub struct PluginSourceListResponse {
     pub sources: Vec<MarketplaceSource>,
@@ -648,6 +650,7 @@ pub struct PluginSourceAddRequest {
 pub struct PluginSourceAddResponse {
     pub source: MarketplaceSource,
     pub plugins: Vec<Plugin>,
+    pub warnings: Vec<PluginWarning>,
 }
 
 pub enum MarketplaceSourceInput {
@@ -669,6 +672,7 @@ pub struct PluginSourceRefreshRequest {
 pub struct PluginSourceRefreshResponse {
     pub source: MarketplaceSource,
     pub plugins: Vec<Plugin>,
+    pub warnings: Vec<PluginWarning>,
 }
 
 pub struct PluginSourceRemoveRequest {
@@ -697,6 +701,16 @@ pub enum PluginListStatusFilter {
 
 pub struct PluginListResponse {
     pub plugins: Vec<Plugin>,
+    pub warnings: Vec<PluginWarning>,
+}
+
+pub struct PluginReadRequest {
+    pub plugin_id: PluginId,
+}
+
+pub struct PluginReadResponse {
+    pub plugin: Plugin,
+    pub contents: String,
 }
 
 pub struct PluginSearchRequest {
@@ -724,6 +738,7 @@ pub enum PluginSearchRefreshPolicy {
 
 pub struct PluginSearchResponse {
     pub plugins: Vec<Plugin>,
+    pub warnings: Vec<PluginWarning>,
 }
 
 pub struct PluginInstallRequest {
@@ -736,15 +751,6 @@ pub enum PluginInstallTarget {
     Plugin {
         plugin_id: PluginId,
         expected_source_commit: Option<String>,
-    },
-    LocalPath {
-        path: PathBuf,
-    },
-    Git {
-        url: String,
-        reference: String,
-        sparse_paths: Vec<String>,
-        path_in_source: String,
     },
 }
 
@@ -897,7 +903,10 @@ Plugin Manager 使用 JSON 文件持久化，但必须具备文件级事务语�
 - JSON 写入必须使用 temp file + fsync + atomic rename。
 - 安装目录写入必须先写到 `${TALOS_HOME}/plugins/installs/.tmp-<install-id>`，验证成功后 atomic rename 到最终目录。
 - install / update 事务必须在 lock 内完成。
-- crash recovery 需要清理 `.tmp-*` 目录。
+- crash recovery 必须读取 `plugin-installs.json` 后再处理安装目录残留：
+  - `.tmp-*` 始终视为未激活 materialization，可删除。
+  - `.backup-<install-id>` 需要和当前 install record 对齐；最终安装目录缺失或 manifest 不匹配 record 时恢复 backup，最终安装目录已匹配 record 时删除 backup。
+  - `.trash-<install-id>` 表示 uninstall staging；install record 仍存在时恢复 trash，install record 已删除时删除 trash。
 - install record 存在但目录不存在时标记 `Conflict(TargetPathMissing)`。
 - 目录存在但 install record 不存在时不自动暴露为 plugin-owned，可显示为 orphan 诊断。
 - `SkillStateFile` 中指向不存在 plugin install 的 key 在读时忽略，并在下一次成功写入时清理。

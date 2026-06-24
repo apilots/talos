@@ -1,12 +1,13 @@
-import type {
-  TalosActiveTurn,
-  TalosTimelineContent,
-  TalosTimelineDelta,
-  TalosTimelineItem,
-  TalosTurnExecutionMetrics,
-  TimelineEventEnvelope,
-  TalosHistoryTimelineItem,
-  TalosSessionHistorySnapshot,
+import {
+  dynamicToolArgumentsValue,
+  type TalosActiveTurn,
+  type TalosTimelineContent,
+  type TalosTimelineDelta,
+  type TalosTimelineItem,
+  type TalosTurnExecutionMetrics,
+  type TimelineEventEnvelope,
+  type TalosHistoryTimelineItem,
+  type TalosSessionHistorySnapshot,
 } from "@talos/sdk-core";
 
 import { useAppStore } from "@/shared/store/app-store";
@@ -366,7 +367,7 @@ function applyItemDelta(
       ensureTimelineToolForRequest(sessionId, messageId, itemId, item, delta.call_id, delta.tool_name);
       state.updateTimelineTool(sessionId, messageId, itemId, {
         toolName: delta.tool_name,
-        arguments: unwrapJsonValue(delta.arguments),
+        arguments: dynamicToolArgumentsValue(delta.arguments),
         status: "running",
         progress: [
           ...toolProgress(item),
@@ -467,7 +468,7 @@ function appendToolProgressSnapshot(
   item.item.content.progress.push({
     progress_kind: progressKind,
     text,
-    timestamp_ms: BigInt(Date.now()),
+    timestamp_ms: Date.now(),
   });
 }
 
@@ -557,10 +558,6 @@ function toolProgress(item: TimelineItemSnapshot | undefined) {
     kind: entry.progress_kind,
     message: entry.text,
   }));
-}
-
-function unwrapJsonValue(value: { value: unknown }) {
-  return value.value;
 }
 
 export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActiveTurn) {

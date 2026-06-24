@@ -233,13 +233,13 @@ async fn test_submit_input_sends_structured_skill_selection() {
     app.session_id = Some("sess-test".to_string());
     app.input_buffer = "please use $web-design-guidelines".to_string();
     app.cursor_index = app.input_buffer.chars().count();
-    app.selected_skills = vec![ProtocolSkillSuggestion {
+    app.selected_skills = vec![SkillSuggestion {
         name: "web-design-guidelines".to_string(),
         description: "Review web UI against design guidelines.".to_string(),
         short_description: None,
         root: PathBuf::from("/tmp/skills/web-design-guidelines"),
         path: PathBuf::from("/tmp/skills/web-design-guidelines/SKILL.md"),
-        scope: talos_sdk::ProtocolSkillScope::External,
+        scope: talos_sdk::SkillScope::External,
         source_plugin: None,
         source_install: None,
     }];

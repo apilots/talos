@@ -1,9 +1,10 @@
 import { i18n } from "@/shared/i18n/setup";
-import type { TalosContentItem, TalosSession } from "./protocol";
+import { jsonContentValue } from "@talos/sdk-browser";
+import type { SessionInfo, TalosContentItem } from "./protocol";
 import type {
-  FileRecord,
-  MemoryRecord,
-  ProjectRecord,
+  FileItemView,
+  MemoryItemView,
+  ProjectView,
   SessionUiStatus,
   StreamSessionState,
 } from "./ui";
@@ -40,7 +41,7 @@ export function normalizeProjectDirectory(directory?: string | null) {
   return directory?.trim() || null;
 }
 
-export function createDefaultProjects(): ProjectRecord[] {
+export function createDefaultProjects(): ProjectView[] {
   const now = Date.now();
   return [
     {
@@ -59,7 +60,7 @@ export function describeProjectDirectory(directory?: string | null) {
   return normalizeProjectDirectory(directory) ?? i18n.t("common:noProject");
 }
 
-export function getProjectRecordKey(project: ProjectRecord) {
+export function getProjectViewKey(project: ProjectView) {
   return project.id;
 }
 
@@ -68,7 +69,7 @@ export function hasRealSessionTitle(title?: string | null) {
   return normalized.length > 0 && normalized !== DEFAULT_SESSION_TITLE;
 }
 
-export function resolveProjectRecord(projects: ProjectRecord[], projectId?: string | null) {
+export function resolveProjectView(projects: ProjectView[], projectId?: string | null) {
   return projects.find((project) => project.id === projectId) ?? projects[0];
 }
 
@@ -76,7 +77,7 @@ export function isUnboundProject(projectId?: string | null) {
   return !projectId || projectId === UNBOUND_PROJECT_ID;
 }
 
-export function createDefaultMemory(): MemoryRecord[] {
+export function createDefaultMemory(): MemoryItemView[] {
   const now = Date.now();
   return [
     {
@@ -110,7 +111,7 @@ export function createDefaultMemory(): MemoryRecord[] {
   ];
 }
 
-export function createDefaultFiles(): FileRecord[] {
+export function createDefaultFiles(): FileItemView[] {
   const now = Date.now();
   return [
     {
@@ -151,7 +152,7 @@ export function outputContentToText(content: TalosContentItem[]) {
         case "text":
           return item.text;
         case "json":
-          return JSON.stringify(unwrapTalosJsonValue(item.value), null, 2);
+          return JSON.stringify(jsonContentValue(item.value), null, 2);
         case "file_read":
           return item.content;
         case "diff":
@@ -179,26 +180,10 @@ export function outputContentToText(content: TalosContentItem[]) {
     .join("\n");
 }
 
-function unwrapTalosJsonValue(value: unknown) {
-  if (
-    value &&
-    typeof value === "object" &&
-    "value" in value &&
-    Object.keys(value).length === 1
-  ) {
-    return (value as { value: unknown }).value;
-  }
-  return value;
-}
-
 function assertNeverToolContentItem(item: never): string {
   return JSON.stringify(item);
 }
 
-export function getSessionModel(session: TalosSession) {
-  return (
-    session.config?.llm?.model ??
-    session.config?.agent?.model ??
-    "unknown"
-  );
+export function getSessionModel(session: SessionInfo) {
+  return session.model || "unknown";
 }

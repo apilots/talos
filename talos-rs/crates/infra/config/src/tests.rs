@@ -6,8 +6,6 @@ fn test_default_config() {
     assert_eq!(config.agent.name, "talos");
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
-    assert!(config.gateway.auth_cache.enabled);
-    assert_eq!(config.gateway.auth_cache.ttl_seconds, 300);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
     assert!(config.storage.connection_string.ends_with("/data/talos.db"));
     assert_eq!(
@@ -385,18 +383,6 @@ models:
 }
 
 #[test]
-fn test_validate_runtime_rejects_zero_auth_cache_ttl() {
-    let mut config = Config::default();
-    config.gateway.auth_cache.ttl_seconds = 0;
-    config.llm.provider = "ollama".to_string();
-    config.llm.model = "qwen-max".to_string();
-    config.agent.model = "qwen-max".to_string();
-    config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
-
-    assert!(config.validate_runtime().is_err());
-}
-
-#[test]
 fn test_load_from_path_fails_when_required_keys_missing() {
     let temp_file =
         std::env::temp_dir().join(format!("talos-config-missing-{}.yaml", std::process::id()));
@@ -409,6 +395,23 @@ fn test_load_from_path_fails_when_required_keys_missing() {
     ));
     let _ = std::fs::remove_file(&temp_file);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_source_path_uses_talos_config_env() {
+    let temp_file = std::env::temp_dir().join(format!(
+        "talos-config-source-env-{}.yaml",
+        std::process::id()
+    ));
+    let previous = std::env::var_os("TALOS_CONFIG");
+    std::env::set_var("TALOS_CONFIG", &temp_file);
+
+    assert_eq!(Config::source_path(), temp_file);
+
+    match previous {
+        Some(value) => std::env::set_var("TALOS_CONFIG", value),
+        None => std::env::remove_var("TALOS_CONFIG"),
+    }
 }
 
 #[test]

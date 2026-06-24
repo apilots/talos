@@ -20,9 +20,9 @@ use talos_llm_provider::{
     ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningEffort, ToolChoice, ToolDefinition,
 };
 use talos_memory::{
-    strip_json_fences, Memory, MemoryGetResult, MemorySearchResponse, MemoryStore, RecordHeader,
-    RetrievedMemoryItem, SessionMemorySummary, SessionPromptContextConfig, SummaryRecord,
-    TalosMessageRole, TalosTurn, ToolCallRecord,
+    memory_search_response_into_retrieved_items, strip_json_fences, Memory, MemoryGetResult,
+    MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary,
+    SessionPromptContextConfig, SummaryRecord, TalosMessageRole, TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
     render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
@@ -34,7 +34,7 @@ use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
 use talos_types::talos::{
-    StopReason as TalosApiStopReason, TalosContentItem, TalosJsonValue, TalosOutputItem,
+    DynamicToolArguments, StopReason as TalosApiStopReason, TalosContentItem, TalosOutputItem,
     TalosUsage, TurnExecutionMetrics,
 };
 use tokio::sync::mpsc;
@@ -64,6 +64,7 @@ mod loop_run;
 mod memory_summary;
 mod persist;
 mod prepare;
+mod prepare_continuity;
 #[cfg(test)]
 mod prepare_tests;
 mod run;
@@ -93,13 +94,12 @@ pub use memory_summary::{
 };
 pub use persist::persist_general_turn_artifacts;
 pub use prepare::prepare_general_turn;
-pub(crate) use prepare::{
-    build_session_continuity, next_session_compaction_state, stage_session_state_update,
-};
+pub(crate) use prepare::{next_session_compaction_state, stage_session_state_update};
 pub(crate) use prepare::{
     LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY,
     SESSION_CONTINUITY_STATE_KEY,
 };
+pub(crate) use prepare_continuity::build_session_continuity;
 pub use run::{run_general_turn, run_general_turn_with_resume};
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;

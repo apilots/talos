@@ -100,6 +100,7 @@ async fn test_execute_general_turn_loop_forces_summary_when_budget_is_exhausted(
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Inspect the project structure.")],
         tool_definitions: registry.get_tool_definitions(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {
             mode: talos_prompt::PromptMode::Full,
             included_sections: Vec::new(),

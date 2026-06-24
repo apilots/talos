@@ -3,15 +3,19 @@ use std::{collections::HashMap, process::Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AppServerClient, AppServerClientConfig, EventSubscribeParams,
-    ExpectedFileVersion, ProjectPatch, ProtocolSkillSelector, SkillsResolveRequest,
-    SkillsSuggestRequest, TalosContext, TalosError, TalosInputItem, TalosMessageRequest,
+    canonical_method, AppServerClient, AppServerClientConfig, ExpectedFileVersion,
+    StartTurnRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
     TimelineEventEnvelope, WorkspaceDocKind,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
+
+mod mcp_e2e;
+mod skills_e2e;
+use mcp_e2e::{mcp_e2e, prepare_mcp_fixture};
+use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,6 +27,9 @@ async fn main() -> Result<()> {
     }
     if scenario == Scenario::SkillsE2e {
         prepare_skills_fixture()?;
+    }
+    if scenario == Scenario::McpE2e {
+        prepare_mcp_fixture()?;
     }
 
     let mut client = AppServerClient::connect(AppServerClientConfig {
@@ -43,6 +50,7 @@ async fn main() -> Result<()> {
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
         Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
+        Scenario::McpE2e => mcp_e2e(&mut client).await?,
     }
     client.shutdown().await?;
     Ok(())
@@ -59,6 +67,7 @@ enum Scenario {
     ResourceMatrix,
     CloudSessionCache,
     SkillsE2e,
+    McpE2e,
 }
 
 impl Scenario {
@@ -73,6 +82,7 @@ impl Scenario {
             "resource-matrix" => Ok(Self::ResourceMatrix),
             "cloud-session-cache" => Ok(Self::CloudSessionCache),
             "skills-e2e" => Ok(Self::SkillsE2e),
+            "mcp-e2e" => Ok(Self::McpE2e),
             other => Err(anyhow!("unsupported scenario: {other}")),
         }
     }
@@ -87,8 +97,8 @@ async fn smoke(client: &mut AppServerClient) -> Result<()> {
     client.list_models().await?;
     eprintln!("session id");
     new_session_id(client).await?;
-    eprintln!("config.read");
-    client.config_read().await?;
+    eprintln!("config.get");
+    client.config_get().await?;
     eprintln!("memory.file.list");
     client.list_memory_files().await?;
     eprintln!("workspace.doc.list");
@@ -183,11 +193,11 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
     start_turn(client, &session_id).await?;
     eprintln!("active-turn-conflict second turn.start");
     let err = client
-        .start_turn(
+        .start_turn(start_turn_request(
             &session_id,
-            message_request("answer with ok"),
+            "answer with ok",
             Some("app-server-test-conflict".to_string()),
-        )
+        ))
         .await
         .expect_err("second turn should conflict");
     if matches!(err, talos_sdk::TalosError::Conflict(_)) {
@@ -200,14 +210,14 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     eprintln!("resource-matrix config/model list");
     client.list_models().await?;
-    client.config_read().await?;
+    client.config_get().await?;
 
     eprintln!("resource-matrix memory roundtrip");
     let memory_path = "2099-12-31.md";
     let memory_content =
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
     let memory_expected_version = match client.read_memory_file(memory_path).await {
-        Ok(existing) => Some(existing.version_token),
+        Ok(existing) => Some(existing.file.version_token),
         Err(TalosError::ResourceNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
@@ -217,14 +227,15 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
             memory_content.to_string(),
             memory_expected_version,
         )
-        .await?;
+        .await?
+        .file;
     if !written_memory
         .content
         .contains("app-server resource parity")
     {
         return Err(anyhow!("memory write did not persist expected content"));
     }
-    let read_memory = client.read_memory_file(memory_path).await?;
+    let read_memory = client.read_memory_file(memory_path).await?.file;
     if read_memory.version_token != written_memory.version_token {
         return Err(anyhow!("memory read returned a different version token"));
     }
@@ -245,7 +256,10 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     client.list_memory_files().await?;
 
     eprintln!("resource-matrix workspace doc read/conflict");
-    let read_workspace = client.read_workspace_doc(WorkspaceDocKind::Memory).await?;
+    let read_workspace = client
+        .read_workspace_doc(WorkspaceDocKind::Memory)
+        .await?
+        .doc;
     if !read_workspace.exists {
         return Err(anyhow!("expected bootstrap workspace memory doc to exist"));
     }
@@ -270,13 +284,17 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         .with_context(|| format!("create project test directory {}", project_dir.display()))?;
     let project_name = format!("App Server {}", uuid::Uuid::new_v4().simple());
     let project = client
-        .create_project(project_name.clone(), project_dir.clone())
-        .await?;
-    let read_project = client.get_project(&project.project_id).await?;
+        .create_project(talos_sdk::ProjectCreateRequest {
+            name: project_name.clone(),
+            directory: project_dir.clone(),
+        })
+        .await?
+        .project;
+    let read_project = client.get_project_by_id(&project.project_id).await?.project;
     if read_project.directory != project_dir {
         return Err(anyhow!("project.read returned a different directory"));
     }
-    let listed_projects = client.list_projects().await?;
+    let listed_projects = client.list_all_projects().await?.projects;
     if !listed_projects
         .iter()
         .any(|candidate| candidate.project_id == project.project_id)
@@ -285,19 +303,18 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     }
     let patched_name = format!("{project_name} patched");
     let patched_project = client
-        .patch_project(
-            &project.project_id,
-            ProjectPatch {
-                name: Some(patched_name.clone()),
-            },
-        )
-        .await?;
+        .patch_project(talos_sdk::ProjectPatchRequest {
+            project_id: project.project_id.clone(),
+            name: Some(patched_name.clone()),
+        })
+        .await?
+        .project;
     if patched_project.name != patched_name {
         return Err(anyhow!("project.patch did not update name"));
     }
-    client.delete_project(&project.project_id).await?;
+    client.delete_project_by_id(&project.project_id).await?;
     expect_not_found(
-        client.get_project(&project.project_id).await,
+        client.get_project_by_id(&project.project_id).await,
         "deleted project should map to not found",
     )?;
 
@@ -306,23 +323,24 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     start_turn(client, &session_id).await?;
     let listed_sessions = client.list_sessions(Default::default()).await?;
     if !listed_sessions
+        .sessions
         .iter()
-        .any(|candidate| candidate.context.session_id == session_id)
+        .any(|candidate| candidate.id == session_id)
     {
         return Err(anyhow!("session.list did not include created session"));
     }
-    let _snapshot = client.recover_session(&session_id).await?;
+    let _snapshot = client.recover_session_after(&session_id, None).await?;
     expect_not_found(
-        client.get_session("missing-session").await,
+        client.get_session_by_id("missing-session").await,
         "missing session should map to not found",
     )?;
     expect_not_found(
-        client.recover_session("missing-session").await,
+        client.recover_session_after("missing-session", None).await,
         "missing session recovery should map to not found",
     )?;
     expect_not_found(
         client
-            .submit_dynamic_tool_result(
+            .submit_dynamic_tool_result_from_fields(
                 "missing-session",
                 "call-1",
                 "DynamicTool",
@@ -336,152 +354,6 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     Ok(())
 }
 
-async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
-    eprintln!("skills-e2e suggest");
-    let suggestions = client
-        .suggest_skills(SkillsSuggestRequest {
-            query: "localizer".to_string(),
-            limit: Some(8),
-        })
-        .await?;
-    let skill = suggestions
-        .data
-        .into_iter()
-        .find(|skill| skill.name == "e2e-localizer")
-        .ok_or_else(|| anyhow!("e2e-localizer skill was not suggested"))?;
-
-    eprintln!("skills-e2e resolve");
-    let resolved = client
-        .resolve_skills(SkillsResolveRequest {
-            text: "Use $e2e-localizer.".to_string(),
-            selected: vec![ProtocolSkillSelector {
-                name: Some(skill.name.clone()),
-                path: Some(skill.path.clone()),
-            }],
-        })
-        .await?;
-    if !resolved.warnings.is_empty() {
-        return Err(anyhow!(
-            "skills.resolve returned warnings: {:?}",
-            resolved.warnings
-        ));
-    }
-    if !resolved
-        .data
-        .iter()
-        .any(|candidate| candidate.path == skill.path)
-    {
-        return Err(anyhow!(
-            "skills.resolve did not include selected localizer skill"
-        ));
-    }
-
-    eprintln!("skills-e2e turn.start");
-    let session_id = new_session_id(client).await?;
-    client
-        .start_turn(
-            &session_id,
-            TalosMessageRequest {
-                input: vec![
-                    TalosInputItem::Text {
-                        text: concat!(
-                            "Use $e2e-localizer. Localize this source text: ",
-                            "\"The Skill chip opens the Plugin marketplace before the permission prompt appears.\" ",
-                            "Follow the selected skill output contract."
-                        )
-                        .to_string(),
-                    },
-                    TalosInputItem::SkillSelection {
-                        name: skill.name.clone(),
-                        path: skill.path.to_string_lossy().to_string(),
-                    },
-                ],
-                workspace_id: None,
-                context: Some(test_talos_context()),
-                model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-                    .ok()
-                    .filter(|value| !value.trim().is_empty()),
-                project_id: None,
-                current_directory: None,
-            },
-            Some(format!(
-                "app-server-skills-{}",
-                uuid::Uuid::new_v4().simple()
-            )),
-        )
-        .await?;
-    eprintln!("skills-e2e event.subscribe");
-    let subscription = subscribe_events(client, &session_id).await?;
-    eprintln!("skills-e2e collect events");
-    let events = collect_until_terminal(client, &subscription.subscription_id).await?;
-    ensure_turn_event_flow(&events)?;
-    let output = assistant_text_from_events(&events);
-    eprintln!("skills-e2e assistant output:\n{output}");
-    assert_skill_localizer_output(&output)?;
-    Ok(())
-}
-
-fn assert_skill_localizer_output(output: &str) -> Result<()> {
-    for expected in [
-        "Skill: e2e-localizer",
-        "Translation:",
-        "技能标签",
-        "插件市场",
-        "权限提示",
-        "Terms:",
-        "Skill chip=技能标签",
-        "Plugin marketplace=插件市场",
-        "permission prompt=权限提示",
-        "Check: localized-by-skill",
-    ] {
-        if !output.contains(expected) {
-            return Err(anyhow!(
-                "skill localizer output missing `{expected}`; output={output:?}"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn prepare_skills_fixture() -> Result<()> {
-    let talos_home = std::env::var("TALOS_HOME").context("TALOS_HOME is required")?;
-    let skill_root = std::path::Path::new(&talos_home)
-        .join("agents-skills")
-        .join("e2e-localizer");
-    std::fs::create_dir_all(&skill_root)
-        .with_context(|| format!("create skill fixture {}", skill_root.display()))?;
-    std::fs::write(
-        skill_root.join("SKILL.md"),
-        r#"---
-name: e2e-localizer
-description: Localize Talos UI release notes into Simplified Chinese with the E2E glossary.
-metadata:
-  author: talos-e2e
-  version: 1
-  argument-hint: source text
----
-
-When this skill is selected, localize the user's source text into Simplified Chinese.
-Use this glossary exactly:
-
-- Skill chip = 技能标签
-- Plugin marketplace = 插件市场
-- permission prompt = 权限提示
-
-Always answer with exactly these four lines:
-
-Skill: e2e-localizer
-Translation: <localized Chinese sentence using the glossary terms>
-Terms: Skill chip=技能标签; Plugin marketplace=插件市场; permission prompt=权限提示
-Check: localized-by-skill
-
-Do not answer with a generic acknowledgement.
-"#,
-    )
-    .with_context(|| format!("write skill fixture {}", skill_root.display()))?;
-    Ok(())
-}
-
 async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
     let _ = client;
     Ok(uuid::Uuid::new_v4().to_string())
@@ -490,7 +362,7 @@ async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
 async fn subscribe_events(
     client: &mut AppServerClient,
     session_id: &str,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     subscribe_events_with_limit(client, session_id, 32).await
 }
 
@@ -498,7 +370,7 @@ async fn subscribe_events_with_limit(
     client: &mut AppServerClient,
     session_id: &str,
     replay_limit: usize,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     subscribe_events_with_cursor(client, session_id, None, replay_limit).await
 }
 
@@ -507,9 +379,9 @@ async fn subscribe_events_with_cursor(
     session_id: &str,
     since_event_id: Option<String>,
     replay_limit: usize,
-) -> Result<talos_sdk::EventSubscribeResponse> {
+) -> Result<talos_sdk::SubscribeTimelineResponse> {
     Ok(client
-        .subscribe_events(EventSubscribeParams {
+        .subscribe_events(SubscribeTimelineRequest {
             session_id: session_id.to_string(),
             since_event_id,
             replay_limit: Some(replay_limit),
@@ -521,17 +393,22 @@ async fn subscribe_events_with_cursor(
 
 async fn start_turn(client: &mut AppServerClient, session_id: &str) -> Result<()> {
     client
-        .start_turn(
+        .start_turn(start_turn_request(
             session_id,
-            message_request("answer with ok"),
+            "answer with ok",
             Some(format!("app-server-test-{}", uuid::Uuid::new_v4().simple())),
-        )
+        ))
         .await?;
     Ok(())
 }
 
-fn message_request(text: &str) -> TalosMessageRequest {
-    TalosMessageRequest {
+fn start_turn_request(
+    session_id: &str,
+    text: &str,
+    client_request_id: Option<String>,
+) -> StartTurnRequest {
+    StartTurnRequest {
+        session_id: session_id.to_string(),
         input: vec![TalosInputItem::Text {
             text: text.to_string(),
         }],
@@ -542,6 +419,7 @@ fn message_request(text: &str) -> TalosMessageRequest {
             .filter(|value| !value.trim().is_empty()),
         project_id: None,
         current_directory: None,
+        client_request_id,
     }
 }
 
@@ -550,7 +428,7 @@ async fn collect_until_terminal(
     _subscription_id: &str,
 ) -> Result<Vec<TimelineEventEnvelope>> {
     let mut events = Vec::new();
-    for _ in 0..128 {
+    for _ in 0..1024 {
         let event = next_event_with_timeout(client).await?;
         let terminal = is_terminal_event(&event);
         events.push(event);

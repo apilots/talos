@@ -12,18 +12,20 @@ class RecordingTransport implements AppServerTransport {
 
   request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
-    if (
-      method === "model.list" ||
-      method === "memory.search" ||
-      method === "project.list"
-    ) {
+    if (method === "model.list") {
+      return Promise.resolve({ models: [] } as T);
+    }
+    if (method === "memory.search") {
       return Promise.resolve({ data: [] } as T);
     }
-    if (method === "session.recover") {
-      return Promise.resolve(emptyRecoverySnapshot as T);
+    if (method === "project.list") {
+      return Promise.resolve({ projects: [] } as T);
     }
-    if (method === "config.read" || method === "config.value.write") {
-      return Promise.resolve(testLlmConfig as T);
+    if (method === "session.recover") {
+      return Promise.resolve({ snapshot: emptyRecoverySnapshot } as T);
+    }
+    if (method === "config.get" || method === "config.update") {
+      return Promise.resolve(testLlmConfigRead as T);
     }
     return Promise.resolve({} as T);
   }
@@ -42,16 +44,20 @@ describe("AppServerClient", () => {
     await client.listModels();
     await client.patchSession({
       session_id: "session-1",
+      conf: { agent: { model: "MiniMax-M2.5" } },
       project_id: null,
       current_directory: null,
-      model: "MiniMax-M2.5",
     });
-    await client.listProjects();
+    await client.listProjects({});
     await client.getLlmConfig();
     await client.updateLlmConfig(testLlmConfig);
-    await client.createProject("Talos", "/tmp/talos");
-    await client.patchProject("project-1", { name: "Talos Core" });
-    await client.recoverSession("session-1", "ev_00000000000000000001", 100);
+    await client.createProject({ name: "Talos", directory: "/tmp/talos" });
+    await client.patchProject({ project_id: "project-1", name: "Talos Core" });
+    await client.recoverSession({
+      session_id: "session-1",
+      after_event_id: "ev_00000000000000000001",
+      replay_limit: 100,
+    });
     await client.submitDynamicToolResult({
       session_id: "session-1",
       call_id: "call-1",
@@ -71,18 +77,18 @@ describe("AppServerClient", () => {
         method: "session.patch",
         params: {
           session_id: "session-1",
+          conf: { agent: { model: "MiniMax-M2.5" } },
           project_id: null,
           current_directory: null,
-          model: "MiniMax-M2.5",
         },
       },
       { method: "project.list", params: {} },
-      { method: "config.read", params: {} },
+      { method: "config.get", params: {} },
       {
-        method: "config.value.write",
+        method: "config.update",
         params: {
           path: "llm",
-          value: JSON.stringify(testLlmConfig),
+          value: { type: "llm", value: testLlmConfig },
         },
       },
       { method: "project.create", params: { name: "Talos", directory: "/tmp/talos" } },
@@ -118,8 +124,6 @@ describe("AppServerClient", () => {
 });
 
 const emptyProvider = {
-  api_key: null,
-  base_url: null,
   enabled: false,
   models: [],
 };
@@ -150,4 +154,15 @@ const testLlmConfig = {
   bailian: emptyProvider,
   ollama: emptyProvider,
   openrouter: emptyProvider,
+};
+
+const testLlmConfigRead = {
+  config: testLlmConfig,
+  model_readiness: {
+    ready: true,
+    provider: "anthropic",
+    model: "MiniMax-M2.5",
+    issues: [],
+  },
+  provider_keys: {},
 };

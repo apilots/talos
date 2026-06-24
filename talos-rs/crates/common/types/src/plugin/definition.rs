@@ -1,4 +1,5 @@
 use super::{MarketplaceSourceId, PluginId, PluginInstallId};
+use crate::McpServerDefinition;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -20,11 +21,46 @@ pub struct SkillManifestMetadata {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginMetadata {
+    pub name: String,
+    pub display_name: Option<String>,
+    pub description: String,
+    pub short_description: Option<String>,
+    pub icon: Option<String>,
+    pub license: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginDocumentRef {
+    pub role: PluginDocumentRole,
+    pub path: String,
+    pub title: String,
+    pub media_type: PluginDocumentMediaType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginDocumentRole {
+    Primary,
+    Readme,
+    Manifest,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginDocumentMediaType {
+    Markdown,
+    Json,
+    Text,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct Plugin {
     pub id: PluginId,
     pub kind: PluginKind,
-    pub name: String,
-    pub description: String,
+    pub metadata: PluginMetadata,
+    #[serde(default)]
+    pub documents: Vec<PluginDocumentRef>,
     pub source_id: Option<MarketplaceSourceId>,
     pub path_in_source: Option<String>,
     pub source_commit: Option<String>,
@@ -81,14 +117,12 @@ pub enum PluginDefinition {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SkillPlugin {
-    pub manifest: SkillManifest,
     pub skill_md_path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct McpServerPlugin {
-    pub name: String,
-    pub transport: McpServerTransportKind,
+    pub server: McpServerDefinition,
     pub manifest_path: String,
 }
 
@@ -96,8 +130,7 @@ pub struct McpServerPlugin {
 #[serde(rename_all = "snake_case")]
 pub enum McpServerTransportKind {
     Stdio,
-    Http,
-    Sse,
+    StreamableHttp,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
@@ -149,6 +182,7 @@ pub enum PluginWarningCode {
     PathEscapedSource,
     InvalidSourceLayout,
     OrphanInstallDirectory,
+    SourceRefreshFailed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

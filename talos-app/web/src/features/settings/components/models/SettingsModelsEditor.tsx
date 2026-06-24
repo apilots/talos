@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   LlmConfig,
-  LlmConfigRead,
   LlmProtocol,
   ProviderConfig,
+  ConfigUpdateResponse,
 } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, Pencil, Plus, Trash2 } from "lucide-react";
@@ -160,7 +160,7 @@ function ProviderTab({ providerKey, config, keyConfigured, onChange }: ProviderT
           <span className="w-24 shrink-0 text-sm text-muted">{t("modelsPanel.baseUrl")}</span>
           <Input
             value={config.base_url ?? ""}
-            onChange={(e) => onChange({ base_url: e.target.value || null })}
+            onChange={(e) => onChange({ base_url: e.target.value || undefined })}
             placeholder="https://api.openai.com/v1"
             className="flex-1 text-sm font-mono"
           />
@@ -253,7 +253,7 @@ export function SettingsModelsEditor() {
 
   const mutation = useMutation({
     mutationFn: updateLlmConfig,
-    onSuccess: (updated: LlmConfigRead) => {
+    onSuccess: (updated: ConfigUpdateResponse) => {
       queryClient.setQueryData(["llm-config", connectionKey], updated);
       setDraft(updated.config);
     },

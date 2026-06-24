@@ -9,7 +9,7 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::MemoryStore;
-use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload};
+use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -90,10 +90,14 @@ async fn execute_single_tool_call(
     call: ToolExecutionInput,
 ) -> ToolExecutionOutput {
     let tool_context = build_tool_context(execution_context, registry.as_ref(), &call.call_id);
-    let invocation = call.to_invocation();
-    let result = registry
-        .execute_invocation_with_context(invocation, tool_context)
-        .await;
+    let result = match call.build_invocation(registry.as_ref()) {
+        Ok(invocation) => {
+            registry
+                .execute_invocation_with_context(invocation, tool_context)
+                .await
+        }
+        Err(error) => Err(error),
+    };
     match result {
         Ok(payload) => ToolExecutionOutput {
             call_id: call.call_id,
@@ -177,10 +181,14 @@ impl ToolExecutor for ParallelToolExecutor {
             let tool_context =
                 build_tool_context(execution_context, registry.as_ref(), &call.call_id);
             join_set.spawn(async move {
-                let invocation = call.to_invocation();
-                let result = registry
-                    .execute_invocation_with_context(invocation, tool_context)
-                    .await;
+                let result = match call.build_invocation(registry.as_ref()) {
+                    Ok(invocation) => {
+                        registry
+                            .execute_invocation_with_context(invocation, tool_context)
+                            .await
+                    }
+                    Err(error) => Err(error),
+                };
                 let output = match result {
                     Ok(payload) => ToolExecutionOutput {
                         call_id: call.call_id,
@@ -238,8 +246,11 @@ impl ToolExecutorFactory {
 }
 
 impl ToolExecutionInput {
-    pub fn to_invocation(&self) -> ToolInvocation {
-        ToolInvocation::function(
+    pub fn build_invocation(
+        &self,
+        registry: &dyn ToolExecutorPort,
+    ) -> TalosResult<talos_tools::ToolInvocation> {
+        registry.build_function_invocation(
             self.call_id.clone(),
             self.tool_name.clone(),
             self.arguments.clone(),

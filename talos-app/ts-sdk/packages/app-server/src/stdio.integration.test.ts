@@ -31,7 +31,7 @@ describeIntegration("StdioAppServerClient integration", () => {
       throw new Error(`${errorMessage(error)}\n${stderr.join("")}`);
     }
     const models = await client.listModels();
-    expect(models.length).toBeGreaterThan(0);
+    expect(models.models.length).toBeGreaterThan(0);
 
     const sessionId = crypto.randomUUID();
 
@@ -47,23 +47,17 @@ describeIntegration("StdioAppServerClient integration", () => {
       });
       await client.startTurn({
         session_id: sessionId,
-        request: {
-          input: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }],
-          workspace_id: null,
-          context: {
-            source_type: "cli",
-            provider: "cli",
-            user_id: "ts-sdk-integration",
-            channel_id: "ts-sdk-integration",
-            thread_id: null,
-            message_id: `msg_${Date.now()}`,
-            trace_id: `trace_${Date.now()}`,
-            project_root: null,
-            environment: null,
-          },
-          model: null,
-          project_id: null,
-          current_directory: null,
+        input: [{ type: "text", text: "Answer exactly: ts-sdk-app-server-ok" }],
+        context: {
+          source_type: "cli",
+          provider: "cli",
+          user_id: "ts-sdk-integration",
+          channel_id: "ts-sdk-integration",
+          thread_id: null,
+          message_id: `msg_${Date.now()}`,
+          trace_id: `trace_${Date.now()}`,
+          project_root: null,
+          environment: null,
         },
         client_request_id: "ts-sdk-app-server-smoke",
       });

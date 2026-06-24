@@ -3,39 +3,38 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Json;
-use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
+use talos_types::{AuthLogoutRequest, AuthLogoutResponse, UserCurrentRequest, UserCurrentResponse};
 
+use super::access::shared_actor;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
 pub(super) async fn logout_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-) -> Result<Json<Value>, ApiError> {
-    state
-        .account
-        .logout(&actor.0)
+) -> Result<Json<AuthLogoutResponse>, ApiError> {
+    let actor = shared_actor(&actor.0);
+    let response = state
+        .gateway
+        .logout(&actor, AuthLogoutRequest {})
         .await
         .map_err(map_auth_error)?;
-    state
-        .cloud_session_cache
-        .clear()
-        .map_err(ApiError::from_talos_error)?;
-    Ok(Json(json!({ "success": true })))
+    Ok(Json(response))
 }
 
 pub(super) async fn current_user_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-) -> Result<Json<Value>, ApiError> {
-    let user = state
-        .account
-        .current_user(&actor.0)
+) -> Result<Json<UserCurrentResponse>, ApiError> {
+    let actor = shared_actor(&actor.0);
+    let response = state
+        .gateway
+        .current_user(&actor, UserCurrentRequest {})
         .await
         .map_err(map_auth_error)?;
-    Ok(Json(json!(user)))
+    Ok(Json(response))
 }
 
 fn map_auth_error(error: talos_error::TalosError) -> ApiError {

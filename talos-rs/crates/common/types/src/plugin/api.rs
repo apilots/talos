@@ -1,16 +1,14 @@
 use super::{
-    MarketplaceSource, MarketplaceSourceId, MarketplaceSourceInput, Plugin, PluginId,
-    PluginInstall, PluginInstallId, PluginKind, PluginWarning,
+    MarketplaceSource, MarketplaceSourceId, MarketplaceSourceInput, Plugin,
+    PluginDocumentMediaType, PluginDocumentRole, PluginId, PluginInstall, PluginInstallId,
+    PluginKind, PluginWarning,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS, Default)]
-pub struct PluginSourceListRequest {
-    #[serde(default)]
-    pub include_disabled: bool,
-}
+pub struct PluginSourceListRequest {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct PluginSourceListResponse {
@@ -76,6 +74,26 @@ pub enum PluginListStatusFilter {
 pub struct PluginListResponse {
     pub plugins: Vec<Plugin>,
     pub warnings: Vec<PluginWarning>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginReadRequest {
+    pub plugin_id: PluginId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginReadResponse {
+    pub plugin: Plugin,
+    pub documents: Vec<PluginDocument>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+pub struct PluginDocument {
+    pub role: PluginDocumentRole,
+    pub path: String,
+    pub title: String,
+    pub media_type: PluginDocumentMediaType,
+    pub contents: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

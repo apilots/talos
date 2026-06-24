@@ -124,6 +124,28 @@ describe("ChatComposer controls", () => {
     expect(getComposerInput()).toHaveValue("$browser ");
   });
 
+  it("shows filtered skill suggestions for a body token after whitespace", async () => {
+    renderControlledComposer({ initialDraft: "please use $br now" });
+    const input = getComposerInput();
+    input.setSelectionRange(14, 14);
+    fireEvent.keyUp(input);
+
+    expect(await screen.findByTestId("skill-suggestions")).toBeInTheDocument();
+    expect(apiMocks.suggestSkills).toHaveBeenLastCalledWith("br");
+
+    fireEvent.mouseDown(screen.getByText("Browser"));
+
+    await waitFor(() => expect(input).toHaveValue("please use $browser now"));
+  });
+
+  it("does not show skill suggestions for a token joined to body text", async () => {
+    renderControlledComposer({ initialDraft: "please$br" });
+
+    await new Promise((resolve) => window.setTimeout(resolve, 160));
+    expect(screen.queryByTestId("skill-suggestions")).not.toBeInTheDocument();
+    expect(apiMocks.suggestSkills).not.toHaveBeenCalled();
+  });
+
   it("keeps local runtime selected and shows cloud as unavailable", () => {
     const onRuntimeModeChange = vi.fn();
     renderComposer({ onRuntimeModeChange });

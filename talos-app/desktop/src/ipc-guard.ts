@@ -14,18 +14,9 @@ const llmConfigWriteParams = (params: unknown) =>
   hasString(params, "path") &&
   isRecord(params) &&
   params.path === "llm" &&
-  hasString(params, "value");
-const authSessionStoreParams = (params: unknown) =>
-  isRecord(params) &&
-  isRecord(params.session) &&
-  params.session.schema_version === 1 &&
-  hasString(params.session, "access_token") &&
-  hasString(params.session, "token_type") &&
-  hasString(params.session, "cloud_api_base_url") &&
-  hasString(params.session, "last_used_at_ms") &&
-  isRecord(params.session.user) &&
-  hasString(params.session.user, "user_id") &&
-  hasString(params.session.user, "username");
+  isRecord(params.value) &&
+  params.value.type === "llm" &&
+  isRecord(params.value.value);
 const authLoginStartParams = (params: unknown) =>
   isRecord(params) &&
   hasString(params, "client_name") &&
@@ -54,6 +45,7 @@ const pluginSourceAddParams = (params: unknown) =>
   marketplaceSourceInput(params.source) &&
   (params.refresh === undefined || typeof params.refresh === "boolean");
 const pluginSourceIdParams = (params: unknown) => isRecord(params) && hasString(params, "source_id");
+const pluginReadParams = (params: unknown) => isRecord(params) && hasString(params, "plugin_id");
 const pluginSearchParams = (params: unknown) =>
   isRecord(params) &&
   (params.query === null || typeof params.query === "string") &&
@@ -93,20 +85,15 @@ const pluginUpdateParams = (params: unknown) =>
   ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
-  "app.list": emptyParams,
   "auth.login.cancel": authLoginSessionParams,
   "auth.login.start": authLoginStartParams,
   "auth.login.status": authLoginSessionParams,
   "auth.logout": emptyParams,
   "auth.session.clear": emptyParams,
   "auth.session.read": emptyParams,
-  "auth.session.store": authSessionStoreParams,
-  "config.read": emptyParams,
-  "config.value.write": llmConfigWriteParams,
-  "config.batch.write": (params) =>
-    isRecord(params) &&
-    Array.isArray(params.entries) &&
-    params.entries.every(llmConfigWriteParams),
+  "config.get": emptyParams,
+  "config.update": llmConfigWriteParams,
+  "config.delete": (params) => hasString(params, "path"),
   "config.reload": emptyParams,
   "event.subscribe": sessionParams,
   "event.unsubscribe": (params) => hasString(params, "subscription_id"),
@@ -130,16 +117,15 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "session.history": sessionParams,
   "session.list": emptyParams,
   "session.patch": sessionParams,
-  "session.read": sessionParams,
+  "session.get": sessionParams,
   "session.recover": sessionParams,
-  "plugin.source.list": (params) =>
-    isRecord(params) &&
-    (params.include_disabled === undefined || typeof params.include_disabled === "boolean"),
+  "plugin.source.list": emptyParams,
   "plugin.source.add": pluginSourceAddParams,
   "plugin.source.refresh": pluginSourceIdParams,
   "plugin.source.remove": pluginSourceIdParams,
   "plugin.search": pluginSearchParams,
   "plugin.list": pluginListParams,
+  "plugin.read": pluginReadParams,
   "plugin.install": pluginInstallParams,
   "plugin.update": pluginUpdateParams,
   "plugin.uninstall": pluginInstallIdParams,
@@ -163,7 +149,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "tool_name") &&
     hasString(params, "output") &&
     hasBoolean(params, "success"),
-  "tool.list": emptyParams,
   "turn.interrupt": sessionParams,
   "turn.retry": (params) =>
     hasString(params, "session_id") &&

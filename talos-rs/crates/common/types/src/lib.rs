@@ -5,26 +5,38 @@
 pub use async_trait::async_trait;
 pub use talos_error::{TalosError, TalosResult};
 
+pub mod agent_dispatch;
+pub mod auth_api;
+pub mod config_api;
+pub mod event_api;
 pub mod file_api;
 pub mod fs;
-pub mod gateway;
 pub mod ids;
+pub mod mcp;
 pub mod model;
 pub mod plugin;
 pub mod runtime;
 pub mod schema;
 pub mod session;
+pub mod skills;
 pub mod talos;
+pub mod turn_api;
 
+pub use agent_dispatch::*;
+pub use auth_api::*;
+pub use config_api::*;
+pub use event_api::*;
 pub use file_api::*;
 pub use fs::*;
-pub use gateway::*;
 pub use ids::*;
+pub use mcp::*;
 pub use model::*;
 pub use plugin::*;
 pub use runtime::*;
 pub use session::*;
+pub use skills::*;
 pub use talos::*;
+pub use turn_api::*;
 
 #[cfg(test)]
 mod tests;

@@ -92,7 +92,7 @@ pub trait ToolDefinitionProvider: Send + Sync {
 }
 
 #[async_trait]
-pub trait ToolExecutorPort: Send + Sync {
+pub trait ToolExecutorPort: ToolDefinitionProvider + Send + Sync {
     fn build_function_invocation(
         &self,
         call_id: String,
@@ -209,6 +209,23 @@ impl ToolRegistry {
             )),
             other => other,
         }
+    }
+
+    fn is_static_policy_exempt(spec: &RegisteredToolSpec) -> bool {
+        matches!(spec.source, ToolSource::Mcp)
+    }
+
+    fn requires_tool_search_activation(spec: &RegisteredToolSpec) -> bool {
+        matches!(spec.source, ToolSource::Mcp | ToolSource::Dynamic)
+    }
+
+    fn normalize_registered_spec(mut spec: RegisteredToolSpec) -> RegisteredToolSpec {
+        if Self::requires_tool_search_activation(&spec)
+            && !matches!(spec.visibility, ToolVisibility::Disabled)
+        {
+            spec.visibility = ToolVisibility::Deferred;
+        }
+        spec
     }
 
     fn truncate_structured_error(
@@ -479,6 +496,7 @@ impl ToolRegistry {
         handler: Arc<dyn ToolHandler>,
     ) {
         let tool_name = tool_name.into();
+        let spec = Self::normalize_registered_spec(spec);
         if self.specs.insert(tool_name.clone(), spec).is_some() {
             warn!(tool_name = %tool_name, "overwriting tool spec");
         }
@@ -557,9 +575,11 @@ impl ToolRegistry {
         context: ToolContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         if let Some(spec) = self.tool_catalog().find(invocation.tool_name.as_str()) {
-            self.policy_checker
-                .check_tool_access(spec.definition.name.as_str())
-                .map_err(Self::annotate_policy_error)?;
+            if !Self::is_static_policy_exempt(&spec) {
+                self.policy_checker
+                    .check_tool_access(spec.definition.name.as_str())
+                    .map_err(Self::annotate_policy_error)?;
+            }
         } else {
             self.policy_checker
                 .check_tool_access(invocation.tool_name.as_str())
@@ -635,8 +655,11 @@ impl ToolRegistry {
         self.tool_catalog()
             .specs()
             .iter()
+            .filter(|spec| {
+                Self::is_static_policy_exempt(spec)
+                    || self.policy_checker.policy.is_allowed(&spec.definition.name)
+            })
             .map(|spec| spec.definition.name.clone())
-            .filter(|name| self.policy_checker.policy.is_allowed(name))
             .collect()
     }
 
@@ -644,7 +667,10 @@ impl ToolRegistry {
     pub fn is_tool_available(&self, name: &str) -> bool {
         self.tool_catalog()
             .find(name)
-            .map(|spec| self.policy_checker.policy.is_allowed(&spec.definition.name))
+            .map(|spec| {
+                Self::is_static_policy_exempt(&spec)
+                    || self.policy_checker.policy.is_allowed(&spec.definition.name)
+            })
             .unwrap_or(false)
     }
 

@@ -91,6 +91,17 @@ TALOS_APP_SERVER_CWD=../talos-rs \
 pnpm --filter @talos/sdk-app-server test:integration
 ```
 
+## Plugin / Skills / MCP 管理
+
+Web 的 `/plugins` 页面是插件能力的统一管理入口：
+
+- `Plugins` tab 展示所有 plugin capabilities。
+- `Skills` tab 只展示 skill plugins，详情页读取 `SKILL.md` 等 plugin documents。
+- `MCP` tab 只展示 MCP server plugins，详情页读取 `README.md` 和 `talos-mcp.json`。
+- 安装、更新、启用、禁用、卸载都通过后端 Plugin lifecycle API，不在首页提供 MCP 单独入口。
+
+前端类型来自 `@talos/sdk-browser` / `@talos/sdk-core` 的协议生成物，页面组件只消费共享 Plugin / MCP / Skill 对象，不在 UI 层复制领域结构。
+
 ## 预览构建产物
 
 ```bash

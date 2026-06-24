@@ -91,7 +91,7 @@ export function Sidebar({
 
       <div className="mb-5 border-b border-border/80 pb-4">
         <SidebarNavItem icon={<FolderOpen size={16} />} label={t("sidebar:projects")} to="/projects" />
-        <SidebarNavItem icon={<Blocks size={16} />} label="Plugins" to="/plugins" />
+        <SidebarNavItem icon={<Blocks size={16} />} label={t("sidebar:plugins")} to="/plugins" />
       </div>
 
       <div className="mb-3 flex items-end justify-between gap-3">

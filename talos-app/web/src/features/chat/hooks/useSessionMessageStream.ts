@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { retryTimelineEvents, sendTimelineEvents, subscribeTimelineEventsForMessage } from "../api";
 import { applyStreamEvent } from "../stream-events";
-import type { TalosMessageRequest } from "@talos/sdk-browser";
+import type { RetryTurnRequest, StartTurnRequest } from "@talos/sdk-browser";
 
 export function useSessionMessageStream(sessionId: string) {
   const abortRef = useRef<AbortController | null>(null);
@@ -15,7 +15,7 @@ export function useSessionMessageStream(sessionId: string) {
 
   const eventMessage = useCallback(
     async (
-      request: TalosMessageRequest,
+      request: StartTurnRequest,
       onAcceptedMessageId?: (messageId: string) => void,
     ) => {
       abortRef.current?.abort();
@@ -24,7 +24,6 @@ export function useSessionMessageStream(sessionId: string) {
 
       try {
         await sendTimelineEvents(
-          sessionId,
           request,
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
@@ -85,12 +84,12 @@ export function useSessionMessageStream(sessionId: string) {
 
       try {
         await retryTimelineEvents(
-          sessionId,
           {
+            session_id: sessionId,
             client_message_id: clientMessageId,
             retry_of_message_id: retryOfMessageId,
             input: [{ type: "text", text }],
-          },
+          } satisfies RetryTurnRequest,
           (event) => applyStreamEvent(sessionId, event),
           controller.signal,
           onAcceptedMessageId,

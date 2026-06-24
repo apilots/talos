@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_types::gateway::GatewayRequest;
-use talos_types::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType,
-};
-use talos_types::{RequestHandler, SessionService};
+use talos_types::agent_dispatch::AgentDispatchResponse;
+use talos_types::talos::{StopReason, TalosContext, TalosProvider, TalosSourceType};
+use talos_types::TalosSession;
 use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
@@ -54,9 +53,23 @@ impl CollaborationTask {
     }
 }
 
+#[async_trait]
+pub trait CollaborationAgentHost: Send + Sync {
+    async fn create_session(&self, context: TalosContext) -> TalosResult<TalosSession>;
+
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
+
+    async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
+
+    async fn submit_input(
+        &self,
+        session: TalosSession,
+        message: String,
+    ) -> TalosResult<AgentDispatchResponse>;
+}
+
 pub struct CollaborationRuntime {
-    session_service: Arc<dyn SessionService>,
-    request_handler: Arc<dyn RequestHandler>,
+    host: Arc<dyn CollaborationAgentHost>,
     tasks: DashMap<String, Arc<CollaborationTask>>,
 }
 
@@ -68,13 +81,9 @@ impl std::fmt::Debug for CollaborationRuntime {
 }
 
 impl CollaborationRuntime {
-    pub fn new(
-        session_service: Arc<dyn SessionService>,
-        request_handler: Arc<dyn RequestHandler>,
-    ) -> Self {
+    pub fn new(host: Arc<dyn CollaborationAgentHost>) -> Self {
         Self {
-            session_service,
-            request_handler,
+            host,
             tasks: DashMap::new(),
         }
     }
@@ -85,24 +94,18 @@ impl CollaborationRuntime {
         initial_message: Option<String>,
     ) -> TalosResult<String> {
         let session = self
-            .session_service
-            .create_session(
-                TalosContext {
-                    source_type: TalosSourceType::System,
-                    provider: TalosProvider::System,
-                    user_id: user_id.to_string(),
-                    message_id: Uuid::new_v4().to_string(),
-                    trace_id: Uuid::new_v4().to_string(),
-                    channel_id: None,
-                    thread_id: None,
-                    project_root: None,
-                    environment: None,
-                },
-                None,
-                None,
-                None,
-                None,
-            )
+            .host
+            .create_session(TalosContext {
+                source_type: TalosSourceType::System,
+                provider: TalosProvider::System,
+                user_id: user_id.to_string(),
+                message_id: Uuid::new_v4().to_string(),
+                trace_id: Uuid::new_v4().to_string(),
+                channel_id: None,
+                thread_id: None,
+                project_root: None,
+                environment: None,
+            })
             .await?;
         let session_id = session.context.session_id.clone();
         self.tasks
@@ -127,7 +130,7 @@ impl CollaborationRuntime {
             ));
         }
         let session = self
-            .session_service
+            .host
             .get_session(session_id)
             .await?
             .ok_or_else(|| TalosError::ResourceNotFound(format!("session {}", session_id)))?;
@@ -151,33 +154,14 @@ impl CollaborationRuntime {
             }
         }
 
-        let request_handler = Arc::clone(&self.request_handler);
+        let host = Arc::clone(&self.host);
         let status_tx = task.status_tx.clone();
-        let request = GatewayRequest {
-            session_id: session_id.to_string(),
-            turn_id: None,
-            workspace_id: session.context.workspace_id.clone(),
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
-                text: message.to_string(),
-            }],
-            context: TalosContext {
-                source_type: session.context.source_type.clone(),
-                provider: session.context.provider.clone(),
-                user_id: session.context.user_id.clone(),
-                message_id: Uuid::new_v4().to_string(),
-                trace_id: Uuid::new_v4().to_string(),
-                channel_id: session.context.channel_id.clone(),
-                thread_id: session.context.thread_id.clone(),
-                project_root: session.context.project_root.clone(),
-                environment: session.context.environment.clone(),
-            },
-        };
+        let message = message.to_string();
 
         let _ = status_tx.send(CollaborationAgentStatus::Running);
         let submission_id = Uuid::new_v4().to_string();
         let handle = tokio::spawn(async move {
-            let next_status = match request_handler.handle(request).await {
+            let next_status = match host.submit_input(session, message).await {
                 Ok(response) => CollaborationAgentStatus::Completed {
                     output: response.content,
                     stop_reason: response.stop_reason,
@@ -247,12 +231,14 @@ impl CollaborationRuntime {
             }
             let _ = task.status_tx.send(CollaborationAgentStatus::Closed);
         }
-        self.session_service.close_session(target).await?;
+        if let Some(session) = self.host.get_session(target).await? {
+            self.host.close_session(session).await?;
+        }
         Ok(CollaborationAgentStatus::Closed)
     }
 
     pub async fn resume_agent(&self, target: &str) -> TalosResult<CollaborationAgentStatus> {
-        let Some(_session) = self.session_service.get_session(target).await? else {
+        let Some(_session) = self.host.get_session(target).await? else {
             return Ok(CollaborationAgentStatus::NotFound);
         };
         let task = self

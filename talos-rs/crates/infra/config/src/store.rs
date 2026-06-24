@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
+use talos_fs::FileSystem;
 
 use crate::{
     model_readiness_for_llm, EnvSecretStore, LlmConfig, LlmConfigRead, ProviderConfig,
@@ -152,13 +153,15 @@ impl LlmConfigStore for YamlLlmConfigStore {
         let output = serde_yaml::to_string(&root)
             .map_err(|e| TalosError::ConfigError(format!("failed to serialize yaml: {}", e)))?;
 
-        std::fs::write(&self.config_path, output).map_err(|e| {
-            TalosError::ConfigError(format!(
-                "failed to write config file {}: {}",
-                self.config_path.display(),
-                e
-            ))
-        })?;
+        talos_fs::std_fs()
+            .write_file(&self.config_path, &output)
+            .map_err(|e| {
+                TalosError::ConfigError(format!(
+                    "failed to write config file {}: {}",
+                    self.config_path.display(),
+                    e
+                ))
+            })?;
 
         sanitize_llm_for_read(&mut safe_llm);
         Ok(safe_llm)

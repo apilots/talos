@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use talos_error::{TalosError, TalosResult};
+use talos_fs::{FileSystem, WriteOptions};
 
 pub const TALOS_ENV_PREFIX: &str = "TALOS_";
 
@@ -62,22 +63,14 @@ impl EnvSecretStore {
         if self.path.exists() {
             return Ok(());
         }
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                TalosError::StorageError(format!(
-                    "create env file parent {}: {}",
-                    parent.display(),
-                    err
-                ))
-            })?;
-        }
-        std::fs::write(&self.path, "").map_err(|err| {
-            TalosError::ConfigError(format!(
+        match talos_fs::std_fs().write_file_with(&self.path, "", WriteOptions::create_new()) {
+            Ok(()) | Err(TalosError::Conflict(_)) => Ok(()),
+            Err(err) => Err(TalosError::ConfigError(format!(
                 "failed to create env file {}: {}",
                 self.path.display(),
                 err
-            ))
-        })
+            ))),
+        }
     }
 
     pub fn ensure_random(&self, key: &str) -> TalosResult<()> {
@@ -111,15 +104,6 @@ impl EnvSecretStore {
     }
 
     pub fn write_filtered(&self, values: &BTreeMap<String, String>) -> TalosResult<()> {
-        if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|err| {
-                TalosError::StorageError(format!(
-                    "create env file parent {}: {}",
-                    parent.display(),
-                    err
-                ))
-            })?;
-        }
         let mut output = String::new();
         for (key, value) in values {
             if !is_talos_env_key(key) {
@@ -130,13 +114,15 @@ impl EnvSecretStore {
             output.push_str(&quote_env_value(value));
             output.push('\n');
         }
-        std::fs::write(&self.path, output).map_err(|err| {
-            TalosError::ConfigError(format!(
-                "failed to write env file {}: {}",
-                self.path.display(),
-                err
-            ))
-        })
+        talos_fs::std_fs()
+            .write_file(&self.path, &output)
+            .map_err(|err| {
+                TalosError::ConfigError(format!(
+                    "failed to write env file {}: {}",
+                    self.path.display(),
+                    err
+                ))
+            })
     }
 }
 

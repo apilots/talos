@@ -13,23 +13,23 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import type { ProjectRecord } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
   initialModel?: string;
   initialProjectId?: string;
-  initialProject?: ProjectRecord;
-  initialSkills?: ProtocolSkillSuggestion[];
+  initialProject?: ProjectView;
+  initialSkills?: SkillSuggestion[];
 }
 
-function selectedSkillsOption(skills?: ProtocolSkillSuggestion[]) {
+function selectedSkillsOption(skills?: SkillSuggestion[]) {
   return skills && skills.length > 0 ? skills : undefined;
 }
 
@@ -70,7 +70,7 @@ export function ChatSessionPage() {
     showReconnectControls,
     stopResponse,
     streamError,
-  } = useChatSession(sessionId, session?.state.message_count, session?.title);
+  } = useChatSession(sessionId, session?.message_count, session?.title);
   const updateModel = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
   const connection = useAppStore((state) => state.connection);

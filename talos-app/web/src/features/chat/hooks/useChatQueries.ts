@@ -59,15 +59,15 @@ export function useSessionsQuery() {
   });
 
   const data = [...(query.data ?? [])]
-    .sort((left, right) => right.state.last_activity - left.state.last_activity)
+    .sort((left, right) => right.last_activity - left.last_activity)
     .filter((session) => {
       if (threadFilter === "all") {
         return true;
       }
       const state = useAppStore.getState();
       const status = getEffectiveSessionStatus(
-        state.transientStatuses[session.context.session_id],
-        state.streams[session.context.session_id],
+        state.transientStatuses[session.id],
+        state.streams[session.id],
       );
       return status === threadFilter;
     });

@@ -28,7 +28,7 @@ impl TuiApp {
         ));
     }
 
-    fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::TalosSession) {
+    fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::SessionInfo) {
         self.apply_session_snapshot(session);
         self.input_buffer.clear();
         self.cursor_index = 0;
@@ -129,9 +129,9 @@ impl TuiApp {
                     Self::append_usage_lines(&mut lines, "local", &self.displayed_usage());
                     if let Some(info) = session_info {
                         self.apply_session_snapshot(&info);
-                        lines.push(format!("server.model: {}", info.config.llm.model));
-                        lines.push(format!("server.messages: {}", info.state.message_count));
-                        Self::append_usage_lines(&mut lines, "server", &info.state.usage);
+                        lines.push(format!("server.model: {}", info.model));
+                        lines.push(format!("server.messages: {}", info.message_count));
+                        Self::append_usage_lines(&mut lines, "server", &info.usage);
                     }
                     self.push_block(ChatRole::System, lines.join("\n"));
                     self.push_right_event("status loaded".to_string());
@@ -195,10 +195,9 @@ impl TuiApp {
                     let mut sessions = sessions;
                     sessions.sort_by(|left, right| {
                         right
-                            .state
                             .last_activity
-                            .cmp(&left.state.last_activity)
-                            .then(right.state.created_at.cmp(&left.state.created_at))
+                            .cmp(&left.last_activity)
+                            .then(right.created_at.cmp(&left.created_at))
                     });
                     self.history_sessions = sessions;
                     self.history_selected = 0;
@@ -230,8 +229,8 @@ impl TuiApp {
             },
             CommandUpdate::SessionHistoryLoaded { session, result } => match result {
                 Ok(load) => {
-                    let sid = &session.context.session_id;
-                    let model = &session.config.llm.model;
+                    let sid = &session.id;
+                    let model = &session.model;
                     let title = &session.title;
                     self.push_block(
                         ChatRole::System,
@@ -260,7 +259,7 @@ impl TuiApp {
                     }
                 }
                 Err(err) => {
-                    let sid = &session.context.session_id;
+                    let sid = &session.id;
                     self.push_block(
                         ChatRole::System,
                         format!(

@@ -1,17 +1,15 @@
-use crate::{PluginManager, PluginStateStore};
-use talos_config::{
-    PluginRootConfig as ConfigRoot, PluginRootKind as ConfigPluginRootKind, PluginSourceConfig,
-    PluginsRuntimeConfig,
+use crate::{
+    test_support::{manager_with_state, write_skill, LocalSkillSourceFixture},
+    PluginManager, PluginStateStore,
 };
+use talos_config::{PluginSourceConfig, PluginSourceKind, PluginSourceType, PluginsRuntimeConfig};
 use talos_error::TalosError;
 use talos_types::{
-    MarketplaceSourceInput, MarketplaceSourceType, PluginDefinition, PluginDisableRequest,
-    PluginEnableRequest, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
-    PluginKind, PluginListRequest, PluginListStatusFilter, PluginRootKind,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
-    PluginSourceRemoveRequest, PluginStatus, PluginUninstallRequest, PluginUpdateConflictPolicy,
-    PluginUpdateRequest, PluginWarningCode,
+    MarketplaceSourceInput, MarketplaceSourceType, PluginDefinition, PluginDocumentMediaType,
+    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
+    PluginKind, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
+    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceListRequest,
+    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginWarningCode,
 };
 
 #[test]
@@ -21,9 +19,7 @@ fn lists_default_official_source_and_user_sources() {
     let manager = PluginManager::with_state_store(PluginsRuntimeConfig::default(), state);
 
     let sources = manager
-        .list_sources(PluginSourceListRequest {
-            include_disabled: false,
-        })
+        .list_sources(PluginSourceListRequest {})
         .expect("sources should list")
         .sources;
 
@@ -33,18 +29,82 @@ fn lists_default_official_source_and_user_sources() {
 }
 
 #[test]
+fn refresh_scans_local_mcp_source_and_rejects_unsupported_transport() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let mcp_root = repo.join("mcp");
+    let valid_dir = mcp_root.join("playwright");
+    std::fs::create_dir_all(&valid_dir).expect("valid MCP dir should exist");
+    std::fs::write(
+        valid_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "playwright",
+  "display_name": "Playwright",
+  "description": "Browser automation MCP server.",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"]
+  }
+}"#,
+    )
+    .expect("valid MCP manifest should be written");
+    let invalid_dir = mcp_root.join("legacy-sse");
+    std::fs::create_dir_all(&invalid_dir).expect("invalid MCP dir should exist");
+    std::fs::write(
+        invalid_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "legacy_sse",
+  "transport": { "type": "sse" }
+}"#,
+    )
+    .expect("invalid MCP manifest should be written");
+
+    let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["mcp".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("MCP source should add and refresh");
+
+    assert_eq!(added.plugins.len(), 1);
+    assert_eq!(added.plugins[0].kind, PluginKind::McpServer);
+    assert_eq!(
+        added.plugins[0].path_in_source.as_deref(),
+        Some("mcp/playwright")
+    );
+    assert_eq!(added.plugins[0].metadata.name, "playwright");
+    assert_eq!(
+        added.plugins[0].metadata.display_name.as_deref(),
+        Some("Playwright")
+    );
+    assert_eq!(
+        added.plugins[0].metadata.description,
+        "Browser automation MCP server."
+    );
+    match &added.plugins[0].definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+            assert_eq!(mcp.manifest_path, "mcp/playwright/talos-mcp.json");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(added.warnings.len(), 1);
+    assert_eq!(added.warnings[0].kind, Some(PluginKind::McpServer));
+    assert_eq!(added.warnings[0].code, PluginWarningCode::InvalidManifest);
+}
+
+#[test]
 fn corrupt_source_state_fails_fast() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
     let state = PluginStateStore::new(temp.path());
     std::fs::create_dir_all(temp.path()).expect("state dir should exist");
     std::fs::write(state.sources_path(), "{not-json").expect("corrupt state should be written");
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        state,
-    );
+    let manager = manager_with_state(state);
 
     let err = manager
         .list_sources(talos_types::PluginSourceListRequest::default())
@@ -54,37 +114,10 @@ fn corrupt_source_state_fails_fast() {
 }
 
 #[test]
-fn configured_skill_roots_are_read_only_external_roots() {
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: vec![ConfigRoot {
-                kind: ConfigPluginRootKind::Skill,
-                path: "/tmp/agents-skills".to_string(),
-                read_only: true,
-            }],
-        },
-        PluginStateStore::new("/tmp/talos-plugins"),
-    );
-
-    let roots = manager.configured_skill_roots();
-
-    assert_eq!(roots.len(), 1);
-    assert_eq!(roots[0].kind, PluginRootKind::Skill);
-    assert!(roots[0].read_only);
-}
-
-#[test]
 fn adds_and_removes_user_git_source() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
     let state = PluginStateStore::new(temp.path());
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        state,
-    );
+    let manager = manager_with_state(state);
 
     let added = manager
         .add_source(PluginSourceAddRequest {
@@ -154,13 +187,7 @@ fn refresh_updates_user_source_timestamp() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
     let repo = temp.path().join("repo");
     std::fs::create_dir_all(&repo).expect("repo dir should be created");
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path()),
-    );
+    let manager = manager_with_state(PluginStateStore::new(temp.path()));
     let added = manager
         .add_source(PluginSourceAddRequest {
             source: MarketplaceSourceInput::LocalFolder {
@@ -184,10 +211,8 @@ fn refresh_updates_user_source_timestamp() {
 #[test]
 fn refresh_scans_local_skill_source_and_search_reads_cache() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
-    let repo = temp.path().join("repo");
-    let skills = repo.join("skills");
-    write_skill(
-        &skills,
+    let fixture = LocalSkillSourceFixture::new(&temp);
+    fixture.write_skill(
         "docx",
         r#"---
 name: docx
@@ -198,23 +223,7 @@ short_description: Edit Word documents
 Use this skill for docx files.
 "#,
     );
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path().join("state")),
-    );
-
-    let added = manager
-        .add_source(PluginSourceAddRequest {
-            source: MarketplaceSourceInput::LocalFolder {
-                path: repo,
-                sparse_paths: vec!["skills".to_string()],
-            },
-            refresh: true,
-        })
-        .expect("source should add and refresh");
+    let added = fixture.add_source(true);
 
     assert_eq!(added.plugins.len(), 1);
     assert_eq!(added.plugins[0].kind, PluginKind::Skill);
@@ -224,13 +233,28 @@ Use this skill for docx files.
     );
     match &added.plugins[0].definition {
         PluginDefinition::Skill(skill) => {
-            assert_eq!(skill.manifest.name, "docx");
             assert_eq!(skill.skill_md_path, "skills/docx/SKILL.md");
         }
         _ => panic!("expected skill plugin"),
     }
+    assert_eq!(added.plugins[0].metadata.name, "docx");
+    assert_eq!(
+        added.plugins[0].metadata.description,
+        "Work with Word documents."
+    );
+    assert_eq!(
+        added.plugins[0].metadata.short_description.as_deref(),
+        Some("Edit Word documents")
+    );
+    assert_eq!(added.plugins[0].documents.len(), 1);
+    assert_eq!(
+        added.plugins[0].documents[0].role,
+        PluginDocumentRole::Primary
+    );
+    assert_eq!(added.plugins[0].documents[0].path, "skills/docx/SKILL.md");
 
-    let search = manager
+    let search = fixture
+        .manager
         .search(PluginSearchRequest {
             query: Some("word".to_string()),
             source_id: Some(added.source.id),
@@ -242,16 +266,259 @@ Use this skill for docx files.
         .expect("search should read scan cache");
 
     assert_eq!(search.plugins.len(), 1);
-    assert_eq!(search.plugins[0].name, "docx");
+    assert_eq!(search.plugins[0].metadata.name, "docx");
+}
+
+#[test]
+fn reads_marketplace_and_installed_skill_document() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let fixture = LocalSkillSourceFixture::new(&temp);
+    fixture.write_skill(
+        "manual-reviewer",
+        r#"---
+name: manual-reviewer
+display_name: Manual Reviewer
+description: Review a manual test marker.
+---
+
+# Manual Reviewer
+
+Expected marker: plugin-read-visible
+"#,
+    );
+    let added = fixture.add_source(true);
+    let plugin = added.plugins[0].clone();
+
+    let marketplace_doc = fixture
+        .manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("marketplace plugin should read");
+    assert_eq!(marketplace_doc.plugin.metadata.name, "manual-reviewer");
+    assert_eq!(
+        marketplace_doc.plugin.metadata.description,
+        "Review a manual test marker."
+    );
+    match &marketplace_doc.plugin.definition {
+        PluginDefinition::Skill(skill) => {
+            assert_eq!(skill.skill_md_path, "skills/manual-reviewer/SKILL.md")
+        }
+        _ => panic!("expected skill plugin"),
+    }
+    assert_eq!(marketplace_doc.documents.len(), 1);
+    assert_eq!(
+        marketplace_doc.documents[0].role,
+        PluginDocumentRole::Primary
+    );
+    assert_eq!(marketplace_doc.documents[0].path, "SKILL.md");
+    assert_eq!(
+        marketplace_doc.documents[0].media_type,
+        PluginDocumentMediaType::Markdown
+    );
+    assert!(marketplace_doc.documents[0]
+        .contents
+        .contains("Expected marker: plugin-read-visible"));
+    assert!(matches!(
+        marketplace_doc.plugin.status,
+        talos_types::PluginStatus::NotInstalled
+    ));
+
+    fixture
+        .manager
+        .install(PluginInstallRequest {
+            target: PluginInstallTarget::Plugin {
+                plugin_id: plugin.id.clone(),
+                expected_source_commit: plugin.source_commit.clone(),
+            },
+            enable: Some(true),
+            conflict_policy: PluginInstallConflictPolicy::Reject,
+        })
+        .expect("plugin should install");
+    let installed_doc = fixture
+        .manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("installed plugin should read");
+
+    assert!(matches!(
+        installed_doc.plugin.definition,
+        PluginDefinition::Skill(_)
+    ));
+    assert_eq!(installed_doc.documents.len(), 1);
+    assert_eq!(installed_doc.documents[0].path, "SKILL.md");
+    assert!(installed_doc.documents[0]
+        .contents
+        .contains("Expected marker: plugin-read-visible"));
+    assert!(matches!(
+        installed_doc.plugin.status,
+        talos_types::PluginStatus::Installed { .. }
+    ));
+}
+
+#[test]
+fn reads_marketplace_and_installed_mcp_manifest() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let mcp_dir = repo.join("mcp").join("playwright");
+    std::fs::create_dir_all(&mcp_dir).expect("MCP dir should exist");
+    std::fs::write(
+        mcp_dir.join("talos-mcp.json"),
+        r#"{
+  "name": "playwright",
+  "display_name": "Playwright",
+  "description": "Browser automation MCP server.",
+  "icon": "browser",
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["@playwright/mcp@latest"]
+  },
+  "marker": "mcp-read-visible"
+}"#,
+    )
+    .expect("MCP manifest should be written");
+    std::fs::write(
+        mcp_dir.join("README.md"),
+        "# Playwright MCP\n\nExpected marker: mcp-readme-visible\n",
+    )
+    .expect("MCP README should be written");
+
+    let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["mcp".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("MCP source should add");
+    let plugin = added.plugins[0].clone();
+
+    let marketplace_doc = manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("marketplace MCP plugin should read");
+    match &marketplace_doc.plugin.definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(marketplace_doc.plugin.metadata.name, "playwright");
+    assert_eq!(
+        marketplace_doc.plugin.metadata.display_name.as_deref(),
+        Some("Playwright")
+    );
+    assert_eq!(
+        marketplace_doc.plugin.metadata.icon.as_deref(),
+        Some("browser")
+    );
+    assert_eq!(marketplace_doc.documents.len(), 2);
+    assert_eq!(
+        marketplace_doc.documents[0].role,
+        PluginDocumentRole::Readme
+    );
+    assert_eq!(marketplace_doc.documents[0].path, "README.md");
+    assert_eq!(
+        marketplace_doc.documents[0].media_type,
+        PluginDocumentMediaType::Markdown
+    );
+    assert!(marketplace_doc.documents[0]
+        .contents
+        .contains("mcp-readme-visible"));
+    assert_eq!(marketplace_doc.documents[1].path, "talos-mcp.json");
+    assert!(marketplace_doc.documents[1]
+        .contents
+        .contains("mcp-read-visible"));
+    assert!(matches!(
+        marketplace_doc.plugin.status,
+        talos_types::PluginStatus::NotInstalled
+    ));
+
+    manager
+        .install(PluginInstallRequest {
+            target: PluginInstallTarget::Plugin {
+                plugin_id: plugin.id.clone(),
+                expected_source_commit: plugin.source_commit.clone(),
+            },
+            enable: Some(true),
+            conflict_policy: PluginInstallConflictPolicy::Reject,
+        })
+        .expect("MCP plugin should install");
+    let installed_doc = manager
+        .read(PluginReadRequest {
+            plugin_id: plugin.id.clone(),
+        })
+        .expect("installed MCP plugin should read");
+
+    match &installed_doc.plugin.definition {
+        PluginDefinition::McpServer(mcp) => {
+            assert_eq!(mcp.server.name, "playwright");
+        }
+        _ => panic!("expected MCP plugin"),
+    }
+    assert_eq!(
+        installed_doc.plugin.metadata.icon.as_deref(),
+        Some("browser")
+    );
+    assert_eq!(installed_doc.documents.len(), 2);
+    assert_eq!(installed_doc.documents[0].path, "README.md");
+    assert!(installed_doc.documents[0]
+        .contents
+        .contains("mcp-readme-visible"));
+    assert_eq!(installed_doc.documents[1].path, "talos-mcp.json");
+    assert!(installed_doc.documents[1]
+        .contents
+        .contains("mcp-read-visible"));
+    assert!(matches!(
+        installed_doc.plugin.status,
+        talos_types::PluginStatus::Installed { .. }
+    ));
+}
+
+#[test]
+fn read_rejects_skill_document_above_server_limit() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let fixture = LocalSkillSourceFixture::new(&temp);
+    fixture.write_skill(
+        "manual-reviewer",
+        r#"---
+name: manual-reviewer
+description: Review a manual test marker.
+---
+
+This document is intentionally longer than the test limit.
+"#,
+    );
+    let manager = manager_with_state(fixture.state.clone()).with_max_skill_md_bytes(32);
+    let added = manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: fixture.repo.clone(),
+                sparse_paths: vec!["skills".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("source should add");
+
+    let err = manager
+        .read(PluginReadRequest {
+            plugin_id: added.plugins[0].id.clone(),
+        })
+        .expect_err("oversized skill document should be rejected");
+
+    assert!(matches!(err, TalosError::ValidationError(_)));
 }
 
 #[test]
 fn refresh_reports_invalid_and_nested_skill_warnings() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
-    let repo = temp.path().join("repo");
-    let skills = repo.join("skills");
-    write_skill(
-        &skills,
+    let fixture = LocalSkillSourceFixture::new(&temp);
+    fixture.write_skill(
         "valid",
         r#"---
 name: valid
@@ -261,8 +528,7 @@ description: A valid skill.
 Valid skill.
 "#,
     );
-    write_skill(
-        &skills,
+    fixture.write_skill(
         "outer",
         r#"---
 name: outer
@@ -273,7 +539,7 @@ Outer skill.
 "#,
     );
     write_skill(
-        &skills.join("outer"),
+        &fixture.skills.join("outer"),
         "inner",
         r#"---
 name: inner
@@ -283,7 +549,7 @@ description: Inner skill.
 Inner skill.
 "#,
     );
-    let broken_dir = skills.join("broken");
+    let broken_dir = fixture.skills.join("broken");
     std::fs::create_dir_all(&broken_dir).expect("broken dir should be created");
     std::fs::write(
         broken_dir.join("SKILL.md"),
@@ -296,27 +562,12 @@ Broken skill.
     )
     .expect("broken skill should be written");
 
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path().join("state")),
-    );
-    let added = manager
-        .add_source(PluginSourceAddRequest {
-            source: MarketplaceSourceInput::LocalFolder {
-                path: repo,
-                sparse_paths: vec!["skills".to_string()],
-            },
-            refresh: true,
-        })
-        .expect("source should refresh");
+    let added = fixture.add_source(true);
 
     let mut names = added
         .plugins
         .iter()
-        .map(|plugin| plugin.name.as_str())
+        .map(|plugin| plugin.metadata.name.as_str())
         .collect::<Vec<_>>();
     names.sort();
     assert_eq!(names, vec!["inner", "outer", "valid"]);
@@ -334,7 +585,8 @@ Broken skill.
             && warning.path.is_some()
     }));
 
-    let search = manager
+    let search = fixture
+        .manager
         .search(PluginSearchRequest {
             query: None,
             source_id: Some(added.source.id),
@@ -352,10 +604,8 @@ Broken skill.
 #[test]
 fn search_refresh_policy_controls_source_refresh() {
     let temp = tempfile::tempdir().expect("temp dir should exist");
-    let repo = temp.path().join("repo");
-    let skills = repo.join("skills");
-    write_skill(
-        &skills,
+    let fixture = LocalSkillSourceFixture::new(&temp);
+    fixture.write_skill(
         "first",
         r#"---
 name: first
@@ -365,25 +615,9 @@ description: First skill.
 First skill.
 "#,
     );
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path().join("state")),
-    );
-    let added = manager
-        .add_source(PluginSourceAddRequest {
-            source: MarketplaceSourceInput::LocalFolder {
-                path: repo,
-                sparse_paths: vec!["skills".to_string()],
-            },
-            refresh: true,
-        })
-        .expect("source should refresh");
+    let added = fixture.add_source(true);
 
-    write_skill(
-        &skills,
+    fixture.write_skill(
         "second",
         r#"---
 name: second
@@ -394,7 +628,8 @@ Second skill.
 "#,
     );
 
-    let cache_only = manager
+    let cache_only = fixture
+        .manager
         .search(PluginSearchRequest {
             query: None,
             source_id: Some(added.source.id.clone()),
@@ -406,7 +641,8 @@ Second skill.
         .expect("cache-only search should succeed");
     assert_eq!(cache_only.plugins.len(), 1);
 
-    let refresh_stale = manager
+    let refresh_stale = fixture
+        .manager
         .search(PluginSearchRequest {
             query: None,
             source_id: Some(added.source.id.clone()),
@@ -418,7 +654,8 @@ Second skill.
         .expect("refresh-stale search should use non-empty cache");
     assert_eq!(refresh_stale.plugins.len(), 1);
 
-    let forced = manager
+    let forced = fixture
+        .manager
         .search(PluginSearchRequest {
             query: None,
             source_id: Some(added.source.id),
@@ -429,6 +666,65 @@ Second skill.
         })
         .expect("force-refresh search should refresh source");
     assert_eq!(forced.plugins.len(), 2);
+}
+
+#[test]
+fn search_returns_cached_results_when_another_source_refresh_fails() {
+    let temp = tempfile::tempdir().expect("temp dir should exist");
+    let repo = temp.path().join("repo");
+    let skills = repo.join("skills");
+    write_skill(
+        &skills,
+        "manual",
+        r#"---
+name: manual
+description: Manual local marketplace skill.
+---
+
+Manual body.
+"#,
+    );
+    let manager = PluginManager::with_state_store(
+        PluginsRuntimeConfig {
+            sources: vec![PluginSourceConfig {
+                source_type: PluginSourceType::Official,
+                display_name: "Broken Source".to_string(),
+                kind: PluginSourceKind::Git,
+                url: "file:///tmp/talos-missing-plugin-source.git".to_string(),
+                reference: "main".to_string(),
+                sparse_paths: vec!["skills".to_string()],
+            }],
+            roots: Vec::new(),
+        },
+        PluginStateStore::new(temp.path().join("state")),
+    );
+    manager
+        .add_source(PluginSourceAddRequest {
+            source: MarketplaceSourceInput::LocalFolder {
+                path: repo,
+                sparse_paths: vec!["skills".to_string()],
+            },
+            refresh: true,
+        })
+        .expect("local source should add and refresh");
+
+    let search = manager
+        .search(PluginSearchRequest {
+            query: Some("manual".to_string()),
+            source_id: None,
+            kind: Some(PluginKind::Skill),
+            status: Some(PluginSearchStatusFilter::NotInstalled),
+            refresh: PluginSearchRefreshPolicy::RefreshStale,
+            limit: Some(10),
+        })
+        .expect("search should continue after one source refresh failure");
+
+    assert_eq!(search.plugins.len(), 1);
+    assert_eq!(search.plugins[0].metadata.name, "manual");
+    assert!(search
+        .warnings
+        .iter()
+        .any(|warning| warning.code == PluginWarningCode::SourceRefreshFailed));
 }
 
 #[cfg(unix)]
@@ -453,13 +749,7 @@ Escaped skill.
     std::fs::create_dir_all(&repo).expect("repo dir should be created");
     symlink(&outside, repo.join("linked")).expect("source symlink should be created");
 
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path().join("state")),
-    );
+    let manager = manager_with_state(PluginStateStore::new(temp.path().join("state")));
     let err = manager
         .add_source(PluginSourceAddRequest {
             source: MarketplaceSourceInput::LocalFolder {
@@ -471,325 +761,4 @@ Escaped skill.
         .expect_err("sparse path symlink escape should be rejected");
 
     assert!(matches!(err, TalosError::ValidationError(_)));
-}
-
-#[test]
-fn installs_skill_plugin_and_controls_catalog_enabled_state() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let repo = temp.path().join("repo");
-    let skills = repo.join("skills");
-    write_skill(
-        &skills,
-        "translate",
-        r#"---
-name: translate
-description: Translate text with domain-specific rules.
-short_description: Translate text
----
-
-Use this skill to translate text.
-"#,
-    );
-    let state = PluginStateStore::new(temp.path().join("state"));
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        state.clone(),
-    );
-    let added = manager
-        .add_source(PluginSourceAddRequest {
-            source: MarketplaceSourceInput::LocalFolder {
-                path: repo,
-                sparse_paths: vec!["skills".to_string()],
-            },
-            refresh: true,
-        })
-        .expect("source should add and refresh");
-    let plugin_id = added.plugins[0].id.clone();
-
-    let installed = manager
-        .install(PluginInstallRequest {
-            target: PluginInstallTarget::Plugin {
-                plugin_id,
-                expected_source_commit: None,
-            },
-            enable: Some(true),
-            conflict_policy: PluginInstallConflictPolicy::Reject,
-        })
-        .expect("plugin should install");
-
-    assert!(matches!(
-        installed.plugin.status,
-        PluginStatus::Installed { enabled: true, .. }
-    ));
-    assert!(installed.install.installed_path.exists());
-
-    let roots = manager
-        .installed_skill_roots()
-        .expect("installed roots should load");
-    let snapshot = talos_skills::refresh(&talos_skills::SkillRoots {
-        roots,
-        state_path: state.skills_state_path(),
-        max_skill_md_bytes: 64 * 1024,
-        max_available_summary_bytes: 8 * 1024,
-    })
-    .expect("installed skill should load");
-    assert_eq!(snapshot.skills.len(), 1);
-    assert_eq!(snapshot.skills[0].name, "translate");
-    assert!(snapshot.skills[0].enabled);
-    assert_eq!(
-        snapshot.skills[0].source_install.as_deref(),
-        Some(installed.install.id.0.as_str())
-    );
-
-    let disabled = manager
-        .disable(PluginDisableRequest {
-            install_id: installed.install.id.clone(),
-        })
-        .expect("plugin should disable");
-    assert!(matches!(
-        disabled.plugin.status,
-        PluginStatus::Installed { enabled: false, .. }
-    ));
-    let snapshot = talos_skills::refresh(&talos_skills::SkillRoots {
-        roots: manager
-            .installed_skill_roots()
-            .expect("installed roots should load"),
-        state_path: state.skills_state_path(),
-        max_skill_md_bytes: 64 * 1024,
-        max_available_summary_bytes: 8 * 1024,
-    })
-    .expect("installed skill should load");
-    assert!(!snapshot.skills[0].enabled);
-
-    let install_id = installed.install.id.clone();
-    let enabled = manager
-        .enable(PluginEnableRequest {
-            install_id: install_id.clone(),
-        })
-        .expect("plugin should enable");
-    assert!(matches!(
-        enabled.plugin.status,
-        PluginStatus::Installed { enabled: true, .. }
-    ));
-    let listed = manager
-        .list_plugins(PluginListRequest {
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginListStatusFilter::Installed),
-            source_id: Some(added.source.id.clone()),
-            include_disabled: false,
-        })
-        .expect("plugins should list");
-    assert_eq!(listed.plugins.len(), 1);
-
-    let installed_search = manager
-        .search(PluginSearchRequest {
-            query: Some("translate".to_string()),
-            source_id: Some(added.source.id.clone()),
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginSearchStatusFilter::Installed),
-            refresh: PluginSearchRefreshPolicy::CacheOnly,
-            limit: Some(10),
-        })
-        .expect("search should merge installed status");
-    assert_eq!(installed_search.plugins.len(), 1);
-    assert!(matches!(
-        installed_search.plugins[0].status,
-        PluginStatus::Installed { enabled: true, .. }
-    ));
-
-    let not_installed_search = manager
-        .search(PluginSearchRequest {
-            query: Some("translate".to_string()),
-            source_id: Some(added.source.id),
-            kind: Some(PluginKind::Skill),
-            status: Some(PluginSearchStatusFilter::NotInstalled),
-            refresh: PluginSearchRefreshPolicy::CacheOnly,
-            limit: Some(10),
-        })
-        .expect("search should filter installed plugin out");
-    assert!(not_installed_search.plugins.is_empty());
-
-    let uninstalled = manager
-        .uninstall(PluginUninstallRequest { install_id })
-        .expect("plugin should uninstall");
-    assert!(uninstalled.uninstalled);
-    assert!(manager
-        .installed_skill_roots()
-        .expect("installed roots should load")
-        .is_empty());
-}
-
-#[test]
-fn update_rejects_local_changes_and_replace_updates_install() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let repo = temp.path().join("repo");
-    let skills = repo.join("skills");
-    write_skill(
-        &skills,
-        "writer",
-        r#"---
-name: writer
-description: Write the first version.
-short_description: Write text
----
-
-First version.
-"#,
-    );
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        PluginStateStore::new(temp.path().join("state")),
-    );
-    let added = manager
-        .add_source(PluginSourceAddRequest {
-            source: MarketplaceSourceInput::LocalFolder {
-                path: repo,
-                sparse_paths: vec!["skills".to_string()],
-            },
-            refresh: true,
-        })
-        .expect("source should add and refresh");
-    let installed = manager
-        .install(PluginInstallRequest {
-            target: PluginInstallTarget::Plugin {
-                plugin_id: added.plugins[0].id.clone(),
-                expected_source_commit: None,
-            },
-            enable: Some(true),
-            conflict_policy: PluginInstallConflictPolicy::Reject,
-        })
-        .expect("plugin should install");
-
-    write_skill(
-        &skills,
-        "writer",
-        r#"---
-name: writer
-description: Write the second version.
-short_description: Write text
----
-
-Second version.
-"#,
-    );
-    std::fs::write(
-        installed
-            .install
-            .installed_path
-            .join("skills")
-            .join("writer")
-            .join("SKILL.md"),
-        "local change",
-    )
-    .expect("installed skill should be changed");
-
-    let rejected = manager
-        .update(PluginUpdateRequest {
-            install_id: installed.install.id.clone(),
-            expected_source_commit: None,
-            conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
-        })
-        .expect_err("local changes should reject update");
-    assert!(matches!(rejected, TalosError::Conflict(_)));
-
-    let updated = manager
-        .update(PluginUpdateRequest {
-            install_id: installed.install.id,
-            expected_source_commit: None,
-            conflict_policy: PluginUpdateConflictPolicy::ReplaceLocalChanges,
-        })
-        .expect("local changes should be replaced");
-    assert_eq!(updated.install.file_manifest.files.len(), 1);
-    let contents = std::fs::read_to_string(
-        updated
-            .install
-            .installed_path
-            .join("skills")
-            .join("writer")
-            .join("SKILL.md"),
-    )
-    .expect("updated skill should exist");
-    assert!(contents.contains("Second version."));
-}
-
-#[test]
-fn list_plugins_cleans_stale_transaction_dirs() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let state = PluginStateStore::new(temp.path().join("state"));
-    let stale_tmp = temp
-        .path()
-        .join("state")
-        .join("installs")
-        .join(".tmp-install_stale");
-    let stale_backup = temp
-        .path()
-        .join("state")
-        .join("installs")
-        .join(".backup-install_stale");
-    std::fs::create_dir_all(&stale_tmp).expect("tmp dir should be created");
-    std::fs::create_dir_all(&stale_backup).expect("backup dir should be created");
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        state,
-    );
-
-    let listed = manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("plugins should list");
-
-    assert!(listed.plugins.is_empty());
-    assert!(!stale_tmp.exists());
-    assert!(!stale_backup.exists());
-}
-
-#[test]
-fn list_plugins_reports_orphan_install_dirs() {
-    let temp = tempfile::tempdir().expect("temp dir should exist");
-    let state = PluginStateStore::new(temp.path().join("state"));
-    let orphan = state.installs_dir().join("install_orphan");
-    std::fs::create_dir_all(&orphan).expect("orphan dir should be created");
-    let manager = PluginManager::with_state_store(
-        PluginsRuntimeConfig {
-            sources: Vec::<PluginSourceConfig>::new(),
-            roots: Vec::<ConfigRoot>::new(),
-        },
-        state,
-    );
-
-    let listed = manager
-        .list_plugins(PluginListRequest {
-            kind: None,
-            status: None,
-            source_id: None,
-            include_disabled: true,
-        })
-        .expect("plugins should list");
-
-    assert!(listed.plugins.is_empty());
-    assert_eq!(listed.warnings.len(), 1);
-    assert_eq!(
-        listed.warnings[0].code,
-        PluginWarningCode::OrphanInstallDirectory
-    );
-    assert!(orphan.exists());
-}
-
-fn write_skill(root: &std::path::Path, name: &str, contents: &str) {
-    let skill_dir = root.join(name);
-    std::fs::create_dir_all(&skill_dir).expect("skill dir should be created");
-    std::fs::write(skill_dir.join("SKILL.md"), contents).expect("skill file should be written");
 }

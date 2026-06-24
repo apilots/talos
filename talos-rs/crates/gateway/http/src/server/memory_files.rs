@@ -6,10 +6,12 @@ use axum::response::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use talos_application_service::{MemoryDate, MemoryListParams, MemorySearchParams};
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
-use talos_types::DocUpdateRequest;
+use talos_types::{
+    DocUpdateRequest, ExpectedFileVersion, MemoryFileListRequest, MemoryFileReadRequest,
+    MemoryFileWriteRequest, MemorySearchRequest,
+};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
@@ -44,18 +46,18 @@ pub(super) async fn list_memory_files_handler(
     Query(query): Query<MemoryFilesQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
-    let params = MemoryListParams {
+    let request = MemoryFileListRequest {
         limit: query.limit,
-        before_date: parse_optional_memory_date(query.before_date.as_deref())?,
-        date_from: parse_optional_memory_date(query.date_from.as_deref())?,
-        date_to: parse_optional_memory_date(query.date_to.as_deref())?,
+        before_date: query.before_date,
+        date_from: query.date_from,
+        date_to: query.date_to,
     };
-    let files = state
-        .memory
-        .list_files(&actor, params)
+    let response = state
+        .gateway
+        .list_memory_files(&actor, request)
         .await
         .map_err(map_memory_error)?;
-    Ok(Json(json!({ "data": files })))
+    Ok(Json(json!(response)))
 }
 
 pub(super) async fn get_memory_file_handler(
@@ -64,10 +66,14 @@ pub(super) async fn get_memory_file_handler(
     Path(date): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
-    let date = MemoryDate::parse(&date).map_err(map_memory_error)?;
     let detail = state
-        .memory
-        .get_file(&actor, date)
+        .gateway
+        .read_memory_file(
+            &actor,
+            MemoryFileReadRequest {
+                path: format!("memory/{date}.md").into(),
+            },
+        )
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(detail)))
@@ -80,10 +86,16 @@ pub(super) async fn put_memory_file_handler(
     Json(request): Json<DocUpdateRequest>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
-    let date = MemoryDate::parse(&date).map_err(map_memory_error)?;
     let detail = state
-        .memory
-        .put_file(&actor, date, request)
+        .gateway
+        .write_memory_file(
+            &actor,
+            MemoryFileWriteRequest {
+                path: format!("memory/{date}.md").into(),
+                content: request.content,
+                expected_version: expected_file_version_token(request.base_version),
+            },
+        )
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(detail)))
@@ -95,25 +107,18 @@ pub(super) async fn search_memory_files_handler(
     Query(query): Query<MemorySearchHttpQuery>,
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
-    let params = MemorySearchParams {
+    let request = MemorySearchRequest {
         query: query.q,
         limit: query.limit,
-        date_from: parse_optional_memory_date(query.date_from.as_deref())?,
-        date_to: parse_optional_memory_date(query.date_to.as_deref())?,
+        date_from: query.date_from,
+        date_to: query.date_to,
     };
-    let results = state
-        .memory
-        .search_files(&actor, params)
+    let response = state
+        .gateway
+        .search_memory(&actor, request)
         .await
         .map_err(map_memory_error)?;
-    Ok(Json(json!({ "data": results })))
-}
-
-fn parse_optional_memory_date(value: Option<&str>) -> Result<Option<MemoryDate>, ApiError> {
-    value
-        .map(MemoryDate::parse)
-        .transpose()
-        .map_err(map_memory_error)
+    Ok(Json(json!(response)))
 }
 
 fn map_memory_error(error: TalosError) -> ApiError {
@@ -135,5 +140,12 @@ fn map_memory_error(error: TalosError) -> ApiError {
             "internal_error",
             other.to_string(),
         ),
+    }
+}
+
+fn expected_file_version_token(value: ExpectedFileVersion) -> Option<String> {
+    match value {
+        ExpectedFileVersion::MustNotExist => None,
+        ExpectedFileVersion::Match { version_token } => Some(version_token),
     }
 }

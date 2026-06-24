@@ -2,6 +2,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use talos_error::TalosResult;
+use talos_fs::FileSystem;
 
 use crate::{env::RuntimeEnv, validate, Config, EnvSecretStore, TalosPaths};
 
@@ -17,9 +18,7 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     use talos_error::TalosError;
 
     let paths = TalosPaths::resolve();
-    let explicit_path = path
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from));
+    let explicit_path = explicit_config_path(path);
     let config_path = match explicit_path {
         Some(path) => path,
         None => {
@@ -66,6 +65,15 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     Ok(config)
 }
 
+pub(crate) fn config_source_path(path: Option<&str>) -> PathBuf {
+    explicit_config_path(path).unwrap_or_else(default_config_path)
+}
+
+fn explicit_config_path(path: Option<&str>) -> Option<PathBuf> {
+    path.map(PathBuf::from)
+        .or_else(|| std::env::var_os(TALOS_CONFIG_ENV).map(PathBuf::from))
+}
+
 fn ensure_first_run_files(paths: &TalosPaths) -> TalosResult<()> {
     paths.ensure_base_dirs()?;
     if !paths.config_file.exists() {
@@ -100,7 +108,7 @@ where
         )));
     };
 
-    std::fs::copy(template_path, &paths.config_file).map_err(|err| {
+    talos_fs::copy_file(template_path, &paths.config_file).map_err(|err| {
         TalosError::ConfigError(format!(
             "failed to copy default config template from {} to {}: {}",
             template_path.display(),
@@ -146,7 +154,8 @@ pub(crate) fn save_config(config: &Config, path: &str) -> TalosResult<()> {
     let yaml = serde_yaml::to_string(config)
         .map_err(|e| TalosError::ConfigError(format!("Failed to serialize config: {}", e)))?;
 
-    std::fs::write(path, yaml)
+    talos_fs::std_fs()
+        .write_file(Path::new(path), &yaml)
         .map_err(|e| TalosError::ConfigError(format!("Failed to write config file: {}", e)))?;
 
     Ok(())

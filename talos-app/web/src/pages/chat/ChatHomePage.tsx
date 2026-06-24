@@ -10,15 +10,15 @@ import {
   useProjectsQuery,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { resolveProjectRecord } from "@/shared/types/domain";
-import type { ProtocolSkillSuggestion } from "@talos/sdk-browser";
+import { resolveProjectView } from "@/shared/types/domain";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface HomeLocationState {
   initialDraft?: string;
-  initialSkills?: ProtocolSkillSuggestion[];
+  initialSkills?: SkillSuggestion[];
 }
 
-function initialSkillsState(skills: ProtocolSkillSuggestion[]) {
+function initialSkillsState(skills: SkillSuggestion[]) {
   return skills.length > 0 ? skills : undefined;
 }
 
@@ -36,11 +36,11 @@ export function ChatHomePage() {
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
-  const [initialSkills] = useState<ProtocolSkillSuggestion[]>(locationState?.initialSkills ?? []);
+  const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
   const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
 
   const activeProject = useMemo(
-    () => resolveProjectRecord(projects, activeProjectId),
+    () => resolveProjectView(projects, activeProjectId),
     [activeProjectId, projects],
   );
 
@@ -63,7 +63,7 @@ export function ChatHomePage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, locationState?.initialDraft, locationState?.initialSkills, navigate]);
 
-  async function handleStartDraft(initialPrompt?: string, skills: ProtocolSkillSuggestion[] = []) {
+  async function handleStartDraft(initialPrompt?: string, skills: SkillSuggestion[] = []) {
     const trimmed = initialPrompt?.trim();
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {
@@ -90,30 +90,28 @@ export function ChatHomePage() {
         <h1 className="mb-8 text-center text-[26px] font-semibold tracking-tight text-ink">
           {t("chat:startPromptTitle")}
         </h1>
-        <div className="space-y-2">
-          <ChatComposer
-            activeProjectId={activeProject?.id ?? activeProjectId}
-            disabled={false}
-            draft={draft}
-            isStreaming={false}
-            models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
-            onCreateProject={handleCreateProject}
-            onDraftChange={setDraft}
-            initialSelectedSkills={initialSkills}
-            onModelChange={setSelectedModel}
-            onProjectChange={setActiveProjectId}
-            onRuntimeModeChange={(mode) => {
-              if (mode === "local") {
-                setConnection({ runtimeMode: mode });
-              }
-            }}
-            onSend={(skills) => handleStartDraft(draft, skills)}
-            projects={projects}
-            runtimeMode={connection.runtimeMode}
-            selectedModel={selectedModel}
-            showProjectSelector
-          />
-        </div>
+        <ChatComposer
+          activeProjectId={activeProject?.id ?? activeProjectId}
+          disabled={false}
+          draft={draft}
+          isStreaming={false}
+          models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
+          onCreateProject={handleCreateProject}
+          onDraftChange={setDraft}
+          initialSelectedSkills={initialSkills}
+          onModelChange={setSelectedModel}
+          onProjectChange={setActiveProjectId}
+          onRuntimeModeChange={(mode) => {
+            if (mode === "local") {
+              setConnection({ runtimeMode: mode });
+            }
+          }}
+          onSend={(skills) => handleStartDraft(draft, skills)}
+          projects={projects}
+          runtimeMode={connection.runtimeMode}
+          selectedModel={selectedModel}
+          showProjectSelector
+        />
       </div>
     </div>
   );

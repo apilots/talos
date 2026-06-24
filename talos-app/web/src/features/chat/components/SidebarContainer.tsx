@@ -24,14 +24,14 @@ export function SidebarContainer() {
 
   const sessions = sessionsQuery.data ?? [];
   const threads = sessions.map((session) => {
-    const sessionId = session.context.session_id;
+    const sessionId = session.id;
     return {
       id: sessionId,
       label: aliases[sessionId] ?? session.title,
       status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
-      model: session.config.llm?.model ?? session.config.agent?.model ?? "unknown",
-      lastActivityAt: session.state.last_activity,
-      createdAt: session.state.created_at,
+      model: session.model || "unknown",
+      lastActivityAt: session.last_activity,
+      createdAt: session.created_at,
     };
   });
 

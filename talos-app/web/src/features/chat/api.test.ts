@@ -14,9 +14,10 @@ import {
 
 describe("chat api initial turn request", () => {
   it("builds first-turn metadata without session create configuration", () => {
-    const request = createInitialTurnRequest("user-1", "hello", "qwen-max", undefined);
+    const request = createInitialTurnRequest("sess-1", "user-1", "hello", "qwen-max", undefined);
 
     expect(request).toMatchObject({
+      session_id: "sess-1",
       input: [{ type: "text", text: "hello" }],
       model: "qwen-max",
       context: expect.objectContaining({
@@ -29,18 +30,25 @@ describe("chat api initial turn request", () => {
   });
 
   it("keeps selected skills as structured input items", () => {
-    const request = createInitialTurnRequest("user-1", "use $docs", undefined, undefined, [
-      {
-        name: "docs",
-        description: "Write docs",
-        short_description: null,
-        root: "/Users/test/.agents/skills/docs",
-        path: "/Users/test/.agents/skills/docs/SKILL.md",
-        scope: "external",
-        source_plugin: null,
-        source_install: null,
-      },
-    ]);
+    const request = createInitialTurnRequest(
+      "sess-1",
+      "user-1",
+      "use $docs",
+      undefined,
+      undefined,
+      [
+        {
+          name: "docs",
+          description: "Write docs",
+          short_description: null,
+          root: "/Users/test/.agents/skills/docs",
+          path: "/Users/test/.agents/skills/docs/SKILL.md",
+          scope: "external",
+          source_plugin: null,
+          source_install: null,
+        },
+      ],
+    );
 
     expect(request.input).toEqual([
       { type: "text", text: "use $docs" },
@@ -113,8 +121,7 @@ describe("chat message api", () => {
     } as unknown as TalosWebClient));
 
     await sendTimelineEvents(
-      "sess-1",
-      { input: [{ type: "text", text: "hello" }] },
+      { session_id: "sess-1", input: [{ type: "text", text: "hello" }] },
       onEvent,
       undefined,
       onAcceptedMessageId,
@@ -148,8 +155,8 @@ describe("chat message api", () => {
     } as unknown as TalosWebClient));
 
     await retryTimelineEvents(
-      "sess-1",
       {
+        session_id: "sess-1",
         client_message_id: "client-1",
         retry_of_message_id: "msg-old",
         input: [{ type: "text", text: "hello" }],

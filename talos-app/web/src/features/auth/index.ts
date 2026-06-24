@@ -8,6 +8,5 @@ export {
   logoutUser,
   readDesktopCloudSession,
   startCloudLogin,
-  storeDesktopCloudSession,
 } from "./api";
 export { redirectToExternalUrl } from "./navigation";

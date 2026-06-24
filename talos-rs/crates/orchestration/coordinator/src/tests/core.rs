@@ -1,12 +1,10 @@
 use super::*;
-use talos_types::gateway::{GatewayResumeContext, GatewayResumeToolCall};
+use talos_types::agent_dispatch::{AgentDispatchResumeContext, AgentDispatchResumeToolCall};
 
 #[tokio::test]
 async fn test_coordinator_creation() {
     let mock_router = Arc::new(MockRouter::new());
-    let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-
-    let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
 
     assert_eq!(coordinator.agents.read().await.len(), 0);
 }
@@ -14,9 +12,7 @@ async fn test_coordinator_creation() {
 #[tokio::test]
 async fn test_register_agent() {
     let mock_router = Arc::new(MockRouter::new());
-    let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-
-    let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
 
     let mock_agent = Arc::new(talos_agent::MockAgent::new());
     let result = coordinator.register_agent("test_agent", mock_agent).await;
@@ -28,8 +24,7 @@ async fn test_register_agent() {
 #[tokio::test]
 async fn test_drain_memory_flushes_delegates_to_registered_agents() {
     let mock_router = Arc::new(MockRouter::new());
-    let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-    let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
 
     let drained = Arc::new(AtomicUsize::new(0));
     coordinator
@@ -56,35 +51,36 @@ async fn test_drain_memory_flushes_delegates_to_registered_agents() {
 }
 
 #[tokio::test]
-async fn test_handle_stream_returns_orchestrator_events() {
+async fn test_handle_stream_returns_agent_events() {
     let mock_router = Arc::new(MockRouter::new());
-    let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-    let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
     coordinator
         .register_agent("test_agent", Arc::new(talos_agent::MockAgent::new()))
         .await
         .expect("agent registration should succeed");
 
+    let context = TalosContext {
+        source_type: TalosSourceType::Im,
+        provider: TalosProvider::Telegram,
+        user_id: "user-1".to_string(),
+        message_id: "message-1".to_string(),
+        trace_id: "trace-1".to_string(),
+        channel_id: Some("test-channel".to_string()),
+        thread_id: None,
+        project_root: None,
+        environment: None,
+    };
     let mut stream = coordinator
-        .handle_stream(GatewayRequest {
+        .handle_stream(AgentDispatchRequest {
             session_id: "test-session".to_string(),
             turn_id: None,
             workspace_id: None,
+            session: Some(Box::new(test_session("test-session", context.clone()))),
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-            context: TalosContext {
-                source_type: TalosSourceType::Im,
-                provider: TalosProvider::Telegram,
-                user_id: "user-1".to_string(),
-                message_id: "message-1".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("test-channel".to_string()),
-                thread_id: None,
-                project_root: None,
-                environment: None,
-            },
+            context,
         })
         .await
         .expect("stream request should succeed");
@@ -105,7 +101,7 @@ async fn test_handle_stream_returns_orchestrator_events() {
 }
 
 #[tokio::test]
-async fn test_handle_request_persists_agent_generated_session_title() {
+async fn test_handle_request_uses_prepared_session() {
     let mock_router = Arc::new(MockRouter::new());
     let context = TalosContext {
         source_type: TalosSourceType::Im,
@@ -118,32 +114,18 @@ async fn test_handle_request_persists_agent_generated_session_title() {
         project_root: None,
         environment: None,
     };
-    let session_store = Arc::new(TitleTestSessionStore::new(SessionRecord {
-        id: "test-session".to_string(),
-        title: DEFAULT_SESSION_TITLE.to_string(),
-        user_id: "user-1".to_string(),
-        context: context.clone(),
-        model: "mock-model".to_string(),
-        created_at: 0,
-        last_activity: 0,
-        message_count: 0,
-        usage: TalosUsage::default(),
-        conf: SessionConf::default(),
-        project_id: None,
-        current_directory: None,
-    }));
-    let coordinator =
-        CoordinatorImpl::new(mock_router, session_store.clone(), TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
     coordinator
         .register_agent("test_agent", Arc::new(RecordingStreamAgent::new()))
         .await
         .expect("agent registration should succeed");
 
     let response = coordinator
-        .handle(GatewayRequest {
+        .handle(AgentDispatchRequest {
             session_id: "test-session".to_string(),
             turn_id: Some("turn-title".to_string()),
             workspace_id: None,
+            session: Some(Box::new(test_session("test-session", context.clone()))),
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
@@ -154,19 +136,13 @@ async fn test_handle_request_persists_agent_generated_session_title() {
         .expect("request should succeed");
 
     assert_eq!(response.content, "ok");
-    let stored = session_store
-        .get_session_record("test-session")
-        .await
-        .expect("session read should succeed")
-        .expect("session should exist");
-    assert_eq!(stored.title, "Meaningful Topic");
+    assert_eq!(response.session_id, "test-session");
 }
 
 #[tokio::test]
 async fn test_handle_stream_preserves_resume_turn_and_message() {
     let mock_router = Arc::new(MockRouter::new());
-    let mock_session_store = Arc::new(talos_session_store::MockSessionStore::new());
-    let coordinator = CoordinatorImpl::new(mock_router, mock_session_store, TalosConfig::default());
+    let coordinator = CoordinatorImpl::new(mock_router);
     let agent = Arc::new(RecordingStreamAgent::new());
     let stream_requests = agent.stream_requests.clone();
     coordinator
@@ -174,30 +150,32 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
         .await
         .expect("agent registration should succeed");
 
+    let context = TalosContext {
+        source_type: TalosSourceType::Im,
+        provider: TalosProvider::Telegram,
+        user_id: "user-1".to_string(),
+        message_id: "message-original".to_string(),
+        trace_id: "trace-1".to_string(),
+        channel_id: Some("test-channel".to_string()),
+        thread_id: None,
+        project_root: None,
+        environment: None,
+    };
     let mut stream = coordinator
-        .handle_stream(GatewayRequest {
+        .handle_stream(AgentDispatchRequest {
             session_id: "test-session".to_string(),
             turn_id: Some("turn-original".to_string()),
             workspace_id: None,
-            resume_context: Some(GatewayResumeContext {
-                tool_call: Some(GatewayResumeToolCall {
+            session: Some(Box::new(test_session("test-session", context.clone()))),
+            resume_context: Some(AgentDispatchResumeContext {
+                tool_call: Some(AgentDispatchResumeToolCall {
                     item_id: "tool-original".to_string(),
                     call_id: "call-1".to_string(),
                     tool_name: "Bash".to_string(),
                 }),
             }),
             input: Vec::new(),
-            context: TalosContext {
-                source_type: TalosSourceType::Im,
-                provider: TalosProvider::Telegram,
-                user_id: "user-1".to_string(),
-                message_id: "message-original".to_string(),
-                trace_id: "trace-1".to_string(),
-                channel_id: Some("test-channel".to_string()),
-                thread_id: None,
-                project_root: None,
-                environment: None,
-            },
+            context,
         })
         .await
         .expect("stream request should succeed");

@@ -140,12 +140,12 @@ fn skill_display_name(name: &str) -> String {
         .join(" ")
 }
 
-fn skill_scope_label(scope: &talos_sdk::ProtocolSkillScope) -> &'static str {
+fn skill_scope_label(scope: &talos_sdk::SkillScope) -> &'static str {
     match scope {
-        talos_sdk::ProtocolSkillScope::Project => "[Project]",
-        talos_sdk::ProtocolSkillScope::Plugin => "[Plugin]",
-        talos_sdk::ProtocolSkillScope::External => "[External]",
-        talos_sdk::ProtocolSkillScope::System => "[System]",
+        talos_sdk::SkillScope::Project => "[Project]",
+        talos_sdk::SkillScope::Plugin => "[Plugin]",
+        talos_sdk::SkillScope::External => "[External]",
+        talos_sdk::SkillScope::System => "[System]",
     }
 }
 

@@ -1,7 +1,8 @@
 use super::*;
 use talos_llm_provider::ToolDefinition;
 use talos_tools::{
-    default_governance_for_source, RegisteredToolSpec, ToolParallelism, ToolPayloadKind, ToolSource,
+    default_governance_for_source, handlers::dynamic::DynamicToolFn, RegisteredToolSpec,
+    ToolOutputPayload, ToolParallelism, ToolPayloadKind, ToolSource,
 };
 
 #[derive(Default)]
@@ -11,6 +12,11 @@ struct DynamicLoopProvider {
 
 #[derive(Default)]
 struct DynamicResumeProvider {
+    round: AtomicUsize,
+}
+
+#[derive(Default)]
+struct ToolSearchActivationProvider {
     round: AtomicUsize,
 }
 
@@ -108,6 +114,94 @@ impl LlmProvider for DynamicResumeProvider {
 }
 
 #[async_trait]
+impl LlmProvider for ToolSearchActivationProvider {
+    fn name(&self) -> &str {
+        "tool-search-activation"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.chat_with_tools(request).await
+    }
+
+    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        let round = self.round.fetch_add(1, Ordering::SeqCst);
+        let tool_names = request
+            .tools
+            .as_ref()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .map(|tool| tool.name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        match round {
+            0 => {
+                assert!(tool_names.contains(&"ToolSearch".to_string()));
+                assert!(!tool_names.contains(&"echo_test".to_string()));
+                Ok(ChatResponse {
+                    content: String::new(),
+                    reasoning: Vec::new(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![FunctionCall::new(
+                        "call_search",
+                        "ToolSearch",
+                        json!({ "query": "echo_test" }),
+                    )]),
+                })
+            }
+            1 => {
+                assert!(tool_names.contains(&"echo_test".to_string()));
+                Ok(ChatResponse {
+                    content: String::new(),
+                    reasoning: Vec::new(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("tool_calls".to_string()),
+                    tool_calls: Some(vec![FunctionCall::new(
+                        "call_echo",
+                        "echo_test",
+                        json!({ "message": "ping" }),
+                    )]),
+                })
+            }
+            2 => {
+                let tool_message = request
+                    .messages
+                    .iter()
+                    .find(|message| {
+                        message.role == talos_llm_provider::Role::Tool
+                            && message.tool_call_id.as_deref() == Some("call_echo")
+                            && message.name.as_deref() == Some("echo_test")
+                    })
+                    .expect("activated dynamic tool result should be in the next model request");
+                assert!(tool_message.content.contains("dynamic pong"));
+                Ok(ChatResponse {
+                    content: "activated done".to_string(),
+                    reasoning: Vec::new(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: None,
+                })
+            }
+            other => panic!("unexpected model round {other}"),
+        }
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    fn default_model(&self) -> String {
+        "tool-search-activation".to_string()
+    }
+}
+
+#[async_trait]
 impl LlmProvider for PolicyStepProvider {
     fn name(&self) -> &str {
         "policy-step"
@@ -166,7 +260,6 @@ impl GeneralTurnPolicy for RecordingStepPolicy {
 }
 
 #[tokio::test]
-
 async fn test_run_general_turn_bash_then_task_output() {
     let provider = Arc::new(ExecLoopProvider::default());
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -178,7 +271,8 @@ async fn test_run_general_turn_bash_then_task_output() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-    let mut ctx = build_ctx_with_stream(None);
+    configure_test_skill_root(&mut config, &workspace_dir);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-bash-task-output", None);
 
     let result = run_general_turn(
         &mut ctx,
@@ -190,6 +284,7 @@ async fn test_run_general_turn_bash_then_task_output() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -230,7 +325,8 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-    let mut ctx = build_ctx_with_stream(None);
+    configure_test_skill_root(&mut config, &workspace_dir);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-pending-dynamic", None);
 
     let provider = Arc::new(DynamicLoopProvider::default());
     let result = run_general_turn(
@@ -243,6 +339,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -269,6 +366,61 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
 }
 
 #[tokio::test]
+async fn test_run_general_turn_activates_external_tool_with_tool_search_in_same_turn() {
+    let tool_registry = Arc::new(ToolRegistry::new());
+    register_core_local_tools(tool_registry.as_ref());
+    let dynamic_spec = RegisteredToolSpec::new(
+        ToolDefinition::new(
+            "echo_test",
+            "External dynamic echo tool",
+            Some(json!({
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string" }
+                }
+            })),
+        ),
+        ToolSource::Dynamic,
+        ToolPayloadKind::Function,
+        ToolParallelism::ParallelSafe,
+        false,
+        default_governance_for_source(ToolSource::Dynamic),
+    );
+    let dynamic_fn: DynamicToolFn = Arc::new(|_args, _ctx| {
+        Box::pin(async move { Ok(ToolOutputPayload::success_text("dynamic pong")) })
+    });
+    tool_registry.register_dynamic_tool(dynamic_spec, dynamic_fn);
+
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let mut config = AgentKernelConfig::default();
+    config.prompt.bootstrap.enabled = false;
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-tool-search-activation", None);
+
+    let provider = Arc::new(ToolSearchActivationProvider::default());
+    let result = run_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Find and use the external echo tool.",
+        provider.clone(),
+        tool_registry.clone(),
+        tool_registry,
+        memory_store,
+        &config,
+        skill_options_from_config(&workspace_dir, &config),
+    )
+    .await
+    .expect("general turn should succeed");
+
+    assert_eq!(result.output_text, "activated done");
+    assert_eq!(provider.round.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
 async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
@@ -277,6 +429,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let provider = Arc::new(PolicyStepProvider::default());
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
@@ -292,6 +445,8 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
         tool_definitions: tool_registry.get_tool_definitions(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default()
+            .with_session_id("s-policy"),
         prompt_diagnostics: PromptDiagnostics {
             mode: talos_prompt::PromptMode::Full,
             included_sections: Vec::new(),
@@ -356,6 +511,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let provider = Arc::new(DynamicResumeProvider::default());
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
@@ -372,6 +528,8 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
             "Continue after external dynamic tool result.",
         )],
         tool_definitions: tool_registry.get_tool_definitions(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default()
+            .with_session_id("s-dynamic-resume"),
         prompt_diagnostics: PromptDiagnostics {
             mode: talos_prompt::PromptMode::Full,
             included_sections: Vec::new(),

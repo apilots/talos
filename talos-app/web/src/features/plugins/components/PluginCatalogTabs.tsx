@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 import { cn } from "@/shared/lib/cn";
 import type { PluginsCatalogTab } from "../types";
 
@@ -7,13 +9,18 @@ interface PluginCatalogTabsProps {
 }
 
 export function PluginCatalogTabs({ activeTab, onTabChange }: PluginCatalogTabsProps) {
+  const { t } = useTranslation("plugins");
+
   return (
     <div className="mb-5 flex items-center gap-1">
       <TabButton active={activeTab === "plugins"} onClick={() => onTabChange("plugins")}>
-        Plugins
+        {t("tabs.plugins")}
       </TabButton>
       <TabButton active={activeTab === "skills"} onClick={() => onTabChange("skills")}>
-        Skills
+        {t("tabs.skills")}
+      </TabButton>
+      <TabButton active={activeTab === "mcp"} onClick={() => onTabChange("mcp")}>
+        {t("tabs.mcp")}
       </TabButton>
     </div>
   );
@@ -31,8 +38,10 @@ function TabButton({
   return (
     <button
       className={cn(
-        "rounded-[0.55rem] px-3 py-2 text-sm transition",
-        active ? "bg-card text-ink shadow-sm" : "text-muted hover:bg-card/65 hover:text-ink",
+        "inline-flex h-9 items-center rounded-[0.55rem] border px-3 text-sm transition-colors",
+        active
+          ? "border-ink bg-ink text-background shadow-sm"
+          : "border-transparent text-muted hover:border-border/80 hover:text-ink",
       )}
       onClick={onClick}
       type="button"

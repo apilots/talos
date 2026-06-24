@@ -13,7 +13,7 @@ pub use prompt::{
     LocalSkillProvider, SkillPromptBudget, SkillPromptContext, SkillPromptInjection,
     SkillPromptRequest, SkillPromptWarning, SkillProvider,
 };
-pub use state::{load_skill_state, save_skill_state, PluginSkillStateKey, SkillState};
+pub use state::{load_skill_state, PluginSkillStateKey, SkillState};
 
 #[cfg(test)]
 mod tests {
@@ -129,6 +129,68 @@ Broken.
 
         assert_eq!(snapshot.skills.len(), 0);
         assert_eq!(snapshot.errors.len(), 2);
+    }
+
+    #[test]
+    fn loader_recurses_collection_dirs_and_ignores_empty_dirs() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let roots = test_roots(&temp);
+        let system_root = roots.roots[1].path.join(".system");
+        let empty_root = roots.roots[1].path.join("codex-primary-runtime");
+        fs::create_dir_all(&empty_root).expect("empty collection dir should be created");
+        write_skill(
+            &system_root,
+            "openai-docs",
+            r#"---
+name: openai-docs
+description: Use official OpenAI docs.
+---
+
+Read docs.
+"#,
+        );
+
+        let snapshot = refresh(&roots).expect("skills should load");
+
+        assert_eq!(snapshot.errors, Vec::new());
+        assert_eq!(snapshot.skills.len(), 1);
+        assert_eq!(snapshot.skills[0].name, "openai-docs");
+    }
+
+    #[test]
+    fn suggest_supports_fuzzy_name_matching() {
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        let roots = test_roots(&temp);
+        write_skill(
+            &roots.roots[1].path,
+            "find-skills",
+            r#"---
+name: find-skills
+description: Discover and install agent skills.
+---
+
+Find skills.
+"#,
+        );
+        write_skill(
+            &roots.roots[1].path,
+            "documents",
+            r#"---
+name: documents
+description: Mentions fuzzy search in the description only.
+---
+
+Work with documents.
+"#,
+        );
+
+        let suggestions = suggest(&roots, "fs", 10).expect("skills should suggest fuzzy matches");
+
+        assert_eq!(
+            suggestions.first().map(|skill| skill.name.as_str()),
+            Some("find-skills")
+        );
+        assert!(suggestions.iter().any(|skill| skill.name == "find-skills"));
     }
 
     #[test]

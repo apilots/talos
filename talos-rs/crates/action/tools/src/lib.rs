@@ -13,7 +13,7 @@ pub mod state;
 pub mod r#trait;
 pub mod trait_impl;
 
-pub use collaboration::{CollaborationAgentStatus, CollaborationRuntime};
+pub use collaboration::{CollaborationAgentHost, CollaborationAgentStatus, CollaborationRuntime};
 pub use context::ToolContext;
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};

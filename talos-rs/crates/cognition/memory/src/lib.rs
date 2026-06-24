@@ -9,7 +9,7 @@ mod workspace_store;
 
 pub use mapper::SessionTranscriptMapper;
 pub use r#trait::Memory;
-pub use retrieval::{strip_json_fences, MemorySearchResponse};
+pub use retrieval::{memory_search_response_into_retrieved_items, strip_json_fences};
 pub use store::{
     MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
     MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary, SessionPromptContext,
@@ -23,3 +23,4 @@ pub use store::{
     SummaryRecord, TalosMessage, TalosMessageRole, TalosTurn, ToolCallRecord, ToolResultRecord,
     WorkspaceMemoryRecord,
 };
+pub use talos_types::MemorySearchResponse;

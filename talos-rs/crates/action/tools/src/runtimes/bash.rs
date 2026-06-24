@@ -633,7 +633,7 @@ mod tests {
             &TaskOutputRequest {
                 session_id,
                 chars: String::new(),
-                yield_time_ms: 100,
+                yield_time_ms: 1_000,
                 offset: Some(1200),
                 max_output_tokens: None,
             },

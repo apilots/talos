@@ -1,4 +1,4 @@
-use std::convert::Infallible;
+use std::io;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -6,23 +6,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
-use serde_json::json;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use tracing::error;
 
 use talos_app_protocol::events::canonical_method;
-use talos_app_protocol::requests::{
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelinePendingDynamicToolResult, TimelinePendingUserAction, TimelineRecoverySnapshot,
-    TimelineReplay,
-};
-use talos_application_service::{
-    TimelineCursorStatus as ApplicationTimelineCursorStatus, TimelineSubscribeParams,
-    TimelineSubscriptionMessage,
-};
+use talos_app_protocol::requests::TimelineRecoveryResponse;
 use talos_auth::RequestIdentity;
-use talos_session_store::{ActiveTurnRecord, ActiveTurnStatus, PendingUserAction, TimelineEventId};
+use talos_service::TimelineSubscriptionMessage;
+use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
@@ -47,14 +38,6 @@ pub(super) async fn subscribe_timeline_events_handler(
     headers: HeaderMap,
     Query(query): Query<TimelineEventsQuery>,
 ) -> Result<Response, ApiError> {
-    let _session = state
-        .app
-        .get_session(&shared_actor(&actor.0), &session_id)
-        .await
-        .map_err(|err| {
-            ApiError::new(StatusCode::NOT_FOUND, "session_not_found", err.to_string())
-        })?;
-
     let after_event_id = parse_cursor(query.after_event_id, &headers)?;
     let limit = query
         .limit
@@ -69,22 +52,25 @@ pub(super) async fn subscribe_timeline_events_handler(
         .max(1);
 
     let subscription = state
-        .events
-        .subscribe(TimelineSubscribeParams {
-            session_id: session_id.clone(),
-            after_event_id,
-            replay_limit: limit,
-            close_when_idle: true,
-            close_on_terminal: true,
-        })
+        .app
+        .open_timeline_subscription(
+            &shared_actor(&actor.0),
+            SubscribeTimelineRequest {
+                session_id: session_id.clone(),
+                since_event_id: after_event_id,
+                replay_limit: Some(limit),
+                close_when_idle: Some(true),
+                close_on_terminal: Some(true),
+            },
+        )
         .await
         .map_err(map_event_replay_error)?;
 
-    let stream = ReceiverStream::new(subscription.events).filter_map(|message| {
+    let stream = ReceiverStream::new(subscription.subscription.events).filter_map(|message| {
         let TimelineSubscriptionMessage::Event(record) = message else {
             return None;
         };
-        Some(Ok::<Event, Infallible>(timeline_sse_event(record)))
+        Some(timeline_sse_event(record).map_err(io::Error::other))
     });
 
     Ok(Sse::new(stream)
@@ -92,42 +78,21 @@ pub(super) async fn subscribe_timeline_events_handler(
         .into_response())
 }
 
-fn timeline_sse_event(record: talos_types::talos::TimelineEventEnvelope) -> Event {
+fn timeline_sse_event(
+    record: talos_types::talos::TimelineEventEnvelope,
+) -> Result<Event, serde_json::Error> {
     let event_name = canonical_method(&record.event.event_type);
     let event_id = record.event_id.clone();
     let is_live_metrics = matches!(
         record.event.payload,
         talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
     );
-    let data = match serde_json::to_string(&record) {
-        Ok(data) => data,
-        Err(err) => {
-            error!(error = %err, "failed to serialize timeline event record");
-            let turn_id = record.turn_id.clone();
-            json!({
-                "event_id": record.event_id,
-                "event_seq": record.event_seq,
-                "created_at_ms": record.created_at_ms,
-                "session_id": record.session_id,
-                "message_id": record.message_id,
-                "turn_id": turn_id,
-                "event": {
-                    "event_type": "turn_error",
-                    "session_id": record.session_id,
-                    "message_id": record.message_id,
-                    "sequence": 0,
-                    "turn_id": turn_id,
-                    "payload": { "type": "turn_error", "request_id": "unknown", "turn_id": turn_id, "error": "failed to serialize timeline event", "failed_at_ms": 0 }
-                }
-            })
-            .to_string()
-        }
-    };
+    let data = serde_json::to_string(&record)?;
     let event = Event::default().event(event_name).data(data);
     if is_live_metrics {
-        event
+        Ok(event)
     } else {
-        event.id(event_id)
+        Ok(event.id(event_id))
     }
 }
 
@@ -137,15 +102,7 @@ pub(super) async fn recover_timeline_handler(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<TimelineRecoveryQuery>,
-) -> Result<Json<TimelineRecoverySnapshot>, ApiError> {
-    let _session = state
-        .app
-        .get_session(&shared_actor(&actor.0), &session_id)
-        .await
-        .map_err(|err| {
-            ApiError::new(StatusCode::NOT_FOUND, "session_not_found", err.to_string())
-        })?;
-
+) -> Result<Json<TimelineRecoveryResponse>, ApiError> {
     let after_event_id = parse_cursor(query.after_event_id, &headers)?;
     let limit = query
         .limit
@@ -158,48 +115,34 @@ pub(super) async fn recover_timeline_handler(
                 .replay_batch_size,
         )
         .max(1);
-    let snapshot = state
-        .events
-        .recover_session(&session_id, after_event_id.as_ref(), limit)
+    let response = state
+        .gateway
+        .recover_timeline(
+            &shared_actor(&actor.0),
+            RecoverTimelineRequest {
+                session_id: session_id.clone(),
+                after_event_id,
+                replay_limit: Some(limit),
+            },
+        )
         .await
         .map_err(map_event_replay_error)?;
 
-    Ok(Json(TimelineRecoverySnapshot {
-        replay: TimelineReplay {
-            events: snapshot.replay.events,
-            high_water_mark_event_id: snapshot
-                .replay
-                .high_water_mark_event_id
-                .map(|value| value.to_string()),
-            last_replay_seq: snapshot.replay.last_replay_seq,
-            cursor_status: map_timeline_cursor_status(snapshot.replay.cursor_status),
-        },
-        active_turn: map_active_turn_snapshot(&session_id, snapshot.active_turn),
-    }))
+    Ok(Json(response))
 }
 
 fn parse_cursor(
     query_after_event_id: Option<String>,
     headers: &HeaderMap,
-) -> Result<Option<TimelineEventId>, ApiError> {
-    let cursor = query_after_event_id.or_else(|| {
+) -> Result<Option<String>, ApiError> {
+    Ok(query_after_event_id.or_else(|| {
         headers
             .get("last-event-id")
             .and_then(|value| value.to_str().ok())
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(ToString::to_string)
-    });
-    match cursor {
-        Some(value) => {
-            let event_id = TimelineEventId::from(value);
-            event_id.event_seq().map_err(|err| {
-                ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", err.to_string())
-            })?;
-            Ok(Some(event_id))
-        }
-        None => Ok(None),
-    }
+    }))
 }
 
 fn map_event_replay_error(error: talos_error::TalosError) -> ApiError {
@@ -209,6 +152,9 @@ fn map_event_replay_error(error: talos_error::TalosError) -> ApiError {
         }
         talos_error::TalosError::ValidationError(message) => {
             ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", message)
+        }
+        talos_error::TalosError::ResourceNotFound(message) => {
+            ApiError::new(StatusCode::NOT_FOUND, "session_not_found", message)
         }
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -223,89 +169,37 @@ pub(super) async fn get_active_turn_handler(
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = state
-        .app
-        .get_session(&shared_actor(&actor.0), &session_id)
+    let snapshot = state
+        .gateway
+        .get_active_turn(
+            &shared_actor(&actor.0),
+            SessionActiveTurnRequest { session_id },
+        )
         .await
-        .map_err(|err| {
-            ApiError::new(StatusCode::NOT_FOUND, "session_not_found", err.to_string())
-        })?;
+        .map_err(map_active_turn_error)?;
 
-    let active_turn = state
-        .events
-        .get_active_turn(&session_id)
-        .await
-        .map_err(|err| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "active_turn_failed",
-                err.to_string(),
-            )
-        })?;
-
-    Ok(Json(render_active_turn(&session_id, active_turn)))
+    let value = serde_json::to_value(snapshot).map_err(|err| {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "active_turn_serialize_failed",
+            format!("failed to serialize active turn snapshot: {err}"),
+        )
+    })?;
+    Ok(Json(value))
 }
 
-fn render_active_turn(
-    session_id: &str,
-    active_turn: Option<ActiveTurnRecord>,
-) -> serde_json::Value {
-    serde_json::to_value(map_active_turn_snapshot(session_id, active_turn))
-        .unwrap_or_else(|_| json!({ "session_id": session_id, "status": "failed" }))
-}
-
-fn map_active_turn_snapshot(
-    session_id: &str,
-    active_turn: Option<ActiveTurnRecord>,
-) -> TimelineActiveTurnSnapshot {
-    match active_turn {
-        Some(record) => TimelineActiveTurnSnapshot {
-            session_id: record.session_id,
-            turn_id: Some(record.turn_id),
-            message_id: record.message_id,
-            status: map_active_turn_status(record.status),
-            last_event_id: record.last_event_id.map(|value| value.to_string()),
-            pending_user_action: record.pending_user_action.map(map_pending_user_action),
-            updated_at: record.updated_at,
-        },
-        None => TimelineActiveTurnSnapshot {
-            session_id: session_id.to_string(),
-            turn_id: None,
-            message_id: None,
-            status: TimelineActiveTurnStatus::Completed,
-            last_event_id: None,
-            pending_user_action: None,
-            updated_at: chrono::Utc::now().timestamp_millis(),
-        },
-    }
-}
-
-fn map_active_turn_status(status: ActiveTurnStatus) -> TimelineActiveTurnStatus {
-    match status {
-        ActiveTurnStatus::Running => TimelineActiveTurnStatus::Running,
-        ActiveTurnStatus::WaitingUserAction => TimelineActiveTurnStatus::WaitingUserAction,
-        ActiveTurnStatus::Cancelling => TimelineActiveTurnStatus::Cancelling,
-        ActiveTurnStatus::Completed => TimelineActiveTurnStatus::Completed,
-        ActiveTurnStatus::Failed => TimelineActiveTurnStatus::Failed,
-    }
-}
-
-fn map_pending_user_action(action: PendingUserAction) -> TimelinePendingUserAction {
-    match action {
-        PendingUserAction::DynamicToolResult(pending) => {
-            TimelinePendingUserAction::DynamicToolResult(TimelinePendingDynamicToolResult {
-                item_id: pending.item_id,
-                call_id: pending.call_id,
-                tool_name: pending.tool_name,
-            })
-        }
-    }
-}
-
-fn map_timeline_cursor_status(status: ApplicationTimelineCursorStatus) -> TimelineCursorStatus {
-    match status {
-        ApplicationTimelineCursorStatus::Current => TimelineCursorStatus::Current,
-        ApplicationTimelineCursorStatus::FromBeginning => TimelineCursorStatus::FromBeginning,
+fn map_active_turn_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "session_not_found",
+            "session not found",
+        ),
+        other => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "active_turn_failed",
+            other.to_string(),
+        ),
     }
 }
 

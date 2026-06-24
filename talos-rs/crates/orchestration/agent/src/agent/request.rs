@@ -1,5 +1,5 @@
 use super::AgentHarness;
-use crate::service::{AgentRequest, OrchestratorRequest};
+use crate::service::{AgentKernelRequest, AgentRequest};
 use talos_agent_kernel::TurnPhase;
 use talos_skills::SkillSelector;
 use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning};
@@ -20,18 +20,7 @@ impl AgentHarness {
                 .iter()
                 .find(|m| m.id == selected_model)
             {
-                return ModelInfo {
-                    id: model.id.clone(),
-                    name: model.display_name().to_string(),
-                    provider: provider_name,
-                    context_window: model.context_window,
-                    reasoning: model.reasoning,
-                    reasoning_effort: model.reasoning_effort,
-                    speed: model.speed,
-                    input: model.input.clone(),
-                    cost: model.cost.clone(),
-                    compat: model.compat.clone(),
-                };
+                return ModelInfo::from_provider_model(provider_name, model.clone());
             }
         }
 
@@ -89,8 +78,8 @@ impl AgentHarness {
             .collect()
     }
 
-    pub(crate) fn to_agent_request(&self, request: OrchestratorRequest) -> AgentRequest {
-        AgentRequest {
+    pub(crate) fn to_agent_request(&self, request: AgentRequest) -> AgentKernelRequest {
+        AgentKernelRequest {
             session: request.session,
             input: request.input,
             phase: TurnPhase::Execution,
@@ -123,10 +112,10 @@ mod tests {
 
         assert_eq!(
             selections,
-            vec![SkillSelector::Selection {
-                name: "review".to_string(),
-                path: PathBuf::from("/tmp/review/SKILL.md"),
-            }]
+            vec![SkillSelector::selection(
+                "review",
+                PathBuf::from("/tmp/review/SKILL.md")
+            )]
         );
     }
 }

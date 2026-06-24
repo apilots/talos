@@ -2,7 +2,7 @@ use super::*;
 
 fn test_state_with_config_and_plugin_manager(
     config: talos_types::TalosConfig,
-    plugin_manager: talos_application_service::PluginManagerService,
+    plugin_manager: talos_service::PluginManagerService,
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
@@ -11,12 +11,12 @@ fn test_state_with_config_and_plugin_manager(
     let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
         InMemoryLlmConfigStore::new(config.llm.clone()),
     )));
-    let app = TalosApplicationService::new_with_session_store(
+    let session_service: Arc<dyn SessionService> = Arc::new(MockSessionService::default());
+    let app = TalosService::new_with_session_store(
         Arc::new(MockGateway),
-        Arc::new(SessionServiceRuntimeAdapter::new(Arc::new(
-            MockSessionService,
-        ))),
-        Arc::new(SessionStoreAdapter::new(Arc::new(MockSessionService))),
+        Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
+        Arc::new(SessionStoreAdapter::new(session_service)),
+        Arc::new(talos_store::project::MockProjectStore::new()),
         event_service.clone(),
         event_store,
         config.clone(),
@@ -28,12 +28,12 @@ fn test_state_with_config_and_plugin_manager(
     );
     let mut app = app;
     app.plugins = plugin_manager.clone();
-    app.skills = talos_application_service::SkillsService::new(
+    app.skills = talos_service::SkillsService::new(
         config.agent.kernel.skills.clone(),
         config.agent.kernel.plugins.clone(),
     )
     .with_plugin_manager(plugin_manager);
-    Arc::new(HttpApiState::from_application_service(
+    Arc::new(HttpApiState::from_service(
         Arc::new(app),
         event_service,
         config,
@@ -111,10 +111,10 @@ async fn test_models() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["data"][0]["id"], "qwen-plus");
-    assert_eq!(payload["data"][0]["provider"], "bailian");
-    assert_eq!(payload["data"][0]["context_window"], 32_768);
-    assert_eq!(payload["data"][0]["reasoning"], true);
+    assert_eq!(payload["models"][0]["id"], "qwen-plus");
+    assert_eq!(payload["models"][0]["provider"], "bailian");
+    assert_eq!(payload["models"][0]["context_window"], 32_768);
+    assert_eq!(payload["models"][0]["reasoning"], true);
 }
 
 #[tokio::test]
@@ -124,12 +124,12 @@ async fn test_list_sessions_handler_returns_data_array() {
     let response = list_sessions_handler(
         State(state),
         axum::extract::Extension(test_auth()),
-        Query(SessionQuery::default()),
+        Query(SessionListRequest::default()),
     )
     .await
     .expect("list sessions should succeed");
 
-    assert!(response.0["data"].is_array());
+    assert!(response.0["sessions"].is_array());
 }
 
 #[tokio::test]
@@ -157,7 +157,7 @@ async fn test_patch_session_handler_returns_success_ack() {
         Path("mock-session".to_string()),
         Json(
             serde_json::from_value(serde_json::json!({
-                "conf": {"agent.model": "qwen-plus"}
+                "conf": {"agent": {"model": "qwen-plus"}}
             }))
             .expect("patch request should deserialize"),
         ),
@@ -165,7 +165,7 @@ async fn test_patch_session_handler_returns_success_ack() {
     .await
     .expect("patch session should succeed");
 
-    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+    assert_eq!(response.0["session"]["id"], "mock-session");
 }
 
 #[tokio::test]
@@ -180,7 +180,7 @@ async fn test_close_session_handler_returns_success() {
     .await
     .expect("close session should succeed");
 
-    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+    assert!(response.0.success);
 }
 
 #[tokio::test]
@@ -210,8 +210,8 @@ async fn test_compact_session_handler_returns_session_payload() {
     .await
     .expect("compact session should succeed");
 
-    assert_eq!(response.0["context"]["session_id"], "mock-session");
-    assert_eq!(response.0["state"]["message_count"], 1);
+    assert_eq!(response.0["session"]["id"], "mock-session");
+    assert_eq!(response.0["session"]["message_count"], 1);
 }
 
 #[tokio::test]
@@ -226,9 +226,9 @@ async fn test_clear_session_handler_returns_reset_session_payload() {
     .await
     .expect("clear session should succeed");
 
-    assert_eq!(response.0["context"]["session_id"], "mock-session");
-    assert_eq!(response.0["state"]["message_count"], 0);
-    assert_eq!(response.0["state"]["usage"]["total_tokens"], 0);
+    assert_eq!(response.0["session"]["id"], "mock-session");
+    assert_eq!(response.0["session"]["message_count"], 0);
+    assert_eq!(response.0["session"]["usage"]["total_tokens"], 0);
 }
 
 #[tokio::test]
@@ -244,9 +244,9 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
     .await
     .expect("get workspace doc should succeed");
 
-    assert_eq!(response.0["kind"], "soul");
-    assert_eq!(response.0["exists"], serde_json::Value::Bool(false));
-    assert_eq!(response.0["content"], "");
+    assert_eq!(response.0["doc"]["kind"], "soul");
+    assert_eq!(response.0["doc"]["exists"], serde_json::Value::Bool(false));
+    assert_eq!(response.0["doc"]["content"], "");
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
@@ -293,7 +293,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("put memory file should succeed");
 
-    assert_eq!(put_response.0["date"], "2026-04-04");
+    assert_eq!(put_response.0["file"]["date"], "2026-04-04");
 
     let get_response = get_memory_file_handler(
         State(state.clone()),
@@ -303,7 +303,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("get memory file should succeed");
 
-    assert!(get_response.0["content"]
+    assert!(get_response.0["file"]["content"]
         .as_str()
         .unwrap()
         .contains("stable fact"));
@@ -321,18 +321,19 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
 }
 
 #[tokio::test]
-async fn test_http_and_app_server_adapters_share_application_service_contract() {
-    use talos_app_protocol::errors::VALIDATION_FAILED;
-    use talos_app_protocol::requests::{
-        ClientMethod, ClientRequest, ClientRequestParams, ConfigReadParams, MemoryFileReadParams,
-        ModelListParams, WorkspaceDocReadParams,
-    };
+async fn test_http_and_app_server_adapters_share_service_contract() {
+    use talos_app_protocol::errors::INVALID_PARAMS;
+    use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
+    use talos_types::{
+        ConfigGetRequest, MemoryFileReadRequest, ModelListRequest, WorkspaceDocKind,
+        WorkspaceDocReadRequest,
+    };
 
     let (config, workspace_dir) = isolated_test_config();
     let state = test_state_with_config(config, false);
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
-    let actor = talos_application_service::Actor::regular("static-token");
+    let actor = talos_service::Actor::regular("static-token");
 
     let put_response = put_memory_file_handler(
         State(state.clone()),
@@ -347,21 +348,21 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
     )
     .await
     .expect("HTTP memory write should succeed");
-    assert_eq!(put_response.0["date"], "2026-04-04");
+    assert_eq!(put_response.0["file"]["date"], "2026-04-04");
 
     let app_server_memory = adapter
         .dispatch(
             &actor,
             ClientRequest {
                 method: ClientMethod::MemoryFileRead,
-                params: ClientRequestParams::MemoryFileRead(MemoryFileReadParams {
+                params: ClientRequestParams::MemoryFileRead(MemoryFileReadRequest {
                     path: "2026-04-04.md".into(),
                 }),
             },
         )
         .await
         .expect("app-server memory read should use shared service");
-    assert!(app_server_memory["content"]
+    assert!(app_server_memory["file"]["content"]
         .as_str()
         .unwrap()
         .contains("shared service fact"));
@@ -371,15 +372,15 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
             &actor,
             ClientRequest {
                 method: ClientMethod::WorkspaceDocRead,
-                params: ClientRequestParams::WorkspaceDocRead(WorkspaceDocReadParams {
-                    kind: "soul".to_string(),
+                params: ClientRequestParams::WorkspaceDocRead(WorkspaceDocReadRequest {
+                    kind: WorkspaceDocKind::Soul,
                 }),
             },
         )
         .await
         .expect("app-server workspace read should use shared service");
     assert_eq!(
-        app_server_workspace["exists"],
+        app_server_workspace["doc"]["exists"],
         serde_json::Value::Bool(false)
     );
 
@@ -388,49 +389,42 @@ async fn test_http_and_app_server_adapters_share_application_service_contract() 
             &actor,
             ClientRequest {
                 method: ClientMethod::ModelList,
-                params: ClientRequestParams::ModelList(ModelListParams {}),
+                params: ClientRequestParams::ModelList(ModelListRequest::default()),
             },
         )
         .await
         .expect("app-server model list should use shared config service");
-    assert_eq!(models["data"][0]["id"], "qwen-plus");
+    assert_eq!(models["models"][0]["id"], "qwen-plus");
 
     let config = adapter
         .dispatch(
             &actor,
             ClientRequest {
-                method: ClientMethod::ConfigRead,
-                params: ClientRequestParams::ConfigRead(ConfigReadParams {}),
+                method: ClientMethod::ConfigGet,
+                params: ClientRequestParams::ConfigGet(ConfigGetRequest::default()),
             },
         )
         .await
-        .expect("app-server config read should use shared config service");
+        .expect("app-server config get should use shared config service");
     assert!(config["config"]["provider"].is_string());
 
-    let invalid_workspace_kind = adapter
-        .dispatch(
-            &actor,
-            ClientRequest {
-                method: ClientMethod::WorkspaceDocRead,
-                params: ClientRequestParams::WorkspaceDocRead(WorkspaceDocReadParams {
-                    kind: "unknown".to_string(),
-                }),
-            },
-        )
-        .await
-        .expect_err("app-server invalid workspace kind should fail");
-    assert_eq!(invalid_workspace_kind.code, VALIDATION_FAILED);
+    let invalid_workspace_kind = ClientRequest::decode(
+        "workspace.doc.read",
+        Some(serde_json::json!({ "kind": "unknown" })),
+    )
+    .expect_err("invalid workspace kind should fail at protocol decode");
+    assert_eq!(invalid_workspace_kind.code, INVALID_PARAMS);
 
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
 #[tokio::test]
-async fn test_plugin_http_and_app_server_adapters_share_application_service_contract() {
+async fn test_plugin_http_and_app_server_adapters_share_service_contract() {
     use talos_app_protocol::requests::{ClientMethod, ClientRequest, ClientRequestParams};
     use talos_app_server::{AppServerApplication, TalosApplicationAdapter};
-    use talos_application_service::PluginManagerService;
     use talos_config::PluginsRuntimeConfig;
     use talos_plugin::{PluginManager, PluginStateStore};
+    use talos_service::PluginManagerService;
     use talos_types::{
         MarketplaceSourceInput, PluginKind, PluginSearchRefreshPolicy, PluginSearchRequest,
         PluginSearchStatusFilter, PluginSourceAddRequest,
@@ -464,6 +458,7 @@ Use this skill for protocol contract verification.
 
     let added = add_plugin_source_handler(
         State(state.clone()),
+        axum::extract::Extension(test_auth()),
         Json(PluginSourceAddRequest {
             source: MarketplaceSourceInput::LocalFolder {
                 path: repo,
@@ -474,11 +469,11 @@ Use this skill for protocol contract verification.
     )
     .await
     .expect("HTTP plugin source add should succeed");
-    assert_eq!(added.0.plugins[0].name, "contract-skill");
+    assert_eq!(added.0.plugins[0].metadata.name, "contract-skill");
     assert!(added.0.warnings.is_empty());
 
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
-    let actor = talos_application_service::Actor::regular("static-token");
+    let actor = talos_service::Actor::regular("static-token");
     let app_server_search = adapter
         .dispatch(
             &actor,
@@ -497,7 +492,10 @@ Use this skill for protocol contract verification.
         .await
         .expect("app-server plugin search should use shared service");
 
-    assert_eq!(app_server_search["plugins"][0]["name"], "contract-skill");
+    assert_eq!(
+        app_server_search["plugins"][0]["metadata"]["name"],
+        "contract-skill"
+    );
     assert_eq!(
         app_server_search["warnings"].as_array().map(Vec::len),
         Some(0)
@@ -537,7 +535,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     .await
     .expect("search memory should succeed");
 
-    assert_eq!(response.0["data"][0]["path"], "memory/2026-04-04.md");
+    assert_eq!(response.0["results"][0]["path"], "memory/2026-04-04.md");
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 

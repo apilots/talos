@@ -6,10 +6,7 @@ use ts_rs::TS;
 use crate::errors::AppServerErrorBody;
 use crate::jsonrpc::JsonRpcMessage;
 use crate::notifications::ServerNotification;
-use crate::requests::{
-    ClientRequest, ClientRequestParams, EventSubscribeResponse, EventUnsubscribeResponse,
-    InitializeResponse, SessionHistoryResponse, TimelineRecoverySnapshot, TurnStartResponse,
-};
+use crate::requests::{ClientRequest, ClientRequestParams, InitializeResponse};
 use crate::server_requests::ServerRequest;
 
 pub fn json_value_schema(_generator: &mut schemars::gen::SchemaGenerator) -> Schema {
@@ -24,14 +21,24 @@ pub struct AppProtocolSchemaRoot {
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
+    pub start_turn_request: talos_types::StartTurnRequest,
+    pub start_turn_response: talos_types::StartTurnResponse,
+    pub retry_turn_request: talos_types::RetryTurnRequest,
+    pub retry_turn_response: talos_types::RetryTurnResponse,
+    pub interrupt_turn_request: talos_types::InterruptTurnRequest,
+    pub interrupt_turn_response: talos_types::InterruptTurnResponse,
+    pub submit_tool_result_request: talos_types::SubmitToolResultRequest,
+    pub submit_tool_result_response: talos_types::SubmitToolResultResponse,
+    pub subscribe_timeline_request: talos_types::SubscribeTimelineRequest,
+    pub subscribe_timeline_response: talos_types::SubscribeTimelineResponse,
+    pub recover_timeline_request: talos_types::RecoverTimelineRequest,
     pub timeline_event: talos_types::talos::TalosTimelineEvent,
     pub timeline_event_envelope: talos_types::talos::TimelineEventEnvelope,
     pub initialize_response: InitializeResponse,
-    pub turn_start_response: TurnStartResponse,
-    pub session_history_response: SessionHistoryResponse,
-    pub timeline_recovery_snapshot: TimelineRecoverySnapshot,
-    pub event_subscribe_response: EventSubscribeResponse,
-    pub event_unsubscribe_response: EventUnsubscribeResponse,
+    pub turn_start_response: talos_types::StartTurnResponse,
+    pub session_history_response: talos_types::SessionHistoryResponse,
+    pub timeline_recovery_response: talos_types::TimelineRecoveryResponse,
+    pub event_unsubscribe_response: talos_types::EventUnsubscribeResponse,
 }
 
 pub fn generate_json_schema() -> String {
@@ -63,83 +70,143 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
-    output.push_str(&export::<crate::requests::SessionListParams>());
-    output.push_str(&export::<crate::requests::SessionReadParams>());
-    output.push_str(&export::<crate::requests::SessionPatchParams>());
-    output.push_str(&export::<crate::requests::SessionDeleteParams>());
-    output.push_str(&export::<crate::requests::SessionCloseParams>());
-    output.push_str(&export::<crate::requests::SessionCompactParams>());
-    output.push_str(&export::<crate::requests::SessionClearParams>());
-    output.push_str(&export::<crate::requests::SessionActiveTurnParams>());
-    output.push_str(&export::<crate::requests::SessionHistoryParams>());
+    output.push_str(&export::<talos_types::SessionListRequest>());
+    output.push_str(&export::<talos_types::SessionListResponse>());
+    output.push_str(&export::<talos_types::SessionGetRequest>());
+    output.push_str(&export::<talos_types::SessionGetResponse>());
+    output.push_str(&export::<talos_types::SessionPatchRequest>());
+    output.push_str(&export::<talos_types::SessionUpdateResponse>());
+    output.push_str(&export::<talos_types::SessionDeleteRequest>());
+    output.push_str(&export::<talos_types::SessionDeleteResponse>());
+    output.push_str(&export::<talos_types::SessionCloseRequest>());
+    output.push_str(&export::<talos_types::SessionCloseResponse>());
+    output.push_str(&export::<talos_types::SessionCompactRequest>());
+    output.push_str(&export::<talos_types::SessionCompactResponse>());
+    output.push_str(&export::<talos_types::SessionClearRequest>());
+    output.push_str(&export::<talos_types::SessionClearResponse>());
+    output.push_str(&export::<talos_types::SessionInfo>());
+    output.push_str(&export::<talos_types::SessionActiveTurnRequest>());
+    output.push_str(&export::<talos_types::SessionActiveTurnResponse>());
+    output.push_str(&export::<talos_types::SessionHistoryRequest>());
+    output.push_str(&export::<talos_types::SessionHistoryResponse>());
     output.push_str(&export::<talos_types::talos::SessionHistorySnapshot>());
     output.push_str(&export::<talos_types::talos::SessionHistoryMessage>());
-    output.push_str(&export::<crate::requests::TimelineRecoveryParams>());
-    output.push_str(&export::<crate::requests::TimelineRecoverySnapshot>());
-    output.push_str(&export::<crate::requests::TimelineReplay>());
-    output.push_str(&export::<crate::requests::TimelineCursorStatus>());
-    output.push_str(&export::<crate::requests::TimelineActiveTurnSnapshot>());
-    output.push_str(&export::<crate::requests::TimelineActiveTurnStatus>());
-    output.push_str(&export::<crate::requests::TimelinePendingUserAction>());
-    output.push_str(&export::<crate::requests::TimelinePendingDynamicToolResult>());
-    output.push_str(&export::<crate::requests::ProjectCreateParams>());
-    output.push_str(&export::<crate::requests::ProjectListParams>());
-    output.push_str(&export::<crate::requests::ProjectReadParams>());
-    output.push_str(&export::<crate::requests::ProjectPatchParams>());
-    output.push_str(&export::<crate::requests::ProjectDeleteParams>());
-    output.push_str(&export::<crate::requests::FsDirectoryReadParams>());
-    output.push_str(&export::<crate::requests::FsDirectoryCreateParams>());
+    output.push_str(&export::<talos_types::TimelineRecoverySnapshot>());
+    output.push_str(&export::<talos_types::TimelineRecoveryResponse>());
+    output.push_str(&export::<talos_types::TimelineReplay>());
+    output.push_str(&export::<talos_types::TimelineCursorStatus>());
+    output.push_str(&export::<talos_types::TimelineActiveTurnSnapshot>());
+    output.push_str(&export::<talos_types::TimelineActiveTurnStatus>());
+    output.push_str(&export::<talos_types::TimelinePendingUserAction>());
+    output.push_str(&export::<talos_types::TimelinePendingDynamicToolResult>());
+    output.push_str(&export::<talos_types::ProjectCreateRequest>());
+    output.push_str(&export::<talos_types::ProjectCreateResponse>());
+    output.push_str(&export::<talos_types::ProjectListRequest>());
+    output.push_str(&export::<talos_types::ProjectListResponse>());
+    output.push_str(&export::<talos_types::ProjectReadRequest>());
+    output.push_str(&export::<talos_types::ProjectReadResponse>());
+    output.push_str(&export::<talos_types::ProjectPatchRequest>());
+    output.push_str(&export::<talos_types::ProjectPatchResponse>());
+    output.push_str(&export::<talos_types::ProjectDeleteRequest>());
+    output.push_str(&export::<talos_types::ProjectDeleteResponse>());
+    output.push_str(&export::<talos_types::ProjectInfo>());
+    output.push_str(&export::<talos_types::ProjectStatus>());
+    output.push_str(&export::<talos_types::ProjectStatusState>());
+    output.push_str(&export::<talos_types::ProjectUnavailableReason>());
+    output.push_str(&export::<talos_types::ProjectPatch>());
+    output.push_str(&export::<talos_types::FsDirectoryReadRequest>());
+    output.push_str(&export::<talos_types::FsDirectoryReadResponse>());
+    output.push_str(&export::<talos_types::FsDirectoryCreateRequest>());
     output.push_str(&export::<talos_types::FsDirectorySnapshot>());
     output.push_str(&export::<talos_types::FsDirectoryEntry>());
     output.push_str(&export::<talos_types::FsEntryKind>());
     output.push_str(&export::<talos_types::FsDirectoryCreateResponse>());
-    output.push_str(&export::<crate::requests::TurnStartParams>());
-    output.push_str(&export::<talos_types::talos::TalosMessageRequest>());
-    output.push_str(&export::<talos_types::talos::TalosMessageRetryRequest>());
+    output.push_str(&export::<talos_types::StartTurnRequest>());
+    output.push_str(&export::<talos_types::StartTurnResponse>());
+    output.push_str(&export::<talos_types::RetryTurnRequest>());
+    output.push_str(&export::<talos_types::RetryTurnResponse>());
+    output.push_str(&export::<talos_types::InterruptTurnRequest>());
+    output.push_str(&export::<talos_types::InterruptTurnResponse>());
+    output.push_str(&export::<talos_types::SubmitToolResultRequest>());
+    output.push_str(&export::<talos_types::SubmitToolResultResponse>());
+    output.push_str(&export::<talos_types::SubscribeTimelineRequest>());
+    output.push_str(&export::<talos_types::SubscribeTimelineResponse>());
+    output.push_str(&export::<talos_types::RecoverTimelineRequest>());
+    output.push_str(&export::<talos_types::TurnCommandStatus>());
     output.push_str(&export::<talos_types::talos::TalosContext>());
     output.push_str(&export::<talos_types::talos::TalosSourceType>());
     output.push_str(&export::<talos_types::talos::TalosProvider>());
     output.push_str(&export::<talos_types::talos::TalosSessionEnvironment>());
     output.push_str(&export::<talos_types::talos::TalosConnectionMode>());
     output.push_str(&export::<talos_types::talos::TalosInputItem>());
-    output.push_str(&export::<crate::requests::MessageCommandStatus>());
-    output.push_str(&export::<crate::requests::TurnStartResponse>());
-    output.push_str(&export::<crate::requests::TurnInterruptParams>());
-    output.push_str(&export::<crate::requests::TurnRetryParams>());
-    output.push_str(&export::<crate::requests::EventSubscribeParams>());
-    output.push_str(&export::<crate::requests::EventSubscribeResponse>());
-    output.push_str(&export::<crate::requests::EventUnsubscribeParams>());
-    output.push_str(&export::<crate::requests::EventUnsubscribeResponse>());
-    output.push_str(&export::<crate::requests::ToolDynamicResultSubmitParams>());
-    output.push_str(&export::<crate::requests::ModelListParams>());
-    output.push_str(&export::<crate::requests::ConfigReadParams>());
-    output.push_str(&export::<crate::requests::ConfigValueWriteParams>());
-    output.push_str(&export::<crate::requests::ConfigBatchWriteParams>());
-    output.push_str(&export::<crate::requests::ConfigReloadParams>());
-    output.push_str(&export::<crate::requests::MemoryFileListParams>());
-    output.push_str(&export::<crate::requests::MemoryFileReadParams>());
-    output.push_str(&export::<crate::requests::MemoryFileWriteParams>());
-    output.push_str(&export::<crate::requests::WorkspaceDocListParams>());
-    output.push_str(&export::<crate::requests::WorkspaceDocReadParams>());
-    output.push_str(&export::<crate::requests::WorkspaceDocWriteParams>());
-    output.push_str(&export::<crate::requests::WorkspaceInfoParams>());
-    output.push_str(&export::<crate::requests::WorkspaceInfoResponse>());
-    output.push_str(&export::<crate::requests::SkillsListRequest>());
-    output.push_str(&export::<crate::requests::SkillsRefreshRequest>());
-    output.push_str(&export::<crate::requests::SkillsSuggestRequest>());
-    output.push_str(&export::<crate::requests::SkillsReadRequest>());
-    output.push_str(&export::<crate::requests::SkillsResolveRequest>());
-    output.push_str(&export::<crate::requests::ProtocolSkillSelector>());
-    output.push_str(&export::<crate::requests::ProtocolSkillScope>());
-    output.push_str(&export::<crate::requests::ProtocolSkillMetadata>());
-    output.push_str(&export::<crate::requests::ProtocolSkillSummary>());
-    output.push_str(&export::<crate::requests::ProtocolSkillSuggestion>());
-    output.push_str(&export::<crate::requests::ProtocolSkillLoadError>());
-    output.push_str(&export::<crate::requests::ProtocolSkillDocument>());
-    output.push_str(&export::<crate::requests::ProtocolSkillWarning>());
-    output.push_str(&export::<crate::requests::SkillsListResponse>());
-    output.push_str(&export::<crate::requests::SkillsSuggestResponse>());
-    output.push_str(&export::<crate::requests::SkillsResolveResponse>());
+    output.push_str(&export::<talos_types::talos::TalosOutputItem>());
+    output.push_str(&export::<talos_types::talos::TalosReasoning>());
+    output.push_str(&export::<talos_types::EventUnsubscribeRequest>());
+    output.push_str(&export::<talos_types::EventUnsubscribeResponse>());
+    output.push_str(&export::<talos_types::ModelListRequest>());
+    output.push_str(&export::<talos_types::ModelListResponse>());
+    output.push_str(&export::<talos_types::ModelInfo>());
+    output.push_str(&export::<talos_types::LlmConfig>());
+    output.push_str(&export::<talos_types::LlmProviderConfig>());
+    output.push_str(&export::<talos_types::LlmModelConfig>());
+    output.push_str(&export::<talos_types::LlmProtocol>());
+    output.push_str(&export::<talos_types::LlmReasoningEffort>());
+    output.push_str(&export::<talos_types::LlmModelSpeed>());
+    output.push_str(&export::<talos_types::LlmModelInputKind>());
+    output.push_str(&export::<talos_types::LlmModelCost>());
+    output.push_str(&export::<talos_types::LlmModelCompat>());
+    output.push_str(&export::<talos_types::LlmThinkingFormat>());
+    output.push_str(&export::<talos_types::ConfigGetRequest>());
+    output.push_str(&export::<talos_types::ConfigGetResponse>());
+    output.push_str(&export::<talos_types::ConfigUpdateRequest>());
+    output.push_str(&export::<talos_types::ConfigUpdateResponse>());
+    output.push_str(&export::<talos_types::ConfigDeleteRequest>());
+    output.push_str(&export::<talos_types::ConfigDeleteResponse>());
+    output.push_str(&export::<talos_types::ConfigReloadRequest>());
+    output.push_str(&export::<talos_types::ConfigReloadResponse>());
+    output.push_str(&export::<talos_types::ConfigValue>());
+    output.push_str(&export::<talos_types::ModelReadiness>());
+    output.push_str(&export::<talos_types::ProviderKeyStatus>());
+    output.push_str(&export::<talos_types::ExpectedFileVersion>());
+    output.push_str(&export::<talos_types::DocUpdateRequest>());
+    output.push_str(&export::<talos_types::MemoryFileListRequest>());
+    output.push_str(&export::<talos_types::MemoryFileListResponse>());
+    output.push_str(&export::<talos_types::MemoryFileReadRequest>());
+    output.push_str(&export::<talos_types::MemoryFileReadResponse>());
+    output.push_str(&export::<talos_types::MemoryFileWriteRequest>());
+    output.push_str(&export::<talos_types::MemoryFileWriteResponse>());
+    output.push_str(&export::<talos_types::MemoryFileSummary>());
+    output.push_str(&export::<talos_types::MemoryFileDetail>());
+    output.push_str(&export::<talos_types::MemorySearchResult>());
+    output.push_str(&export::<talos_types::MemorySearchResponse>());
+    output.push_str(&export::<talos_types::WorkspaceDocListRequest>());
+    output.push_str(&export::<talos_types::WorkspaceDocListResponse>());
+    output.push_str(&export::<talos_types::WorkspaceDocReadRequest>());
+    output.push_str(&export::<talos_types::WorkspaceDocReadResponse>());
+    output.push_str(&export::<talos_types::WorkspaceDocWriteRequest>());
+    output.push_str(&export::<talos_types::WorkspaceDocWriteResponse>());
+    output.push_str(&export::<talos_types::WorkspaceInfoRequest>());
+    output.push_str(&export::<talos_types::WorkspaceInfoResponse>());
+    output.push_str(&export::<talos_types::WorkspaceDocKind>());
+    output.push_str(&export::<talos_types::WorkspaceDocSummary>());
+    output.push_str(&export::<talos_types::WorkspaceDocInfo>());
+    output.push_str(&export::<talos_types::SkillsListRequest>());
+    output.push_str(&export::<talos_types::SkillsRefreshRequest>());
+    output.push_str(&export::<talos_types::SkillsSuggestRequest>());
+    output.push_str(&export::<talos_types::SkillsReadRequest>());
+    output.push_str(&export::<talos_types::SkillsResolveRequest>());
+    output.push_str(&export::<talos_types::SkillSelector>());
+    output.push_str(&export::<talos_types::SkillScope>());
+    output.push_str(&export::<talos_types::SkillMetadata>());
+    output.push_str(&export::<talos_types::SkillSummary>());
+    output.push_str(&export::<talos_types::SkillSuggestion>());
+    output.push_str(&export::<talos_types::SkillLoadError>());
+    output.push_str(&export::<talos_types::SkillDocument>());
+    output.push_str(&export::<talos_types::SkillWarning>());
+    output.push_str(&export::<talos_types::SkillsListResponse>());
+    output.push_str(&export::<talos_types::SkillsReadResponse>());
+    output.push_str(&export::<talos_types::SkillsSuggestResponse>());
+    output.push_str(&export::<talos_types::SkillsResolveResponse>());
     output.push_str(&export::<talos_types::PluginSourceListRequest>());
     output.push_str(&export::<talos_types::PluginSourceListResponse>());
     output.push_str(&export::<talos_types::PluginSourceAddRequest>());
@@ -155,6 +222,12 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::PluginListRequest>());
     output.push_str(&export::<talos_types::PluginListResponse>());
     output.push_str(&export::<talos_types::PluginListStatusFilter>());
+    output.push_str(&export::<talos_types::PluginReadRequest>());
+    output.push_str(&export::<talos_types::PluginReadResponse>());
+    output.push_str(&export::<talos_types::PluginDocument>());
+    output.push_str(&export::<talos_types::PluginDocumentRef>());
+    output.push_str(&export::<talos_types::PluginDocumentRole>());
+    output.push_str(&export::<talos_types::PluginDocumentMediaType>());
     output.push_str(&export::<talos_types::PluginInstallRequest>());
     output.push_str(&export::<talos_types::PluginInstallResponse>());
     output.push_str(&export::<talos_types::PluginInstallTarget>());
@@ -175,18 +248,34 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::MarketplaceSourceKind>());
     output.push_str(&export::<talos_types::MarketplaceSourceLocation>());
     output.push_str(&export::<talos_types::Plugin>());
+    output.push_str(&export::<talos_types::PluginMetadata>());
     output.push_str(&export::<talos_types::PluginId>());
     output.push_str(&export::<talos_types::PluginKind>());
     output.push_str(&export::<talos_types::PluginStatus>());
     output.push_str(&export::<talos_types::PluginInstall>());
     output.push_str(&export::<talos_types::PluginInstallId>());
     output.push_str(&export::<talos_types::PluginInstallSource>());
-    output.push_str(&export::<talos_types::FileManifest>());
-    output.push_str(&export::<talos_types::FileEntry>());
+    output.push_str(&export::<talos_types::ContentDigest>());
+    output.push_str(&export::<talos_types::ContentDigestAlgorithm>());
     output.push_str(&export::<talos_types::PluginDefinition>());
     output.push_str(&export::<talos_types::SkillPlugin>());
     output.push_str(&export::<talos_types::McpServerPlugin>());
-    output.push_str(&export::<talos_types::McpServerTransportKind>());
+    output.push_str(&export::<talos_types::McpServerDefinition>());
+    output.push_str(&export::<talos_types::McpTransportDefinition>());
+    output.push_str(&export::<talos_types::McpTransportKind>());
+    output.push_str(&export::<talos_types::McpServerRuntimeDescriptor>());
+    output.push_str(&export::<talos_types::McpServerSource>());
+    output.push_str(&export::<talos_types::McpServerSnapshot>());
+    output.push_str(&export::<talos_types::McpServerStatus>());
+    output.push_str(&export::<talos_types::McpToolDescriptor>());
+    output.push_str(&export::<talos_types::McpResourceDescriptor>());
+    output.push_str(&export::<talos_types::McpResourceTemplateDescriptor>());
+    output.push_str(&export::<talos_types::McpCallToolRequest>());
+    output.push_str(&export::<talos_types::McpCallToolResponse>());
+    output.push_str(&export::<talos_types::McpContent>());
+    output.push_str(&export::<talos_types::McpResourceContents>());
+    output.push_str(&export::<talos_types::McpReadResourceRequest>());
+    output.push_str(&export::<talos_types::McpReadResourceResponse>());
     output.push_str(&export::<talos_types::PackagePlugin>());
     output.push_str(&export::<talos_types::PackageKind>());
     output.push_str(&export::<talos_types::FeaturePlugin>());
@@ -196,28 +285,30 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::PluginWarning>());
     output.push_str(&export::<talos_types::PluginWarningCode>());
     output.push_str(&export::<talos_types::PluginConflictReason>());
-    output.push_str(&export::<crate::requests::AppListParams>());
-    output.push_str(&export::<crate::requests::ToolListParams>());
-    output.push_str(&export::<crate::requests::AuthLogoutParams>());
+    output.push_str(&export::<talos_types::AuthLogoutRequest>());
+    output.push_str(&export::<talos_types::AuthLogoutResponse>());
     output.push_str(&export::<talos_auth::CloudLoginClientKind>());
     output.push_str(&export::<talos_auth::CloudLoginStartRequest>());
     output.push_str(&export::<talos_auth::CloudLoginStartResponse>());
     output.push_str(&export::<talos_auth::CloudLoginStatusRequest>());
     output.push_str(&export::<talos_auth::CloudLoginStatusResponse>());
     output.push_str(&export::<talos_auth::CloudLoginCancelRequest>());
-    output.push_str(&export::<crate::requests::AuthSessionReadParams>());
-    output.push_str(&export::<crate::requests::AuthSessionReadResponse>());
-    output.push_str(&export::<crate::requests::AuthSessionStoreParams>());
-    output.push_str(&export::<crate::requests::AuthSessionClearParams>());
-    output.push_str(&export::<crate::requests::AuthSessionSnapshot>());
-    output.push_str(&export::<crate::requests::AuthSessionUserSnapshot>());
-    output.push_str(&export::<crate::requests::UserCurrentParams>());
-    output.push_str(&export::<crate::requests::MemorySearchParams>());
+    output.push_str(&export::<talos_types::CloudLoginCancelResponse>());
+    output.push_str(&export::<talos_types::AuthSessionReadRequest>());
+    output.push_str(&export::<talos_types::AuthSessionReadResponse>());
+    output.push_str(&export::<talos_types::AuthSessionClearRequest>());
+    output.push_str(&export::<talos_types::AuthSessionClearResponse>());
+    output.push_str(&export::<talos_types::AuthSessionSnapshot>());
+    output.push_str(&export::<talos_types::AuthSessionUserSnapshot>());
+    output.push_str(&export::<talos_types::UserCurrentRequest>());
+    output.push_str(&export::<talos_types::UserCurrentResponse>());
+    output.push_str(&export::<talos_types::MemorySearchRequest>());
     output.push_str(&export::<talos_auth::UserRole>());
     output.push_str(&export::<talos_auth::UserDto>());
-    output.push_str(&export::<talos_auth::Capabilities>());
-    output.push_str(&export::<crate::requests::OptionalStringPatch>());
-    output.push_str(&export::<crate::requests::OptionalPathPatch>());
+    output.push_str(&export::<talos_types::OptionalProjectIdPatch>());
+    output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
+    output.push_str(&export::<talos_types::SessionConf>());
+    output.push_str(&export::<talos_types::SessionAgentConf>());
     output.push_str(&export::<crate::requests::ProtocolTalosContext>());
     output.push_str(&export::<talos_types::talos::TalosTimelineEvent>());
     output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
@@ -242,7 +333,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosTurnMetricsEvent>());
     output.push_str(&export::<talos_types::talos::TalosTurnCompletedEvent>());
     output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
-    output.push_str(&export::<talos_types::talos::TalosJsonValue>());
+    output.push_str(&export::<talos_types::talos::JsonContentValue>());
+    output.push_str(&export::<talos_types::talos::ToolArguments>());
+    output.push_str(&export::<talos_types::talos::DynamicToolArguments>());
+    output.push_str(&export::<talos_types::talos::ToolExecutionResult>());
     output.push_str(&export::<talos_types::talos::TalosContentItem>());
     output.push_str(&export::<talos_types::talos::TalosToolTaskStatus>());
     output.push_str(&export::<talos_types::talos::TalosToolFileDiff>());
@@ -268,6 +362,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcErrorResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcMessage>());
+    output.truncate(output.trim_end().len());
+    output.push('\n');
     output
 }
 

@@ -1,8 +1,17 @@
+mod config;
+mod fs;
 pub mod gateway;
-pub mod r#trait;
-pub mod types;
+pub mod gateway_service;
+mod memory;
+mod model;
+mod plugin;
+mod project;
 
-pub use gateway::GatewayImpl;
-pub use r#trait::Gateway;
-pub use talos_types::talos::TalosInputItem;
-pub use types::{GatewayRequest, GatewayResponse};
+mod session;
+mod skills;
+mod turn;
+mod user_auth;
+mod workspace;
+
+pub use gateway::Gateway;
+pub use gateway_service::ServiceGateway;

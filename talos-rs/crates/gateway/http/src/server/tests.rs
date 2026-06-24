@@ -2,47 +2,88 @@ use super::*;
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, Request, StatusCode};
+use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use serde_json::Value;
-use talos_application_service::TalosApplicationService;
-use talos_auth::{
-    AuthResponse, AuthService, LoginRequest, RegisterRequest, RequestIdentity, UserDto, UserService,
-};
+use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::Gateway;
-use talos_gateway::GatewayRequest;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_session_store::{
+use talos_service::{TalosService, TurnExecutor};
+use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_store::project::MockProjectStore;
+use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
-    IdempotencyReservation, IdempotencyStatus, MessageCommandAck, MessageIdempotencyStore,
-    PendingDynamicToolResult, PendingUserAction, SessionStore, TimelineEventId,
-    TimelineEventRetentionConfig, TimelineEventService, TimelineEventStore,
+    IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
+    PendingDynamicToolResult, PendingUserAction, SessionPatchAck, SessionQuery, SessionRecord,
+    SessionStore, TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent,
-    TalosMessageRequest, TalosOutputItem, TalosReasoning, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
-    TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
+    StopReason, TalosContext, TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
+    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
+    TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
 };
-use talos_types::{
-    ModelInfo, ProjectPatch, ProjectRecord, SessionConf, SessionPatch, SessionPatchAck,
-    SessionQuery, SessionRecord, SessionRuntime, SessionService, TalosSession,
-};
+use talos_types::{ModelInfo, SessionConf, SessionListRequest, SessionPatch, TalosSession};
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
 use crate::server::messages::{
-    retry_message_attempt_handler, session_message_handler, submit_message_command,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
+    submit_dynamic_tool_result_handler,
 };
 use crate::server::misc::get_llm_handler;
 
 #[path = "tests/support.rs"]
 mod support;
 use support::*;
+
+#[async_trait]
+trait SessionService: Send + Sync {
+    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
+        Ok("default".to_string())
+    }
+
+    async fn create_session(
+        &self,
+        context: TalosContext,
+        model: Option<String>,
+        conf: Option<SessionConf>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
+    ) -> TalosResult<TalosSession>;
+
+    async fn list_sessions(&self, request: SessionListRequest) -> TalosResult<Vec<TalosSession>>;
+
+    async fn count_sessions(&self, request: SessionListRequest) -> TalosResult<usize>;
+
+    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
+
+    async fn patch_session(
+        &self,
+        session_id: &str,
+        patch: SessionPatch,
+    ) -> TalosResult<SessionPatchAck>;
+
+    async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
+
+    async fn close_session(&self, session_id: &str) -> TalosResult<()>;
+
+    async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
+
+    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
+
+    async fn submit_dynamic_tool_result(
+        &self,
+        session_id: &str,
+        call_id: &str,
+        tool_name: &str,
+        output: String,
+        success: bool,
+    ) -> TalosResult<()>;
+}
 
 fn test_model_info() -> ModelInfo {
     ModelInfo {
@@ -80,7 +121,7 @@ fn test_state_with_lifecycle(
     let event_store = Arc::new(RecordingEventStore::default());
     build_test_state_with_lifecycle(
         Arc::new(MockGateway),
-        Arc::new(MockSessionService),
+        Arc::new(MockSessionService::default()),
         event_service_from_store(event_store.clone()),
         event_store,
         test_config(),
@@ -93,7 +134,7 @@ fn test_state_with_lifecycle(
 }
 
 fn build_test_state_with_lifecycle(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     session_service: Arc<dyn SessionService>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
@@ -108,7 +149,7 @@ fn build_test_state_with_lifecycle(
         InMemoryLlmConfigStore::new(base_config.llm.clone()),
     )));
     build_test_state_with_lifecycle_and_config(
-        gateway,
+        turn_executor,
         session_service,
         event_service,
         idempotency_store,
@@ -124,7 +165,7 @@ fn build_test_state_with_lifecycle(
 }
 
 fn build_test_state_with_lifecycle_and_config(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     session_service: Arc<dyn SessionService>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
@@ -137,10 +178,11 @@ fn build_test_state_with_lifecycle_and_config(
     llm_config_service: Arc<dyn LlmConfigService>,
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
-    let app = Arc::new(TalosApplicationService::new_with_session_store(
-        gateway,
+    let app = Arc::new(TalosService::new_with_session_store(
+        turn_executor,
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
+        Arc::new(MockProjectStore::new()),
         event_service.clone(),
         idempotency_store,
         base_config.clone(),
@@ -150,7 +192,7 @@ fn build_test_state_with_lifecycle_and_config(
         auth_service.clone(),
         user_service,
     ));
-    Arc::new(HttpApiState::from_application_service(
+    Arc::new(HttpApiState::from_service(
         app,
         event_service,
         base_config,
@@ -172,7 +214,7 @@ fn test_state_with_config(
     let event_store = Arc::new(RecordingEventStore::default());
     build_test_state_with_lifecycle(
         Arc::new(MockGateway),
-        Arc::new(MockSessionService),
+        Arc::new(MockSessionService::default()),
         event_service_from_store(event_store.clone()),
         event_store,
         config,
@@ -207,7 +249,7 @@ fn test_state_with_event_store(
 }
 
 fn test_state_with_gateway_event_store_config(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
@@ -216,7 +258,7 @@ fn test_state_with_gateway_event_store_config(
         InMemoryLlmConfigStore::new(config.llm.clone()),
     )));
     test_state_with_gateway_event_store_config_and_lifecycle(
-        gateway,
+        turn_executor,
         auth_disabled,
         store,
         config,
@@ -244,36 +286,49 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
         self.service.resolve_target_agent(context).await
     }
 
-    async fn compact_session(&self, session_id: &str) -> talos_error::TalosResult<TalosSession> {
-        self.service.compact_session(session_id).await
+    async fn compact_session(
+        &self,
+        _session: TalosSession,
+    ) -> talos_error::TalosResult<talos_types::TalosUsage> {
+        Ok(talos_types::TalosUsage::default())
     }
 
-    async fn clear_session(&self, session_id: &str) -> talos_error::TalosResult<TalosSession> {
-        self.service.clear_session(session_id).await
+    async fn clear_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
-    async fn close_session(&self, session_id: &str) -> talos_error::TalosResult<()> {
-        self.service.close_session(session_id).await
+    async fn close_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
+        self.service
+            .close_session(&session.context.session_id)
+            .await
     }
 
-    async fn delete_session(&self, session_id: &str) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
+    async fn prepare_delete_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
-    async fn cancel_active_turn(&self, session_id: &str) -> talos_error::TalosResult<()> {
-        self.service.cancel_active_turn(session_id).await
+    async fn cancel_active_turn(&self, session: TalosSession) -> talos_error::TalosResult<()> {
+        self.service
+            .cancel_active_turn(&session.context.session_id)
+            .await
     }
 
     async fn submit_dynamic_tool_result(
         &self,
-        session_id: &str,
+        session: TalosSession,
         call_id: &str,
         tool_name: &str,
         output: String,
         success: bool,
     ) -> talos_error::TalosResult<()> {
         self.service
-            .submit_dynamic_tool_result(session_id, call_id, tool_name, output, success)
+            .submit_dynamic_tool_result(
+                &session.context.session_id,
+                call_id,
+                tool_name,
+                output,
+                success,
+            )
             .await
     }
 }
@@ -297,57 +352,13 @@ impl SessionStoreAdapter {
 
 #[async_trait::async_trait]
 impl SessionStore for SessionStoreAdapter {
-    async fn create_session(
+    async fn insert_session_record(
         &self,
-        session_id: Option<&str>,
-        context: &TalosContext,
+        _record: &SessionRecord,
         _agent_id: &str,
-        _default_model: &str,
-        requested_model: Option<&str>,
-        conf: Option<SessionConf>,
-        _dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> talos_error::TalosResult<SessionRecord> {
-        let session = self
-            .service
-            .create_session(
-                context.clone(),
-                requested_model.map(str::to_string),
-                conf,
-                project_id,
-                current_directory,
-            )
-            .await?;
-        let mut record = self.to_record(session)?;
-        if let Some(session_id) = session_id {
-            record.id = session_id.to_string();
-        }
-        Ok(record)
-    }
-
-    async fn resolve_or_create_session(
-        &self,
-        context: &TalosContext,
-        agent_id: &str,
-        default_model: &str,
-        requested_model: Option<&str>,
-        dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> talos_error::TalosResult<SessionRecord> {
-        self.create_session(
-            None,
-            context,
-            agent_id,
-            default_model,
-            requested_model,
-            None,
-            dm_scope,
-            project_id,
-            current_directory,
-        )
-        .await
+        _scope: &str,
+    ) -> talos_error::TalosResult<()> {
+        Ok(())
     }
 
     async fn get_session_record(
@@ -365,103 +376,44 @@ impl SessionStore for SessionStoreAdapter {
         query: &SessionQuery,
     ) -> talos_error::TalosResult<Vec<SessionRecord>> {
         let mut records = Vec::new();
-        for session in self.service.list_sessions(query.clone()).await? {
+        for session in self
+            .service
+            .list_sessions(SessionListRequest {
+                project_id: query.project_id.clone(),
+                limit: query.limit,
+                offset: query.offset,
+            })
+            .await?
+        {
             records.push(self.to_record(session)?);
         }
         Ok(records)
     }
 
     async fn count_session_records(&self, query: &SessionQuery) -> talos_error::TalosResult<usize> {
-        self.service.count_sessions(query.clone()).await
-    }
-
-    async fn patch_session_record(
-        &self,
-        session_id: &str,
-        patch: &SessionPatch,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.patch_session(session_id, patch.clone()).await
-    }
-
-    async fn reset_session_record(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
-    }
-
-    async fn delete_session_record(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<SessionPatchAck> {
-        self.service.delete_session(session_id).await
-    }
-
-    async fn update_session_title(
-        &self,
-        _session_id: &str,
-        _title: &str,
-    ) -> talos_error::TalosResult<()> {
-        Ok(())
-    }
-
-    async fn record_session_progress(
-        &self,
-        _session_id: &str,
-        _message_delta: u64,
-        _usage: &talos_types::talos::TalosUsage,
-        _model: Option<&str>,
-    ) -> talos_error::TalosResult<()> {
-        Ok(())
-    }
-
-    async fn list_projects(&self) -> talos_error::TalosResult<Vec<ProjectRecord>> {
-        self.service.list_projects().await
-    }
-
-    async fn get_project(
-        &self,
-        project_id: &str,
-    ) -> talos_error::TalosResult<Option<ProjectRecord>> {
-        self.service.get_project(project_id).await
-    }
-
-    async fn create_project(
-        &self,
-        name: &str,
-        directory: &std::path::PathBuf,
-    ) -> talos_error::TalosResult<ProjectRecord> {
         self.service
-            .create_project(name.to_string(), directory.clone(), String::new())
+            .count_sessions(SessionListRequest {
+                project_id: query.project_id.clone(),
+                limit: query.limit,
+                offset: query.offset,
+            })
             .await
     }
 
-    async fn create_project_for_owner(
+    async fn update_session_record(
         &self,
-        name: &str,
-        directory: &std::path::PathBuf,
-        user_id: &str,
-    ) -> talos_error::TalosResult<ProjectRecord> {
-        self.service
-            .create_project(name.to_string(), directory.clone(), user_id.to_string())
-            .await
+        _record: &SessionRecord,
+    ) -> talos_error::TalosResult<bool> {
+        Ok(true)
     }
 
-    async fn patch_project(
-        &self,
-        project_id: &str,
-        patch: &ProjectPatch,
-    ) -> talos_error::TalosResult<Option<ProjectRecord>> {
-        self.service.patch_project(project_id, patch.clone()).await
-    }
-
-    async fn delete_project(&self, project_id: &str) -> talos_error::TalosResult<()> {
-        self.service.delete_project(project_id).await
+    async fn delete_session_record(&self, session_id: &str) -> talos_error::TalosResult<bool> {
+        Ok(self.service.delete_session(session_id).await?.success)
     }
 }
 
 fn test_state_with_gateway_event_store_config_and_lifecycle(
-    gateway: Arc<dyn Gateway>,
+    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
@@ -470,8 +422,8 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     build_test_state_with_lifecycle_and_config(
-        gateway,
-        Arc::new(MockSessionService),
+        turn_executor,
+        Arc::new(MockSessionService::default()),
         event_service_from_store(store.clone()),
         store,
         config,
@@ -639,7 +591,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
             turn_id: turn_id.to_string(),
             message_id: None,
             status: IdempotencyStatus::Pending,
-            ack: None,
+            result: None,
             created_at: now_ms,
             updated_at: now_ms,
             expires_at: expires_at_ms,
@@ -654,7 +606,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
         idempotency_key: &str,
         status: IdempotencyStatus,
         message_id: Option<&str>,
-        ack: &MessageCommandAck,
+        result: &MessageCommandResult,
         now_ms: i64,
     ) -> TalosResult<()> {
         let mut records = self.idempotency_records.lock().unwrap();
@@ -662,7 +614,7 @@ impl MessageIdempotencyStore for RecordingEventStore {
         if let Some(record) = records.get_mut(&key) {
             record.status = status;
             record.message_id = message_id.map(ToString::to_string);
-            record.ack = Some(ack.clone());
+            record.result = Some(result.clone());
             record.updated_at = now_ms;
         }
         Ok(())
@@ -710,18 +662,6 @@ impl FakeAuthService {
 
 #[async_trait]
 impl AuthService for FakeAuthService {
-    async fn register(&self, _input: RegisterRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError(
-            "local auth is not available in tests".to_string(),
-        ))
-    }
-
-    async fn login(&self, _input: LoginRequest) -> TalosResult<AuthResponse> {
-        Err(TalosError::AuthError(
-            "local auth is not available in tests".to_string(),
-        ))
-    }
-
     async fn logout(&self, _actor: &RequestIdentity) -> TalosResult<()> {
         Ok(())
     }
@@ -730,7 +670,13 @@ impl AuthService for FakeAuthService {
         if token == "reject" {
             return Err(TalosError::AuthError("invalid token".to_string()));
         }
-        Ok(RequestIdentity::mock_admin(token).with_access_token(token))
+        Ok(RequestIdentity {
+            user_id: token.to_string(),
+            username: None,
+            role: talos_auth::UserRole::User,
+            auth_disabled: false,
+            access_token: Some(token.to_string()),
+        })
     }
 }
 
@@ -749,7 +695,13 @@ fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
 }
 
 fn test_auth() -> RequestIdentity {
-    RequestIdentity::mock_admin("static-token")
+    RequestIdentity {
+        user_id: "static-token".to_string(),
+        username: None,
+        role: talos_auth::UserRole::User,
+        auth_disabled: false,
+        access_token: None,
+    }
 }
 
 #[path = "tests/active_turn.rs"]

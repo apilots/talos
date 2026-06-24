@@ -29,8 +29,7 @@ use tracing::{error, info};
 
 use self::auth::{auth_middleware, lifecycle_gate_middleware};
 use self::auth_session::{
-    cancel_cloud_login_handler, clear_auth_session_handler, cloud_login_status_handler,
-    read_auth_session_handler, start_cloud_login_handler, store_auth_session_handler,
+    cancel_cloud_login_handler, cloud_login_status_handler, start_cloud_login_handler,
 };
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
@@ -42,14 +41,15 @@ use self::memory_files::{
     search_memory_files_handler,
 };
 use self::messages::{
-    retry_message_attempt_handler, session_message_handler, submit_dynamic_tool_result_handler,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
+    submit_dynamic_tool_result_handler,
 };
 use self::misc::{
     get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
-    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler,
+    install_plugin_handler, list_plugin_sources_handler, list_plugins_handler, read_plugin_handler,
     refresh_plugin_source_handler, remove_plugin_source_handler, search_plugins_handler,
     uninstall_plugin_handler, update_plugin_handler,
 };
@@ -58,9 +58,8 @@ use self::projects::{
     patch_project_handler,
 };
 use self::sessions::{
-    cancel_active_turn_handler, clear_session_handler, close_session_handler,
-    compact_session_handler, delete_session_handler, get_session_handler,
-    get_session_history_handler, list_sessions_handler, patch_session_handler,
+    clear_session_handler, close_session_handler, compact_session_handler, delete_session_handler,
+    get_session_handler, get_session_history_handler, list_sessions_handler, patch_session_handler,
 };
 use self::skills::{
     list_skills_handler, read_skill_handler, refresh_skills_handler, resolve_skills_handler,
@@ -72,15 +71,15 @@ use self::workspace_docs::{
     get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
     put_workspace_doc_handler,
 };
-use talos_application_service::TalosApplicationService;
 use talos_auth::AuthService;
 use talos_error::TalosResult;
-use talos_session_store::TimelineEventService;
+use talos_service::TalosService;
+use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
 
 /// HTTP Server for the Talos Gateway.
 pub struct HttpServer {
-    application_service: Arc<TalosApplicationService>,
+    service: Arc<TalosService>,
     #[cfg(test)]
     event_service: Arc<TimelineEventService>,
     auth_service: Arc<dyn AuthService>,
@@ -95,7 +94,7 @@ pub struct HttpServer {
 impl HttpServer {
     /// Create a new HTTP server instance.
     pub fn new(
-        application_service: Arc<TalosApplicationService>,
+        service: Arc<TalosService>,
         event_service: Arc<TimelineEventService>,
         auth_service: Arc<dyn AuthService>,
         base_config: TalosConfig,
@@ -105,7 +104,7 @@ impl HttpServer {
         #[cfg(not(test))]
         let _ = event_service;
         Self {
-            application_service,
+            service,
             #[cfg(test)]
             event_service,
             auth_service,
@@ -150,13 +149,13 @@ impl HttpServer {
     pub async fn run_with_shutdown(&self, shutdown: CancellationToken) -> TalosResult<()> {
         info!("Starting HTTP server on {}:{}", self.host, self.port);
         let gc_shutdown = shutdown.clone();
-        let app_events_for_gc = self.application_service.events.clone();
+        let app_events_for_gc = self.service.events.clone();
         let gc_task = tokio::spawn(async move {
             app_events_for_gc.run_event_log_gc_loop(gc_shutdown).await;
         });
 
-        let state = Arc::new(HttpApiState::from_application_service(
-            self.application_service.clone(),
+        let state = Arc::new(HttpApiState::from_service(
+            self.service.clone(),
             #[cfg(test)]
             self.event_service.clone(),
             self.base_config.clone(),
@@ -172,12 +171,6 @@ impl HttpServer {
             .route("/v1/auth/login/start", post(start_cloud_login_handler))
             .route("/v1/auth/login/status", get(cloud_login_status_handler))
             .route("/v1/auth/login/cancel", post(cancel_cloud_login_handler))
-            .route(
-                "/v1/auth/session",
-                get(read_auth_session_handler)
-                    .post(store_auth_session_handler)
-                    .delete(clear_auth_session_handler),
-            )
             .route("/v1/user", get(current_user_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
             .route(
@@ -217,6 +210,7 @@ impl HttpServer {
             )
             .route("/v1/plugin/search", post(search_plugins_handler))
             .route("/v1/plugin/list", post(list_plugins_handler))
+            .route("/v1/plugin/read", post(read_plugin_handler))
             .route("/v1/plugin/install", post(install_plugin_handler))
             .route("/v1/plugin/update", post(update_plugin_handler))
             .route("/v1/plugin/uninstall", post(uninstall_plugin_handler))
@@ -258,10 +252,6 @@ impl HttpServer {
                 post(close_session_handler),
             )
             .route(
-                "/v1/sessions/:session_id/cancel",
-                post(cancel_active_turn_handler),
-            )
-            .route(
                 "/v1/sessions/:session_id/compact",
                 post(compact_session_handler),
             )
@@ -269,16 +259,11 @@ impl HttpServer {
                 "/v1/sessions/:session_id/clear",
                 post(clear_session_handler),
             )
+            .route("/v1/turns/start", post(start_turn_handler))
+            .route("/v1/turns/retry", post(retry_turn_handler))
+            .route("/v1/turns/interrupt", post(interrupt_turn_handler))
             .route(
-                "/v1/sessions/:session_id/messages",
-                post(session_message_handler),
-            )
-            .route(
-                "/v1/sessions/:session_id/message-attempts",
-                post(retry_message_attempt_handler),
-            )
-            .route(
-                "/v1/sessions/:session_id/dynamic-tool-results",
+                "/v1/tools/dynamic-results/submit",
                 post(submit_dynamic_tool_result_handler),
             )
             .with_state(state.clone())

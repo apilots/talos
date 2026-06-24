@@ -34,7 +34,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, ProtocolSkillSuggestion, TalosSession, TalosTimelineItem, TimelineEventEnvelope,
+    ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
 };
 use talos_types::talos::{TalosUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -73,9 +73,9 @@ fn format_session_timestamp(timestamp_ms: u64) -> String {
     local_dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
-pub(crate) fn session_list_label(session: &TalosSession) -> String {
+pub(crate) fn session_list_label(session: &SessionInfo) -> String {
     let title = session.title.trim();
-    let time_text = format_session_timestamp(session.state.last_activity);
+    let time_text = format_session_timestamp(session.last_activity);
     format!(" {}  {}", title, time_text)
 }
 
@@ -113,7 +113,7 @@ pub struct TuiApp {
     pub(crate) received_output_delta: bool,
     pub(crate) active_message: Option<String>,
     pub(crate) active_message_raw: Option<String>,
-    pub(crate) active_message_skills: Vec<ProtocolSkillSuggestion>,
+    pub(crate) active_message_skills: Vec<SkillSuggestion>,
     pub(crate) active_retry_count: u8,
     pub(crate) active_user_idx: Option<usize>,
     pub(crate) transcript: TranscriptState,
@@ -137,7 +137,7 @@ pub struct TuiApp {
     pub(crate) stream_started_at: Option<Instant>,
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
-    pub(crate) history_sessions: Vec<TalosSession>,
+    pub(crate) history_sessions: Vec<SessionInfo>,
     pub(crate) history_selected: usize,
     pub(crate) show_model_picker: bool,
     pub(crate) model_picker_selected: usize,
@@ -150,9 +150,9 @@ pub struct TuiApp {
     pub(crate) command_autocomplete_selected: usize,
     pub(crate) command_input_buffer: String,
     pub(crate) show_skill_autocomplete: bool,
-    pub(crate) skill_suggestions: Vec<ProtocolSkillSuggestion>,
+    pub(crate) skill_suggestions: Vec<SkillSuggestion>,
     pub(crate) skill_autocomplete_selected: usize,
-    pub(crate) selected_skills: Vec<ProtocolSkillSuggestion>,
+    pub(crate) selected_skills: Vec<SkillSuggestion>,
     pub(crate) close_in_progress: bool,
     pub(crate) close_started_at: Option<Instant>,
     pub(crate) close_timeout_reported: bool,

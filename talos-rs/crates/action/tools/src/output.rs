@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::{TalosContentItem, TalosJsonValue};
+use talos_types::talos::{JsonContentValue, TalosContentItem};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -155,7 +155,7 @@ impl ToolOutputPayload {
             success: true,
             structured_content: Some(structured_content.clone()),
             content_items: vec![TalosContentItem::Json {
-                value: TalosJsonValue::from(structured_content),
+                value: JsonContentValue::from(structured_content),
             }],
         })
     }
@@ -166,7 +166,7 @@ impl ToolOutputPayload {
             success: true,
             structured_content: Some(value.clone()),
             content_items: vec![TalosContentItem::Json {
-                value: TalosJsonValue::from(value),
+                value: JsonContentValue::from(value),
             }],
         }
     }
@@ -381,7 +381,7 @@ impl ToolOutputPayload {
                     "content": content,
                 })),
                 content_items: vec![TalosContentItem::Json {
-                    value: TalosJsonValue::from(serde_json::json!({
+                    value: JsonContentValue::from(serde_json::json!({
                         "uri": uri,
                         "mime_type": mime_type,
                         "content": content,

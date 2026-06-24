@@ -1,19 +1,19 @@
 import { createElectronAppServerClient, type DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import type {
   AppProtocol,
+  ConfigGetResponse,
+  ConfigUpdateResponse,
   DocUpdateRequest,
   LlmConfig,
-  LlmConfigRead,
-  MemoryFileListParams,
-  MemorySearchParams,
-  SessionQuery,
-  SessionUpdate,
-  TalosMessageAck,
-  TalosMessageRequest,
-  TalosMessageRetryRequest,
-  TalosSessionHistorySnapshot,
+  MemoryFileListRequest,
+  MemorySearchQuery,
+  RetryTurnRequest,
+  StartTurnRequest,
+  StartTurnResponse,
+  SessionListRequest,
+  SessionPatchRequest,
   TimelineEventEnvelope,
-  TimelineRecoverySnapshot,
+  TimelineRecoveryResponse,
   WorkspaceDocKind,
 } from "@talos/sdk-core";
 
@@ -43,40 +43,26 @@ export function createDesktopTalosClient(
   });
 
   const turns = {
-    start: async (sessionId: string, request: TalosMessageRequest): Promise<TalosMessageAck> => {
-      return client.startTurn({
-        session_id: sessionId,
-        request: toProtocolMessageRequest(request),
-        client_request_id: createClientRequestId(),
-      });
+    start: async (request: AppProtocol.StartTurnRequest): Promise<StartTurnResponse> => {
+      return client.startTurn(
+        toProtocolStartTurnRequest(request, request.client_request_id ?? createClientRequestId()),
+      );
     },
     startWithIdempotencyKey: async (
-      sessionId: string,
-      request: TalosMessageRequest,
+      request: AppProtocol.StartTurnRequest,
       idempotencyKey: string,
-    ): Promise<TalosMessageAck> => {
-      return client.startTurn({
-        session_id: sessionId,
-        request: toProtocolMessageRequest(request),
-        client_request_id: idempotencyKey,
-      });
+    ): Promise<StartTurnResponse> => {
+      return client.startTurn(toProtocolStartTurnRequest(request, idempotencyKey));
     },
-    retry: (sessionId: string, request: TalosMessageRetryRequest) =>
-      client.retryTurn({
-        session_id: sessionId,
-        request: toProtocolRetryRequest(request),
-      }),
+    retry: (request: AppProtocol.RetryTurnRequest) =>
+      client.retryTurn(request),
     retryWithIdempotencyKey: (
-      sessionId: string,
-      request: TalosMessageRetryRequest,
+      request: AppProtocol.RetryTurnRequest,
       idempotencyKey: string,
     ) =>
       client.retryTurn({
-        session_id: sessionId,
-        request: toProtocolRetryRequest({
-          ...request,
-          client_message_id: idempotencyKey,
-        }),
+        ...request,
+        client_message_id: idempotencyKey,
       }),
     events: (
       sessionId: string,
@@ -103,17 +89,15 @@ export function createDesktopTalosClient(
       }
     }, undefined, afterEventId ?? null, true, true),
     startEvents: (
-      sessionId: string,
-      request: TalosMessageRequest,
+      request: StartTurnRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-    ) => startTurnAndStream(client, sessionId, request, onEvent, signal),
+    ) => startTurnAndStream(client, request, onEvent, signal),
     retryEvents: (
-      sessionId: string,
-      request: TalosMessageRetryRequest,
+      request: RetryTurnRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-    ) => retryTurnAndStream(client, sessionId, request, onEvent, signal),
+    ) => retryTurnAndStream(client, request, onEvent, signal),
   };
 
   return {
@@ -124,74 +108,89 @@ export function createDesktopTalosClient(
       current: () => client.getCurrentUser(),
     },
     llm: {
-      get: (): Promise<LlmConfigRead> => client.getLlmConfig(),
-      update: (config: LlmConfig): Promise<LlmConfigRead> => client.updateLlmConfig(config),
+      get: (): Promise<ConfigGetResponse> => client.getLlmConfig(),
+      update: (config: LlmConfig): Promise<ConfigUpdateResponse> => client.updateLlmConfig(config),
     },
     models: {
       list: () => client.listModels(),
     },
     sessions: {
-      list: (query?: SessionQuery) =>
+      list: (query?: SessionListRequest) =>
         client.listSessions({
           project_id: query?.project_id ?? null,
           limit: query?.limit ?? null,
           offset: query?.offset ?? null,
         }),
-      get: (sessionId: string) => client.getSession(sessionId),
-      patch: (sessionId: string, update: SessionUpdate) =>
+      get: (request: Parameters<TalosWebClient["sessions"]["get"]>[0]) =>
+        client.getSession(request),
+      patch: (request: SessionPatchRequest) =>
         client.patchSession({
-          session_id: sessionId,
-          project_id: toProtocolProjectPatch(update.project_id),
-          current_directory: toProtocolDirectoryPatch(update.current_directory),
-          model: update.conf?.agent?.model ?? null,
-        }).then(() => undefined),
-      close: (sessionId: string) =>
-        client.closeSession(sessionId).then(() => undefined),
-      delete: (sessionId: string) => client.deleteSession(sessionId).then(() => undefined),
-      cancel: (sessionId: string) => client.interruptTurn(sessionId).then(() => undefined),
-      compact: (sessionId: string) => client.compactSession(sessionId),
-      clear: (sessionId: string) => client.clearSession(sessionId),
-      activeTurn: (sessionId: string) => client.getActiveTurn(sessionId),
-      history: (sessionId: string): Promise<TalosSessionHistorySnapshot> =>
-        client.getSessionHistory(sessionId),
+          session_id: request.session_id,
+          conf: toProtocolSessionConf(request.conf),
+          project_id: toProtocolProjectPatch(request.project_id),
+          current_directory: toProtocolDirectoryPatch(request.current_directory),
+        }),
+      close: (request: Parameters<TalosWebClient["sessions"]["close"]>[0]) =>
+        client.closeSession(request),
+      delete: (request: Parameters<TalosWebClient["sessions"]["delete"]>[0]) =>
+        client.deleteSession(request),
+      cancel: (request: Parameters<TalosWebClient["sessions"]["cancel"]>[0]) =>
+        client.interruptTurn(request),
+      compact: (request: Parameters<TalosWebClient["sessions"]["compact"]>[0]) =>
+        client.compactSession(request),
+      clear: (request: Parameters<TalosWebClient["sessions"]["clear"]>[0]) =>
+        client.clearSession(request),
+      activeTurn: (request: Parameters<TalosWebClient["sessions"]["activeTurn"]>[0]) =>
+        client.getActiveTurn(request),
+      history: (
+        request: Parameters<TalosWebClient["sessions"]["history"]>[0],
+      ) =>
+        client.getSessionHistory(request),
       recover: (
-        sessionId: string,
-        afterEventId?: string,
-        replayLimit?: number,
-      ): Promise<TimelineRecoverySnapshot> =>
-        client.recoverSession(sessionId, afterEventId ?? null, replayLimit ?? null),
+        request: Parameters<TalosWebClient["sessions"]["recover"]>[0],
+      ): Promise<TimelineRecoveryResponse> =>
+        client.recoverSession({
+          session_id: request.session_id,
+          after_event_id: request.after_event_id ?? null,
+          replay_limit: request.replay_limit ?? null,
+        }),
     },
     projects: {
-      list: () => client.listProjects(),
-      get: (projectId: string) => client.getProject(projectId),
+      list: () => client.listProjects({}),
+      get: (request: Parameters<TalosWebClient["projects"]["get"]>[0]) =>
+        client.getProject(request),
       create: (body: Parameters<TalosWebClient["projects"]["create"]>[0]) =>
-        client.createProject(body.name, body.directory),
-      patch: (
-        projectId: string,
-        patch: Parameters<TalosWebClient["projects"]["patch"]>[1],
-      ) => client.patchProject(projectId, patch),
-      delete: (projectId: string) => client.deleteProject(projectId).then(() => undefined),
+        client.createProject(body),
+      patch: (request: Parameters<TalosWebClient["projects"]["patch"]>[0]) =>
+        client.patchProject(request),
+      delete: (request: Parameters<TalosWebClient["projects"]["delete"]>[0]) =>
+        client.deleteProject(request),
     },
     fs: {
       directory: {
-        read: (query?: { path?: string | null }) => client.readFsDirectory(query?.path ?? null),
+        read: (query?: { path?: string | null }) =>
+          client.readFsDirectory({ path: query?.path ?? null }),
         create: (body: { parent: string; name: string }) =>
-          client.createFsDirectory(body.parent, body.name),
+          client.createFsDirectory(body),
       },
     },
     memory: {
-      list: (query?: MemoryFileListParams) => client.listMemoryFiles(query?.limit),
+      list: (query?: MemoryFileListRequest) => client.listMemoryFiles(query?.limit ?? undefined),
       get: (date: string) => client.readMemoryFile(date),
       put: (date: string, request: DocUpdateRequest) =>
-        client.writeMemoryFile(date, request.content, expectedVersionToken(request)),
-      search: (query: MemorySearchParams) => client.searchMemory(query.q, query.limit),
+        client
+          .writeMemoryFile(date, request.content, expectedVersionToken(request))
+          .then((response) => response),
+      search: (query: MemorySearchQuery) => client.searchMemory(query.q, query.limit),
     },
     workspaceDocs: {
       info: () => client.getWorkspaceInfo(),
       list: () => client.listWorkspaceDocs(),
       get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
-        client.writeWorkspaceDoc(kind, request.content, expectedVersionToken(request)),
+        client
+          .writeWorkspaceDoc(kind, request.content, expectedVersionToken(request))
+          .then((response) => response),
     },
     skills: {
       list: (query?: Parameters<TalosWebClient["skills"]["list"]>[0]) => client.listSkills(query),
@@ -236,22 +235,21 @@ export function createDesktopTalosClient(
 
 async function startTurnAndStream(
   client: ReturnType<typeof createElectronAppServerClient>,
-  sessionId: string,
-  request: TalosMessageRequest,
+  request: StartTurnRequest,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
   const clientRequestId = createClientRequestId();
-  const ack = await client.startTurn({
-    session_id: sessionId,
-    request: toProtocolMessageRequest(request),
-    client_request_id: clientRequestId,
-  });
+  const protocolRequest = toProtocolStartTurnRequest(
+    request as AppProtocol.StartTurnRequest,
+    request.client_request_id ?? clientRequestId,
+  );
+  const ack = await client.startTurn(protocolRequest);
   if (!ack.message_id) {
     throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
   }
 
-  await streamUntilTerminal(client, sessionId, signal, async (event, stop) => {
+  await streamUntilTerminal(client, request.session_id, signal, async (event, stop) => {
     const envelope = toTimelineEnvelope(event);
     if (envelope.message_id === ack.message_id) {
       onEvent(envelope);
@@ -264,20 +262,16 @@ async function startTurnAndStream(
 
 async function retryTurnAndStream(
   client: ReturnType<typeof createElectronAppServerClient>,
-  sessionId: string,
-  request: TalosMessageRetryRequest,
+  request: RetryTurnRequest,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
 ): Promise<void> {
-  const ack = await client.retryTurn({
-    session_id: sessionId,
-    request: toProtocolRetryRequest(request),
-  });
+  const ack = await client.retryTurn(request as AppProtocol.RetryTurnRequest);
   if (!ack.message_id) {
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
   }
 
-  await streamUntilTerminal(client, sessionId, signal, async (event, stop) => {
+  await streamUntilTerminal(client, request.session_id, signal, async (event, stop) => {
     const envelope = toTimelineEnvelope(event);
     if (envelope.message_id === ack.message_id) {
       onEvent(envelope);
@@ -420,19 +414,19 @@ function isTerminalEvent(event: TimelineEventEnvelope): boolean {
 }
 
 function toProtocolProjectPatch(
-  patch: SessionUpdate["project_id"] | undefined | null,
-): AppProtocol.OptionalStringPatch | null {
+  patch: SessionPatchRequest["project_id"] | undefined | null,
+): AppProtocol.OptionalProjectIdPatch | null {
   if (!patch) {
     return null;
   }
   return patch.type === "set"
-    ? { type: "set", value: patch.project_id }
+    ? { type: "set", project_id: patch.project_id }
     : { type: "clear" };
 }
 
 function toProtocolDirectoryPatch(
-  patch: SessionUpdate["current_directory"] | undefined | null,
-): AppProtocol.OptionalPathPatch | null {
+  patch: SessionPatchRequest["current_directory"] | undefined | null,
+): AppProtocol.OptionalCurrentDirectoryPatch | null {
   if (!patch) {
     return null;
   }
@@ -441,10 +435,27 @@ function toProtocolDirectoryPatch(
     : { type: "clear" };
 }
 
-function toProtocolMessageRequest(request: TalosMessageRequest): AppProtocol.TalosMessageRequest {
+function toProtocolSessionConf(
+  conf: SessionPatchRequest["conf"] | undefined | null,
+): AppProtocol.SessionConf | null {
+  if (!conf) {
+    return null;
+  }
   return {
-    input: request.input as AppProtocol.TalosInputItem[],
-    workspace_id: request.workspace_id ?? null,
+    agent: conf.agent
+      ? {
+          model: conf.agent.model ?? null,
+        }
+      : null,
+  };
+}
+
+function toProtocolStartTurnRequest(
+  request: AppProtocol.StartTurnRequest,
+  clientRequestId: string,
+): AppProtocol.StartTurnRequest {
+  return {
+    ...request,
     context: request.context
       ? ({
           ...request.context,
@@ -454,21 +465,11 @@ function toProtocolMessageRequest(request: TalosMessageRequest): AppProtocol.Tal
           project_root: null,
           environment: request.context.environment ?? null,
         } as AppProtocol.TalosContext)
-      : null,
-    model: request.model ?? null,
-    project_id: request.project_id ?? null,
-    current_directory: request.current_directory ?? null,
+      : undefined,
+    client_request_id: clientRequestId,
   };
 }
 
-function toProtocolRetryRequest(request: TalosMessageRetryRequest): AppProtocol.TalosMessageRetryRequest {
-  return {
-    input: request.input as AppProtocol.TalosInputItem[],
-    workspace_id: request.workspace_id ?? null,
-    client_message_id: request.client_message_id,
-    retry_of_message_id: request.retry_of_message_id,
-  };
-}
 
 function expectedVersionToken(request: DocUpdateRequest): string | null {
   return request.base_version.mode === "match" ? request.base_version.version_token : null;

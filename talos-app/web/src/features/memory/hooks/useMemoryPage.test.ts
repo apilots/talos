@@ -51,41 +51,49 @@ describe("useMemoryPage helpers", () => {
 
     const today = getTodayDateString();
 
-    listMemoryFiles.mockResolvedValue([
-      {
+    listMemoryFiles.mockResolvedValue({
+      data: [
+        {
+          date: today,
+          path: `memory/${today}.md`,
+          section_count: 1,
+          updated_at: 1776393847462,
+          version_token: "token-1",
+        },
+      ],
+    });
+
+    getMemoryFile.mockResolvedValue({
+      file: {
         date: today,
         path: `memory/${today}.md`,
         section_count: 1,
+        content: "# Existing memory",
         updated_at: 1776393847462,
         version_token: "token-1",
       },
-    ]);
-
-    getMemoryFile.mockResolvedValue({
-      date: today,
-      path: `memory/${today}.md`,
-      section_count: 1,
-      content: "# Existing memory",
-      updated_at: 1776393847462,
-      version_token: "token-1",
     });
 
-    searchMemory.mockResolvedValue([
-      {
-        path: `memory/${today}.md`,
-        snippet: "Talos architecture memory result",
-        start_line: 1,
-        end_line: 4,
-      },
-    ]);
+    searchMemory.mockResolvedValue({
+      results: [
+        {
+          path: `memory/${today}.md`,
+          snippet: "Talos architecture memory result",
+          start_line: 1,
+          end_line: 4,
+        },
+      ],
+    });
 
     putMemoryFile.mockResolvedValue({
-      date: today,
-      path: `memory/${today}.md`,
-      section_count: 1,
-      content: "# Updated memory",
-      updated_at: 1776393847462,
-      version_token: "token-2",
+      file: {
+        date: today,
+        path: `memory/${today}.md`,
+        section_count: 1,
+        content: "# Updated memory",
+        updated_at: 1776393847462,
+        version_token: "token-2",
+      },
     });
   });
 

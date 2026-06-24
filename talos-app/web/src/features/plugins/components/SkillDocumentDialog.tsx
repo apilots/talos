@@ -1,21 +1,24 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FileText, Loader2, X } from "lucide-react";
-import type { ProtocolSkillSummary } from "@talos/sdk-browser";
+import { useTranslation } from "react-i18next";
+import type { PluginDocument, SkillSummary } from "@talos/sdk-browser";
 
-import { readSkillDocument } from "@/features/plugins/api";
-import { MarkdownRenderer } from "@/widgets/message-list/MarkdownRenderer";
+import { readLocalSkill } from "@/features/plugins/api";
+import { skillTitle } from "@/features/plugins/lib/pluginDisplay";
+import { PluginDocumentBody } from "./PluginDocumentBody";
 
 interface SkillDocumentDialogProps {
-  skill: ProtocolSkillSummary | null;
+  skill: SkillSummary | null;
   onClose: () => void;
 }
 
 export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps) {
+  const { t } = useTranslation("plugins");
   const documentQuery = useQuery({
     enabled: Boolean(skill),
     queryKey: ["talos", "skills", "document", skill?.path],
-    queryFn: () => readSkillDocument(skill as ProtocolSkillSummary),
+    queryFn: () => readLocalSkill(skill as SkillSummary),
   });
 
   useEffect(() => {
@@ -35,28 +38,38 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
     return null;
   }
 
-  const title = skill.metadata?.display_name ?? titleFromName(skill.name);
-  const contents = stripFrontmatter(documentQuery.data?.contents ?? "");
+  const readSkill = documentQuery.data?.document.summary ?? skill;
+  const document = documentQuery.data
+    ? skillDocumentToPluginDocument(documentQuery.data.document.contents, readSkill.path)
+    : null;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px]">
-      <button aria-label="Close skill document" className="absolute inset-0 cursor-default" onClick={onClose} />
+    <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
+      <button
+        aria-label={t("dialog.closeSkillBackdrop")}
+        className="absolute inset-0 cursor-default"
+        onClick={onClose}
+        type="button"
+      />
       <section className="relative flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[1.1rem] border border-border bg-background shadow-[0_24px_80px_rgba(34,28,20,0.22)]">
         <header className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
           <div className="flex min-w-0 items-start gap-3">
-            <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[0.8rem] bg-card text-brand">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-[0.7rem] bg-card text-brand">
               <FileText size={18} />
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-ink">{title}</h2>
+              <h2 className="truncate text-lg font-semibold text-ink">{skillTitle(readSkill)}</h2>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
-                <span className="rounded-full bg-card px-2 py-0.5 capitalize">{skill.scope}</span>
-                <span className="min-w-0 truncate">{skill.path}</span>
+                <span className="rounded-full bg-card px-2 py-0.5">{t("localSkills.heading")}</span>
+                {readSkill.read_only ? (
+                  <span className="rounded-full bg-card px-2 py-0.5">{t("localSkills.readOnly")}</span>
+                ) : null}
+                <span className="min-w-0 truncate">{compactHomePath(readSkill.path)}</span>
               </div>
             </div>
           </div>
           <button
-            aria-label="Close"
+            aria-label={t("dialog.closeSkill")}
             className="flex size-9 shrink-0 items-center justify-center rounded-[0.7rem] text-muted transition hover:bg-card hover:text-ink"
             onClick={onClose}
             type="button"
@@ -68,17 +81,18 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
           {documentQuery.isLoading ? (
             <div className="flex h-40 items-center justify-center gap-2 text-sm text-muted">
               <Loader2 className="animate-spin" size={16} />
-              Loading SKILL.md
+              {t("dialog.loadingSkill")}
             </div>
           ) : documentQuery.isError ? (
             <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
-              Failed to load SKILL.md.
+              {t("dialog.failedLoadSkill")}
             </div>
+          ) : document ? (
+            <PluginDocumentBody document={document} />
           ) : (
-            <MarkdownRenderer
-              className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-p:leading-[1.8]"
-              text={contents}
-            />
+            <div className="rounded-[0.8rem] border border-border bg-card px-4 py-3 text-sm text-muted">
+              {t("dialog.noSkillDocument")}
+            </div>
           )}
         </div>
       </section>
@@ -86,21 +100,19 @@ export function SkillDocumentDialog({ skill, onClose }: SkillDocumentDialogProps
   );
 }
 
-function titleFromName(name: string) {
-  return name
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(" ");
+function skillDocumentToPluginDocument(contents: string, path: string): PluginDocument {
+  return {
+    role: "primary",
+    path,
+    title: "SKILL.md",
+    media_type: "markdown",
+    contents,
+  };
 }
 
-function stripFrontmatter(contents: string) {
-  if (!contents.startsWith("---")) {
-    return contents;
+function compactHomePath(path: string) {
+  if (typeof window === "undefined") {
+    return path;
   }
-  const end = contents.indexOf("\n---", 3);
-  if (end < 0) {
-    return contents;
-  }
-  return contents.slice(end + 4).trimStart();
+  return path.replace(/^\/Users\/[^/]+/, "~");
 }

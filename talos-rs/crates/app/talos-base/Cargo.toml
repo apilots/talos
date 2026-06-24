@@ -9,14 +9,14 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
-talos-application-service = { workspace = true }
+talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }
 talos-channel = { workspace = true }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-error = { workspace = true }
 talos-app-server = { workspace = true }
-talos-gateway = { workspace = true }
+talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
 talos-llm-anthropic = { workspace = true }
 talos-llm-bailian = { workspace = true }
@@ -24,7 +24,9 @@ talos-llm-openai = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }
-talos-session-store = { path = "../../orchestration/session-store" }
+talos-store = { workspace = true }
+talos-skills = { workspace = true }
 talos-storage = { workspace = true }
+talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }

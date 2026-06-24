@@ -1,9 +1,7 @@
-mod callbacks;
 mod contents_builder;
 mod execution;
 mod general_turn;
 mod planner;
-mod plugin;
 mod processor;
 mod session;
 mod timeline;
@@ -12,12 +10,6 @@ mod traits;
 mod types;
 mod warnings;
 
-use std::sync::Arc;
-
-pub use callbacks::{
-    AfterModelCallback, AfterToolCallback, BeforeModelCallback, BeforeToolCallback,
-    CallbackControl, CallbackKind, CallbackRegistry, ToolCallbackPayload,
-};
 pub use contents_builder::ContentsBuilder;
 pub use execution::ReplayToolInvocation;
 pub use execution::{
@@ -43,7 +35,6 @@ pub use general_turn::{
     StreamingToolExecutionConfig,
 };
 pub use planner::BuiltInPlanner;
-pub use plugin::{InvocationPluginManager, PluginRegistry};
 pub use processor::{
     AgentTransferRequestProcessor, BasicRequestProcessor, ContentsRequestProcessor,
     EventProjectionProcessor, InstructionsRequestProcessor, PlanningRequestProcessor,
@@ -62,7 +53,7 @@ pub use tool_execution::{
     StreamingToolScheduler, ToolExecutionContext, ToolExecutionInput, ToolExecutionOutput,
     ToolExecutor, ToolExecutorFactory,
 };
-pub use traits::{Planner, Plugin};
+pub use traits::Planner;
 pub use types::{
     AgentRunResult, AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ContextStateBags,
@@ -82,7 +73,3 @@ pub use warnings::{
     PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
     PromptDynamicSectionDroppedWarning,
 };
-
-pub fn default_plugin_manager() -> Arc<InvocationPluginManager> {
-    Arc::new(InvocationPluginManager::new())
-}

@@ -1,7 +1,7 @@
 //! Demo to validate Agent with Tool Integration
 
 use std::sync::Arc;
-use talos_agent::{AgentHarness, AgentOrchestrator, OrchestratorRequest};
+use talos_agent::{Agent, AgentHarness, AgentRequest};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test the agent's message handling
     println!("\n3. Testing agent message handling:");
     match agent
-        .run(OrchestratorRequest {
+        .run(AgentRequest {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
                 user_id: "demo-user".to_string(),

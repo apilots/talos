@@ -2,7 +2,6 @@ use chrono::Utc;
 use talos_error::TalosError;
 use talos_llm_provider::ChatMessage;
 use tempfile::TempDir;
-use tokio::fs;
 
 use crate::Memory;
 use crate::TalosMessageRole;
@@ -446,9 +445,11 @@ async fn test_transcript_records_roundtrip_from_jsonl_artifacts() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].header.id, "transcript-1");
 
-    let session_files = std::fs::read_dir(_guard.path().join("sessions").join("s1"))
+    let session_files = talos_fs::read_directory(&_guard.path().join("sessions").join("s1"))
+        .expect("session dir should read")
         .expect("session dir should exist")
-        .map(|entry| entry.expect("dir entry should load").path())
+        .into_iter()
+        .map(|entry| entry.path)
         .collect::<Vec<_>>();
     assert_eq!(session_files.len(), 1);
     assert_eq!(
@@ -731,8 +732,9 @@ async fn test_append_workspace_memory_creates_daily_file_on_first_write() {
         .expect("first append should succeed");
 
     let file_path = store.workspace_memory_file_for(timestamp);
-    let content = fs::read_to_string(file_path)
+    let content = talos_fs::read_file(&file_path)
         .await
+        .expect("workspace memory file should read after first append")
         .expect("workspace memory file should exist after first append");
 
     assert!(content.contains("first memory entry"));
@@ -759,8 +761,9 @@ async fn test_append_workspace_memory_dedupes_duplicate_records() {
         .expect("second append should dedupe");
 
     let file_path = store.workspace_memory_file_for(record.timestamp);
-    let content = fs::read_to_string(file_path)
+    let content = talos_fs::read_file(&file_path)
         .await
+        .expect("workspace memory file should read")
         .expect("workspace memory file should exist");
     let occurrences = content.matches("user prefers tea over coffee").count();
     assert_eq!(occurrences, 1);

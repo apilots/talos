@@ -13,7 +13,7 @@ export type ReasoningLevel = "low" | "medium" | "high" | "extra_high";
 export type ThreadFilter = "all" | "running" | "done" | "error";
 export type SessionUiStatus = "running" | "done" | "error";
 
-export interface ProjectRecord {
+export interface ProjectView {
   id: string;
   name: string;
   directory?: string | null;
@@ -32,7 +32,7 @@ export interface ProjectStatus {
   reason?: ProjectUnavailableReason | null;
 }
 
-export interface MemoryRecord {
+export interface MemoryItemView {
   id: string;
   title: string;
   detail: string;
@@ -40,7 +40,7 @@ export interface MemoryRecord {
   updatedAt: number;
 }
 
-export interface FileRecord {
+export interface FileItemView {
   id: string;
   label: string;
   path: string;

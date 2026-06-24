@@ -496,7 +496,6 @@ mod tests {
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::default(),
             events: Vec::new(),
-            plugin_manager: crate::default_plugin_manager(),
             transcript_service: None,
             stream_tx: None,
         }

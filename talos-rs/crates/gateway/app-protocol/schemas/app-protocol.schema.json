@@ -34,9 +34,6 @@
       ],
       "type": "object"
     },
-    "AppListParams": {
-      "type": "object"
-    },
     "AppServerErrorBody": {
       "properties": {
         "code": {
@@ -251,90 +248,13 @@
         }
       ]
     },
-    "AuthLogoutParams": {
+    "AuthLogoutRequest": {
       "type": "object"
     },
-    "AuthSessionClearParams": {
+    "AuthSessionClearRequest": {
       "type": "object"
     },
-    "AuthSessionReadParams": {
-      "type": "object"
-    },
-    "AuthSessionSnapshot": {
-      "properties": {
-        "access_token": {
-          "type": "string"
-        },
-        "cloud_api_base_url": {
-          "type": "string"
-        },
-        "expires_at_ms": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "last_used_at_ms": {
-          "type": "string"
-        },
-        "schema_version": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "token_type": {
-          "type": "string"
-        },
-        "user": {
-          "$ref": "#/definitions/AuthSessionUserSnapshot"
-        }
-      },
-      "required": [
-        "access_token",
-        "cloud_api_base_url",
-        "last_used_at_ms",
-        "schema_version",
-        "token_type",
-        "user"
-      ],
-      "type": "object"
-    },
-    "AuthSessionStoreParams": {
-      "properties": {
-        "session": {
-          "$ref": "#/definitions/AuthSessionSnapshot"
-        }
-      },
-      "required": [
-        "session"
-      ],
-      "type": "object"
-    },
-    "AuthSessionUserSnapshot": {
-      "properties": {
-        "email": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "role": {
-          "$ref": "#/definitions/UserRole"
-        },
-        "user_id": {
-          "type": "string"
-        },
-        "username": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "role",
-        "user_id",
-        "username"
-      ],
+    "AuthSessionReadRequest": {
       "type": "object"
     },
     "ClientCapabilities": {
@@ -382,7 +302,7 @@
       "enum": [
         "initialize",
         "session.list",
-        "session.read",
+        "session.get",
         "session.patch",
         "session.delete",
         "session.close",
@@ -405,9 +325,9 @@
         "event.unsubscribe",
         "tool.dynamic_result.submit",
         "model.list",
-        "config.read",
-        "config.value.write",
-        "config.batch.write",
+        "config.get",
+        "config.update",
+        "config.delete",
         "config.reload",
         "memory.file.list",
         "memory.file.read",
@@ -427,19 +347,17 @@
         "plugin.source.remove",
         "plugin.search",
         "plugin.list",
+        "plugin.read",
         "plugin.install",
         "plugin.update",
         "plugin.uninstall",
         "plugin.enable",
         "plugin.disable",
-        "app.list",
-        "tool.list",
         "auth.logout",
         "auth.login.start",
         "auth.login.status",
         "auth.login.cancel",
         "auth.session.read",
-        "auth.session.store",
         "auth.session.clear",
         "user.current",
         "memory.search"
@@ -490,7 +408,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionListParams"
+              "$ref": "#/definitions/SessionListRequest"
             }
           },
           "required": [
@@ -503,12 +421,12 @@
           "properties": {
             "method": {
               "enum": [
-                "session.read"
+                "session.get"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionReadParams"
+              "$ref": "#/definitions/SessionGetRequest"
             }
           },
           "required": [
@@ -526,7 +444,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionPatchParams"
+              "$ref": "#/definitions/SessionPatchRequest"
             }
           },
           "required": [
@@ -544,7 +462,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionDeleteParams"
+              "$ref": "#/definitions/SessionDeleteRequest"
             }
           },
           "required": [
@@ -562,7 +480,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionCloseParams"
+              "$ref": "#/definitions/SessionCloseRequest"
             }
           },
           "required": [
@@ -580,7 +498,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionCompactParams"
+              "$ref": "#/definitions/SessionCompactRequest"
             }
           },
           "required": [
@@ -598,7 +516,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionClearParams"
+              "$ref": "#/definitions/SessionClearRequest"
             }
           },
           "required": [
@@ -616,7 +534,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionActiveTurnParams"
+              "$ref": "#/definitions/SessionActiveTurnRequest"
             }
           },
           "required": [
@@ -634,7 +552,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SessionHistoryParams"
+              "$ref": "#/definitions/SessionHistoryRequest"
             }
           },
           "required": [
@@ -652,7 +570,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineRecoveryParams"
+              "$ref": "#/definitions/RecoverTimelineRequest"
             }
           },
           "required": [
@@ -670,7 +588,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ProjectCreateParams"
+              "$ref": "#/definitions/ProjectCreateRequest"
             }
           },
           "required": [
@@ -688,7 +606,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ProjectListParams"
+              "$ref": "#/definitions/ProjectListRequest"
             }
           },
           "required": [
@@ -706,7 +624,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ProjectReadParams"
+              "$ref": "#/definitions/ProjectReadRequest"
             }
           },
           "required": [
@@ -724,7 +642,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ProjectPatchParams"
+              "$ref": "#/definitions/ProjectPatchRequest"
             }
           },
           "required": [
@@ -742,7 +660,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ProjectDeleteParams"
+              "$ref": "#/definitions/ProjectDeleteRequest"
             }
           },
           "required": [
@@ -760,7 +678,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FsDirectoryReadParams"
+              "$ref": "#/definitions/FsDirectoryReadRequest"
             }
           },
           "required": [
@@ -778,7 +696,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/FsDirectoryCreateParams"
+              "$ref": "#/definitions/FsDirectoryCreateRequest"
             }
           },
           "required": [
@@ -796,7 +714,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TurnStartParams"
+              "$ref": "#/definitions/StartTurnRequest"
             }
           },
           "required": [
@@ -814,7 +732,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TurnInterruptParams"
+              "$ref": "#/definitions/InterruptTurnRequest"
             }
           },
           "required": [
@@ -832,7 +750,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TurnRetryParams"
+              "$ref": "#/definitions/RetryTurnRequest"
             }
           },
           "required": [
@@ -850,7 +768,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/EventSubscribeParams"
+              "$ref": "#/definitions/SubscribeTimelineRequest"
             }
           },
           "required": [
@@ -868,7 +786,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/EventUnsubscribeParams"
+              "$ref": "#/definitions/EventUnsubscribeRequest"
             }
           },
           "required": [
@@ -886,7 +804,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ToolDynamicResultSubmitParams"
+              "$ref": "#/definitions/SubmitToolResultRequest"
             }
           },
           "required": [
@@ -904,7 +822,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ModelListParams"
+              "$ref": "#/definitions/ModelListRequest"
             }
           },
           "required": [
@@ -917,12 +835,12 @@
           "properties": {
             "method": {
               "enum": [
-                "config.read"
+                "config.get"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ConfigReadParams"
+              "$ref": "#/definitions/ConfigGetRequest"
             }
           },
           "required": [
@@ -935,12 +853,12 @@
           "properties": {
             "method": {
               "enum": [
-                "config.value.write"
+                "config.update"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ConfigValueWriteParams"
+              "$ref": "#/definitions/ConfigUpdateRequest"
             }
           },
           "required": [
@@ -953,12 +871,12 @@
           "properties": {
             "method": {
               "enum": [
-                "config.batch.write"
+                "config.delete"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ConfigBatchWriteParams"
+              "$ref": "#/definitions/ConfigDeleteRequest"
             }
           },
           "required": [
@@ -976,7 +894,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/ConfigReloadParams"
+              "$ref": "#/definitions/ConfigReloadRequest"
             }
           },
           "required": [
@@ -994,7 +912,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/MemoryFileListParams"
+              "$ref": "#/definitions/MemoryFileListRequest"
             }
           },
           "required": [
@@ -1012,7 +930,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/MemoryFileReadParams"
+              "$ref": "#/definitions/MemoryFileReadRequest"
             }
           },
           "required": [
@@ -1030,7 +948,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/MemoryFileWriteParams"
+              "$ref": "#/definitions/MemoryFileWriteRequest"
             }
           },
           "required": [
@@ -1048,7 +966,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/WorkspaceDocListParams"
+              "$ref": "#/definitions/WorkspaceDocListRequest"
             }
           },
           "required": [
@@ -1066,7 +984,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/WorkspaceDocReadParams"
+              "$ref": "#/definitions/WorkspaceDocReadRequest"
             }
           },
           "required": [
@@ -1084,7 +1002,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/WorkspaceDocWriteParams"
+              "$ref": "#/definitions/WorkspaceDocWriteRequest"
             }
           },
           "required": [
@@ -1102,7 +1020,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/WorkspaceInfoParams"
+              "$ref": "#/definitions/WorkspaceInfoRequest"
             }
           },
           "required": [
@@ -1313,6 +1231,24 @@
           "properties": {
             "method": {
               "enum": [
+                "plugin.read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/PluginReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "plugin.install"
               ],
               "type": "string"
@@ -1403,48 +1339,12 @@
           "properties": {
             "method": {
               "enum": [
-                "app.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AppListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "tool.list"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/ToolListParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
                 "auth.logout"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/AuthLogoutParams"
+              "$ref": "#/definitions/AuthLogoutRequest"
             }
           },
           "required": [
@@ -1516,25 +1416,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/AuthSessionReadParams"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "auth.session.store"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/AuthSessionStoreParams"
+              "$ref": "#/definitions/AuthSessionReadRequest"
             }
           },
           "required": [
@@ -1552,7 +1434,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/AuthSessionClearParams"
+              "$ref": "#/definitions/AuthSessionClearRequest"
             }
           },
           "required": [
@@ -1570,7 +1452,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/UserCurrentParams"
+              "$ref": "#/definitions/UserCurrentRequest"
             }
           },
           "required": [
@@ -1588,7 +1470,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/MemorySearchParams"
+              "$ref": "#/definitions/MemorySearchRequest"
             }
           },
           "required": [
@@ -1645,33 +1527,39 @@
       ],
       "type": "object"
     },
-    "ConfigBatchWriteParams": {
+    "ConfigDeleteRequest": {
       "properties": {
-        "entries": {
-          "items": {
-            "$ref": "#/definitions/ConfigValueWriteParams"
-          },
-          "type": "array"
+        "path": {
+          "type": "string"
         }
       },
       "required": [
-        "entries"
+        "path"
       ],
       "type": "object"
     },
-    "ConfigReadParams": {
+    "ConfigGetRequest": {
+      "properties": {
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
-    "ConfigReloadParams": {
+    "ConfigReloadRequest": {
       "type": "object"
     },
-    "ConfigValueWriteParams": {
+    "ConfigUpdateRequest": {
       "properties": {
         "path": {
           "type": "string"
         },
         "value": {
-          "type": "string"
+          "$ref": "#/definitions/ConfigValue"
         }
       },
       "required": [
@@ -1680,70 +1568,40 @@
       ],
       "type": "object"
     },
-    "EventSubscribeParams": {
+    "ConfigValue": {
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "llm"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/LlmConfig"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "DynamicToolArguments": {
       "properties": {
-        "close_on_terminal": {
-          "default": null,
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "close_when_idle": {
-          "default": null,
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "replay_limit": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "since_event_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+        "value": {
+          "type": "object"
         }
       },
       "required": [
-        "session_id"
+        "value"
       ],
       "type": "object"
     },
-    "EventSubscribeResponse": {
-      "properties": {
-        "high_water_mark_event_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "subscription_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id",
-        "subscription_id"
-      ],
-      "type": "object"
-    },
-    "EventUnsubscribeParams": {
+    "EventUnsubscribeRequest": {
       "properties": {
         "subscription_id": {
           "type": "string"
@@ -1769,7 +1627,7 @@
       ],
       "type": "object"
     },
-    "FsDirectoryCreateParams": {
+    "FsDirectoryCreateRequest": {
       "properties": {
         "name": {
           "type": "string"
@@ -1784,7 +1642,7 @@
       ],
       "type": "object"
     },
-    "FsDirectoryReadParams": {
+    "FsDirectoryReadRequest": {
       "properties": {
         "path": {
           "default": null,
@@ -1845,6 +1703,39 @@
       },
       "required": [
         "protocol_version"
+      ],
+      "type": "object"
+    },
+    "InterruptTurnRequest": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "InterruptTurnResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
+    "JsonContentValue": {
+      "properties": {
+        "value": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "value"
       ],
       "type": "object"
     },
@@ -1957,6 +1848,217 @@
       ],
       "type": "object"
     },
+    "LlmConfig": {
+      "properties": {
+        "anthropic": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
+        "bailian": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
+        "model": {
+          "type": "string"
+        },
+        "ollama": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
+        "openai": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
+        "openrouter": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "anthropic",
+        "bailian",
+        "model",
+        "ollama",
+        "openai",
+        "openrouter",
+        "provider"
+      ],
+      "type": "object"
+    },
+    "LlmModelCompat": {
+      "properties": {
+        "thinking_format": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LlmThinkingFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "LlmModelConfig": {
+      "properties": {
+        "compat": {
+          "$ref": "#/definitions/LlmModelCompat"
+        },
+        "context_window": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cost": {
+          "$ref": "#/definitions/LlmModelCost"
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/LlmModelInputKind"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "boolean"
+        },
+        "reasoning_effort": {
+          "$ref": "#/definitions/LlmReasoningEffort"
+        },
+        "speed": {
+          "$ref": "#/definitions/LlmModelSpeed"
+        }
+      },
+      "required": [
+        "compat",
+        "context_window",
+        "cost",
+        "id",
+        "input",
+        "name",
+        "reasoning",
+        "reasoning_effort",
+        "speed"
+      ],
+      "type": "object"
+    },
+    "LlmModelCost": {
+      "properties": {
+        "cache_read": {
+          "format": "double",
+          "type": "number"
+        },
+        "cache_write": {
+          "format": "double",
+          "type": "number"
+        },
+        "input": {
+          "format": "double",
+          "type": "number"
+        },
+        "output": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "cache_read",
+        "cache_write",
+        "input",
+        "output"
+      ],
+      "type": "object"
+    },
+    "LlmModelInputKind": {
+      "enum": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "file"
+      ],
+      "type": "string"
+    },
+    "LlmModelSpeed": {
+      "enum": [
+        "standard",
+        "fast"
+      ],
+      "type": "string"
+    },
+    "LlmProtocol": {
+      "enum": [
+        "chat",
+        "responses",
+        "messages"
+      ],
+      "type": "string"
+    },
+    "LlmProviderConfig": {
+      "properties": {
+        "api_key": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_url": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "models": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/LlmModelConfig"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LlmProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "LlmReasoningEffort": {
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "type": "string"
+    },
+    "LlmThinkingFormat": {
+      "enum": [
+        "open_ai",
+        "anthropic",
+        "qwen"
+      ],
+      "type": "string"
+    },
     "MarketplaceSourceId": {
       "type": "string"
     },
@@ -2018,8 +2120,29 @@
         }
       ]
     },
-    "MemoryFileListParams": {
+    "MemoryFileListRequest": {
       "properties": {
+        "before_date": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date_from": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date_to": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "limit": {
           "default": null,
           "format": "uint",
@@ -2032,7 +2155,7 @@
       },
       "type": "object"
     },
-    "MemoryFileReadParams": {
+    "MemoryFileReadRequest": {
       "properties": {
         "path": {
           "type": "string"
@@ -2043,7 +2166,7 @@
       ],
       "type": "object"
     },
-    "MemoryFileWriteParams": {
+    "MemoryFileWriteRequest": {
       "properties": {
         "content": {
           "type": "string"
@@ -2065,8 +2188,22 @@
       ],
       "type": "object"
     },
-    "MemorySearchParams": {
+    "MemorySearchRequest": {
       "properties": {
+        "date_from": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "date_to": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "limit": {
           "default": null,
           "format": "uint",
@@ -2085,19 +2222,10 @@
       ],
       "type": "object"
     },
-    "MessageCommandStatus": {
-      "enum": [
-        "pending",
-        "accepted",
-        "failed",
-        "failed_no_first_event"
-      ],
-      "type": "string"
-    },
-    "ModelListParams": {
+    "ModelListRequest": {
       "type": "object"
     },
-    "OptionalPathPatch": {
+    "OptionalCurrentDirectoryPatch": {
       "oneOf": [
         {
           "properties": {
@@ -2133,23 +2261,23 @@
         }
       ]
     },
-    "OptionalStringPatch": {
+    "OptionalProjectIdPatch": {
       "oneOf": [
         {
           "properties": {
+            "project_id": {
+              "type": "string"
+            },
             "type": {
               "enum": [
                 "set"
               ],
               "type": "string"
-            },
-            "value": {
-              "type": "string"
             }
           },
           "required": [
-            "type",
-            "value"
+            "project_id",
+            "type"
           ],
           "type": "object"
         },
@@ -2313,6 +2441,17 @@
       ],
       "type": "string"
     },
+    "PluginReadRequest": {
+      "properties": {
+        "plugin_id": {
+          "$ref": "#/definitions/PluginId"
+        }
+      },
+      "required": [
+        "plugin_id"
+      ],
+      "type": "object"
+    },
     "PluginSearchRefreshPolicy": {
       "enum": [
         "cache_only",
@@ -2402,12 +2541,6 @@
       "type": "object"
     },
     "PluginSourceListRequest": {
-      "properties": {
-        "include_disabled": {
-          "default": false,
-          "type": "boolean"
-        }
-      },
       "type": "object"
     },
     "PluginSourceRefreshRequest": {
@@ -2471,7 +2604,7 @@
       ],
       "type": "object"
     },
-    "ProjectCreateParams": {
+    "ProjectCreateRequest": {
       "properties": {
         "directory": {
           "type": "string"
@@ -2486,7 +2619,7 @@
       ],
       "type": "object"
     },
-    "ProjectDeleteParams": {
+    "ProjectDeleteRequest": {
       "properties": {
         "project_id": {
           "type": "string"
@@ -2497,10 +2630,10 @@
       ],
       "type": "object"
     },
-    "ProjectListParams": {
+    "ProjectListRequest": {
       "type": "object"
     },
-    "ProjectPatchParams": {
+    "ProjectPatchRequest": {
       "properties": {
         "name": {
           "default": null,
@@ -2510,15 +2643,13 @@
           ]
         },
         "project_id": {
+          "default": "",
           "type": "string"
         }
       },
-      "required": [
-        "project_id"
-      ],
       "type": "object"
     },
-    "ProjectReadParams": {
+    "ProjectReadRequest": {
       "properties": {
         "project_id": {
           "type": "string"
@@ -2527,25 +2658,6 @@
       "required": [
         "project_id"
       ],
-      "type": "object"
-    },
-    "ProtocolSkillSelector": {
-      "properties": {
-        "name": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "path": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
       "type": "object"
     },
     "ProtocolVersion": {
@@ -2564,6 +2676,33 @@
       "required": [
         "major",
         "minor"
+      ],
+      "type": "object"
+    },
+    "RecoverTimelineRequest": {
+      "properties": {
+        "after_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "replay_limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
       ],
       "type": "object"
     },
@@ -2586,6 +2725,69 @@
       },
       "required": [
         "prompt"
+      ],
+      "type": "object"
+    },
+    "RetryTurnRequest": {
+      "properties": {
+        "client_message_id": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "retry_of_message_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "client_message_id",
+        "input",
+        "retry_of_message_id",
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "RetryTurnResponse": {
+      "properties": {
+        "message_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TurnCommandStatus"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_id",
+        "status",
+        "turn_id"
       ],
       "type": "object"
     },
@@ -2820,7 +3022,7 @@
         }
       ]
     },
-    "SessionActiveTurnParams": {
+    "SessionActiveTurnRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2831,7 +3033,19 @@
       ],
       "type": "object"
     },
-    "SessionClearParams": {
+    "SessionAgentConf": {
+      "properties": {
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SessionClearRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2842,7 +3056,7 @@
       ],
       "type": "object"
     },
-    "SessionCloseParams": {
+    "SessionCloseRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2853,7 +3067,7 @@
       ],
       "type": "object"
     },
-    "SessionCompactParams": {
+    "SessionCompactRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2864,7 +3078,34 @@
       ],
       "type": "object"
     },
-    "SessionDeleteParams": {
+    "SessionConf": {
+      "properties": {
+        "agent": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionAgentConf"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "SessionDeleteRequest": {
+      "properties": {
+        "session_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionGetRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2917,7 +3158,7 @@
       ],
       "type": "object"
     },
-    "SessionHistoryParams": {
+    "SessionHistoryRequest": {
       "properties": {
         "session_id": {
           "type": "string"
@@ -2925,6 +3166,17 @@
       },
       "required": [
         "session_id"
+      ],
+      "type": "object"
+    },
+    "SessionHistoryResponse": {
+      "properties": {
+        "history": {
+          "$ref": "#/definitions/SessionHistorySnapshot"
+        }
+      },
+      "required": [
+        "history"
       ],
       "type": "object"
     },
@@ -2959,7 +3211,7 @@
       ],
       "type": "object"
     },
-    "SessionListParams": {
+    "SessionListRequest": {
       "properties": {
         "limit": {
           "default": null,
@@ -2989,12 +3241,12 @@
       },
       "type": "object"
     },
-    "SessionPatchParams": {
+    "SessionPatchRequest": {
       "properties": {
-        "current_directory": {
+        "conf": {
           "anyOf": [
             {
-              "$ref": "#/definitions/OptionalPathPatch"
+              "$ref": "#/definitions/SessionConf"
             },
             {
               "type": "null"
@@ -3002,42 +3254,52 @@
           ],
           "default": null
         },
-        "model": {
+        "current_directory": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OptionalCurrentDirectoryPatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/OptionalProjectIdPatch"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "session_id": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SkillSelector": {
+      "properties": {
+        "name": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "project_id": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/OptionalStringPatch"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "session_id": {
-          "type": "string"
+        "path": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "required": [
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "SessionReadParams": {
-      "properties": {
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id"
-      ],
       "type": "object"
     },
     "SkillsListRequest": {
@@ -3052,7 +3314,7 @@
     "SkillsReadRequest": {
       "properties": {
         "selector": {
-          "$ref": "#/definitions/ProtocolSkillSelector"
+          "$ref": "#/definitions/SkillSelector"
         }
       },
       "required": [
@@ -3068,7 +3330,7 @@
         "selected": {
           "default": [],
           "items": {
-            "$ref": "#/definitions/ProtocolSkillSelector"
+            "$ref": "#/definitions/SkillSelector"
           },
           "type": "array"
         },
@@ -3097,6 +3359,100 @@
       },
       "type": "object"
     },
+    "StartTurnRequest": {
+      "properties": {
+        "client_request_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TalosContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "current_directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "model": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "workspace_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input",
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "StartTurnResponse": {
+      "properties": {
+        "message_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "request_id": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/definitions/TurnCommandStatus"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_id",
+        "status",
+        "turn_id"
+      ],
+      "type": "object"
+    },
     "StopReason": {
       "enum": [
         "end_turn",
@@ -3104,11 +3460,110 @@
         "tool_round_limit",
         "waiting_dynamic_input",
         "transfer_unresolved",
-        "before_model_callback_stopped",
-        "after_model_callback_stopped",
         "cancelled"
       ],
       "type": "string"
+    },
+    "SubmitToolResultRequest": {
+      "properties": {
+        "call_id": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "tool_name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "call_id",
+        "output",
+        "session_id",
+        "success",
+        "tool_name"
+      ],
+      "type": "object"
+    },
+    "SubmitToolResultResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
+    "SubscribeTimelineRequest": {
+      "properties": {
+        "close_on_terminal": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "close_when_idle": {
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "replay_limit": {
+          "default": null,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "since_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "type": "object"
+    },
+    "SubscribeTimelineResponse": {
+      "properties": {
+        "high_water_mark_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "subscription_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "subscription_id"
+      ],
+      "type": "object"
     },
     "SubscriptionTerminatedEnvelope": {
       "properties": {
@@ -3182,7 +3637,7 @@
               "type": "string"
             },
             "value": {
-              "$ref": "#/definitions/TalosJsonValue"
+              "$ref": "#/definitions/JsonContentValue"
             }
           },
           "required": [
@@ -3748,101 +4203,6 @@
         }
       ]
     },
-    "TalosJsonValue": {
-      "properties": {
-        "value": {
-          "type": "object"
-        }
-      },
-      "required": [
-        "value"
-      ],
-      "type": "object"
-    },
-    "TalosMessageRequest": {
-      "description": "Talos message request payload for session interactions.",
-      "properties": {
-        "context": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TalosContext"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "current_directory": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
-        },
-        "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "project_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "input"
-      ],
-      "type": "object"
-    },
-    "TalosMessageRetryRequest": {
-      "description": "Talos retry request payload for session interactions.",
-      "properties": {
-        "client_message_id": {
-          "type": "string"
-        },
-        "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
-        },
-        "retry_of_message_id": {
-          "type": "string"
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "client_message_id",
-        "input",
-        "retry_of_message_id"
-      ],
-      "type": "object"
-    },
     "TalosProvider": {
       "description": "Concrete source provider.",
       "enum": [
@@ -4096,7 +4456,7 @@
         {
           "properties": {
             "arguments": {
-              "$ref": "#/definitions/TalosJsonValue"
+              "$ref": "#/definitions/DynamicToolArguments"
             },
             "call_id": {
               "type": "string"
@@ -5003,30 +5363,14 @@
         }
       ]
     },
-    "TimelineRecoveryParams": {
+    "TimelineRecoveryResponse": {
       "properties": {
-        "after_event_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "replay_limit": {
-          "default": null,
-          "format": "uint",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "session_id": {
-          "type": "string"
+        "snapshot": {
+          "$ref": "#/definitions/TimelineRecoverySnapshot"
         }
       },
       "required": [
-        "session_id"
+        "snapshot"
       ],
       "type": "object"
     },
@@ -5090,35 +5434,14 @@
       ],
       "type": "object"
     },
-    "ToolDynamicResultSubmitParams": {
-      "properties": {
-        "call_id": {
-          "type": "string"
-        },
-        "output": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "success": {
-          "type": "boolean"
-        },
-        "tool_name": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "call_id",
-        "output",
-        "session_id",
-        "success",
-        "tool_name"
+    "TurnCommandStatus": {
+      "enum": [
+        "pending",
+        "accepted",
+        "failed",
+        "failed_no_first_event"
       ],
-      "type": "object"
-    },
-    "ToolListParams": {
-      "type": "object"
+      "type": "string"
     },
     "TurnExecutionMetrics": {
       "description": "Kernel-owned execution metrics for a turn.",
@@ -5169,101 +5492,26 @@
       ],
       "type": "object"
     },
-    "TurnInterruptParams": {
-      "properties": {
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id"
-      ],
+    "UserCurrentRequest": {
       "type": "object"
     },
-    "TurnRetryParams": {
-      "properties": {
-        "request": {
-          "$ref": "#/definitions/TalosMessageRetryRequest"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request",
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "TurnStartParams": {
-      "properties": {
-        "client_request_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "request": {
-          "$ref": "#/definitions/TalosMessageRequest"
-        },
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request",
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "TurnStartResponse": {
-      "properties": {
-        "message_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "request_id": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/definitions/MessageCommandStatus"
-        },
-        "turn_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request_id",
-        "session_id",
-        "status",
-        "turn_id"
-      ],
-      "type": "object"
-    },
-    "UserCurrentParams": {
-      "type": "object"
-    },
-    "UserRole": {
+    "WorkspaceDocKind": {
       "enum": [
+        "soul",
+        "identity",
         "user",
-        "admin"
+        "heartbeat",
+        "memory"
       ],
       "type": "string"
     },
-    "WorkspaceDocListParams": {
+    "WorkspaceDocListRequest": {
       "type": "object"
     },
-    "WorkspaceDocReadParams": {
+    "WorkspaceDocReadRequest": {
       "properties": {
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/WorkspaceDocKind"
         }
       },
       "required": [
@@ -5271,7 +5519,7 @@
       ],
       "type": "object"
     },
-    "WorkspaceDocWriteParams": {
+    "WorkspaceDocWriteRequest": {
       "properties": {
         "content": {
           "type": "string"
@@ -5284,7 +5532,7 @@
           ]
         },
         "kind": {
-          "type": "string"
+          "$ref": "#/definitions/WorkspaceDocKind"
         }
       },
       "required": [
@@ -5293,7 +5541,7 @@
       ],
       "type": "object"
     },
-    "WorkspaceInfoParams": {
+    "WorkspaceInfoRequest": {
       "type": "object"
     }
   },
@@ -5307,17 +5555,29 @@
     "error": {
       "$ref": "#/definitions/AppServerErrorBody"
     },
-    "event_subscribe_response": {
-      "$ref": "#/definitions/EventSubscribeResponse"
-    },
     "event_unsubscribe_response": {
       "$ref": "#/definitions/EventUnsubscribeResponse"
     },
     "initialize_response": {
       "$ref": "#/definitions/InitializeResponse"
     },
+    "interrupt_turn_request": {
+      "$ref": "#/definitions/InterruptTurnRequest"
+    },
+    "interrupt_turn_response": {
+      "$ref": "#/definitions/InterruptTurnResponse"
+    },
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
+    },
+    "recover_timeline_request": {
+      "$ref": "#/definitions/RecoverTimelineRequest"
+    },
+    "retry_turn_request": {
+      "$ref": "#/definitions/RetryTurnRequest"
+    },
+    "retry_turn_response": {
+      "$ref": "#/definitions/RetryTurnResponse"
     },
     "server_notification": {
       "$ref": "#/definitions/ServerNotification"
@@ -5326,7 +5586,25 @@
       "$ref": "#/definitions/ServerRequest"
     },
     "session_history_response": {
-      "$ref": "#/definitions/SessionHistorySnapshot"
+      "$ref": "#/definitions/SessionHistoryResponse"
+    },
+    "start_turn_request": {
+      "$ref": "#/definitions/StartTurnRequest"
+    },
+    "start_turn_response": {
+      "$ref": "#/definitions/StartTurnResponse"
+    },
+    "submit_tool_result_request": {
+      "$ref": "#/definitions/SubmitToolResultRequest"
+    },
+    "submit_tool_result_response": {
+      "$ref": "#/definitions/SubmitToolResultResponse"
+    },
+    "subscribe_timeline_request": {
+      "$ref": "#/definitions/SubscribeTimelineRequest"
+    },
+    "subscribe_timeline_response": {
+      "$ref": "#/definitions/SubscribeTimelineResponse"
     },
     "timeline_event": {
       "$ref": "#/definitions/TalosTimelineEvent"
@@ -5334,27 +5612,37 @@
     "timeline_event_envelope": {
       "$ref": "#/definitions/TimelineEventEnvelope"
     },
-    "timeline_recovery_snapshot": {
-      "$ref": "#/definitions/TimelineRecoverySnapshot"
+    "timeline_recovery_response": {
+      "$ref": "#/definitions/TimelineRecoveryResponse"
     },
     "turn_start_response": {
-      "$ref": "#/definitions/TurnStartResponse"
+      "$ref": "#/definitions/StartTurnResponse"
     }
   },
   "required": [
     "client_request",
     "client_request_params",
     "error",
-    "event_subscribe_response",
     "event_unsubscribe_response",
     "initialize_response",
+    "interrupt_turn_request",
+    "interrupt_turn_response",
     "jsonrpc_message",
+    "recover_timeline_request",
+    "retry_turn_request",
+    "retry_turn_response",
     "server_notification",
     "server_request",
     "session_history_response",
+    "start_turn_request",
+    "start_turn_response",
+    "submit_tool_result_request",
+    "submit_tool_result_response",
+    "subscribe_timeline_request",
+    "subscribe_timeline_response",
     "timeline_event",
     "timeline_event_envelope",
-    "timeline_recovery_snapshot",
+    "timeline_recovery_response",
     "turn_start_response"
   ],
   "title": "AppProtocolSchemaRoot",

@@ -1,29 +1,42 @@
 import type * as AppProtocol from "./generated/app-protocol";
 import type {
-  MemoryFileDetail,
-  MemoryFileSummary,
-  MemorySearchResult,
+  MemoryFileListResponse,
+  MemoryFileReadResponse,
+  MemoryFileWriteResponse,
+  MemorySearchResponse,
   FsDirectoryCreateResponse,
-  FsDirectorySnapshot,
+  FsDirectoryReadResponse,
+  ConfigGetResponse,
+  ConfigReloadResponse,
+  ConfigUpdateResponse,
+  ConfigValue,
   LlmConfig,
-  LlmConfigRead,
-  ModelInfo,
+  ModelListResponse,
+  ProjectCreateResponse,
+  ProjectDeleteResponse,
+  ProjectListResponse,
   ProjectPatch,
-  ProjectRecord,
-  TalosActiveTurn,
-  TalosMessageAck,
-  TalosSessionHistorySnapshot,
-  TalosSession,
-  TalosTurnExecutionMetrics,
-  TalosUsage,
-  TimelineRecoverySnapshot,
-  UserDto,
+  ProjectPatchResponse,
+  ProjectReadResponse,
+  SessionActiveTurnResponse,
+  SessionHistoryResponse,
+  SessionListResponse,
+  SessionUpdateResponse,
+  SessionCompactResponse,
+  SessionClearResponse,
+  SessionDeleteResponse,
+  TimelineRecoveryResponse,
+  UserCurrentResponse,
+  AuthLogoutResponse,
+  AuthSessionClearResponse,
   AuthSessionReadResponse,
-  AuthSessionStoreParams,
+  CloudLoginCancelResponse,
+  SessionCloseResponse,
   AgentWorkspaceInfo,
-  WorkspaceDocDetail,
   WorkspaceDocKind,
-  WorkspaceDocSummary,
+  WorkspaceDocListResponse,
+  WorkspaceDocReadResponse,
+  WorkspaceDocWriteResponse,
 } from "./types";
 
 export type AppServerEventHandler = (
@@ -51,10 +64,6 @@ export interface AppServerTransport {
   onError?(handler: AppServerErrorHandler): () => void;
 }
 
-interface ListResponse<T> {
-  data: T[];
-}
-
 export class AppServerClient {
   constructor(protected readonly transport: AppServerTransport) {}
 
@@ -70,37 +79,31 @@ export class AppServerClient {
     return this.transport.onError?.(handler) ?? (() => undefined);
   }
 
-  listModels(): Promise<ModelInfo[]> {
-    return this.transport
-      .request<ListResponse<ModelInfo>>("model.list", {})
-      .then((response) => response.data);
+  listModels(): Promise<ModelListResponse> {
+    return this.transport.request("model.list", {} satisfies AppProtocol.ModelListRequest);
   }
 
-  configRead(): Promise<LlmConfigRead> {
-    return this.transport.request("config.read", {});
+  configGet(): Promise<ConfigGetResponse> {
+    return this.transport.request("config.get", {});
   }
 
-  configWriteValue(path: string, value: string): Promise<LlmConfigRead> {
-    return this.transport.request("config.value.write", { path, value });
+  configUpdate(path: string, value: ConfigValue): Promise<ConfigUpdateResponse> {
+    return this.transport.request("config.update", { path, value });
   }
 
-  getLlmConfig(): Promise<LlmConfigRead> {
-    return this.configRead();
+  getLlmConfig(): Promise<ConfigGetResponse> {
+    return this.configGet();
   }
 
-  updateLlmConfig(config: LlmConfig): Promise<LlmConfigRead> {
-    return this.configWriteValue("llm", JSON.stringify(config));
+  updateLlmConfig(config: LlmConfig): Promise<ConfigUpdateResponse> {
+    return this.configUpdate("llm", { type: "llm", value: config });
   }
 
-  configWriteBatch(entries: AppProtocol.ConfigValueWriteParams[]): Promise<unknown> {
-    return this.transport.request("config.batch.write", { entries });
-  }
-
-  configReload(): Promise<unknown> {
+  configReload(): Promise<ConfigReloadResponse> {
     return this.transport.request("config.reload", {});
   }
 
-  authLogout(): Promise<unknown> {
+  authLogout(): Promise<AuthLogoutResponse> {
     return this.transport.request("auth.logout", {});
   }
 
@@ -112,7 +115,7 @@ export class AppServerClient {
     return this.transport.request("auth.login.status", params);
   }
 
-  cancelCloudLogin(params: AppProtocol.CloudLoginCancelRequest): Promise<unknown> {
+  cancelCloudLogin(params: AppProtocol.CloudLoginCancelRequest): Promise<CloudLoginCancelResponse> {
     return this.transport.request("auth.login.cancel", params);
   }
 
@@ -120,20 +123,16 @@ export class AppServerClient {
     return this.transport.request("auth.session.read", {});
   }
 
-  storeAuthSession(params: AuthSessionStoreParams): Promise<unknown> {
-    return this.transport.request("auth.session.store", params);
-  }
-
-  clearAuthSession(): Promise<unknown> {
+  clearAuthSession(): Promise<AuthSessionClearResponse> {
     return this.transport.request("auth.session.clear", {});
   }
 
-  getCurrentUser(): Promise<UserDto> {
+  getCurrentUser(): Promise<UserCurrentResponse> {
     return this.transport.request("user.current", {});
   }
 
   listPluginSources(
-    params: AppProtocol.PluginSourceListRequest = { include_disabled: false },
+    params: AppProtocol.PluginSourceListRequest = {},
   ): Promise<AppProtocol.PluginSourceListResponse> {
     return this.transport.request("plugin.source.list", params);
   }
@@ -160,6 +159,10 @@ export class AppServerClient {
 
   listPlugins(params: AppProtocol.PluginListRequest): Promise<AppProtocol.PluginListResponse> {
     return this.transport.request("plugin.list", params);
+  }
+
+  readPlugin(params: AppProtocol.PluginReadRequest): Promise<AppProtocol.PluginReadResponse> {
+    return this.transport.request("plugin.read", params);
   }
 
   installPlugin(params: AppProtocol.PluginInstallRequest): Promise<AppProtocol.PluginInstallResponse> {
@@ -194,7 +197,7 @@ export class AppServerClient {
     return this.transport.request("skills.suggest", params);
   }
 
-  readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.ProtocolSkillDocument> {
+  readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.SkillsReadResponse> {
     return this.transport.request("skills.read", params);
   }
 
@@ -202,120 +205,151 @@ export class AppServerClient {
     return this.transport.request("skills.resolve", params);
   }
 
-  listApps(): Promise<unknown[]> {
-    return this.transport
-      .request<ListResponse<unknown>>("app.list", {})
-      .then((response) => response.data);
+  listSessions(params: AppProtocol.SessionListRequest): Promise<SessionListResponse> {
+    return this.transport.request("session.list", params);
   }
 
-  listTools(): Promise<unknown[]> {
-    return this.transport
-      .request<ListResponse<unknown>>("tool.list", {})
-      .then((response) => response.data);
+  getSession(params: AppProtocol.SessionGetRequest): Promise<AppProtocol.SessionGetResponse> {
+    return this.transport.request("session.get", params);
   }
 
-  listSessions(params: AppProtocol.SessionListParams): Promise<TalosSession[]> {
-    return this.transport
-      .request<ListResponse<TalosSession>>("session.list", params)
-      .then((response) => response.data);
+  getSessionById(sessionId: string): Promise<AppProtocol.SessionGetResponse> {
+    return this.getSession({ session_id: sessionId });
   }
 
-  getSession(sessionId: string): Promise<TalosSession> {
-    return this.transport.request("session.read", { session_id: sessionId });
-  }
-
-  patchSession(params: AppProtocol.SessionPatchParams): Promise<unknown> {
+  patchSession(params: AppProtocol.SessionPatchRequest): Promise<SessionUpdateResponse> {
     return this.transport.request("session.patch", params);
   }
 
-  deleteSession(sessionId: string): Promise<unknown> {
-    return this.transport.request("session.delete", { session_id: sessionId });
+  deleteSession(params: AppProtocol.SessionDeleteRequest): Promise<SessionDeleteResponse> {
+    return this.transport.request("session.delete", params);
   }
 
-  closeSession(sessionId: string): Promise<unknown> {
-    return this.transport.request("session.close", { session_id: sessionId });
+  deleteSessionById(sessionId: string): Promise<SessionDeleteResponse> {
+    return this.deleteSession({ session_id: sessionId });
   }
 
-  compactSession(sessionId: string): Promise<TalosSession> {
-    return this.transport.request("session.compact", { session_id: sessionId });
+  closeSession(params: AppProtocol.SessionCloseRequest): Promise<SessionCloseResponse> {
+    return this.transport.request("session.close", params);
   }
 
-  clearSession(sessionId: string): Promise<TalosSession> {
-    return this.transport.request("session.clear", { session_id: sessionId });
+  closeSessionById(sessionId: string): Promise<SessionCloseResponse> {
+    return this.closeSession({ session_id: sessionId });
   }
 
-  getActiveTurn(sessionId: string): Promise<TalosActiveTurn> {
-    return this.transport.request("session.active_turn", { session_id: sessionId });
+  compactSession(params: AppProtocol.SessionCompactRequest): Promise<SessionCompactResponse> {
+    return this.transport.request("session.compact", params);
   }
 
-  getSessionHistory(sessionId: string): Promise<TalosSessionHistorySnapshot> {
-    return this.transport
-      .request<TalosSessionHistorySnapshot>("session.history", { session_id: sessionId })
-      .then(normalizeSessionHistorySnapshot);
+  compactSessionById(sessionId: string): Promise<SessionCompactResponse> {
+    return this.compactSession({ session_id: sessionId });
   }
 
-  recoverSession(
-    sessionId: string,
-    afterEventId: string | null = null,
-    replayLimit: number | null = null,
-  ): Promise<TimelineRecoverySnapshot> {
-    return this.transport
-      .request<TimelineRecoverySnapshot>("session.recover", {
-        session_id: sessionId,
-        after_event_id: afterEventId,
-        replay_limit: replayLimit,
-      })
-      .then(normalizeTimelineRecoverySnapshot);
+  clearSession(params: AppProtocol.SessionClearRequest): Promise<SessionClearResponse> {
+    return this.transport.request("session.clear", params);
   }
 
-  listProjects(): Promise<ProjectRecord[]> {
-    return this.transport
-      .request<ListResponse<ProjectRecord>>("project.list", {})
-      .then((response) => response.data);
+  clearSessionById(sessionId: string): Promise<SessionClearResponse> {
+    return this.clearSession({ session_id: sessionId });
   }
 
-  getProject(projectId: string): Promise<ProjectRecord> {
-    return this.transport.request("project.read", { project_id: projectId });
+  getActiveTurn(params: AppProtocol.SessionActiveTurnRequest): Promise<SessionActiveTurnResponse> {
+    return this.transport.request("session.active_turn", params);
   }
 
-  createProject(name: string, directory: string): Promise<ProjectRecord> {
-    return this.transport.request("project.create", { name, directory });
+  getActiveTurnById(sessionId: string): Promise<SessionActiveTurnResponse> {
+    return this.getActiveTurn({ session_id: sessionId });
   }
 
-  patchProject(projectId: string, patch: ProjectPatch): Promise<ProjectRecord> {
-    return this.transport.request("project.patch", {
-      project_id: projectId,
-      name: patch.name ?? null,
+  getSessionHistory(params: AppProtocol.SessionHistoryRequest): Promise<SessionHistoryResponse> {
+    return this.transport.request<SessionHistoryResponse>("session.history", {
+      session_id: params.session_id,
     });
   }
 
-  deleteProject(projectId: string): Promise<unknown> {
-    return this.transport.request("project.delete", { project_id: projectId });
+  getSessionHistoryById(sessionId: string): Promise<SessionHistoryResponse> {
+    return this.getSessionHistory({ session_id: sessionId });
   }
 
-  readFsDirectory(path: string | null = null): Promise<FsDirectorySnapshot> {
-    return this.transport.request("fs.directory.read", { path });
+  recoverSession(params: AppProtocol.RecoverTimelineRequest): Promise<TimelineRecoveryResponse> {
+    return this.transport.request<TimelineRecoveryResponse>("session.recover", params);
   }
 
-  createFsDirectory(parent: string, name: string): Promise<FsDirectoryCreateResponse> {
-    return this.transport.request("fs.directory.create", { parent, name });
+  recoverSessionById(
+    sessionId: string,
+    afterEventId: string | null = null,
+    replayLimit: number | null = null,
+  ): Promise<TimelineRecoveryResponse> {
+    return this.recoverSession({
+      session_id: sessionId,
+      after_event_id: afterEventId,
+      replay_limit: replayLimit,
+    });
   }
 
-  startTurn(params: AppProtocol.TurnStartParams): Promise<TalosMessageAck> {
+  listProjects(params: AppProtocol.ProjectListRequest = {}): Promise<ProjectListResponse> {
+    return this.transport.request<ProjectListResponse>("project.list", params);
+  }
+
+  getProject(params: AppProtocol.ProjectReadRequest): Promise<ProjectReadResponse> {
+    return this.transport.request<ProjectReadResponse>("project.read", params);
+  }
+
+  getProjectById(projectId: string): Promise<ProjectReadResponse> {
+    return this.getProject({ project_id: projectId });
+  }
+
+  createProject(params: AppProtocol.ProjectCreateRequest): Promise<ProjectCreateResponse> {
+    return this.transport.request<ProjectCreateResponse>("project.create", params);
+  }
+
+  createProjectFromFields(name: string, directory: string): Promise<ProjectCreateResponse> {
+    return this.createProject({ name, directory });
+  }
+
+  patchProject(params: AppProtocol.ProjectPatchRequest): Promise<ProjectPatchResponse> {
+    return this.transport.request<ProjectPatchResponse>("project.patch", params);
+  }
+
+  patchProjectById(projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> {
+    return this.patchProject({ project_id: projectId, name: patch.name });
+  }
+
+  deleteProject(params: AppProtocol.ProjectDeleteRequest): Promise<ProjectDeleteResponse> {
+    return this.transport.request("project.delete", params);
+  }
+
+  deleteProjectById(projectId: string): Promise<ProjectDeleteResponse> {
+    return this.deleteProject({ project_id: projectId });
+  }
+
+  readFsDirectory(params: AppProtocol.FsDirectoryReadRequest = { path: null }): Promise<FsDirectoryReadResponse> {
+    return this.transport.request("fs.directory.read", params);
+  }
+
+  createFsDirectory(params: AppProtocol.FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> {
+    return this.transport.request("fs.directory.create", params);
+  }
+
+  startTurn(params: AppProtocol.StartTurnRequest): Promise<AppProtocol.StartTurnResponse> {
     return this.transport.request("turn.start", params);
   }
 
-  retryTurn(params: AppProtocol.TurnRetryParams): Promise<TalosMessageAck> {
+  retryTurn(params: AppProtocol.RetryTurnRequest): Promise<AppProtocol.RetryTurnResponse> {
     return this.transport.request("turn.retry", params);
   }
 
-  interruptTurn(sessionId: string): Promise<unknown> {
-    return this.transport.request("turn.interrupt", { session_id: sessionId });
+  interruptTurn(params: AppProtocol.InterruptTurnRequest): Promise<AppProtocol.InterruptTurnResponse> {
+    return this.transport.request("turn.interrupt", params);
+  }
+
+  interruptTurnById(sessionId: string): Promise<AppProtocol.InterruptTurnResponse> {
+    return this.interruptTurn({ session_id: sessionId });
   }
 
   subscribeEvents(
-    params: AppProtocol.EventSubscribeParams,
-  ): Promise<AppProtocol.EventSubscribeResponse> {
+    params: AppProtocol.SubscribeTimelineRequest,
+  ): Promise<AppProtocol.SubscribeTimelineResponse> {
     return this.transport.request("event.subscribe", params);
   }
 
@@ -325,34 +359,34 @@ export class AppServerClient {
     return this.transport.request("event.unsubscribe", { subscription_id: subscriptionId });
   }
 
-  submitDynamicToolResult(params: AppProtocol.ToolDynamicResultSubmitParams): Promise<unknown> {
+  submitDynamicToolResult(
+    params: AppProtocol.SubmitToolResultRequest,
+  ): Promise<AppProtocol.SubmitToolResultResponse> {
     return this.transport.request("tool.dynamic_result.submit", params);
   }
 
-  listMemoryFiles(limit?: number): Promise<MemoryFileSummary[]> {
-    return this.transport
-      .request<ListResponse<MemoryFileSummary>>("memory.file.list", { limit: limit ?? null })
-      .then((response) => response.data);
+  listMemoryFiles(limit?: number): Promise<MemoryFileListResponse> {
+    return this.transport.request<MemoryFileListResponse>("memory.file.list", {
+      limit: limit ?? null,
+    });
   }
 
-  readMemoryFile(path: string): Promise<MemoryFileDetail> {
+  readMemoryFile(path: string): Promise<MemoryFileReadResponse> {
     return this.transport.request("memory.file.read", { path });
   }
 
-  searchMemory(query: string, limit?: number): Promise<MemorySearchResult[]> {
-    return this.transport
-      .request<ListResponse<MemorySearchResult>>("memory.search", {
-        query,
-        limit: limit ?? null,
-      })
-      .then((response) => response.data);
+  searchMemory(query: string, limit?: number): Promise<MemorySearchResponse> {
+    return this.transport.request<MemorySearchResponse>("memory.search", {
+      query,
+      limit: limit ?? null,
+    });
   }
 
   writeMemoryFile(
     path: string,
     content: string,
     expectedVersion: string | null,
-  ): Promise<MemoryFileDetail> {
+  ): Promise<MemoryFileWriteResponse> {
     return this.transport.request("memory.file.write", {
       path,
       content,
@@ -360,17 +394,15 @@ export class AppServerClient {
     });
   }
 
-  listWorkspaceDocs(): Promise<WorkspaceDocSummary[]> {
-    return this.transport
-      .request<ListResponse<WorkspaceDocSummary>>("workspace.doc.list", {})
-      .then((response) => response.data);
+  listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {
+    return this.transport.request<WorkspaceDocListResponse>("workspace.doc.list", {});
   }
 
   getWorkspaceInfo(): Promise<AgentWorkspaceInfo> {
     return this.transport.request("workspace.info", {});
   }
 
-  readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocDetail> {
+  readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocReadResponse> {
     return this.transport.request("workspace.doc.read", { kind });
   }
 
@@ -378,104 +410,11 @@ export class AppServerClient {
     kind: WorkspaceDocKind,
     content: string,
     expectedVersion: string | null,
-  ): Promise<WorkspaceDocDetail> {
+  ): Promise<WorkspaceDocWriteResponse> {
     return this.transport.request("workspace.doc.write", {
       kind,
       content,
       expected_version: expectedVersion,
     });
   }
-}
-
-function normalizeTimelineRecoverySnapshot(
-  snapshot: TimelineRecoverySnapshot,
-): TimelineRecoverySnapshot {
-  return {
-    ...snapshot,
-    replay: {
-      ...snapshot.replay,
-      events: snapshot.replay.events.map((event) => ({
-        ...event,
-        event_seq: Number(event.event_seq),
-        created_at_ms: Number(event.created_at_ms),
-        event: {
-          ...event.event,
-          event_seq: event.event.event_seq == null ? event.event.event_seq : Number(event.event.event_seq),
-          created_at_ms: event.event.created_at_ms == null ? event.event.created_at_ms : Number(event.event.created_at_ms),
-          sequence: Number(event.event.sequence),
-        },
-      })),
-      last_replay_seq: Number(snapshot.replay.last_replay_seq),
-    },
-    active_turn: {
-      ...snapshot.active_turn,
-      updated_at: Number(snapshot.active_turn.updated_at),
-    },
-  };
-}
-
-function normalizeSessionHistorySnapshot(
-  snapshot: TalosSessionHistorySnapshot,
-): TalosSessionHistorySnapshot {
-  return {
-    ...snapshot,
-    generated_at_ms: Number(snapshot.generated_at_ms),
-    messages: snapshot.messages.map((message) => ({
-      ...message,
-      items: message.items.map((item) => ({
-        ...item,
-        started_at_ms: Number(item.started_at_ms),
-        completed_at_ms:
-          item.completed_at_ms == null ? item.completed_at_ms : Number(item.completed_at_ms),
-      })),
-      usage: {
-        ...normalizeUsage(message.usage),
-      },
-      metrics: normalizeTurnExecutionMetrics(message.metrics),
-    })),
-  };
-}
-
-function normalizeTurnExecutionMetrics(
-  metrics: ({
-    model_rounds: bigint | number;
-    tool_calls: bigint | number;
-    tool_successes: bigint | number;
-    tool_errors: bigint | number;
-    stop_reason: TalosTurnExecutionMetrics["stop_reason"];
-    usage: TalosUsage;
-    duration_ms: bigint | number | null;
-  }) | null,
-): TalosTurnExecutionMetrics | null {
-  if (metrics == null) {
-    return null;
-  }
-  return {
-    ...metrics,
-    model_rounds: Number(metrics.model_rounds),
-    tool_calls: Number(metrics.tool_calls),
-    tool_successes: Number(metrics.tool_successes),
-    tool_errors: Number(metrics.tool_errors),
-    duration_ms: metrics.duration_ms == null ? metrics.duration_ms : Number(metrics.duration_ms),
-    usage: {
-      ...normalizeUsage(metrics.usage),
-    },
-  };
-}
-
-function normalizeUsage(usage: TalosUsage): TalosUsage {
-  return {
-    ...usage,
-    input_tokens: Number(usage.input_tokens),
-    output_tokens: Number(usage.output_tokens),
-    total_tokens: Number(usage.total_tokens),
-    cache_creation_input_tokens:
-      usage.cache_creation_input_tokens == null
-        ? usage.cache_creation_input_tokens
-        : Number(usage.cache_creation_input_tokens),
-    cache_read_input_tokens:
-      usage.cache_read_input_tokens == null
-        ? usage.cache_read_input_tokens
-        : Number(usage.cache_read_input_tokens),
-  };
 }

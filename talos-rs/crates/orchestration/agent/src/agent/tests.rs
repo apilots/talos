@@ -21,7 +21,7 @@ use talos_tools::{
     ToolRegistry, ToolSource, WebSearchTool,
 };
 use talos_tools_policy::ToolPolicy;
-use talos_types::gateway::{GatewayResumeContext, GatewayResumeToolCall};
+use talos_types::agent_dispatch::{AgentDispatchResumeContext, AgentDispatchResumeToolCall};
 use talos_types::talos::{
     StopReason as TalosStopReason, TalosContentItem, TalosInputItem, TalosOutputItem,
     TalosProvider, TalosSourceType, TalosTimelineEventPayload, TalosUsage,
@@ -892,7 +892,7 @@ async fn test_run_uses_session_kernel_config_override() {
     session.config.agent.kernel.output.max_tokens = 123;
 
     let result = agent
-        .run(OrchestratorRequest {
+        .run(AgentRequest {
             session,
             turn_id: None,
             resume_context: None,
@@ -919,7 +919,7 @@ async fn test_run_generates_title_update_for_first_turn() {
     session.title = DEFAULT_SESSION_TITLE.to_string();
 
     let result = agent
-        .run(OrchestratorRequest {
+        .run(AgentRequest {
             session,
             turn_id: None,
             resume_context: None,
@@ -1035,11 +1035,11 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         .expect("dynamic response record should append");
 
     let mut stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session,
             turn_id: Some("turn-original".to_string()),
-            resume_context: Some(GatewayResumeContext {
-                tool_call: Some(GatewayResumeToolCall {
+            resume_context: Some(AgentDispatchResumeContext {
+                tool_call: Some(AgentDispatchResumeToolCall {
                     item_id: "tool-item-original".to_string(),
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
@@ -1350,7 +1350,7 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     let session = build_test_session("session-cancel", "workspace-a");
 
     let mut first_stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session: session.clone(),
             turn_id: None,
             resume_context: None,
@@ -1376,7 +1376,7 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     assert_eq!(first_stop_reason, Some(TalosStopReason::Cancelled));
 
     let mut second_stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session,
             turn_id: None,
             resume_context: None,
@@ -1414,7 +1414,7 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
     let session = build_test_session("session-busy", "workspace-a");
 
     let mut first_stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session: session.clone(),
             turn_id: None,
             resume_context: None,
@@ -1427,7 +1427,7 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
     started.notified().await;
 
     let mut second_stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session: session.clone(),
             turn_id: None,
             resume_context: None,
@@ -1475,7 +1475,7 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
     let session = build_test_session("session-timeline", "workspace-a");
 
     let mut stream = agent
-        .run_stream(OrchestratorRequest {
+        .run_stream(AgentRequest {
             session,
             turn_id: None,
             resume_context: None,
@@ -1583,7 +1583,7 @@ async fn test_run_queues_second_active_turn_for_same_session() {
     let first_session = session.clone();
     let first_run = tokio::spawn(async move {
         first_agent
-            .run(OrchestratorRequest {
+            .run(AgentRequest {
                 session: first_session,
                 turn_id: None,
                 resume_context: None,
@@ -1599,7 +1599,7 @@ async fn test_run_queues_second_active_turn_for_same_session() {
     let second_session = session.clone();
     let mut second_run = Box::pin(tokio::spawn(async move {
         second_agent
-            .run(OrchestratorRequest {
+            .run(AgentRequest {
                 session: second_session,
                 turn_id: None,
                 resume_context: None,

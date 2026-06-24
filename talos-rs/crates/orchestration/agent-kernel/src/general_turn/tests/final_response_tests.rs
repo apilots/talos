@@ -18,6 +18,7 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -30,6 +31,7 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");
@@ -62,6 +64,7 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream(None);
 
     let result = run_general_turn(
@@ -74,6 +77,7 @@ async fn test_run_general_turn_uses_salvage_call_when_forced_summary_is_still_em
         tool_registry,
         memory_store,
         &config,
+        skill_options_from_config(&workspace_dir, &config),
     )
     .await
     .expect("general turn should succeed");

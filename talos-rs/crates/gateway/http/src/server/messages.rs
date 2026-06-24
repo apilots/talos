@@ -1,103 +1,104 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
-use serde::Deserialize;
-use talos_application_service::TurnRetryRequest;
 use talos_auth::RequestIdentity;
-use talos_session_store::MessageCommandAck;
-use talos_types::talos::{TalosMessageRequest, TalosMessageRetryRequest};
+use talos_types::{
+    InterruptTurnRequest, InterruptTurnResponse, RetryTurnRequest, StartTurnRequest,
+    SubmitToolResultRequest, SubmitToolResultResponse,
+};
 
 use super::access::shared_actor;
 use super::errors::ApiError;
 use super::state::HttpApiState;
 
-pub(super) async fn session_message_handler(
+pub(super) async fn start_turn_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     headers: HeaderMap,
-    Path(session_id): Path<String>,
-    Json(request): Json<TalosMessageRequest>,
+    Json(request): Json<StartTurnRequest>,
 ) -> Result<Response, ApiError> {
-    let ack = submit_message_command(state, actor.0, headers, session_id, request).await?;
+    let idempotency_key = start_turn_idempotency_key(&headers, request.client_request_id.clone())?;
+    let ack = state
+        .gateway
+        .start_turn(&shared_actor(&actor.0), request, idempotency_key)
+        .await
+        .map_err(map_turn_submit_error)?;
     Ok((StatusCode::ACCEPTED, Json(ack)).into_response())
 }
 
-pub(super) async fn retry_message_attempt_handler(
+pub(super) async fn retry_turn_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     _headers: HeaderMap,
-    Path(session_id): Path<String>,
-    Json(request): Json<TalosMessageRetryRequest>,
+    Json(request): Json<RetryTurnRequest>,
 ) -> Result<Response, ApiError> {
     let ack = state
-        .app
-        .submit_retry(
-            &shared_actor(&actor.0),
-            &session_id,
-            TurnRetryRequest {
-                input: request.input,
-                workspace_id: request.workspace_id,
-                client_message_id: request.client_message_id,
-                retry_of_message_id: request.retry_of_message_id,
-            },
-        )
+        .gateway
+        .retry_turn(&shared_actor(&actor.0), request)
         .await
         .map_err(map_retry_submit_error)?;
     Ok((StatusCode::ACCEPTED, Json(ack)).into_response())
 }
 
-pub(super) async fn submit_message_command(
-    state: Arc<HttpApiState>,
-    actor: RequestIdentity,
-    headers: HeaderMap,
-    session_id: String,
-    request: TalosMessageRequest,
-) -> Result<MessageCommandAck, ApiError> {
-    let idempotency_key = headers
+pub(super) async fn interrupt_turn_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<InterruptTurnRequest>,
+) -> Result<Json<InterruptTurnResponse>, ApiError> {
+    state
+        .gateway
+        .interrupt_turn(&shared_actor(&actor.0), request)
+        .await
+        .map(Json)
+        .map_err(|err| match err {
+            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+                StatusCode::NOT_FOUND,
+                "invalid_request",
+                "session not found",
+            ),
+            _ => ApiError::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                err.to_string(),
+            ),
+        })
+}
+
+fn start_turn_idempotency_key(
+    headers: &HeaderMap,
+    client_request_id: Option<String>,
+) -> Result<Option<String>, ApiError> {
+    let header_key = headers
         .get("idempotency-key")
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string);
-
-    state
-        .app
-        .submit_message(&shared_actor(&actor), &session_id, request, idempotency_key)
-        .await
-        .map_err(map_turn_submit_error)
-}
-
-#[derive(Deserialize)]
-pub(super) struct DynamicToolResultRequest {
-    call_id: String,
-    tool_name: String,
-    output: String,
-    success: bool,
+    if let (Some(header), Some(body)) = (&header_key, &client_request_id) {
+        if header != body {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                "invalid_request",
+                "idempotency-key header must match client_request_id",
+            ));
+        }
+    }
+    Ok(header_key.or(client_request_id))
 }
 
 pub(super) async fn submit_dynamic_tool_result_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Path(session_id): Path<String>,
-    Json(body): Json<DynamicToolResultRequest>,
-) -> impl IntoResponse {
-    match state
-        .app
-        .submit_dynamic_tool_result(
-            &shared_actor(&actor.0),
-            &session_id,
-            &body.call_id,
-            &body.tool_name,
-            body.output,
-            body.success,
-        )
+    Json(request): Json<SubmitToolResultRequest>,
+) -> Result<Json<SubmitToolResultResponse>, ApiError> {
+    state
+        .gateway
+        .submit_tool_result(&shared_actor(&actor.0), request)
         .await
-    {
-        Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(e) => map_turn_submit_error(e).into_response(),
-    }
+        .map(Json)
+        .map_err(map_turn_submit_error)
 }
 
 fn map_retry_submit_error(error: talos_error::TalosError) -> ApiError {

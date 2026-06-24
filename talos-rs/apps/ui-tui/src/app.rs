@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use talos_sdk::{TalosContext, TalosProvider, TalosSession, TalosSourceType};
+use talos_sdk::{SessionInfo, TalosContext, TalosProvider, TalosSourceType};
 use talos_types::talos::TalosUsage;
 
 use crate::client::GatewayClient;
@@ -219,22 +219,15 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn apply_session_snapshot(&mut self, session: &TalosSession) {
-        self.session_id = Some(session.context.session_id.clone());
-        self.current_model = session.config.llm.model.clone();
-        self.session_usage = session.state.usage.clone();
+    pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
+        self.session_id = Some(session.id.clone());
+        self.current_model = session.model.clone();
+        self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         self.current_project_root = session
             .current_directory
             .clone()
-            .or_else(|| {
-                session
-                    .context
-                    .environment
-                    .as_ref()
-                    .map(|env| env.directory.clone())
-            })
             .or_else(|| Some(self.startup_directory.clone()));
         if let Some(welcome_block) = self.chat_blocks.first_mut() {
             if welcome_block.content.starts_with('╭') {
