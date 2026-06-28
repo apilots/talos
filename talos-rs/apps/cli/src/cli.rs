@@ -1,89 +1,88 @@
 //! Talos Command Line Interface
 //!
 //! This module provides a command-line interface for interacting with the Talos system
-//! through the local JSON-RPC app-server client.
+//! through the local Talos runtime client.
 
 use clap::Parser;
 use std::collections::HashMap;
 use std::io::Write;
 use std::time::Duration;
+use talos_config::Config;
 use talos_sdk::{
-    now_ms, open_external_url, AppServerClient, AppServerClientConfig, CloudLoginClientKind,
-    CloudLoginStatusResponse, SkillSelector, SkillsListRequest, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsSuggestRequest, StartTurnRequest, TalosContext, TalosInputItem,
-    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
+    now_ms, open_external_url, AuthLogoutRequest, AuthSessionReadRequest, CloudLoginClientKind,
+    CloudLoginStartRequest, CloudLoginStatusRequest, CloudLoginStatusResponse, GatewayClient,
+    ModelListRequest, SessionAgentConf, SessionConf, SessionDeleteRequest, SessionGetRequest,
+    SessionListRequest, SessionPatchRequest, SkillSelector, SkillsListRequest, SkillsReadRequest,
+    SkillsRefreshRequest, SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest,
+    TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineEventPayload, TalosTimelineItemKind, TalosTimelinePhase,
+    TimelineEventEnvelope,
 };
+use talos_sdk_embedded::{EmbeddedServerClient, EmbeddedServerClientConfig};
+use tokio::sync::mpsc;
 use tracing::{debug, error};
 
 mod types;
 
 use types::{
-    AppServerSmokeCmd, AuthCommands, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands,
-    SkillsCommands,
+    AuthCommands, ChatCommands, Cli, Commands, ModelsCmd, SessionCommands, SkillsCommands,
 };
 
 /// Main function to run the CLI
 pub async fn run_cli() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    run_app_server_cli(cli).await
+    run_cli_with_client(cli).await
 }
 
-async fn run_app_server_cli(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let app_server_bin = cli
-        .app_server_bin
-        .or_else(|| std::env::var("TALOS_APP_SERVER_BIN").ok())
-        .unwrap_or_else(|| "app-server".to_string());
-    let config = AppServerClientConfig {
-        app_server_bin,
-        client_name: "talos-cli".to_string(),
-        client_version: env!("CARGO_PKG_VERSION").to_string(),
-        actor_credentials: None,
-        use_cloud_session_cache: false,
-    }
-    .with_cloud_session_cache();
-    let mut client = AppServerClient::connect(config).await?;
+async fn run_cli_with_client(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let command = cli.command;
+    let mut client = create_cli_client().await?;
 
-    let result = match cli.command {
-        Commands::Chat(cmd) => execute_app_server_chat_command(&mut client, cmd).await,
-        Commands::Session(cmd) => execute_app_server_session_command(&mut client, cmd).await,
-        Commands::Models(cmd) => execute_app_server_models_command(&mut client, cmd).await,
-        Commands::Skills(cmd) => execute_app_server_skills_command(&mut client, cmd).await,
-        Commands::Status => execute_app_server_status_command(&mut client).await,
-        Commands::Auth(cmd) => execute_auth_command(&mut client, cmd).await,
+    let result = match command {
+        Commands::Chat(cmd) => execute_app_server_chat_command(&mut *client, cmd).await,
+        Commands::Session(cmd) => execute_app_server_session_command(&mut *client, cmd).await,
+        Commands::Models(cmd) => execute_app_server_models_command(&mut *client, cmd).await,
+        Commands::Skills(cmd) => execute_app_server_skills_command(&mut *client, cmd).await,
+        Commands::Status => execute_app_server_status_command(&mut *client).await,
+        Commands::Auth(cmd) => execute_auth_command(&mut *client, cmd).await,
         Commands::Info => execute_app_server_info_command().await,
-        Commands::AppServerSmoke(cmd) => {
-            execute_app_server_smoke_with_client(&mut client, cmd).await
-        }
     };
-    let shutdown_result = client.shutdown().await;
+    let shutdown_result = GatewayClient::shutdown(&mut *client).await;
     result?;
     shutdown_result?;
     Ok(())
 }
 
+async fn create_cli_client() -> Result<Box<dyn GatewayClient>, Box<dyn std::error::Error>> {
+    let config = Config::load()?;
+    Ok(Box::new(
+        EmbeddedServerClient::connect(EmbeddedServerClientConfig::new(config)).await?,
+    ))
+}
+
 async fn execute_app_server_skills_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     cmd: SkillsCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         SkillsCommands::List { include_disabled } => {
-            let response = client
-                .list_skills(SkillsListRequest { include_disabled })
-                .await?;
+            let response =
+                GatewayClient::list_skills(client, SkillsListRequest { include_disabled }).await?;
             print_skills_snapshot(response);
         }
         SkillsCommands::Refresh => {
-            let response = client.refresh_skills(SkillsRefreshRequest {}).await?;
+            let response = GatewayClient::refresh_skills(client, SkillsRefreshRequest {}).await?;
             print_skills_snapshot(response);
         }
         SkillsCommands::Suggest { query, limit } => {
-            let response = client
-                .suggest_skills(SkillsSuggestRequest {
+            let response = GatewayClient::suggest_skills(
+                client,
+                SkillsSuggestRequest {
                     query,
                     limit: Some(limit),
-                })
-                .await?;
+                },
+            )
+            .await?;
             for skill in response.data {
                 println!(
                     "${} [{}] {}",
@@ -101,7 +100,8 @@ async fn execute_app_server_skills_command(
             if selector.name.is_none() && selector.path.is_none() {
                 return Err("skills read requires --name or --path".into());
             }
-            let response = client.read_skill(SkillsReadRequest { selector }).await?;
+            let response =
+                GatewayClient::read_skill(client, SkillsReadRequest { selector }).await?;
             let document = response.document;
             println!("# {}", document.summary.name);
             println!("Path: {}", document.summary.path.display());
@@ -137,13 +137,14 @@ fn print_skills_snapshot(response: talos_sdk::SkillsListResponse) {
 }
 
 async fn execute_auth_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     cmd: AuthCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         AuthCommands::Login { no_browser } => login_with_cloud(client, no_browser).await,
         AuthCommands::Status => {
-            let response = client.read_auth_session().await?;
+            let response =
+                GatewayClient::read_auth_session(client, AuthSessionReadRequest {}).await?;
             if let Some(session) = response.session {
                 println!("Authenticated as {}", session.user.username);
                 println!("User ID: {}", session.user.user_id);
@@ -154,7 +155,7 @@ async fn execute_auth_command(
             Ok(())
         }
         AuthCommands::Logout => {
-            client.auth_logout().await?;
+            GatewayClient::auth_logout(client, AuthLogoutRequest {}).await?;
             println!("Logged out");
             Ok(())
         }
@@ -162,12 +163,17 @@ async fn execute_auth_command(
 }
 
 async fn login_with_cloud(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     no_browser: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let start = client
-        .start_cloud_login("Talos CLI", CloudLoginClientKind::Cli)
-        .await?;
+    let start = GatewayClient::start_cloud_login(
+        client,
+        CloudLoginStartRequest {
+            client_name: "Talos CLI".to_string(),
+            client_kind: CloudLoginClientKind::Cli,
+        },
+    )
+    .await?;
     println!("Open this URL to sign in:");
     println!("{}", start.login_url);
     println!("Code: {}", start.user_code);
@@ -181,7 +187,14 @@ async fn login_with_cloud(
         if now_ms() >= start.expires_at_ms {
             return Err("Cloud login expired".into());
         }
-        match client.poll_cloud_login(start.login_id.clone()).await? {
+        match GatewayClient::cloud_login_status(
+            client,
+            CloudLoginStatusRequest {
+                login_id: start.login_id.clone(),
+            },
+        )
+        .await?
+        {
             CloudLoginStatusResponse::Pending { interval_ms } => {
                 tokio::time::sleep(Duration::from_millis(interval_ms.max(500))).await;
             }
@@ -195,77 +208,8 @@ async fn login_with_cloud(
     }
 }
 
-async fn execute_app_server_smoke_with_client(
-    client: &mut AppServerClient,
-    cmd: AppServerSmokeCmd,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match cmd.scenario.as_str() {
-        "smoke" => run_app_server_smoke(client).await?,
-        "turn-smoke" => run_app_server_turn_smoke(client).await?,
-        other => return Err(format!("unsupported app-server smoke scenario: {other}").into()),
-    }
-    println!("App-server scenario passed: {}", cmd.scenario);
-    Ok(())
-}
-
-async fn run_app_server_smoke(
-    client: &mut AppServerClient,
-) -> Result<(), Box<dyn std::error::Error>> {
-    client.list_models().await?;
-    client.config_get().await?;
-    client.list_sessions(Default::default()).await?;
-    Ok(())
-}
-
-async fn run_app_server_turn_smoke(
-    client: &mut AppServerClient,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let mut events = client
-        .send_timeline_events(StartTurnRequest {
-            session_id: session_id.clone(),
-            input: vec![TalosInputItem::Text {
-                text: "answer with ok".to_string(),
-            }],
-            workspace_id: None,
-            context: Some(default_chat_context("cli-app-server")),
-            model: None,
-            project_id: None,
-            current_directory: current_cli_directory(),
-            client_request_id: None,
-        })
-        .await?;
-
-    let mut saw_started = false;
-    let mut saw_delta = false;
-    for _ in 0..128 {
-        let Some(envelope) = events.recv().await else {
-            break;
-        };
-        if envelope.session_id != session_id {
-            continue;
-        }
-        match envelope.event.payload {
-            TalosTimelineEventPayload::TurnStarted(_) => saw_started = true,
-            TalosTimelineEventPayload::ItemDelta(payload) => {
-                if matches!(payload.delta, TalosTimelineDelta::Text { .. }) {
-                    saw_delta = true;
-                }
-            }
-            TalosTimelineEventPayload::TurnCompleted(_) if saw_started && saw_delta => {
-                return Ok(());
-            }
-            TalosTimelineEventPayload::TurnError(payload) => {
-                return Err(format!("app-server turn failed: {}", payload.error).into());
-            }
-            _ => {}
-        }
-    }
-    Err("app-server turn smoke did not receive a complete event flow".into())
-}
-
 async fn execute_app_server_chat_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     cmd: ChatCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
@@ -298,8 +242,7 @@ async fn execute_app_server_chat_command(
             model,
             stream,
         } => {
-            let session_id = client
-                .list_sessions(Default::default())
+            let session_id = GatewayClient::list_sessions(client, SessionListRequest::default())
                 .await
                 .ok()
                 .and_then(|response| response.sessions.into_iter().nth(index))
@@ -316,12 +259,13 @@ async fn execute_app_server_chat_command(
 }
 
 async fn execute_app_server_session_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     cmd: SessionCommands,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match cmd {
         SessionCommands::List { limit, user: _ } => {
-            let sessions = client.list_sessions(Default::default()).await?;
+            let sessions =
+                GatewayClient::list_sessions(client, SessionListRequest::default()).await?;
             println!("Active Sessions:");
             for (i, session) in sessions.sessions.iter().take(limit).enumerate() {
                 println!(
@@ -331,7 +275,13 @@ async fn execute_app_server_session_command(
             }
         }
         SessionCommands::Info { session_id } => {
-            let response = client.get_session_by_id(&session_id).await?;
+            let response = GatewayClient::get_session(
+                client,
+                SessionGetRequest {
+                    session_id: session_id.clone(),
+                },
+            )
+            .await?;
             let session = response.session;
             println!("Session Info:");
             println!("  ID: {}", session.id);
@@ -339,7 +289,20 @@ async fn execute_app_server_session_command(
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let response = client.update_session_model(&session_id, &model).await?;
+            let response = GatewayClient::patch_session(
+                client,
+                SessionPatchRequest {
+                    session_id: session_id.clone(),
+                    conf: Some(SessionConf {
+                        agent: Some(SessionAgentConf {
+                            model: Some(model.clone()),
+                        }),
+                    }),
+                    project_id: None,
+                    current_directory: None,
+                },
+            )
+            .await?;
             let session = response.session;
             println!("Session model updated:");
             println!("  ID: {}", session.id);
@@ -362,7 +325,14 @@ async fn execute_app_server_session_command(
                 stdin.lock().read_line(&mut line).unwrap();
                 let input = line.trim();
                 if input == "quit" || input == "exit" {
-                    if let Err(err) = client.delete_session_by_id(&session_id).await {
+                    if let Err(err) = GatewayClient::delete_session(
+                        client,
+                        SessionDeleteRequest {
+                            session_id: session_id.clone(),
+                        },
+                    )
+                    .await
+                    {
                         debug!("Failed to close session {}: {}", session_id, err);
                     }
                     break;
@@ -384,10 +354,10 @@ async fn execute_app_server_session_command(
 }
 
 async fn execute_app_server_models_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     cmd: ModelsCmd,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let models = client.list_models().await?;
+    let models = GatewayClient::list_models(client, ModelListRequest {}).await?;
     if cmd.format == "json" {
         println!("{}", serde_json::to_string_pretty(&models)?);
     } else {
@@ -400,21 +370,19 @@ async fn execute_app_server_models_command(
 }
 
 async fn execute_app_server_status_command(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Status: App-server accessible");
+    println!("Status: Talos runtime accessible");
     println!(
         "Active sessions: {}",
-        client
-            .list_sessions(Default::default())
+        GatewayClient::list_sessions(client, SessionListRequest::default())
             .await
             .map(|response| response.sessions.len())
             .unwrap_or_default()
     );
     println!(
         "Available models: {}",
-        client
-            .list_models()
+        GatewayClient::list_models(client, ModelListRequest {})
             .await
             .map(|response| response.models.len())
             .unwrap_or_default()
@@ -425,7 +393,7 @@ async fn execute_app_server_status_command(
 async fn execute_app_server_info_command() -> Result<(), Box<dyn std::error::Error>> {
     println!("Talos CLI - AI Assistant System");
     println!("Version: 1.0.0");
-    println!("Transport: app-server JSON-RPC stdio");
+    println!("Default runtime: embedded");
     Ok(())
 }
 
@@ -450,12 +418,12 @@ fn build_start_turn_request(
 }
 
 async fn send_and_render_app_server_message(
-    client: &mut AppServerClient,
+    client: &mut dyn GatewayClient,
     request: StartTurnRequest,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut output_text = String::new();
     let mut output_stream = std::io::stdout();
-    let mut events = client.send_timeline_events(request).await?;
+    let mut events = start_turn_stream(client, request).await?;
     let mut item_phases = HashMap::new();
     let mut item_texts = HashMap::new();
 
@@ -476,6 +444,30 @@ async fn send_and_render_app_server_message(
     }
 
     Ok(output_text)
+}
+
+async fn start_turn_stream(
+    client: &mut dyn GatewayClient,
+    mut request: StartTurnRequest,
+) -> talos_sdk::TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+    let session_id = request.session_id.clone();
+    if request.client_request_id.is_none() {
+        request.client_request_id = Some(format!("cli-{}", uuid::Uuid::new_v4().simple()));
+    }
+    let response = GatewayClient::start_turn(client, request).await?;
+    let subscription = GatewayClient::open_timeline_stream(
+        client,
+        SubscribeTimelineRequest {
+            session_id,
+            turn_id: Some(response.turn_id),
+            since_event_id: None,
+            replay_limit: Some(256),
+            close_when_idle: Some(false),
+            close_on_terminal: Some(true),
+        },
+    )
+    .await?;
+    Ok(subscription.stream.into_inner())
 }
 
 fn render_event(

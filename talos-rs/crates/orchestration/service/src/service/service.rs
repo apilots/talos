@@ -430,6 +430,7 @@ impl TalosService {
             .events
             .subscribe(TimelineSubscribeCommand {
                 session_id: request.session_id,
+                turn_id: request.turn_id,
                 after_event_id,
                 replay_limit: request.replay_limit.unwrap_or(1).max(1),
                 close_when_idle: request.close_when_idle.unwrap_or(false),

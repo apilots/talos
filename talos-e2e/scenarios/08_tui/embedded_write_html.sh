@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../../scripts/common.sh"
+
+load_env
+require_command tmux
+require_command python3
+build_binaries
+
+TEST_TALOS_HOME="$(make_e2e_temp_dir "talos-tui-write-home")"
+export TALOS_HOME="${TEST_TALOS_HOME}"
+prepare_talos_home
+
+TARGET_DIR="$(scenario_report_path "tui-write-target")"
+TARGET_FILE="${TARGET_DIR}/calculator.html"
+PANE_SNAPSHOT="$(scenario_report_path "tui_write_pane.txt")"
+SESSION_SNAPSHOT="$(scenario_report_path "tui_write_session.json")"
+TALOS_LOG_FILE="${TALOS_HOME}/logs/talos.log"
+TUI_SESSION_NAME="talos-tui-write-$$"
+MARKER="TUI_EMBEDDED_WRITE_${RANDOM}_$$"
+
+cleanup() {
+  if [[ -n "${TUI_SESSION_NAME:-}" ]] && tmux has-session -t "${TUI_SESSION_NAME}" 2>/dev/null; then
+    tmux kill-session -t "${TUI_SESSION_NAME}" || true
+  fi
+  rm -rf "${TEST_TALOS_HOME}"
+}
+trap cleanup EXIT
+
+capture_tui() {
+  tmux capture-pane -t "${TUI_SESSION_NAME}" -p
+}
+
+send_tui_input() {
+  local text="$1"
+  tmux send-keys -t "${TUI_SESSION_NAME}" C-u >/dev/null
+  tmux send-keys -t "${TUI_SESSION_NAME}" -l "${text}" >/dev/null
+  tmux send-keys -t "${TUI_SESSION_NAME}" C-m >/dev/null
+}
+
+dump_failure_context() {
+  capture_tui >"${PANE_SNAPSHOT}" || true
+  echo "CASE embedded_tui_write DEBUG talos_home=${TALOS_HOME}"
+  echo "CASE embedded_tui_write DEBUG target_file=${TARGET_FILE}"
+  echo "CASE embedded_tui_write DEBUG pane_snapshot=${PANE_SNAPSHOT}"
+  if [[ -f "${TALOS_LOG_FILE}" ]]; then
+    echo "CASE embedded_tui_write DEBUG talos_log_tail_begin"
+    tail -n 120 "${TALOS_LOG_FILE}" || true
+    echo "CASE embedded_tui_write DEBUG talos_log_tail_end"
+  fi
+}
+
+wait_for_tui_ready() {
+  for _ in $(seq 1 120); do
+    if capture_tui | grep -Fq "Type a message or use /help"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  dump_failure_context
+  echo "CASE embedded_tui_write_bootstrap FAIL"
+  exit 1
+}
+
+read_latest_session_snapshot() {
+  python3 - "${TALOS_HOME}/data/talos.db" "${SESSION_SNAPSHOT}" <<'PY'
+import json
+import sqlite3
+import sys
+from pathlib import Path
+
+db_path = Path(sys.argv[1])
+out_path = Path(sys.argv[2])
+if not db_path.exists():
+    print("{}")
+    raise SystemExit(0)
+
+conn = sqlite3.connect(str(db_path))
+row = conn.execute(
+    "SELECT session_key, model, current_directory, context_json FROM sessions ORDER BY created_at DESC LIMIT 1"
+).fetchone()
+if not row:
+    print("{}")
+    raise SystemExit(0)
+
+payload = {
+    "session_id": row[0],
+    "model": row[1],
+    "current_directory": row[2],
+    "context": json.loads(row[3] or "{}"),
+}
+out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+print(json.dumps(payload, ensure_ascii=False))
+PY
+}
+
+mkdir -p "${TARGET_DIR}"
+tmux new-session -d -s "${TUI_SESSION_NAME}" \
+  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' ./target/debug/talos"
+wait_for_tui_ready
+
+prompt="Use the Write tool exactly once to create the absolute path ${TARGET_FILE}. The file content must be a minimal standalone HTML calculator page, include marker ${MARKER}, include buttons for 1, +, 2, =, and show result 3 for 1+2. After the tool call completes, reply exactly TUI_EMBEDDED_WRITE_OK:${MARKER}. Do not only describe the file; actually write it."
+send_tui_input "${prompt}"
+
+for _ in $(seq 1 180); do
+  capture_tui >"${PANE_SNAPSHOT}" || true
+  if [[ -f "${TARGET_FILE}" ]] && grep -Fq "${MARKER}" "${TARGET_FILE}"; then
+    echo "CASE embedded_tui_write_file PASS path=${TARGET_FILE}"
+    break
+  fi
+  sleep 0.5
+done
+
+if [[ ! -f "${TARGET_FILE}" ]]; then
+  dump_failure_context
+  echo "CASE embedded_tui_write_file FAIL missing_file path=${TARGET_FILE}"
+  exit 1
+fi
+
+if ! grep -Fq "${MARKER}" "${TARGET_FILE}"; then
+  dump_failure_context
+  echo "CASE embedded_tui_write_file FAIL missing_marker path=${TARGET_FILE}"
+  exit 1
+fi
+
+if ! grep -Eiq "<html|<!doctype html" "${TARGET_FILE}"; then
+  dump_failure_context
+  echo "CASE embedded_tui_write_file FAIL not_html path=${TARGET_FILE}"
+  exit 1
+fi
+
+session_snapshot="$(read_latest_session_snapshot)"
+if ! python3 - "${session_snapshot}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1] or "{}")
+context = payload.get("context") or {}
+environment = context.get("environment") or {}
+ok = (
+    payload.get("model") == "qwen3.6-flash"
+    and payload.get("current_directory")
+    and environment.get("connection_mode") == "embedded"
+)
+raise SystemExit(0 if ok else 1)
+PY
+then
+  dump_failure_context
+  echo "CASE embedded_tui_write_session FAIL snapshot=${SESSION_SNAPSHOT} data=${session_snapshot}"
+  exit 1
+fi
+
+echo "CASE embedded_tui_write_session PASS snapshot=${SESSION_SNAPSHOT}"

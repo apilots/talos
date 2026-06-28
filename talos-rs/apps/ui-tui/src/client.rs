@@ -1,8 +1,12 @@
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AppServerClient, ModelInfo, SessionHistorySnapshot, SessionInfo, SkillSuggestion,
-    SkillsSuggestRequest, StartTurnRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
+    GatewayClient as SdkGatewayClient, InterruptTurnRequest, ModelInfo, ModelListRequest,
+    RecoverTimelineRequest, SessionActiveTurnRequest, SessionAgentConf, SessionClearRequest,
+    SessionCloseRequest, SessionCompactRequest, SessionConf, SessionDeleteRequest,
+    SessionGetRequest, SessionHistoryRequest, SessionHistorySnapshot, SessionInfo,
+    SessionListRequest, SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest,
+    StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
     TimelineRecoveryResponse,
 };
 use tokio::sync::mpsc;
@@ -23,11 +27,11 @@ pub trait GatewayClient: Send + Sync {
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot>;
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot>;
-    async fn send_timeline_events(
+    async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
-    async fn reconnect_active_timeline_events(
+    async fn reconnect_active_turn_stream(
         &self,
         session_id: &str,
         since_event_id: Option<String>,
@@ -42,64 +46,83 @@ pub trait GatewayClient: Send + Sync {
 }
 
 #[async_trait]
-impl GatewayClient for Mutex<AppServerClient> {
+impl<C> GatewayClient for Mutex<C>
+where
+    C: SdkGatewayClient + Send,
+{
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
-        self.lock()
-            .await
-            .list_models()
+        let mut client = self.lock().await;
+        SdkGatewayClient::list_models(&mut *client, ModelListRequest {})
             .await
             .map(|response| response.models)
     }
 
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>> {
-        self.lock()
-            .await
-            .suggest_skills(SkillsSuggestRequest {
+        let mut client = self.lock().await;
+        SdkGatewayClient::suggest_skills(
+            &mut *client,
+            SkillsSuggestRequest {
                 query: query.to_string(),
                 limit: Some(8),
-            })
-            .await
-            .map(|response| response.data)
+            },
+        )
+        .await
+        .map(|response| response.data)
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {
-        self.lock()
-            .await
-            .list_sessions(Default::default())
+        let mut client = self.lock().await;
+        SdkGatewayClient::list_sessions(&mut *client, SessionListRequest::default())
             .await
             .map(|response| response.sessions)
     }
 
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
-        self.lock()
-            .await
-            .get_session_by_id(session_id)
-            .await
-            .map(|response| response.session)
+        let mut client = self.lock().await;
+        SdkGatewayClient::get_session(
+            &mut *client,
+            SessionGetRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|response| response.session)
     }
 
     async fn close_session(&self, session_id: &str) -> TalosResult<()> {
-        self.lock()
-            .await
-            .close_session_by_id(session_id)
-            .await
-            .map(|_| ())
+        let mut client = self.lock().await;
+        SdkGatewayClient::close_session(
+            &mut *client,
+            SessionCloseRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn delete_session(&self, session_id: &str) -> TalosResult<()> {
-        self.lock()
-            .await
-            .delete_session_by_id(session_id)
-            .await
-            .map(|_| ())
+        let mut client = self.lock().await;
+        SdkGatewayClient::delete_session(
+            &mut *client,
+            SessionDeleteRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        self.lock()
-            .await
-            .interrupt_turn_by_id(session_id)
-            .await
-            .map(|_| ())
+        let mut client = self.lock().await;
+        SdkGatewayClient::interrupt_turn(
+            &mut *client,
+            InterruptTurnRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn update_session_model(
@@ -107,57 +130,129 @@ impl GatewayClient for Mutex<AppServerClient> {
         session_id: &str,
         model: &str,
     ) -> TalosResult<SessionInfo> {
-        self.lock()
-            .await
-            .update_session_model(session_id, model)
-            .await
-            .map(|response| response.session)
+        let mut client = self.lock().await;
+        SdkGatewayClient::patch_session(
+            &mut *client,
+            SessionPatchRequest {
+                session_id: session_id.to_string(),
+                conf: Some(SessionConf {
+                    agent: Some(SessionAgentConf {
+                        model: Some(model.to_string()),
+                    }),
+                }),
+                project_id: None,
+                current_directory: None,
+            },
+        )
+        .await
+        .map(|response| response.session)
     }
 
-    async fn compact_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
-        Err(TalosError::ValidationError(
-            "app-server TUI spike does not support session compact yet".to_string(),
-        ))
+    async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::compact_session(
+            &mut *client,
+            SessionCompactRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|response| response.session)
     }
 
-    async fn clear_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
-        Err(TalosError::ValidationError(
-            "app-server TUI spike does not support session clear yet".to_string(),
-        ))
+    async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::clear_session(
+            &mut *client,
+            SessionClearRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|response| response.session)
     }
 
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
-        self.lock()
-            .await
-            .get_session_history_by_id(session_id)
-            .await
-            .map(|response| response.history)
+        let mut client = self.lock().await;
+        SdkGatewayClient::get_session_history(
+            &mut *client,
+            SessionHistoryRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|response| response.history)
     }
 
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
-        self.lock()
-            .await
-            .get_active_turn_by_id(session_id)
-            .await
-            .map(|response| response.active_turn)
+        let mut client = self.lock().await;
+        SdkGatewayClient::get_active_turn(
+            &mut *client,
+            SessionActiveTurnRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await
+        .map(|response| response.active_turn)
     }
 
-    async fn send_timeline_events(
+    async fn start_turn_stream(
         &self,
-        request: StartTurnRequest,
+        mut request: StartTurnRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
-        self.lock().await.send_timeline_events(request).await
+        let session_id = request.session_id.clone();
+        if request.client_request_id.is_none() {
+            request.client_request_id = Some(format!("tui-{}", uuid::Uuid::new_v4().simple()));
+        }
+        let mut client = self.lock().await;
+        let response = SdkGatewayClient::start_turn(&mut *client, request).await?;
+        let subscription = SdkGatewayClient::open_timeline_stream(
+            &mut *client,
+            SubscribeTimelineRequest {
+                session_id,
+                turn_id: Some(response.turn_id),
+                since_event_id: None,
+                replay_limit: Some(256),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(true),
+            },
+        )
+        .await?;
+        Ok(subscription.stream.into_inner())
     }
 
-    async fn reconnect_active_timeline_events(
+    async fn reconnect_active_turn_stream(
         &self,
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
-        self.lock()
-            .await
-            .reconnect_active_timeline_events(session_id, since_event_id)
-            .await
+        let mut client = self.lock().await;
+        let active_turn = SdkGatewayClient::get_active_turn(
+            &mut *client,
+            SessionActiveTurnRequest {
+                session_id: session_id.to_string(),
+            },
+        )
+        .await?
+        .active_turn;
+        let Some(turn_id) = active_turn.turn_id else {
+            return Err(TalosError::Conflict(
+                "No active turn stream is available for this session.".to_string(),
+            ));
+        };
+        let subscription = SdkGatewayClient::open_timeline_stream(
+            &mut *client,
+            SubscribeTimelineRequest {
+                session_id: session_id.to_string(),
+                turn_id: Some(turn_id),
+                since_event_id,
+                replay_limit: Some(256),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(true),
+            },
+        )
+        .await?;
+        Ok(subscription.stream.into_inner())
     }
 
     async fn recover_session(
@@ -165,13 +260,20 @@ impl GatewayClient for Mutex<AppServerClient> {
         session_id: &str,
         after_event_id: Option<String>,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        self.lock()
-            .await
-            .recover_session_after(session_id, after_event_id)
-            .await
+        let mut client = self.lock().await;
+        SdkGatewayClient::recover_timeline(
+            &mut *client,
+            RecoverTimelineRequest {
+                session_id: session_id.to_string(),
+                after_event_id,
+                replay_limit: Some(256),
+            },
+        )
+        .await
     }
 
     async fn shutdown(&self) -> TalosResult<()> {
-        self.lock().await.shutdown().await
+        let mut client = self.lock().await;
+        SdkGatewayClient::shutdown(&mut *client).await
     }
 }

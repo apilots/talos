@@ -21,7 +21,6 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 4. `scenarios/05_cli/`
 - Scope: CLI-driven interactive scenarios
 - Files:
-  - `app_server_e2e.sh`
   - `full_flow.sh`
   - `bilingual_chat.sh`
 
@@ -58,6 +57,7 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 - Scope: embedded TUI lifecycle validation
 - Files:
   - `embedded_quit_flushes_memory.sh`
+  - `embedded_write_html.sh`
 
 9. `scenarios/09_app_server/`
 - Scope: JSON-RPC app-server protocol, resource parity, skills, and MCP turn paths
@@ -80,7 +80,6 @@ talos-e2e/run_e2e.sh
 talos-e2e/run_e2e.sh --group 06_tools
 talos-e2e/run_e2e.sh --group 09_app_server
 talos-e2e/run_e2e.sh --case 05_cli/full_flow
-talos-e2e/run_e2e.sh --case 05_cli/app_server_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/skills_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/mcp_e2e

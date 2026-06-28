@@ -42,6 +42,7 @@ members = [
     "crates/app/talos-base",
     # Apps
     "apps/sdk",
+    "apps/sdk-embedded",
     "apps/cli",
     "apps/app-server-test-client",
     "apps/ui-tui",
@@ -133,4 +134,5 @@ talos-logging = { path = "crates/infra/logging" }
 talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
+talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }

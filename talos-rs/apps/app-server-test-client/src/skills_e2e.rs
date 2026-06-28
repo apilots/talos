@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, MarketplaceSourceInput, PluginDocumentMediaType, PluginDocumentRole,
-    PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget, PluginKind,
-    PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary,
-    SkillsListRequest, SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest,
-    StartTurnRequest, TalosInputItem,
+    AppServerClient, GatewayClient, MarketplaceSourceInput, PluginDocumentMediaType,
+    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
+    PluginKind, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
+    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope,
+    SkillSelector, SkillSummary, SkillsListRequest, SkillsReadRequest, SkillsResolveRequest,
+    SkillsSuggestRequest, StartTurnRequest, TalosInputItem,
 };
 
 pub(super) async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {

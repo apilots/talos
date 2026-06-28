@@ -229,7 +229,6 @@ async fn handle_request(
                     AppServerErrorBody::new(
                         ALREADY_INITIALIZED,
                         "app-server is already initialized",
-                        None,
                     ),
                 )
                 .await;
@@ -386,7 +385,6 @@ async fn resolve_request_actor(
         AppServerErrorBody::new(
             UNAUTHORIZED,
             "authenticated JSON-RPC request requires actor credentials",
-            None,
         )
     })?;
     validator.validate(&credentials).await

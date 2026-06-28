@@ -219,6 +219,7 @@ async fn submit_channel_turn(
             actor,
             SubscribeTimelineRequest {
                 session_id: response.session_id.clone(),
+                turn_id: Some(response.turn_id.clone()),
                 since_event_id: None,
                 replay_limit: Some(128),
                 close_when_idle: Some(false),

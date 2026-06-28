@@ -17,3 +17,5 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 uuid = { workspace = true }
 talos-sdk = { path = "../sdk" }
+talos-sdk-embedded = { path = "../sdk-embedded" }
+talos-config = { workspace = true }

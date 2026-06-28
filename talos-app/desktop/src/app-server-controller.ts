@@ -36,6 +36,7 @@ export interface DesktopAppServerControllerOptions extends AppServerClientOption
 
 interface SubscriptionReplayState {
   sessionId: string;
+  turnId: string | null;
   subscriptionId: string;
   replayLimit: number | null;
   lastEventId: string | null;
@@ -179,6 +180,7 @@ export class DesktopAppServerController {
         "event.subscribe",
         {
           session_id: subscription.sessionId,
+          turn_id: subscription.turnId,
           since_event_id: subscription.lastEventId,
           replay_limit: subscription.replayLimit,
           close_when_idle: subscription.closeWhenIdle,
@@ -205,6 +207,7 @@ export class DesktopAppServerController {
     }
     this.subscriptions.set(params.session_id, {
       sessionId: response.session_id,
+      turnId: params.turn_id ?? null,
       subscriptionId: response.subscription_id,
       replayLimit: params.replay_limit,
       lastEventId: response.high_water_mark_event_id ?? params.since_event_id,

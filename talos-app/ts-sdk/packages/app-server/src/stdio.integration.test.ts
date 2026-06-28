@@ -40,6 +40,7 @@ describeIntegration("StdioAppServerClient integration", () => {
     try {
       await client.subscribeEvents({
         session_id: sessionId,
+        turn_id: null,
         since_event_id: null,
         replay_limit: 50,
         close_when_idle: null,

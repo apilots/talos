@@ -7,17 +7,11 @@ describe("AppServerProtocolError", () => {
     const error = new AppServerProtocolError({
       code: -32002,
       message: "missing session",
-      data: { type: "resource", kind: "not_found", resource: "session missing" },
     });
 
     expect(error.name).toBe("AppServerProtocolError");
     expect(error.message).toBe("missing session");
     expect(error.code).toBe(-32002);
-    expect(error.data).toEqual({
-      type: "resource",
-      kind: "not_found",
-      resource: "session missing",
-    });
   });
 });
 
@@ -64,7 +58,6 @@ describe("JsonRpcStdioTransport server requests", () => {
         error: {
           code: -32601,
           message: "unsupported server request: client.unknown",
-          data: null,
         },
       },
     ]);

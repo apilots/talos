@@ -202,7 +202,7 @@ impl TuiApp {
         };
         let since_event_id = self.last_stream_event_id.clone();
         match client
-            .reconnect_active_timeline_events(&session_id, since_event_id)
+            .reconnect_active_turn_stream(&session_id, since_event_id)
             .await
         {
             Ok(receiver) => {

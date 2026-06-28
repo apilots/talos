@@ -7,10 +7,6 @@ use clap::{Args, Parser, Subcommand};
 #[command(version)]
 #[command(about = "Talos AI System CLI - Full-stack access to AI assistant capabilities", long_about = None)]
 pub struct Cli {
-    /// App-server host binary.
-    #[arg(long)]
-    pub(super) app_server_bin: Option<String>,
-
     /// Commands for the CLI
     #[command(subcommand)]
     pub(super) command: Commands,
@@ -43,9 +39,6 @@ pub(super) enum Commands {
 
     /// System information
     Info,
-
-    /// Run a local app-server protocol smoke scenario
-    AppServerSmoke(AppServerSmokeCmd),
 }
 
 #[derive(Subcommand)]
@@ -190,15 +183,4 @@ pub(super) struct ModelsCmd {
     /// Show verbose information
     #[arg(long)]
     pub(super) verbose: bool,
-}
-
-#[derive(Args)]
-pub(super) struct AppServerSmokeCmd {
-    /// Scenario name supported by talos-app-server-test-client
-    #[arg(long, default_value = "turn-smoke")]
-    pub(super) scenario: String,
-
-    /// App-server host binary.
-    #[arg(long)]
-    pub(super) app_server_bin: Option<String>,
 }

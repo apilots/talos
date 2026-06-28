@@ -143,12 +143,12 @@ impl TuiApp {
 
     pub async fn initialize_session(&mut self) {
         self.connection_status = "connecting".to_string();
-        self.push_right_event("connecting to app-server".to_string());
+        self.push_right_event("connecting to embedded runtime".to_string());
 
         if let Err(err) = self.refresh_models_with_retry().await {
             self.push_block(
                 ChatRole::System,
-                format!("Failed to load models from app-server: {}", err),
+                format!("Failed to load models from gateway: {}", err),
             );
             self.connection_status = "error".to_string();
             return;

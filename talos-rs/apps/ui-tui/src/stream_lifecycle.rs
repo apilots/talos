@@ -90,7 +90,7 @@ impl TuiApp {
         self.push_right_event(format!("message dispatched to session {}", session_id));
 
         let handle = tokio::spawn(async move {
-            let result = client.send_timeline_events(request).await;
+            let result = client.start_turn_stream(request).await;
             if tx.send(result).await.is_err() {
                 error!(
                     session_id = %session_id,

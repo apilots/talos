@@ -4,9 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, MarketplaceSourceInput, PluginDocumentMediaType, PluginDocumentRole,
-    PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest, PluginInstallTarget,
-    PluginKind, PluginListRequest, PluginListStatusFilter, PluginReadRequest,
+    AppServerClient, GatewayClient, MarketplaceSourceInput, PluginDocumentMediaType,
+    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest,
+    PluginInstallTarget, PluginKind, PluginListRequest, PluginListStatusFilter, PluginReadRequest,
     PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
     PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus, PluginUninstallRequest,
     TalosTimelineContent, TalosTimelineEventPayload, TalosTimelineItemKind, TimelineEventEnvelope,

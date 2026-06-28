@@ -87,12 +87,13 @@ TALOS_TELEGRAM_BOT_TOKEN="your-telegram-bot-token"  # for Telegram integration
 | Binary | Package | Purpose |
 |--------|---------|---------|
 | `talos` | `talos-ui-tui` | TUI user entrypoint |
-| `app-server` | `app-server` | Private JSON-RPC stdio runtime used by TUI, Desktop, and SDK clients |
+| `app-server` | `app-server` | Private JSON-RPC stdio protocol adapter used by Desktop and protocol tests |
 | `talos-server` | `talos-server` | HTTP API and WebUI server |
-| `talos-cli` | `talos-cli` | CLI binary for App Server flows |
+| `talos-cli` | `talos-cli` | CLI binary using the embedded runtime |
 
-`app-server` is not the product server. It is a local runtime process and does
-not listen on a port. `talos-server` is the deployable HTTP/WebUI server.
+`app-server` is not the product server. It is a local JSON-RPC protocol adapter
+for Desktop and protocol tests, and does not listen on a port. `talos-server` is
+the deployable HTTP/WebUI server.
 
 Start the Talos server:
 ```bash
@@ -101,7 +102,7 @@ cargo run -p talos-server --bin talos-server
 
 The server will start on `http://0.0.0.0:8080` by default.
 
-Start the local app-server protocol adapter:
+Start the local app-server protocol adapter for protocol testing:
 ```bash
 cargo run -p app-server --bin app-server
 ```
@@ -109,7 +110,7 @@ cargo run -p app-server --bin app-server
 `app-server` speaks JSON-RPC over stdin/stdout JSONL. It does not open a
 port; stdout is reserved for protocol messages and logs go to stderr.
 
-Run CLI through the embedded app-server path:
+Run CLI through the embedded runtime path:
 ```bash
 cargo run -p talos-cli --bin talos-cli -- models
 cargo run -p talos-cli --bin talos-cli -- chat simple "hello" --stream
@@ -122,8 +123,9 @@ Start the Terminal User Interface:
 cargo run -p talos-ui-tui --bin talos
 ```
 
-The TUI starts an embedded `app-server` child process and communicates
-over JSON-RPC stdio without opening a local port.
+The TUI runs the embedded Talos runtime in-process and talks to Gateway through
+the Rust embedded SDK without starting an app-server child process or opening a
+local port.
 
 ### API Usage
 

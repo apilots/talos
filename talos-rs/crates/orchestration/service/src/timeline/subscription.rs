@@ -30,16 +30,20 @@ impl TimelineSubscriptionService {
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events()?;
         let high_water_mark_event_id = self.latest_event_id(&params.session_id).await?;
-        let replay = self
+        let mut replay = self
             .replay_after(
                 &params.session_id,
                 params.after_event_id.as_ref(),
                 params.replay_limit,
             )
             .await?;
+        if let Some(turn_id) = params.turn_id.as_deref() {
+            replay.events.retain(|record| record.turn_id == turn_id);
+        }
         let has_live_turn = self.has_live_turn(&params.session_id).await?;
         let events = spawn_subscription_stream(
             params.session_id.clone(),
+            params.turn_id.clone(),
             replay.events.clone(),
             replay.last_replay_seq,
             live_events,
@@ -110,6 +114,7 @@ impl TimelineSubscriptionService {
 
 fn spawn_subscription_stream(
     session_id: String,
+    turn_id: Option<String>,
     replay_events: Vec<TimelineEventEnvelope>,
     last_replay_seq: i64,
     mut live_events: ApplicationEventStream,
@@ -121,6 +126,9 @@ fn spawn_subscription_stream(
     tokio::spawn(async move {
         let mut last_sent_seq = last_replay_seq;
         for record in replay_events {
+            if !matches_turn_filter(&record, turn_id.as_deref()) {
+                continue;
+            }
             last_sent_seq = record.event_seq;
             if tx
                 .send(TimelineSubscriptionMessage::Event(record))
@@ -145,6 +153,9 @@ fn spawn_subscription_stream(
             match live_events.recv().await {
                 Ok(record) => {
                     if record.session_id != session_id {
+                        continue;
+                    }
+                    if !matches_turn_filter(&record, turn_id.as_deref()) {
                         continue;
                     }
                     let is_live_metrics = matches!(
@@ -202,6 +213,10 @@ fn spawn_subscription_stream(
         }
     });
     rx
+}
+
+fn matches_turn_filter(record: &TimelineEventEnvelope, turn_id: Option<&str>) -> bool {
+    turn_id.is_none_or(|turn_id| record.turn_id == turn_id)
 }
 
 async fn send_subscription_closed(
@@ -295,18 +310,22 @@ mod tests {
     }
 
     fn unpersisted_event(sequence: u64) -> TalosTimelineEvent {
+        unpersisted_event_for_turn(sequence, "turn-1")
+    }
+
+    fn unpersisted_event_for_turn(sequence: u64, turn_id: &str) -> TalosTimelineEvent {
         TalosTimelineEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: Some(100 + sequence as i64),
             event_type: TalosTimelineEventType::TurnStarted,
-            turn_id: "turn-1".to_string(),
-            message_id: "msg-1".to_string(),
+            turn_id: turn_id.to_string(),
+            message_id: format!("msg-{turn_id}"),
             session_id: "s1".to_string(),
             sequence,
             payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
                 request_id: "req-1".to_string(),
-                turn_id: "turn-1".to_string(),
+                turn_id: turn_id.to_string(),
                 started_at_ms: 1,
             }),
         }
@@ -378,6 +397,7 @@ mod tests {
         let mut subscription = events
             .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
+                turn_id: None,
                 after_event_id: None,
                 replay_limit: 32,
                 close_when_idle: false,
@@ -420,6 +440,7 @@ mod tests {
         let mut subscription = events
             .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
+                turn_id: None,
                 after_event_id: None,
                 replay_limit: 32,
                 close_when_idle: false,
@@ -454,6 +475,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn turn_scoped_subscription_filters_replay_and_live_events() {
+        let (timeline, _store) = service();
+        let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
+        timeline
+            .record_talos_event(unpersisted_event_for_turn(1, "turn-old"))
+            .await
+            .unwrap();
+        let replay_match = timeline
+            .record_talos_event(unpersisted_event_for_turn(2, "turn-current"))
+            .await
+            .unwrap();
+
+        let mut subscription = events
+            .subscribe(TimelineSubscribeCommand {
+                session_id: "s1".to_string(),
+                turn_id: Some("turn-current".to_string()),
+                after_event_id: None,
+                replay_limit: 32,
+                close_when_idle: false,
+                close_on_terminal: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(subscription.replay.events.len(), 1);
+        assert_eq!(
+            subscription.replay.events[0].event_id,
+            replay_match.event_id
+        );
+
+        timeline
+            .record_talos_event(unpersisted_event_for_turn(3, "turn-other"))
+            .await
+            .unwrap();
+        let live_match = timeline
+            .record_talos_event(unpersisted_event_for_turn(4, "turn-current"))
+            .await
+            .unwrap();
+
+        let replay = recv_event(&mut subscription.events).await;
+        let live = recv_event(&mut subscription.events).await;
+        assert_eq!(replay.event_id, replay_match.event_id);
+        assert_eq!(live.event_id, live_match.event_id);
+    }
+
+    #[tokio::test]
     async fn session_scoped_subscription_continues_after_terminal_event() {
         let (timeline, _store) = service();
         let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
@@ -461,6 +528,7 @@ mod tests {
         let mut subscription = events
             .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
+                turn_id: None,
                 after_event_id: None,
                 replay_limit: 32,
                 close_when_idle: false,
@@ -492,6 +560,7 @@ mod tests {
         let mut subscription = events
             .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
+                turn_id: None,
                 after_event_id: None,
                 replay_limit: 32,
                 close_when_idle: false,
@@ -535,6 +604,7 @@ mod tests {
         let mut subscription = events
             .subscribe(TimelineSubscribeCommand {
                 session_id: "s1".to_string(),
+                turn_id: None,
                 after_event_id: None,
                 replay_limit: 32,
                 close_when_idle: true,

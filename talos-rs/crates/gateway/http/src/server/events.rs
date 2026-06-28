@@ -57,6 +57,7 @@ pub(super) async fn subscribe_timeline_events_handler(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),
+                turn_id: None,
                 since_event_id: after_event_id,
                 replay_limit: Some(limit),
                 close_when_idle: Some(true),

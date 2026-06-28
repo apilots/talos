@@ -17,8 +17,6 @@ echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-
 cli="${TALOS_RS_DIR}/target/debug/talos-cli"
 
 run_cli() {

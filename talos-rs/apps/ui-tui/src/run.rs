@@ -32,9 +32,11 @@ pub async fn run_tui_app_with_gateway_client(
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
 
+    let shutdown_client = client.clone();
     let mut app = TuiApp::new_with_gateway_client(client);
     app.initialize_session().await;
     let run_result = run_event_loop(&mut terminal, &mut app).await;
+    let shutdown_result = shutdown_client.shutdown().await;
 
     disable_raw_mode()?;
     execute!(
@@ -45,7 +47,9 @@ pub async fn run_tui_app_with_gateway_client(
     )?;
     terminal.show_cursor()?;
 
-    run_result
+    run_result?;
+    shutdown_result?;
+    Ok(())
 }
 
 async fn run_event_loop<B: Backend>(

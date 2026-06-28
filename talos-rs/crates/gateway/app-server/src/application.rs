@@ -4,10 +4,8 @@ use serde_json::Value;
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams};
 use talos_auth::CloudSessionCache;
-use talos_error::TalosError;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_service::{Actor, TalosService, TimelineSubscriptionSource};
-use talos_types::talos::TalosInputItem;
 use talos_types::{
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, StartTurnRequest,
     StartTurnResponse, SubscribeTimelineRequest,
@@ -230,7 +228,6 @@ impl AppServerApplication for TalosApplicationAdapter {
             ),
             ClientRequestParams::TurnRetry(params) => {
                 let request: SharedRetryTurnRequest = params.into();
-                validate_app_server_input(&request.input)?;
                 to_value(
                     self.gateway
                         .retry_turn(actor, request)
@@ -545,33 +542,12 @@ impl TalosApplicationAdapter {
         actor: &Actor,
         request: StartTurnRequest,
     ) -> ProtocolResult<StartTurnResponse> {
-        validate_app_server_input(&request.input)?;
         let client_request_id = request.client_request_id.clone();
         self.gateway
             .start_turn(actor, request, client_request_id)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
     }
-}
-
-fn validate_app_server_input(input: &[TalosInputItem]) -> ProtocolResult<()> {
-    for item in input {
-        match item {
-            TalosInputItem::Text { .. } | TalosInputItem::SkillSelection { .. } => {}
-            TalosInputItem::Image { .. }
-            | TalosInputItem::File { .. }
-            | TalosInputItem::Voice { .. }
-            | TalosInputItem::Video { .. } => {
-                return Err(AppServerErrorBody::from_talos_error(
-                    TalosError::ValidationError(
-                        "app-server protocol currently supports text and skill selection input items"
-                            .to_string(),
-                    ),
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 fn to_value<T: Serialize>(value: T) -> ProtocolResult<Value> {

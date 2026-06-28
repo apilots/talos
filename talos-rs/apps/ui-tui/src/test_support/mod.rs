@@ -659,7 +659,7 @@ impl GatewayClient for MockGatewayClient {
         Ok(state.session_info(0))
     }
 
-    async fn send_timeline_events(
+    async fn start_turn_stream(
         &self,
         request: StartTurnRequest,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
@@ -749,7 +749,7 @@ impl GatewayClient for MockGatewayClient {
         Ok(rx)
     }
 
-    async fn reconnect_active_timeline_events(
+    async fn reconnect_active_turn_stream(
         &self,
         _session_id: &str,
         since_event_id: Option<String>,

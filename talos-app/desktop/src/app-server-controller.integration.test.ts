@@ -114,6 +114,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
 
       await rendererClient.subscribeEvents({
         session_id: sessionId,
+        turn_id: null,
         since_event_id: null,
         replay_limit: 50,
         close_when_idle: null,

@@ -110,6 +110,7 @@ describe("DesktopAppServerController", () => {
     await controller.connect();
     await controller.invoke("event.subscribe", {
       session_id: "session-1",
+      turn_id: null,
       since_event_id: null,
       replay_limit: 50,
       close_when_idle: true,
@@ -128,6 +129,7 @@ describe("DesktopAppServerController", () => {
         method: "event.subscribe",
         params: {
           session_id: "session-1",
+          turn_id: null,
           since_event_id: "event-7",
           replay_limit: 50,
           close_when_idle: true,
@@ -153,6 +155,7 @@ describe("DesktopAppServerController", () => {
     await controller.connect();
     const response = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event.subscribe", {
       session_id: "session-1",
+      turn_id: null,
       since_event_id: null,
       replay_limit: 50,
       close_when_idle: null,
@@ -208,6 +211,7 @@ describe("DesktopAppServerController", () => {
       await controller.connect();
       await rendererClient.subscribeEvents({
         session_id: "session-1",
+        turn_id: null,
         since_event_id: null,
         replay_limit: 50,
         close_when_idle: null,
@@ -235,6 +239,7 @@ describe("DesktopAppServerController", () => {
           method: "event.subscribe",
           params: {
             session_id: "session-1",
+            turn_id: null,
             since_event_id: "event-7",
             replay_limit: 50,
             close_when_idle: null,

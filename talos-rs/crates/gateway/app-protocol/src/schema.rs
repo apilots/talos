@@ -53,13 +53,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::version::ProtocolVersion>());
     output.push_str(&export::<crate::jsonrpc::RequestId>());
     output.push_str(&export::<crate::errors::AppServerErrorBody>());
-    output.push_str(&export::<crate::errors::AppServerErrorData>());
-    output.push_str(&export::<crate::errors::AuthErrorData>());
-    output.push_str(&export::<crate::errors::ResourceErrorData>());
-    output.push_str(&export::<crate::errors::ValidationErrorData>());
-    output.push_str(&export::<crate::errors::TurnErrorData>());
-    output.push_str(&export::<crate::errors::ToolErrorData>());
-    output.push_str(&export::<crate::errors::ConfigErrorData>());
     output.push_str(&export::<crate::requests::ClientMethod>());
     output.push_str(&export::<crate::requests::ClientRequestParams>());
     output.push_str(&export::<crate::requests::ClientRequest>());

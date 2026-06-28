@@ -20,8 +20,6 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-
 prepare_talos_home
 trap cleanup EXIT
 
@@ -126,7 +124,7 @@ if [[ -f "${DAY_FILE}" ]]; then
 fi
 
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' TALOS_APP_SERVER_BIN='${TALOS_APP_SERVER_BIN}' ./target/debug/talos --app-server-bin ./target/debug/app-server"
+  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' ./target/debug/talos"
 wait_for_tui_ready
 
 for _ in $(seq 1 160); do

@@ -44,13 +44,11 @@ interface PendingRequest {
 
 export class AppServerProtocolError extends Error {
   readonly code: number;
-  readonly data: AppProtocol.AppServerErrorData | null;
 
   constructor(error: AppProtocol.AppServerErrorBody) {
     super(error.message);
     this.name = "AppServerProtocolError";
     this.code = error.code;
-    this.data = error.data;
   }
 }
 
@@ -291,7 +289,6 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       error: {
         code,
         message,
-        data: null,
       },
     };
     this.requireChild().stdin.write(`${JSON.stringify(response)}\n`);

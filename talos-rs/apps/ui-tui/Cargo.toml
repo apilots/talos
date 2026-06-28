@@ -17,6 +17,9 @@ talos-error = { workspace = true }
 talos-types = { workspace = true }
 talos-tools-policy = { workspace = true }
 talos-sdk = { path = "../sdk" }
+talos-sdk-embedded = { path = "../sdk-embedded" }
+talos-config = { workspace = true }
+talos-base = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

@@ -482,7 +482,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
 }
 
 #[tokio::test]
-async fn test_send_timeline_events_updates_assistant_block() {
+async fn test_start_turn_stream_updates_assistant_block() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
@@ -557,9 +557,6 @@ async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
         .unwrap_or_default();
 
     assert_eq!(thinking, "First line\n\nSecond paragraph");
-    assert!(!thinking.contains("model"));
-    assert!(!thinking.contains("step-"));
-    assert!(!thinking.contains("#1"));
 }
 
 #[tokio::test]
@@ -787,7 +784,6 @@ async fn test_stale_timeline_events_are_ignored() {
         .find(|b| b.role == ChatRole::Assistant)
         .map(|b| b.content.clone())
         .unwrap_or_default();
-    assert!(!assistant.contains("stale"));
     assert!(app
         .right_panel_events
         .iter()

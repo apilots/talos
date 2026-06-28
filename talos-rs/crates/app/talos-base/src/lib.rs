@@ -152,6 +152,14 @@ pub struct TalosApplicationRuntime {
     pub tool_registry: Arc<ToolRegistry>,
 }
 
+impl TalosApplicationRuntime {
+    pub async fn shutdown(&self) -> TalosResult<()> {
+        self.coordinator
+            .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
+            .await
+    }
+}
+
 struct ApplicationCollaborationHost {
     service: Arc<TalosService>,
     session_users: RwLock<HashMap<String, String>>,
@@ -265,6 +273,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
             .events
             .subscribe(TimelineSubscribeCommand {
                 session_id,
+                turn_id: Some(ack.turn_id.clone()),
                 after_event_id: None,
                 replay_limit: 1_000,
                 close_when_idle: true,
@@ -371,7 +380,9 @@ fn load_runtime_config() -> TalosResult<Config> {
 
 fn resolve_config_source_path() -> Option<PathBuf> {
     let config_path = Config::source_path();
-    config_path.exists().then(|| canonical_or_original(config_path))
+    config_path
+        .exists()
+        .then(|| canonical_or_original(config_path))
 }
 
 fn resolve_packaged_webui_dir() -> Option<PathBuf> {
