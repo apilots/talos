@@ -130,6 +130,39 @@ cargo run -p talos-server --bin talos-server
 
 ---
 
+## 发布 Release
+
+根目录提供 `release.sh` 用于发布 GitHub Release。脚本只负责打 tag 和创建 Release notes；
+构建、打包和产物发布由 tag 触发的 CI release workflow 自动完成。
+
+发布前需要先通过 PR 把版本号升级合并到 `main`，并准备好外部 release notes 文件。
+
+```bash
+# 在最新 main 分支执行
+./release.sh 0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md
+
+# 自动确认并监控 tag 触发的 workflow
+./release.sh v0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md --yes --watch
+
+# 只做本地校验和命令预览，不创建 tag / release
+./release.sh 0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md --dry-run
+```
+
+脚本会校验：
+
+- 当前目录是仓库根目录
+- 当前分支是 `main`
+- `main` 与 `origin/main` 同步
+- 工作区干净
+- `gh` 已登录
+- 本地和远端不存在同名 tag
+- GitHub Release 不存在
+- Rust / TUI / Web / Desktop / TS SDK 版本号与指定版本一致
+
+脚本不会自动修改版本号，也不会上传本地编译产物。
+
+---
+
 ## 架构设计
 
 ```
