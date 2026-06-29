@@ -95,7 +95,23 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE web_search_session_id PASS session_id=${session_id}"
 
-search_input="Within this single turn, first call tool 'ToolSearch' with query WebSearch to activate it, then call tool 'WebSearch' exactly once with query site:example.com Example Domain, allowed_domains example.com, and limit 3. After both tool calls, respond with exactly WEB_SEARCH_OK"
+activate_input="You must call tool 'ToolSearch' exactly once with query WebSearch to activate it. Do not call WebSearch in this turn. After the ToolSearch tool result is returned, respond with exactly WEB_SEARCH_ACTIVATED"
+activate_payload="$(build_payload "${activate_input}")"
+activate_json="$(send_message_response "${session_id}" "${activate_payload}" "activate")"
+log_case_json "tool_web_search_activate" "${activate_payload}" "${activate_json}"
+
+ACTIVATE_JSON="${activate_json}" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["ACTIVATE_JSON"])
+results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
+assert results, "missing tool_result"
+tool_names = [item.get("tool_name") for item in results]
+assert "ToolSearch" in tool_names, tool_names
+PY
+
+search_input="You must call tool 'WebSearch' exactly once with query site:example.com Example Domain, allowed_domains example.com, and limit 3. Do not call ToolSearch again. After the WebSearch tool result is returned, respond with exactly WEB_SEARCH_OK"
 search_payload="$(build_payload "${search_input}")"
 search_json="$(send_message_response "${session_id}" "${search_payload}" "search")"
 log_case_json "tool_web_search" "${search_payload}" "${search_json}"
@@ -114,7 +130,6 @@ data = json.loads(os.environ["WEB_SEARCH_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, "missing tool_result"
 tool_names = [item.get("tool_name") for item in results]
-assert "ToolSearch" in tool_names, tool_names
 assert "WebSearch" in tool_names, tool_names
 result = next(item for item in results if item.get("tool_name") == "WebSearch")
 content_items = result.get("content") or []

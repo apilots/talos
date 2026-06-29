@@ -1,0 +1,17 @@
+[package]
+name = "talos-sdk-embedded"
+version = "0.1.3"
+edition = "2021"
+description = "Talos embedded SDK client for in-process runtime access"
+
+[dependencies]
+async-trait = { workspace = true }
+talos-auth = { workspace = true }
+talos-base = { workspace = true }
+talos-config = { workspace = true }
+talos-error = { workspace = true }
+talos-gateway = { workspace = true }
+talos-sdk = { workspace = true }
+talos-service = { workspace = true }
+talos-types = { workspace = true }
+tokio = { workspace = true }

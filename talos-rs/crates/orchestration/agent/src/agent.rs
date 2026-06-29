@@ -13,6 +13,7 @@ mod mock;
 mod request;
 mod session;
 #[cfg(test)]
+#[path = "agent/agent_tests.rs"]
 mod tests;
 
 pub use mock::MockAgent;

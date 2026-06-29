@@ -344,4 +344,5 @@ pub fn provider_config_for_llm<'a>(
 }
 
 #[cfg(test)]
+#[path = "config_tests.rs"]
 mod tests;

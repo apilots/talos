@@ -1,0 +1,129 @@
+use super::*;
+use std::sync::Arc;
+use talos_storage::SqliteStorage;
+use talos_store::session::{
+    ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, PendingUserAction,
+};
+use talos_types::talos::{
+    StopReason, TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelineEvent,
+    TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnCompletedEvent, TalosUsage,
+};
+
+async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
+    let event_store: Arc<dyn TimelineEventStore> = store.clone();
+    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
+    (
+        TimelineEventService::new(
+            event_store,
+            active_turn_store,
+            TimelineEventRetentionConfig::default(),
+        ),
+        store,
+    )
+}
+
+fn timeline_event(
+    sequence: u64,
+    event_type: TalosTimelineEventType,
+    payload: TalosTimelineEventPayload,
+) -> TalosTimelineEvent {
+    TalosTimelineEvent {
+        event_seq: None,
+        event_id: None,
+        created_at_ms: Some(1000 + sequence as i64),
+        event_type,
+        turn_id: "turn_1".to_string(),
+        message_id: "msg_1".to_string(),
+        session_id: "s1".to_string(),
+        sequence,
+        payload,
+    }
+}
+
+fn completed_event(sequence: u64) -> TalosTimelineEvent {
+    timeline_event(
+        sequence,
+        TalosTimelineEventType::TurnCompleted,
+        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+            request_id: "req_1".to_string(),
+            turn_id: "turn_1".to_string(),
+            completed_at_ms: 1000,
+            stop_reason: StopReason::EndTurn,
+            usage: TalosUsage::default(),
+            metrics: None,
+        }),
+    )
+}
+
+fn dynamic_event(sequence: u64) -> TalosTimelineEvent {
+    timeline_event(
+        sequence,
+        TalosTimelineEventType::ItemDelta,
+        TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+            request_id: "req_1".to_string(),
+            turn_id: "turn_1".to_string(),
+            item_id: "tool-1".to_string(),
+            delta: TalosTimelineDelta::ToolDynamicRequest {
+                call_id: "call_1".to_string(),
+                tool_name: "ExternalTool".to_string(),
+                arguments: serde_json::json!({"query": "input"}).into(),
+            },
+        }),
+    )
+}
+
+#[tokio::test]
+async fn completed_event_updates_active_turn_terminal_status() {
+    let (service, store) = service().await;
+    let record = service
+        .record_talos_event(completed_event(1))
+        .await
+        .unwrap();
+
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::Completed);
+    assert_eq!(
+        active.last_event_id,
+        Some(TimelineEventId::from(record.event_id))
+    );
+}
+
+#[tokio::test]
+async fn pending_dynamic_event_updates_active_turn_user_action() {
+    let (service, store) = service().await;
+    service.record_talos_event(dynamic_event(1)).await.unwrap();
+
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+    assert!(matches!(
+        active.pending_user_action,
+        Some(PendingUserAction::DynamicToolResult(ref pending))
+            if pending.item_id.as_deref() == Some("tool-1")
+                && pending.call_id == "call_1"
+                && pending.tool_name == "ExternalTool"
+    ));
+}
+
+#[tokio::test]
+async fn completed_event_preserves_pending_dynamic_active_turn() {
+    let (service, store) = service().await;
+    service.record_talos_event(dynamic_event(1)).await.unwrap();
+    let completed = service
+        .record_talos_event(completed_event(2))
+        .await
+        .unwrap();
+
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+    assert_eq!(
+        active.last_event_id,
+        Some(TimelineEventId::from(completed.event_id))
+    );
+    assert!(matches!(
+        active.pending_user_action,
+        Some(PendingUserAction::DynamicToolResult(ref pending))
+            if pending.call_id == "call_1" && pending.tool_name == "ExternalTool"
+    ));
+}

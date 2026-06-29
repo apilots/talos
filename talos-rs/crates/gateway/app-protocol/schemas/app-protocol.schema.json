@@ -40,17 +40,6 @@
           "format": "int32",
           "type": "integer"
         },
-        "data": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/AppServerErrorData"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "message": {
           "type": "string"
         }
@@ -60,193 +49,6 @@
         "message"
       ],
       "type": "object"
-    },
-    "AppServerErrorData": {
-      "oneOf": [
-        {
-          "enum": [
-            "unauthorized",
-            "forbidden"
-          ],
-          "properties": {
-            "type": {
-              "enum": [
-                "auth"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": [
-            "object",
-            "string"
-          ]
-        },
-        {
-          "oneOf": [
-            {
-              "properties": {
-                "kind": {
-                  "enum": [
-                    "not_found"
-                  ],
-                  "type": "string"
-                },
-                "resource": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "resource"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "kind": {
-                  "enum": [
-                    "expired"
-                  ],
-                  "type": "string"
-                },
-                "reason": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "reason"
-              ],
-              "type": "object"
-            }
-          ],
-          "properties": {
-            "type": {
-              "enum": [
-                "resource"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "validation"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "reason",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "oneOf": [
-            {
-              "properties": {
-                "kind": {
-                  "enum": [
-                    "conflict"
-                  ],
-                  "type": "string"
-                },
-                "reason": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "reason"
-              ],
-              "type": "object"
-            },
-            {
-              "properties": {
-                "kind": {
-                  "enum": [
-                    "not_initialized"
-                  ],
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind"
-              ],
-              "type": "object"
-            }
-          ],
-          "properties": {
-            "type": {
-              "enum": [
-                "turn"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reason": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "tool"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "reason",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "path": {
-              "type": "string"
-            },
-            "reason": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "config"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "path",
-            "reason",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "AuthLogoutRequest": {
       "type": "object"
@@ -3531,6 +3333,13 @@
           "type": "string"
         },
         "since_event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "turn_id": {
           "default": null,
           "type": [
             "string",

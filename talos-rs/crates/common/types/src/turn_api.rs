@@ -67,6 +67,8 @@ pub struct SubmitToolResultResponse {
 pub struct SubscribeTimelineRequest {
     pub session_id: String,
     #[serde(default)]
+    pub turn_id: Option<String>,
+    #[serde(default)]
     pub since_event_id: Option<String>,
     #[serde(default)]
     pub replay_limit: Option<usize>,

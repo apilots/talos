@@ -87,7 +87,7 @@ export function createDesktopTalosClient(
       if (isTerminalEvent(envelope)) {
         stop();
       }
-    }, undefined, afterEventId ?? null, true, true),
+    }, undefined, afterEventId ?? null, null, true, true),
     startEvents: (
       request: StartTurnRequest,
       onEvent: (event: TimelineEventEnvelope) => void,
@@ -257,7 +257,7 @@ async function startTurnAndStream(
         stop();
       }
     }
-  }, undefined, null, true, true);
+  }, undefined, null, ack.turn_id, true, true);
 }
 
 async function retryTurnAndStream(
@@ -279,7 +279,7 @@ async function retryTurnAndStream(
         stop();
       }
     }
-  }, undefined, null, true, true);
+  }, undefined, null, ack.turn_id, true, true);
 }
 
 function streamTimelineEvents(
@@ -291,7 +291,7 @@ function streamTimelineEvents(
 ): Promise<void> {
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
-  }, undefined, sinceEventId, true, true);
+  }, undefined, sinceEventId, null, true, true);
 }
 
 function streamUntilTerminal(
@@ -304,6 +304,7 @@ function streamUntilTerminal(
   ) => void | Promise<void>,
   afterSubscribe?: () => void | Promise<void>,
   sinceEventId: string | null = null,
+  turnId: string | null = null,
   closeWhenIdle = false,
   closeOnTerminal = false,
 ): Promise<void> {
@@ -380,6 +381,7 @@ function streamUntilTerminal(
 
     void client.subscribeEvents({
       session_id: sessionId,
+      turn_id: turnId,
       since_event_id: sinceEventId,
       replay_limit: null,
       close_when_idle: closeWhenIdle,

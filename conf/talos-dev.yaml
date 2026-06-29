@@ -20,7 +20,7 @@ fs:
 
 agent:
   name: "talos"
-  model: "qwen3.7-plus"
+  model: "qwen3.6-flash"
   kernel:
     tool_parallelism: 1
     max_tool_rounds: 8
@@ -186,7 +186,7 @@ channels:
 
 llm:
   provider: "bailian"
-  model: "qwen3.7-plus"
+  model: "qwen3.6-flash"
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"

@@ -152,6 +152,14 @@ pub struct TalosApplicationRuntime {
     pub tool_registry: Arc<ToolRegistry>,
 }
 
+impl TalosApplicationRuntime {
+    pub async fn shutdown(&self) -> TalosResult<()> {
+        self.coordinator
+            .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
+            .await
+    }
+}
+
 struct ApplicationCollaborationHost {
     service: Arc<TalosService>,
     session_users: RwLock<HashMap<String, String>>,
@@ -265,6 +273,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
             .events
             .subscribe(TimelineSubscribeCommand {
                 session_id,
+                turn_id: Some(ack.turn_id.clone()),
                 after_event_id: None,
                 replay_limit: 1_000,
                 close_when_idle: true,
@@ -371,7 +380,9 @@ fn load_runtime_config() -> TalosResult<Config> {
 
 fn resolve_config_source_path() -> Option<PathBuf> {
     let config_path = Config::source_path();
-    config_path.exists().then(|| canonical_or_original(config_path))
+    config_path
+        .exists()
+        .then(|| canonical_or_original(config_path))
 }
 
 fn resolve_packaged_webui_dir() -> Option<PathBuf> {
@@ -1038,307 +1049,5 @@ impl LlmProvider for ModelSetupRequiredProvider {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        apply_runtime_options, build_application_runtime, create_llm_provider,
-        ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
-        SERVER_SHUTDOWN_WAIT_TIMEOUT,
-    };
-    use std::sync::Arc;
-    use talos_config::{Config, LlmProtocol};
-    use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
-    use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-    use tokio::sync::oneshot;
-    use tokio::time::Duration;
-    use tokio_util::sync::CancellationToken;
-
-    #[test]
-    fn apply_runtime_options_updates_gateway_and_logging() {
-        let config = Config::default();
-        let options = TalosServerOptions {
-            host: Some("127.0.0.1".to_string()),
-            port: Some(18080),
-            logging_stdout: Some(false),
-            auth_disabled: None,
-            enable_channels: None,
-            webui_dir: None,
-        };
-
-        let updated = apply_runtime_options(config, Some(&options));
-
-        assert_eq!(updated.gateway.host, "127.0.0.1");
-        assert_eq!(updated.gateway.port, 18080);
-        assert!(!updated.logging.stdout);
-    }
-
-    #[tokio::test]
-    async fn application_runtime_builds_when_model_key_is_missing() {
-        let mut config = Config::default();
-        config.gateway.auth = false;
-        config.storage.connection_string = ":memory:".to_string();
-        config.llm.anthropic.api_key = None;
-
-        let runtime = build_application_runtime(config)
-            .await
-            .expect("runtime should start before model setup is complete");
-
-        assert_eq!(runtime.config.llm.provider, "anthropic");
-    }
-
-    #[tokio::test]
-    async fn setup_required_provider_reports_configuration_error_for_model_blocks() {
-        let provider = ModelSetupRequiredProvider {
-            model: "missing-model".to_string(),
-            message: "model setup required: missing key".to_string(),
-        };
-
-        let result = provider
-            .stream_model_blocks(ChatRequest::new_user("hello", "missing-model"))
-            .await;
-        let err = match result {
-            Ok(_) => panic!("setup-required provider should fail"),
-            Err(err) => err,
-        };
-
-        assert!(format!("{err}").contains("model setup required: missing key"));
-    }
-
-    #[tokio::test]
-    async fn openrouter_provider_uses_chat_completions_path_and_identity() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("test server should bind");
-        let addr = listener
-            .local_addr()
-            .expect("test server addr should exist");
-        let (path_tx, path_rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.expect("request should arrive");
-            let mut buf = vec![0; 4096];
-            let n = socket.read(&mut buf).await.expect("request should read");
-            let request = String::from_utf8_lossy(&buf[..n]);
-            let path = request
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .unwrap_or("")
-                .to_string();
-            let _ = path_tx.send(path);
-            let body = r#"{"model":"test-model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            socket
-                .write_all(response.as_bytes())
-                .await
-                .expect("response should write");
-        });
-
-        let mut config = Config::default();
-        config.llm.provider = "openrouter".to_string();
-        config.llm.model = "test-model".to_string();
-        config.llm.openrouter.enabled = true;
-        config.llm.openrouter.api_key = Some("test-key".to_string());
-        config.llm.openrouter.base_url = Some(format!("http://{addr}"));
-
-        let provider = create_llm_provider(&config).expect("provider should be created");
-        assert_eq!(provider.name(), "openrouter");
-        assert_eq!(provider.default_model(), "test-model");
-
-        let response = provider
-            .chat(ChatRequest::new_user("hello", "test-model"))
-            .await
-            .expect("chat should succeed");
-        let path = path_rx.await.expect("path should be captured");
-
-        assert_eq!(path, "/chat/completions");
-        assert_eq!(response.content, "ok");
-    }
-
-    #[tokio::test]
-    async fn openai_provider_uses_responses_path_when_protocol_selected() {
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("test server should bind");
-        let addr = listener
-            .local_addr()
-            .expect("test server addr should exist");
-        let (path_tx, path_rx) = oneshot::channel();
-        tokio::spawn(async move {
-            let (mut socket, _) = listener.accept().await.expect("request should arrive");
-            let mut buf = vec![0; 4096];
-            let n = socket.read(&mut buf).await.expect("request should read");
-            let request = String::from_utf8_lossy(&buf[..n]);
-            let path = request
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .unwrap_or("")
-                .to_string();
-            let _ = path_tx.send(path);
-            let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-            socket
-                .write_all(response.as_bytes())
-                .await
-                .expect("response should write");
-        });
-
-        let mut config = Config::default();
-        config.llm.provider = "openai".to_string();
-        config.llm.model = "gpt-test".to_string();
-        config.llm.openai.enabled = true;
-        config.llm.openai.api_key = Some("test-key".to_string());
-        config.llm.openai.base_url = Some(format!("http://{addr}"));
-        config.llm.openai.protocol = Some(LlmProtocol::Responses);
-
-        let provider = create_llm_provider(&config).expect("provider should be created");
-        assert_eq!(provider.name(), "openai");
-
-        let response = provider
-            .chat(ChatRequest::new_user("hello", "gpt-test"))
-            .await
-            .expect("chat should succeed");
-        let path = path_rx.await.expect("path should be captured");
-
-        assert_eq!(path, "/responses");
-        assert_eq!(response.content, "ok");
-    }
-
-    #[tokio::test]
-    async fn reloadable_llm_provider_uses_reloaded_provider() {
-        let provider = ReloadableLlmProvider::new(Arc::new(TestLlmProvider {
-            text: "before".to_string(),
-            model: "model-a".to_string(),
-        }));
-
-        let first = provider
-            .chat(ChatRequest::new_user("hello", "model-a"))
-            .await
-            .expect("first provider should respond");
-        provider.reload(Arc::new(TestLlmProvider {
-            text: "after".to_string(),
-            model: "model-b".to_string(),
-        }));
-        let second = provider
-            .chat(ChatRequest::new_user("hello", "model-a"))
-            .await
-            .expect("reloaded provider should respond");
-
-        assert_eq!(first.content, "before");
-        assert_eq!(second.content, "after");
-        assert_eq!(provider.default_model(), "model-b");
-    }
-
-    struct TestLlmProvider {
-        text: String,
-        model: String,
-    }
-
-    #[async_trait::async_trait]
-    impl LlmProvider for TestLlmProvider {
-        fn name(&self) -> &str {
-            "test"
-        }
-
-        async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
-            Ok(ChatResponse {
-                content: self.text.clone(),
-                reasoning: Vec::new(),
-                model: request.model,
-                usage: Usage::default(),
-                finish_reason: Some("stop".to_string()),
-                tool_calls: None,
-            })
-        }
-
-        async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
-            Err(talos_error::TalosError::InternalError(
-                "stream is not used in this test".to_string(),
-            ))
-        }
-
-        fn default_model(&self) -> String {
-            self.model.clone()
-        }
-    }
-
-    #[tokio::test]
-    async fn handle_shutdown_waits_for_stopped_state() {
-        let lifecycle = Arc::new(ServerLifecycle::new());
-        let handle = TalosServerHandle {
-            shutdown_token: CancellationToken::new(),
-            lifecycle: lifecycle.clone(),
-            wait_timeout: Duration::from_secs(1),
-        };
-
-        let token = handle.shutdown_token.clone();
-        let lifecycle_for_task = lifecycle.clone();
-        let waiter = tokio::spawn(async move { handle.shutdown().await });
-        token.cancelled().await;
-        lifecycle_for_task.store(ServerLifecycleState::Quiescing);
-        lifecycle_for_task.store(ServerLifecycleState::Draining);
-        lifecycle_for_task.store(ServerLifecycleState::Stopped);
-
-        waiter
-            .await
-            .expect("task should join")
-            .expect("shutdown should finish");
-    }
-
-    #[tokio::test]
-    async fn handle_shutdown_times_out_without_stopped_state() {
-        let lifecycle = Arc::new(ServerLifecycle::new());
-        let handle = TalosServerHandle {
-            shutdown_token: CancellationToken::new(),
-            lifecycle,
-            wait_timeout: Duration::from_millis(50),
-        };
-
-        let err = handle
-            .shutdown()
-            .await
-            .expect_err("shutdown should time out");
-        assert!(matches!(err, talos_error::TalosError::InternalError(_)));
-    }
-
-    #[tokio::test]
-    async fn lifecycle_watch_reports_expected_state_order() {
-        let lifecycle = Arc::new(ServerLifecycle::new());
-        let mut updates = lifecycle.subscribe();
-
-        lifecycle.store(ServerLifecycleState::Quiescing);
-        updates
-            .changed()
-            .await
-            .expect("quiescing update should arrive");
-        assert_eq!(
-            *updates.borrow_and_update(),
-            ServerLifecycleState::Quiescing
-        );
-
-        lifecycle.store(ServerLifecycleState::Draining);
-        updates
-            .changed()
-            .await
-            .expect("draining update should arrive");
-        assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Draining);
-
-        lifecycle.store(ServerLifecycleState::Stopped);
-        updates
-            .changed()
-            .await
-            .expect("stopped update should arrive");
-        assert_eq!(*updates.borrow_and_update(), ServerLifecycleState::Stopped);
-
-        assert!(SERVER_SHUTDOWN_WAIT_TIMEOUT > Duration::from_secs(0));
-    }
-}
+#[path = "lib_tests.rs"]
+mod tests;

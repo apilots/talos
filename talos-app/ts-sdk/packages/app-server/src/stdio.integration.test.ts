@@ -19,7 +19,7 @@ describeIntegration("StdioAppServerClient integration", () => {
       command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
       clientName: "talos-ts-sdk-integration",
-      clientVersion: "0.1.2",
+      clientVersion: "0.1.3",
     });
     const stderr: string[] = [];
     client.transport.onStderr((chunk) => stderr.push(chunk));
@@ -40,6 +40,7 @@ describeIntegration("StdioAppServerClient integration", () => {
     try {
       await client.subscribeEvents({
         session_id: sessionId,
+        turn_id: null,
         since_event_id: null,
         replay_limit: 50,
         close_when_idle: null,

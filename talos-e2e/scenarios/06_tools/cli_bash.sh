@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 load_env
-require_command "${TALOS_RS_DIR}/target/debug/talos-cli"
+require_command "${TALOS_RS_DIR}/target/debug/talos"
 
 if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
@@ -17,12 +17,10 @@ echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-
-cli="${TALOS_RS_DIR}/target/debug/talos-cli"
+cli="${TALOS_RS_DIR}/target/debug/talos"
 
 run_cli() {
-  "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'
+  "${cli}" "$@" 2>&1
 }
 
 models_json="$(run_cli models --format json)"
@@ -40,7 +38,7 @@ stream_stdout="$(scenario_report_path cli_stream_stdout.log)"
 stream_stderr="$(scenario_report_path cli_stream_stderr.log)"
 stream_input="You must call Bash tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
 
-run_cli chat in "${session_id}" "${stream_input}" --model "${primary_model}" --stream \
+run_cli exec --session "${session_id}" --model "${primary_model}" "${stream_input}" \
   >"${stream_stdout}" 2>"${stream_stderr}"
 
 stdout_text="$(cat "${stream_stdout}")"

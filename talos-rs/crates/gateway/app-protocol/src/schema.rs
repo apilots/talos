@@ -53,13 +53,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::version::ProtocolVersion>());
     output.push_str(&export::<crate::jsonrpc::RequestId>());
     output.push_str(&export::<crate::errors::AppServerErrorBody>());
-    output.push_str(&export::<crate::errors::AppServerErrorData>());
-    output.push_str(&export::<crate::errors::AuthErrorData>());
-    output.push_str(&export::<crate::errors::ResourceErrorData>());
-    output.push_str(&export::<crate::errors::ValidationErrorData>());
-    output.push_str(&export::<crate::errors::TurnErrorData>());
-    output.push_str(&export::<crate::errors::ToolErrorData>());
-    output.push_str(&export::<crate::errors::ConfigErrorData>());
     output.push_str(&export::<crate::requests::ClientMethod>());
     output.push_str(&export::<crate::requests::ClientRequestParams>());
     output.push_str(&export::<crate::requests::ClientRequest>());
@@ -378,55 +371,5 @@ pub fn string_schema() -> Schema {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn schema_generation_is_stable_json() {
-        let schema = generate_json_schema();
-        assert!(schema.contains("AppProtocolSchemaRoot"));
-    }
-
-    #[test]
-    fn typescript_generation_includes_jsonrpc_message() {
-        let typescript = generate_typescript();
-        assert!(typescript.contains("JsonRpcMessage"));
-    }
-
-    #[test]
-    fn generated_protocol_includes_timeline_types() {
-        let schema = generate_json_schema();
-        assert!(schema.contains("TalosTimelineEvent"));
-        assert!(schema.contains("TalosTimelineItem"));
-
-        let typescript = generate_typescript();
-        assert!(typescript.contains("TalosTimelineEvent"));
-        assert!(typescript.contains("TalosTimelineDelta"));
-    }
-
-    #[test]
-    fn json_schema_fixture_is_current() {
-        let expected = generate_json_schema();
-        let actual = std::fs::read_to_string(schema_fixture_path())
-            .expect("schema fixture should be checked in");
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn typescript_fixture_is_current() {
-        let expected = generate_typescript();
-        let actual = std::fs::read_to_string(typescript_fixture_path())
-            .expect("typescript fixture should be checked in");
-        assert_eq!(actual, expected);
-    }
-
-    fn schema_fixture_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("schemas/app-protocol.schema.json")
-    }
-
-    fn typescript_fixture_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../../../talos-app/ts-sdk/packages/core/src/generated/app-protocol.ts")
-    }
-}
+#[path = "schema_tests.rs"]
+mod tests;

@@ -152,7 +152,7 @@ create_tui_tarball() {
   local package_dir="$1"
   local version="${TUI_PACKAGE_VERSION:-$(workspace_version)}"
   local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
-  tar -czf "${archive_path}" -C "${package_dir}" bin libexec conf
+  tar -czf "${archive_path}" -C "${package_dir}" bin conf
 }
 
 build_server() {
@@ -187,12 +187,10 @@ build_server_webui() {
 
 build_tui() {
   echo "Building Talos TUI..."
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p app-server --bin app-server $(cargo_profile_args)
-  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-ui-tui --bin talos $(cargo_profile_args)
+  cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-tui --bin talos $(cargo_profile_args)
   rm -rf "${PRODUCT_DIR}/tui"
   mkdir -p "${PRODUCT_DIR}/tui"
   copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"
-  copy_rust_binary_as "app-server" "${PRODUCT_DIR}/tui/libexec/app-server"
   copy_conf_resource "${PRODUCT_DIR}/tui"
   create_tui_tarball "${PRODUCT_DIR}/tui"
   write_sha256sums "${PRODUCT_DIR}/tui"

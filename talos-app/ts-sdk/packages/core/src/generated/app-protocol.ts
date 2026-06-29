@@ -4,21 +4,7 @@ export type ProtocolVersion = { major: number, minor: number, };
 
 export type RequestId = string | number;
 
-export type AppServerErrorBody = { code: number, message: string, data: AppServerErrorData | null, };
-
-export type AppServerErrorData = { "type": "auth" } & AuthErrorData | { "type": "resource" } & ResourceErrorData | { "type": "validation" } & ValidationErrorData | { "type": "turn" } & TurnErrorData | { "type": "tool" } & ToolErrorData | { "type": "config" } & ConfigErrorData;
-
-export type AuthErrorData = "unauthorized" | "forbidden";
-
-export type ResourceErrorData = { "kind": "not_found", resource: string, } | { "kind": "expired", reason: string, };
-
-export type ValidationErrorData = { reason: string, };
-
-export type TurnErrorData = { "kind": "conflict", reason: string, } | { "kind": "not_initialized" };
-
-export type ToolErrorData = { tool_name: string, reason: string, };
-
-export type ConfigErrorData = { path: string, reason: string, };
+export type AppServerErrorBody = { code: number, message: string, };
 
 export type ClientMethod = "initialize" | "session.list" | "session.get" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "session.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "model.list" | "config.get" | "config.update" | "config.delete" | "config.reload" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skills.list" | "skills.refresh" | "skills.suggest" | "skills.read" | "skills.resolve" | "plugin.source.list" | "plugin.source.add" | "plugin.source.refresh" | "plugin.source.remove" | "plugin.search" | "plugin.list" | "plugin.read" | "plugin.install" | "plugin.update" | "plugin.uninstall" | "plugin.enable" | "plugin.disable" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.clear" | "user.current" | "memory.search";
 
@@ -158,7 +144,7 @@ export type SubmitToolResultRequest = { session_id: string, call_id: string, too
 
 export type SubmitToolResultResponse = { success: boolean, };
 
-export type SubscribeTimelineRequest = { session_id: string, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
+export type SubscribeTimelineRequest = { session_id: string, turn_id: string | null, since_event_id: string | null, replay_limit: number | null, close_when_idle: boolean | null, close_on_terminal: boolean | null, };
 
 export type SubscribeTimelineResponse = { subscription_id: string, session_id: string, high_water_mark_event_id: string | null, };
 

@@ -23,6 +23,7 @@ mod response;
 mod response_kinds;
 mod response_processors;
 #[cfg(test)]
+#[path = "processor_tests.rs"]
 mod tests;
 
 pub use compaction::CompactionRequestProcessor;

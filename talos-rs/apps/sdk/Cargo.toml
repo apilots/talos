@@ -1,10 +1,11 @@
 [package]
 name = "talos-sdk"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Talos SDK library for connecting to App Server and gateway APIs"
 
 [dependencies]
+async-trait = { workspace = true }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

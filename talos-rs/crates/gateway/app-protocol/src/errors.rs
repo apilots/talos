@@ -19,168 +19,79 @@ pub const CONFLICT: AppServerErrorCode = -32005;
 pub const NOT_FOUND: AppServerErrorCode = -32006;
 pub const VALIDATION_FAILED: AppServerErrorCode = -32007;
 pub const RESOURCE_EXPIRED: AppServerErrorCode = -32008;
+pub const RUNTIME_UNAVAILABLE: AppServerErrorCode = -32009;
+pub const TRANSPORT_UNAVAILABLE: AppServerErrorCode = -32010;
+pub const REQUEST_TIMEOUT: AppServerErrorCode = -32011;
+pub const CANCELLED: AppServerErrorCode = -32012;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AppServerErrorBody {
     pub code: AppServerErrorCode,
     pub message: String,
-    #[serde(default)]
-    pub data: Option<AppServerErrorData>,
 }
 
 impl AppServerErrorBody {
-    pub fn new(
-        code: AppServerErrorCode,
-        message: impl Into<String>,
-        data: Option<AppServerErrorData>,
-    ) -> Self {
+    pub fn new(code: AppServerErrorCode, message: impl Into<String>) -> Self {
         Self {
             code,
             message: message.into(),
-            data,
         }
     }
 
     pub fn parse_error(message: impl Into<String>) -> Self {
-        Self::new(PARSE_ERROR, message, None)
+        Self::new(PARSE_ERROR, message)
     }
 
     pub fn invalid_request(message: impl Into<String>) -> Self {
-        Self::new(INVALID_REQUEST, message, None)
+        Self::new(INVALID_REQUEST, message)
     }
 
     pub fn invalid_params(message: impl Into<String>) -> Self {
-        Self::new(INVALID_PARAMS, message, None)
+        Self::new(INVALID_PARAMS, message)
     }
 
     pub fn method_not_found(method: impl Into<String>) -> Self {
         let method = method.into();
-        Self::new(
-            METHOD_NOT_FOUND,
-            format!("method not found: {method}"),
-            None,
-        )
+        Self::new(METHOD_NOT_FOUND, format!("method not found: {method}"))
     }
 
     pub fn not_initialized() -> Self {
-        Self::new(NOT_INITIALIZED, "app-server is not initialized", None)
+        Self::new(NOT_INITIALIZED, "app-server is not initialized")
     }
 
     pub fn from_talos_error(error: TalosError) -> Self {
         match error {
             TalosError::AuthError(message) | TalosError::AuthenticationFailed(message) => {
-                Self::new(
-                    UNAUTHORIZED,
-                    message,
-                    Some(AppServerErrorData::Auth(AuthErrorData::Unauthorized)),
-                )
+                Self::new(UNAUTHORIZED, message)
             }
-            TalosError::AuthorizationDenied => Self::new(
-                FORBIDDEN,
-                "authorization denied",
-                Some(AppServerErrorData::Auth(AuthErrorData::Forbidden)),
-            ),
-            TalosError::ResourceNotFound(resource) => Self::new(
-                NOT_FOUND,
-                format!("resource not found: {resource}"),
-                Some(AppServerErrorData::Resource(ResourceErrorData::NotFound {
-                    resource,
-                })),
-            ),
+            TalosError::AuthorizationDenied => Self::new(FORBIDDEN, "authorization denied"),
+            TalosError::ResourceNotFound(resource)
+            | TalosError::AgentNotFound(resource)
+            | TalosError::RouteNotFound(resource)
+            | TalosError::ToolNotFound(resource) => {
+                Self::new(NOT_FOUND, format!("resource not found: {resource}"))
+            }
             TalosError::Conflict(message)
             | TalosError::IdempotencyConflict(message)
-            | TalosError::RetryActiveTurnRunning(message) => Self::new(
-                CONFLICT,
-                message.clone(),
-                Some(AppServerErrorData::Turn(TurnErrorData::Conflict {
-                    reason: message,
-                })),
-            ),
-            TalosError::ValidationError(message) | TalosError::UnsupportedModel(message) => {
-                Self::new(
-                    VALIDATION_FAILED,
-                    message.clone(),
-                    Some(AppServerErrorData::Validation(ValidationErrorData {
-                        reason: message,
-                    })),
-                )
+            | TalosError::RetryActiveTurnRunning(message) => Self::new(CONFLICT, message),
+            TalosError::ValidationError(message)
+            | TalosError::UnsupportedModel(message)
+            | TalosError::InvalidConfiguration(message)
+            | TalosError::ConfigError(message) => Self::new(VALIDATION_FAILED, message),
+            TalosError::ResourceExpired(message) => Self::new(RESOURCE_EXPIRED, message),
+            TalosError::Timeout(message) => Self::new(REQUEST_TIMEOUT, message),
+            TalosError::RuntimeUnavailable(message) => Self::new(RUNTIME_UNAVAILABLE, message),
+            TalosError::NetworkError(message)
+            | TalosError::ClientError(message)
+            | TalosError::TransportUnavailable(message) => {
+                Self::new(TRANSPORT_UNAVAILABLE, message)
             }
-            TalosError::ResourceExpired(message) => Self::new(
-                RESOURCE_EXPIRED,
-                message.clone(),
-                Some(AppServerErrorData::Resource(ResourceErrorData::Expired {
-                    reason: message,
-                })),
-            ),
-            other => Self::new(INTERNAL_ERROR, other.to_string(), None),
+            TalosError::Cancelled(message) => Self::new(CANCELLED, message),
+            other => Self::new(INTERNAL_ERROR, other.to_string()),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AppServerErrorData {
-    Auth(AuthErrorData),
-    Resource(ResourceErrorData),
-    Validation(ValidationErrorData),
-    Turn(TurnErrorData),
-    Tool(ToolErrorData),
-    Config(ConfigErrorData),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthErrorData {
-    Unauthorized,
-    Forbidden,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ResourceErrorData {
-    NotFound { resource: String },
-    Expired { reason: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ValidationErrorData {
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TurnErrorData {
-    Conflict { reason: String },
-    NotInitialized,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ToolErrorData {
-    pub tool_name: String,
-    pub reason: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ConfigErrorData {
-    pub path: String,
-    pub reason: String,
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn maps_common_not_found_error() {
-        let body = AppServerErrorBody::from_talos_error(TalosError::ResourceNotFound(
-            "session s1".to_string(),
-        ));
-        assert_eq!(body.code, NOT_FOUND);
-        assert!(matches!(
-            body.data,
-            Some(AppServerErrorData::Resource(
-                ResourceErrorData::NotFound { .. }
-            ))
-        ));
-    }
-}
+#[path = "errors_tests.rs"]
+mod tests;

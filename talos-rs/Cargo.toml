@@ -42,16 +42,16 @@ members = [
     "crates/app/talos-base",
     # Apps
     "apps/sdk",
-    "apps/cli",
+    "apps/sdk-embedded",
     "apps/app-server-test-client",
-    "apps/ui-tui",
+    "apps/tui",
     # Binary
     "bin/app-server",
     "bin/talos-server",
 ]
 
 [workspace.package]
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Liu Xi"]
 license = "MIT"
@@ -133,4 +133,5 @@ talos-logging = { path = "crates/infra/logging" }
 talos-storage = { path = "crates/infra/storage" }
 talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
+talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }

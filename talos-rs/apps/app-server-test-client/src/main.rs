@@ -3,11 +3,15 @@ use std::{collections::HashMap, process::Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AppServerClient, AppServerClientConfig, ExpectedFileVersion,
-    StartTurnRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
+    canonical_method, AppServerClient, AppServerClientConfig, ConfigGetRequest,
+    ExpectedFileVersion, GatewayClient, MemoryFileListRequest, MemoryFileReadRequest,
+    MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest, ProjectListRequest,
+    ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest, StartTurnRequest,
+    SubmitToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
     TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
-    TimelineEventEnvelope, WorkspaceDocKind,
+    TimelineEventEnvelope, WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -52,7 +56,7 @@ async fn main() -> Result<()> {
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
         Scenario::McpE2e => mcp_e2e(&mut client).await?,
     }
-    client.shutdown().await?;
+    GatewayClient::shutdown(&mut client).await?;
     Ok(())
 }
 
@@ -94,21 +98,21 @@ impl Scenario {
 
 async fn smoke(client: &mut AppServerClient) -> Result<()> {
     eprintln!("model.list");
-    client.list_models().await?;
+    list_models(client).await?;
     eprintln!("session id");
     new_session_id(client).await?;
     eprintln!("config.get");
-    client.config_get().await?;
+    get_config(client).await?;
     eprintln!("memory.file.list");
-    client.list_memory_files().await?;
+    list_memory_files(client).await?;
     eprintln!("workspace.doc.list");
-    client.list_workspace_docs().await?;
+    list_workspace_docs(client).await?;
     Ok(())
 }
 
 async fn cloud_session_cache(client: &mut AppServerClient) -> Result<()> {
     eprintln!("cloud-session-cache model.list");
-    client.list_models().await?;
+    list_models(client).await?;
     eprintln!("cloud-session-cache session id");
     new_session_id(client).await?;
     Ok(())
@@ -209,71 +213,70 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
 
 async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     eprintln!("resource-matrix config/model list");
-    client.list_models().await?;
-    client.config_get().await?;
+    list_models(client).await?;
+    get_config(client).await?;
 
     eprintln!("resource-matrix memory roundtrip");
     let memory_path = "2099-12-31.md";
     let memory_content =
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
-    let memory_expected_version = match client.read_memory_file(memory_path).await {
+    let memory_expected_version = match read_memory_file(client, memory_path).await {
         Ok(existing) => Some(existing.file.version_token),
         Err(TalosError::ResourceNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
-    let written_memory = client
-        .write_memory_file(
-            memory_path,
-            memory_content.to_string(),
-            memory_expected_version,
-        )
-        .await?
-        .file;
+    let written_memory = write_memory_file(
+        client,
+        memory_path,
+        memory_content.to_string(),
+        memory_expected_version,
+    )
+    .await?
+    .file;
     if !written_memory
         .content
         .contains("app-server resource parity")
     {
         return Err(anyhow!("memory write did not persist expected content"));
     }
-    let read_memory = client.read_memory_file(memory_path).await?.file;
+    let read_memory = read_memory_file(client, memory_path).await?.file;
     if read_memory.version_token != written_memory.version_token {
         return Err(anyhow!("memory read returned a different version token"));
     }
     expect_conflict(
-        client
-            .write_memory_file(
-                memory_path,
-                "stale write".to_string(),
-                Some("stale-version-token".to_string()),
-            )
-            .await,
+        write_memory_file(
+            client,
+            memory_path,
+            "stale write".to_string(),
+            Some("stale-version-token".to_string()),
+        )
+        .await,
         "memory stale write should conflict",
     )?;
     expect_validation(
-        client.read_memory_file("not-a-date.md").await,
+        read_memory_file(client, "not-a-date.md").await,
         "invalid memory path should validate",
     )?;
-    client.list_memory_files().await?;
+    list_memory_files(client).await?;
 
     eprintln!("resource-matrix workspace doc read/conflict");
-    let read_workspace = client
-        .read_workspace_doc(WorkspaceDocKind::Memory)
+    let read_workspace = read_workspace_doc(client, WorkspaceDocKind::Memory)
         .await?
         .doc;
     if !read_workspace.exists {
         return Err(anyhow!("expected bootstrap workspace memory doc to exist"));
     }
     expect_conflict(
-        client
-            .write_workspace_doc(
-                WorkspaceDocKind::Memory,
-                "blind overwrite".to_string(),
-                ExpectedFileVersion::MustNotExist,
-            )
-            .await,
+        write_workspace_doc(
+            client,
+            WorkspaceDocKind::Memory,
+            "blind overwrite".to_string(),
+            ExpectedFileVersion::MustNotExist,
+        )
+        .await,
         "workspace blind overwrite should conflict",
     )?;
-    client.list_workspace_docs().await?;
+    list_workspace_docs(client).await?;
 
     eprintln!("resource-matrix project roundtrip");
     let project_dir = std::env::temp_dir().join(format!(
@@ -290,11 +293,13 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         })
         .await?
         .project;
-    let read_project = client.get_project_by_id(&project.project_id).await?.project;
+    let read_project = get_project_by_id(client, &project.project_id)
+        .await?
+        .project;
     if read_project.directory != project_dir {
         return Err(anyhow!("project.read returned a different directory"));
     }
-    let listed_projects = client.list_all_projects().await?.projects;
+    let listed_projects = list_all_projects(client).await?.projects;
     if !listed_projects
         .iter()
         .any(|candidate| candidate.project_id == project.project_id)
@@ -312,9 +317,9 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     if patched_project.name != patched_name {
         return Err(anyhow!("project.patch did not update name"));
     }
-    client.delete_project_by_id(&project.project_id).await?;
+    delete_project_by_id(client, &project.project_id).await?;
     expect_not_found(
-        client.get_project_by_id(&project.project_id).await,
+        get_project_by_id(client, &project.project_id).await,
         "deleted project should map to not found",
     )?;
 
@@ -329,25 +334,25 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("session.list did not include created session"));
     }
-    let _snapshot = client.recover_session_after(&session_id, None).await?;
+    let _snapshot = recover_session_after(client, &session_id, None).await?;
     expect_not_found(
-        client.get_session_by_id("missing-session").await,
+        get_session_by_id(client, "missing-session").await,
         "missing session should map to not found",
     )?;
     expect_not_found(
-        client.recover_session_after("missing-session", None).await,
+        recover_session_after(client, "missing-session", None).await,
         "missing session recovery should map to not found",
     )?;
     expect_not_found(
-        client
-            .submit_dynamic_tool_result_from_fields(
-                "missing-session",
-                "call-1",
-                "DynamicTool",
-                "result".to_string(),
-                true,
-            )
-            .await,
+        submit_dynamic_tool_result_from_fields(
+            client,
+            "missing-session",
+            "call-1",
+            "DynamicTool",
+            "result".to_string(),
+            true,
+        )
+        .await,
         "missing dynamic tool result session should map to not found",
     )?;
 
@@ -357,6 +362,176 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
 async fn new_session_id(client: &mut AppServerClient) -> Result<String> {
     let _ = client;
     Ok(uuid::Uuid::new_v4().to_string())
+}
+
+async fn list_models(
+    client: &mut AppServerClient,
+) -> talos_sdk::TalosResult<talos_sdk::ModelListResponse> {
+    GatewayClient::list_models(client, ModelListRequest {}).await
+}
+
+async fn get_config(
+    client: &mut AppServerClient,
+) -> talos_sdk::TalosResult<talos_sdk::ConfigGetResponse> {
+    GatewayClient::get_config(client, ConfigGetRequest { path: None }).await
+}
+
+async fn list_memory_files(
+    client: &mut AppServerClient,
+) -> talos_sdk::TalosResult<talos_sdk::MemoryFileListResponse> {
+    GatewayClient::list_memory_files(
+        client,
+        MemoryFileListRequest {
+            limit: Some(32),
+            before_date: None,
+            date_from: None,
+            date_to: None,
+        },
+    )
+    .await
+}
+
+async fn read_memory_file(
+    client: &mut AppServerClient,
+    path: impl Into<std::path::PathBuf>,
+) -> talos_sdk::TalosResult<talos_sdk::MemoryFileReadResponse> {
+    GatewayClient::read_memory_file(client, MemoryFileReadRequest { path: path.into() }).await
+}
+
+async fn write_memory_file(
+    client: &mut AppServerClient,
+    path: impl Into<std::path::PathBuf>,
+    content: String,
+    expected_version: Option<String>,
+) -> talos_sdk::TalosResult<talos_sdk::MemoryFileWriteResponse> {
+    GatewayClient::write_memory_file(
+        client,
+        MemoryFileWriteRequest {
+            path: path.into(),
+            content,
+            expected_version,
+        },
+    )
+    .await
+}
+
+async fn list_workspace_docs(
+    client: &mut AppServerClient,
+) -> talos_sdk::TalosResult<talos_sdk::WorkspaceDocListResponse> {
+    GatewayClient::list_workspace_docs(client, WorkspaceDocListRequest {}).await
+}
+
+async fn read_workspace_doc(
+    client: &mut AppServerClient,
+    kind: WorkspaceDocKind,
+) -> talos_sdk::TalosResult<talos_sdk::WorkspaceDocReadResponse> {
+    GatewayClient::read_workspace_doc(client, WorkspaceDocReadRequest { kind }).await
+}
+
+async fn write_workspace_doc(
+    client: &mut AppServerClient,
+    kind: WorkspaceDocKind,
+    content: String,
+    expected_version: ExpectedFileVersion,
+) -> talos_sdk::TalosResult<talos_sdk::WorkspaceDocWriteResponse> {
+    GatewayClient::write_workspace_doc(
+        client,
+        WorkspaceDocWriteRequest {
+            kind,
+            content,
+            expected_version: expected_file_version_token(expected_version),
+        },
+    )
+    .await
+}
+
+async fn list_all_projects(
+    client: &mut AppServerClient,
+) -> talos_sdk::TalosResult<talos_sdk::ProjectListResponse> {
+    GatewayClient::list_projects(client, ProjectListRequest {}).await
+}
+
+async fn get_project_by_id(
+    client: &mut AppServerClient,
+    project_id: &str,
+) -> talos_sdk::TalosResult<talos_sdk::ProjectReadResponse> {
+    GatewayClient::get_project(
+        client,
+        ProjectReadRequest {
+            project_id: project_id.to_string(),
+        },
+    )
+    .await
+}
+
+async fn delete_project_by_id(
+    client: &mut AppServerClient,
+    project_id: &str,
+) -> talos_sdk::TalosResult<talos_sdk::ProjectDeleteResponse> {
+    GatewayClient::delete_project(
+        client,
+        ProjectDeleteRequest {
+            project_id: project_id.to_string(),
+        },
+    )
+    .await
+}
+
+async fn get_session_by_id(
+    client: &mut AppServerClient,
+    session_id: &str,
+) -> talos_sdk::TalosResult<talos_sdk::SessionGetResponse> {
+    GatewayClient::get_session(
+        client,
+        SessionGetRequest {
+            session_id: session_id.to_string(),
+        },
+    )
+    .await
+}
+
+async fn recover_session_after(
+    client: &mut AppServerClient,
+    session_id: &str,
+    after_event_id: Option<String>,
+) -> talos_sdk::TalosResult<talos_sdk::TimelineRecoveryResponse> {
+    GatewayClient::recover_timeline(
+        client,
+        RecoverTimelineRequest {
+            session_id: session_id.to_string(),
+            after_event_id,
+            replay_limit: None,
+        },
+    )
+    .await
+}
+
+async fn submit_dynamic_tool_result_from_fields(
+    client: &mut AppServerClient,
+    session_id: &str,
+    call_id: &str,
+    tool_name: &str,
+    output: String,
+    success: bool,
+) -> talos_sdk::TalosResult<talos_sdk::SubmitToolResultResponse> {
+    GatewayClient::submit_tool_result(
+        client,
+        SubmitToolResultRequest {
+            session_id: session_id.to_string(),
+            call_id: call_id.to_string(),
+            tool_name: tool_name.to_string(),
+            output,
+            success,
+        },
+    )
+    .await
+}
+
+fn expected_file_version_token(expected_version: ExpectedFileVersion) -> Option<String> {
+    match expected_version {
+        ExpectedFileVersion::MustNotExist => None,
+        ExpectedFileVersion::Match { version_token } => Some(version_token),
+    }
 }
 
 async fn subscribe_events(
@@ -380,15 +555,18 @@ async fn subscribe_events_with_cursor(
     since_event_id: Option<String>,
     replay_limit: usize,
 ) -> Result<talos_sdk::SubscribeTimelineResponse> {
-    Ok(client
-        .subscribe_events(SubscribeTimelineRequest {
+    Ok(GatewayClient::subscribe_timeline(
+        client,
+        SubscribeTimelineRequest {
             session_id: session_id.to_string(),
+            turn_id: None,
             since_event_id,
             replay_limit: Some(replay_limit),
             close_when_idle: None,
             close_on_terminal: None,
-        })
-        .await?)
+        },
+    )
+    .await?)
 }
 
 async fn start_turn(client: &mut AppServerClient, session_id: &str) -> Result<()> {

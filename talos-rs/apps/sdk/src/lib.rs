@@ -4,19 +4,19 @@
 //! and protocol integration tests.
 
 pub mod app_server;
-mod app_server_events;
-mod common;
+mod contract;
 mod login;
 
-pub use app_server::{AppServerClient, AppServerClientConfig};
+pub use app_server::{AppServerClient, AppServerClientConfig, AppServerOwnership};
+pub use contract::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
 pub use login::{now_ms, open_external_url};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{
     ProtocolTalosContext, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
 };
 pub use talos_auth::{
-    AuthResponse, CloudLoginClientKind, CloudLoginStartResponse, CloudLoginStatusResponse, UserDto,
-    UserRole,
+    AuthResponse, CloudLoginCancelRequest, CloudLoginClientKind, CloudLoginStartRequest,
+    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, UserDto, UserRole,
 };
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
@@ -41,19 +41,20 @@ pub use talos_types::{
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     LlmConfig, LlmModelCompat, LlmModelConfig, LlmModelCost, LlmModelInputKind, LlmModelSpeed,
     LlmProtocol, LlmProviderConfig, LlmReasoningEffort, LlmThinkingFormat, MemoryFileDetail,
-    MemoryFileListRequest, MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileSummary,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, ModelInfo,
-    ModelListRequest, ModelListResponse, ModelReadiness, OptionalCurrentDirectoryPatch,
+    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
+    MemoryFileSummary, MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest,
+    ModelInfo, ModelListRequest, ModelListResponse, ModelReadiness, OptionalCurrentDirectoryPatch,
     OptionalProjectIdPatch, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
     ProjectDeleteResponse, ProjectInfo, ProjectListRequest, ProjectListResponse, ProjectPatch,
     ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
     ProjectStatus, ProjectStatusState, ProjectUnavailableReason, ProviderKeyStatus,
-    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnResponse, SessionAgentConf,
-    SessionClearResponse, SessionCloseResponse, SessionCompactResponse, SessionConf,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionInfo, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, StartTurnRequest, StartTurnResponse,
-    SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
+    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SessionAgentConf, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionConf,
+    SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
+    SessionHistoryRequest, SessionHistoryResponse, SessionInfo, SessionListRequest,
+    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, StartTurnRequest,
+    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
     SubscribeTimelineResponse, TimelineCursorStatus, TimelineRecoveryResponse, TimelineReplay,
     TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocInfo, WorkspaceDocKind,
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,

@@ -39,4 +39,5 @@ pub use talos::*;
 pub use turn_api::*;
 
 #[cfg(test)]
+#[path = "types_tests.rs"]
 mod tests;

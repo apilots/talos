@@ -6,17 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 load_env
-require_command "${TALOS_RS_DIR}/target/debug/talos-cli"
+require_command "${TALOS_RS_DIR}/target/debug/talos"
 
 build_binaries
 prepare_talos_home
 
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
-
-cli="${TALOS_RS_DIR}/target/debug/talos-cli"
+cli="${TALOS_RS_DIR}/target/debug/talos"
 
 run_cli() {
-  "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'
+  "${cli}" "$@" 2>&1
 }
 
 models_json="$(run_cli models --format json)"
@@ -40,14 +38,14 @@ echo "CASE cli_models PASS"
 session_id="$(new_session_id)"
 echo "CASE cli_session_id PASS session_id=${session_id}"
 
-in_output="$(run_cli chat in "${session_id}" "hello from cli scenario" --model "${primary_model}")"
-log_case_json "cli_chat_in_session" "{\"command\":\"chat in\",\"session_id\":\"${session_id}\",\"input\":\"hello from cli scenario\"}" "${in_output}"
+in_output="$(run_cli exec --session "${session_id}" --model "${primary_model}" "hello from cli scenario")"
+log_case_json "cli_exec_in_session" "{\"command\":\"exec\",\"session_id\":\"${session_id}\",\"input\":\"hello from cli scenario\"}" "${in_output}"
 if [[ -z "${in_output}" || "${in_output}" == Error:* ]]; then
-  echo "CASE cli_chat_in_session FAIL output=${in_output}"
+  echo "CASE cli_exec_in_session FAIL output=${in_output}"
   exit 1
 fi
-echo "CASE cli_chat_in_session PASS"
-echo "DETAIL cli_chat_in_session_output=${in_output}"
+echo "CASE cli_exec_in_session PASS"
+echo "DETAIL cli_exec_in_session_output=${in_output}"
 
 set_model_output="$(run_cli session set-model "${session_id}" "${secondary_model}")"
 log_case_json "cli_set_model" "{\"command\":\"session set-model\",\"session_id\":\"${session_id}\",\"model\":\"${secondary_model}\"}" "${set_model_output}"

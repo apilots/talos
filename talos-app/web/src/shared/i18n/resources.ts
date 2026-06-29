@@ -159,8 +159,7 @@ export const resources = {
     memory: {
       pageLabel: "Memory",
       title: "Durable notes the assistant keeps about you",
-      detail:
-        "Review and edit the shared facts Talos should carry across your conversations.",
+      detail: "Review and edit the shared facts Talos should carry across your conversations.",
       addMemory: "Add memory",
       overview: "Overview",
       activeNotes: "Active notes",

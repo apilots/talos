@@ -3,7 +3,7 @@ mod maintenance;
 #[path = "stream.rs"]
 mod stream;
 #[cfg(test)]
-#[path = "tests.rs"]
+#[path = "coordinator_tests.rs"]
 mod tests;
 
 use crate::Coordinator;

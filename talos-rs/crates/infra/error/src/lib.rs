@@ -66,6 +66,12 @@ pub enum TalosError {
     #[error("Gateway error: {0}")]
     GatewayError(String),
 
+    #[error("Runtime unavailable: {0}")]
+    RuntimeUnavailable(String),
+
+    #[error("Transport unavailable: {0}")]
+    TransportUnavailable(String),
+
     #[error("Internal error: {0}")]
     InternalError(String),
 
@@ -80,6 +86,9 @@ pub enum TalosError {
 
     #[error("Client error: {0}")]
     ClientError(String),
+
+    #[error("Cancelled: {0}")]
+    Cancelled(String),
 }
 
 pub type TalosResult<T> = Result<T, TalosError>;

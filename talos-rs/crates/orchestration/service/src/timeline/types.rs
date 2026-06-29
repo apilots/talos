@@ -9,6 +9,7 @@ pub type ApplicationEventStream = broadcast::Receiver<TimelineEventEnvelope>;
 #[derive(Debug, Clone)]
 pub struct TimelineSubscribeCommand {
     pub session_id: String,
+    pub turn_id: Option<String>,
     pub after_event_id: Option<TimelineEventId>,
     pub replay_limit: usize,
     pub close_when_idle: bool,

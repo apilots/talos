@@ -436,7 +436,7 @@ Web/Desktop/TUI                 Talos runtime                   Talos Cloud
 | `@talos/sdk-core` | login start/status types | Web/Desktop TS 调用 |
 | `talos-web` | AuthPage pending UI | 不接触 token，只观察 status |
 | `talos-desktop` | open external browser | main process 打开 Cloud login URL |
-| `talos-ui-tui` | print/open login URL | 终端登录 UX |
+| `talos-tui` | print/open login URL | 终端登录 UX |
 
 ## 验证策略
 
