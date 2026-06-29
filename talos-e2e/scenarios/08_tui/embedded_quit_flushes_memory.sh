@@ -124,7 +124,7 @@ if [[ -f "${DAY_FILE}" ]]; then
 fi
 
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
-  "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' ./target/debug/talos"
+  "cd '${WORKSPACE_DIR}' && TALOS_HOME='${TALOS_HOME}' '${TALOS_RS_DIR}/target/debug/talos'"
 wait_for_tui_ready
 
 for _ in $(seq 1 160); do
