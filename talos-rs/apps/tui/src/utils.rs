@@ -12,7 +12,7 @@ use std::{
 };
 use unicode_width::UnicodeWidthChar;
 
-pub(crate) const APP_VERSION: &str = "v0.1.2";
+pub(crate) const APP_VERSION: &str = "v0.1.3";
 
 // ── Event labels ────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 [package]
 name = "talos-tui"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "Talos terminal user interface and command mode"
 autobins = false

@@ -468,7 +468,7 @@ fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
     let mut app = create_embedded_app();
     app.chat_blocks = vec![ChatBlock::new(
         ChatRole::System,
-        "Talos TUI (v0.1.2)".to_string(),
+        "Talos TUI (v0.1.3)".to_string(),
     )];
     app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
 

@@ -645,7 +645,7 @@ fn initialize_request(_token: &str) -> String {
             "params": {
                 "client_info": {
                     "name": "test",
-                    "version": "0.1.2"
+                    "version": "0.1.3"
                 },
                 "capabilities": {
                     "protocol_version": { "major": 0, "minor": 2 },
