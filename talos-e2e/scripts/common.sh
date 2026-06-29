@@ -334,16 +334,25 @@ stop_server() {
 build_binaries() {
   if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos-server" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/app-server" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-cli" ]] \
-    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-app-server-test-client" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
     return 0
   fi
 
   mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p talos-server -p app-server -p talos-cli -p talos-app-server-test-client -p talos-ui-tui >/dev/null)
+  (cd "${TALOS_RS_DIR}" && cargo build -p talos-server -p talos-tui >/dev/null)
   export TALOS_BINARIES_READY=1
+}
+
+build_app_server_binaries() {
+  if [[ "${TALOS_APP_SERVER_BINARIES_READY:-}" == "1" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/app-server" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-app-server-test-client" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${REPORT_ROOT}"
+  (cd "${TALOS_RS_DIR}" && cargo build -p app-server -p talos-app-server-test-client >/dev/null)
+  export TALOS_APP_SERVER_BINARIES_READY=1
 }
 
 json_get() {

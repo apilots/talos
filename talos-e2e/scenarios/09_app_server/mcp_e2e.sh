@@ -7,6 +7,7 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 load_env
 build_binaries
+build_app_server_binaries
 prepare_talos_home
 
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"

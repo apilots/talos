@@ -43,9 +43,8 @@ members = [
     # Apps
     "apps/sdk",
     "apps/sdk-embedded",
-    "apps/cli",
     "apps/app-server-test-client",
-    "apps/ui-tui",
+    "apps/tui",
     # Binary
     "bin/app-server",
     "bin/talos-server",

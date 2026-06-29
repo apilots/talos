@@ -43,15 +43,16 @@ Shared Gateway/API Contract
 
 1. Rust SDK crate 当前位于 `talos-rs/apps/sdk`，包名为 `talos-sdk`。
 2. Rust SDK 当前主要公开 `AppServerClient`、`AppServerClientConfig` 和 shared type re-export。
-3. TUI 在 `talos-rs/apps/ui-tui` 内保留 UI-facing `GatewayClient` trait，并通过泛型 SDK adapter 连接 `AppServerClient` 或 `EmbeddedServerClient`。
-4. CLI 在 `talos-rs/apps/cli` 中通过 Rust SDK `GatewayClient` contract 调用本地 runtime，默认 embedded，显式 app-server 模式才实例化 `AppServerClient`。
-5. app-server server crate 位于 `talos-rs/crates/gateway/app-server`，binary 位于 `talos-rs/bin/app-server`。
-6. app-server 是 Gateway 之上的本地 stdio JSON-RPC 能力服务器，处理 framing、method dispatch、response envelope、notification stream 和 subscription runtime。
-7. `talos-base` 位于 `talos-rs/crates/app/talos-base`，已经提供 `TalosApplicationRuntime` 和 `build_application_runtime` 等进程内 runtime 构建能力。
-8. Gateway Core 位于 `talos-rs/crates/gateway/core`，提供协议无关 Gateway trait / service gateway 能力。
-9. Desktop 使用 TS SDK app-server package，通过 Electron 主进程托管的 app-server 访问本地 runtime。
-10. TS SDK 基于服务端 JSON-RPC / app protocol 生成和封装类型，Desktop 不使用 Rust SDK client。
-11. `client_kind` 当前主要存在于 Cloud Login 协议对象中，取值为 `web | desktop | tui | cli`，不是全局 request metadata。
+3. TUI 在 `talos-rs/apps/tui` 内保留 UI-facing `GatewayClient` trait，并通过泛型 SDK adapter 连接 `AppServerClient` 或 `EmbeddedServerClient`。
+4. CLI command mode 在 `talos-rs/apps/tui/src/cli` 中通过 Rust SDK `GatewayClient` contract 调用本地 embedded runtime，不再保留独立 CLI crate。
+5. `talos exec` 是非交互执行主入口，支持调用方指定 `--session`；`models`、`session`、`status` 是同一 `talos` binary 下的终端管理命令，不是独立 CLI 产品形态。
+6. app-server server crate 位于 `talos-rs/crates/gateway/app-server`，binary 位于 `talos-rs/bin/app-server`。
+7. app-server 是 Gateway 之上的本地 stdio JSON-RPC 能力服务器，处理 framing、method dispatch、response envelope、notification stream 和 subscription runtime。
+8. `talos-base` 位于 `talos-rs/crates/app/talos-base`，已经提供 `TalosApplicationRuntime` 和 `build_application_runtime` 等进程内 runtime 构建能力。
+9. Gateway Core 位于 `talos-rs/crates/gateway/core`，提供协议无关 Gateway trait / service gateway 能力。
+10. Desktop 使用 TS SDK app-server package，通过 Electron 主进程托管的 app-server 访问本地 runtime。
+11. TS SDK 基于服务端 JSON-RPC / app protocol 生成和封装类型，Desktop 不使用 Rust SDK client。
+12. `client_kind` 当前主要存在于 Cloud Login 协议对象中，取值为 `web | desktop | tui | cli`，不是全局 request metadata。
 
 ## 目标
 
@@ -602,8 +603,8 @@ TS SDK contract tests
 
 1. `talos-rs/apps/sdk`：定义 public contract、保留 `AppServerClient`、新增 factory / mode、re-export shared error types、提供 stream type。
 2. `talos-rs/apps/sdk-embedded`：新增 `EmbeddedServerClient`，依赖 `talos-base` 和 `talos-sdk` contract。
-3. `talos-rs/apps/ui-tui`：移除或迁移本地 `GatewayClient` trait，使用 `EmbeddedServerClient`。
-4. `talos-rs/apps/cli`：使用 `EmbeddedServerClient`，不暴露 app-server transport 选择。
+3. `talos-rs/apps/tui`：保留 UI-facing `GatewayClient` trait 作为 TUI/command mode 共享的终端侧薄适配层，底层使用 `EmbeddedServerClient`。
+4. `talos-rs/apps/tui/src/cli`：作为 `talos` command mode 复用 TUI `GatewayClient::start_turn_stream`，不再自建 start_turn/subscribe 流语义；`exec` 是主执行命令，终端管理命令只暴露同一 embedded runtime 的模型、session 和状态查询/更新能力。
 5. `talos-rs/apps/app-server-test-client`：继续直接使用 `AppServerClient` 验证 app-server protocol。
 6. `talos-rs/crates/gateway/app-server`：保持本地 stdio JSON-RPC capability server 定位，必要时抽取 subscription runtime。
 7. `talos-rs/bin/app-server`：继续作为独立 app-server binary。

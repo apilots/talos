@@ -33,15 +33,15 @@ verify_server_config_template() {
   fi
 }
 
-verify_tui_app_server() {
+verify_tui() {
   local archive_path
   archive_path="$(find "${PRODUCT_DIR}/tui" -maxdepth 1 -name "Talos-TUI-*.tar.gz" | head -n 1)"
   if ! tar -tzf "${archive_path}" | grep -Eq '^bin/talos$'; then
     echo "Missing TUI binary in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^libexec/app-server$'; then
-    echo "Missing bundled App Server binary in ${archive_path}" >&2
+  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/talos.yaml$'; then
+    echo "Missing TUI config template in ${archive_path}" >&2
     exit 1
   fi
 }
@@ -85,7 +85,7 @@ verify_linux_app_server() {
 )
 
 verify_server_config_template
-verify_tui_app_server
+verify_tui
 verify_macos_app_server
 verify_linux_app_server
 

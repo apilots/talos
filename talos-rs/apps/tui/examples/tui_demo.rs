@@ -1,6 +1,6 @@
 //! Example demonstrating the TUI interface capabilities
 //!
-//! Run with: cargo run -p talos-ui-tui --example tui_demo
+//! Run with: cargo run -p talos-tui --example tui_demo
 
 fn main() {
     println!("Talos TUI Example");
@@ -9,7 +9,7 @@ fn main() {
     println!();
     println!("To run the TUI:");
     println!("  # Embedded runtime (requires <talos_home>/conf/talos.yaml):");
-    println!("  cargo run -p talos-ui-tui --bin talos");
+    println!("  cargo run -p talos-tui --bin talos");
     println!();
     println!("Key features:");
     println!("- Welcome header with model/mode/workspace");

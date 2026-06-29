@@ -7,8 +7,8 @@ use std::time::Instant;
 use crate::utils::{
     char_display_width, compact_directory_path, summarize_for_queue, text_display_width,
 };
-use crate::TuiApp;
 use crate::MAX_QUEUE_LEN;
+use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT};
 
 impl TuiApp {
     pub(crate) fn input_lines(&self, width: usize, height: usize) -> Vec<Line<'static>> {
@@ -55,17 +55,18 @@ impl TuiApp {
             display_text.push('█');
         }
 
-        let first_prefix = "❯ ";
-        let continuation_prefix = "  ";
-        let first_prefix_width = text_display_width(first_prefix);
-        let continuation_prefix_width = text_display_width(continuation_prefix);
+        let left_padding = " ".repeat(CHAT_CONTENT_PADDING_LEFT as usize);
+        let first_prefix = format!("{}❯ ", left_padding);
+        let continuation_prefix = format!("{}  ", left_padding);
+        let first_prefix_width = text_display_width(&first_prefix);
+        let continuation_prefix_width = text_display_width(&continuation_prefix);
         let mut rendered_lines = Vec::new();
 
         for (logical_idx, logical_line) in display_text.split('\n').enumerate() {
             let line_prefix = if logical_idx == 0 {
-                first_prefix
+                first_prefix.as_str()
             } else {
-                continuation_prefix
+                continuation_prefix.as_str()
             };
             let mut current_line = line_prefix.to_string();
             let mut current_width = text_display_width(line_prefix);
@@ -77,7 +78,7 @@ impl TuiApp {
 
             for ch in logical_line.chars() {
                 let ch_width = char_display_width(ch).max(1);
-                let wrap_prefix_width = if current_line.starts_with(first_prefix) {
+                let wrap_prefix_width = if current_line.starts_with(&first_prefix) {
                     first_prefix_width
                 } else {
                     continuation_prefix_width
@@ -87,7 +88,7 @@ impl TuiApp {
                     && current_width > wrap_prefix_width
                 {
                     rendered_lines.push(current_line);
-                    current_line = continuation_prefix.to_string();
+                    current_line = continuation_prefix.clone();
                     current_width = continuation_prefix_width;
                 }
                 current_line.push(ch);
@@ -100,10 +101,10 @@ impl TuiApp {
         rendered_lines
             .into_iter()
             .map(|line| {
-                if let Some(rest) = line.strip_prefix(first_prefix) {
+                if let Some(rest) = line.strip_prefix(first_prefix.as_str()) {
                     Line::from(vec![
                         Span::styled(
-                            first_prefix.to_string(),
+                            first_prefix.clone(),
                             Style::default()
                                 .fg(Color::Cyan)
                                 .add_modifier(Modifier::BOLD),
@@ -170,6 +171,7 @@ impl TuiApp {
         } else {
             base
         };
+        text = format!("{}{}", " ".repeat(CHAT_CONTENT_PADDING_LEFT as usize), text);
 
         let max = width.saturating_sub(1);
         if text.chars().count() > max {
@@ -180,6 +182,7 @@ impl TuiApp {
 
     pub(crate) fn turn_metrics_status_line(&self, width: usize) -> Option<Line<'static>> {
         let mut text = self.compact_turn_metrics_text(width)?;
+        text = format!("{}{}", " ".repeat(CHAT_CONTENT_PADDING_LEFT as usize), text);
         let max = width.saturating_sub(1);
         if text.chars().count() > max {
             text = text.chars().take(max).collect();

@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
 load_env
-require_command "${TALOS_RS_DIR}/target/debug/talos-cli"
+require_command "${TALOS_RS_DIR}/target/debug/talos"
 
 if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
@@ -17,10 +17,10 @@ echo "CASE cli_stream_real_llm_precheck PASS key_detected=true"
 build_binaries
 prepare_talos_home
 
-cli="${TALOS_RS_DIR}/target/debug/talos-cli"
+cli="${TALOS_RS_DIR}/target/debug/talos"
 
 run_cli() {
-  "${cli}" "$@" 2>&1 | sed '/^Command executed successfully$/d'
+  "${cli}" "$@" 2>&1
 }
 
 models_json="$(run_cli models --format json)"
@@ -38,7 +38,7 @@ echo "CASE cli_stream_memory_session_id PASS session_id=${memory_session_id}"
 
 memory_stream_input="You must call MemorySearch exactly once with query talos项目 before any final answer. Do not answer from prior knowledge, prior messages, or workspace context. If no result is found, say so in one short sentence after the tool call."
 
-run_cli chat in "${memory_session_id}" "${memory_stream_input}" --model "${primary_model}" --stream \
+run_cli exec --session "${memory_session_id}" --model "${primary_model}" "${memory_stream_input}" \
   >"${memory_stream_stdout}" 2>"${memory_stream_stderr}"
 
 memory_stdout_text="$(cat "${memory_stream_stdout}")"

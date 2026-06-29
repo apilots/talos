@@ -68,6 +68,10 @@ const createRouter = isDesktopBuild ? createHashRouter : createBrowserRouter;
 
 export const router = createRouter([
   {
+    path: "/auth",
+    element: <Navigate replace to="/auth/login" />,
+  },
+  {
     path: "/auth/login",
     element: withSuspense(<AuthPage />),
   },

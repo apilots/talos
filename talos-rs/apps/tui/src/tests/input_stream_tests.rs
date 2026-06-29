@@ -49,7 +49,7 @@ fn test_handle_paste_inserts_short_multiline_text_into_draft() {
         .into_iter()
         .map(|line| line_plain_text(&line))
         .collect::<Vec<_>>();
-    assert_eq!(rendered, vec!["❯ alpha", "  beta█"]);
+    assert_eq!(rendered, vec!["  ❯ alpha", "    beta█"]);
 }
 
 #[test]
@@ -60,14 +60,14 @@ fn test_short_long_single_line_paste_wraps_inside_draft() {
     app.handle_paste(pasted);
 
     assert!(app.pasted_blocks.is_empty());
-    assert_eq!(app.composer_line_count(24), 6);
+    assert_eq!(app.composer_line_count(24), 7);
     let rendered = app
         .input_lines(24, 8)
         .into_iter()
         .map(|line| line_plain_text(&line))
         .collect::<Vec<_>>();
     assert!(rendered.len() > 1);
-    let expected_first_line = format!("❯ {}", "A".repeat(22));
+    let expected_first_line = format!("  ❯ {}", "A".repeat(20));
     assert_eq!(
         rendered.first().map(String::as_str),
         Some(expected_first_line.as_str())

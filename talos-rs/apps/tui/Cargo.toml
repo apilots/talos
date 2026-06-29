@@ -1,8 +1,8 @@
 [package]
-name = "talos-ui-tui"
+name = "talos-tui"
 version = "0.1.2"
 edition = "2021"
-description = "Talos TUI (Terminal User Interface) module"
+description = "Talos terminal user interface and command mode"
 autobins = false
 
 [[bin]]
@@ -20,6 +20,7 @@ talos-sdk = { path = "../sdk" }
 talos-sdk-embedded = { path = "../sdk-embedded" }
 talos-config = { workspace = true }
 talos-base = { workspace = true }
+talos-logging = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }

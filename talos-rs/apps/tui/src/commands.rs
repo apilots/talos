@@ -324,7 +324,7 @@ impl TuiApp {
     pub(crate) async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
 
@@ -341,16 +341,15 @@ impl TuiApp {
         }
         self.available_model_info = models;
         self.available_models = ids;
-        // Only correct the model when user already has one selected that's no longer available.
-        // Empty means "not yet set" — let the server determine the default via session creation.
-        if !self.current_model.is_empty()
-            && !self
+        if self.current_model.is_empty()
+            || !self
                 .available_models
                 .iter()
                 .any(|m| m == &self.current_model)
         {
             self.current_model = self.available_models[0].clone();
         }
+        self.refresh_welcome_card();
         self.push_right_event(format!("models loaded: {}", self.available_models.len()));
         Ok(())
     }
@@ -358,7 +357,7 @@ impl TuiApp {
     pub(crate) fn refresh_models_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
 
@@ -371,7 +370,7 @@ impl TuiApp {
     pub(crate) fn status_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
         let session_id = self.session_id.clone();
@@ -406,7 +405,7 @@ impl TuiApp {
     pub(crate) fn compact_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
         let Some(session_id) = self.active_session_id_for_control_command("compact") else {
@@ -420,7 +419,7 @@ impl TuiApp {
     pub(crate) fn clear_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
         let Some(session_id) = self.active_session_id_for_control_command("clear") else {
@@ -439,7 +438,7 @@ impl TuiApp {
         }
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
         let session_id = self.session_id.clone().expect("session checked above");
@@ -617,7 +616,7 @@ impl TuiApp {
 
         let Some(client) = self.gateway_client.clone() else {
             return Err(TalosError::ClientError(
-                "missing app-server client".to_string(),
+                "missing gateway client".to_string(),
             ));
         };
         let session_id = self.session_id.clone();

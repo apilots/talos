@@ -136,7 +136,7 @@ fail_count=0
   echo "- E2E 目录: ${TALOS_E2E_DIR}"
   echo "- Rust 目录: ${TALOS_RS_DIR}"
   echo "- 服务端: talos-rs/target/debug/talos-server"
-  echo "- 客户端 CLI: talos-rs/target/debug/talos-cli"
+  echo "- 终端客户端: talos-rs/target/debug/talos"
   echo
   echo "## 场景执行结果"
   echo

@@ -101,10 +101,9 @@
 |------|------|------|
 | `talos-base` | `crates/app/talos-base` | 共享 runtime base，供 `app-server` 与 `talos-server` binary 复用 |
 | `talos-sdk` | `apps/sdk` | Rust SDK library |
-| `talos-cli` | `apps/cli` | CLI package，构建 `talos-cli` binary |
 | `talos-app-server-test-client` | `apps/app-server-test-client` | App Server protocol e2e 测试客户端 |
-| `talos-ui-tui` | `apps/ui-tui` | TUI package，构建公开用户入口 binary `talos` |
-| `app-server` | `bin/app-server` | 本地 App Server binary，供 TUI/Desktop/SDK 使用 |
+| `talos-tui` | `apps/tui` | Terminal package，构建统一的 TUI 与 command mode binary `talos` |
+| `app-server` | `bin/app-server` | 本地 App Server binary，供 Desktop 和协议测试使用 |
 | `talos-server` | `bin/talos-server` | HTTP/WebUI Server binary |
 
 ## 文档边界

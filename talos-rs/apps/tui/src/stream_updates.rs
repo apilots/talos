@@ -108,7 +108,7 @@ impl TuiApp {
                         .cloned()
                         .or_else(|| self.current_project_root.clone());
                     let mut lines = vec![
-                        "mode: app-server".to_string(),
+                        "mode: embedded".to_string(),
                         format!("model: {}", self.current_model),
                         format!(
                             "working_directory: {}",

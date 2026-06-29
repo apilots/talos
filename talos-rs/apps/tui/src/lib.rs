@@ -17,12 +17,15 @@ mod stream_lifecycle;
 mod stream_text;
 mod stream_updates;
 mod transcript;
+mod turn_request;
 mod types;
 mod utils;
 
 pub use client::GatewayClient;
 pub use run::run_tui_app_with_gateway_client;
+pub use turn_request::TerminalTurnRequest;
 use types::*;
+pub use utils::display_tool_name;
 
 use chrono::{Datelike, Local, TimeZone};
 use ratatui::layout::Rect;

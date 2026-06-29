@@ -1,13 +1,13 @@
 use std::time::Instant;
 
 use talos_error::TalosResult;
-use talos_sdk::{SkillSuggestion, StartTurnRequest, TalosInputItem};
+use talos_sdk::SkillSuggestion;
 use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::types::ChatRole;
 use crate::utils::summarize_for_queue;
-use crate::TuiApp;
+use crate::{TerminalTurnRequest, TuiApp};
 
 impl TuiApp {
     pub(crate) async fn start_stream_for_message_with_skills(
@@ -41,25 +41,16 @@ impl TuiApp {
         let is_first_turn =
             self.session_usage.total_tokens == 0 && self.active_stream_message_id.is_none();
         let active_summary = summarize_for_queue(&user_message);
-        let mut input = vec![TalosInputItem::Text {
-            text: user_message.clone(),
-        }];
-        input.extend(skills.iter().map(|skill| TalosInputItem::SkillSelection {
-            name: skill.name.clone(),
-            path: skill.path.to_string_lossy().to_string(),
-        }));
-        let request = StartTurnRequest {
+        let request = TerminalTurnRequest {
             session_id: session_id.clone(),
-            input,
-            workspace_id: None,
+            message: user_message.clone(),
+            skills: skills.clone(),
             context: is_first_turn.then(|| self.build_talos_context()),
-            model: is_first_turn
-                .then(|| self.current_model.clone())
-                .filter(|model| !model.is_empty()),
-            project_id: None,
+            model: is_first_turn.then(|| self.current_model.clone()),
             current_directory: is_first_turn.then(|| self.startup_directory.clone()),
             client_request_id: None,
-        };
+        }
+        .build();
 
         self.abort_pending_stream_task();
         self.in_flight = true;

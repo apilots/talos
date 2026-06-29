@@ -114,7 +114,7 @@ wait_for_tui_ready() {
     sleep 0.25
   done
   echo "CASE tui_bootstrap FAIL timeout waiting for ready prompt"
-  echo "CASE tui_bootstrap FAIL snapshot=$(capture_tui || true)"
+  dump_failure_context
   exit 1
 }
 

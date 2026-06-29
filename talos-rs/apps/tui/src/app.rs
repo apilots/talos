@@ -229,6 +229,11 @@ impl TuiApp {
             .current_directory
             .clone()
             .or_else(|| Some(self.startup_directory.clone()));
+        self.refresh_welcome_card();
+        self.rebuild_chat_render_state_if_rect();
+    }
+
+    pub(crate) fn refresh_welcome_card(&mut self) {
         if let Some(welcome_block) = self.chat_blocks.first_mut() {
             if welcome_block.content.starts_with('╭') {
                 welcome_block.content = build_welcome_card(
@@ -238,7 +243,6 @@ impl TuiApp {
                 );
             }
         }
-        self.rebuild_chat_render_state_if_rect();
     }
 
     pub(crate) fn reset_chat_surface(&mut self) {

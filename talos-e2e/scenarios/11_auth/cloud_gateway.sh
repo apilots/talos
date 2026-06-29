@@ -170,7 +170,6 @@ export TALOS_HOME="${TMP_DIR}/talos-home"
 export TALOS_TEST_GATEWAY_AUTH="true"
 export TALOS_TEST_CLOUD_API_BASE_URL="${CLOUD_BASE_URL}"
 export TALOS_TEST_CLOUD_WEB_BASE_URL="${CLOUD_BASE_URL}"
-export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
 
 start_cloud_server
 
@@ -222,6 +221,9 @@ write_cloud_session_cache \
   "${ADMIN_EMAIL}" \
   "${CLOUD_ROLE}"
 
+build_app_server_binaries
+export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"
+
 if timeout 90 "${TALOS_RS_DIR}/target/debug/talos-app-server-test-client" cloud-session-cache >"$(scenario_report_path "app_server_cloud_session_cache.log")" 2>&1; then
   echo "CASE app_server_existing_session_token PASS"
 else
@@ -229,7 +231,7 @@ else
   fail_case "app-server failed to use verified cloud session cache"
 fi
 
-if timeout 90 "${TALOS_RS_DIR}/target/debug/talos-cli" models >"$(scenario_report_path "cli_cloud_session_cache.log")" 2>&1; then
+if timeout 180 "${TALOS_RS_DIR}/target/debug/talos" exec --session "auth-cache-${timestamp}" "Reply exactly: ok" >"$(scenario_report_path "cli_cloud_session_cache.log")" 2>&1; then
   echo "CASE cli_existing_session_token PASS"
 else
   cat "$(scenario_report_path "cli_cloud_session_cache.log")"
@@ -238,7 +240,7 @@ fi
 
 stop_cloud_server
 
-if timeout 45 "${TALOS_RS_DIR}/target/debug/talos-cli" models >"$(scenario_report_path "cli_cloud_session_cache_offline.log")" 2>&1; then
+if timeout 45 "${TALOS_RS_DIR}/target/debug/talos" exec --session "auth-cache-offline-${timestamp}" "Reply exactly: ok" >"$(scenario_report_path "cli_cloud_session_cache_offline.log")" 2>&1; then
   cat "$(scenario_report_path "cli_cloud_session_cache_offline.log")"
   fail_case "CLI authorized from cached cloud session while Talos Cloud was offline"
 fi

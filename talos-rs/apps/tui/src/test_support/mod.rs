@@ -16,8 +16,9 @@ pub(crate) use talos_sdk::{
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
     TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
-    TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay, TurnExecutionMetrics,
+    TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
 };
+pub(crate) use talos_types::TimelineRecoverySnapshot;
 
 #[derive(Default)]
 pub(crate) struct MockGatewayState {

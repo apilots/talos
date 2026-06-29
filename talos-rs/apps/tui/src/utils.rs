@@ -16,7 +16,7 @@ pub(crate) const APP_VERSION: &str = "v0.1.2";
 
 // ── Event labels ────────────────────────────────────────────────────────────
 
-pub(crate) fn display_tool_name(tool_name: &str) -> &str {
+pub fn display_tool_name(tool_name: &str) -> &str {
     match tool_name {
         "bash" | "Bash" => "Bash",
         "read" | "Read" => "Read",
@@ -243,7 +243,6 @@ pub(crate) fn build_welcome_card(
     working_directory: Option<&Path>,
 ) -> String {
     const CARD_WIDTH: usize = 50;
-    const INFO_BLOCK_INDENT: usize = 2;
 
     fn card_line(content: &str) -> String {
         let mut inner: String = content.chars().take(CARD_WIDTH).collect();
@@ -254,24 +253,35 @@ pub(crate) fn build_welcome_card(
         format!("│{}│", inner)
     }
 
-    fn indented_card_line(content: &str, indent: usize) -> String {
-        card_line(&format!("{}{}", " ".repeat(indent), content))
+    fn info_line(label: &str, value: &str) -> String {
+        card_line(&format!(" {:<12} {}", label, value))
     }
 
-    let working_directory_line = working_directory
-        .map(|path| format!("working_directory: {}", compact_directory_path(path)))
-        .unwrap_or_else(|| "working_directory: (server-managed)".to_string());
+    fn info_line_with_suffix(label: &str, value: &str, suffix: &str) -> String {
+        let prefix = format!(" {:<12} {}", label, value);
+        let prefix_len = prefix.chars().count();
+        let suffix_len = suffix.chars().count();
+        if prefix_len + suffix_len >= CARD_WIDTH {
+            return card_line(&prefix);
+        }
+        card_line(&format!(
+            "{}{}{}",
+            prefix,
+            " ".repeat(CARD_WIDTH - prefix_len - suffix_len),
+            suffix
+        ))
+    }
+
+    let directory = working_directory
+        .map(compact_directory_path)
+        .unwrap_or_else(|| "(server-managed)".to_string());
     [
         "╭──────────────────────────────────────────────────╮".to_string(),
         card_line(&format!(" >_ Talos TUI ({})", version)),
         card_line(""),
-        indented_card_line("Session", INFO_BLOCK_INDENT),
-        indented_card_line("", INFO_BLOCK_INDENT),
-        indented_card_line(
-            &format!("model:     {:<12} /model to change", model),
-            INFO_BLOCK_INDENT,
-        ),
-        indented_card_line(&working_directory_line, INFO_BLOCK_INDENT),
+        info_line_with_suffix("model:", model, "/model to change"),
+        info_line("directory:", &directory),
+        info_line("permissions:", "YOLO mode"),
         "╰──────────────────────────────────────────────────╯".to_string(),
     ]
     .join("\n")
@@ -295,18 +305,12 @@ mod tests {
             lines[1],
             "│ >_ Talos TUI (v0.1.2)                            │"
         );
+        assert!(lines[3].starts_with("│ model:"));
+        assert!(lines[3].contains("/model to change"));
+        assert!(lines[4].starts_with("│ directory:"));
+        assert!(lines[5].starts_with("│ permissions:"));
         assert_eq!(
-            lines[3],
-            "│  Session                                         │"
-        );
-        assert_eq!(
-            lines[4],
-            "│                                                  │"
-        );
-        assert!(lines[5].starts_with("│  model:"));
-        assert!(lines[6].starts_with("│  working_directory:"));
-        assert_eq!(
-            lines[7],
+            lines[6],
             "╰──────────────────────────────────────────────────╯"
         );
     }

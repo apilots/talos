@@ -137,7 +137,7 @@ if ! echo "${plan_output}" | grep -Fq "PLAN_READY"; then
   exit 1
 fi
 
-exit_input="You must call tool 'ExitPlanMode' exactly once with summary exactly \"Planning finished\". After the tool call, respond with exactly EXIT_PLAN_MODE_OK"
+exit_input="Do not inspect files. Do not call Bash, Glob, Grep, Read, or any other tool. You must call tool 'ExitPlanMode' exactly once with summary exactly \"Planning finished\". After the tool call, respond with exactly EXIT_PLAN_MODE_OK"
 exit_payload="$(build_payload "${exit_input}")"
 exit_json="$(send_message_response "${session_id}" "${exit_payload}" "exit")"
 log_case_json "tool_exit_plan_mode" "${exit_payload}" "${exit_json}"
@@ -159,8 +159,9 @@ import os
 data = json.loads(os.environ["EXIT_JSON"])
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, "missing tool_result"
-result = results[0]
-assert result.get("tool_name") == "ExitPlanMode", result.get("tool_name")
+exit_results = [item for item in results if item.get("tool_name") == "ExitPlanMode"]
+assert len(exit_results) == 1, [item.get("tool_name") for item in results]
+result = exit_results[0]
 content_items = result.get("content") or []
 assert content_items, "missing content payload"
 item = content_items[0]

@@ -28,7 +28,7 @@ Talos提供了多种用户交互界面：
 | `talos-server` | HTTP API / WebUI 服务端入口，面向服务端 tar 包部署 |
 
 ### 终端用户界面 (TUI)
-- 使用 `cargo run -p talos-ui-tui --bin talos` 运行
+- 使用 `cargo run -p talos-tui --bin talos` 运行
 - 丰富的键盘导航支持
 - 支持多面板视图（聊天、历史、工具、设置）
 - 默认以内嵌 runtime 运行，不需要单独启动 `app-server`，也不占用本地端口
@@ -114,12 +114,15 @@ cargo run --example basic
 ```bash
 # 启动 TUI 界面（默认 embedded runtime）
 cd talos/talos-rs
-cargo run -p talos-ui-tui --bin talos
+cargo run -p talos-tui --bin talos
 
 # TUI/CLI 直接使用 embedded runtime，不需要额外启动 app-server
 
-# 运行 CLI（默认 embedded runtime）
-cargo run -p talos-cli --bin talos-cli -- models
+# 运行 command mode（默认 embedded runtime）
+cargo run -p talos-tui --bin talos -- exec --session demo "hello"
+
+# 终端管理命令同样走 embedded runtime
+cargo run -p talos-tui --bin talos -- models
 
 # 启动 HTTP/WebUI 服务端
 cargo run -p talos-server --bin talos-server
