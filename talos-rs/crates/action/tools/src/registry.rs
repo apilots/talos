@@ -837,4 +837,5 @@ impl Default for ToolRegistry {
 }
 
 #[cfg(test)]
+#[path = "registry/registry_tests.rs"]
 mod tests;

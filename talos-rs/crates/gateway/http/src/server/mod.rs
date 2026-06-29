@@ -309,4 +309,5 @@ impl HttpServer {
 }
 
 #[cfg(test)]
+#[path = "server_tests.rs"]
 mod tests;

@@ -784,6 +784,7 @@ async fn test_stale_timeline_events_are_ignored() {
         .find(|b| b.role == ChatRole::Assistant)
         .map(|b| b.content.clone())
         .unwrap_or_default();
+    assert!(assistant.is_empty());
     assert!(app
         .right_panel_events
         .iter()

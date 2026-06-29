@@ -1,4 +1,5 @@
 #[cfg(test)]
+#[path = "store/store_tests.rs"]
 mod tests;
 mod types;
 

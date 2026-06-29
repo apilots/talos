@@ -26,7 +26,7 @@ use talos_types::talos::{
     TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
     TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
 };
-use talos_types::{ModelInfo, SessionConf, SessionListRequest, SessionPatch, TalosSession};
+use talos_types::{ModelInfo, SessionListRequest, TalosSession};
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
@@ -46,26 +46,11 @@ trait SessionService: Send + Sync {
         Ok("default".to_string())
     }
 
-    async fn create_session(
-        &self,
-        context: TalosContext,
-        model: Option<String>,
-        conf: Option<SessionConf>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> TalosResult<TalosSession>;
-
     async fn list_sessions(&self, request: SessionListRequest) -> TalosResult<Vec<TalosSession>>;
 
     async fn count_sessions(&self, request: SessionListRequest) -> TalosResult<usize>;
 
     async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
-
-    async fn patch_session(
-        &self,
-        session_id: &str,
-        patch: SessionPatch,
-    ) -> TalosResult<SessionPatchAck>;
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
 
@@ -293,8 +278,11 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
         Ok(talos_types::TalosUsage::default())
     }
 
-    async fn clear_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
-        Ok(())
+    async fn clear_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
+        self.service
+            .clear_session(&session.context.session_id)
+            .await
+            .map(|_| ())
     }
 
     async fn close_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {

@@ -237,50 +237,6 @@ impl TurnExecutor for SilentGateway {
 
 #[async_trait::async_trait]
 impl SessionService for MockSessionService {
-    async fn create_session(
-        &self,
-        context: TalosContext,
-        model: Option<String>,
-        conf: Option<talos_types::SessionConf>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
-    ) -> TalosResult<talos_types::TalosSession> {
-        assert_ne!(
-            context.user_id, "empty-input-user",
-            "empty input requests must fail before session creation"
-        );
-        Ok(talos_types::TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: context.user_id.clone(),
-            context: talos_types::SessionContext {
-                session_id: "mock-session".to_string(),
-                workspace_id: None,
-                source_type: context.source_type,
-                provider: context.provider,
-                user_id: context.user_id,
-                message_id: context.message_id,
-                trace_id: context.trace_id,
-                channel_id: context.channel_id,
-                thread_id: context.thread_id,
-                project_id: project_id.clone(),
-                current_directory: current_directory.clone(),
-                project_root: context.project_root,
-                environment: context.environment,
-            },
-            conf: conf.unwrap_or_default(),
-            project_id,
-            current_directory,
-            config: {
-                let mut config = talos_types::TalosConfig::default();
-                let resolved = model.unwrap_or_else(|| "qwen-plus".to_string());
-                config.agent.model = resolved.clone();
-                config.llm.model = resolved;
-                config
-            },
-            state: talos_types::SessionState::default(),
-        })
-    }
-
     async fn list_sessions(
         &self,
         _request: talos_types::SessionListRequest,
@@ -337,14 +293,6 @@ impl SessionService for MockSessionService {
                 usage: talos_types::talos::TalosUsage::default(),
             },
         }))
-    }
-
-    async fn patch_session(
-        &self,
-        _session_id: &str,
-        _patch: talos_types::SessionPatch,
-    ) -> TalosResult<SessionPatchAck> {
-        Ok(SessionPatchAck { success: true })
     }
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
