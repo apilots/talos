@@ -7,8 +7,10 @@ import { createDesktopTalosClient } from "./desktop-client";
 describe("createDesktopTalosClient", () => {
   it("forwards request-object params without nesting session and project ids", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge: DesktopRendererBridge = {
-      invoke: async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
+    const bridge = bridgeWithInvoke(async function <T>(
+      method: AppProtocol.ClientMethod,
+      params?: unknown,
+    ): Promise<T> {
         calls.push({ method, params });
         if (method === "session.get") {
           return { session: { id: "session-1" } } as T;
@@ -43,10 +45,7 @@ describe("createDesktopTalosClient", () => {
           return { success: true } as T;
         }
         throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
-      },
-      onEvent: () => () => undefined,
-      onSubscriptionTerminated: () => () => undefined,
-    };
+    });
     const client = createDesktopTalosClient(bridge);
 
     await client.sessions.get({ session_id: "session-1" });
@@ -73,10 +72,8 @@ describe("createDesktopTalosClient", () => {
   });
 
   it("keeps desktop fs, memory, and workspace document response envelopes aligned with HTTP client", async () => {
-    const bridge: DesktopRendererBridge = {
-      invoke: async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
-        if (method === "fs.directory.read") {
-          return {
+    const bridge = bridgeWithResponses({
+      "fs.directory.read": {
             directory: {
               path: "/tmp/project",
               parent: "/tmp",
@@ -84,10 +81,8 @@ describe("createDesktopTalosClient", () => {
               readable: true,
               writable: true,
             },
-          } as T;
-        }
-        if (method === "memory.file.read") {
-          return {
+      },
+      "memory.file.read": {
             file: {
               date: "2026-06-24",
               path: "memory/2026-06-24.md",
@@ -96,10 +91,8 @@ describe("createDesktopTalosClient", () => {
               updated_at: 1776393847462,
               version_token: "memory-token",
             },
-          } as T;
-        }
-        if (method === "memory.file.write") {
-          return {
+      },
+      "memory.file.write": {
             file: {
               date: "2026-06-24",
               path: "memory/2026-06-24.md",
@@ -108,10 +101,8 @@ describe("createDesktopTalosClient", () => {
               updated_at: 1776393847463,
               version_token: "memory-token-2",
             },
-          } as T;
-        }
-        if (method === "workspace.doc.read") {
-          return {
+      },
+      "workspace.doc.read": {
             doc: {
               kind: "memory",
               path: "MEMORY.md",
@@ -120,10 +111,8 @@ describe("createDesktopTalosClient", () => {
               updated_at: 1776393847462,
               version_token: "doc-token",
             },
-          } as T;
-        }
-        if (method === "workspace.doc.write") {
-          return {
+      },
+      "workspace.doc.write": {
             doc: {
               kind: "memory",
               path: "MEMORY.md",
@@ -132,52 +121,29 @@ describe("createDesktopTalosClient", () => {
               updated_at: 1776393847463,
               version_token: "doc-token-2",
             },
-          } as T;
-        }
-        throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
       },
-      onEvent: () => () => undefined,
-      onSubscriptionTerminated: () => () => undefined,
-    };
+    });
     const client = createDesktopTalosClient(bridge);
 
-    await expect(client.fs.directory.read({ path: "/tmp/project" })).resolves.toMatchObject({
-      directory: {
-        path: "/tmp/project",
-      },
-    });
-    await expect(client.memory.get("2026-06-24")).resolves.toMatchObject({
-      file: {
-        content: "# Memory",
-      },
-    });
+    await expect(client.fs.directory.read({ path: "/tmp/project" })).resolves.toMatchObject({ directory: { path: "/tmp/project" } });
+    await expect(client.memory.get("2026-06-24")).resolves.toMatchObject({ file: { content: "# Memory" } });
     await expect(client.memory.put("2026-06-24", {
       content: "# Updated memory",
       base_version: { mode: "match", version_token: "memory-token" },
-    })).resolves.toMatchObject({
-      file: {
-        version_token: "memory-token-2",
-      },
-    });
-    await expect(client.workspaceDocs.get("memory")).resolves.toMatchObject({
-      doc: {
-        content: "# Workspace memory",
-      },
-    });
+    })).resolves.toMatchObject({ file: { version_token: "memory-token-2" } });
+    await expect(client.workspaceDocs.get("memory")).resolves.toMatchObject({ doc: { content: "# Workspace memory" } });
     await expect(client.workspaceDocs.put("memory", {
       content: "# Updated workspace memory",
       base_version: { mode: "match", version_token: "doc-token" },
-    })).resolves.toMatchObject({
-      doc: {
-        version_token: "doc-token-2",
-      },
-    });
+    })).resolves.toMatchObject({ doc: { version_token: "doc-token-2" } });
   });
 
   it("uses the desktop source type when starting desktop turns", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-    const bridge: DesktopRendererBridge = {
-      invoke: async function <T>(method: AppProtocol.ClientMethod, params?: unknown): Promise<T> {
+    const bridge = bridgeWithInvoke(async function <T>(
+      method: AppProtocol.ClientMethod,
+      params?: unknown,
+    ): Promise<T> {
         calls.push({ method, params });
         if (method === "turn.start") {
           return {
@@ -189,10 +155,7 @@ describe("createDesktopTalosClient", () => {
           } as T;
         }
         throw new Error(`unexpected method: ${method}`);
-      },
-      onEvent: () => () => undefined,
-      onSubscriptionTerminated: () => () => undefined,
-    };
+    });
     const client = createDesktopTalosClient(bridge);
 
     await client.turns.start({
@@ -331,4 +294,23 @@ function usage(): AppProtocol.TalosUsage {
     cache_creation_input_tokens: null,
     cache_read_input_tokens: null,
   };
+}
+
+function bridgeWithInvoke(invoke: DesktopRendererBridge["invoke"]): DesktopRendererBridge {
+  return {
+    invoke,
+    onEvent: () => () => undefined,
+    onSubscriptionTerminated: () => () => undefined,
+  };
+}
+
+function bridgeWithResponses(
+  responses: Partial<Record<AppProtocol.ClientMethod, unknown>>,
+): DesktopRendererBridge {
+  return bridgeWithInvoke(async function <T>(method: AppProtocol.ClientMethod, params?: unknown) {
+    if (Object.prototype.hasOwnProperty.call(responses, method)) {
+      return responses[method] as T;
+    }
+    throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
+  });
 }

@@ -26,12 +26,7 @@ import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
-import type {
-  ProjectView,
-  ReasoningLevel,
-  RuntimeMode,
-  SessionInputHistory,
-} from "@/shared/types/ui";
+import type { ProjectView, ReasoningLevel, RuntimeMode, SessionInputHistory } from "@/shared/types/ui";
 
 interface ChatComposerProps {
   draft: string;
