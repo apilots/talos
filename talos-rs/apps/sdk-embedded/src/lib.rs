@@ -83,7 +83,7 @@ impl EmbeddedServerClient {
                 ))
             })?;
         let actor = if auth_enabled && !actor_overridden {
-            resolve_cached_actor(&runtime).await?
+            resolve_cached_actor(&runtime).await?.unwrap_or(config.actor)
         } else {
             config.actor
         };
@@ -95,19 +95,19 @@ impl EmbeddedServerClient {
     }
 }
 
-async fn resolve_cached_actor(runtime: &TalosApplicationRuntime) -> TalosResult<Actor> {
+async fn resolve_cached_actor(runtime: &TalosApplicationRuntime) -> TalosResult<Option<Actor>> {
     let response = runtime
         .gateway
         .read_auth_session(&Actor::regular("anonymous"), AuthSessionReadRequest {})
         .await?;
-    let session = response.session.ok_or_else(|| {
-        TalosError::AuthError("cached cloud session is required for embedded auth".to_string())
-    })?;
+    let Some(session) = response.session else {
+        return Ok(None);
+    };
     let identity = runtime
         .auth_service
         .verify_access_token(&session.access_token)
         .await?;
-    Ok(actor_from_identity(&identity))
+    Ok(Some(actor_from_identity(&identity)))
 }
 
 fn actor_from_identity(identity: &RequestIdentity) -> Actor {
@@ -118,6 +118,14 @@ fn actor_from_identity(identity: &RequestIdentity) -> Actor {
         Some(token) => actor.with_access_token(token),
         None => actor,
     }
+}
+
+async fn authenticated_actor_from_access_token(
+    runtime: &TalosApplicationRuntime,
+    access_token: &str,
+) -> TalosResult<Actor> {
+    let identity = runtime.auth_service.verify_access_token(access_token).await?;
+    Ok(actor_from_identity(&identity))
 }
 
 fn normalize_embedded_start_turn_request(
@@ -191,10 +199,15 @@ impl GatewayClient for EmbeddedServerClient {
         &mut self,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        self.runtime
+        let response = self
+            .runtime
             .gateway
             .cloud_login_status(&self.actor, request)
-            .await
+            .await?;
+        if let CloudLoginStatusResponse::Authenticated { access_token, .. } = &response {
+            self.actor = authenticated_actor_from_access_token(&self.runtime, access_token).await?;
+        }
+        Ok(response)
     }
 
     async fn cancel_cloud_login(
