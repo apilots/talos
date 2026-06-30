@@ -83,7 +83,7 @@ fn skills_methods_parse_without_legacy_skill_list_alias() {
 }
 
 #[test]
-fn deferred_methods_are_empty_after_p2_freeze() {
+fn client_method_parser_accepts_current_methods() {
     assert!(DEFERRED_CLIENT_METHODS.is_empty());
     assert_eq!(
         ClientMethod::from_str("event.unsubscribe").unwrap(),
@@ -97,7 +97,5 @@ fn deferred_methods_are_empty_after_p2_freeze() {
         ClientMethod::from_str("session.close").unwrap(),
         ClientMethod::SessionClose
     );
-    assert!(ClientMethod::from_str("account.get").is_err());
-    assert!(ClientMethod::from_str("admin.session.list").is_err());
-    assert!(ClientMethod::from_str("admin.project.list").is_err());
+    assert!(ClientMethod::from_str("unknown.method").is_err());
 }

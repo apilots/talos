@@ -112,7 +112,7 @@
         "session.clear",
         "session.active_turn",
         "session.history",
-        "session.recover",
+        "timeline.recover",
         "project.create",
         "project.list",
         "project.read",
@@ -367,7 +367,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.recover"
+                "timeline.recover"
               ],
               "type": "string"
             },
@@ -606,7 +606,7 @@
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SubmitToolResultRequest"
+              "$ref": "#/definitions/SubmitDynamicToolResultRequest"
             }
           },
           "required": [
@@ -1959,12 +1959,12 @@
     },
     "MemoryFileReadRequest": {
       "properties": {
-        "path": {
+        "date": {
           "type": "string"
         }
       },
       "required": [
-        "path"
+        "date"
       ],
       "type": "object"
     },
@@ -1973,20 +1973,20 @@
         "content": {
           "type": "string"
         },
+        "date": {
+          "type": "string"
+        },
         "expected_version": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
-        },
-        "path": {
-          "type": "string"
         }
       },
       "required": [
         "content",
-        "path"
+        "date"
       ],
       "type": "object"
     },
@@ -3266,7 +3266,7 @@
       ],
       "type": "string"
     },
-    "SubmitToolResultRequest": {
+    "SubmitDynamicToolResultRequest": {
       "properties": {
         "call_id": {
           "type": "string"
@@ -3293,7 +3293,7 @@
       ],
       "type": "object"
     },
-    "SubmitToolResultResponse": {
+    "SubmitDynamicToolResultResponse": {
       "properties": {
         "success": {
           "type": "boolean"
@@ -5403,11 +5403,11 @@
     "start_turn_response": {
       "$ref": "#/definitions/StartTurnResponse"
     },
-    "submit_tool_result_request": {
-      "$ref": "#/definitions/SubmitToolResultRequest"
+    "submit_dynamic_tool_result_request": {
+      "$ref": "#/definitions/SubmitDynamicToolResultRequest"
     },
-    "submit_tool_result_response": {
-      "$ref": "#/definitions/SubmitToolResultResponse"
+    "submit_dynamic_tool_result_response": {
+      "$ref": "#/definitions/SubmitDynamicToolResultResponse"
     },
     "subscribe_timeline_request": {
       "$ref": "#/definitions/SubscribeTimelineRequest"
@@ -5445,8 +5445,8 @@
     "session_history_response",
     "start_turn_request",
     "start_turn_response",
-    "submit_tool_result_request",
-    "submit_tool_result_response",
+    "submit_dynamic_tool_result_request",
+    "submit_dynamic_tool_result_response",
     "subscribe_timeline_request",
     "subscribe_timeline_response",
     "timeline_event",

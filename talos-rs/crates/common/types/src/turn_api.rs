@@ -50,7 +50,7 @@ pub struct InterruptTurnResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct SubmitToolResultRequest {
+pub struct SubmitDynamicToolResultRequest {
     pub session_id: String,
     pub call_id: String,
     pub tool_name: String,
@@ -59,7 +59,7 @@ pub struct SubmitToolResultRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct SubmitToolResultResponse {
+pub struct SubmitDynamicToolResultResponse {
     pub success: bool,
 }
 

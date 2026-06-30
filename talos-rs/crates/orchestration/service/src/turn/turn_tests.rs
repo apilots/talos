@@ -1,5 +1,6 @@
 use super::*;
-use crate::{SessionRecordService, TimelineEventRetentionConfig};
+use crate::session::SessionRecordService;
+use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -191,6 +192,7 @@ async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
             &context,
             "default",
             "default-model",
+            None,
             None,
             None,
             None,

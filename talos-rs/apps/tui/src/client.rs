@@ -36,7 +36,7 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
-    async fn recover_session(
+    async fn recover_timeline(
         &self,
         session_id: &str,
         after_event_id: Option<String>,
@@ -255,7 +255,7 @@ where
         Ok(subscription.stream.into_inner())
     }
 
-    async fn recover_session(
+    async fn recover_timeline(
         &self,
         session_id: &str,
         after_event_id: Option<String>,

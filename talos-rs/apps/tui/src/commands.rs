@@ -540,7 +540,7 @@ impl TuiApp {
                         {
                             Some(
                                 client
-                                    .recover_session(
+                                    .recover_timeline(
                                         &session_id,
                                         history.last_stable_event_id.clone(),
                                     )

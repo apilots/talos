@@ -35,11 +35,12 @@ use talos_types::{
     SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
     SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
     SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsReadResponse,
-    StartTurnRequest, StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::task::JoinHandle;
 
@@ -83,7 +84,9 @@ impl EmbeddedServerClient {
                 ))
             })?;
         let actor = if auth_enabled && !actor_overridden {
-            resolve_cached_actor(&runtime).await?.unwrap_or(config.actor)
+            resolve_cached_actor(&runtime)
+                .await?
+                .unwrap_or(config.actor)
         } else {
             config.actor
         };
@@ -124,7 +127,10 @@ async fn authenticated_actor_from_access_token(
     runtime: &TalosApplicationRuntime,
     access_token: &str,
 ) -> TalosResult<Actor> {
-    let identity = runtime.auth_service.verify_access_token(access_token).await?;
+    let identity = runtime
+        .auth_service
+        .verify_access_token(access_token)
+        .await?;
     Ok(actor_from_identity(&identity))
 }
 
@@ -491,13 +497,13 @@ impl GatewayClient for EmbeddedServerClient {
             .await
     }
 
-    async fn submit_tool_result(
+    async fn submit_dynamic_tool_result(
         &mut self,
-        request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse> {
+        request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse> {
         self.runtime
             .gateway
-            .submit_tool_result(&self.actor, request)
+            .submit_dynamic_tool_result(&self.actor, request)
             .await
     }
 

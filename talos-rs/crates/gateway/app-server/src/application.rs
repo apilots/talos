@@ -154,7 +154,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
-            ClientRequestParams::SessionRecover(params) => {
+            ClientRequestParams::TimelineRecover(params) => {
                 let snapshot = self
                     .gateway
                     .recover_timeline(
@@ -243,7 +243,7 @@ impl AppServerApplication for TalosApplicationAdapter {
             )),
             ClientRequestParams::ToolDynamicResultSubmit(params) => to_value(
                 self.gateway
-                    .submit_tool_result(actor, params.into())
+                    .submit_dynamic_tool_result(actor, params.into())
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),

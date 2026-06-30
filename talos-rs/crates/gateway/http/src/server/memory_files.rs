@@ -9,8 +9,7 @@ use serde_json::{json, Value};
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
 use talos_types::{
-    DocUpdateRequest, ExpectedFileVersion, MemoryFileListRequest, MemoryFileReadRequest,
-    MemoryFileWriteRequest, MemorySearchRequest,
+    MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest, MemorySearchRequest,
 };
 
 use super::access::shared_actor;
@@ -31,7 +30,7 @@ pub(super) struct MemoryFilesQuery {
 
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct MemorySearchHttpQuery {
-    q: String,
+    query: String,
     #[serde(default)]
     limit: Option<usize>,
     #[serde(default)]
@@ -68,12 +67,7 @@ pub(super) async fn get_memory_file_handler(
     let actor = shared_actor(&auth.0);
     let detail = state
         .gateway
-        .read_memory_file(
-            &actor,
-            MemoryFileReadRequest {
-                path: format!("memory/{date}.md").into(),
-            },
-        )
+        .read_memory_file(&actor, MemoryFileReadRequest { date })
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(detail)))
@@ -83,19 +77,19 @@ pub(super) async fn put_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
-    Json(request): Json<DocUpdateRequest>,
+    Json(request): Json<MemoryFileWriteRequest>,
 ) -> Result<Json<Value>, ApiError> {
+    if request.date != date {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "memory file route date must match request date",
+        ));
+    }
     let actor = shared_actor(&auth.0);
     let detail = state
         .gateway
-        .write_memory_file(
-            &actor,
-            MemoryFileWriteRequest {
-                path: format!("memory/{date}.md").into(),
-                content: request.content,
-                expected_version: expected_file_version_token(request.base_version),
-            },
-        )
+        .write_memory_file(&actor, request)
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(detail)))
@@ -108,7 +102,7 @@ pub(super) async fn search_memory_files_handler(
 ) -> Result<Json<Value>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemorySearchRequest {
-        query: query.q,
+        query: query.query,
         limit: query.limit,
         date_from: query.date_from,
         date_to: query.date_to,
@@ -140,12 +134,5 @@ fn map_memory_error(error: TalosError) -> ApiError {
             "internal_error",
             other.to_string(),
         ),
-    }
-}
-
-fn expected_file_version_token(value: ExpectedFileVersion) -> Option<String> {
-    match value {
-        ExpectedFileVersion::MustNotExist => None,
-        ExpectedFileVersion::Match { version_token } => Some(version_token),
     }
 }

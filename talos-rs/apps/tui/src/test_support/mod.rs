@@ -795,7 +795,7 @@ impl GatewayClient for MockGatewayClient {
         })
     }
 
-    async fn recover_session(
+    async fn recover_timeline(
         &self,
         _session_id: &str,
         _after_event_id: Option<String>,

@@ -42,6 +42,7 @@ fn record(
         message_count: 0,
         usage: TalosUsage::default(),
         conf: SessionConf::default(),
+        workspace_id: Some("workspace-alpha".to_string()),
         project_id,
         current_directory,
     }
@@ -90,6 +91,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
         .unwrap();
 
     assert_eq!(loaded.id, record.id);
+    assert_eq!(loaded.workspace_id, record.workspace_id);
     assert_eq!(loaded.project_id, record.project_id);
     assert_eq!(loaded.current_directory, record.current_directory);
     assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);

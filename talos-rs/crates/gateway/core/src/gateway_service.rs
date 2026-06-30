@@ -33,11 +33,11 @@ use talos_types::{
     SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
     SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
     SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
-    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    StartTurnResponse, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tracing::info;
 
@@ -94,12 +94,12 @@ impl Gateway for ServiceGateway {
         ServiceGateway::interrupt_turn(self, actor, request).await
     }
 
-    async fn submit_tool_result(
+    async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,
-        request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse> {
-        ServiceGateway::submit_tool_result(self, actor, request).await
+        request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse> {
+        ServiceGateway::submit_dynamic_tool_result(self, actor, request).await
     }
 
     async fn subscribe_timeline(

@@ -66,7 +66,8 @@ vi.mock("@/features/memory", () => ({
     searchResultDates: [],
     selectedDate: "2026-05-06",
     selectedDetail: {
-      path: "memory/2026-05-06.md",
+      date: "2026-05-06",
+      section_count: 1,
       content: "Memory content",
       version_token: "v1",
       updated_at: Date.now(),

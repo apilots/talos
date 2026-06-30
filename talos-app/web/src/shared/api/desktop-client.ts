@@ -6,7 +6,9 @@ import type {
   DocUpdateRequest,
   LlmConfig,
   MemoryFileListRequest,
-  MemorySearchQuery,
+  MemoryFileReadRequest,
+  MemoryFileWriteRequest,
+  MemorySearchRequest,
   RetryTurnRequest,
   StartTurnRequest,
   StartTurnResponse,
@@ -146,13 +148,23 @@ export function createDesktopTalosClient(
         request: Parameters<TalosWebClient["sessions"]["history"]>[0],
       ) =>
         client.getSessionHistory(request),
-      recover: (
-        request: Parameters<TalosWebClient["sessions"]["recover"]>[0],
+      recoverTimeline: (
+        request: Parameters<TalosWebClient["sessions"]["recoverTimeline"]>[0],
       ): Promise<TimelineRecoveryResponse> =>
-        client.recoverSession({
+        client.recoverTimeline({
           session_id: request.session_id,
           after_event_id: request.after_event_id ?? null,
           replay_limit: request.replay_limit ?? null,
+        }),
+      recoverTimelineById: (
+        sessionId: string,
+        afterEventId?: string,
+        replayLimit?: number,
+      ): Promise<TimelineRecoveryResponse> =>
+        client.recoverTimeline({
+          session_id: sessionId,
+          after_event_id: afterEventId ?? null,
+          replay_limit: replayLimit ?? null,
         }),
     },
     projects: {
@@ -175,13 +187,11 @@ export function createDesktopTalosClient(
       },
     },
     memory: {
-      list: (query?: MemoryFileListRequest) => client.listMemoryFiles(query?.limit ?? undefined),
-      get: (date: string) => client.readMemoryFile(date),
-      put: (date: string, request: DocUpdateRequest) =>
-        client
-          .writeMemoryFile(date, request.content, expectedVersionToken(request))
-          .then((response) => response),
-      search: (query: MemorySearchQuery) => client.searchMemory(query.q, query.limit),
+      list: (query?: MemoryFileListRequest) => client.listMemoryFiles(query ?? {}),
+      get: (request: MemoryFileReadRequest) => client.readMemoryFile(request),
+      put: (request: MemoryFileWriteRequest) =>
+        client.writeMemoryFile(request).then((response) => response),
+      search: (query: MemorySearchRequest) => client.searchMemory(query),
     },
     workspaceDocs: {
       info: () => client.getWorkspaceInfo(),

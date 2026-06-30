@@ -22,7 +22,7 @@ pub fn memory_search_response_into_retrieved_items(
         .results
         .into_iter()
         .map(|item| RetrievedMemoryItem {
-            path: item.path,
+            path: format!("memory/{}.md", item.date),
             snippet: item.snippet,
         })
         .collect()

@@ -135,6 +135,7 @@ impl SessionService {
         target_agent: &str,
         model: Option<String>,
         conf: Option<SessionConf>,
+        workspace_id: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<TalosSession> {
@@ -155,6 +156,7 @@ impl SessionService {
                 model.as_deref(),
                 conf,
                 self.resolve_dm_scope(&context.provider),
+                workspace_id,
                 project_id,
                 current_directory,
             )

@@ -1,4 +1,4 @@
 mod service;
 mod types;
 
-pub use service::FsService;
+pub(crate) use service::FsService;

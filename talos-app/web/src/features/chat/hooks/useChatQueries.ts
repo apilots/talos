@@ -10,7 +10,7 @@ import {
   deleteSession,
   getActiveTurn,
   getSessionHistory,
-  recoverSessionLiveTail,
+  recoverTimelineLiveTail,
   getSession,
   listModels,
   listProjects,
@@ -127,7 +127,7 @@ export function useLiveRecoveryQuery(
   const connectionKey = useConnectionKey();
   return useQuery({
     queryKey: chatKeys.liveRecovery(connectionKey, sessionId, afterEventId),
-    queryFn: () => recoverSessionLiveTail(sessionId, afterEventId),
+    queryFn: () => recoverTimelineLiveTail(sessionId, afterEventId),
     enabled: Boolean(sessionId) && enabled,
   });
 }

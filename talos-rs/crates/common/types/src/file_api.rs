@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -40,7 +38,7 @@ pub struct MemoryFileListResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileReadRequest {
-    pub path: PathBuf,
+    pub date: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -50,7 +48,7 @@ pub struct MemoryFileReadResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileWriteRequest {
-    pub path: PathBuf,
+    pub date: String,
     pub content: String,
     #[serde(default)]
     #[ts(optional)]
@@ -84,7 +82,7 @@ pub struct MemorySearchResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemorySearchResult {
-    pub path: String,
+    pub date: String,
     pub snippet: String,
     pub start_line: usize,
     pub end_line: usize,
@@ -93,7 +91,6 @@ pub struct MemorySearchResult {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileSummary {
     pub date: String,
-    pub path: String,
     pub section_count: usize,
     #[ts(type = "number | null")]
     pub updated_at: Option<i64>,
@@ -103,7 +100,6 @@ pub struct MemoryFileSummary {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct MemoryFileDetail {
     pub date: String,
-    pub path: String,
     pub section_count: usize,
     pub content: String,
     #[ts(type = "number | null")]

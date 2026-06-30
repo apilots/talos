@@ -173,15 +173,15 @@ echo "CASE messages_idempotency PASS message_id=${id1}"
 echo "DETAIL messages_idempotency_first_output=${first_output}"
 echo "DETAIL messages_idempotency_second_output=${second_output}"
 
-recovery_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/recovery")"
-log_case_json "session_recovery" "{\"session_id\":\"${session_id}\"}" "${recovery_json}"
+recovery_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")"
+log_case_json "timeline_recovery" "{\"session_id\":\"${session_id}\"}" "${recovery_json}"
 RECOVERY_JSON="${recovery_json}" python3 - <<'PY'
 import json, os, sys
 raw = os.environ.get("RECOVERY_JSON", "")
 try:
     data = json.loads(raw)
 except Exception as e:
-    print(f"CASE session_recovery FAIL parse_error={e}")
+    print(f"CASE timeline_recovery FAIL parse_error={e}")
     sys.exit(1)
 snapshot = data.get("snapshot", data)
 events = snapshot.get("replay", {}).get("events", [])
@@ -206,7 +206,7 @@ for envelope in events:
         if item_id in assistant_items and payload.get("phase") == "final_answer":
             has_final_answer = True
 if len(events) < 1 or not has_user_input or not has_final_answer:
-    print(f"CASE session_recovery FAIL event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
+    print(f"CASE timeline_recovery FAIL event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
     sys.exit(1)
-print(f"CASE session_recovery PASS event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
+print(f"CASE timeline_recovery PASS event_count={len(events)} has_user_input={has_user_input} has_final_answer={has_final_answer}")
 PY

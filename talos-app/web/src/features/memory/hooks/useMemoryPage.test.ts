@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getTodayDateString, memoryDateFromPath, useMemoryPage } from "./useMemoryPage";
+import { getTodayDateString, useMemoryPage } from "./useMemoryPage";
 
 const listMemoryFiles = vi.fn();
 const getMemoryFile = vi.fn();
@@ -55,7 +55,6 @@ describe("useMemoryPage helpers", () => {
       data: [
         {
           date: today,
-          path: `memory/${today}.md`,
           section_count: 1,
           updated_at: 1776393847462,
           version_token: "token-1",
@@ -66,7 +65,6 @@ describe("useMemoryPage helpers", () => {
     getMemoryFile.mockResolvedValue({
       file: {
         date: today,
-        path: `memory/${today}.md`,
         section_count: 1,
         content: "# Existing memory",
         updated_at: 1776393847462,
@@ -77,7 +75,7 @@ describe("useMemoryPage helpers", () => {
     searchMemory.mockResolvedValue({
       results: [
         {
-          path: `memory/${today}.md`,
+          date: today,
           snippet: "Talos architecture memory result",
           start_line: 1,
           end_line: 4,
@@ -88,17 +86,12 @@ describe("useMemoryPage helpers", () => {
     putMemoryFile.mockResolvedValue({
       file: {
         date: today,
-        path: `memory/${today}.md`,
         section_count: 1,
         content: "# Updated memory",
         updated_at: 1776393847462,
         version_token: "token-2",
       },
     });
-  });
-
-  it("extracts memory file dates from search result paths", () => {
-    expect(memoryDateFromPath("memory/2026-04-17.md")).toBe("2026-04-17");
   });
 
   it("returns an ISO day string for today", () => {
@@ -127,7 +120,7 @@ describe("useMemoryPage helpers", () => {
 
     await waitFor(() => {
       expect(searchMemory).toHaveBeenCalledWith(
-        { q: "Talos", limit: 20 },
+        { query: "Talos", limit: 20 },
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
@@ -155,12 +148,10 @@ describe("useMemoryPage helpers", () => {
       await result.current.saveCurrent();
     });
 
-    expect(putMemoryFile).toHaveBeenCalledWith(getTodayDateString(), {
+    expect(putMemoryFile).toHaveBeenCalledWith({
+      date: getTodayDateString(),
       content: "# Updated memory",
-      base_version: {
-        mode: "match",
-        version_token: "token-1",
-      },
+      expected_version: "token-1",
     });
   });
 });

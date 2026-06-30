@@ -287,6 +287,7 @@ fn record_for(
         message_count: 0,
         usage: TalosUsage::default(),
         conf,
+        workspace_id: None,
         project_id,
         current_directory,
     }
@@ -425,6 +426,7 @@ async fn creating_session_uses_actor_user_id() {
             &Actor::regular("member-user"),
             "session-created",
             context,
+            None,
             None,
             None,
             None,

@@ -127,8 +127,8 @@ PY
 create_memory_payload="$(python3 - <<PY
 import json
 print(json.dumps({
+    "date": "${MEMORY_DATE}",
     "content": "# Memory\\n${MEMORY_MARKER}\\n",
-    "base_version": {"mode": "must_not_exist"},
 }))
 PY
 )"

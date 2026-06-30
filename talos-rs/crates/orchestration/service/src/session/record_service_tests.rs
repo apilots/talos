@@ -28,24 +28,6 @@ async fn service() -> (SessionRecordService, Arc<DatabaseSessionStore>) {
 }
 
 #[tokio::test]
-async fn resolve_or_create_session_uses_default_scope() {
-    let (service, _store) = service().await;
-    let session = service
-        .resolve_or_create_session_record(&context(), "agent-a", "gpt-5.3", None, None, None, None)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        session.id,
-        scope::stable_session_key(
-            &context(),
-            "agent-a",
-            scope::SESSION_SCOPE_PER_CHANNEL_PEER_TOPIC,
-        )
-    );
-}
-
-#[tokio::test]
 async fn create_session_generates_record() {
     let (service, _store) = service().await;
     let session = service
@@ -54,6 +36,7 @@ async fn create_session_generates_record() {
             &context(),
             "agent-a",
             "gpt-5.3",
+            None,
             None,
             None,
             None,
@@ -76,6 +59,7 @@ async fn record_session_progress_accumulates_usage() {
             &context(),
             "agent-a",
             "gpt-5.3",
+            None,
             None,
             None,
             None,

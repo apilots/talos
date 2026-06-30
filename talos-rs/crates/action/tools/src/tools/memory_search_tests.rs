@@ -109,7 +109,7 @@ async fn test_memory_search_uses_structured_defaults() {
     .expect("response should deserialize");
 
     assert_eq!(response.results.len(), 1);
-    assert_eq!(response.results[0].path, "memory/2026-03-25.md");
+    assert_eq!(response.results[0].date, "2026-03-25");
 }
 
 #[tokio::test]
@@ -228,7 +228,7 @@ async fn test_memory_search_expands_tilde_workspace_dir() {
     .expect("response should deserialize");
 
     assert_eq!(response.results.len(), 1);
-    assert_eq!(response.results[0].path, expected_memory_path);
+    assert_eq!(response.results[0].date, "2026-03-27");
 
     let _ = tokio::fs::remove_dir_all(workspace_dir).await;
 }

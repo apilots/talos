@@ -1,8 +1,12 @@
 import type * as AppProtocol from "./generated/app-protocol";
 import type {
   MemoryFileListResponse,
+  MemoryFileReadRequest,
   MemoryFileReadResponse,
+  MemoryFileWriteRequest,
   MemoryFileWriteResponse,
+  MemoryFileListRequest,
+  MemorySearchRequest,
   MemorySearchResponse,
   FsDirectoryCreateResponse,
   FsDirectoryReadResponse,
@@ -32,7 +36,7 @@ import type {
   AuthSessionReadResponse,
   CloudLoginCancelResponse,
   SessionCloseResponse,
-  AgentWorkspaceInfo,
+  WorkspaceInfoResponse,
   WorkspaceDocKind,
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
@@ -271,16 +275,16 @@ export class AppServerClient {
     return this.getSessionHistory({ session_id: sessionId });
   }
 
-  recoverSession(params: AppProtocol.RecoverTimelineRequest): Promise<TimelineRecoveryResponse> {
-    return this.transport.request<TimelineRecoveryResponse>("session.recover", params);
+  recoverTimeline(params: AppProtocol.RecoverTimelineRequest): Promise<TimelineRecoveryResponse> {
+    return this.transport.request<TimelineRecoveryResponse>("timeline.recover", params);
   }
 
-  recoverSessionById(
+  recoverTimelineById(
     sessionId: string,
     afterEventId: string | null = null,
     replayLimit: number | null = null,
   ): Promise<TimelineRecoveryResponse> {
-    return this.recoverSession({
+    return this.recoverTimeline({
       session_id: sessionId,
       after_event_id: afterEventId,
       replay_limit: replayLimit,
@@ -360,45 +364,32 @@ export class AppServerClient {
   }
 
   submitDynamicToolResult(
-    params: AppProtocol.SubmitToolResultRequest,
-  ): Promise<AppProtocol.SubmitToolResultResponse> {
+    params: AppProtocol.SubmitDynamicToolResultRequest,
+  ): Promise<AppProtocol.SubmitDynamicToolResultResponse> {
     return this.transport.request("tool.dynamic_result.submit", params);
   }
 
-  listMemoryFiles(limit?: number): Promise<MemoryFileListResponse> {
-    return this.transport.request<MemoryFileListResponse>("memory.file.list", {
-      limit: limit ?? null,
-    });
+  listMemoryFiles(request: MemoryFileListRequest = {}): Promise<MemoryFileListResponse> {
+    return this.transport.request<MemoryFileListResponse>("memory.file.list", request);
   }
 
-  readMemoryFile(path: string): Promise<MemoryFileReadResponse> {
-    return this.transport.request("memory.file.read", { path });
+  readMemoryFile(request: MemoryFileReadRequest): Promise<MemoryFileReadResponse> {
+    return this.transport.request("memory.file.read", request);
   }
 
-  searchMemory(query: string, limit?: number): Promise<MemorySearchResponse> {
-    return this.transport.request<MemorySearchResponse>("memory.search", {
-      query,
-      limit: limit ?? null,
-    });
+  searchMemory(request: MemorySearchRequest): Promise<MemorySearchResponse> {
+    return this.transport.request<MemorySearchResponse>("memory.search", request);
   }
 
-  writeMemoryFile(
-    path: string,
-    content: string,
-    expectedVersion: string | null,
-  ): Promise<MemoryFileWriteResponse> {
-    return this.transport.request("memory.file.write", {
-      path,
-      content,
-      expected_version: expectedVersion,
-    });
+  writeMemoryFile(request: MemoryFileWriteRequest): Promise<MemoryFileWriteResponse> {
+    return this.transport.request("memory.file.write", request);
   }
 
   listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {
     return this.transport.request<WorkspaceDocListResponse>("workspace.doc.list", {});
   }
 
-  getWorkspaceInfo(): Promise<AgentWorkspaceInfo> {
+  getWorkspaceInfo(): Promise<WorkspaceInfoResponse> {
     return this.transport.request("workspace.info", {});
   }
 

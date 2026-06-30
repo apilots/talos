@@ -5,7 +5,14 @@ use talos_types::talos::{
     DynamicToolArguments, JsonContentValue, StopReason, TalosOutputItem, TalosUsage, ToolArguments,
     ToolExecutionResult,
 };
-pub use talos_types::MemorySearchResult;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemorySearchResult {
+    pub path: String,
+    pub snippet: String,
+    pub start_line: usize,
+    pub end_line: usize,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

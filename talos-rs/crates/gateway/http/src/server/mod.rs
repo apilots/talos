@@ -240,7 +240,7 @@ impl HttpServer {
                 get(get_session_history_handler),
             )
             .route(
-                "/v1/sessions/:session_id/recovery",
+                "/v1/sessions/:session_id/timeline/recovery",
                 get(recover_timeline_handler),
             )
             .route(

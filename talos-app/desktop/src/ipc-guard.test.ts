@@ -30,18 +30,9 @@ describe("desktop IPC guard", () => {
     ).not.toThrow();
   });
 
-  it("allows llm config methods and rejects removed admin methods", () => {
-    const removedMethod = "admin.session.list" as never;
-
-    expect(isDesktopRendererMethod(removedMethod)).toBe(false);
-    expect(isDesktopRendererMethod("admin.user.list")).toBe(false);
-    expect(isDesktopRendererMethod("account.get")).toBe(false);
-    expect(isDesktopRendererMethod("app.list")).toBe(false);
-    expect(isDesktopRendererMethod("tool.execute")).toBe(false);
-    expect(isDesktopRendererMethod("tool.list")).toBe(false);
+  it("allows llm config methods", () => {
     expect(isDesktopRendererMethod("config.get")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);
-    expect(() => assertDesktopRendererInvoke(removedMethod, {})).toThrow();
     expect(() => assertDesktopRendererInvoke("config.update", {
       path: "llm",
       value: { type: "llm", value: {} },

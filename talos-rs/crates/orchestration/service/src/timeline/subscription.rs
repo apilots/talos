@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
-use talos_store::session::{ActiveTurnRecord, ActiveTurnStatus, TimelineEventId};
+use talos_store::session::{ActiveTurnStatus, TimelineEventId};
 use talos_types::talos::TimelineEventEnvelope;
 use talos_types::TimelineActiveTurnSnapshot;
 use tokio::sync::mpsc;
@@ -64,7 +64,10 @@ impl TimelineSubscriptionService {
         Ok(self.inner_talos()?.subscribe_live_events())
     }
 
-    pub async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<ActiveTurnRecord>> {
+    pub(crate) async fn get_active_turn(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<talos_store::session::ActiveTurnRecord>> {
         self.inner_talos()?.get_active_turn(session_id).await
     }
 

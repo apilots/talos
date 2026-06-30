@@ -7,6 +7,8 @@ use talos_types::{SessionConf, SessionConfigOverridePolicy, TalosSession, DEFAUL
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
     pub id: String,
+    #[serde(default)]
+    pub workspace_id: Option<String>,
     pub title: String,
     pub user_id: String,
     pub context: TalosContext,
@@ -31,6 +33,7 @@ impl SessionRecord {
 
         Self {
             id: session.context.session_id.clone(),
+            workspace_id: session.context.workspace_id.clone(),
             title: session.title.clone(),
             user_id: session.user_id.clone(),
             context: TalosContext {

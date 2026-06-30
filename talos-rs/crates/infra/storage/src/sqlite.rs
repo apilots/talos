@@ -292,6 +292,7 @@ impl Storage for SqliteStorage {
                 message_count INTEGER NOT NULL DEFAULT 0,
                 usage_json TEXT,
                 conf_json TEXT,
+                workspace_id TEXT,
                 project_id TEXT,
                 current_directory TEXT
             )
@@ -299,6 +300,21 @@ impl Storage for SqliteStorage {
 
         self.execute(create_sessions, &[]).await?;
         debug!("Sessions table created/verified");
+
+        if self.table_exists("sessions").await? {
+            let session_columns = self.query("PRAGMA table_info(sessions)", &[]).await?;
+            let mut existing = std::collections::HashSet::new();
+            for row in session_columns {
+                if let Some(name) = row.get_string("name") {
+                    existing.insert(name);
+                }
+            }
+            if !existing.contains("workspace_id") {
+                info!("Adding workspace_id column to sessions schema");
+                self.execute("ALTER TABLE sessions ADD COLUMN workspace_id TEXT", &[])
+                    .await?;
+            }
+        }
 
         // Bindings table
         let create_bindings = r#"

@@ -219,8 +219,8 @@ export async function getSessionHistory(sessionId: string) {
   return response.history;
 }
 
-export async function recoverSessionLiveTail(sessionId: string, afterEventId?: string) {
-  const response = await getTalosClient().sessions.recover({
+export async function recoverTimelineLiveTail(sessionId: string, afterEventId?: string) {
+  const response = await getTalosClient().sessions.recoverTimeline({
     session_id: sessionId,
     after_event_id: afterEventId ?? null,
     replay_limit: null,

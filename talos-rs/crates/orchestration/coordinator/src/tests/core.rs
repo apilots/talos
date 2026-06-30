@@ -165,7 +165,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
         .handle_stream(AgentDispatchRequest {
             session_id: "test-session".to_string(),
             turn_id: Some("turn-original".to_string()),
-            workspace_id: None,
+            workspace_id: Some("workspace-alpha".to_string()),
             session: Some(Box::new(test_session("test-session", context.clone()))),
             resume_context: Some(AgentDispatchResumeContext {
                 tool_call: Some(AgentDispatchResumeToolCall {
@@ -188,6 +188,10 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
         .expect("resume stream request should reach agent");
     assert_eq!(request.turn_id.as_deref(), Some("turn-original"));
     assert_eq!(request.session.context.message_id, "message-original");
+    assert_eq!(
+        request.session.context.workspace_id.as_deref(),
+        Some("workspace-alpha")
+    );
     assert!(request.input.is_empty());
     assert!(request.resume_context.is_some());
 }

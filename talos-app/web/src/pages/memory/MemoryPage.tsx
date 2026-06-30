@@ -113,7 +113,7 @@ export function MemoryPage() {
                         type="button"
                       >
                         <div className="font-medium">{date}</div>
-                        <div className="mt-1 text-xs text-muted">{`memory/${date}.md`}</div>
+                        <div className="mt-1 text-xs text-muted">{t("memory:dailyMemory")}</div>
                       </button>
                     ))
                   )}
@@ -155,16 +155,15 @@ export function MemoryPage() {
                       searchResults.map((result) => (
                         <button
                           className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
-                          key={`${result.path}:${result.start_line}:${result.end_line}`}
-                          onClick={() => selectDate(result.path.split("/").at(-1)?.replace(/\.md$/, "") ?? selectedDate)}
+                          key={`${result.date}:${result.start_line}:${result.end_line}`}
+                          onClick={() => selectDate(result.date)}
                           type="button"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <div className="text-xs uppercase tracking-[0.18em] text-muted">
-                                {result.path.split("/").at(-1)?.replace(/\.md$/, "")}
+                                {result.date}
                               </div>
-                              <div className="mt-1 text-xs text-muted">{result.path}</div>
                             </div>
                             <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/68 px-2.5 py-1 text-[11px] text-muted">
                               {t("memory:lineRange", { start: result.start_line, end: result.end_line })}
@@ -222,10 +221,6 @@ export function MemoryPage() {
                         ) : null}
                       </div>
                     ) : null}
-                  </div>
-
-                  <div className="mt-4 rounded-[var(--radius-control)] border border-border/70 bg-background/52 px-3 py-2 text-xs text-muted">
-                    {selectedDetail.path}
                   </div>
 
                   {viewMode === "edit" && canEdit ? (

@@ -919,7 +919,7 @@ export interface FrontendEventEnvelope<TType extends string, TPayload> {
 talos app-server
 talos --transport app-server app-server-smoke --scenario turn-smoke
 cargo run -p talos-app-server-test-client resource-matrix
-cargo run -p talos-app-protocol --example export_fixtures
+cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 ```
 
 ### 10.2 TUI 迁移方向
@@ -1007,7 +1007,7 @@ App-server 不自行发明身份。父进程必须在启动后通过 `initialize
 `talos-app-protocol` 的当前生成命令：
 
 ```text
-cargo run -p talos-app-protocol --example export_fixtures
+cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 ```
 
 该命令会同时刷新：

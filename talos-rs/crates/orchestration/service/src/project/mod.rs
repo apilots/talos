@@ -1,4 +1,4 @@
 mod service;
 mod types;
 
-pub use service::ProjectService;
+pub(crate) use service::ProjectService;

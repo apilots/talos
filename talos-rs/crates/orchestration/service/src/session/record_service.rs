@@ -2,36 +2,30 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
-use talos_store::session::{SessionPatchAck, SessionQuery, SessionRecord, SessionStore};
+use talos_store::session::{SessionPatchAck, SessionRecord, SessionStore};
 use talos_types::talos::{TalosContext, TalosUsage};
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf,
     SessionConfigOverridePolicy, SessionPatch, DEFAULT_SESSION_TITLE,
 };
 
-use crate::session::scope;
-
 const API_SESSION_SCOPE: &str = "api";
 
 #[derive(Clone)]
-pub struct SessionRecordService {
+pub(crate) struct SessionRecordService {
     session_store: Arc<dyn SessionStore>,
 }
 
 impl SessionRecordService {
-    pub fn new(session_store: Arc<dyn SessionStore>) -> Self {
+    pub(crate) fn new(session_store: Arc<dyn SessionStore>) -> Self {
         Self { session_store }
     }
 
-    pub fn new_session_id() -> String {
+    pub(crate) fn new_session_id() -> String {
         uuid::Uuid::now_v7().to_string()
     }
 
-    pub fn stable_session_key(context: &TalosContext, agent_id: &str, dm_scope: &str) -> String {
-        scope::stable_session_key(context, agent_id, dm_scope)
-    }
-
-    pub async fn create_session_record(
+    pub(crate) async fn create_session_record(
         &self,
         session_id: Option<&str>,
         context: &TalosContext,
@@ -40,6 +34,7 @@ impl SessionRecordService {
         requested_model: Option<&str>,
         conf: Option<SessionConf>,
         _dm_scope: Option<String>,
+        workspace_id: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<SessionRecord> {
@@ -53,6 +48,7 @@ impl SessionRecordService {
             default_model,
             requested_model,
             conf,
+            workspace_id,
             project_id,
             current_directory,
             now,
@@ -64,113 +60,7 @@ impl SessionRecordService {
         Ok(record)
     }
 
-    pub async fn create_session(
-        &self,
-        session_id: Option<&str>,
-        context: &TalosContext,
-        agent_id: &str,
-        default_model: &str,
-        requested_model: Option<&str>,
-        conf: Option<SessionConf>,
-        dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<PathBuf>,
-    ) -> TalosResult<SessionRecord> {
-        self.create_session_record(
-            session_id,
-            context,
-            agent_id,
-            default_model,
-            requested_model,
-            conf,
-            dm_scope,
-            project_id,
-            current_directory,
-        )
-        .await
-    }
-
-    pub async fn resolve_or_create_session_record(
-        &self,
-        context: &TalosContext,
-        agent_id: &str,
-        default_model: &str,
-        requested_model: Option<&str>,
-        dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<PathBuf>,
-    ) -> TalosResult<SessionRecord> {
-        let dm_scope = scope::resolve_dm_scope(dm_scope.as_deref());
-        let session_key = scope::stable_session_key(context, agent_id, &dm_scope);
-        let now = chrono::Utc::now().timestamp_millis();
-
-        if let Some(mut record) = self.session_store.get_session_record(&session_key).await? {
-            if let Some(model) = requested_model {
-                record.model = model.to_string();
-                record.conf = SessionConfigOverridePolicy::merge_conf(
-                    &record.conf,
-                    &SessionConfigOverridePolicy::single_model_conf(model),
-                );
-            }
-            record.last_activity = now.try_into().unwrap_or_default();
-            self.session_store.update_session_record(&record).await?;
-            return Ok(record);
-        }
-
-        let record = Self::new_session_record(
-            session_key,
-            context,
-            default_model,
-            requested_model,
-            None,
-            project_id,
-            current_directory,
-            now,
-        )?;
-        self.session_store
-            .insert_session_record(&record, agent_id, &dm_scope)
-            .await?;
-        Ok(record)
-    }
-
-    pub async fn resolve_or_create_session(
-        &self,
-        context: &TalosContext,
-        agent_id: &str,
-        default_model: &str,
-        requested_model: Option<&str>,
-        dm_scope: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<PathBuf>,
-    ) -> TalosResult<SessionRecord> {
-        self.resolve_or_create_session_record(
-            context,
-            agent_id,
-            default_model,
-            requested_model,
-            dm_scope,
-            project_id,
-            current_directory,
-        )
-        .await
-    }
-
-    pub async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
-        self.session_store.get_session_record(session_id).await
-    }
-
-    pub async fn list_session_records(
-        &self,
-        query: &SessionQuery,
-    ) -> TalosResult<Vec<SessionRecord>> {
-        self.session_store.list_session_records(query).await
-    }
-
-    pub async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize> {
-        self.session_store.count_session_records(query).await
-    }
-
-    pub async fn patch_session_record(
+    pub(crate) async fn patch_session_record(
         &self,
         session_id: &str,
         patch: &SessionPatch,
@@ -215,7 +105,10 @@ impl SessionRecordService {
         Ok(SessionPatchAck { success })
     }
 
-    pub async fn reset_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+    pub(crate) async fn reset_session_record(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<SessionPatchAck> {
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(SessionPatchAck { success: false });
         };
@@ -230,12 +123,11 @@ impl SessionRecordService {
         Ok(SessionPatchAck { success })
     }
 
-    pub async fn delete_session_record(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
-        let success = self.session_store.delete_session_record(session_id).await?;
-        Ok(SessionPatchAck { success })
-    }
-
-    pub async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
+    pub(crate) async fn update_session_title(
+        &self,
+        session_id: &str,
+        title: &str,
+    ) -> TalosResult<()> {
         let normalized = title.trim();
         if normalized.is_empty() {
             return Err(TalosError::ValidationError(
@@ -258,7 +150,7 @@ impl SessionRecordService {
         Ok(())
     }
 
-    pub async fn record_session_progress(
+    pub(crate) async fn record_session_progress(
         &self,
         session_id: &str,
         message_delta: u64,
@@ -290,6 +182,7 @@ impl SessionRecordService {
         default_model: &str,
         requested_model: Option<&str>,
         conf: Option<SessionConf>,
+        workspace_id: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
         now: i64,
@@ -307,6 +200,7 @@ impl SessionRecordService {
 
         Ok(SessionRecord {
             id: session_id,
+            workspace_id,
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: context.user_id.clone(),
             context: context.clone(),

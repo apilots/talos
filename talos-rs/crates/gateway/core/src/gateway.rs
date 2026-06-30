@@ -31,11 +31,11 @@ use talos_types::{
     SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
     SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
     SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
-    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
-    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    StartTurnResponse, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 #[async_trait]
@@ -59,11 +59,11 @@ pub trait Gateway: Send + Sync {
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse>;
 
-    async fn submit_tool_result(
+    async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,
-        request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse>;
+        request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse>;
 
     async fn subscribe_timeline(
         &self,

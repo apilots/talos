@@ -36,7 +36,7 @@ echo "CASE cli_stream_session_id PASS session_id=${session_id}"
 
 stream_stdout="$(scenario_report_path cli_stream_stdout.log)"
 stream_stderr="$(scenario_report_path cli_stream_stderr.log)"
-stream_input="You must call Bash tool exactly once with command ls and return raw output inside <tool_output></tool_output>."
+stream_input="You must call tool 'Bash' exactly once before any final answer. Use command ls. Do not call any other tool in this turn. Do not answer from prior knowledge, prior messages, or workspace context. After the Bash tool result is returned, return the raw stdout inside <tool_output></tool_output>."
 
 run_cli exec --session "${session_id}" --model "${primary_model}" "${stream_input}" \
   >"${stream_stdout}" 2>"${stream_stderr}"

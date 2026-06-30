@@ -284,6 +284,47 @@ fn test_resolve_effective_project_root_uses_embedded_current_directory() {
 }
 
 #[test]
+fn test_resolve_effective_project_root_uses_workspace_root() {
+    let session = TalosSession {
+        title: DEFAULT_SESSION_TITLE.to_string(),
+        user_id: "user-1".to_string(),
+        context: SessionContext {
+            session_id: "session-root".to_string(),
+            workspace_id: Some("workspace-alpha".to_string()),
+            source_type: talos::TalosSourceType::Http,
+            provider: talos::TalosProvider::Http,
+            user_id: "user-1".to_string(),
+            message_id: "message-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: Some("default".to_string()),
+            thread_id: None,
+            project_id: None,
+            current_directory: None,
+            project_root: None,
+            environment: None,
+        },
+        conf: SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+        config: TalosConfig::default(),
+        state: SessionState {
+            created_at: 100,
+            last_activity: 200,
+            message_count: 0,
+            usage: talos::TalosUsage::default(),
+        },
+    };
+
+    let root = resolve_effective_project_root(
+        &session,
+        None,
+        Some(std::path::PathBuf::from("/workspace")),
+    );
+
+    assert_eq!(root.as_deref(), Some(std::path::Path::new("/workspace")));
+}
+
+#[test]
 fn test_doc_update_request_roundtrip() {
     let request = DocUpdateRequest {
         content: "hello".to_string(),
@@ -302,7 +343,6 @@ fn test_doc_update_request_roundtrip() {
 fn test_memory_file_summary_roundtrip() {
     let summary = MemoryFileSummary {
         date: "2026-04-17".to_string(),
-        path: "memory/2026-04-17.md".to_string(),
         section_count: 3,
         updated_at: Some(123),
         version_token: "token-1".to_string(),
@@ -344,7 +384,6 @@ fn test_workspace_doc_detail_roundtrip() {
 fn test_memory_file_detail_roundtrip() {
     let detail = MemoryFileDetail {
         date: "2026-04-17".to_string(),
-        path: "memory/2026-04-17.md".to_string(),
         section_count: 4,
         content: "content".to_string(),
         updated_at: Some(123),

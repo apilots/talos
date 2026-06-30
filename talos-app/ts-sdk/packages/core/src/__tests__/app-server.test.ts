@@ -21,7 +21,7 @@ class RecordingTransport implements AppServerTransport {
     if (method === "project.list") {
       return Promise.resolve({ projects: [] } as T);
     }
-    if (method === "session.recover") {
+    if (method === "timeline.recover") {
       return Promise.resolve({ snapshot: emptyRecoverySnapshot } as T);
     }
     if (method === "config.get" || method === "config.update") {
@@ -53,7 +53,7 @@ describe("AppServerClient", () => {
     await client.updateLlmConfig(testLlmConfig);
     await client.createProject({ name: "Talos", directory: "/tmp/talos" });
     await client.patchProject({ project_id: "project-1", name: "Talos Core" });
-    await client.recoverSession({
+    await client.recoverTimeline({
       session_id: "session-1",
       after_event_id: "ev_00000000000000000001",
       replay_limit: 100,
@@ -69,7 +69,13 @@ describe("AppServerClient", () => {
     await client.getCloudLoginStatus({ login_id: "login-1" });
     await client.cancelCloudLogin({ login_id: "login-1" });
     await client.unsubscribeEvents("sub-1");
-    await client.searchMemory("stable fact", 3);
+    await client.readMemoryFile({ date: "2026-06-24" });
+    await client.writeMemoryFile({
+      date: "2026-06-24",
+      content: "# Memory",
+      expected_version: "memory-token",
+    });
+    await client.searchMemory({ query: "stable fact", limit: 3 });
 
     expect(transport.requests).toEqual([
       { method: "model.list", params: {} },
@@ -94,7 +100,7 @@ describe("AppServerClient", () => {
       { method: "project.create", params: { name: "Talos", directory: "/tmp/talos" } },
       { method: "project.patch", params: { project_id: "project-1", name: "Talos Core" } },
       {
-        method: "session.recover",
+        method: "timeline.recover",
         params: {
           session_id: "session-1",
           after_event_id: "ev_00000000000000000001",
@@ -118,6 +124,15 @@ describe("AppServerClient", () => {
       { method: "auth.login.status", params: { login_id: "login-1" } },
       { method: "auth.login.cancel", params: { login_id: "login-1" } },
       { method: "event.unsubscribe", params: { subscription_id: "sub-1" } },
+      { method: "memory.file.read", params: { date: "2026-06-24" } },
+      {
+        method: "memory.file.write",
+        params: {
+          date: "2026-06-24",
+          content: "# Memory",
+          expected_version: "memory-token",
+        },
+      },
       { method: "memory.search", params: { query: "stable fact", limit: 3 } },
     ]);
   });

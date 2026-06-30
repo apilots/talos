@@ -395,7 +395,7 @@ event subscription 不是普通同步 Gateway method call。terminal、replay、
 2. terminal event 判断和 stream 终止语义。
 3. replay / recovery cursor 解释。
 4. close-on-terminal / close-when-idle 行为。
-5. start_turn、interrupt_turn、submit_tool_result 对 timeline stream 的影响。
+5. start_turn、interrupt_turn、submit_dynamic_tool_result 对 timeline stream 的影响。
 6. turn-scoped filtering，例如 `SubscribeTimelineRequest.turn_id` 对 replay 和 live events 的过滤。
 7. 如果 TUI / CLI 需要 start-turn-and-stream 这类组合流程，可以在 TUI / CLI 自身层面组合 SDK contract；SDK 层不应混入 TUI / CLI 自身业务范围或 convenience workflow。
 
@@ -421,7 +421,7 @@ SDK client 不允许负责：
 1. `AppServerClient` 和 `EmbeddedServerClient` 都返回同一 `TimelineEventStream` public type。
 2. stream 语义来自服务端 contract，而不是 client-side cache / filter。
 3. TUI / CLI 只消费 `TimelineEventStream` 和 typed events。
-4. SDK public contract 只暴露 `start_turn`、`open_timeline_stream`、`subscribe_timeline`、`unsubscribe_timeline`、`recover_timeline`、`interrupt_turn`、`submit_tool_result` 等服务端原子能力；TUI / CLI 如需组合 start-turn-and-stream 流程，应在端内 workflow 层组合 SDK API。
+4. SDK public contract 只暴露 `start_turn`、`open_timeline_stream`、`subscribe_timeline`、`unsubscribe_timeline`、`recover_timeline`、`interrupt_turn`、`submit_dynamic_tool_result` 等服务端原子能力；TUI / CLI 如需组合 start-turn-and-stream 流程，应在端内 workflow 层组合 SDK API。
 
 必须建立 parity tests，分别跑 `AppServerClient` 和 `EmbeddedServerClient`，确保事件序列、终止、replay、cancel、shutdown 行为一致，并证明 client 没有重新解释业务事件含义。
 

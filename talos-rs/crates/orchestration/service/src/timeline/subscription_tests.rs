@@ -221,7 +221,7 @@ async fn live_metrics_events_are_not_replayed_or_used_as_cursor_progress() {
     ));
     assert_eq!(live.event_id, second.event_id);
 
-    let recovered = events.recover_session("s1", None, 32).await.unwrap();
+    let recovered = events.recover_timeline("s1", None, 32).await.unwrap();
     assert_eq!(recovered.replay.events.len(), 2);
     assert!(recovered.replay.events.iter().all(|event| !matches!(
         event.event.payload,
@@ -385,7 +385,7 @@ async fn recv_event(
 }
 
 #[tokio::test]
-async fn recover_session_returns_active_turn_snapshot() {
+async fn recover_timeline_returns_active_turn_snapshot() {
     let (timeline, _store) = service();
     let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
     timeline
@@ -393,7 +393,7 @@ async fn recover_session_returns_active_turn_snapshot() {
         .await
         .unwrap();
 
-    let snapshot = events.recover_session("s1", None, 32).await.unwrap();
+    let snapshot = events.recover_timeline("s1", None, 32).await.unwrap();
 
     assert_eq!(snapshot.replay.events.len(), 1);
     assert_eq!(snapshot.active_turn.session_id, "s1");

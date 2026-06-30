@@ -6,9 +6,11 @@ import type {
   LlmConfig,
   MemoryFileListRequest,
   MemoryFileListResponse,
+  MemoryFileReadRequest,
   MemoryFileReadResponse,
+  MemoryFileWriteRequest,
   MemoryFileWriteResponse,
-  MemorySearchQuery,
+  MemorySearchRequest,
   MemorySearchResponse,
   ModelListResponse,
   PluginDisableRequest,
@@ -91,7 +93,7 @@ import type {
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
   WorkspaceDocWriteResponse,
-  AgentWorkspaceInfo,
+  WorkspaceInfoResponse,
 } from "./types";
 
 interface RequestControlOptions {
@@ -309,20 +311,20 @@ export class TalosClient {
     },
     historyById: (sessionId: string): Promise<SessionHistoryResponse> =>
       this.sessions.history({ session_id: sessionId }),
-    recover: async (request: RecoverTimelineRequest): Promise<TimelineRecoveryResponse> => {
+    recoverTimeline: async (request: RecoverTimelineRequest): Promise<TimelineRecoveryResponse> => {
       return this.http.request<TimelineRecoveryResponse>(
-        this.urlWithQuery(`/v1/sessions/${request.session_id}/recovery`, {
+        this.urlWithQuery(`/v1/sessions/${request.session_id}/timeline/recovery`, {
           after_event_id: request.after_event_id ?? undefined,
           limit: request.replay_limit ?? undefined,
         }),
       );
     },
-    recoverById: (
+    recoverTimelineById: (
       sessionId: string,
       afterEventId?: string,
       replayLimit?: number,
     ): Promise<TimelineRecoveryResponse> =>
-      this.sessions.recover({
+      this.sessions.recoverTimeline({
         session_id: sessionId,
         after_event_id: afterEventId ?? null,
         replay_limit: replayLimit ?? null,
@@ -377,15 +379,15 @@ export class TalosClient {
       this.http.request<MemoryFileListResponse>(
         this.urlWithQuery("/v1/memory/files", query),
       ),
-    get: (date: string) =>
-      this.http.request<MemoryFileReadResponse>(this.url(`/v1/memory/files/${date}`)),
-    put: (date: string, request: DocUpdateRequest) =>
-      this.http.request<MemoryFileWriteResponse>(this.url(`/v1/memory/files/${date}`), {
+    get: (request: MemoryFileReadRequest) =>
+      this.http.request<MemoryFileReadResponse>(this.url(`/v1/memory/files/${request.date}`)),
+    put: (request: MemoryFileWriteRequest) =>
+      this.http.request<MemoryFileWriteResponse>(this.url(`/v1/memory/files/${request.date}`), {
         method: "PUT",
         body: JSON.stringify(request),
       }),
     search: async (
-      query: MemorySearchQuery,
+      query: MemorySearchRequest,
       options?: RequestControlOptions,
     ): Promise<MemorySearchResponse> => {
       const requestOptions = options?.signal ? { signal: options.signal } : undefined;
@@ -398,7 +400,7 @@ export class TalosClient {
 
   workspaceDocs = {
     info: () =>
-      this.http.request<AgentWorkspaceInfo>(this.url("/v1/workspace/info")),
+      this.http.request<WorkspaceInfoResponse>(this.url("/v1/workspace/info")),
     list: (): Promise<WorkspaceDocListResponse> =>
       this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
     get: (kind: WorkspaceDocKind) =>

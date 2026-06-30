@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 029 |
 | `fix` | 004 |
-| `refactor` | 031 |
+| `refactor` | 032 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -31,6 +31,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-028 | `refactor-028-orchestration-store-service-layout` | implemented |
 | refactor-029 | `refactor-029-plugin-install-state-layout` | draft |
 | refactor-030 | `refactor-030-tui-embedded-sdk-transport` | draft |
+| refactor-031 | `refactor-031-api-concept-alignment` | implemented |
 
 ## Archived Specs
 

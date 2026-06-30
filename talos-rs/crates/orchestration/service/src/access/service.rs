@@ -14,14 +14,14 @@ use crate::project::ProjectService;
 use crate::session::SessionService;
 
 #[derive(Clone)]
-pub struct ResourceAccessService {
+pub(crate) struct ResourceAccessService {
     session_runtime: Arc<dyn SessionRuntime>,
     session_records: Arc<SessionService>,
     projects: Arc<ProjectService>,
 }
 
 impl ResourceAccessService {
-    pub fn with_records(
+    pub(crate) fn with_records(
         session_runtime: Arc<dyn SessionRuntime>,
         session_records: Arc<SessionService>,
         projects: Arc<ProjectService>,
@@ -33,12 +33,13 @@ impl ResourceAccessService {
         }
     }
 
-    pub async fn get_or_create_session(
+    pub(crate) async fn get_or_create_session(
         &self,
         actor: &Actor,
         session_id: &str,
         mut context: talos_types::talos::TalosContext,
         model: Option<String>,
+        workspace_id: Option<String>,
         project_id: Option<String>,
         current_directory: Option<PathBuf>,
     ) -> TalosResult<TalosSession> {
@@ -65,13 +66,14 @@ impl ResourceAccessService {
                 &target_agent,
                 model,
                 None,
+                workspace_id,
                 project_id,
                 current_directory,
             )
             .await
     }
 
-    pub async fn list_sessions(
+    pub(crate) async fn list_sessions(
         &self,
         actor: &Actor,
         request: SessionListRequest,
@@ -88,13 +90,17 @@ impl ResourceAccessService {
         Ok(self.filter_sessions(actor, sessions))
     }
 
-    pub async fn get_session(&self, actor: &Actor, session_id: &str) -> TalosResult<TalosSession> {
+    pub(crate) async fn get_session(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+    ) -> TalosResult<TalosSession> {
         let session = self.get_session_record(session_id).await?;
         self.ensure_session_visibility(actor, &session)?;
         Ok(session)
     }
 
-    pub async fn patch_session(
+    pub(crate) async fn patch_session(
         &self,
         actor: &Actor,
         session_id: &str,
@@ -118,7 +124,7 @@ impl ResourceAccessService {
         Ok(ack)
     }
 
-    pub async fn compact_session(
+    pub(crate) async fn compact_session(
         &self,
         actor: &Actor,
         session_id: &str,
@@ -132,7 +138,7 @@ impl ResourceAccessService {
         self.get_session(actor, session_id).await
     }
 
-    pub async fn clear_session(
+    pub(crate) async fn clear_session(
         &self,
         actor: &Actor,
         session_id: &str,
@@ -150,12 +156,12 @@ impl ResourceAccessService {
         self.get_session(actor, session_id).await
     }
 
-    pub async fn close_session(&self, actor: &Actor, session_id: &str) -> TalosResult<()> {
+    pub(crate) async fn close_session(&self, actor: &Actor, session_id: &str) -> TalosResult<()> {
         let session = self.get_session(actor, session_id).await?;
         self.close_runtime_session(session).await
     }
 
-    pub async fn delete_session(
+    pub(crate) async fn delete_session(
         &self,
         actor: &Actor,
         session_id: &str,
@@ -190,37 +196,31 @@ impl ResourceAccessService {
         Ok(ack)
     }
 
-    pub async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> TalosResult<()> {
+    pub(crate) async fn cancel_active_turn(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+    ) -> TalosResult<()> {
         let session = self.get_session(actor, session_id).await?;
         self.cancel_runtime_turn(session).await
     }
 
-    pub async fn submit_dynamic_tool_result(
-        &self,
-        actor: &Actor,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()> {
-        let session = self.get_session(actor, session_id).await?;
-        self.submit_runtime_dynamic_tool_result(session, call_id, tool_name, output, success)
-            .await
-    }
-
-    pub async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {
+    pub(crate) async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {
         let projects = self.projects.list_projects().await?;
         Ok(self.filter_projects(actor, projects))
     }
 
-    pub async fn get_project(&self, actor: &Actor, project_id: &str) -> TalosResult<ProjectRecord> {
+    pub(crate) async fn get_project(
+        &self,
+        actor: &Actor,
+        project_id: &str,
+    ) -> TalosResult<ProjectRecord> {
         let project = self.get_project_record(project_id).await?;
         self.ensure_project_visibility(actor, &project)?;
         Ok(project)
     }
 
-    pub async fn create_project(
+    pub(crate) async fn create_project(
         &self,
         actor: &Actor,
         name: String,
@@ -231,7 +231,7 @@ impl ResourceAccessService {
             .await
     }
 
-    pub async fn patch_project(
+    pub(crate) async fn patch_project(
         &self,
         actor: &Actor,
         project_id: &str,
@@ -247,7 +247,7 @@ impl ResourceAccessService {
         Ok(project)
     }
 
-    pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> TalosResult<()> {
+    pub(crate) async fn delete_project(&self, actor: &Actor, project_id: &str) -> TalosResult<()> {
         let _project = self.get_project(actor, project_id).await?;
         self.invalidate_project_sessions(project_id).await?;
         self.projects.delete_project(project_id).await
@@ -358,19 +358,6 @@ impl ResourceAccessService {
 
     async fn cancel_runtime_turn(&self, session: TalosSession) -> TalosResult<()> {
         self.session_runtime.cancel_active_turn(session).await
-    }
-
-    async fn submit_runtime_dynamic_tool_result(
-        &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()> {
-        self.session_runtime
-            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
-            .await
     }
 }
 

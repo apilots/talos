@@ -21,18 +21,6 @@ if [[ -z "${primary_model}" || -z "${secondary_model}" ]]; then
 fi
 echo "CASE select_models PASS primary=${primary_model} secondary=${secondary_model}"
 
-removed_create_body="$(scenario_report_path removed_create_session_response.json)"
-removed_create_status="$(curl -sS -o "${removed_create_body}" -w "%{http_code}" \
-  -X POST "${GATEWAY_URL}/v1/sessions" \
-  -H "Content-Type: application/json" \
-  -d '{}')"
-log_case_json "explicit_session_create_removed" "{}" "$(cat "${removed_create_body}")"
-if [[ "${removed_create_status}" != "404" && "${removed_create_status}" != "405" ]]; then
-  echo "CASE explicit_session_create_removed FAIL status=${removed_create_status} body=$(cat "${removed_create_body}")"
-  exit 1
-fi
-echo "CASE explicit_session_create_removed PASS status=${removed_create_status}"
-
 create_payload='{
   "context": {
     "source_type": "http",

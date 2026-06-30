@@ -46,11 +46,12 @@ use talos_types::{
     SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
     SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
     SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsReadResponse,
-    StartTurnRequest, StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -523,7 +524,7 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: RecoverTimelineRequest,
     ) -> TalosResult<TimelineRecoveryResponse> {
-        self.request_typed("session.recover", request).await
+        self.request_typed("timeline.recover", request).await
     }
 
     async fn subscribe_timeline(
@@ -598,10 +599,10 @@ impl GatewayClient for AppServerClient {
         self.request_typed("turn.interrupt", request).await
     }
 
-    async fn submit_tool_result(
+    async fn submit_dynamic_tool_result(
         &mut self,
-        request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse> {
+        request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse> {
         self.request_typed("tool.dynamic_result.submit", request)
             .await
     }

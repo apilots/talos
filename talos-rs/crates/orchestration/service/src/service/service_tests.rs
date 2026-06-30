@@ -261,7 +261,7 @@ async fn assert_session_creation_rolled_back(
         .is_empty());
     let recovery = service
         .events
-        .recover_session(session_id, None, 32)
+        .recover_timeline(session_id, None, 32)
         .await
         .expect("recovery should succeed");
     assert!(recovery.replay.events.is_empty());

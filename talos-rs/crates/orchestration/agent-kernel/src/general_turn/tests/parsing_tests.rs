@@ -3,8 +3,8 @@ use super::*;
 #[test]
 fn test_parse_retrieved_memory_items_from_memory_search() {
     let payload = json!(MemorySearchResponse {
-        results: vec![talos_memory::MemorySearchResult {
-            path: "memory/2026-03-24.md".to_string(),
+        results: vec![talos_types::MemorySearchResult {
+            date: "2026-03-24".to_string(),
             snippet: "launch on friday".to_string(),
             start_line: 1,
             end_line: 1,
@@ -17,11 +17,11 @@ fn test_parse_retrieved_memory_items_from_memory_search() {
 }
 
 #[test]
-fn test_parse_retrieved_memory_items_ignores_invalid_search_rows() {
+fn test_parse_retrieved_memory_items_from_memory_search_json() {
     let payload = json!({
         "results": [
             {
-                "path": "memory/2026-03-25.md",
+                "date": "2026-03-25",
                 "snippet": "valid snippet",
                 "start_line": 1,
                 "end_line": 1

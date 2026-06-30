@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemorySearchQuery, MemorySearchResponse};
+use talos_types::MemorySearchResult;
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
@@ -12,6 +13,19 @@ fn resolve_search_defaults(context: &ToolContext) -> usize {
         .map(|config| config.memory.search_max_results)
         .unwrap_or(6)
         .max(1)
+}
+
+fn memory_search_result_from_store(
+    result: talos_memory::MemorySearchResult,
+) -> Option<MemorySearchResult> {
+    let file_name = result.path.rsplit('/').next()?;
+    let date = file_name.strip_suffix(".md")?;
+    Some(MemorySearchResult {
+        date: date.to_string(),
+        snippet: result.snippet,
+        start_line: result.start_line,
+        end_line: result.end_line,
+    })
 }
 
 pub struct MemorySearchTool;
@@ -100,6 +114,10 @@ impl Tool for MemorySearchTool {
         let results = memory
             .search_memory(&MemorySearchQuery { query, max_results })
             .await?;
+        let results = results
+            .into_iter()
+            .filter_map(memory_search_result_from_store)
+            .collect();
         ToolOutputPayload::success_json(
             &MemorySearchResponse { results },
             "serialize memory_search result",

@@ -194,8 +194,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
         let actor = Self::actor_for_user(&user_id);
         let session = self
             .service
-            .access
-            .get_or_create_session(&actor, &session_id, context, None, None, None)
+            .create_session(&actor, &session_id, context, None, None, None, None)
             .await?;
         self.session_users
             .write()

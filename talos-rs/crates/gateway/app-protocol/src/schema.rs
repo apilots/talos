@@ -27,8 +27,8 @@ pub struct AppProtocolSchemaRoot {
     pub retry_turn_response: talos_types::RetryTurnResponse,
     pub interrupt_turn_request: talos_types::InterruptTurnRequest,
     pub interrupt_turn_response: talos_types::InterruptTurnResponse,
-    pub submit_tool_result_request: talos_types::SubmitToolResultRequest,
-    pub submit_tool_result_response: talos_types::SubmitToolResultResponse,
+    pub submit_dynamic_tool_result_request: talos_types::SubmitDynamicToolResultRequest,
+    pub submit_dynamic_tool_result_response: talos_types::SubmitDynamicToolResultResponse,
     pub subscribe_timeline_request: talos_types::SubscribeTimelineRequest,
     pub subscribe_timeline_response: talos_types::SubscribeTimelineResponse,
     pub recover_timeline_request: talos_types::RecoverTimelineRequest,
@@ -120,8 +120,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::RetryTurnResponse>());
     output.push_str(&export::<talos_types::InterruptTurnRequest>());
     output.push_str(&export::<talos_types::InterruptTurnResponse>());
-    output.push_str(&export::<talos_types::SubmitToolResultRequest>());
-    output.push_str(&export::<talos_types::SubmitToolResultResponse>());
+    output.push_str(&export::<talos_types::SubmitDynamicToolResultRequest>());
+    output.push_str(&export::<talos_types::SubmitDynamicToolResultResponse>());
     output.push_str(&export::<talos_types::SubscribeTimelineRequest>());
     output.push_str(&export::<talos_types::SubscribeTimelineResponse>());
     output.push_str(&export::<talos_types::RecoverTimelineRequest>());
@@ -302,7 +302,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());
     output.push_str(&export::<talos_types::SessionAgentConf>());
-    output.push_str(&export::<crate::requests::ProtocolTalosContext>());
     output.push_str(&export::<talos_types::talos::TalosTimelineEvent>());
     output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
     output.push_str(&export::<talos_types::talos::TalosTimelineEventType>());

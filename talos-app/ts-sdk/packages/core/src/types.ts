@@ -42,7 +42,7 @@ import type {
   StopReason as ProtocolStopReason,
   TalosConnectionMode as ProtocolTalosConnectionMode,
   TalosContentItem as ProtocolTalosContentItem,
-  TalosContext as ProtocolTalosContext,
+  TalosContext as GeneratedTalosContext,
   TalosInputItem as ProtocolTalosInputItem,
   TalosOutputItem as ProtocolTalosOutputItem,
   TalosProvider as ProtocolTalosProvider,
@@ -68,7 +68,6 @@ import type {
   WorkspaceDocInfo as ProtocolWorkspaceDocInfo,
   WorkspaceDocKind as ProtocolWorkspaceDocKind,
   WorkspaceDocSummary as ProtocolWorkspaceDocSummary,
-  WorkspaceInfoResponse as ProtocolWorkspaceInfoResponse,
 } from "./generated/app-protocol";
 
 export type {
@@ -226,8 +225,8 @@ export type {
   RetryTurnResponse,
   StartTurnRequest,
   StartTurnResponse,
-  SubmitToolResultRequest,
-  SubmitToolResultResponse,
+  SubmitDynamicToolResultRequest,
+  SubmitDynamicToolResultResponse,
   SubscribeTimelineRequest,
   SubscribeTimelineResponse,
   SkillsListRequest,
@@ -263,7 +262,7 @@ export type StopReason = ProtocolStopReason;
 export type TalosSessionEnvironment = ProtocolTalosSessionEnvironment;
 export type TalosSourceType = ProtocolTalosSourceType;
 export type TalosProvider = ProtocolTalosProvider;
-export type TalosContext = ProtocolTalosContext;
+export type TalosContext = GeneratedTalosContext;
 
 export type UserRole = ProtocolUserRole;
 export type UserDto = ProtocolUserDto;
@@ -345,18 +344,9 @@ export type DocUpdateRequest = ProtocolDocUpdateRequest;
 export type MemoryFileSummary = ProtocolMemoryFileSummary;
 export type MemoryFileDetail = ProtocolMemoryFileDetail;
 
-export interface MemorySearchQuery {
-  q: string;
-  limit?: number;
-  date_from?: string;
-  date_to?: string;
-}
-
 export type WorkspaceDocKind = ProtocolWorkspaceDocKind;
 export type WorkspaceDocSummary = ProtocolWorkspaceDocSummary;
 export type WorkspaceDocInfo = ProtocolWorkspaceDocInfo;
-export type AgentWorkspaceInfo = ProtocolWorkspaceInfoResponse;
-
 export type ModelInputKind = ProtocolLlmModelInputKind;
 export type ThinkingFormat = ProtocolLlmThinkingFormat;
 export type ModelCompatConfig = ProtocolLlmModelCompat;

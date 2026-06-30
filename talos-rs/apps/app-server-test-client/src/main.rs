@@ -7,8 +7,8 @@ use talos_sdk::{
     ExpectedFileVersion, GatewayClient, MemoryFileListRequest, MemoryFileReadRequest,
     MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest, ProjectListRequest,
     ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest, StartTurnRequest,
-    SubmitToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError, TalosInputItem,
-    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError,
+    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
     TimelineEventEnvelope, WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocReadRequest,
     WorkspaceDocWriteRequest,
@@ -217,17 +217,17 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     get_config(client).await?;
 
     eprintln!("resource-matrix memory roundtrip");
-    let memory_path = "2099-12-31.md";
+    let memory_date = "2099-12-31";
     let memory_content =
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
-    let memory_expected_version = match read_memory_file(client, memory_path).await {
+    let memory_expected_version = match read_memory_file(client, memory_date).await {
         Ok(existing) => Some(existing.file.version_token),
         Err(TalosError::ResourceNotFound(_)) => None,
         Err(error) => return Err(error.into()),
     };
     let written_memory = write_memory_file(
         client,
-        memory_path,
+        memory_date,
         memory_content.to_string(),
         memory_expected_version,
     )
@@ -239,14 +239,14 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("memory write did not persist expected content"));
     }
-    let read_memory = read_memory_file(client, memory_path).await?.file;
+    let read_memory = read_memory_file(client, memory_date).await?.file;
     if read_memory.version_token != written_memory.version_token {
         return Err(anyhow!("memory read returned a different version token"));
     }
     expect_conflict(
         write_memory_file(
             client,
-            memory_path,
+            memory_date,
             "stale write".to_string(),
             Some("stale-version-token".to_string()),
         )
@@ -255,7 +255,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
     expect_validation(
         read_memory_file(client, "not-a-date.md").await,
-        "invalid memory path should validate",
+        "invalid memory date should validate",
     )?;
     list_memory_files(client).await?;
 
@@ -334,14 +334,14 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     {
         return Err(anyhow!("session.list did not include created session"));
     }
-    let _snapshot = recover_session_after(client, &session_id, None).await?;
+    let _snapshot = recover_timeline_after(client, &session_id, None).await?;
     expect_not_found(
         get_session_by_id(client, "missing-session").await,
         "missing session should map to not found",
     )?;
     expect_not_found(
-        recover_session_after(client, "missing-session", None).await,
-        "missing session recovery should map to not found",
+        recover_timeline_after(client, "missing-session", None).await,
+        "missing timeline recovery should map to not found",
     )?;
     expect_not_found(
         submit_dynamic_tool_result_from_fields(
@@ -393,21 +393,21 @@ async fn list_memory_files(
 
 async fn read_memory_file(
     client: &mut AppServerClient,
-    path: impl Into<std::path::PathBuf>,
+    date: impl Into<String>,
 ) -> talos_sdk::TalosResult<talos_sdk::MemoryFileReadResponse> {
-    GatewayClient::read_memory_file(client, MemoryFileReadRequest { path: path.into() }).await
+    GatewayClient::read_memory_file(client, MemoryFileReadRequest { date: date.into() }).await
 }
 
 async fn write_memory_file(
     client: &mut AppServerClient,
-    path: impl Into<std::path::PathBuf>,
+    date: impl Into<String>,
     content: String,
     expected_version: Option<String>,
 ) -> talos_sdk::TalosResult<talos_sdk::MemoryFileWriteResponse> {
     GatewayClient::write_memory_file(
         client,
         MemoryFileWriteRequest {
-            path: path.into(),
+            date: date.into(),
             content,
             expected_version,
         },
@@ -490,7 +490,7 @@ async fn get_session_by_id(
     .await
 }
 
-async fn recover_session_after(
+async fn recover_timeline_after(
     client: &mut AppServerClient,
     session_id: &str,
     after_event_id: Option<String>,
@@ -513,10 +513,10 @@ async fn submit_dynamic_tool_result_from_fields(
     tool_name: &str,
     output: String,
     success: bool,
-) -> talos_sdk::TalosResult<talos_sdk::SubmitToolResultResponse> {
-    GatewayClient::submit_tool_result(
+) -> talos_sdk::TalosResult<talos_sdk::SubmitDynamicToolResultResponse> {
+    GatewayClient::submit_dynamic_tool_result(
         client,
-        SubmitToolResultRequest {
+        SubmitDynamicToolResultRequest {
             session_id: session_id.to_string(),
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),

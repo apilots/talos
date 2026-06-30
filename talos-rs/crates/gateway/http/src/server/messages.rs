@@ -6,7 +6,7 @@ use axum::response::{IntoResponse, Json, Response};
 use talos_auth::RequestIdentity;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RetryTurnRequest, StartTurnRequest,
-    SubmitToolResultRequest, SubmitToolResultResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
 };
 
 use super::access::shared_actor;
@@ -91,11 +91,11 @@ fn start_turn_idempotency_key(
 pub(super) async fn submit_dynamic_tool_result_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<SubmitToolResultRequest>,
-) -> Result<Json<SubmitToolResultResponse>, ApiError> {
+    Json(request): Json<SubmitDynamicToolResultRequest>,
+) -> Result<Json<SubmitDynamicToolResultResponse>, ApiError> {
     state
         .gateway
-        .submit_tool_result(&shared_actor(&actor.0), request)
+        .submit_dynamic_tool_result(&shared_actor(&actor.0), request)
         .await
         .map(Json)
         .map_err(map_turn_submit_error)

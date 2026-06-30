@@ -50,7 +50,7 @@ async fn update_base_llm_changes_new_session_default_model() {
 
     service.update_base_llm(&llm);
     let session = service
-        .create_session(None, context(), "default", None, None, None, None)
+        .create_session(None, context(), "default", None, None, None, None, None)
         .await
         .expect("session should be created");
 
@@ -87,6 +87,7 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
             None,
             None,
             None,
+            None,
         )
         .await
         .expect("session should be created");
@@ -119,6 +120,7 @@ async fn provider_switch_resets_existing_session_model_to_new_default() {
             None,
             None,
             None,
+            None,
         )
         .await
         .expect("session should be created");
@@ -138,4 +140,32 @@ async fn provider_switch_resets_existing_session_model_to_new_default() {
 
     assert_eq!(reloaded.config.llm.provider, "openai");
     assert_eq!(reloaded.config.llm.model, "new-default");
+}
+
+#[tokio::test]
+async fn create_session_preserves_workspace_routing_key() {
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        talos_types::TalosConfig::default(),
+    );
+
+    let session = service
+        .create_session(
+            None,
+            context(),
+            "default",
+            None,
+            None,
+            Some("workspace-alpha".to_string()),
+            None,
+            None,
+        )
+        .await
+        .expect("session should be created");
+
+    assert_eq!(
+        session.context.workspace_id,
+        Some("workspace-alpha".to_string())
+    );
 }

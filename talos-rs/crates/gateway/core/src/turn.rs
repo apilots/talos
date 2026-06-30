@@ -2,8 +2,8 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
-    SubmitToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
     TimelineRecoveryResponse,
 };
 use tracing::info;
@@ -43,12 +43,14 @@ impl ServiceGateway {
         self.service.interrupt_turn(actor, request).await
     }
 
-    pub(crate) async fn submit_tool_result(
+    pub(crate) async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,
-        request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse> {
-        self.service.submit_tool_result(actor, request).await
+        request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse> {
+        self.service
+            .submit_dynamic_tool_result(actor, request)
+            .await
     }
 
     pub(crate) async fn subscribe_timeline(

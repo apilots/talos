@@ -8,7 +8,8 @@ use talos_types::talos::{TalosInputItem, TalosTimelineEvent, TalosTimelineEventP
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::{SessionRecordService, TimelineEventService};
+use crate::session::SessionRecordService;
+use crate::timeline::TimelineEventService;
 
 mod service;
 mod types;

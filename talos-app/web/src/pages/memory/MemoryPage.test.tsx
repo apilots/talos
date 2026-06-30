@@ -31,14 +31,14 @@ function buildMemoryState() {
     files: [
       {
         date: "2026-04-21",
-        path: "memory/2026-04-21.md",
       },
     ],
     searchResults: [],
     searchResultDates: [],
     selectedDate: "2026-04-21",
     selectedDetail: {
-      path: "memory/2026-04-21.md",
+      date: "2026-04-21",
+      section_count: 1,
       content: "# Shared memory",
       version_token: "token-1",
       updated_at: 1776393847462,

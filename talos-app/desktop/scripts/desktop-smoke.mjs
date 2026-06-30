@@ -168,7 +168,7 @@ try {
 
   await waitForExpression(
     cdp,
-    `window.__talosSmokeInvoke("session.recover", { session_id: ${JSON.stringify(createdSessionId)}, after_event_id: null, replay_limit: null }).then((response) => {
+    `window.__talosSmokeInvoke("timeline.recover", { session_id: ${JSON.stringify(createdSessionId)}, after_event_id: null, replay_limit: null }).then((response) => {
       const events = response?.replay?.events ?? [];
       return events.some((envelope) => {
         const item = envelope?.event?.payload?.item;

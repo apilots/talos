@@ -85,7 +85,6 @@ describe("createDesktopTalosClient", () => {
       "memory.file.read": {
             file: {
               date: "2026-06-24",
-              path: "memory/2026-06-24.md",
               section_count: 1,
               content: "# Memory",
               updated_at: 1776393847462,
@@ -95,12 +94,21 @@ describe("createDesktopTalosClient", () => {
       "memory.file.write": {
             file: {
               date: "2026-06-24",
-              path: "memory/2026-06-24.md",
               section_count: 1,
               content: "# Updated memory",
               updated_at: 1776393847463,
               version_token: "memory-token-2",
             },
+      },
+      "memory.search": {
+            results: [
+              {
+                date: "2026-06-24",
+                snippet: "Updated memory",
+                start_line: 1,
+                end_line: 1,
+              },
+            ],
       },
       "workspace.doc.read": {
             doc: {
@@ -126,16 +134,105 @@ describe("createDesktopTalosClient", () => {
     const client = createDesktopTalosClient(bridge);
 
     await expect(client.fs.directory.read({ path: "/tmp/project" })).resolves.toMatchObject({ directory: { path: "/tmp/project" } });
-    await expect(client.memory.get("2026-06-24")).resolves.toMatchObject({ file: { content: "# Memory" } });
-    await expect(client.memory.put("2026-06-24", {
+    await expect(client.memory.get({ date: "2026-06-24" })).resolves.toMatchObject({ file: { content: "# Memory" } });
+    await expect(client.memory.put({
+      date: "2026-06-24",
       content: "# Updated memory",
-      base_version: { mode: "match", version_token: "memory-token" },
+      expected_version: "memory-token",
     })).resolves.toMatchObject({ file: { version_token: "memory-token-2" } });
+    await expect(client.memory.search({
+      query: "Updated",
+      limit: 5,
+      date_from: "2026-06-01",
+      date_to: "2026-06-30",
+    })).resolves.toMatchObject({ results: [{ date: "2026-06-24" }] });
     await expect(client.workspaceDocs.get("memory")).resolves.toMatchObject({ doc: { content: "# Workspace memory" } });
     await expect(client.workspaceDocs.put("memory", {
       content: "# Updated workspace memory",
       base_version: { mode: "match", version_token: "doc-token" },
     })).resolves.toMatchObject({ doc: { version_token: "doc-token-2" } });
+  });
+
+  it("passes memory search query and date filters to the desktop bridge", async () => {
+    const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
+    const bridge = bridgeWithInvoke(async function <T>(
+      method: AppProtocol.ClientMethod,
+      params?: unknown,
+    ): Promise<T> {
+        calls.push({ method, params });
+        if (method === "memory.search") {
+          return { results: [] } as T;
+        }
+        throw new Error(`unexpected method: ${method}`);
+    });
+    const client = createDesktopTalosClient(bridge);
+
+    await client.memory.search({
+      query: "memory",
+      limit: 5,
+      date_from: "2026-06-01",
+      date_to: "2026-06-30",
+    });
+
+    expect(calls).toEqual([
+      {
+        method: "memory.search",
+        params: {
+          query: "memory",
+          limit: 5,
+          date_from: "2026-06-01",
+          date_to: "2026-06-30",
+        },
+      },
+    ]);
+  });
+
+  it("passes memory file request objects to the desktop bridge", async () => {
+    const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
+    const bridge = bridgeWithInvoke(async function <T>(
+      method: AppProtocol.ClientMethod,
+      params?: unknown,
+    ): Promise<T> {
+        calls.push({ method, params });
+        if (method === "memory.file.read") {
+          return { file: { date: "2026-06-24", content: "# Memory" } } as T;
+        }
+        if (method === "memory.file.write") {
+          return { file: { date: "2026-06-24", content: "# Updated memory" } } as T;
+        }
+        throw new Error(`unexpected method: ${method}`);
+    });
+    const client = createDesktopTalosClient(bridge);
+
+    await client.memory.get({ date: "2026-06-24" });
+    await client.memory.put({
+      date: "2026-06-24",
+      content: "# Updated memory",
+      expected_version: "memory-token",
+    });
+    await client.memory.put({
+      date: "2026-06-25",
+      content: "# New memory",
+    });
+
+    expect(calls).toEqual([
+      { method: "memory.file.read", params: { date: "2026-06-24" } },
+      {
+        method: "memory.file.write",
+        params: {
+          date: "2026-06-24",
+          content: "# Updated memory",
+          expected_version: "memory-token",
+        },
+      },
+      {
+        method: "memory.file.write",
+        params: {
+          date: "2026-06-25",
+          content: "# New memory",
+        },
+      },
+    ]);
   });
 
   it("uses the desktop source type when starting desktop turns", async () => {

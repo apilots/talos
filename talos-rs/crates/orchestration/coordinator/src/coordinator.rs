@@ -179,6 +179,9 @@ impl AgentDispatchRuntime for CoordinatorImpl {
         };
         let mut turn_session = session.clone();
         turn_session.context.message_id = message_id;
+        if let Some(workspace_id) = request.workspace_id.clone() {
+            turn_session.context.workspace_id = Some(workspace_id);
+        }
         let agent_response = agent
             .run(AgentRequest {
                 session: turn_session,
@@ -238,6 +241,9 @@ impl AgentDispatchRuntime for CoordinatorImpl {
         };
         let mut turn_session = session.clone();
         turn_session.context.message_id = message_id.clone();
+        if let Some(workspace_id) = request.workspace_id.clone() {
+            turn_session.context.workspace_id = Some(workspace_id);
+        }
         let mut agent_event_stream = agent
             .run_stream(AgentRequest {
                 session: turn_session,

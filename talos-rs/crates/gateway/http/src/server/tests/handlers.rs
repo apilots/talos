@@ -284,10 +284,11 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
-        Json(talos_types::DocUpdateRequest {
+        Json(talos_types::MemoryFileWriteRequest {
+            date: "2026-04-04".to_string(),
             content: "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n"
                 .to_string(),
-            base_version: talos_types::ExpectedFileVersion::MustNotExist,
+            expected_version: None,
         }),
     )
     .await
@@ -339,11 +340,12 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         State(state.clone()),
         axum::extract::Extension(test_auth()),
         Path("2026-04-04".to_string()),
-        Json(talos_types::DocUpdateRequest {
+        Json(talos_types::MemoryFileWriteRequest {
+            date: "2026-04-04".to_string(),
             content:
                 "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- shared service fact\n"
                     .to_string(),
-            base_version: talos_types::ExpectedFileVersion::MustNotExist,
+            expected_version: None,
         }),
     )
     .await
@@ -356,7 +358,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
             ClientRequest {
                 method: ClientMethod::MemoryFileRead,
                 params: ClientRequestParams::MemoryFileRead(MemoryFileReadRequest {
-                    path: "2026-04-04.md".into(),
+                    date: "2026-04-04".to_string(),
                 }),
             },
         )
@@ -524,7 +526,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
         axum::extract::Extension(test_auth()),
         Query(
             serde_json::from_value(serde_json::json!({
-                "q": "stable",
+                "query": "stable",
                 "limit": 5,
                 "date_from": "2026-04-01",
                 "date_to": "2026-04-30"
@@ -535,7 +537,7 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     .await
     .expect("search memory should succeed");
 
-    assert_eq!(response.0["results"][0]["path"], "memory/2026-04-04.md");
+    assert_eq!(response.0["results"][0]["date"], "2026-04-04");
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 

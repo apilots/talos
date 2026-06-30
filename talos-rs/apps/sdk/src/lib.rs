@@ -11,9 +11,7 @@ pub use app_server::{AppServerClient, AppServerClientConfig, AppServerOwnership}
 pub use contract::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
 pub use login::{now_ms, open_external_url};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
-pub use talos_app_protocol::requests::{
-    ProtocolTalosContext, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-};
+pub use talos_app_protocol::requests::{TimelineActiveTurnSnapshot, TimelineActiveTurnStatus};
 pub use talos_auth::{
     AuthResponse, CloudLoginCancelRequest, CloudLoginClientKind, CloudLoginStartRequest,
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, UserDto, UserRole,
@@ -54,12 +52,13 @@ pub use talos_types::{
     SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
     SessionHistoryRequest, SessionHistoryResponse, SessionInfo, SessionListRequest,
     SessionListResponse, SessionPatchRequest, SessionUpdateResponse, StartTurnRequest,
-    StartTurnResponse, SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineRequest,
-    SubscribeTimelineResponse, TimelineCursorStatus, TimelineRecoveryResponse, TimelineReplay,
-    TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocInfo, WorkspaceDocKind,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    StartTurnResponse, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineCursorStatus,
+    TimelineRecoveryResponse, TimelineReplay, TurnCommandStatus, UserCurrentRequest,
+    UserCurrentResponse, WorkspaceDocInfo, WorkspaceDocKind, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,

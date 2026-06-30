@@ -5,5 +5,5 @@ mod record_service;
 mod service;
 mod types;
 
-pub use record_service::SessionRecordService;
+pub(crate) use record_service::SessionRecordService;
 pub use service::SessionService;

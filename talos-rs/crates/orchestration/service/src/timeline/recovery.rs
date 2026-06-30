@@ -55,7 +55,7 @@ impl TimelineSubscriptionService {
         })
     }
 
-    pub async fn recover_session(
+    pub async fn recover_timeline(
         &self,
         session_id: &str,
         after_event_id: Option<&TimelineEventId>,

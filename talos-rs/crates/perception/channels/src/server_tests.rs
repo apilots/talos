@@ -37,7 +37,7 @@ use talos_types::{
     SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
     SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
     SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnResponse,
-    SubmitToolResultRequest, SubmitToolResultResponse, SubscribeTimelineResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineResponse,
     TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest, UserCurrentResponse,
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
@@ -173,12 +173,12 @@ impl Gateway for MockGateway {
         unreachable!("interrupt_turn is not used by channel tests")
     }
 
-    async fn submit_tool_result(
+    async fn submit_dynamic_tool_result(
         &self,
         _actor: &Actor,
-        _request: SubmitToolResultRequest,
-    ) -> TalosResult<SubmitToolResultResponse> {
-        unreachable!("submit_tool_result is not used by channel tests")
+        _request: SubmitDynamicToolResultRequest,
+    ) -> TalosResult<SubmitDynamicToolResultResponse> {
+        unreachable!("submit_dynamic_tool_result is not used by channel tests")
     }
 
     async fn subscribe_timeline(

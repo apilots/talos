@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getTalosClient } from "@/shared/api/client";
 import { useConnectionKey } from "@/features/chat";
 import type {
-  ExpectedFileVersion,
   MemoryFileDetail,
 } from "@talos/sdk-browser";
 
@@ -17,7 +16,6 @@ function isNotFoundError(error: unknown) {
 function buildMissingDetail(date: string): MemoryFileDetail {
   return {
     date,
-    path: `memory/${date}.md`,
     section_count: 0,
     content: "",
     updated_at: null,
@@ -27,11 +25,6 @@ function buildMissingDetail(date: string): MemoryFileDetail {
 
 export function getTodayDateString() {
   return new Date().toISOString().slice(0, 10);
-}
-
-export function memoryDateFromPath(path: string) {
-  const fileName = path.split("/").at(-1) ?? "";
-  return fileName.replace(/\.md$/, "");
 }
 
 export function formatMemoryDate(updatedAt?: number | null) {
@@ -73,7 +66,7 @@ export function useMemoryPage() {
       return await Promise.race([
         getTalosClient()
           .memory.search(
-            { q: normalizedDebouncedQuery, limit: 20 },
+            { query: normalizedDebouncedQuery, limit: 20 },
             { signal },
           )
           .then((response) => response.results),
@@ -93,7 +86,7 @@ export function useMemoryPage() {
     queryKey: ["talos", connectionKey, "memory-file", selectedDate],
     queryFn: async () => {
       try {
-        const response = await getTalosClient().memory.get(selectedDate);
+        const response = await getTalosClient().memory.get({ date: selectedDate });
         return response.file;
       } catch (error) {
         if (isNotFoundError(error)) {
@@ -134,12 +127,10 @@ export function useMemoryPage() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const detail = detailQuery.data ?? buildMissingDetail(selectedDate);
-      const baseVersion: ExpectedFileVersion = detail.version_token
-        ? { mode: "match", version_token: detail.version_token }
-        : { mode: "must_not_exist" };
-      const response = await getTalosClient().memory.put(selectedDate, {
+      const response = await getTalosClient().memory.put({
+        date: selectedDate,
         content: editorContent,
-        base_version: baseVersion,
+        ...(detail.version_token ? { expected_version: detail.version_token } : {}),
       });
       return response.file;
     },
@@ -160,7 +151,7 @@ export function useMemoryPage() {
     () =>
       Array.from(
         new Map(
-          searchResults.map((result) => [memoryDateFromPath(result.path), memoryDateFromPath(result.path)]),
+          searchResults.map((result) => [result.date, result.date]),
         ).values(),
       ),
     [searchResults],

@@ -269,14 +269,14 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    const response = await client.sessions.recover({
+    const response = await client.sessions.recoverTimeline({
       session_id: "session-1",
       after_event_id: "ev_00000000000000000001",
       replay_limit: 100,
     });
 
     expect(request).toHaveBeenCalledWith(
-      "http://localhost:8080/v1/sessions/session-1/recovery?after_event_id=ev_00000000000000000001&limit=100",
+      "http://localhost:8080/v1/sessions/session-1/timeline/recovery?after_event_id=ev_00000000000000000001&limit=100",
     );
     expect(response.snapshot.replay.events).toEqual([]);
   });
@@ -343,14 +343,14 @@ describe("TalosClient", () => {
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
     await client.memory.search({
-      q: "hello",
+      query: "hello",
       limit: 5,
       date_from: "2026-04-01",
       date_to: "2026-04-30",
     });
 
     expect(request).toHaveBeenCalledWith(
-      "http://localhost:8080/v1/memory/search?q=hello&limit=5&date_from=2026-04-01&date_to=2026-04-30",
+      "http://localhost:8080/v1/memory/search?query=hello&limit=5&date_from=2026-04-01&date_to=2026-04-30",
     );
   });
 
@@ -363,11 +363,44 @@ describe("TalosClient", () => {
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
     const controller = new AbortController();
 
-    await client.memory.search({ q: "hello" }, { signal: controller.signal });
+    await client.memory.search({ query: "hello" }, { signal: controller.signal });
 
     expect(request).toHaveBeenCalledWith(
-      "http://localhost:8080/v1/memory/search?q=hello",
+      "http://localhost:8080/v1/memory/search?query=hello",
       { signal: controller.signal },
+    );
+  });
+
+  it("reads and writes memory files through request objects", async () => {
+    const request = vi.fn().mockResolvedValue({ file: { date: "2026-06-24" } });
+    const http: HttpAdapter = { request };
+    const streamAdapter: StreamAdapter = {
+      stream: vi.fn().mockResolvedValue(undefined),
+    };
+    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
+
+    await client.memory.get({ date: "2026-06-24" });
+    await client.memory.put({
+      date: "2026-06-24",
+      content: "# Memory",
+      expected_version: "memory-token",
+    });
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8080/v1/memory/files/2026-06-24",
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8080/v1/memory/files/2026-06-24",
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          date: "2026-06-24",
+          content: "# Memory",
+          expected_version: "memory-token",
+        }),
+      },
     );
   });
 

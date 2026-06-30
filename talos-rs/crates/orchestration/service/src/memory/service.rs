@@ -3,11 +3,14 @@ use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProvider;
-use talos_memory::{Memory, MemoryIndexFile, MemorySearchQuery, MemorySearchResult, MemoryStore};
+use talos_memory::{
+    Memory, MemoryIndexFile, MemorySearchQuery, MemorySearchResult as MemoryStoreSearchResult,
+    MemoryStore,
+};
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, MemoryFileDetail, MemoryFileListRequest,
     MemoryFileListResponse, MemoryFileReadRequest, MemoryFileSummary, MemoryFileWriteRequest,
-    MemorySearchRequest, MemorySearchResponse, TalosConfig,
+    MemorySearchRequest, MemorySearchResponse, MemorySearchResult, TalosConfig,
 };
 
 use super::types::{MemoryDate, MemoryListCommand, MemorySearchCommand};
@@ -68,7 +71,6 @@ impl MemoryService {
             };
             files.push(MemoryFileSummary {
                 date: detail.date,
-                path: detail.path,
                 section_count: detail.section_count,
                 updated_at: detail.updated_at,
                 version_token: detail.version_token,
@@ -111,7 +113,7 @@ impl MemoryService {
         actor: &Actor,
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileDetail> {
-        self.get_file(actor, memory_date_from_path(&request.path)?)
+        self.get_file(actor, MemoryDate::parse(&request.date)?)
             .await
     }
 
@@ -151,7 +153,7 @@ impl MemoryService {
         actor: &Actor,
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileDetail> {
-        let date = memory_date_from_path(&request.path)?;
+        let date = MemoryDate::parse(&request.date)?;
         self.put_file(
             actor,
             date,
@@ -186,24 +188,19 @@ impl MemoryService {
             &workspace.config.agent.kernel,
             self.llm_provider.clone(),
         );
-        let mut results = store
+        let results = store
             .search_memory(&MemorySearchQuery {
                 query: params.query,
                 max_results: limit,
             })
             .await?;
-        results.retain(|result| {
-            let Some(file_name) = result.path.rsplit('/').next() else {
-                return false;
-            };
-            let date_text = file_name.strip_suffix(".md").unwrap_or(file_name);
-            let Ok(date) = MemoryDate::parse(date_text) else {
-                return false;
-            };
-            date_in_range(date, params.date_from, params.date_to, None)
-        });
-        results.truncate(limit);
-        Ok(results)
+        Ok(results
+            .into_iter()
+            .filter_map(|result| {
+                memory_search_result_from_store(result, params.date_from, params.date_to)
+            })
+            .take(limit)
+            .collect())
     }
 
     pub async fn search_files_with_request(
@@ -258,7 +255,6 @@ impl MemoryService {
                 let date_text = date.file_stem();
                 Ok(Some(MemoryFileDetail {
                     date: date_text.clone(),
-                    path: format!("memory/{date_text}.md"),
                     section_count,
                     version_token,
                     updated_at,
@@ -293,6 +289,25 @@ impl MemoryService {
     }
 }
 
+fn memory_search_result_from_store(
+    result: MemoryStoreSearchResult,
+    date_from: Option<MemoryDate>,
+    date_to: Option<MemoryDate>,
+) -> Option<MemorySearchResult> {
+    let file_name = result.path.rsplit('/').next()?;
+    let date_text = file_name.strip_suffix(".md").unwrap_or(file_name);
+    let date = MemoryDate::parse(date_text).ok()?;
+    if !date_in_range(date, date_from, date_to, None) {
+        return None;
+    }
+    Some(MemorySearchResult {
+        date: date.file_stem(),
+        snippet: result.snippet,
+        start_line: result.start_line,
+        end_line: result.end_line,
+    })
+}
+
 fn date_in_range(
     date: MemoryDate,
     date_from: Option<MemoryDate>,
@@ -309,15 +324,6 @@ fn date_in_range(
         return false;
     }
     true
-}
-
-fn memory_date_from_path(path: &Path) -> TalosResult<MemoryDate> {
-    let stem = path
-        .file_stem()
-        .or_else(|| path.file_name())
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| TalosError::ValidationError("memory file path is invalid".to_string()))?;
-    MemoryDate::parse(stem)
 }
 
 fn expected_version(value: Option<String>) -> ExpectedFileVersion {

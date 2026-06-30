@@ -17,7 +17,8 @@ use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::{SessionRecordService, TimelineEventService};
+use crate::session::SessionRecordService;
+use crate::timeline::TimelineEventService;
 
 use super::{
     completed_turn_from_event, record_completed_turn_progress, result_from_idempotency_record,

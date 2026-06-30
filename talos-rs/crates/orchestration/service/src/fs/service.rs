@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use talos_config::{DirectoryPickerConfig, DirectoryPickerRoot};
 use talos_error::{TalosError, TalosResult};
 use talos_fs::FileSystem;
-use talos_store::project::ProjectRecord;
 use talos_types::{
     FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectStatus,
     ProjectStatusState, ProjectUnavailableReason,
@@ -12,23 +11,20 @@ use talos_types::{
 use crate::Actor;
 
 #[derive(Clone)]
-pub struct FsService {
+pub(crate) struct FsService {
     config: DirectoryPickerConfig,
 }
 
 impl FsService {
-    pub fn new(config: DirectoryPickerConfig) -> Self {
+    pub(crate) fn new(config: DirectoryPickerConfig) -> Self {
         Self { config }
     }
 
-    pub fn project_status(&self, project: ProjectRecord) -> ProjectRecord {
-        ProjectRecord {
-            status: status_for_directory(&project.directory),
-            ..project
-        }
+    pub(crate) fn project_status_for_directory(&self, directory: &Path) -> ProjectStatus {
+        status_for_directory(directory)
     }
 
-    pub async fn read_directory(
+    pub(crate) async fn read_directory(
         &self,
         _actor: &Actor,
         path: Option<PathBuf>,
@@ -61,7 +57,7 @@ impl FsService {
         })
     }
 
-    pub async fn create_directory(
+    pub(crate) async fn create_directory(
         &self,
         _actor: &Actor,
         parent: PathBuf,

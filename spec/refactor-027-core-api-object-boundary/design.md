@@ -147,9 +147,9 @@ TS SDK 和 Rust SDK 是多端共享 API 的语言封装，不是新的业务模�
 async fn start_turn(request: StartTurnRequest) -> TalosResult<StartTurnResponse>;
 async fn retry_turn(request: RetryTurnRequest) -> TalosResult<RetryTurnResponse>;
 async fn interrupt_turn(request: InterruptTurnRequest) -> TalosResult<InterruptTurnResponse>;
-async fn submit_tool_result(
-    request: SubmitToolResultRequest,
-) -> TalosResult<SubmitToolResultResponse>;
+async fn submit_dynamic_tool_result(
+    request: SubmitDynamicToolResultRequest,
+) -> TalosResult<SubmitDynamicToolResultResponse>;
 async fn subscribe_timeline(
     request: SubscribeTimelineRequest,
 ) -> TalosResult<SubscribeTimelineResponse>;
@@ -273,7 +273,7 @@ AgentHarness 不负责：
 StartTurnRequest / StartTurnResponse
 RetryTurnRequest / RetryTurnResponse
 InterruptTurnRequest / InterruptTurnResponse
-SubmitToolResultRequest / SubmitToolResultResponse
+SubmitDynamicToolResultRequest / SubmitDynamicToolResultResponse
 SubscribeTimelineRequest / SubscribeTimelineResponse
 TimelineEvent / TimelineEventEnvelope
 SessionSnapshot / SessionHistorySnapshot
@@ -335,7 +335,7 @@ KernelStreamEvent
 | `TurnStartResponse` / `MessageCommandAck` | `StartTurnResponse` |
 | `TalosMessageRetryRequest` / `TurnRetryParams` | 已删除；主路径使用 `RetryTurnRequest` |
 | `TurnInterruptParams` | `InterruptTurnRequest` |
-| `ToolDynamicResultSubmitParams` | `SubmitToolResultRequest` |
+| `ToolDynamicResultSubmitParams` | `SubmitDynamicToolResultRequest` |
 | `EventSubscribeParams` | `SubscribeTimelineRequest` |
 | `EventSubscribeResponse` | `SubscribeTimelineResponse` |
 | `GatewayRequest` / `GatewayResponse` | 已从代码主链路移除；内部 dispatch 改为 `AgentDispatchRequest` / `AgentDispatchResponse` |
@@ -415,12 +415,12 @@ JsonContentValue
 - 已收敛：`AgentHarness` 对上主 API 已改为 `AgentRequest` / `AgentResponse` / `AgentEvent`，旧 `OrchestratorRequest` / `OrchestratorExecution` 从 Rust 代码中移除；Harness 内部 kernel 输入明确命名为 `AgentKernelRequest`。
 - 已收敛：Agent registry 使用 `Agent` trait，不再用 `AgentOrchestrator` 命名表达可调度 Agent。
 - 已收敛：删除未使用的 `CoordinatorResponse` / `CoordinatorStatus` / `RawAgentEvent` 导出，避免 Coordinator 暴露带 `TalosJsonValue` 兜底 payload 的半成品 API。
-- 已收敛：`talos-gateway` core 的 `Gateway` trait 已改为 `start_turn` / `retry_turn` / `interrupt_turn` / `submit_tool_result` 具体业务 API，`ApplicationServiceGateway` 只调用 `Application Service`，不再持有 `AgentDispatchRuntime` 或暴露泛化 `GatewayRequest` / `GatewayResponse` 主入口。
+- 已收敛：`talos-gateway` core 的 `Gateway` trait 已改为 `start_turn` / `retry_turn` / `interrupt_turn` / `submit_dynamic_tool_result` 具体业务 API，`ApplicationServiceGateway` 只调用 `Application Service`，不再持有 `AgentDispatchRuntime` 或暴露泛化 `GatewayRequest` / `GatewayResponse` 主入口。
 - 已收敛：Gateway 具体实现已按业务域拆分为 turn / session / project 等文件，`api_impl` 只负责实现 `Gateway` trait 的薄代理，避免所有 API 堆在单个实现文件中。
 - 已收敛：Application Service 开始按业务域拆分实现文件，`model.list` 已落到 `application-service/src/model.rs`，后续新增领域 API 不能继续堆进 `lib.rs`。
 - 已收敛：HTTP handler 与 JSON-RPC app-server 的 turn command 主路径已复用 `Gateway` core 门面，包括 start / retry / interrupt / submit tool result。
 - 已收敛：timeline subscribe / recover 已纳入 `Gateway` core 门面；session 校验和 cursor 解析由 `Application Service` 承接，HTTP/SSE 与 JSON-RPC runtime 只负责协议包装。
-- 已收敛：`session.recover` 不再使用 app-protocol 本地 `TimelineRecoveryParams`，统一改用 `talos_types::RecoverTimelineRequest` 并同步 Rust/TS SDK 导出。
+- 已收敛：timeline recovery 不再使用 app-protocol 本地 `TimelineRecoveryParams`，统一改用 `talos_types::RecoverTimelineRequest` 并同步 Rust/TS SDK 导出。
 - 已收敛：Application Service 到 Coordinator 的内部执行接口已从 `RequestHandler` / `GatewayRequest` / `GatewayResponse` 改为 `AgentDispatchRuntime` / `AgentDispatchRequest` / `AgentDispatchResponse`，职责命名与 AgentCoordinator dispatch 语义对齐。
 - 已收敛：HTTP 与 JSON-RPC app-server 的普通 session 资源 API 已纳入 `Gateway` core，包括 list/read/history/patch/delete/close/compact/clear；Gateway 仍只薄委托 `Application Service`。
 - 已收敛：active turn snapshot 已上移到 `talos_types`，HTTP 与 JSON-RPC app-server 的 `session.active_turn` 已纳入 `Gateway` core，协议层不再为该查询直接消费 `ActiveTurnRecord`。

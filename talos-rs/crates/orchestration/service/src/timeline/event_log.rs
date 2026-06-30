@@ -74,7 +74,10 @@ impl TimelineEventService {
         self.live_tx.subscribe()
     }
 
-    pub async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<ActiveTurnRecord>> {
+    pub(crate) async fn get_active_turn(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<ActiveTurnRecord>> {
         self.active_turn_store.get_active_turn(session_id).await
     }
 

@@ -159,8 +159,8 @@ echo "CASE list_memory_files_before_write PASS count=${memory_count_before}"
 create_memory_payload="$(python3 - <<PY
 import json
 print(json.dumps({
+    "date": "${MEMORY_DATE}",
     "content": "# Memory\\n${MEMORY_MARKER}\\n",
-    "base_version": {"mode": "must_not_exist"},
 }))
 PY
 )"
@@ -225,10 +225,10 @@ if [[ "${memory_count_before_date}" != "0" ]]; then
 fi
 echo "CASE list_memory_files_before_date PASS count=${memory_count_before_date}"
 
-parse_response "$(request_json GET "${GATEWAY_URL}/v1/memory/search?q=${MEMORY_MARKER}&limit=5")"
+parse_response "$(request_json GET "${GATEWAY_URL}/v1/memory/search?query=${MEMORY_MARKER}&limit=5")"
 status="${RESPONSE_STATUS}"
 body="${RESPONSE_BODY}"
-log_case_json "search_memory_files" "{\"q\":\"${MEMORY_MARKER}\",\"limit\":5}" "${body}"
+log_case_json "search_memory_files" "{\"query\":\"${MEMORY_MARKER}\",\"limit\":5}" "${body}"
 if [[ "${status}" != "200" ]]; then
   echo "CASE search_memory_files FAIL status=${status} body=${body}"
   exit 1
@@ -239,8 +239,9 @@ echo "CASE search_memory_files PASS hits=${search_hit_count}"
 stale_memory_payload="$(python3 - <<PY
 import json
 print(json.dumps({
+    "date": "${MEMORY_DATE}",
     "content": "# Memory\\nstale-overwrite\\n",
-    "base_version": {"mode": "match", "version_token": "stale-token"},
+    "expected_version": "stale-token",
 }))
 PY
 )"

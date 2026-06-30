@@ -39,7 +39,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -75,6 +75,7 @@ impl DatabaseSessionStore {
 
         SessionRecord {
             id: row.get_string("session_key").unwrap_or_default(),
+            workspace_id: Self::normalized_optional_string(row.get_string("workspace_id")),
             title: row
                 .get_string("title")
                 .filter(|title| !title.trim().is_empty())
@@ -145,6 +146,7 @@ impl DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "workspace_id".to_string(),
                 "project_id".to_string(),
                 "current_directory".to_string(),
             ],
@@ -156,6 +158,11 @@ impl DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
+                record
+                    .workspace_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
                 record
                     .project_id
                     .clone()
@@ -197,6 +204,7 @@ impl SessionStore for DatabaseSessionStore {
                 "message_count".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
+                "workspace_id".to_string(),
                 "project_id".to_string(),
                 "current_directory".to_string(),
             ],
@@ -228,6 +236,11 @@ impl SessionStore for DatabaseSessionStore {
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
                 record
+                    .workspace_id
+                    .clone()
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+                record
                     .project_id
                     .clone()
                     .map(Value::String)
@@ -249,7 +262,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         if let Some(user_id) = query.user_id.as_deref() {

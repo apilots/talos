@@ -46,6 +46,7 @@ impl SessionStore for MockSessionStore {
             message_count: 0,
             usage: TalosUsage::default(),
             conf: SessionConf::default(),
+            workspace_id: None,
             project_id: None,
             current_directory: None,
         }))

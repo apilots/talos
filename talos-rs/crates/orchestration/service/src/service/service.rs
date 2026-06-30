@@ -12,30 +12,32 @@ use talos_store::session::{
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse,
-    SessionListRequest, SessionPatch, StartTurnRequest, StartTurnResponse, SubmitToolResultRequest,
-    SubmitToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
-    TimelineActiveTurnSnapshot,
+    SessionListRequest, SessionPatch, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
+    TalosConfig, TalosSession, TimelineActiveTurnSnapshot,
 };
 
 use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
 use super::types::ServiceResult;
+use crate::access::ResourceAccessService;
+use crate::fs::FsService;
+use crate::project::ProjectService;
 use crate::{
-    AccountService, Actor, ConfigService, FsService, MemoryService, PluginManagerService,
-    ProjectService, ResourceAccessService, RuntimeConfigReloadHook, SessionHistoryService,
-    SessionService, SkillsService, TimelineEventService, TimelineSubscribeCommand,
-    TimelineSubscriptionService, TimelineSubscriptionSource, TurnExecutor, TurnRetryRequest,
-    TurnService, WorkspaceDocService,
+    AccountService, Actor, ConfigService, MemoryService, PluginManagerService,
+    RuntimeConfigReloadHook, SessionHistoryService, SessionService, SkillsService,
+    TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
+    TimelineSubscriptionSource, TurnExecutor, TurnRetryRequest, TurnService, WorkspaceDocService,
 };
 
 #[derive(Clone)]
 pub struct TalosService {
-    pub access: ResourceAccessService,
+    access: ResourceAccessService,
     pub account: AccountService,
-    pub turns: TurnService,
+    turns: TurnService,
     pub events: TimelineSubscriptionService,
-    pub history: SessionHistoryService,
+    history: SessionHistoryService,
     pub config: ConfigService,
-    pub fs: FsService,
+    fs: FsService,
     pub memory: MemoryService,
     pub plugins: PluginManagerService,
     pub skills: SkillsService,
@@ -211,6 +213,32 @@ impl TalosService {
         self.access.get_session(actor, session_id).await
     }
 
+    pub async fn create_session(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        context: talos_types::talos::TalosContext,
+        model: Option<String>,
+        workspace_id: Option<String>,
+        project_id: Option<String>,
+        current_directory: Option<std::path::PathBuf>,
+    ) -> ServiceResult<TalosSession> {
+        if let Some(model) = model.as_deref() {
+            self.config.validate_model_supported(model)?;
+        }
+        self.access
+            .get_or_create_session(
+                actor,
+                session_id,
+                context,
+                model,
+                workspace_id,
+                project_id,
+                current_directory,
+            )
+            .await
+    }
+
     pub async fn get_session_history(
         &self,
         actor: &Actor,
@@ -255,6 +283,7 @@ impl TalosService {
                         &session_id,
                         context,
                         request.model.clone(),
+                        request.workspace_id.clone(),
                         request.project_id.clone(),
                         request.current_directory.clone(),
                     )
@@ -377,7 +406,7 @@ impl TalosService {
         Ok(InterruptTurnResponse { success: true })
     }
 
-    pub async fn submit_dynamic_tool_result(
+    pub async fn submit_dynamic_tool_result_for_session_fields(
         &self,
         actor: &Actor,
         session_id: &str,
@@ -392,12 +421,12 @@ impl TalosService {
             .await
     }
 
-    pub async fn submit_tool_result(
+    pub async fn submit_dynamic_tool_result(
         &self,
         actor: &Actor,
-        request: SubmitToolResultRequest,
-    ) -> ServiceResult<SubmitToolResultResponse> {
-        self.submit_dynamic_tool_result(
+        request: SubmitDynamicToolResultRequest,
+    ) -> ServiceResult<SubmitDynamicToolResultResponse> {
+        self.submit_dynamic_tool_result_for_session_fields(
             actor,
             &request.session_id,
             &request.call_id,
@@ -406,7 +435,7 @@ impl TalosService {
             request.success,
         )
         .await?;
-        Ok(SubmitToolResultResponse { success: true })
+        Ok(SubmitDynamicToolResultResponse { success: true })
     }
 
     pub async fn subscribe_timeline(
@@ -460,7 +489,7 @@ impl TalosService {
         let after_event_id = parse_timeline_event_id(request.after_event_id)?;
         let recovery = self
             .events
-            .recover_session(
+            .recover_timeline(
                 &request.session_id,
                 after_event_id.as_ref(),
                 request.replay_limit.unwrap_or(1).max(1),
@@ -486,14 +515,13 @@ impl TalosService {
         let projects = self.access.list_projects(actor).await?;
         Ok(projects
             .into_iter()
-            .map(|project| self.fs.project_status(project))
-            .map(project_info_from_record)
+            .map(|project| self.project_info_with_status(project))
             .collect())
     }
 
     pub async fn get_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<ProjectInfo> {
         let project = self.access.get_project(actor, project_id).await?;
-        Ok(project_info_from_record(self.fs.project_status(project)))
+        Ok(self.project_info_with_status(project))
     }
 
     pub async fn create_project(
@@ -503,7 +531,7 @@ impl TalosService {
         directory: std::path::PathBuf,
     ) -> ServiceResult<ProjectInfo> {
         let project = self.access.create_project(actor, name, directory).await?;
-        Ok(project_info_from_record(self.fs.project_status(project)))
+        Ok(self.project_info_with_status(project))
     }
 
     pub async fn patch_project(
@@ -513,11 +541,19 @@ impl TalosService {
         patch: ProjectPatch,
     ) -> ServiceResult<ProjectInfo> {
         let project = self.access.patch_project(actor, project_id, patch).await?;
-        Ok(project_info_from_record(self.fs.project_status(project)))
+        Ok(self.project_info_with_status(project))
     }
 
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<()> {
         self.access.delete_project(actor, project_id).await
+    }
+
+    fn project_info_with_status(
+        &self,
+        mut project: talos_store::project::ProjectRecord,
+    ) -> ProjectInfo {
+        project.status = self.fs.project_status_for_directory(&project.directory);
+        project_info_from_record(project)
     }
 
     pub async fn read_fs_directory(

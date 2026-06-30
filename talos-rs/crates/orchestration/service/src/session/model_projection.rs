@@ -19,7 +19,7 @@ pub(crate) fn build_session(
         user_id: record.user_id.clone(),
         context: SessionContext {
             session_id: record.id.clone(),
-            workspace_id,
+            workspace_id: record.workspace_id.clone().or(workspace_id),
             source_type: record.context.source_type.clone(),
             provider: record.context.provider.clone(),
             user_id: record.context.user_id.clone(),

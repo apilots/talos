@@ -18,9 +18,9 @@ use talos_types::{
     ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest,
     SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
     SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest, SessionListRequest,
-    SessionPatchRequest, StartTurnRequest, SubmitToolResultRequest, SubscribeTimelineRequest,
-    UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
-    WorkspaceInfoRequest,
+    SessionPatchRequest, StartTurnRequest, SubmitDynamicToolResultRequest,
+    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -61,8 +61,8 @@ pub enum ClientMethod {
     SessionActiveTurn,
     #[serde(rename = "session.history")]
     SessionHistory,
-    #[serde(rename = "session.recover")]
-    SessionRecover,
+    #[serde(rename = "timeline.recover")]
+    TimelineRecover,
     #[serde(rename = "project.create")]
     ProjectCreate,
     #[serde(rename = "project.list")]
@@ -178,7 +178,7 @@ impl ClientMethod {
             Self::SessionClear => "session.clear",
             Self::SessionActiveTurn => "session.active_turn",
             Self::SessionHistory => "session.history",
-            Self::SessionRecover => "session.recover",
+            Self::TimelineRecover => "timeline.recover",
             Self::ProjectCreate => "project.create",
             Self::ProjectList => "project.list",
             Self::ProjectRead => "project.read",
@@ -254,7 +254,7 @@ impl FromStr for ClientMethod {
             "session.clear" => Ok(Self::SessionClear),
             "session.active_turn" => Ok(Self::SessionActiveTurn),
             "session.history" => Ok(Self::SessionHistory),
-            "session.recover" => Ok(Self::SessionRecover),
+            "timeline.recover" => Ok(Self::TimelineRecover),
             "project.create" => Ok(Self::ProjectCreate),
             "project.list" => Ok(Self::ProjectList),
             "project.read" => Ok(Self::ProjectRead),
@@ -333,8 +333,8 @@ pub enum ClientRequestParams {
     SessionActiveTurn(SessionActiveTurnRequest),
     #[serde(rename = "session.history")]
     SessionHistory(SessionHistoryRequest),
-    #[serde(rename = "session.recover")]
-    SessionRecover(RecoverTimelineRequest),
+    #[serde(rename = "timeline.recover")]
+    TimelineRecover(RecoverTimelineRequest),
     #[serde(rename = "project.create")]
     ProjectCreate(ProjectCreateRequest),
     #[serde(rename = "project.list")]
@@ -360,7 +360,7 @@ pub enum ClientRequestParams {
     #[serde(rename = "event.unsubscribe")]
     EventUnsubscribe(EventUnsubscribeRequest),
     #[serde(rename = "tool.dynamic_result.submit")]
-    ToolDynamicResultSubmit(SubmitToolResultRequest),
+    ToolDynamicResultSubmit(SubmitDynamicToolResultRequest),
     #[serde(rename = "model.list")]
     ModelList(ModelListRequest),
     #[serde(rename = "config.get")]
@@ -469,8 +469,8 @@ impl ClientRequest {
             ClientMethod::SessionHistory => {
                 ClientRequestParams::SessionHistory(decode(params_value)?)
             }
-            ClientMethod::SessionRecover => {
-                ClientRequestParams::SessionRecover(decode(params_value)?)
+            ClientMethod::TimelineRecover => {
+                ClientRequestParams::TimelineRecover(decode(params_value)?)
             }
             ClientMethod::ProjectCreate => {
                 ClientRequestParams::ProjectCreate(decode(params_value)?)
@@ -641,17 +641,6 @@ pub struct ActorCredentials {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ActorCredential {
     ExistingSessionToken { token: String },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ProtocolTalosContext {
-    pub source_type: String,
-    pub provider: String,
-    pub channel_id: String,
-    #[serde(default)]
-    pub thread_id: Option<String>,
-    pub message_id: String,
-    pub trace_id: String,
 }
 
 #[cfg(test)]
