@@ -46,7 +46,6 @@ talos-e2e/.tmp/
 
 # sisyphus
 .sisyphus
-IMPLEMENTATION_PLAN.md
 
 # node
 node_modules/

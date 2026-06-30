@@ -365,9 +365,10 @@ fn export<T: TS>() -> String {
 }
 
 pub fn string_schema() -> Schema {
-    let mut schema = SchemaObject::default();
-    schema.instance_type = Some(InstanceType::String.into());
-    Schema::Object(schema)
+    Schema::Object(SchemaObject {
+        instance_type: Some(InstanceType::String.into()),
+        ..Default::default()
+    })
 }
 
 #[cfg(test)]

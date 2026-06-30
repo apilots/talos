@@ -72,18 +72,18 @@ impl Default for AgentKernelBootstrapPromptConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ReservedOutputPolicy {
+    #[default]
     UseModelDefault,
-    Fixed { tokens: usize },
-    Ratio { numerator: u32, denominator: u32 },
-}
-
-impl Default for ReservedOutputPolicy {
-    fn default() -> Self {
-        Self::UseModelDefault
-    }
+    Fixed {
+        tokens: usize,
+    },
+    Ratio {
+        numerator: u32,
+        denominator: u32,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -110,7 +110,7 @@ impl Default for PromptWindowPolicy {
 }
 
 /// Prompt defaults under agent.kernel
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentKernelPromptConfig {
     /// Prompt context window governance policy.
@@ -120,15 +120,6 @@ pub struct AgentKernelPromptConfig {
     /// Workspace bootstrap prompt policy.
     #[serde(default)]
     pub bootstrap: AgentKernelBootstrapPromptConfig,
-}
-
-impl Default for AgentKernelPromptConfig {
-    fn default() -> Self {
-        Self {
-            window: PromptWindowPolicy::default(),
-            bootstrap: AgentKernelBootstrapPromptConfig::default(),
-        }
-    }
 }
 
 fn default_true() -> bool {

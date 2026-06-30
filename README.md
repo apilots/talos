@@ -94,17 +94,34 @@ talos/
 ### Rust 实现
 
 ```bash
-cd talos-rs
+cd talos
 
-# 构建
-cargo build
+# 安装本地开发工具
+just install-tools
 
-# 运行测试
-cargo test
+# 格式化
+just fmt
 
-# 运行示例
-cargo run --example basic
+# 构建指定包
+just build -p talos-server
+
+# 运行指定包测试，避免日常全量 workspace 编译
+just test -p talos-service
+
+# 运行单个 E2E 场景
+just e2e-case 01_health_and_models
 ```
+
+Talos 的 Rust workspace 使用根目录 `justfile` 统一开发入口。`just test`
+通过 `cargo-nextest` 运行测试；日常开发应优先按 package 或测试名缩小范围。
+`just check` 使用独立的 `target/talos-check` 目录，避免日常类型检查继续膨胀
+`target/debug`。
+E2E 也可以通过 root `justfile` 运行：`just e2e` 会转发到
+`talos-e2e/run_e2e.sh`，`just e2e-case <case>` 用于单 case 重跑，
+`just e2e-group <group>` 用于按分组执行。
+如果 `talos-rs/target` 体积过大，先使用 `just target-size` 查看分布，再按需运行
+`just clean-incremental` 或 `just clean-debug`。不要把清理 target 当作常规验证步骤；
+它会牺牲后续增量编译速度。
 
 ### 其他语言实现
 

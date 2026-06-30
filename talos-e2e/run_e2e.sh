@@ -54,6 +54,51 @@ collect_group_cases() {
   find "${group_dir}" -type f -name '*.sh' | sort
 }
 
+scenario_needs_server_binary() {
+  local scenario="$1"
+  grep -q 'start_server' "${scenario}"
+}
+
+scenario_needs_cli_binary() {
+  local scenario_name="$1"
+  case "${scenario_name}" in
+    05_cli/full_flow.sh|06_tools/cli_bash.sh|06_tools/cli_memory_search.sh|08_tui/*|11_auth/cloud_gateway.sh)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+build_required_binaries() {
+  local scenario
+  local scenario_name
+  local needs_server=0
+  local needs_cli=0
+
+  for scenario in "${scenarios[@]}"; do
+    if scenario_needs_server_binary "${scenario}"; then
+      needs_server=1
+    fi
+
+    scenario_name="${scenario#${SCENARIO_ROOT}/}"
+    if scenario_needs_cli_binary "${scenario_name}"; then
+      needs_cli=1
+    fi
+  done
+
+  if [[ "${needs_server}" == "1" ]]; then
+    build_server_binary
+  fi
+
+  if [[ "${needs_cli}" == "1" ]]; then
+    build_cli_binary
+  fi
+
+  export TALOS_E2E_REQUIRED_BINARIES_READY=1
+}
+
 append_lines_to_array() {
   local line
   while IFS= read -r line; do
@@ -123,7 +168,7 @@ else
 fi
 
 load_env
-build_binaries
+build_required_binaries
 
 pass_count=0
 fail_count=0
@@ -135,14 +180,12 @@ fail_count=0
   echo "- 工作目录: ${REPO_ROOT}"
   echo "- E2E 目录: ${TALOS_E2E_DIR}"
   echo "- Rust 目录: ${TALOS_RS_DIR}"
-  echo "- 服务端: talos-rs/target/debug/talos-server"
-  echo "- 终端客户端: talos-rs/target/debug/talos"
+  echo "- 服务端: talos-rs/target/debug/talos-server（按场景需要构建）"
+  echo "- 终端客户端: talos-rs/target/debug/talos（按场景需要构建）"
   echo
   echo "## 场景执行结果"
   echo
 } > "${report_file}"
-
-export TALOS_BINARIES_READY=1
 
 for scenario in "${scenarios[@]}"; do
   script_path="${scenario}"

@@ -1,9 +1,10 @@
 use super::*;
 
 fn test_kernel_config() -> AgentKernelConfig {
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = "/tmp/talos-workspace".to_string();
-    config
+    AgentKernelConfig {
+        workspace_dir: "/tmp/talos-workspace".to_string(),
+        ..Default::default()
+    }
 }
 
 #[test]

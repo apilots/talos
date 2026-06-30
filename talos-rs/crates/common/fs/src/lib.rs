@@ -695,6 +695,7 @@ fn create_parent_dir(path: &Path) -> TalosResult<()> {
 fn open_lock_file(path: &Path) -> TalosResult<File> {
     OpenOptions::new()
         .create(true)
+        .truncate(false)
         .read(true)
         .write(true)
         .open(path)

@@ -38,24 +38,13 @@ impl Default for GatewayConfig {
 }
 
 /// Channel configurations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ChannelsConfig {
     pub whatsapp: ChannelConfig,
     pub telegram: TelegramChannelsConfig,
     pub discord: ChannelConfig,
     pub feishu: ChannelConfig,
-}
-
-impl Default for ChannelsConfig {
-    fn default() -> Self {
-        Self {
-            whatsapp: ChannelConfig::default(),
-            telegram: TelegramChannelsConfig::default(),
-            discord: ChannelConfig::default(),
-            feishu: ChannelConfig::default(),
-        }
-    }
 }
 
 /// Generic channel configuration
@@ -190,7 +179,7 @@ pub struct TelegramGroupConfig {
 }
 
 /// Telegram topic config
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TelegramTopicConfig {
     pub id: String,
@@ -257,16 +246,6 @@ impl Default for TelegramGroupConfig {
             require_mention: true,
             allow_from: Vec::new(),
             topics: Vec::new(),
-        }
-    }
-}
-
-impl Default for TelegramTopicConfig {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            require_mention: false,
-            allow_from: Vec::new(),
         }
     }
 }

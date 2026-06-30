@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FsConfig {
     #[serde(default)]
@@ -18,18 +18,11 @@ pub struct DirectoryPickerConfig {
     pub show_hidden: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DirectoryPickerRoot {
+    #[default]
     Home,
-}
-
-impl Default for FsConfig {
-    fn default() -> Self {
-        Self {
-            directory_picker: DirectoryPickerConfig::default(),
-        }
-    }
 }
 
 impl Default for DirectoryPickerConfig {
@@ -39,12 +32,6 @@ impl Default for DirectoryPickerConfig {
             root: DirectoryPickerRoot::default(),
             show_hidden: default_show_hidden(),
         }
-    }
-}
-
-impl Default for DirectoryPickerRoot {
-    fn default() -> Self {
-        Self::Home
     }
 }
 

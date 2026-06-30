@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
@@ -193,15 +193,15 @@ impl YamlLlmConfigStore {
 }
 
 fn persist_provider_secret(
-    env_path: &PathBuf,
+    env_path: &Path,
     env_key: &str,
     keep_placeholder: bool,
     provider: &mut ProviderConfig,
     existing_provider: Option<&ProviderConfig>,
 ) -> TalosResult<()> {
-    let store = EnvSecretStore::new(env_path.clone());
+    let store = EnvSecretStore::new(env_path.to_path_buf());
     match provider.api_key.as_deref().map(str::trim) {
-        Some(value) if value.is_empty() => {
+        Some("") => {
             store.remove(env_key)?;
             provider.api_key = keep_placeholder.then(|| placeholder(env_key));
         }
@@ -222,7 +222,7 @@ fn persist_provider_secret(
 }
 
 fn migrate_existing_plaintext_secret(
-    env_path: &PathBuf,
+    env_path: &Path,
     env_key: &str,
     existing_provider: Option<&ProviderConfig>,
 ) -> TalosResult<()> {
@@ -244,7 +244,7 @@ fn migrate_existing_plaintext_secret(
         return Ok(());
     }
 
-    EnvSecretStore::new(env_path.clone()).set(env_key, existing_value)
+    EnvSecretStore::new(env_path.to_path_buf()).set(env_key, existing_value)
 }
 
 fn sanitize_llm_for_read(llm: &mut LlmConfig) {
@@ -332,7 +332,7 @@ fn provider_api_key_configured(
     runtime_env: &RuntimeEnv,
 ) -> bool {
     match provider.api_key.as_deref().map(str::trim) {
-        Some(value) if value.is_empty() => false,
+        Some("") => false,
         Some(value) if is_env_placeholder(value) => runtime_env
             .get(env_key)
             .is_some_and(|value| !value.trim().is_empty()),

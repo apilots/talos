@@ -331,15 +331,41 @@ stop_server() {
   fi
 }
 
+build_server_binary() {
+  if [[ "${TALOS_SERVER_BINARY_READY:-}" == "1" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/talos-server" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${REPORT_ROOT}"
+  (cd "${TALOS_RS_DIR}" && cargo build -p talos-server >/dev/null)
+  export TALOS_SERVER_BINARY_READY=1
+}
+
+build_cli_binary() {
+  if [[ "${TALOS_CLI_BINARY_READY:-}" == "1" ]] \
+    && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
+    return 0
+  fi
+
+  mkdir -p "${REPORT_ROOT}"
+  (cd "${TALOS_RS_DIR}" && cargo build -p talos-tui >/dev/null)
+  export TALOS_CLI_BINARY_READY=1
+}
+
 build_binaries() {
+  if [[ "${TALOS_E2E_REQUIRED_BINARIES_READY:-}" == "1" ]]; then
+    return 0
+  fi
+
   if [[ "${TALOS_BINARIES_READY:-}" == "1" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos-server" ]] \
     && [[ -x "${TALOS_RS_DIR}/target/debug/talos" ]]; then
     return 0
   fi
 
-  mkdir -p "${REPORT_ROOT}"
-  (cd "${TALOS_RS_DIR}" && cargo build -p talos-server -p talos-tui >/dev/null)
+  build_server_binary
+  build_cli_binary
   export TALOS_BINARIES_READY=1
 }
 

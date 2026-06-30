@@ -55,13 +55,30 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 1. Clone the repository
 ```bash
 git clone <repository-url>
-cd talos/talos-rs
+cd talos
 ```
 
-2. Install Rust and build the project
+2. Install Rust and local developer tools
 ```bash
-./build.sh
+cargo install --locked just
+cargo install --locked cargo-nextest
 ```
+
+3. Use the root `justfile` for routine Rust commands
+```bash
+just fmt
+just build -p talos-server
+just test -p talos-service
+```
+
+`just` runs from the repository root and uses `talos-rs` as its working
+directory. Prefer scoped package commands such as `just test -p talos-service`
+for local iteration. Avoid routine full-workspace `cargo test` runs because
+they create large `target/debug/deps` and `target/debug/incremental` trees.
+`just check` writes check artifacts to `target/talos-check` so normal type
+checks do not keep growing `target/debug`. Use `just target-size` to inspect
+Rust build output, `just clean-incremental` to reclaim incremental state, and
+`just clean-debug` only when `target/debug` must be rebuilt from scratch.
 
 ### Configuration
 
@@ -161,6 +178,12 @@ curl -X POST "http://localhost:8080/v1/turns/start" \
     "client_request_id": null
   }'
 ```
+
+`workspace_id` is an Agent workspace logical routing key. It is not a
+filesystem path, project directory, or current directory. When omitted, the
+session uses `agent.kernel.default_workspace_id` as the default routing key;
+project execution roots are still resolved from `project.directory`, embedded
+`current_directory`, then the effective workspace root.
 
 Send another message inside an existing session:
 ```bash

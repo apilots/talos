@@ -84,15 +84,14 @@ impl TalosPaths {
                 err
             ))
         })?;
-        for dir in [workspace_dir.join("users").join("anonymous")] {
-            std::fs::create_dir_all(&dir).map_err(|err| {
-                TalosError::StorageError(format!(
-                    "create agent workspace dir {}: {}",
-                    dir.display(),
-                    err
-                ))
-            })?;
-        }
+        let dir = workspace_dir.join("users").join("anonymous");
+        std::fs::create_dir_all(&dir).map_err(|err| {
+            TalosError::StorageError(format!(
+                "create agent workspace dir {}: {}",
+                dir.display(),
+                err
+            ))
+        })?;
         Ok(())
     }
 }

@@ -86,6 +86,20 @@ talos-e2e/run_e2e.sh --case 09_app_server/mcp_e2e
 talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
 ```
 
+From the repository root, the same runner is also exposed through `just`:
+
+```bash
+just e2e
+just e2e-group 09_app_server
+just e2e-case 09_app_server/skills_e2e
+```
+
+The runner prebuilds only the binaries required by the selected scenario set.
+Scenarios that call `start_server` build `talos-server`; CLI/TUI scenarios that
+invoke the terminal client build `talos`. App-server scenarios call
+`build_app_server_binaries` inside the scenario script when they need
+`app-server` and `talos-app-server-test-client`.
+
 `protocol_e2e.sh` starts `app-server` through the Rust app-server
 client and verifies initialize, model/config/session/event flows, replay,
 multi-subscriber ordering, active-turn conflict handling, memory files,
@@ -118,7 +132,7 @@ talos-e2e/run_e2e.sh --case 09_app_server/mcp_e2e
 Protocol fixtures are generated from Rust with:
 
 ```bash
-cargo run -p talos-app-protocol --example export_fixtures
+cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 ```
 
 The command refreshes both the JSON Schema fixture and the generated TypeScript

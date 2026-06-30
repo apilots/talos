@@ -135,3 +135,8 @@ talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }
+
+[profile.dev]
+# Keep useful line tables and backtraces without emitting full local variable
+# debug info for every crate. This keeps local target/debug growth bounded.
+debug = "limited"

@@ -156,7 +156,7 @@ pub struct TalosSessionEnvironment {
 }
 
 /// High-level source category.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosSourceType {
     Http,
@@ -164,13 +164,8 @@ pub enum TalosSourceType {
     Im,
     Cli,
     Ws,
+    #[default]
     System,
-}
-
-impl Default for TalosSourceType {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 impl TalosSourceType {
@@ -204,7 +199,7 @@ impl fmt::Display for TalosSourceType {
 }
 
 /// Concrete source provider.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosProvider {
     Http,
@@ -212,13 +207,8 @@ pub enum TalosProvider {
     Cli,
     Telegram,
     WebSocket,
+    #[default]
     System,
-}
-
-impl Default for TalosProvider {
-    fn default() -> Self {
-        Self::System
-    }
 }
 
 impl TalosProvider {
