@@ -79,6 +79,16 @@ pub fn now() -> u64 {
         .as_millis() as u64
 }
 
+/// Parameters for cancelling the active turn through the internal runtime boundary.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelActiveTurnParams {
+    /// Prepared session used to resolve the owning agent.
+    pub session: crate::session::TalosSession,
+    /// Active turn identity from TalosService, when a persisted active turn exists.
+    #[serde(default)]
+    pub turn_id: Option<String>,
+}
+
 /// Runtime boundary used by TalosService to dispatch work to AgentCoordinator.
 ///
 /// Public transports must call Gateway. This trait is only for the internal
@@ -88,8 +98,8 @@ pub trait AgentDispatchRuntime: Send + Sync {
     /// Dispatch a prepared agent request and return a response.
     async fn handle(
         &self,
-        request: agent_dispatch::AgentDispatchRequest,
-    ) -> crate::TalosResult<agent_dispatch::AgentDispatchResponse>;
+        request: agent_dispatch::AgentDispatchParams,
+    ) -> crate::TalosResult<agent_dispatch::AgentDispatchResult>;
 
     /// Return the internal domain timeline stream before TalosService persistence.
     ///
@@ -97,17 +107,15 @@ pub trait AgentDispatchRuntime: Send + Sync {
     /// these domain events and attaches recovery cursor metadata.
     async fn handle_stream(
         &self,
-        request: agent_dispatch::AgentDispatchRequest,
-    ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::TalosTimelineEvent>>;
+        request: agent_dispatch::AgentDispatchParams,
+    ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::AgentEvent>>;
 
-    async fn cancel_active_turn(
-        &self,
-        session: crate::session::TalosSession,
-    ) -> crate::TalosResult<()>;
+    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> crate::TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,
         _session: crate::session::TalosSession,
+        _turn_id: &str,
         _call_id: &str,
         _tool_name: &str,
         _output: String,

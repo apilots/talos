@@ -11,16 +11,17 @@ use talos_store::session::{
     TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TalosUsage,
+    StopReason, TalosContext, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TokenUsage,
 };
 use talos_types::{
-    AgentDispatchRequest, SessionConf, SessionContext, SessionState, StartTurnRequest, TalosConfig,
+    AgentDispatchParams, SessionConf, SessionContext, SessionState, StartTurnRequest, TalosConfig,
     TalosSession,
 };
 
 #[derive(Default)]
 struct RecordingTurnExecutor {
-    stream_request: Mutex<Option<AgentDispatchRequest>>,
+    stream_request: Mutex<Option<AgentDispatchParams>>,
+    dynamic_turn_id: Mutex<Option<String>>,
     title_update: Mutex<Option<String>>,
 }
 
@@ -31,7 +32,7 @@ impl SessionRuntime for NoopSessionRuntime {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<talos_types::TalosUsage> {
+    ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in turn service tests")
     }
 
@@ -47,7 +48,10 @@ impl SessionRuntime for NoopSessionRuntime {
         unreachable!("not used in turn service tests")
     }
 
-    async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        _params: talos_types::CancelActiveTurnParams,
+    ) -> TalosResult<()> {
         unreachable!("not used in turn service tests")
     }
 
@@ -67,25 +71,25 @@ impl SessionRuntime for NoopSessionRuntime {
 impl TurnExecutor for RecordingTurnExecutor {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.stream_request.lock().unwrap().replace(request.clone());
         let (tx, rx) = mpsc::channel(4);
-        let event = TalosTimelineEvent {
+        let event = AgentEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: None,
-            event_type: talos_types::talos::TalosTimelineEventType::TurnCompleted,
+            event_type: talos_types::talos::AgentEventType::TurnCompleted,
             turn_id: request.turn_id.clone().unwrap_or_default(),
             message_id: request.context.message_id.clone(),
             session_id: request.session_id.clone(),
             sequence: 0,
-            payload: TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+            payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
                 request_id: "req-test".to_string(),
                 turn_id: request.turn_id.unwrap_or_default(),
                 completed_at_ms: 1,
                 stop_reason: StopReason::EndTurn,
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 metrics: None,
             }),
         };
@@ -93,18 +97,26 @@ impl TurnExecutor for RecordingTurnExecutor {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        _params: talos_types::CancelActiveTurnParams,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
     async fn submit_dynamic_tool_result(
         &self,
         _session: TalosSession,
+        turn_id: &str,
         _call_id: &str,
         _tool_name: &str,
         _output: String,
         _success: bool,
     ) -> TalosResult<()> {
+        self.dynamic_turn_id
+            .lock()
+            .unwrap()
+            .replace(turn_id.to_string());
         Ok(())
     }
 
@@ -362,6 +374,10 @@ async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
         .clone()
         .expect("resume stream request should be captured");
     assert_eq!(request.turn_id.as_deref(), Some("turn-original"));
+    assert_eq!(
+        turn_executor.dynamic_turn_id.lock().unwrap().as_deref(),
+        Some("turn-original")
+    );
     assert_eq!(request.context.message_id, "msg-original");
     assert!(request.input.is_empty());
     let tool_call = request

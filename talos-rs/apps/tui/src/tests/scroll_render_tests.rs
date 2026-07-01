@@ -21,11 +21,11 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "kimi-k2.5", 32_768);
     app.current_model = "kimi-k2.5".to_string();
-    app.session_usage = TalosUsage {
+    app.session_usage = TokenUsage {
         input_tokens: 964,
         output_tokens: 16,
         total_tokens: 980,
-        ..TalosUsage::default()
+        ..TokenUsage::default()
     };
 
     let text = line_plain_text(&app.input_status_line(120));
@@ -48,7 +48,7 @@ async fn test_turn_completed_updates_session_usage() {
         "msg-usage",
         "sess-test",
         1,
-        TalosUsage {
+        TokenUsage {
             input_tokens: 964,
             output_tokens: 16,
             total_tokens: 980,
@@ -70,7 +70,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     set_test_model_info(&mut app, "kimi-k2.5", 1_000);
     app.current_model = "kimi-k2.5".to_string();
     app.session_id = Some("sess-test".to_string());
-    app.session_usage = TalosUsage {
+    app.session_usage = TokenUsage {
         input_tokens: 80,
         output_tokens: 20,
         total_tokens: 100,
@@ -78,7 +78,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
         cache_read_input_tokens: Some(5),
     };
 
-    let turn_usage = TalosUsage {
+    let turn_usage = TokenUsage {
         input_tokens: 30,
         output_tokens: 10,
         total_tokens: 40,
@@ -154,11 +154,11 @@ async fn test_completed_without_final_metrics_preserves_last_live_metrics() {
     app.current_model = "kimi-k2.5".to_string();
     app.session_id = Some("sess-test".to_string());
 
-    let turn_usage = TalosUsage {
+    let turn_usage = TokenUsage {
         input_tokens: 30,
         output_tokens: 10,
         total_tokens: 40,
-        ..TalosUsage::default()
+        ..TokenUsage::default()
     };
     let live_metrics = TurnExecutionMetrics {
         model_rounds: 2,
@@ -197,9 +197,9 @@ fn test_metrics_line_renders_above_input_without_border() {
         tool_successes: 2,
         tool_errors: 1,
         stop_reason: StopReason::EndTurn,
-        usage: TalosUsage {
+        usage: TokenUsage {
             total_tokens: 4_200,
-            ..TalosUsage::default()
+            ..TokenUsage::default()
         },
         duration_ms: Some(12_300),
     });

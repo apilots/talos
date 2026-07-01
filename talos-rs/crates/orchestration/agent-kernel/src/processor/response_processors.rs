@@ -16,7 +16,7 @@ impl ResponseProcessor for EventProjectionProcessor {
         let mut events = Vec::new();
         for item in &response.output_items {
             match item {
-                TalosOutputItem::Reasoning { text } => {
+                RunItem::Reasoning { text } => {
                     events.push(ExecutionEvent::text(
                         ctx,
                         EventAuthor::Agent,
@@ -26,7 +26,7 @@ impl ResponseProcessor for EventProjectionProcessor {
                         true,
                     ));
                 }
-                TalosOutputItem::ExecutionSummary { text } => {
+                RunItem::ExecutionSummary { text } => {
                     events.push(ExecutionEvent::text(
                         ctx,
                         EventAuthor::Agent,
@@ -36,7 +36,7 @@ impl ResponseProcessor for EventProjectionProcessor {
                         true,
                     ));
                 }
-                TalosOutputItem::ToolResult {
+                RunItem::ToolResult {
                     call_id,
                     tool_name,
                     content,
@@ -56,9 +56,9 @@ impl ResponseProcessor for EventProjectionProcessor {
                         *is_error,
                     ));
                 }
-                TalosOutputItem::OutputText { .. }
-                | TalosOutputItem::ToolCall { .. }
-                | TalosOutputItem::UserInput { .. } => {}
+                RunItem::OutputText { .. }
+                | RunItem::ToolCall { .. }
+                | RunItem::UserInput { .. } => {}
             }
         }
 

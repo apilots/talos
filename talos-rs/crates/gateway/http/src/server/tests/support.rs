@@ -1,6 +1,6 @@
 use super::*;
 use std::sync::Mutex;
-use talos_types::agent_dispatch::AgentDispatchRequest;
+use talos_types::agent_dispatch::AgentDispatchParams;
 use talos_types::talos::{TalosProvider, TalosSourceType};
 
 pub(crate) struct MockGateway;
@@ -13,10 +13,10 @@ pub(crate) struct MockLlmProvider;
 
 fn test_timeline_event(
     sequence: u64,
-    event_type: TalosTimelineEventType,
-    payload: TalosTimelineEventPayload,
-) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+    event_type: AgentEventType,
+    payload: AgentEventPayload,
+) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: None,
@@ -76,14 +76,14 @@ impl LlmProvider for MockLlmProvider {
 impl TurnExecutor for MockGateway {
     async fn start_turn_stream(
         &self,
-        _request: AgentDispatchRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
+        _request: AgentDispatchParams,
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<AgentEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(8);
         tokio::spawn(async move {
             let started = test_timeline_event(
                 0,
-                TalosTimelineEventType::TurnStarted,
-                TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+                AgentEventType::TurnStarted,
+                AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     started_at_ms: 0,
@@ -106,8 +106,8 @@ impl TurnExecutor for MockGateway {
             };
             let output_started = test_timeline_event(
                 1,
-                TalosTimelineEventType::ItemStarted,
-                TalosTimelineEventPayload::ItemStarted(TalosItemStartedEvent {
+                AgentEventType::ItemStarted,
+                AgentEventPayload::ItemStarted(TalosItemStartedEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     item: assistant_item,
@@ -117,8 +117,8 @@ impl TurnExecutor for MockGateway {
 
             let output = test_timeline_event(
                 2,
-                TalosTimelineEventType::ItemDelta,
-                TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                AgentEventType::ItemDelta,
+                AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     item_id: "assistant-1".to_string(),
@@ -148,8 +148,8 @@ impl TurnExecutor for MockGateway {
             };
             let tool_started = test_timeline_event(
                 3,
-                TalosTimelineEventType::ItemStarted,
-                TalosTimelineEventPayload::ItemStarted(TalosItemStartedEvent {
+                AgentEventType::ItemStarted,
+                AgentEventPayload::ItemStarted(TalosItemStartedEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     item: tool_item,
@@ -159,8 +159,8 @@ impl TurnExecutor for MockGateway {
 
             let progress = test_timeline_event(
                 4,
-                TalosTimelineEventType::ItemDelta,
-                TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+                AgentEventType::ItemDelta,
+                AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     item_id: "tool-1".to_string(),
@@ -174,13 +174,13 @@ impl TurnExecutor for MockGateway {
 
             let completed = test_timeline_event(
                 5,
-                TalosTimelineEventType::TurnCompleted,
-                TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                AgentEventType::TurnCompleted,
+                AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
                     request_id: "req_mock".to_string(),
                     turn_id: "turn_mock".to_string(),
                     completed_at_ms: 5,
                     stop_reason: StopReason::EndTurn,
-                    usage: TalosUsage::default(),
+                    usage: TokenUsage::default(),
                     metrics: None,
                 }),
             );
@@ -189,7 +189,10 @@ impl TurnExecutor for MockGateway {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        _params: talos_types::CancelActiveTurnParams,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -209,8 +212,8 @@ impl TurnExecutor for MockGateway {
 impl TurnExecutor for SilentGateway {
     async fn start_turn_stream(
         &self,
-        _request: AgentDispatchRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
+        _request: AgentDispatchParams,
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<AgentEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
@@ -219,7 +222,10 @@ impl TurnExecutor for SilentGateway {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        _params: talos_types::CancelActiveTurnParams,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -290,7 +296,7 @@ impl SessionService for MockSessionService {
                 created_at: 0,
                 last_activity: 0,
                 message_count: if session_cleared { 0 } else { 1 },
-                usage: talos_types::talos::TalosUsage::default(),
+                usage: talos_types::talos::TokenUsage::default(),
             },
         }))
     }
@@ -302,7 +308,7 @@ impl SessionService for MockSessionService {
             .await?
             .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?;
         session.state.message_count = 0;
-        session.state.usage = talos_types::talos::TalosUsage::default();
+        session.state.usage = talos_types::talos::TokenUsage::default();
         Ok(session)
     }
 

@@ -1,8 +1,8 @@
 use super::*;
 
-fn item_id(event: &TalosTimelineEvent) -> String {
+fn item_id(event: &AgentEvent) -> String {
     match &event.payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
         _ => panic!("expected item started event"),
     }
 }
@@ -78,7 +78,7 @@ fn timeline_builder_orders_reasoning_tool_progress_and_final_answer() {
     );
 
     match progress_event.payload {
-        TalosTimelineEventPayload::ItemDelta(payload) => {
+        AgentEventPayload::ItemDelta(payload) => {
             assert_eq!(payload.item_id, tool_id);
         }
         _ => panic!("expected item delta payload"),
@@ -163,5 +163,5 @@ fn timeline_builder_closes_running_items_before_turn_terminal() {
     );
     assert!(completions
         .iter()
-        .all(|event| matches!(event.payload, TalosTimelineEventPayload::ItemCompleted(_))));
+        .all(|event| matches!(event.payload, AgentEventPayload::ItemCompleted(_))));
 }

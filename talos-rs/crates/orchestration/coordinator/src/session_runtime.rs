@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
-use talos_types::talos::{TalosContext, TalosUsage};
-use talos_types::TalosSession;
+use talos_types::talos::{TalosContext, TokenUsage};
+use talos_types::{CancelActiveTurnParams, TalosSession};
 
 #[async_trait]
 pub trait SessionRuntime: Send + Sync {
@@ -13,7 +13,7 @@ pub trait SessionRuntime: Send + Sync {
         Ok(())
     }
 
-    async fn compact_session(&self, session: TalosSession) -> TalosResult<TalosUsage>;
+    async fn compact_session(&self, session: TalosSession) -> TalosResult<TokenUsage>;
 
     async fn clear_session(&self, session: TalosSession) -> TalosResult<()>;
 
@@ -21,7 +21,7 @@ pub trait SessionRuntime: Send + Sync {
 
     async fn prepare_delete_session(&self, session: TalosSession) -> TalosResult<()>;
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> TalosResult<()>;
+    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,

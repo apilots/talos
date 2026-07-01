@@ -9,17 +9,17 @@ async fn store() -> DatabaseSessionStore {
     DatabaseSessionStore::new(storage).await.unwrap()
 }
 
-fn started_event(session_id: &str, sequence: u64) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn started_event(session_id: &str, sequence: u64) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: Some(1000),
-        event_type: TalosTimelineEventType::TurnStarted,
+        event_type: AgentEventType::TurnStarted,
         turn_id: "turn_1".to_string(),
         message_id: "msg_1".to_string(),
         session_id: session_id.to_string(),
         sequence,
-        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: "req_1".to_string(),
             turn_id: "turn_1".to_string(),
             started_at_ms: 1000,

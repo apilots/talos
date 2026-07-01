@@ -4,6 +4,7 @@ use super::*;
 fn test_default_config() {
     let config = Config::default();
     assert_eq!(config.agent.name, "talos");
+    assert!(config.agent.agents.is_empty());
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
@@ -12,6 +13,80 @@ fn test_default_config() {
         config.logging.file.as_deref(),
         Some(config.talos_paths().log_file.to_string_lossy().as_ref())
     );
+}
+
+#[test]
+fn test_agent_definition_config_parses_kernel_runtime() {
+    let yaml = r#"
+agent:
+  agents:
+    - id: reviewer
+      name: Reviewer
+      kind: kernel
+      enabled: true
+      description: Review-focused agent
+      default_workspace_id: default
+      model: qwen-plus
+      runtime_config:
+        type: kernel
+        kernel:
+          max_tool_rounds: 4
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  auth: false
+llm:
+  provider: ollama
+  model: qwen-plus
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+
+    let config = serde_yaml::from_str::<Config>(yaml).expect("agent definition should parse");
+    let definition = config
+        .agent
+        .agents
+        .first()
+        .expect("agent definition should exist");
+    assert_eq!(definition.id, "reviewer");
+    assert_eq!(definition.name, "Reviewer");
+    assert_eq!(definition.kind, AgentKind::Kernel);
+    assert_eq!(definition.default_workspace_id.as_deref(), Some("default"));
+    assert_eq!(definition.model.as_deref(), Some("qwen-plus"));
+    match definition
+        .runtime_config
+        .as_ref()
+        .expect("runtime config should exist")
+    {
+        AgentRuntimeConfig::Kernel { kernel } => assert_eq!(kernel.max_tool_rounds, 4),
+    }
+}
+
+#[test]
+fn test_agent_definition_rejects_unsupported_runtime_config() {
+    let yaml = r#"
+agent:
+  agents:
+    - id: codex
+      name: Codex
+      kind: codex
+      runtime_config:
+        type: codex
+gateway:
+  host: 127.0.0.1
+  port: 18789
+  auth: false
+llm:
+  provider: ollama
+  model: qwen-plus
+  ollama:
+    enabled: true
+    base_url: http://localhost:11434
+"#;
+
+    let err = serde_yaml::from_str::<Config>(yaml).expect_err("unsupported runtime must fail");
+    assert!(err.to_string().contains("codex"));
 }
 
 #[test]

@@ -230,7 +230,7 @@ impl SessionService {
         &self,
         session_id: &str,
         assistant_model: &str,
-        usage: &talos_types::talos::TalosUsage,
+        usage: &talos_types::talos::TokenUsage,
     ) -> TalosResult<()> {
         self.session_records
             .record_session_progress(session_id, 0, usage, Some(assistant_model))

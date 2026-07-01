@@ -23,7 +23,7 @@ pub async fn persist_general_turn_artifacts(
     let now = Utc::now();
     let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
     if !input.trim().is_empty() {
-        items.push(TalosOutputItem::UserInput {
+        items.push(RunItem::UserInput {
             text: input.to_string(),
         });
     }

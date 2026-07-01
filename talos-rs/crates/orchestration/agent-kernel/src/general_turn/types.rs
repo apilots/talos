@@ -70,9 +70,9 @@ impl SessionCompactionState {
 #[derive(Debug, Clone)]
 pub struct GeneralTurnResult {
     pub output_text: String,
-    pub output_items: Vec<TalosOutputItem>,
+    pub output_items: Vec<RunItem>,
     pub stop_reason: StopReason,
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     pub metrics: TurnExecutionMetrics,
     pub prompt_diagnostics: PromptDiagnostics,
     pub warnings: Vec<KernelWarning>,
@@ -103,9 +103,9 @@ pub struct PreparedGeneralTurn {
 #[derive(Debug, Clone)]
 pub struct ExecutedTurnArtifacts {
     pub output_text: String,
-    pub output_items: Vec<TalosOutputItem>,
+    pub output_items: Vec<RunItem>,
     pub stop_reason: StopReason,
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     pub metrics: TurnExecutionMetrics,
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
@@ -119,16 +119,16 @@ pub struct ExecutedTurnArtifacts {
 pub enum GeneralTurnOutcome {
     Completed {
         output_text: String,
-        output_items: Vec<TalosOutputItem>,
+        output_items: Vec<RunItem>,
         stop_reason: StopReason,
-        usage: TalosUsage,
+        usage: TokenUsage,
         metrics: TurnExecutionMetrics,
     },
     Waiting {
-        output_items: Vec<TalosOutputItem>,
+        output_items: Vec<RunItem>,
         pending_action: PendingGeneralTurnAction,
         stop_reason: StopReason,
-        usage: TalosUsage,
+        usage: TokenUsage,
         metrics: TurnExecutionMetrics,
     },
 }
@@ -240,8 +240,8 @@ pub struct GeneralTurnLoopState {
     pub started_at: Instant,
     pub messages: Vec<ChatMessage>,
     pub round: u32,
-    pub output_items: Vec<TalosOutputItem>,
-    pub usage: TalosUsage,
+    pub output_items: Vec<RunItem>,
+    pub usage: TokenUsage,
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
@@ -284,7 +284,7 @@ impl GeneralTurnLoopState {
             messages: Vec::new(),
             round: 0,
             output_items: Vec::new(),
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             reasoning_log: Vec::new(),
             tool_call_log: Vec::new(),
             tool_result_log: Vec::new(),
@@ -354,8 +354,8 @@ pub struct GeneralTurnStepResult {
     pub tool_calls: Vec<FunctionCall>,
     pub streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub model_finish_reason: ModelFinishReason,
-    pub output_items: Vec<TalosOutputItem>,
-    pub usage: TalosUsage,
+    pub output_items: Vec<RunItem>,
+    pub usage: TokenUsage,
     pub final_answer_streamed: bool,
     pub execution_summary_streamed: bool,
     pub disposition: GeneralTurnStepDisposition,
@@ -380,7 +380,7 @@ impl fmt::Debug for StreamingToolExecutionConfig {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnToolBatch {
-    pub output_items: Vec<TalosOutputItem>,
+    pub output_items: Vec<RunItem>,
     pub tool_messages: Vec<ChatMessage>,
     pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
     pub retrieved_memories: Vec<RetrievedMemoryItem>,

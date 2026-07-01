@@ -1,0 +1,315 @@
+use std::collections::HashSet;
+use std::sync::Arc;
+
+use talos_config::{
+    AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
+};
+use talos_error::{TalosError, TalosResult};
+use talos_llm_provider::LlmProvider;
+use talos_tools::ToolRegistry;
+
+use crate::{AgentHarnessImpl, SkillRootsResolver};
+
+/// Supported Agent runtime families.
+///
+/// Adding a new kind requires a matching typed runtime_config variant and an
+/// AgentRuntime implementation. Do not route unsupported kinds to Kernel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentKind {
+    Kernel,
+    Codex,
+    Claude,
+}
+
+impl From<ConfigAgentKind> for AgentKind {
+    fn from(kind: ConfigAgentKind) -> Self {
+        match kind {
+            ConfigAgentKind::Kernel => Self::Kernel,
+            ConfigAgentKind::Codex => Self::Codex,
+            ConfigAgentKind::Claude => Self::Claude,
+        }
+    }
+}
+
+/// Capability flags used by Coordinator and Harness validation.
+///
+/// These flags are not presentation-only metadata. Unsupported capabilities
+/// must fail fast before a request reaches a concrete runtime.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentCapabilities {
+    /// The Agent can stream standardized AgentEvent values.
+    pub streaming: bool,
+    /// The Agent can accept interrupt requests for active runs.
+    pub interrupt: bool,
+    /// The Agent can accept structured continuation input.
+    pub dynamic_input: bool,
+}
+
+impl AgentCapabilities {
+    /// Capabilities exposed by the built-in Kernel-backed Agent runtime.
+    pub fn kernel() -> Self {
+        Self {
+            streaming: true,
+            interrupt: true,
+            dynamic_input: true,
+        }
+    }
+}
+
+/// Lifecycle status of an Agent definition in the Harness framework.
+///
+/// This is not product session state and must not mirror Service active-turn
+/// persistence. Runtime health can be added later as a separate concept.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentStatus {
+    Enabled,
+    Disabled,
+}
+
+/// Resolved Agent definition used to build an AgentHarness.
+///
+/// This is the Harness domain object produced from configuration. It must not
+/// carry store records, Gateway DTOs, or concrete runtime clients.
+#[derive(Debug, Clone)]
+pub struct AgentDefinition {
+    /// Stable Agent identity used by Coordinator routing.
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Runtime family selected for this Agent.
+    pub kind: AgentKind,
+    /// Whether this definition should be instantiated.
+    pub enabled: bool,
+    /// Human-readable description for management surfaces.
+    pub description: String,
+    /// Default execution workspace key, not a filesystem path and not an Agent selector.
+    pub default_workspace_id: Option<String>,
+    /// Optional model override for this Agent.
+    pub model: Option<String>,
+    /// Typed runtime configuration matched with kind.
+    pub runtime_config: AgentRuntimeConfig,
+}
+
+/// Management descriptor exposed by AgentHarness and AgentRegistry.
+///
+/// Descriptors support routing, capability validation, and UI/SDK management
+/// surfaces. They must not expose runtime-private handles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentDescriptor {
+    /// Stable Agent identity used by Coordinator routing.
+    pub agent_id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Runtime family for the Agent.
+    pub kind: AgentKind,
+    /// Human-readable description.
+    pub description: String,
+    /// Capabilities available through the standard Harness API.
+    pub capabilities: AgentCapabilities,
+    /// Definition lifecycle status.
+    pub status: AgentStatus,
+}
+
+/// Loads AgentDefinition values from product configuration.
+///
+/// The loader owns config-to-domain validation only. It does not instantiate
+/// runtimes, register Agents, or read stores.
+pub struct AgentDefinitionLoader;
+
+impl AgentDefinitionLoader {
+    /// Load explicit definitions or synthesize the default Kernel Agent.
+    pub fn load(config: &AgentConfig, default_model: &str) -> TalosResult<Vec<AgentDefinition>> {
+        if config.agents.is_empty() {
+            return Ok(vec![synthesized_default_definition(config, default_model)]);
+        }
+
+        let mut seen_ids = HashSet::new();
+        config
+            .agents
+            .iter()
+            .map(|definition| {
+                let definition = definition_from_config(config, default_model, definition)?;
+                if !seen_ids.insert(definition.id.clone()) {
+                    return Err(TalosError::ValidationError(format!(
+                        "duplicate agent definition id: {}",
+                        definition.id
+                    )));
+                }
+                Ok(definition)
+            })
+            .collect()
+    }
+}
+
+/// Builds AgentHarness instances from resolved AgentDefinition values.
+///
+/// The factory belongs to the Harness layer. It assembles shared infrastructure
+/// and selects the concrete runtime implementation without leaking runtime
+/// internals to Coordinator.
+pub struct AgentHarnessFactory {
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_registry: Arc<ToolRegistry>,
+    skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+}
+
+impl AgentHarnessFactory {
+    /// Create a factory with shared Harness infrastructure.
+    pub fn new(
+        llm_provider: Arc<dyn LlmProvider>,
+        tool_registry: Arc<ToolRegistry>,
+        skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    ) -> Self {
+        Self {
+            llm_provider,
+            tool_registry,
+            skill_roots_resolver,
+        }
+    }
+
+    /// Build a runnable Harness for an enabled Agent definition.
+    ///
+    /// Unsupported runtime kinds must fail explicitly instead of falling back to
+    /// Kernel, otherwise routing and capability validation become misleading.
+    pub fn build(&self, definition: &AgentDefinition) -> TalosResult<AgentHarnessImpl> {
+        if !definition.enabled {
+            return Err(TalosError::ValidationError(format!(
+                "agent `{}` is disabled",
+                definition.id
+            )));
+        }
+        match (&definition.kind, &definition.runtime_config) {
+            (AgentKind::Kernel, AgentRuntimeConfig::Kernel { kernel }) => {
+                Ok(AgentHarnessImpl::new_with_skill_roots_resolver(
+                    definition.id.clone(),
+                    definition.name.clone(),
+                    definition.description.clone(),
+                    self.llm_provider.clone(),
+                    definition.model.clone().ok_or_else(|| {
+                        TalosError::ValidationError(format!(
+                            "agent `{}` is missing a model",
+                            definition.id
+                        ))
+                    })?,
+                    self.tool_registry.clone(),
+                    kernel.clone(),
+                    self.skill_roots_resolver.clone(),
+                ))
+            }
+            (kind, _) => Err(TalosError::UnsupportedModel(format!(
+                "agent runtime kind is not implemented: {:?}",
+                kind
+            ))),
+        }
+    }
+}
+
+impl AgentDefinition {
+    /// Convert the definition into a routing and management descriptor.
+    pub fn descriptor(&self) -> AgentDescriptor {
+        AgentDescriptor {
+            agent_id: self.id.clone(),
+            name: self.name.clone(),
+            kind: self.kind,
+            description: self.description.clone(),
+            capabilities: match self.kind {
+                AgentKind::Kernel => AgentCapabilities::kernel(),
+                AgentKind::Codex | AgentKind::Claude => AgentCapabilities {
+                    streaming: false,
+                    interrupt: false,
+                    dynamic_input: false,
+                },
+            },
+            status: if self.enabled {
+                AgentStatus::Enabled
+            } else {
+                AgentStatus::Disabled
+            },
+        }
+    }
+}
+
+fn synthesized_default_definition(config: &AgentConfig, default_model: &str) -> AgentDefinition {
+    AgentDefinition {
+        id: "default".to_string(),
+        name: config.name.clone(),
+        kind: AgentKind::Kernel,
+        enabled: true,
+        description: "Default AI assistant".to_string(),
+        default_workspace_id: Some(config.kernel.default_workspace_id.clone()),
+        model: model_or_default(Some(config.model.as_str()), default_model),
+        runtime_config: AgentRuntimeConfig::Kernel {
+            kernel: config.kernel.clone(),
+        },
+    }
+}
+
+fn definition_from_config(
+    config: &AgentConfig,
+    default_model: &str,
+    definition: &AgentDefinitionConfig,
+) -> TalosResult<AgentDefinition> {
+    let id = definition.id.trim();
+    if id.is_empty() {
+        return Err(TalosError::ValidationError(
+            "agent definition id cannot be empty".to_string(),
+        ));
+    }
+    let kind = AgentKind::from(definition.kind);
+    let runtime_config =
+        definition
+            .runtime_config
+            .clone()
+            .unwrap_or_else(|| AgentRuntimeConfig::Kernel {
+                kernel: config.kernel.clone(),
+            });
+    let runtime_kind = kind_for_runtime_config(&runtime_config);
+    if kind != runtime_kind {
+        return Err(TalosError::ValidationError(format!(
+            "agent `{id}` kind {:?} does not match runtime_config {:?}",
+            kind, runtime_kind
+        )));
+    }
+
+    Ok(AgentDefinition {
+        id: id.to_string(),
+        name: non_empty_or(&definition.name, id),
+        kind,
+        enabled: definition.enabled,
+        description: definition
+            .description
+            .clone()
+            .unwrap_or_else(|| format!("{} agent", non_empty_or(&definition.name, id))),
+        default_workspace_id: definition
+            .default_workspace_id
+            .clone()
+            .or_else(|| Some(config.kernel.default_workspace_id.clone())),
+        model: model_or_default(definition.model.as_deref(), default_model),
+        runtime_config,
+    })
+}
+
+fn model_or_default(model: Option<&str>, default_model: &str) -> Option<String> {
+    model
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| value.trim().to_string())
+        .or_else(|| Some(default_model.to_string()).filter(|value| !value.trim().is_empty()))
+}
+
+fn non_empty_or(value: &str, fallback: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        fallback.to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+fn kind_for_runtime_config(runtime_config: &AgentRuntimeConfig) -> AgentKind {
+    match runtime_config {
+        AgentRuntimeConfig::Kernel { .. } => AgentKind::Kernel,
+    }
+}
+
+#[cfg(test)]
+#[path = "definition_tests.rs"]
+mod tests;

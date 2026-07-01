@@ -86,7 +86,7 @@ fn timeline_sse_event(
     let event_id = record.event_id.clone();
     let is_live_metrics = matches!(
         record.event.payload,
-        talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
+        talos_types::talos::AgentEventPayload::TurnMetrics(_)
     );
     let data = serde_json::to_string(&record)?;
     let event = Event::default().event(event_name).data(data);

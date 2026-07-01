@@ -34,8 +34,8 @@ use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
 use talos_types::talos::{
-    DynamicToolArguments, StopReason as TalosApiStopReason, TalosContentItem, TalosOutputItem,
-    TalosUsage, TurnExecutionMetrics,
+    DynamicToolArguments, RunItem, StopReason as TalosApiStopReason, TalosContentItem, TokenUsage,
+    TurnExecutionMetrics,
 };
 use tokio::sync::mpsc;
 use tracing::warn;

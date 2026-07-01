@@ -3,23 +3,23 @@ use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, PendingDynamicToolResult,
     PendingUserAction,
 };
-use talos_types::talos::{TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload};
+use talos_types::talos::{AgentEvent, AgentEventPayload, TalosTimelineDelta};
 
 pub(crate) type ActiveTurnState = Option<(ActiveTurnStatus, Option<PendingUserAction>)>;
 
 pub(crate) async fn state_for_event(
     active_turn_store: &dyn ActiveTurnStore,
-    event: &TalosTimelineEvent,
+    event: &AgentEvent,
 ) -> TalosResult<ActiveTurnState> {
     let session_id = event.session_id.as_str();
     let message_id = event.message_id.as_str();
     let turn_id = event.turn_id.as_str();
     let active_state = match &event.payload {
-        TalosTimelineEventPayload::TurnCompleted(_) => {
+        AgentEventPayload::TurnCompleted(_) => {
             completed_active_state(active_turn_store, session_id, message_id, Some(turn_id)).await?
         }
-        TalosTimelineEventPayload::TurnError(_) => Some((ActiveTurnStatus::Failed, None)),
-        TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
+        AgentEventPayload::TurnError(_) => Some((ActiveTurnStatus::Failed, None)),
+        AgentEventPayload::ItemDelta(payload) => match &payload.delta {
             TalosTimelineDelta::ToolDynamicRequest {
                 call_id, tool_name, ..
             } => Some((
@@ -38,7 +38,7 @@ pub(crate) async fn state_for_event(
             }
             _ => running_active_state(active_turn_store, session_id, turn_id).await?,
         },
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if matches!(
                 payload.status,
                 talos_types::talos::TalosTimelineItemStatus::WaitingDynamicInput
@@ -46,7 +46,7 @@ pub(crate) async fn state_for_event(
         {
             None
         }
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if matches!(
                 payload.status,
                 talos_types::talos::TalosTimelineItemStatus::Completed

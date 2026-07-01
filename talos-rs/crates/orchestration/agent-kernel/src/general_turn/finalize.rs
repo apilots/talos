@@ -48,7 +48,7 @@ pub fn finalize_general_turn_artifacts(
     }
 
     if !matches!(stop_reason, StopReason::WaitingDynamicInput) {
-        output_items.push(TalosOutputItem::OutputText {
+        output_items.push(RunItem::OutputText {
             text: final_output.clone(),
         });
     }

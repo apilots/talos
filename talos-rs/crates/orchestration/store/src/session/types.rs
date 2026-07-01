@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use talos_types::talos::{TalosContext, TalosUsage};
+use talos_types::talos::{TalosContext, TokenUsage};
 use talos_types::{SessionConf, SessionConfigOverridePolicy, TalosSession, DEFAULT_SESSION_TITLE};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +17,7 @@ pub struct SessionRecord {
     pub last_activity: u64,
     pub message_count: u64,
     #[serde(default)]
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     pub conf: SessionConf,
     #[serde(default)]

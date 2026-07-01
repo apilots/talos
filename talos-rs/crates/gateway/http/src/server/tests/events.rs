@@ -4,10 +4,10 @@ fn timeline_event(
     turn_id: &str,
     message_id: &str,
     sequence: u64,
-    event_type: TalosTimelineEventType,
-    payload: TalosTimelineEventPayload,
-) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+    event_type: AgentEventType,
+    payload: AgentEventPayload,
+) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: None,
@@ -20,13 +20,13 @@ fn timeline_event(
     }
 }
 
-fn turn_started(turn_id: &str, message_id: &str, sequence: u64) -> TalosTimelineEvent {
+fn turn_started(turn_id: &str, message_id: &str, sequence: u64) -> AgentEvent {
     timeline_event(
         turn_id,
         message_id,
         sequence,
-        TalosTimelineEventType::TurnStarted,
-        TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+        AgentEventType::TurnStarted,
+        AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: format!("req-{turn_id}"),
             turn_id: turn_id.to_string(),
             started_at_ms: 1,
@@ -34,13 +34,13 @@ fn turn_started(turn_id: &str, message_id: &str, sequence: u64) -> TalosTimeline
     )
 }
 
-fn text_delta(turn_id: &str, message_id: &str, sequence: u64, text: &str) -> TalosTimelineEvent {
+fn text_delta(turn_id: &str, message_id: &str, sequence: u64, text: &str) -> AgentEvent {
     timeline_event(
         turn_id,
         message_id,
         sequence,
-        TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
             request_id: format!("req-{turn_id}"),
             turn_id: turn_id.to_string(),
             item_id: "assistant-1".to_string(),
@@ -51,18 +51,18 @@ fn text_delta(turn_id: &str, message_id: &str, sequence: u64, text: &str) -> Tal
     )
 }
 
-fn turn_completed(turn_id: &str, message_id: &str, sequence: u64) -> TalosTimelineEvent {
+fn turn_completed(turn_id: &str, message_id: &str, sequence: u64) -> AgentEvent {
     timeline_event(
         turn_id,
         message_id,
         sequence,
-        TalosTimelineEventType::TurnCompleted,
-        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+        AgentEventType::TurnCompleted,
+        AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: format!("req-{turn_id}"),
             turn_id: turn_id.to_string(),
             completed_at_ms: 2,
             stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             metrics: None,
         }),
     )

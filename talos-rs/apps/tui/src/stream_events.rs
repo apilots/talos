@@ -1,6 +1,6 @@
 use talos_sdk::{
-    SessionHistorySnapshot, TalosContentItem, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    AgentEventPayload, SessionHistorySnapshot, TalosContentItem, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
     TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope, TimelineRecoveryResponse,
     ToolArguments,
 };
@@ -51,17 +51,17 @@ impl TuiApp {
         self.request_follow_bottom();
 
         match event.payload {
-            TalosTimelineEventPayload::TurnStarted(_) => {
+            AgentEventPayload::TurnStarted(_) => {
                 self.turn_metrics = None;
                 self.turn_metrics_live = false;
             }
-            TalosTimelineEventPayload::ItemStarted(payload) => {
+            AgentEventPayload::ItemStarted(payload) => {
                 self.handle_item_started(payload.item);
             }
-            TalosTimelineEventPayload::ItemDelta(payload) => {
+            AgentEventPayload::ItemDelta(payload) => {
                 self.handle_item_delta(&payload.item_id, payload.delta);
             }
-            TalosTimelineEventPayload::ItemCompleted(payload) => {
+            AgentEventPayload::ItemCompleted(payload) => {
                 self.handle_item_completed(
                     &payload.item_id,
                     payload.status,
@@ -69,14 +69,14 @@ impl TuiApp {
                     payload.final_content,
                 );
             }
-            TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
+            AgentEventPayload::AssistantTextCommitted(payload) => {
                 self.handle_assistant_text_committed(&payload.item_id, payload.phase);
             }
-            TalosTimelineEventPayload::TurnMetrics(payload) => {
+            AgentEventPayload::TurnMetrics(payload) => {
                 self.turn_metrics = Some(payload.metrics);
                 self.turn_metrics_live = true;
             }
-            TalosTimelineEventPayload::TurnCompleted(payload) => {
+            AgentEventPayload::TurnCompleted(payload) => {
                 self.session_usage.accumulate(&payload.usage);
                 if let Some(metrics) = payload.metrics {
                     self.turn_metrics = Some(metrics);
@@ -84,7 +84,7 @@ impl TuiApp {
                 self.turn_metrics_live = false;
                 self.finish_active_stream("stream completed", false, false);
             }
-            TalosTimelineEventPayload::TurnError(payload) => {
+            AgentEventPayload::TurnError(payload) => {
                 self.turn_metrics_live = false;
                 self.push_block(ChatRole::System, format!("Stream error: {}", payload.error));
                 self.finish_active_stream("stream error", true, false);

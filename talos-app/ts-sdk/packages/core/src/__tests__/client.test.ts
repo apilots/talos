@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TalosClient } from "../client";
 import type { HttpAdapter, StreamAdapter } from "../adapters";
-import type { TalosTimelineEvent, TimelineEventEnvelope } from "../types";
+import type { AgentEvent, TimelineEventEnvelope } from "../types";
 
 describe("TalosClient", () => {
   it("uses absolute urls for http requests", async () => {
@@ -434,7 +434,7 @@ describe("TalosClient", () => {
   });
 });
 
-function timelineEnvelope(event: TalosTimelineEvent): TimelineEventEnvelope {
+function timelineEnvelope(event: AgentEvent): TimelineEventEnvelope {
   return {
     event_id: event.event_id ?? "ev_00000000000000000000",
     event_seq: event.event_seq ?? 0,

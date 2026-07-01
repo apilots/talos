@@ -2,45 +2,73 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use talos_agent::{AgentRequest, AgentResponse, SessionTitleUpdate};
+use talos_agent::{
+    AgentInputParams, AgentInputResult, AgentInterruptParams, AgentInterruptResult, AgentRunParams,
+    AgentRunResult, SessionTitleUpdate,
+};
 use talos_error::TalosResult;
 use talos_types::talos::{
-    StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,
-    TalosUsage,
+    AgentEvent, StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType,
+    TokenUsage,
 };
 use talos_types::{
     SessionConf, SessionContext, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::mpsc;
 
-struct MockRouter;
+struct MockRouter {
+    target_agent: Option<String>,
+}
 
 impl MockRouter {
     fn new() -> Self {
-        Self
+        Self {
+            target_agent: Some("test_agent".to_string()),
+        }
+    }
+
+    fn with_target(target_agent: Option<&str>) -> Self {
+        Self {
+            target_agent: target_agent.map(str::to_string),
+        }
     }
 }
 
 struct RecordingStreamAgent {
-    stream_requests: Arc<Mutex<Vec<AgentRequest>>>,
+    id: String,
+    run_requests: Arc<Mutex<Vec<AgentRunParams>>>,
+    stream_requests: Arc<Mutex<Vec<AgentRunParams>>>,
+    interrupt_requests: Arc<Mutex<Vec<AgentInterruptParams>>>,
 }
 
 impl RecordingStreamAgent {
     fn new() -> Self {
+        Self::with_id("test_agent")
+    }
+
+    fn with_id(id: &str) -> Self {
         Self {
+            id: id.to_string(),
+            run_requests: Arc::new(Mutex::new(Vec::new())),
             stream_requests: Arc::new(Mutex::new(Vec::new())),
+            interrupt_requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
 
 struct TrackingFlushAgent {
+    id: String,
     pending: usize,
     drained: Arc<AtomicUsize>,
 }
 
 impl TrackingFlushAgent {
-    fn new(pending: usize, drained: Arc<AtomicUsize>) -> Self {
-        Self { pending, drained }
+    fn new(id: &str, pending: usize, drained: Arc<AtomicUsize>) -> Self {
+        Self {
+            id: id.to_string(),
+            pending,
+            drained,
+        }
     }
 }
 
@@ -71,7 +99,7 @@ fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
         },
     }
 }
@@ -79,7 +107,7 @@ fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
 #[async_trait::async_trait]
 impl talos_router::Router for MockRouter {
     async fn route(&self, _channel: &str, _user_id: &str) -> TalosResult<Option<String>> {
-        Ok(Some("test_agent".to_string()))
+        Ok(self.target_agent.clone())
     }
 
     async fn add_binding(&self, _binding: talos_router::Binding) -> TalosResult<()> {
@@ -96,30 +124,32 @@ impl talos_router::Router for MockRouter {
 }
 
 #[async_trait::async_trait]
-impl Agent for RecordingStreamAgent {
+impl AgentHarness for RecordingStreamAgent {
     fn id(&self) -> &str {
-        "recording-stream"
+        &self.id
     }
 
-    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
-        Ok(AgentResponse {
+    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
+        let session_id = request.session.context.session_id.clone();
+        self.run_requests.lock().unwrap().push(request);
+        Ok(AgentRunResult {
             output_text: "ok".to_string(),
             output_items: Vec::new(),
             reasoning: Vec::new(),
             stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             task_count: 1,
-            session_id: request.session.context.session_id,
+            session_id,
             session_title_update: Some(SessionTitleUpdate {
                 title: "Meaningful Topic".to_string(),
             }),
         })
     }
 
-    async fn run_stream(
+    async fn run_streamed(
         &self,
-        request: AgentRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentRunParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.stream_requests.lock().unwrap().push(request);
         let (_tx, rx) = mpsc::channel(1);
         Ok(rx)
@@ -129,8 +159,8 @@ impl Agent for RecordingStreamAgent {
         Ok(())
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
-        Ok(TalosUsage::default())
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+        Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
@@ -153,49 +183,43 @@ impl Agent for RecordingStreamAgent {
         false
     }
 
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptResult> {
+        self.interrupt_requests.lock().unwrap().push(params);
+        Ok(AgentInterruptResult { interrupted: false })
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        Ok(())
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentInputResult> {
+        Ok(AgentInputResult { accepted: true })
     }
 }
 
 #[async_trait::async_trait]
-impl Agent for TrackingFlushAgent {
+impl AgentHarness for TrackingFlushAgent {
     fn id(&self) -> &str {
-        "tracking-flush"
+        &self.id
     }
 
-    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
-        Ok(AgentResponse {
+    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
+        Ok(AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
             reasoning: Vec::new(),
             stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             task_count: 0,
             session_id: request.session.context.session_id,
             session_title_update: None,
         })
     }
 
-    async fn run_stream(
+    async fn run_streamed(
         &self,
-        _request: AgentRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        _request: AgentRunParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         let (_tx, rx) = mpsc::channel(1);
         Ok(rx)
     }
@@ -204,8 +228,8 @@ impl Agent for TrackingFlushAgent {
         Ok(())
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
-        Ok(TalosUsage::default())
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+        Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
@@ -229,24 +253,58 @@ impl Agent for TrackingFlushAgent {
         false
     }
 
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
+    async fn interrupt(&self, _params: AgentInterruptParams) -> TalosResult<AgentInterruptResult> {
+        Ok(AgentInterruptResult { interrupted: false })
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        Ok(())
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentInputResult> {
+        Ok(AgentInputResult { accepted: true })
     }
+}
+
+#[tokio::test]
+async fn cancel_active_turn_forwards_turn_id_to_agent() {
+    let coordinator = CoordinatorImpl::new(Arc::new(MockRouter::new()));
+    let agent = Arc::new(RecordingStreamAgent::new());
+    let interrupts = agent.interrupt_requests.clone();
+    coordinator
+        .register_agent("test_agent", agent)
+        .await
+        .expect("agent should register");
+
+    let session = test_session(
+        "session-cancel-route",
+        TalosContext {
+            source_type: TalosSourceType::Http,
+            provider: TalosProvider::Sdk,
+            user_id: "user-1".to_string(),
+            message_id: "msg-1".to_string(),
+            trace_id: "trace-1".to_string(),
+            channel_id: None,
+            thread_id: None,
+            project_root: None,
+            environment: Default::default(),
+        },
+    );
+
+    SessionRuntime::cancel_active_turn(
+        &coordinator,
+        talos_types::CancelActiveTurnParams {
+            session,
+            turn_id: Some("turn-route".to_string()),
+        },
+    )
+    .await
+    .expect("cancel should forward to agent");
+
+    let recorded = interrupts.lock().unwrap();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].session_id, "session-cancel-route");
+    assert_eq!(recorded[0].turn_id.as_deref(), Some("turn-route"));
 }
 
 #[path = "tests/core.rs"]

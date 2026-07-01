@@ -59,7 +59,7 @@ impl ResponseProcessor for PlanningResponseProcessor {
         for segment in &effect.segments {
             match segment.kind {
                 PlanningResponseSegmentKind::Thought => {
-                    response.output_items.push(TalosOutputItem::Reasoning {
+                    response.output_items.push(RunItem::Reasoning {
                         text: segment.text.clone(),
                     });
                 }

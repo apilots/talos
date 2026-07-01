@@ -18,15 +18,15 @@ pub use talos_auth::{
 };
 pub use talos_error::{TalosError, TalosResult};
 pub use talos_types::talos::{
-    DynamicToolArguments, JsonContentValue, SessionHistoryMessage, SessionHistorySnapshot,
-    StopReason, TalosAssistantTextCommittedEvent, TalosContentItem, TalosContext, TalosInputItem,
-    TalosItemCompletedEvent, TalosItemDeltaEvent, TalosItemStartedEvent, TalosOutputItem,
-    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelineNoticeLevel, TalosTimelinePhase, TalosToolProgressEntry,
-    TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent,
-    TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage, TimelineEventEnvelope, ToolArguments,
-    ToolExecutionResult, TurnExecutionMetrics,
+    AgentEvent, AgentEventPayload, AgentEventType, DynamicToolArguments, JsonContentValue, RunItem,
+    SessionHistoryMessage, SessionHistorySnapshot, StopReason, TalosAssistantTextCommittedEvent,
+    TalosContentItem, TalosContext, TalosInputItem, TalosItemCompletedEvent, TalosItemDeltaEvent,
+    TalosItemStartedEvent, TalosProvider, TalosSourceType, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelineNoticeLevel, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
+    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
+    TalosTurnStartedEvent, TimelineEventEnvelope, TokenUsage, ToolArguments, ToolExecutionResult,
+    TurnExecutionMetrics,
 };
 pub use talos_types::RecoverTimelineRequest;
 pub use talos_types::{

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use talos_storage::SqliteStorage;
 use talos_store::session::{DatabaseSessionStore, SessionStore};
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 
 use super::*;
 
@@ -72,11 +72,11 @@ async fn record_session_progress_accumulates_usage() {
         .record_session_progress(
             "session-1",
             2,
-            &TalosUsage {
+            &TokenUsage {
                 input_tokens: 1,
                 output_tokens: 2,
                 total_tokens: 3,
-                ..TalosUsage::default()
+                ..TokenUsage::default()
             },
             Some("gpt-5.4"),
         )

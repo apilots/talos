@@ -359,7 +359,7 @@ async fn test_history_enter_switches_session() {
         created_at: 0,
         last_activity: 0,
         message_count: 3,
-        usage: talos_types::talos::TalosUsage::default(),
+        usage: talos_types::talos::TokenUsage::default(),
         project_id: None,
         current_directory: None,
     }];

@@ -1,7 +1,7 @@
 //! Demo to validate Agent with Tool Integration
 
 use std::sync::Arc;
-use talos_agent::{Agent, AgentHarness, AgentRequest};
+use talos_agent::{AgentHarness, AgentHarnessImpl, AgentRunParams};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create an agent with a mock provider
     let llm_provider = Arc::new(DemoLlmProvider {});
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "demo_agent_1".to_string(),
         "Demo Agent".to_string(),
         "An agent for demonstration purposes".to_string(),
@@ -84,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test the agent's message handling
     println!("\n3. Testing agent message handling:");
     match agent
-        .run(AgentRequest {
+        .run(AgentRunParams {
             session: TalosSession {
                 title: "Untitled Session".to_string(),
                 user_id: "demo-user".to_string(),

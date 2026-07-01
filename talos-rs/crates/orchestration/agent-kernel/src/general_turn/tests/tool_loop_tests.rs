@@ -293,7 +293,7 @@ async fn test_run_general_turn_bash_then_task_output() {
     assert!(result
         .output_items
         .iter()
-        .any(|item| matches!(item, talos_types::talos::TalosOutputItem::ToolResult { .. })));
+        .any(|item| matches!(item, talos_types::talos::RunItem::ToolResult { .. })));
     assert!(provider.round.load(Ordering::SeqCst) >= 3);
 }
 
@@ -357,8 +357,8 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     assert!(
         result.output_items.iter().all(|item| !matches!(
             item,
-            talos_types::talos::TalosOutputItem::ToolResult { .. }
-                | talos_types::talos::TalosOutputItem::OutputText { .. }
+            talos_types::talos::RunItem::ToolResult { .. }
+                | talos_types::talos::RunItem::OutputText { .. }
         )),
         "pending dynamic requests should not be emitted as terminal tool results"
     );
@@ -575,7 +575,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     assert_eq!(result.stop_reason, StopReason::EndTurn);
     assert!(result.output_items.iter().any(|item| matches!(
         item,
-        talos_types::talos::TalosOutputItem::ToolResult { call_id, tool_name, .. }
+        talos_types::talos::RunItem::ToolResult { call_id, tool_name, .. }
             if call_id == "call_dynamic" && tool_name == "echo_test"
     )));
     assert_eq!(provider.round.load(Ordering::SeqCst), 1);

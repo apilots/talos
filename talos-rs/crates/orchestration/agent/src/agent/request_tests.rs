@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[test]
 fn extracts_structured_skill_selections_with_path() {
-    let selections = AgentHarness::extract_skill_selections(&[
+    let selections = AgentKernelParams::extract_skill_selections(&[
         TalosInputItem::Text {
             text: "Use $review".to_string(),
         },

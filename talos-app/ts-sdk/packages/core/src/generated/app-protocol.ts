@@ -54,7 +54,7 @@ export type SessionClearRequest = { session_id: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model: string, created_at: number, last_activity: number, message_count: number, usage: TalosUsage, project_id?: string, current_directory?: string, };
+export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model: string, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
 
 export type SessionActiveTurnRequest = { session_id: string, };
 
@@ -66,7 +66,7 @@ export type SessionHistoryResponse = { history: SessionHistorySnapshot, };
 
 export type SessionHistorySnapshot = { session_id: string, messages: Array<SessionHistoryMessage>, generated_at_ms: number, last_stable_event_id: string | null, };
 
-export type SessionHistoryMessage = { message_id: string, turn_id: string, items: Array<TalosTimelineItem>, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
+export type SessionHistoryMessage = { message_id: string, turn_id: string, items: Array<TalosTimelineItem>, stop_reason: StopReason, usage: TokenUsage, metrics: TurnExecutionMetrics | null, };
 
 export type TimelineRecoverySnapshot = { replay: TimelineReplay, active_turn: TimelineActiveTurnSnapshot, };
 
@@ -164,7 +164,7 @@ export type TalosConnectionMode = "embedded" | "remote";
 
 export type TalosInputItem = { "type": "text", text: string, } | { "type": "skill_selection", name: string, path: string, } | { "type": "image", url: string, mime_type: string | null, } | { "type": "file", url: string | null, file_id: string | null, mime_type: string | null, } | { "type": "voice", url: string | null, data_base64: string | null, mime_type: string | null, } | { "type": "video", url: string | null, mime_type: string | null, };
 
-export type TalosOutputItem = { "type": "user_input", text: string, } | { "type": "reasoning", text: string, } | { "type": "execution_summary", text: string, } | { "type": "output_text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: ToolArguments, } | { "type": "tool_result", call_id: string, tool_name: string, content: Array<TalosContentItem>, is_error: boolean, };
+export type RunItem = { "type": "user_input", text: string, } | { "type": "reasoning", text: string, } | { "type": "execution_summary", text: string, } | { "type": "output_text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: ToolArguments, } | { "type": "tool_result", call_id: string, tool_name: string, content: Array<TalosContentItem>, is_error: boolean, };
 
 export type TalosReasoning = { text: string, };
 
@@ -504,13 +504,13 @@ export type SessionConf = { agent: SessionAgentConf | null, };
 
 export type SessionAgentConf = { model: string | null, };
 
-export type TalosTimelineEvent = { event_seq: number | null, event_id: string | null, created_at_ms: number | null, event_type: TalosTimelineEventType, turn_id: string, message_id: string, session_id: string, sequence: number, payload: TalosTimelineEventPayload, };
+export type AgentEvent = { event_seq: number | null, event_id: string | null, created_at_ms: number | null, event_type: AgentEventType, turn_id: string, message_id: string, session_id: string, sequence: number, payload: AgentEventPayload, };
 
-export type TimelineEventEnvelope = { event_id: string, event_seq: number, created_at_ms: number, session_id: string, turn_id: string, message_id: string, event: TalosTimelineEvent, };
+export type TimelineEventEnvelope = { event_id: string, event_seq: number, created_at_ms: number, session_id: string, turn_id: string, message_id: string, event: AgentEvent, };
 
-export type TalosTimelineEventType = "turn_started" | "item_started" | "item_delta" | "item_completed" | "assistant_text_committed" | "turn_metrics" | "turn_completed" | "turn_error";
+export type AgentEventType = "turn_started" | "item_started" | "item_delta" | "item_completed" | "assistant_text_committed" | "turn_metrics" | "turn_completed" | "turn_error";
 
-export type TalosTimelineEventPayload = { "type": "turn_started" } & TalosTurnStartedEvent | { "type": "item_started" } & TalosItemStartedEvent | { "type": "item_delta" } & TalosItemDeltaEvent | { "type": "item_completed" } & TalosItemCompletedEvent | { "type": "assistant_text_committed" } & TalosAssistantTextCommittedEvent | { "type": "turn_metrics" } & TalosTurnMetricsEvent | { "type": "turn_completed" } & TalosTurnCompletedEvent | { "type": "turn_error" } & TalosTurnErrorEvent;
+export type AgentEventPayload = { "type": "turn_started" } & TalosTurnStartedEvent | { "type": "item_started" } & TalosItemStartedEvent | { "type": "item_delta" } & TalosItemDeltaEvent | { "type": "item_completed" } & TalosItemCompletedEvent | { "type": "assistant_text_committed" } & TalosAssistantTextCommittedEvent | { "type": "turn_metrics" } & TalosTurnMetricsEvent | { "type": "turn_completed" } & TalosTurnCompletedEvent | { "type": "turn_error" } & TalosTurnErrorEvent;
 
 export type TalosTimelineItem = { item_id: string, parent_item_id: string | null, kind: TalosTimelineItemKind, phase: TalosTimelinePhase, status: TalosTimelineItemStatus, title: string | null, started_at_ms: number, completed_at_ms: number | null, content: TalosTimelineContent, };
 
@@ -542,7 +542,7 @@ export type TalosAssistantTextCommittedEvent = { request_id: string, turn_id: st
 
 export type TalosTurnMetricsEvent = { request_id: string, turn_id: string, metrics: TurnExecutionMetrics, };
 
-export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TalosUsage, metrics: TurnExecutionMetrics | null, };
+export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TokenUsage, metrics: TurnExecutionMetrics | null, };
 
 export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, failed_at_ms: number, };
 
@@ -566,9 +566,9 @@ export type TalosToolDiffLine = { "kind": "context", text: string, } | { "kind":
 
 export type TalosToolSearchMatch = { path: string, line: number, column: number | null, text: string, before: Array<string>, after: Array<string>, };
 
-export type TalosUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens?: number | null, cache_read_input_tokens?: number | null, };
+export type TokenUsage = { input_tokens: number, output_tokens: number, total_tokens: number, cache_creation_input_tokens?: number | null, cache_read_input_tokens?: number | null, };
 
-export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TalosUsage, duration_ms: number | null, };
+export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TokenUsage, duration_ms: number | null, };
 
 export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "cancelled";
 

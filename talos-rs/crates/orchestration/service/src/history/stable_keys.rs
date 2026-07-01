@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use talos_types::talos::{SessionHistoryMessage, TalosTimelineEvent};
+use talos_types::talos::{AgentEvent, SessionHistoryMessage};
 
 pub(crate) struct StableMessageKeys<'a> {
     turn_ids: HashSet<&'a str>,
@@ -12,7 +12,7 @@ impl StableMessageKeys<'_> {
         self.turn_ids.is_empty() && self.message_ids.is_empty()
     }
 
-    pub(crate) fn contains_event(&self, event: &TalosTimelineEvent) -> bool {
+    pub(crate) fn contains_event(&self, event: &AgentEvent) -> bool {
         self.turn_ids.contains(event.turn_id.as_str())
             || self.message_ids.contains(event.message_id.as_str())
     }

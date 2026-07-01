@@ -107,16 +107,20 @@ if [[ -z "${todo_output}" || "${todo_output}" == Error:* ]]; then
   echo "CASE tool_todo_write FAIL response=${todo_json}"
   exit 1
 fi
-if ! echo "${todo_output}" | grep -Fq "TODO_WRITE_OK:${TODO_ID}"; then
-  echo "CASE tool_todo_write FAIL missing_todo_id output=${todo_output}"
-  exit 1
-fi
-
-TODO_JSON="${todo_json}" python3 - <<'PY'
+TODO_JSON="${todo_json}" TODO_ID="${TODO_ID}" python3 - <<'PY'
 import json
 import os
 
 data = json.loads(os.environ["TODO_JSON"])
+todo_id = os.environ["TODO_ID"]
+tool_calls = [item for item in data.get("output", []) if item.get("type") == "tool_call"]
+assert tool_calls, "missing tool_call"
+call = tool_calls[0]
+assert call.get("name") == "TodoWrite", call.get("name")
+todos = (call.get("arguments") or {}).get("todos") or []
+assert todos, "missing tool_call todos"
+assert todos[0].get("id") == todo_id, todos[0]
+assert todos[0].get("status") == "in_progress", todos[0]
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
 assert results, "missing tool_result"
 result = results[0]
@@ -130,7 +134,7 @@ items = value.get("items") or []
 assert items, "missing todo items"
 first = items[0]
 assert first.get("status") == "in_progress", first
-assert first.get("id"), first
+assert first.get("id") == todo_id, first
 PY
 
 echo "CASE tool_todo_write PASS"

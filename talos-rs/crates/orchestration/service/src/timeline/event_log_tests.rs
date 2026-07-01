@@ -5,8 +5,8 @@ use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, PendingUserAction,
 };
 use talos_types::talos::{
-    StopReason, TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelineEvent,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnCompletedEvent, TalosUsage,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosItemDeltaEvent,
+    TalosTimelineDelta, TalosTurnCompletedEvent, TokenUsage,
 };
 
 async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
@@ -26,10 +26,10 @@ async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
 
 fn timeline_event(
     sequence: u64,
-    event_type: TalosTimelineEventType,
-    payload: TalosTimelineEventPayload,
-) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+    event_type: AgentEventType,
+    payload: AgentEventPayload,
+) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: Some(1000 + sequence as i64),
@@ -42,26 +42,26 @@ fn timeline_event(
     }
 }
 
-fn completed_event(sequence: u64) -> TalosTimelineEvent {
+fn completed_event(sequence: u64) -> AgentEvent {
     timeline_event(
         sequence,
-        TalosTimelineEventType::TurnCompleted,
-        TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+        AgentEventType::TurnCompleted,
+        AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: "req_1".to_string(),
             turn_id: "turn_1".to_string(),
             completed_at_ms: 1000,
             stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             metrics: None,
         }),
     )
 }
 
-fn dynamic_event(sequence: u64) -> TalosTimelineEvent {
+fn dynamic_event(sequence: u64) -> AgentEvent {
     timeline_event(
         sequence,
-        TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
             request_id: "req_1".to_string(),
             turn_id: "turn_1".to_string(),
             item_id: "tool-1".to_string(),

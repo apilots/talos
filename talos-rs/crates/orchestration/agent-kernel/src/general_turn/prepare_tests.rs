@@ -13,7 +13,7 @@ fn build_executed_turn_artifacts(
         output_text: "ok".to_string(),
         output_items: Vec::new(),
         stop_reason: StopReason::EndTurn,
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         metrics: TurnExecutionMetrics::default(),
         reasoning_log: Vec::new(),
         tool_call_log,

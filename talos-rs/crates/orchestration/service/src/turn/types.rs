@@ -2,23 +2,24 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use talos_error::TalosResult;
-use talos_types::agent_dispatch::AgentDispatchRequest;
-use talos_types::talos::{TalosInputItem, TalosTimelineEvent};
-use talos_types::{AgentDispatchRuntime, TalosSession};
+use talos_types::agent_dispatch::AgentDispatchParams;
+use talos_types::talos::{AgentEvent, TalosInputItem};
+use talos_types::{AgentDispatchRuntime, CancelActiveTurnParams, TalosSession};
 use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait TurnExecutor: Send + Sync {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>>;
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> TalosResult<()>;
+    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()>;
 
     async fn submit_dynamic_tool_result(
         &self,
         session: TalosSession,
+        turn_id: &str,
         call_id: &str,
         tool_name: &str,
         output: String,
@@ -45,25 +46,26 @@ impl AgentDispatchTurnExecutor {
 impl TurnExecutor for AgentDispatchTurnExecutor {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.handler.handle_stream(request).await
     }
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> TalosResult<()> {
-        self.handler.cancel_active_turn(session).await
+    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
+        self.handler.cancel_active_turn(params).await
     }
 
     async fn submit_dynamic_tool_result(
         &self,
         session: TalosSession,
+        turn_id: &str,
         call_id: &str,
         tool_name: &str,
         output: String,
         success: bool,
     ) -> TalosResult<()> {
         self.handler
-            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
+            .submit_dynamic_tool_result(session, turn_id, call_id, tool_name, output, success)
             .await
     }
 
@@ -75,7 +77,7 @@ impl TurnExecutor for AgentDispatchTurnExecutor {
 }
 
 #[derive(Debug, Clone)]
-pub struct TurnRetryRequest {
+pub struct TurnRetryParams {
     pub input: Vec<TalosInputItem>,
     pub workspace_id: Option<String>,
     pub client_message_id: String,

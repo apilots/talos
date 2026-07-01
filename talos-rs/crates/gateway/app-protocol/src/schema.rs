@@ -32,7 +32,7 @@ pub struct AppProtocolSchemaRoot {
     pub subscribe_timeline_request: talos_types::SubscribeTimelineRequest,
     pub subscribe_timeline_response: talos_types::SubscribeTimelineResponse,
     pub recover_timeline_request: talos_types::RecoverTimelineRequest,
-    pub timeline_event: talos_types::talos::TalosTimelineEvent,
+    pub timeline_event: talos_types::talos::AgentEvent,
     pub timeline_event_envelope: talos_types::talos::TimelineEventEnvelope,
     pub initialize_response: InitializeResponse,
     pub turn_start_response: talos_types::StartTurnResponse,
@@ -132,7 +132,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosSessionEnvironment>());
     output.push_str(&export::<talos_types::talos::TalosConnectionMode>());
     output.push_str(&export::<talos_types::talos::TalosInputItem>());
-    output.push_str(&export::<talos_types::talos::TalosOutputItem>());
+    output.push_str(&export::<talos_types::talos::RunItem>());
     output.push_str(&export::<talos_types::talos::TalosReasoning>());
     output.push_str(&export::<talos_types::EventUnsubscribeRequest>());
     output.push_str(&export::<talos_types::EventUnsubscribeResponse>());
@@ -302,10 +302,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());
     output.push_str(&export::<talos_types::SessionAgentConf>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineEvent>());
+    output.push_str(&export::<talos_types::talos::AgentEvent>());
     output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineEventType>());
-    output.push_str(&export::<talos_types::talos::TalosTimelineEventPayload>());
+    output.push_str(&export::<talos_types::talos::AgentEventType>());
+    output.push_str(&export::<talos_types::talos::AgentEventPayload>());
     output.push_str(&export::<talos_types::talos::TalosTimelineItem>());
     output.push_str(&export::<talos_types::talos::TalosTimelineItemKind>());
     output.push_str(&export::<talos_types::talos::TalosTimelinePhase>());
@@ -335,7 +335,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosToolDiffHunk>());
     output.push_str(&export::<talos_types::talos::TalosToolDiffLine>());
     output.push_str(&export::<talos_types::talos::TalosToolSearchMatch>());
-    output.push_str(&export::<talos_types::talos::TalosUsage>());
+    output.push_str(&export::<talos_types::talos::TokenUsage>());
     output.push_str(&export::<talos_types::talos::TurnExecutionMetrics>());
     output.push_str(&export::<talos_types::talos::StopReason>());
     output.push_str(&export::<talos_types::talos::TalosToolProgressKind>());

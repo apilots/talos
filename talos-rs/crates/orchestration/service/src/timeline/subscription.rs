@@ -163,7 +163,7 @@ fn spawn_subscription_stream(
                     }
                     let is_live_metrics = matches!(
                         record.event.payload,
-                        talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
+                        talos_types::talos::AgentEventPayload::TurnMetrics(_)
                     );
                     if !is_live_metrics {
                         let event_seq = record.event_seq;
@@ -239,8 +239,8 @@ async fn send_subscription_closed(
 fn is_terminal_event(record: &TimelineEventEnvelope) -> bool {
     matches!(
         record.event.payload,
-        talos_types::talos::TalosTimelineEventPayload::TurnCompleted(_)
-            | talos_types::talos::TalosTimelineEventPayload::TurnError(_)
+        talos_types::talos::AgentEventPayload::TurnCompleted(_)
+            | talos_types::talos::AgentEventPayload::TurnError(_)
     )
 }
 

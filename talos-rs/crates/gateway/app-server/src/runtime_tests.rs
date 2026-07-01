@@ -9,8 +9,7 @@ use talos_service::{
     TimelineSubscriptionMessage,
 };
 use talos_types::talos::{
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnStartedEvent,
-    TimelineEventEnvelope,
+    AgentEvent, AgentEventPayload, AgentEventType, TalosTurnStartedEvent, TimelineEventEnvelope,
 };
 use talos_types::SubscribeTimelineRequest;
 use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -773,16 +772,16 @@ where
 }
 
 fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {
-    let event = TalosTimelineEvent {
+    let event = AgentEvent {
         event_seq: Some(event_seq),
         event_id: Some(event_id.to_string()),
         created_at_ms: Some(100 + event_seq),
-        event_type: TalosTimelineEventType::TurnStarted,
+        event_type: AgentEventType::TurnStarted,
         turn_id: "turn-1".to_string(),
         message_id: "msg-1".to_string(),
         session_id: "s1".to_string(),
         sequence: event_seq as u64,
-        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: "req-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 100 + event_seq as u64,

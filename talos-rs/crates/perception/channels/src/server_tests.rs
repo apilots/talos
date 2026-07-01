@@ -7,9 +7,8 @@ use talos_auth::{
 };
 use talos_service::{EventReplay, TimelineCursorStatus, TimelineSubscription};
 use talos_types::talos::{
-    StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-    TalosTimelineItem, TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent,
-    TimelineEventEnvelope,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosTimelineItem,
+    TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent, TimelineEventEnvelope,
 };
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
@@ -644,35 +643,33 @@ impl ChannelTimelineSubscriptionService for MockTimelineSubscriptions {
             let _ = tx
                 .send(TimelineSubscriptionMessage::Event(timeline_envelope(
                     "event-1",
-                    TalosTimelineEventType::ItemStarted,
+                    AgentEventType::ItemStarted,
                     session_id.clone(),
-                    TalosTimelineEventPayload::ItemStarted(
-                        talos_types::talos::TalosItemStartedEvent {
-                            request_id: "req-mock".to_string(),
-                            turn_id: "turn-mock".to_string(),
-                            item: TalosTimelineItem {
-                                item_id: "item-1".to_string(),
-                                parent_item_id: None,
-                                kind: TalosTimelineItemKind::AssistantText,
-                                phase: TalosTimelinePhase::FinalAnswer,
-                                status: TalosTimelineItemStatus::Running,
-                                title: None,
-                                started_at_ms: 0,
-                                completed_at_ms: None,
-                                content: TalosTimelineContent::Text {
-                                    text: "Echo: ".to_string(),
-                                },
+                    AgentEventPayload::ItemStarted(talos_types::talos::TalosItemStartedEvent {
+                        request_id: "req-mock".to_string(),
+                        turn_id: "turn-mock".to_string(),
+                        item: TalosTimelineItem {
+                            item_id: "item-1".to_string(),
+                            parent_item_id: None,
+                            kind: TalosTimelineItemKind::AssistantText,
+                            phase: TalosTimelinePhase::FinalAnswer,
+                            status: TalosTimelineItemStatus::Running,
+                            title: None,
+                            started_at_ms: 0,
+                            completed_at_ms: None,
+                            content: TalosTimelineContent::Text {
+                                text: "Echo: ".to_string(),
                             },
                         },
-                    ),
+                    }),
                 )))
                 .await;
             let _ = tx
                 .send(TimelineSubscriptionMessage::Event(timeline_envelope(
                     "event-2",
-                    TalosTimelineEventType::ItemDelta,
+                    AgentEventType::ItemDelta,
                     session_id.clone(),
-                    TalosTimelineEventPayload::ItemDelta(talos_types::talos::TalosItemDeltaEvent {
+                    AgentEventPayload::ItemDelta(talos_types::talos::TalosItemDeltaEvent {
                         request_id: "req-mock".to_string(),
                         turn_id: "turn-mock".to_string(),
                         item_id: "item-1".to_string(),
@@ -685,9 +682,9 @@ impl ChannelTimelineSubscriptionService for MockTimelineSubscriptions {
             let _ = tx
                 .send(TimelineSubscriptionMessage::Event(timeline_envelope(
                     "event-3",
-                    TalosTimelineEventType::TurnCompleted,
+                    AgentEventType::TurnCompleted,
                     session_id,
-                    TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                    AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
                         request_id: "req-mock".to_string(),
                         turn_id: "turn-mock".to_string(),
                         completed_at_ms: 0,
@@ -854,9 +851,9 @@ fn extract_text_input(input: &[TalosInputItem]) -> String {
 
 fn timeline_envelope(
     event_id: &str,
-    event_type: TalosTimelineEventType,
+    event_type: AgentEventType,
     session_id: String,
-    payload: TalosTimelineEventPayload,
+    payload: AgentEventPayload,
 ) -> TimelineEventEnvelope {
     TimelineEventEnvelope {
         event_id: event_id.to_string(),
@@ -865,7 +862,7 @@ fn timeline_envelope(
         session_id: session_id.clone(),
         turn_id: "turn-mock".to_string(),
         message_id: "msg-mock".to_string(),
-        event: TalosTimelineEvent {
+        event: AgentEvent {
             event_seq: Some(1),
             event_id: Some(event_id.to_string()),
             created_at_ms: Some(0),

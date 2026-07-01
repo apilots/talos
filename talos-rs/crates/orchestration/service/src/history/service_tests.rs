@@ -2,9 +2,9 @@ use super::*;
 use chrono::Utc;
 use talos_memory::TalosTurn;
 use talos_types::talos::{
-    SessionHistoryMessage, StopReason, TalosContentItem, TalosOutputItem, TalosTimelineContent,
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosUsage, ToolArguments,
+    AgentEvent, AgentEventPayload, RunItem, SessionHistoryMessage, StopReason, TalosContentItem,
+    TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TokenUsage, ToolArguments,
 };
 
 #[test]
@@ -16,18 +16,18 @@ fn history_messages_reuse_timeline_items() {
         seq: 1,
         timestamp: Utc::now(),
         items: vec![
-            TalosOutputItem::UserInput {
+            RunItem::UserInput {
                 text: "question".to_string(),
             },
-            TalosOutputItem::Reasoning {
+            RunItem::Reasoning {
                 text: "thinking".to_string(),
             },
-            TalosOutputItem::ToolCall {
+            RunItem::ToolCall {
                 call_id: "call-1".to_string(),
                 name: "Read".to_string(),
                 arguments: ToolArguments::from(serde_json::json!({"path": "a"})),
             },
-            TalosOutputItem::ToolResult {
+            RunItem::ToolResult {
                 call_id: "call-1".to_string(),
                 tool_name: "Read".to_string(),
                 content: vec![TalosContentItem::Text {
@@ -35,11 +35,11 @@ fn history_messages_reuse_timeline_items() {
                 }],
                 is_error: false,
             },
-            TalosOutputItem::OutputText {
+            RunItem::OutputText {
                 text: "answer".to_string(),
             },
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
     };
 
@@ -78,7 +78,7 @@ fn timeline_message_replaces_memory_message_for_item_timing() {
                 100,
             ),
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         metrics: None,
         stop_reason: StopReason::EndTurn,
     }];
@@ -101,7 +101,7 @@ fn timeline_message_replaces_memory_message_for_item_timing() {
                 240,
             ),
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         metrics: None,
         stop_reason: StopReason::EndTurn,
     };
@@ -134,29 +134,27 @@ fn test_history_message(message_id: &str, turn_id: &str) -> SessionHistoryMessag
             100,
             100,
         )],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         metrics: None,
         stop_reason: StopReason::EndTurn,
     }
 }
 
-fn test_timeline_event(message_id: &str, turn_id: &str, sequence: u64) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn test_timeline_event(message_id: &str, turn_id: &str, sequence: u64) -> AgentEvent {
+    AgentEvent {
         event_seq: Some(sequence as i64),
         event_id: Some(format!("ev_{sequence}")),
         created_at_ms: Some(sequence as i64),
-        event_type: talos_types::talos::TalosTimelineEventType::TurnStarted,
+        event_type: talos_types::talos::AgentEventType::TurnStarted,
         turn_id: turn_id.to_string(),
         message_id: message_id.to_string(),
         session_id: "session-1".to_string(),
         sequence,
-        payload: TalosTimelineEventPayload::TurnStarted(
-            talos_types::talos::TalosTurnStartedEvent {
-                request_id: "request-1".to_string(),
-                turn_id: turn_id.to_string(),
-                started_at_ms: sequence,
-            },
-        ),
+        payload: AgentEventPayload::TurnStarted(talos_types::talos::TalosTurnStartedEvent {
+            request_id: "request-1".to_string(),
+            turn_id: turn_id.to_string(),
+            started_at_ms: sequence,
+        }),
     }
 }
 

@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, ReasoningEffort, ToolDefinition};
-use talos_types::talos::TalosOutputItem;
+use talos_types::talos::RunItem;
 use talos_types::ModelInfo;
 use uuid::Uuid;
 
@@ -347,7 +347,7 @@ pub enum RequestOutputContract {
 #[derive(Debug, Clone)]
 pub struct LlmResponseEnvelope {
     pub output_text: String,
-    pub output_items: Vec<TalosOutputItem>,
+    pub output_items: Vec<RunItem>,
     pub branch: ExecutionBranch,
     pub actions: EventActions,
     pub allow_final_projection: bool,

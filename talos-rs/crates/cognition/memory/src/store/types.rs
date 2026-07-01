@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use talos_llm_provider::ChatMessage;
 use talos_types::talos::{
-    DynamicToolArguments, JsonContentValue, StopReason, TalosOutputItem, TalosUsage, ToolArguments,
+    DynamicToolArguments, JsonContentValue, RunItem, StopReason, TokenUsage, ToolArguments,
     ToolExecutionResult,
 };
 
@@ -69,9 +69,9 @@ pub struct TalosTurn {
     pub seq: u64,
     pub timestamp: DateTime<Utc>,
     #[serde(default)]
-    pub items: Vec<TalosOutputItem>,
+    pub items: Vec<RunItem>,
     #[serde(default)]
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     pub stop_reason: StopReason,
 }

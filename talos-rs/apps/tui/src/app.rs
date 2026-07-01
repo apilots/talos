@@ -9,7 +9,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{SessionInfo, TalosContext, TalosProvider, TalosSourceType};
-use talos_types::talos::TalosUsage;
+use talos_types::talos::TokenUsage;
 
 use crate::client::GatewayClient;
 use crate::render;
@@ -31,7 +31,7 @@ impl TuiApp {
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
             current_model: String::new(),
-            session_usage: TalosUsage::default(),
+            session_usage: TokenUsage::default(),
             turn_metrics: None,
             turn_metrics_live: false,
             available_model_info: vec![],

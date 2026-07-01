@@ -1,4 +1,5 @@
-use super::{ActiveTurnHandle, AgentHarness, QueuedTurn};
+use super::runtime::AgentRuntimeAbortHandle;
+use super::{ActiveTurnHandle, AgentHarnessImpl, QueuedTurn};
 use chrono::Utc;
 use dashmap::mapref::entry::Entry;
 use std::collections::VecDeque;
@@ -11,10 +12,10 @@ use talos_memory::{
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
     SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
 };
-use talos_types::{talos::TalosUsage, TalosSession};
+use talos_types::{talos::TokenUsage, TalosSession};
 use uuid::Uuid;
 
-impl AgentHarness {
+impl AgentHarnessImpl {
     async fn ensure_session_is_idle(&self, session_id: &str, action: &str) -> TalosResult<()> {
         if self.active_turns.contains_key(session_id) {
             return Err(TalosError::ValidationError(format!(
@@ -46,11 +47,15 @@ impl AgentHarness {
     pub(crate) fn activate_reserved_turn(
         &self,
         session_id: &str,
-        execution_task: tokio::task::AbortHandle,
+        turn_id: Option<String>,
+        execution_task: AgentRuntimeAbortHandle,
     ) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
             Entry::Occupied(mut entry) => {
-                entry.insert(ActiveTurnHandle::Running { execution_task });
+                entry.insert(ActiveTurnHandle::Running {
+                    turn_id,
+                    execution_task,
+                });
                 Ok(())
             }
             Entry::Vacant(_) => Err(TalosError::InternalError(format!(
@@ -121,7 +126,7 @@ impl AgentHarness {
                 // Force-abort any remaining running turns
                 for session_id in &remaining {
                     if let Some(handle) = self.active_turns.get(session_id) {
-                        if let ActiveTurnHandle::Running { execution_task } = handle.value() {
+                        if let ActiveTurnHandle::Running { execution_task, .. } = handle.value() {
                             execution_task.abort();
                         }
                     }
@@ -255,7 +260,7 @@ impl AgentHarness {
     pub(crate) async fn compact_session_impl(
         &self,
         session: TalosSession,
-    ) -> TalosResult<TalosUsage> {
+    ) -> TalosResult<TokenUsage> {
         let session_id = session.context.session_id.clone();
         self.ensure_session_is_idle(&session_id, "compact").await?;
         let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
@@ -276,7 +281,7 @@ impl AgentHarness {
             ),
         )
         .await?;
-        Ok(TalosUsage {
+        Ok(TokenUsage {
             input_tokens: report.input_tokens,
             output_tokens: report.output_tokens,
             total_tokens: report.total_tokens,

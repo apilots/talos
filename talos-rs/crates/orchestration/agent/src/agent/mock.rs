@@ -1,15 +1,18 @@
-use super::AgentHarness;
+use super::request::AgentKernelParams;
 use crate::{
-    service::{AgentRequest, AgentResponse},
-    Agent,
+    service::{
+        AgentInputParams, AgentInputResult, AgentInterruptParams, AgentInterruptResult,
+        AgentRunParams, AgentRunResult,
+    },
+    AgentHarness,
 };
 use async_trait::async_trait;
 use std::time::Duration;
 use talos_agent_kernel::TimelineBuilder;
 use talos_error::TalosResult;
 use talos_types::talos::{
-    TalosOutputItem, TalosTimelineDelta, TalosTimelineEvent, TalosTimelineItemStatus,
-    TalosToolProgressKind, TalosUsage,
+    AgentEvent, RunItem, TalosTimelineDelta, TalosTimelineItemStatus, TalosToolProgressKind,
+    TokenUsage,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -23,39 +26,39 @@ impl MockAgent {
 }
 
 #[async_trait]
-impl Agent for MockAgent {
+impl AgentHarness for MockAgent {
     fn id(&self) -> &str {
         "mock"
     }
 
-    async fn run(&self, request: AgentRequest) -> TalosResult<AgentResponse> {
-        let input = AgentHarness::extract_text_input(&request.input);
+    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
+        let input = AgentKernelParams::extract_text_input(&request.input);
         let output = format!("Mock response to: {}", input);
-        Ok(AgentResponse {
+        Ok(AgentRunResult {
             output_text: output,
-            output_items: vec![TalosOutputItem::OutputText {
+            output_items: vec![RunItem::OutputText {
                 text: "Mock response".to_string(),
             }],
             reasoning: Vec::new(),
             stop_reason: talos_types::talos::StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             task_count: 1,
             session_id: request.session.context.session_id,
             session_title_update: None,
         })
     }
 
-    async fn run_stream(
+    async fn run_streamed(
         &self,
-        request: AgentRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentRunParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         let turn_id = request
             .turn_id
             .clone()
             .unwrap_or_else(|| format!("turn_{}", Uuid::new_v4().simple()));
         let message_id = request.session.context.message_id.clone();
         let session_id = request.session.context.session_id.clone();
-        let execution = Agent::run(self, request).await?;
+        let execution = AgentHarness::run(self, request).await?;
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let (tx, rx) = mpsc::channel(8);
         tokio::spawn(async move {
@@ -63,7 +66,7 @@ impl Agent for MockAgent {
             let _ = tx.send(timeline.start_turn()).await;
             let answer_started = timeline.start_final_answer();
             let item_id = match &answer_started.payload {
-                talos_types::talos::TalosTimelineEventPayload::ItemStarted(payload) => {
+                talos_types::talos::AgentEventPayload::ItemStarted(payload) => {
                     payload.item.item_id.clone()
                 }
                 _ => unreachable!("start_final_answer returns item_started"),
@@ -85,7 +88,7 @@ impl Agent for MockAgent {
             let tool_started =
                 timeline.start_tool_call("call-1", "Bash", serde_json::json!({}).to_string());
             let tool_item_id = match &tool_started.payload {
-                talos_types::talos::TalosTimelineEventPayload::ItemStarted(payload) => {
+                talos_types::talos::AgentEventPayload::ItemStarted(payload) => {
                     payload.item.item_id.clone()
                 }
                 _ => unreachable!("start_tool_call returns item_started"),
@@ -119,8 +122,8 @@ impl Agent for MockAgent {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<TalosUsage> {
-        Ok(TalosUsage::default())
+    ) -> TalosResult<TokenUsage> {
+        Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
@@ -143,22 +146,15 @@ impl Agent for MockAgent {
         false
     }
 
-    async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
+    async fn interrupt(&self, _params: AgentInterruptParams) -> TalosResult<AgentInterruptResult> {
+        Ok(AgentInterruptResult { interrupted: false })
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        Ok(())
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentInputResult> {
+        Ok(AgentInputResult { accepted: true })
     }
 }

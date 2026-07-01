@@ -11,12 +11,11 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    SessionHistorySnapshot, SkillSuggestion, StartTurnRequest, StopReason, TalosContentItem,
-    TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEvent,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
-    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
-    TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
+    AgentEvent, AgentEventPayload, AgentEventType, SessionHistorySnapshot, SkillSuggestion,
+    StartTurnRequest, StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
 
@@ -35,7 +34,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) close_session_failures_remaining: u8,
     pub(crate) shutdown_calls: usize,
     pub(crate) cancelled_sessions: Vec<String>,
-    pub(crate) session_usage: talos_types::talos::TalosUsage,
+    pub(crate) session_usage: talos_types::talos::TokenUsage,
     pub(crate) compact_calls: usize,
     pub(crate) clear_calls: usize,
     pub(crate) reconnect_calls: usize,
@@ -87,8 +86,8 @@ pub(crate) fn started_event(message_id: impl Into<String>, sequence: u64) -> Tim
         message_id.into(),
         "sess-test".to_string(),
         sequence,
-        TalosTimelineEventType::TurnStarted,
-        TalosTimelineEventPayload::TurnStarted(talos_sdk::TalosTurnStartedEvent {
+        AgentEventType::TurnStarted,
+        AgentEventPayload::TurnStarted(talos_sdk::TalosTurnStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             started_at_ms: sequence,
@@ -106,8 +105,8 @@ pub(crate) fn output_item_started_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -137,8 +136,8 @@ pub(crate) fn output_delta_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: "final-answer".to_string(),
@@ -156,8 +155,8 @@ pub(crate) fn commentary_item_started_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -187,8 +186,8 @@ pub(crate) fn commentary_delta_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: "commentary".to_string(),
@@ -206,8 +205,8 @@ pub(crate) fn unknown_item_started_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -237,8 +236,8 @@ pub(crate) fn unknown_delta_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemDelta,
-        TalosTimelineEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: "unknown-answer".to_string(),
@@ -257,15 +256,13 @@ pub(crate) fn assistant_text_committed_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::AssistantTextCommitted,
-        TalosTimelineEventPayload::AssistantTextCommitted(
-            talos_sdk::TalosAssistantTextCommittedEvent {
-                request_id: "req-test".to_string(),
-                turn_id: "turn-test".to_string(),
-                item_id: "unknown-answer".to_string(),
-                phase,
-            },
-        ),
+        AgentEventType::AssistantTextCommitted,
+        AgentEventPayload::AssistantTextCommitted(talos_sdk::TalosAssistantTextCommittedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "unknown-answer".to_string(),
+            phase,
+        }),
     )
 }
 
@@ -280,8 +277,8 @@ pub(crate) fn reasoning_delta_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -303,14 +300,14 @@ pub(crate) fn completed_event(
     message_id: impl Into<String>,
     session_id: impl Into<String>,
     sequence: u64,
-    usage: TalosUsage,
+    usage: TokenUsage,
 ) -> TimelineEventEnvelope {
     timeline_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::TurnCompleted,
-        TalosTimelineEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
+        AgentEventType::TurnCompleted,
+        AgentEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             completed_at_ms: sequence,
@@ -325,15 +322,15 @@ pub(crate) fn completed_event_with_metrics(
     message_id: impl Into<String>,
     session_id: impl Into<String>,
     sequence: u64,
-    usage: TalosUsage,
+    usage: TokenUsage,
     metrics: TurnExecutionMetrics,
 ) -> TimelineEventEnvelope {
     timeline_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::TurnCompleted,
-        TalosTimelineEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
+        AgentEventType::TurnCompleted,
+        AgentEventPayload::TurnCompleted(talos_sdk::TalosTurnCompletedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             completed_at_ms: sequence,
@@ -354,8 +351,8 @@ pub(crate) fn turn_metrics_event_with_metrics(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::TurnMetrics,
-        TalosTimelineEventPayload::TurnMetrics(talos_sdk::TalosTurnMetricsEvent {
+        AgentEventType::TurnMetrics,
+        AgentEventPayload::TurnMetrics(talos_sdk::TalosTurnMetricsEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             metrics,
@@ -373,8 +370,8 @@ pub(crate) fn execution_summary_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -408,8 +405,8 @@ pub(crate) fn tool_started_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemStarted,
-        TalosTimelineEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
@@ -448,8 +445,8 @@ pub(crate) fn tool_completed_event(
         message_id.into(),
         session_id.into(),
         sequence,
-        TalosTimelineEventType::ItemCompleted,
-        TalosTimelineEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
+        AgentEventType::ItemCompleted,
+        AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item_id: format!("tool-{call_id}"),
@@ -479,13 +476,13 @@ fn timeline_event(
     message_id: String,
     session_id: String,
     sequence: u64,
-    event_type: TalosTimelineEventType,
-    payload: TalosTimelineEventPayload,
+    event_type: AgentEventType,
+    payload: AgentEventPayload,
 ) -> TimelineEventEnvelope {
     let event_id = format!("ev_{sequence}");
     let event_seq = sequence as i64;
     let created_at_ms = sequence as i64;
-    let event = TalosTimelineEvent {
+    let event = AgentEvent {
         event_seq: Some(event_seq),
         event_id: Some(event_id.clone()),
         created_at_ms: Some(created_at_ms),
@@ -527,7 +524,7 @@ impl MockGatewayClient {
                 close_session_failures_remaining: 0,
                 shutdown_calls: 0,
                 cancelled_sessions: Vec::new(),
-                session_usage: talos_types::talos::TalosUsage::default(),
+                session_usage: talos_types::talos::TokenUsage::default(),
                 compact_calls: 0,
                 clear_calls: 0,
                 reconnect_calls: 0,
@@ -656,7 +653,7 @@ impl GatewayClient for MockGatewayClient {
     async fn clear_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.clear_calls = state.clear_calls.saturating_add(1);
-        state.session_usage = talos_types::talos::TalosUsage::default();
+        state.session_usage = talos_types::talos::TokenUsage::default();
         Ok(state.session_info(0))
     }
 
@@ -741,7 +738,7 @@ impl GatewayClient for MockGatewayClient {
             message_id,
             session_id.to_string(),
             5,
-            TalosUsage::default(),
+            TokenUsage::default(),
         ))
         .await
         .unwrap();
