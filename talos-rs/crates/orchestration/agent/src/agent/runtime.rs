@@ -4,7 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
 
-use chrono::Utc;
 use tokio::sync::mpsc;
 use tokio::task::{AbortHandle, JoinHandle};
 use uuid::Uuid;
@@ -12,7 +11,8 @@ use uuid::Uuid;
 use super::kernel;
 use super::request::{agent_run_params_to_kernel_params, AgentKernelParams};
 use crate::{
-    AgentCapabilities, AgentEvent, AgentKind, AgentRunParams, AgentRunResult, SkillRootsResolver,
+    AgentCapabilities, AgentError, AgentEvent, AgentKind, AgentResult, AgentResumeParams,
+    AgentRunConfig, AgentRunContext, AgentRunParams, AgentRunResult, SkillRootsResolver,
 };
 use talos_agent_kernel::{
     run_general_turn_with_resume, ContextStateBags, DynamicToolResultResume, GeneralTurnOutcome,
@@ -36,7 +36,7 @@ use talos_types::talos::{
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
     TalosTimelinePhase, TalosToolProgressKind, TokenUsage, TurnExecutionMetrics,
 };
-use talos_types::{ModelInfo, TalosSession};
+use talos_types::ModelInfo;
 
 /// Internal SPI implemented by concrete agent backends attached to AgentHarness.
 ///
@@ -55,13 +55,25 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
     fn run(
         &self,
         params: AgentRunParams,
-    ) -> impl Future<Output = TalosResult<AgentRunResult>> + Send;
+    ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Execute a backend run and stream standardized Agent events.
     fn run_streamed(
         &self,
         params: AgentRunParams,
-    ) -> impl Future<Output = TalosResult<AgentRuntimeStream>> + Send;
+    ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
+
+    /// Continue a non-streaming backend run using same-turn Agent parameters.
+    fn resume(
+        &self,
+        params: AgentResumeParams,
+    ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
+
+    /// Continue a backend run and stream standardized same-turn Agent events.
+    fn resume_streamed(
+        &self,
+        params: AgentResumeParams,
+    ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 }
 
 /// Stream resources returned by a concrete AgentRuntime.
@@ -74,7 +86,7 @@ pub(crate) struct AgentRuntimeStream {
     /// Harness-owned abort handle for interrupting the backend task.
     pub(crate) abort_handle: AgentRuntimeAbortHandle,
     /// Completion task that resolves to the final AgentRunResult.
-    pub(crate) completion: JoinHandle<TalosResult<AgentRunResult>>,
+    pub(crate) completion: JoinHandle<AgentResult<AgentRunResult>>,
 }
 
 /// Harness-owned abort handle for a runtime execution.
@@ -89,6 +101,7 @@ pub(crate) struct AgentRuntimeAbortHandle {
 }
 
 impl AgentRuntimeAbortHandle {
+    /// Create an abort handle for a newly spawned runtime task.
     pub(crate) fn new(outer: AbortHandle) -> Self {
         Self {
             outer: Some(outer),
@@ -105,6 +118,7 @@ impl AgentRuntimeAbortHandle {
         }
     }
 
+    /// Abort all tracked runtime tasks for the active Harness run.
     pub(crate) fn abort(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
         if let Some(outer) = &self.outer {
@@ -133,6 +147,7 @@ pub(crate) struct KernelAgent {
 }
 
 impl KernelAgent {
+    /// Create the built-in Kernel runtime from Harness factory inputs.
     pub(crate) fn new(params: KernelAgentParams) -> Self {
         Self {
             id: params.id,
@@ -146,25 +161,38 @@ impl KernelAgent {
         }
     }
 
+    /// Replace runtime-visible tools after Harness registry changes.
     pub(crate) fn set_tool_registry(&mut self, tool_registry: Arc<ToolRegistry>) {
         self.tool_registry = tool_registry;
     }
 
+    /// Replace Kernel runtime configuration after Harness config changes.
     pub(crate) fn set_kernel_config(&mut self, kernel_config: AgentKernelConfig) {
         self.kernel_config = kernel_config;
     }
 
-    fn kernel_config_for_session(session: &TalosSession) -> TalosResult<AgentKernelConfig> {
-        validate_session_workspace_user(&session.user_id, &session.context.user_id)?;
-        let kernel_config = kernel::normalized_kernel_config(session.config.agent.kernel.clone());
-        Ok(resolve_effective_kernel_workspace(&kernel_config, &session.user_id)?.kernel_config)
+    fn kernel_config_for_run(
+        context: &AgentRunContext,
+        config: &AgentRunConfig,
+    ) -> TalosResult<AgentKernelConfig> {
+        let execution_user_id = context
+            .user_id
+            .as_deref()
+            .unwrap_or(context.owner_user_id.as_str());
+        validate_session_workspace_user(&context.owner_user_id, execution_user_id)?;
+        let kernel_config = kernel::normalized_kernel_config(config.agent.kernel.clone());
+        Ok(
+            resolve_effective_kernel_workspace(&kernel_config, &context.owner_user_id)?
+                .kernel_config,
+        )
     }
 
-    async fn memory_store_for_session(
+    async fn memory_store_for_run(
         &self,
-        session: &TalosSession,
+        context: &AgentRunContext,
+        config: &AgentRunConfig,
     ) -> TalosResult<(AgentKernelConfig, Arc<MemoryStore>)> {
-        let kernel_config = Self::kernel_config_for_session(session)?;
+        let kernel_config = Self::kernel_config_for_run(context, config)?;
         let memory_store = Arc::new(MemoryStore::from_config_with_llm(
             &kernel_config,
             self.llm_provider.clone(),
@@ -172,15 +200,15 @@ impl KernelAgent {
         Ok((kernel_config, memory_store))
     }
 
-    fn resolve_selected_model_info(&self, session: &TalosSession) -> ModelInfo {
-        let selected_model = if session.config.llm.model.trim().is_empty() {
+    fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> ModelInfo {
+        let selected_model = if config.llm.model.trim().is_empty() {
             self.model.clone()
         } else {
-            session.config.llm.model.clone()
+            config.llm.model.clone()
         };
-        let provider_name = session.config.llm.provider.clone();
+        let provider_name = config.llm.provider.clone();
 
-        if let Some(provider_config) = session.config.current_provider_config() {
+        if let Some(provider_config) = config.current_provider_config() {
             if let Some(model) = provider_config
                 .models
                 .iter()
@@ -230,10 +258,9 @@ impl KernelAgent {
         stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
         kernel_config: &AgentKernelConfig,
     ) -> InvocationContext {
-        let session_id = agent_request.session.context.session_id.clone();
-        let message_id = agent_request.session.context.message_id.clone();
+        let session_id = agent_request.context.session_id.clone();
+        let message_id = agent_request.context.message_id.clone();
         let workspace_id = agent_request
-            .session
             .context
             .workspace_id
             .clone()
@@ -245,9 +272,9 @@ impl KernelAgent {
             invocation_id,
             agent_id: self.id.clone(),
             workspace_id,
-            project_root: agent_request.session.context.project_root.clone(),
+            project_root: agent_request.context.project_root.clone(),
             input,
-            selected_model_info: self.resolve_selected_model_info(&agent_request.session),
+            selected_model_info: self.resolve_selected_model_info(&agent_request.config),
             phase: agent_request.phase.clone(),
             planning_instruction: agent_request.planning_instruction.clone(),
             transfer_to: agent_request.transfer_to.clone(),
@@ -256,7 +283,7 @@ impl KernelAgent {
                 session_id: session_id.clone(),
                 ..InvocationSession::default()
             },
-            session_environment: agent_request.session.context.environment.clone(),
+            session_environment: agent_request.context.environment.clone(),
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
             limits: InvocationLimits::from(kernel_config),
@@ -276,10 +303,16 @@ impl KernelAgent {
     async fn build_general_turn_resume(
         memory_store: &MemoryStore,
         session_id: &str,
+        turn_id: &str,
         resume_context: Option<AgentDispatchResumeContext>,
     ) -> TalosResult<Option<GeneralTurnResume>> {
-        let Some(tool_call) = resume_context.and_then(|context| context.tool_call) else {
+        let Some(resume_context) = resume_context else {
             return Ok(None);
+        };
+        let Some(tool_call) = resume_context.tool_call else {
+            return Err(TalosError::ValidationError(format!(
+                "dynamic resume context for session `{session_id}` turn `{turn_id}` is missing tool call metadata"
+            )));
         };
 
         let records = memory_store
@@ -290,7 +323,8 @@ impl KernelAgent {
         for record in records {
             match record.payload {
                 SessionTranscriptPayload::DynamicToolRequest { payload }
-                    if payload.call_id.as_str() == tool_call.call_id.as_str()
+                    if record.header.invocation_id.as_str() == turn_id
+                        && payload.call_id.as_str() == tool_call.call_id.as_str()
                         && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
                 {
                     if request
@@ -301,7 +335,8 @@ impl KernelAgent {
                     }
                 }
                 SessionTranscriptPayload::DynamicToolResponse { payload }
-                    if payload.call_id.as_str() == tool_call.call_id.as_str()
+                    if record.header.invocation_id.as_str() == turn_id
+                        && payload.call_id.as_str() == tool_call.call_id.as_str()
                         && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
                 {
                     if response
@@ -314,15 +349,19 @@ impl KernelAgent {
                 _ => {}
             }
         }
-        let response = response.map(|(_, payload)| payload).ok_or_else(|| {
+        let request = request.map(|(_, payload)| payload).ok_or_else(|| {
             TalosError::ToolError(format!(
-                "dynamic tool call `{}` has no submitted result for session `{}`",
-                tool_call.call_id, session_id
+                "dynamic tool call `{}` has no pending request for session `{}` turn `{}`",
+                tool_call.call_id, session_id, turn_id
             ))
         })?;
-        let original_arguments = request
-            .map(|(_, payload)| payload.arguments)
-            .unwrap_or_else(|| serde_json::Value::Null.into());
+        let response = response.map(|(_, payload)| payload).ok_or_else(|| {
+            TalosError::ToolError(format!(
+                "dynamic tool call `{}` has no submitted result for session `{}` turn `{}`",
+                tool_call.call_id, session_id, turn_id
+            ))
+        })?;
+        let original_arguments = request.arguments;
 
         Ok(Some(GeneralTurnResume::DynamicToolResult(
             DynamicToolResultResume {
@@ -368,23 +407,28 @@ impl KernelAgent {
             usage,
             task_count: 1,
             session_id,
-            session_title_update: None,
+            generated_session_title: None,
         }
     }
 
-    async fn execute_unary_run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
+    async fn execute_unary_run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
+        let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
         let input = Self::extract_text_input(&agent_request.input);
-        let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
-        let session_id = agent_request.session.context.session_id.clone();
+        let invocation_id = turn_id.clone();
+        let session_id = agent_request.context.session_id.clone();
         let (kernel_config, memory_store) = self
-            .memory_store_for_session(&agent_request.session)
+            .memory_store_for_run(&agent_request.context, &agent_request.config)
             .await?;
         let skill_options = self.build_skill_options(&agent_request.input, &kernel_config)?;
-        let resume =
-            Self::build_general_turn_resume(memory_store.as_ref(), &session_id, resume_context)
-                .await?;
+        let resume = Self::build_general_turn_resume(
+            memory_store.as_ref(),
+            &session_id,
+            &turn_id,
+            resume_context,
+        )
+        .await?;
         let mut context = self.build_invocation_context(
             &agent_request,
             input.clone(),
@@ -413,16 +457,15 @@ impl KernelAgent {
         ))
     }
 
-    async fn start_streamed_run(&self, request: AgentRunParams) -> TalosResult<AgentRuntimeStream> {
-        let request_turn_id = request.turn_id.clone();
+    async fn start_streamed_run(&self, request: AgentRunParams) -> AgentResult<AgentRuntimeStream> {
+        let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
         let input = Self::extract_text_input(&agent_request.input);
         let request_id = format!("req_{}", Uuid::new_v4().simple());
-        let invocation_id = format!("inv-{}", Utc::now().timestamp_millis());
-        let session_id = agent_request.session.context.session_id.clone();
-        let message_id = agent_request.session.context.message_id.clone();
-        let turn_id = request_turn_id.unwrap_or_else(|| request_id.clone());
+        let invocation_id = turn_id.clone();
+        let session_id = agent_request.context.session_id.clone();
+        let message_id = agent_request.context.message_id.clone();
         let mut timeline = TimelineBuilder::new(
             request_id.clone(),
             turn_id.clone(),
@@ -438,15 +481,17 @@ impl KernelAgent {
         let abort_handle = AgentRuntimeAbortHandle::inner_only(inner_abort_handle.clone());
         let task_abort_handle = abort_handle.clone();
         let task_inner_abort_handle = inner_abort_handle.clone();
-        let task = tokio::spawn(async move {
-            let (kernel_config, memory_store) =
-                match this.memory_store_for_session(&agent_request.session).await {
-                    Ok(value) => value,
-                    Err(err) => {
-                        let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                        return Err(err);
-                    }
-                };
+        let task: JoinHandle<AgentResult<AgentRunResult>> = tokio::spawn(async move {
+            let (kernel_config, memory_store) = match this
+                .memory_store_for_run(&agent_request.context, &agent_request.config)
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    return Err(err.into());
+                }
+            };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
             let kernel_ctx = this.build_invocation_context(
                 &agent_request,
@@ -458,6 +503,7 @@ impl KernelAgent {
             let resume = match Self::build_general_turn_resume(
                 memory_store.as_ref(),
                 &session_id,
+                &turn_id,
                 resume_context.clone(),
             )
             .await
@@ -465,7 +511,7 @@ impl KernelAgent {
                 Ok(resume) => resume,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                    return Err(err);
+                    return Err(err.into());
                 }
             };
 
@@ -482,7 +528,7 @@ impl KernelAgent {
                     }
                     Err(err) => {
                         let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                        return Err(err);
+                        return Err(err.into());
                     }
                 }
             }
@@ -492,7 +538,7 @@ impl KernelAgent {
                 Ok(skill_options) => skill_options,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                    return Err(err);
+                    return Err(err.into());
                 }
             };
 
@@ -549,7 +595,7 @@ impl KernelAgent {
                 }
             }
             if stream_failed {
-                return Err(TalosError::InternalError(
+                return Err(AgentError::runtime_error(
                     "kernel stream event mapping failed".to_string(),
                 ));
             }
@@ -568,7 +614,7 @@ impl KernelAgent {
                         }
                         Err(err) => {
                             let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                            return Err(err);
+                            return Err(err.into());
                         }
                     }
                     if matches!(
@@ -618,7 +664,7 @@ impl KernelAgent {
                         usage: TokenUsage::default(),
                         task_count: 0,
                         session_id,
-                        session_title_update: None,
+                        generated_session_title: None,
                     })
                 }
                 Ok(Err(err)) => {
@@ -629,7 +675,7 @@ impl KernelAgent {
                     )
                     .await;
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                    Err(err)
+                    Err(err.into())
                 }
                 Err(err) => {
                     emit_terminal_item_closures(
@@ -638,7 +684,7 @@ impl KernelAgent {
                         TalosTimelineItemStatus::Failed,
                     )
                     .await;
-                    let error = TalosError::InternalError(format!(
+                    let error = AgentError::runtime_error(format!(
                         "kernel stream task join failed: {}",
                         err
                     ));
@@ -683,6 +729,10 @@ async fn emit_terminal_item_closures(
     }
 }
 
+/// State used while normalizing Kernel stream events into Agent events.
+///
+/// This is runtime-private bookkeeping for event ordering and item identity.
+/// Coordinator and Service must only receive the resulting AgentEvent values.
 #[derive(Default)]
 pub(crate) struct KernelTimelineState {
     pub(crate) reasoning_item_id: Option<String>,
@@ -768,6 +818,11 @@ fn seed_resume_context(
         .insert(tool_call.call_id, tool_call.item_id);
 }
 
+/// Convert one Kernel stream event into standardized Agent timeline events.
+///
+/// This function is the Kernel runtime's event normalization boundary. It must
+/// reject invalid Kernel event ordering instead of leaking KernelStreamEvent
+/// values or backend item ids past the AgentRuntime SPI.
 pub(crate) fn emit_kernel_timeline_events(
     timeline: &mut TimelineBuilder,
     state: &mut KernelTimelineState,
@@ -1341,11 +1396,19 @@ impl AgentRuntime for KernelAgent {
         AgentCapabilities::kernel()
     }
 
-    async fn run(&self, params: AgentRunParams) -> TalosResult<AgentRunResult> {
+    async fn run(&self, params: AgentRunParams) -> AgentResult<AgentRunResult> {
         self.execute_unary_run(params).await
     }
 
-    async fn run_streamed(&self, params: AgentRunParams) -> TalosResult<AgentRuntimeStream> {
+    async fn run_streamed(&self, params: AgentRunParams) -> AgentResult<AgentRuntimeStream> {
         self.start_streamed_run(params).await
+    }
+
+    async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
+        self.execute_unary_run(params.run).await
+    }
+
+    async fn resume_streamed(&self, params: AgentResumeParams) -> AgentResult<AgentRuntimeStream> {
+        self.start_streamed_run(params.run).await
     }
 }

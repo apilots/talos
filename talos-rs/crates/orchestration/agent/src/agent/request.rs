@@ -1,12 +1,16 @@
-use crate::service::AgentRunParams;
+use crate::service::{AgentRunConfig, AgentRunContext, AgentRunParams};
 use talos_agent_kernel::TurnPhase;
 use talos_skills::SkillSelector;
 use talos_types::talos::{RunItem, TalosInputItem, TalosReasoning};
-use talos_types::TalosSession;
 
+/// Kernel-specific request shape derived from shared AgentRunParams.
+///
+/// This adapter object is crate-private. It can carry Kernel execution details,
+/// but it must not replace the shared Harness/Runtime AgentRunParams boundary.
 #[derive(Debug, Clone)]
 pub(crate) struct AgentKernelParams {
-    pub(crate) session: TalosSession,
+    pub(crate) context: AgentRunContext,
+    pub(crate) config: AgentRunConfig,
     pub(crate) input: Vec<TalosInputItem>,
     pub(crate) phase: TurnPhase,
     pub(crate) planning_instruction: Option<String>,
@@ -14,6 +18,7 @@ pub(crate) struct AgentKernelParams {
 }
 
 impl AgentKernelParams {
+    /// Extract normalized user text from shared Agent input items.
     pub(crate) fn extract_text_input(input: &[TalosInputItem]) -> String {
         input
             .iter()
@@ -32,6 +37,7 @@ impl AgentKernelParams {
             .join("\n\n")
     }
 
+    /// Extract skill selections from shared Agent input items.
     pub(crate) fn extract_skill_selections(input: &[TalosInputItem]) -> Vec<SkillSelector> {
         input
             .iter()
@@ -44,6 +50,7 @@ impl AgentKernelParams {
             .collect()
     }
 
+    /// Convert shared run transcript items into Talos reasoning summaries.
     pub(crate) fn collect_reasoning(output_items: &[RunItem]) -> Vec<TalosReasoning> {
         output_items
             .iter()
@@ -55,9 +62,11 @@ impl AgentKernelParams {
     }
 }
 
+/// Convert shared Agent run params into Kernel-private execution params.
 pub(crate) fn agent_run_params_to_kernel_params(request: AgentRunParams) -> AgentKernelParams {
     AgentKernelParams {
-        session: request.session,
+        context: request.context,
+        config: request.config,
         input: request.input,
         phase: TurnPhase::Execution,
         planning_instruction: None,

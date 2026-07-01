@@ -315,7 +315,7 @@ TalosService
   get_active_turn(request: SessionActiveTurnRequest) -> TimelineActiveTurnSnapshot
   cancel_active_turn(session_id) -> ()
   subscribe_timeline(request: SubscribeTimelineRequest) -> SubscribeTimelineResponse
-  open_timeline_subscription(request: SubscribeTimelineRequest) -> TimelineSubscriptionSource
+  timeline_subscription_source(request: SubscribeTimelineRequest) -> TimelineSubscriptionSource
   recover_timeline(request: RecoverTimelineRequest) -> TimelineRecoveryResponse
 ```
 
@@ -326,7 +326,7 @@ TalosService
 3. Service API 不暴露 `runtime_ref`。
 4. 流式输出仍通过 timeline subscription / recovery 表达，不新增 `TurnStream` 产品 API。
 5. dynamic tool result 仍使用现有产品语义，不新增 `submit_turn_input`。
-6. `get_active_turn`、`recover_timeline`、`open_timeline_subscription` 是 live recovery / crash 后 UI 恢复的产品 API，归 Service / Gateway 管理，不下沉到 Harness / Runtime。
+6. `get_active_turn`、`recover_timeline`、`timeline_subscription_source` 是 live recovery / crash 后 UI 恢复的产品 API，归 Service / Gateway 管理，不下沉到 Harness / Runtime。
 7. Service 通过 timeline store 和 active turn store 恢复客户端渲染状态；这不等同于 runtime backend continuation。
 
 ### Gateway / App Protocol Recovery API
@@ -636,12 +636,12 @@ AgentRunResult
   usage: TokenUsage
   task_count
   session_id
-  session_title_update?
+  generated_session_title?
 ```
 
 约束：
 
-1. 当前实现的 `AgentRunResult` 不携带 `agent_id` 和 `turn_id` 字段；agent identity 由 Coordinator registry / selected harness 保证，turn identity 由 `AgentRunParams.turn_id` 和 Service timeline / active-turn 状态保证。
+1. 当前实现的 `AgentRunResult` 不携带 `agent_id` 和 `turn_id` 字段；agent identity 由 Coordinator registry / selected harness 保证，turn identity 由 `AgentRunContext.turn_id` 和 Service timeline / active-turn 状态保证。
 2. 如果未来需要在 result 中回显 `agent_id` / `turn_id`，必须先确认对 Gateway / SDK / timeline envelope 的影响，不能和 `TimelineEventEnvelope` 的恢复元数据重复造对象。
 3. `output_items` 使用 `RunItem`，`usage` 使用 `TokenUsage`，不新增 `AgentItem`、`RunUsage` 或 `AgentUsage`。
 

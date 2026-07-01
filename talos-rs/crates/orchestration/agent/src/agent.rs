@@ -3,9 +3,10 @@ use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::sync::{mpsc, Mutex};
 
 mod kernel;
+mod lifecycle;
 mod mock;
 mod request;
 mod runtime;
@@ -16,10 +17,13 @@ mod tests;
 
 pub use mock::MockAgent;
 
+use lifecycle::{ActiveTurnHandle, AgentRunMode, QueuedTurn};
+
 use crate::{
-    empty_skill_roots_resolver, flush_manager::MemoryFlushManager, AgentDescriptor, AgentHarness,
-    AgentInput, AgentInputParams, AgentInputResult, AgentInterruptParams, AgentInterruptResult,
-    AgentRunParams, AgentRunResult, AgentStatus, SessionTitleUpdate, SkillRootsResolver,
+    empty_skill_roots_resolver, flush_manager::MemoryFlushManager, AgentDescriptor, AgentError,
+    AgentErrorKind, AgentHarness, AgentInput, AgentInputParams, AgentInputResult,
+    AgentInterruptParams, AgentInterruptResult, AgentResult, AgentResumeParams, AgentRunConfig,
+    AgentRunParams, AgentRunResult, AgentRunSessionState, AgentStatus, SkillRootsResolver,
 };
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
@@ -44,28 +48,6 @@ Rules:
 - Focus on the core task topic.
 "#;
 
-/// Harness-owned in-memory state for an active Agent run.
-#[derive(Clone)]
-pub(crate) enum ActiveTurnHandle {
-    Reserved,
-    Running {
-        turn_id: Option<String>,
-        execution_task: AgentRuntimeAbortHandle,
-    },
-}
-
-/// Queued Agent run waiting for the session's active run to finish.
-pub(crate) enum QueuedTurn {
-    Unary {
-        request: AgentRunParams,
-        response_tx: oneshot::Sender<TalosResult<AgentRunResult>>,
-    },
-    Stream {
-        request: AgentRunParams,
-        event_tx: mpsc::Sender<AgentEvent>,
-    },
-}
-
 /// Default AgentHarness implementation used by Talos today.
 ///
 /// The Harness owns shared Agent framework behavior and delegates backend
@@ -89,7 +71,7 @@ pub struct AgentHarnessImpl {
     pub tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
     active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
-    completed_title_updates: Arc<DashMap<String, SessionTitleUpdate>>,
+    generated_session_titles: Arc<DashMap<String, String>>,
     session_backlogs: Arc<Mutex<HashMap<String, VecDeque<QueuedTurn>>>>,
     memory_flush_manager: Arc<MemoryFlushManager>,
     runtime: KernelAgent,
@@ -145,7 +127,7 @@ impl AgentHarnessImpl {
             tool_registry: tool_registry.clone(),
             kernel_config: kernel_config.clone(),
             active_turns: Arc::new(DashMap::new()),
-            completed_title_updates: Arc::new(DashMap::new()),
+            generated_session_titles: Arc::new(DashMap::new()),
             session_backlogs: Arc::new(Mutex::new(HashMap::new())),
             memory_flush_manager: Arc::new(MemoryFlushManager::new()),
             runtime: KernelAgent::new(KernelAgentParams {
@@ -161,12 +143,12 @@ impl AgentHarnessImpl {
         }
     }
 
-    /// Add a tool to this agent's registry
+    /// Register a tool in the Harness-owned tool registry.
     pub fn add_tool(&self, tool: Arc<dyn talos_tools::Tool>) {
         self.tool_registry.register(tool);
     }
 
-    /// Set the tool registry for this agent (allows external tool injection)
+    /// Replace the Harness tool registry and propagate it to the runtime.
     pub fn set_tool_registry(&mut self, tool_registry: Arc<ToolRegistry>) {
         self.tool_registry = tool_registry.clone();
         self.runtime.set_tool_registry(tool_registry);
@@ -180,14 +162,14 @@ impl AgentHarnessImpl {
         Ok(())
     }
 
-    /// Update kernel configuration with a new config object.
+    /// Replace Kernel runtime configuration and rebuild dependent Harness state.
     pub fn update_kernel_config(&mut self, config: AgentKernelConfig) {
         self.kernel_config = Self::normalized_kernel_config(config);
         self.runtime.set_kernel_config(self.kernel_config.clone());
         self.rebuild_memory_store();
     }
 
-    /// Generate a system prompt that includes tool information
+    /// Generate the default Kernel system prompt from Harness metadata and tools.
     pub fn generate_system_prompt(&self) -> String {
         let available_tools = self.tool_registry.list_tool_names();
         format!(
@@ -204,14 +186,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
         )
     }
 
-    async fn generate_session_title_update(
+    async fn generate_session_title(
         &self,
-        session: &talos_types::TalosSession,
+        session_state: &AgentRunSessionState,
+        run_config: &AgentRunConfig,
         first_user_text: &str,
         first_assistant_text: &str,
-    ) -> Option<SessionTitleUpdate> {
-        if session.has_real_title()
-            || session.state.message_count != 0
+    ) -> Option<String> {
+        if session_state.has_real_title()
+            || session_state.message_count != 0
             || first_user_text.trim().is_empty()
             || first_assistant_text.trim().is_empty()
         {
@@ -219,7 +202,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
 
         let request = ChatRequest::builder()
-            .model(session.config.llm.model.clone())
+            .model(run_config.llm.model.clone())
             .messages(vec![
                 ChatMessage::system(SESSION_TITLE_PROMPT),
                 ChatMessage::user(format!(
@@ -231,99 +214,72 @@ After receiving tool outputs, continue reasoning and provide the final response.
             .build();
 
         match self.llm_provider.chat(request).await {
-            Ok(response) => {
-                normalize_session_title(&response.content).map(|title| SessionTitleUpdate { title })
-            }
+            Ok(response) => normalize_session_title(&response.content),
             Err(error) => {
-                warn!(
-                    session_id = %session.context.session_id,
-                    ?error,
-                    "failed to generate session title"
-                );
+                warn!(?error, "failed to generate session title");
                 None
             }
         }
     }
 
-    fn title_update_key(session_id: &str, turn_id: &str) -> String {
+    fn generated_session_title_key(session_id: &str, turn_id: &str) -> String {
         format!("{session_id}:{turn_id}")
     }
 
-    async fn reserve_or_enqueue_unary_turn(
-        &self,
-        request: AgentRunParams,
-    ) -> TalosResult<Option<oneshot::Receiver<TalosResult<AgentRunResult>>>> {
-        let session_id = request.session.context.session_id.clone();
-        if self.has_queued_turns(&session_id).await {
-            let (response_tx, response_rx) = oneshot::channel();
-            self.enqueue_turn(
-                &session_id,
-                QueuedTurn::Unary {
-                    request,
-                    response_tx,
-                },
-            )
-            .await;
-            return Ok(Some(response_rx));
+    fn validate_run_identity(request: &AgentRunParams) -> AgentResult<()> {
+        if request.context.turn_id.trim().is_empty() {
+            return Err(AgentError::invalid_execution_context(
+                "agent run context turn_id is required",
+            ));
         }
+        Ok(())
+    }
 
-        match self.try_reserve_active_turn(&session_id) {
-            Ok(()) => Ok(None),
-            Err(_) => {
-                let (response_tx, response_rx) = oneshot::channel();
-                self.enqueue_turn(
-                    &session_id,
-                    QueuedTurn::Unary {
-                        request,
-                        response_tx,
-                    },
-                )
-                .await;
-                Ok(Some(response_rx))
+    fn map_dynamic_input_error(error: TalosError) -> AgentError {
+        match error {
+            TalosError::ToolError(message) if message.contains("timed out") => {
+                AgentError::new(AgentErrorKind::Timeout, message)
             }
+            TalosError::ToolError(message) | TalosError::ValidationError(message) => {
+                AgentError::input_rejected(message)
+            }
+            other => other.into(),
         }
     }
 
-    async fn reserve_or_enqueue_stream_turn(
+    async fn execute_reserved_run(
         &self,
+        mode: AgentRunMode,
         request: AgentRunParams,
-        event_tx: mpsc::Sender<AgentEvent>,
-    ) -> TalosResult<bool> {
-        let session_id = request.session.context.session_id.clone();
-        if self.has_queued_turns(&session_id).await {
-            self.enqueue_turn(&session_id, QueuedTurn::Stream { request, event_tx })
-                .await;
-            return Ok(false);
-        }
-
-        match self.try_reserve_active_turn(&session_id) {
-            Ok(()) => Ok(true),
-            Err(_) => {
-                self.enqueue_turn(&session_id, QueuedTurn::Stream { request, event_tx })
-                    .await;
-                Ok(false)
-            }
-        }
-    }
-
-    async fn execute_reserved_run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
-        let turn_id = request.turn_id.clone();
-        let session = request.session.clone();
-        let session_id = session.context.session_id.clone();
+    ) -> AgentResult<AgentRunResult> {
+        let turn_id = request.turn_id().to_string();
+        let session_id = request.context.session_id.clone();
+        let session_state = request.session_state.clone();
+        let run_config = request.config.clone();
         let title_input = request::AgentKernelParams::extract_text_input(&request.input);
         let runtime = self.runtime.clone();
-        let run_handle = tokio::spawn(async move { runtime.run(request).await });
+        let run_handle = tokio::spawn(async move {
+            match mode {
+                AgentRunMode::Start => runtime.run(request).await,
+                AgentRunMode::Resume => runtime.resume(AgentResumeParams::new(request)).await,
+            }
+        });
         let abort_handle = AgentRuntimeAbortHandle::new(run_handle.abort_handle());
         if let Err(err) = self.activate_reserved_turn(&session_id, turn_id, abort_handle) {
             run_handle.abort();
-            self.finish_active_turn_and_resume(&session_id).await;
-            return Err(err);
+            self.finish_active_turn_and_dispatch_next(&session_id).await;
+            return Err(err.into());
         }
 
         let result = match run_handle.await {
             Ok(Ok(mut result)) => {
-                result.session_title_update = self
-                    .generate_session_title_update(&session, &title_input, &result.output_text)
+                result.generated_session_title = self
+                    .generate_session_title(
+                        &session_state,
+                        &run_config,
+                        &title_input,
+                        &result.output_text,
+                    )
                     .await;
                 Ok(result)
             }
@@ -336,37 +292,52 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 usage: TokenUsage::default(),
                 task_count: 0,
                 session_id: session_id.clone(),
-                session_title_update: None,
+                generated_session_title: None,
             }),
-            Err(err) => Err(TalosError::InternalError(format!(
+            Err(err) => Err(AgentError::runtime_error(format!(
                 "kernel task join failed: {}",
                 err
             ))),
         };
-        self.finish_active_turn_and_resume(&session_id).await;
+        self.finish_active_turn_and_dispatch_next(&session_id).await;
         result
     }
 
-    fn spawn_reserved_stream_turn(&self, request: AgentRunParams, tx: mpsc::Sender<AgentEvent>) {
+    fn spawn_reserved_stream_turn(
+        &self,
+        mode: AgentRunMode,
+        request: AgentRunParams,
+        tx: mpsc::Sender<AgentEvent>,
+    ) {
         let this = self.clone();
         let stream_task = tokio::spawn(async move {
-            let request_turn_id = request.turn_id.clone();
-            let session = request.session.clone();
-            let session_id = session.context.session_id.clone();
+            let request_turn_id = request.turn_id().to_string();
+            let session_id = request.context.session_id.clone();
+            let message_id = request.context.message_id.clone();
+            let session_state = request.session_state.clone();
+            let run_config = request.config.clone();
             let title_input = request::AgentKernelParams::extract_text_input(&request.input);
-            let title_turn_id = request_turn_id.clone().unwrap_or_default();
+            let title_turn_id = request_turn_id.clone();
             let runtime = this.runtime.clone();
-            let runtime_stream = match runtime.run_streamed(request).await {
+            let runtime_stream = match mode {
+                AgentRunMode::Start => runtime.run_streamed(request).await,
+                AgentRunMode::Resume => {
+                    runtime
+                        .resume_streamed(AgentResumeParams::new(request))
+                        .await
+                }
+            };
+            let runtime_stream = match runtime_stream {
                 Ok(runtime_stream) => runtime_stream,
                 Err(err) => {
                     let mut timeline = TimelineBuilder::new(
                         "req_failed".to_string(),
                         title_turn_id.clone(),
-                        session.context.message_id.clone(),
+                        message_id.clone(),
                         session_id.clone(),
                     );
                     let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                    this.finish_active_turn_and_resume(&session_id).await;
+                    this.finish_active_turn_and_dispatch_next(&session_id).await;
                     return;
                 }
             };
@@ -380,11 +351,11 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 let mut timeline = TimelineBuilder::new(
                     "req_failed".to_string(),
                     title_turn_id.clone(),
-                    session.context.message_id.clone(),
+                    message_id.clone(),
                     session_id.clone(),
                 );
                 let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                this.finish_active_turn_and_resume(&session_id).await;
+                this.finish_active_turn_and_dispatch_next(&session_id).await;
                 return;
             }
 
@@ -393,64 +364,35 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 if tx.send(event).await.is_err() {
                     runtime_stream.abort_handle.abort();
                     runtime_stream.completion.abort();
-                    this.finish_active_turn_and_resume(&session_id).await;
+                    this.finish_active_turn_and_dispatch_next(&session_id).await;
                     return;
                 }
             }
 
             match runtime_stream.completion.await {
                 Ok(Ok(result)) => {
-                    this.finish_active_turn_and_resume(&session_id).await;
-                    if !title_turn_id.is_empty() {
-                        if let Some(update) = this
-                            .generate_session_title_update(
-                                &session,
-                                &title_input,
-                                &result.output_text,
-                            )
-                            .await
-                        {
-                            this.completed_title_updates.insert(
-                                Self::title_update_key(&session_id, &title_turn_id),
-                                update,
-                            );
-                        }
+                    this.finish_active_turn_and_dispatch_next(&session_id).await;
+                    if let Some(title) = this
+                        .generate_session_title(
+                            &session_state,
+                            &run_config,
+                            &title_input,
+                            &result.output_text,
+                        )
+                        .await
+                    {
+                        this.generated_session_titles.insert(
+                            Self::generated_session_title_key(&session_id, &title_turn_id),
+                            title,
+                        );
                     }
                 }
                 Ok(Err(_)) | Err(_) => {
-                    this.finish_active_turn_and_resume(&session_id).await;
+                    this.finish_active_turn_and_dispatch_next(&session_id).await;
                 }
             }
         });
         drop(stream_task);
-    }
-    async fn finish_active_turn_and_resume(&self, session_id: &str) {
-        if let Some(queued_turn) = self.dequeue_next_turn(session_id).await {
-            self.active_turns
-                .insert(session_id.to_string(), ActiveTurnHandle::Reserved);
-            self.dispatch_queued_turn(queued_turn);
-        } else {
-            self.clear_active_turn(session_id);
-        }
-    }
-
-    fn dispatch_queued_turn(&self, queued_turn: QueuedTurn) {
-        match queued_turn {
-            QueuedTurn::Unary {
-                request,
-                response_tx,
-            } => {
-                let this = self.clone();
-                let task = tokio::spawn(async move {
-                    let result = this.execute_reserved_run(request).await;
-                    let _ = response_tx.send(result);
-                });
-                drop(task);
-            }
-            QueuedTurn::Stream { request, event_tx } => {
-                self.spawn_reserved_stream_turn(request, event_tx);
-            }
-        }
     }
 }
 
@@ -471,36 +413,74 @@ impl AgentHarness for AgentHarnessImpl {
         }
     }
 
-    fn take_session_title_update(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-    ) -> Option<SessionTitleUpdate> {
-        self.completed_title_updates
-            .remove(&Self::title_update_key(session_id, turn_id))
-            .map(|(_, update)| update)
+    fn take_generated_session_title(&self, session_id: &str, turn_id: &str) -> Option<String> {
+        self.generated_session_titles
+            .remove(&Self::generated_session_title_key(session_id, turn_id))
+            .map(|(_, title)| title)
     }
 
-    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
-        if let Some(response_rx) = self.reserve_or_enqueue_unary_turn(request.clone()).await? {
+    async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
+        Self::validate_run_identity(&request)?;
+        self.validate_run_request(&request)?;
+        if let Some(response_rx) = self
+            .reserve_or_enqueue_unary_turn(AgentRunMode::Start, request.clone())
+            .await?
+        {
             return response_rx.await.map_err(|err| {
-                TalosError::InternalError(format!("queued agent execution channel closed: {}", err))
+                AgentError::runtime_error(format!("queued agent execution channel closed: {}", err))
             })?;
         }
 
-        self.execute_reserved_run(request).await
+        self.execute_reserved_run(AgentRunMode::Start, request)
+            .await
     }
 
     async fn run_streamed(
         &self,
         request: AgentRunParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
+    ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        Self::validate_run_identity(&request)?;
+        self.validate_streaming_run_request(&request)?;
         let (tx, rx) = mpsc::channel(256);
         let should_start_now = self
-            .reserve_or_enqueue_stream_turn(request.clone(), tx.clone())
+            .reserve_or_enqueue_stream_turn(AgentRunMode::Start, request.clone(), tx.clone())
             .await?;
         if should_start_now {
-            self.spawn_reserved_stream_turn(request, tx);
+            self.spawn_reserved_stream_turn(AgentRunMode::Start, request, tx);
+        }
+        Ok(rx)
+    }
+
+    async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
+        Self::validate_run_identity(&params.run)?;
+        self.validate_resume_request(&params)?;
+        let request = params.run;
+        if let Some(response_rx) = self
+            .reserve_or_enqueue_unary_turn(AgentRunMode::Resume, request.clone())
+            .await?
+        {
+            return response_rx.await.map_err(|err| {
+                AgentError::runtime_error(format!("queued agent execution channel closed: {}", err))
+            })?;
+        }
+
+        self.execute_reserved_run(AgentRunMode::Resume, request)
+            .await
+    }
+
+    async fn resume_streamed(
+        &self,
+        params: AgentResumeParams,
+    ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        Self::validate_run_identity(&params.run)?;
+        self.validate_streaming_resume_request(&params)?;
+        let request = params.run;
+        let (tx, rx) = mpsc::channel(256);
+        let should_start_now = self
+            .reserve_or_enqueue_stream_turn(AgentRunMode::Resume, request.clone(), tx.clone())
+            .await?;
+        if should_start_now {
+            self.spawn_reserved_stream_turn(AgentRunMode::Resume, request, tx);
         }
         Ok(rx)
     }
@@ -533,9 +513,10 @@ impl AgentHarness for AgentHarnessImpl {
         AgentHarnessImpl::has_active_turn(self, session_id)
     }
 
-    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptResult> {
+    async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
+        self.validate_interrupt_request(&params)?;
         let Some(handle) = self.active_turns.get(&params.session_id) else {
-            return Err(talos_error::TalosError::ResourceNotFound(format!(
+            return Err(AgentError::run_not_found(format!(
                 "active turn for session {}",
                 params.session_id
             )));
@@ -545,18 +526,16 @@ impl AgentHarness for AgentHarnessImpl {
             execution_task,
         } = handle.value()
         {
-            if let Some(expected_turn_id) = params.turn_id.as_deref() {
-                if turn_id.as_deref() != Some(expected_turn_id) {
-                    return Err(talos_error::TalosError::ResourceNotFound(format!(
-                        "active turn `{}` for session {}",
-                        expected_turn_id, params.session_id
-                    )));
-                }
+            if turn_id != &params.turn_id {
+                return Err(AgentError::run_not_found(format!(
+                    "active turn `{}` for session {}",
+                    params.turn_id, params.session_id
+                )));
             }
             execution_task.abort();
             return Ok(AgentInterruptResult { interrupted: true });
         }
-        Err(talos_error::TalosError::ResourceNotFound(format!(
+        Err(AgentError::run_not_found(format!(
             "active turn for session {} is not running",
             params.session_id
         )))
@@ -566,7 +545,8 @@ impl AgentHarness for AgentHarnessImpl {
         AgentHarnessImpl::drain_active_turns(self, timeout).await
     }
 
-    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentInputResult> {
+    async fn submit_input(&self, params: AgentInputParams) -> AgentResult<AgentInputResult> {
+        self.validate_input_request(&params)?;
         match params.input {
             AgentInput::DynamicToolResult {
                 call_id,
@@ -576,12 +556,14 @@ impl AgentHarness for AgentHarnessImpl {
             } => {
                 self.submit_dynamic_tool_result(
                     params.session,
+                    &params.turn_id,
                     &call_id,
                     &tool_name,
                     output,
                     success,
                 )
-                .await?;
+                .await
+                .map_err(Self::map_dynamic_input_error)?;
                 Ok(AgentInputResult { accepted: true })
             }
         }

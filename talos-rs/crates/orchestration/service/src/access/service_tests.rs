@@ -199,17 +199,6 @@ impl SessionRuntime for NoopSessionRuntime {
     ) -> TalosResult<()> {
         unreachable!("not used in this test")
     }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
 }
 
 #[derive(Default)]
@@ -249,17 +238,6 @@ impl SessionRuntime for RecordingSessionRuntime {
     async fn cancel_active_turn(
         &self,
         _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
     ) -> TalosResult<()> {
         unreachable!("not used in this test")
     }

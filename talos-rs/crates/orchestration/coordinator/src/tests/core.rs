@@ -72,8 +72,7 @@ async fn test_handle_stream_returns_agent_events() {
     };
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
-            session_id: "test-session".to_string(),
-            turn_id: None,
+            turn_id: "turn-stream".to_string(),
             workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
@@ -122,8 +121,7 @@ async fn test_handle_request_uses_prepared_session() {
 
     let response = coordinator
         .handle(AgentDispatchParams {
-            session_id: "test-session".to_string(),
-            turn_id: Some("turn-title".to_string()),
+            turn_id: "turn-title".to_string(),
             workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
@@ -137,6 +135,58 @@ async fn test_handle_request_uses_prepared_session() {
 
     assert_eq!(response.content, "ok");
     assert_eq!(response.session_id, "test-session");
+}
+
+#[tokio::test]
+async fn test_handle_request_uses_resume_api_for_resume_context() {
+    let mock_router = Arc::new(MockRouter::new());
+    let context = TalosContext {
+        source_type: TalosSourceType::Im,
+        provider: TalosProvider::Telegram,
+        user_id: "user-1".to_string(),
+        message_id: "message-original".to_string(),
+        trace_id: "trace-1".to_string(),
+        channel_id: Some("test-channel".to_string()),
+        thread_id: None,
+        project_root: None,
+        environment: None,
+    };
+    let coordinator = CoordinatorImpl::new(mock_router);
+    let agent = Arc::new(RecordingStreamAgent::new());
+    let run_requests = agent.run_requests.clone();
+    let resume_requests = agent.resume_requests.clone();
+    coordinator
+        .register_agent("test_agent", agent)
+        .await
+        .expect("agent registration should succeed");
+
+    let response = coordinator
+        .handle(AgentDispatchParams {
+            turn_id: "turn-original".to_string(),
+            workspace_id: None,
+            session: test_session("test-session", context.clone()),
+            resume_context: Some(AgentDispatchResumeContext {
+                tool_call: Some(AgentDispatchResumeToolCall {
+                    item_id: "tool-original".to_string(),
+                    call_id: "call-1".to_string(),
+                    tool_name: "Bash".to_string(),
+                }),
+            }),
+            input: Vec::new(),
+            context,
+        })
+        .await
+        .expect("resume request should succeed");
+
+    assert_eq!(response.content, "ok");
+    assert!(run_requests.lock().unwrap().is_empty());
+    let resume_requests = resume_requests.lock().unwrap();
+    let request = resume_requests
+        .first()
+        .expect("resume request should reach agent");
+    assert_eq!(request.run.turn_id(), "turn-original");
+    assert_eq!(request.run.context.message_id, "message-original");
+    assert!(request.run.resume_context.is_some());
 }
 
 #[tokio::test]
@@ -170,8 +220,7 @@ async fn test_handle_request_uses_routed_agent_from_registry() {
 
     let response = coordinator
         .handle(AgentDispatchParams {
-            session_id: "test-session".to_string(),
-            turn_id: Some("turn-routed".to_string()),
+            turn_id: "turn-routed".to_string(),
             workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
@@ -189,7 +238,8 @@ async fn test_handle_request_uses_routed_agent_from_registry() {
     let request = reviewer_requests
         .first()
         .expect("routed agent should receive request");
-    assert_eq!(request.turn_id.as_deref(), Some("turn-routed"));
+    assert_eq!(request.turn_id(), "turn-routed");
+    assert_eq!(request.context.turn_id, "turn-routed");
 }
 
 #[tokio::test]
@@ -198,6 +248,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
     let coordinator = CoordinatorImpl::new(mock_router);
     let agent = Arc::new(RecordingStreamAgent::new());
     let stream_requests = agent.stream_requests.clone();
+    let resume_stream_requests = agent.resume_stream_requests.clone();
     coordinator
         .register_agent("test_agent", agent)
         .await
@@ -216,8 +267,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
     };
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
-            session_id: "test-session".to_string(),
-            turn_id: Some("turn-original".to_string()),
+            turn_id: "turn-original".to_string(),
             workspace_id: Some("workspace-alpha".to_string()),
             session: test_session("test-session", context.clone()),
             resume_context: Some(AgentDispatchResumeContext {
@@ -235,16 +285,18 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
 
     while stream.recv().await.is_some() {}
 
-    let stream_requests = stream_requests.lock().unwrap();
-    let request = stream_requests
+    assert!(stream_requests.lock().unwrap().is_empty());
+    let resume_stream_requests = resume_stream_requests.lock().unwrap();
+    let request = resume_stream_requests
         .first()
         .expect("resume stream request should reach agent");
-    assert_eq!(request.turn_id.as_deref(), Some("turn-original"));
-    assert_eq!(request.session.context.message_id, "message-original");
+    assert_eq!(request.run.turn_id(), "turn-original");
+    assert_eq!(request.run.context.turn_id, "turn-original");
+    assert_eq!(request.run.context.message_id, "message-original");
     assert_eq!(
-        request.session.context.workspace_id.as_deref(),
+        request.run.context.workspace_id.as_deref(),
         Some("workspace-alpha")
     );
-    assert!(request.input.is_empty());
-    assert!(request.resume_context.is_some());
+    assert!(request.run.input.is_empty());
+    assert!(request.run.resume_context.is_some());
 }

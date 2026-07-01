@@ -632,7 +632,7 @@ impl Gateway for MockGateway {
 
 #[async_trait]
 impl ChannelTimelineSubscriptionService for MockTimelineSubscriptions {
-    async fn open_timeline_subscription(
+    async fn timeline_subscription_source(
         &self,
         _actor: &Actor,
         request: SubscribeTimelineRequest,

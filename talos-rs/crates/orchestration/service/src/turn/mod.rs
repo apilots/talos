@@ -93,7 +93,7 @@ fn spawn_event_forwarder(
 
         if let Some((session_id, turn_id)) = completed_turn {
             if let Some(title) = turn_executor
-                .take_session_title_update(&session_id, &turn_id)
+                .take_generated_session_title(&session_id, &turn_id)
                 .await
             {
                 record_session_title(

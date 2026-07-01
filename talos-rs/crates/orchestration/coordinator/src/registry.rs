@@ -1,8 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
-use talos_agent::{AgentDescriptor, AgentHarness};
-use talos_error::{TalosError, TalosResult};
+use talos_agent::{AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentResult};
 use tokio::sync::RwLock;
 
 /// Registered Agent entry used by Coordinator routing.
@@ -43,22 +42,22 @@ impl AgentRegistry {
         &self,
         agent_id: &str,
         harness: Arc<dyn AgentHarness>,
-    ) -> TalosResult<()> {
+    ) -> AgentResult<()> {
         if agent_id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "agent_id cannot be empty".to_string(),
+            return Err(AgentError::invalid_execution_context(
+                "agent_id cannot be empty",
             ));
         }
         let descriptor = harness.descriptor();
         if descriptor.agent_id != agent_id {
-            return Err(TalosError::ValidationError(format!(
+            return Err(AgentError::invalid_execution_context(format!(
                 "agent registry key `{agent_id}` does not match descriptor id `{}`",
                 descriptor.agent_id
             )));
         }
         let mut registrations = self.registrations.write().await;
         match registrations.entry(agent_id.to_string()) {
-            Entry::Occupied(_) => Err(TalosError::ValidationError(format!(
+            Entry::Occupied(_) => Err(AgentError::run_conflict(format!(
                 "agent `{agent_id}` is already registered"
             ))),
             Entry::Vacant(entry) => {
@@ -72,12 +71,12 @@ impl AgentRegistry {
     }
 
     /// Resolve a registered Agent by id.
-    pub async fn get(&self, agent_id: &str) -> TalosResult<AgentRegistration> {
+    pub async fn get(&self, agent_id: &str) -> AgentResult<AgentRegistration> {
         let registrations = self.registrations.read().await;
         registrations
             .get(agent_id)
             .cloned()
-            .ok_or_else(|| TalosError::AgentNotFound(agent_id.to_string()))
+            .ok_or_else(|| AgentError::new(AgentErrorKind::AgentNotFound, agent_id.to_string()))
     }
 
     /// List registered Agents for routing and management views.

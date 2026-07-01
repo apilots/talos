@@ -1,6 +1,6 @@
 use super::*;
 use std::sync::Mutex;
-use talos_types::agent_dispatch::AgentDispatchParams;
+use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{TalosProvider, TalosSourceType};
 
 pub(crate) struct MockGateway;
@@ -189,21 +189,7 @@ impl TurnExecutor for MockGateway {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -222,21 +208,7 @@ impl TurnExecutor for SilentGateway {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -321,22 +293,6 @@ impl SessionService for MockSessionService {
     }
 
     async fn cancel_active_turn(&self, _session_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        if session_id != "mock-session" {
-            return Err(talos_error::TalosError::ResourceNotFound(format!(
-                "session {session_id}"
-            )));
-        }
         Ok(())
     }
 }

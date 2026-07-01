@@ -13,7 +13,7 @@ use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
     IdempotencyReservation, MessageIdempotencyStore, SessionStore, TimelineEventStore,
 };
-use talos_types::agent_dispatch::AgentDispatchParams;
+use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{
     AgentEvent, TalosContext, TalosInputItem, TalosProvider, TalosSourceType,
 };
@@ -29,7 +29,7 @@ struct TestTurnExecutor {
 
 struct TestSessionRuntime {
     cancel_mode: TestCancelMode,
-    cancelled_turn_ids: Arc<Mutex<Vec<Option<String>>>>,
+    cancelled_turn_ids: Arc<Mutex<Vec<String>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -60,22 +60,7 @@ impl TurnExecutor for TestTurnExecutor {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _turn_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -116,17 +101,6 @@ impl SessionRuntime for TestSessionRuntime {
                 "active turn for session session-interrupt-runtime-missing".to_string(),
             )),
         }
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        unreachable!("not used in this test")
     }
 }
 
@@ -577,6 +551,6 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
     assert!(matches!(error, TalosError::ResourceNotFound(_)));
     assert_eq!(
         *cancelled_turn_ids.lock().unwrap(),
-        vec![Some("turn-existing".to_string())]
+        vec!["turn-existing".to_string()]
     );
 }

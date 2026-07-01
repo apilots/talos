@@ -4,7 +4,7 @@ use crate::{
         AgentInputParams, AgentInputResult, AgentInterruptParams, AgentInterruptResult,
         AgentRunParams, AgentRunResult,
     },
-    AgentHarness,
+    AgentCapabilities, AgentDescriptor, AgentHarness, AgentKind, AgentResult, AgentStatus,
 };
 use async_trait::async_trait;
 use std::time::Duration;
@@ -17,9 +17,14 @@ use talos_types::talos::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+/// Test Harness implementation that emits deterministic Agent outputs.
+///
+/// MockAgent is for tests and local harness wiring only. It should not become a
+/// product runtime kind or a Gateway/SDK-visible Agent implementation.
 pub struct MockAgent;
 
 impl MockAgent {
+    /// Create a deterministic mock Harness instance.
     pub fn new() -> Self {
         Self
     }
@@ -31,7 +36,18 @@ impl AgentHarness for MockAgent {
         "mock"
     }
 
-    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult> {
+    fn descriptor(&self) -> AgentDescriptor {
+        AgentDescriptor {
+            agent_id: self.id().to_string(),
+            name: self.id().to_string(),
+            kind: AgentKind::Kernel,
+            description: "Deterministic test agent".to_string(),
+            capabilities: AgentCapabilities::kernel(),
+            status: AgentStatus::Enabled,
+        }
+    }
+
+    async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
         let input = AgentKernelParams::extract_text_input(&request.input);
         let output = format!("Mock response to: {}", input);
         Ok(AgentRunResult {
@@ -43,21 +59,18 @@ impl AgentHarness for MockAgent {
             stop_reason: talos_types::talos::StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 1,
-            session_id: request.session.context.session_id,
-            session_title_update: None,
+            session_id: request.context.session_id,
+            generated_session_title: None,
         })
     }
 
     async fn run_streamed(
         &self,
         request: AgentRunParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
-        let turn_id = request
-            .turn_id
-            .clone()
-            .unwrap_or_else(|| format!("turn_{}", Uuid::new_v4().simple()));
-        let message_id = request.session.context.message_id.clone();
-        let session_id = request.session.context.session_id.clone();
+    ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        let turn_id = request.turn_id().to_string();
+        let message_id = request.context.message_id.clone();
+        let session_id = request.context.session_id.clone();
         let execution = AgentHarness::run(self, request).await?;
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let (tx, rx) = mpsc::channel(8);
@@ -146,7 +159,7 @@ impl AgentHarness for MockAgent {
         false
     }
 
-    async fn interrupt(&self, _params: AgentInterruptParams) -> TalosResult<AgentInterruptResult> {
+    async fn interrupt(&self, _params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
         Ok(AgentInterruptResult { interrupted: false })
     }
 
@@ -154,7 +167,7 @@ impl AgentHarness for MockAgent {
         Ok(())
     }
 
-    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentInputResult> {
+    async fn submit_input(&self, _params: AgentInputParams) -> AgentResult<AgentInputResult> {
         Ok(AgentInputResult { accepted: true })
     }
 }

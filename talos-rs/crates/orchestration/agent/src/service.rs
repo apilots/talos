@@ -1,18 +1,159 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use talos_config::{resolve_talos_home, AgentKernelConfig};
+use talos_config::{resolve_talos_home, AgentConfig, AgentKernelConfig, LlmConfig, ProviderConfig};
 use talos_error::TalosResult;
 use talos_skills::SkillRoots;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
-use talos_types::talos::{RunItem, StopReason, TalosInputItem, TalosReasoning, TokenUsage};
-use talos_types::TalosSession;
+use talos_types::talos::{
+    RunItem, StopReason, TalosInputItem, TalosReasoning, TalosSessionEnvironment, TokenUsage,
+};
+use talos_types::{TalosSession, DEFAULT_SESSION_TITLE};
 use tokio::sync::mpsc;
 
-use crate::{AgentCapabilities, AgentDescriptor, AgentKind, AgentStatus};
+use crate::{
+    AgentCapabilities, AgentCapabilityValidator, AgentDescriptor, AgentError, AgentKind,
+    AgentResult, AgentStatus,
+};
 
 pub use talos_types::talos::AgentEvent;
+
+/// Minimal execution context prepared for an Agent run.
+///
+/// This context gives Harness and Runtime a stable Agent-domain view of the
+/// current execution without making them depend on product store records,
+/// Gateway DTOs, or a complete TalosSession.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRunContext {
+    /// Product session id associated with this Agent run.
+    pub session_id: String,
+    /// Talos turn id; this is also the internal Agent run identity.
+    pub turn_id: String,
+    /// Product message id used by timeline events for this run.
+    pub message_id: String,
+    /// Product session owner user id used for workspace resolution.
+    pub owner_user_id: String,
+    /// Optional execution user id prepared by Service or Coordinator.
+    #[serde(default)]
+    pub user_id: Option<String>,
+    /// Optional workspace routing key, not a filesystem path.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    /// Optional resolved project root for the run.
+    #[serde(default)]
+    pub project_root: Option<PathBuf>,
+    /// Optional execution environment prepared for the run.
+    #[serde(default)]
+    pub environment: Option<TalosSessionEnvironment>,
+}
+
+impl AgentRunContext {
+    /// Build the minimal Agent run context from a prepared Talos session.
+    pub fn from_session(session: &TalosSession, turn_id: String) -> Self {
+        Self {
+            session_id: session.context.session_id.clone(),
+            turn_id,
+            message_id: session.context.message_id.clone(),
+            owner_user_id: session.user_id.clone(),
+            user_id: Some(session.context.user_id.clone()),
+            workspace_id: session.context.workspace_id.clone(),
+            project_root: session.context.project_root.clone(),
+            environment: session.context.environment.clone(),
+        }
+    }
+}
+
+/// Runtime configuration prepared for an Agent run.
+///
+/// This structure carries only configuration that Runtime needs for execution.
+/// Product session state and store records must not be added here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRunConfig {
+    /// Agent configuration selected for this run.
+    pub agent: AgentConfig,
+    /// LLM configuration selected for this run.
+    pub llm: LlmConfig,
+}
+
+impl AgentRunConfig {
+    /// Build runtime config from the prepared product session.
+    pub fn from_session(session: &TalosSession) -> Self {
+        Self {
+            agent: session.config.agent.clone(),
+            llm: session.config.llm.clone(),
+        }
+    }
+
+    /// Return the provider config for the selected LLM provider.
+    pub fn current_provider_config(&self) -> Option<&ProviderConfig> {
+        match self.llm.provider.trim().to_ascii_lowercase().as_str() {
+            "anthropic" => Some(&self.llm.anthropic),
+            "openai" => Some(&self.llm.openai),
+            "bailian" => Some(&self.llm.bailian),
+            "ollama" => Some(&self.llm.ollama),
+            "openrouter" => Some(&self.llm.openrouter),
+            _ => None,
+        }
+    }
+}
+
+/// Lightweight product session state needed by Harness output behavior.
+///
+/// This is not a DB record or full TalosSession. It only contains the session
+/// metadata required for Agent-owned title generation decisions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRunSessionState {
+    /// Current product session title before the run starts.
+    pub title: String,
+    /// Product message count before the run starts.
+    pub message_count: u64,
+}
+
+impl AgentRunSessionState {
+    /// Build lightweight Agent session state from a prepared product session.
+    pub fn from_session(session: &TalosSession) -> Self {
+        Self {
+            title: session.title.clone(),
+            message_count: session.state.message_count,
+        }
+    }
+
+    /// Return true when the session already has a meaningful user-visible title.
+    pub fn has_real_title(&self) -> bool {
+        let normalized = self.title.trim();
+        !normalized.is_empty() && normalized != DEFAULT_SESSION_TITLE
+    }
+}
+
+/// Standard options shared by AgentHarness and AgentRuntime.
+///
+/// Options must represent cross-runtime Agent semantics only. Runtime-private
+/// settings belong in AgentDefinition.runtime_config, and continuation policy
+/// belongs to AgentInput / AgentResumeParams rather than this structure.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentRunOptions {
+    /// Selected model snapshot for cross-runtime checks and diagnostics.
+    ///
+    /// AgentRunConfig.llm remains the execution source of truth. This snapshot
+    /// must not override runtime configuration or create a second model source.
+    #[serde(default)]
+    pub current_model: Option<String>,
+}
+
+impl AgentRunOptions {
+    /// Derive cross-runtime run options from the selected Agent run config.
+    pub fn from_config(config: &AgentRunConfig) -> Self {
+        let current_model = config.llm.model.trim();
+        let current_model = if current_model.is_empty() {
+            None
+        } else {
+            Some(config.llm.model.clone())
+        };
+        Self { current_model }
+    }
+}
 
 /// Parameters for starting or continuing an AgentHarness run.
 ///
@@ -21,25 +162,85 @@ pub use talos_types::talos::AgentEvent;
 /// records, Gateway DTOs, and runtime-private SDK objects must not be added.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRunParams {
-    /// Prepared Talos session domain object for this run.
-    pub session: TalosSession,
-    /// Talos turn id and Agent run identity.
-    #[serde(default)]
-    pub turn_id: Option<String>,
+    /// Prepared Agent-domain execution context for this run.
+    pub context: AgentRunContext,
+    /// Runtime configuration selected for this Agent run.
+    pub config: AgentRunConfig,
+    /// Lightweight product session state needed by Harness behavior.
+    pub session_state: AgentRunSessionState,
     /// Validated continuation context supplied by Service or Coordinator.
     #[serde(default)]
     pub resume_context: Option<AgentDispatchResumeContext>,
+    /// Cross-runtime options selected for this run.
+    #[serde(default)]
+    pub options: AgentRunOptions,
     /// Structured input items for this Agent run.
     pub input: Vec<TalosInputItem>,
 }
 
-/// Optional title update produced by an Agent run.
+impl AgentRunParams {
+    /// Build Agent run parameters from prepared Agent-domain parts.
+    pub fn new(
+        context: AgentRunContext,
+        config: AgentRunConfig,
+        session_state: AgentRunSessionState,
+        options: AgentRunOptions,
+        input: Vec<TalosInputItem>,
+    ) -> Self {
+        Self {
+            context,
+            config,
+            session_state,
+            resume_context: None,
+            options,
+            input,
+        }
+    }
+
+    /// Return the Talos turn id, which is also the internal Agent run identity.
+    pub fn turn_id(&self) -> &str {
+        &self.context.turn_id
+    }
+
+    /// Return the product session id associated with this Agent run.
+    pub fn session_id(&self) -> &str {
+        &self.context.session_id
+    }
+
+    /// Attach validated Service continuation context for the same Agent turn.
+    pub fn with_resume_context(mut self, resume_context: AgentDispatchResumeContext) -> Self {
+        self.resume_context = Some(resume_context);
+        self
+    }
+}
+
+/// Parameters for continuing an existing Agent run.
 ///
-/// This remains Harness output metadata; Service decides whether and how to
-/// persist it into product session state.
+/// Resume is an internal AgentHarness and AgentRuntime API for same-turn
+/// continuation, such as delivering a dynamic tool result back into the
+/// runtime loop. It is not a Service timeline recovery API, an attach API, or a
+/// Gateway/SDK DTO.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SessionTitleUpdate {
-    pub title: String,
+pub struct AgentResumeParams {
+    /// Original run parameters carrying the same turn_id as the active run.
+    pub run: AgentRunParams,
+}
+
+impl AgentResumeParams {
+    /// Build resume parameters from the original Agent run params.
+    pub fn new(run: AgentRunParams) -> Self {
+        Self { run }
+    }
+
+    /// Return the Talos turn id, which is also the Agent run identity.
+    pub fn turn_id(&self) -> &str {
+        self.run.turn_id()
+    }
+
+    /// Return the product session id associated with the resumed run.
+    pub fn session_id(&self) -> &str {
+        self.run.session_id()
+    }
 }
 
 /// Standard result produced by a completed AgentHarness run.
@@ -65,9 +266,9 @@ pub struct AgentRunResult {
     pub task_count: u32,
     /// Product session id; this is not a backend session or thread id.
     pub session_id: String,
-    /// Optional session title update emitted by Harness.
+    /// Optional generated session title emitted by Harness.
     #[serde(default)]
-    pub session_title_update: Option<SessionTitleUpdate>,
+    pub generated_session_title: Option<String>,
 }
 
 /// Parameters for interrupting an active Agent run.
@@ -77,8 +278,7 @@ pub struct AgentRunResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentInterruptParams {
     pub session_id: String,
-    #[serde(default)]
-    pub turn_id: Option<String>,
+    pub turn_id: String,
 }
 
 /// Result of an Agent interrupt request.
@@ -97,8 +297,7 @@ pub struct AgentInputParams {
     /// Prepared Talos session domain object for input validation and context.
     pub session: TalosSession,
     /// Talos turn id and Agent run identity associated with this input.
-    #[serde(default)]
-    pub turn_id: Option<String>,
+    pub turn_id: String,
     /// Tagged input payload accepted by the Harness input bridge.
     pub input: AgentInput,
 }
@@ -174,23 +373,66 @@ pub trait AgentHarness: Send + Sync {
             name: self.id().to_string(),
             kind: AgentKind::Kernel,
             description: String::new(),
-            capabilities: AgentCapabilities::kernel(),
+            capabilities: AgentCapabilities::none(),
             status: AgentStatus::Enabled,
         }
     }
+    /// Validate a non-streaming run before it reaches Harness lifecycle code.
+    fn validate_run_request(&self, request: &AgentRunParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor()).validate_run(request)
+    }
+    /// Validate a streaming run before it reaches Harness lifecycle code.
+    fn validate_streaming_run_request(&self, request: &AgentRunParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor()).validate_streaming_run(request)
+    }
+    /// Validate a non-streaming same-turn continuation request.
+    fn validate_resume_request(&self, params: &AgentResumeParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor()).validate_resume(params)
+    }
+    /// Validate a streaming same-turn continuation request.
+    fn validate_streaming_resume_request(&self, params: &AgentResumeParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor())
+            .validate_streaming_resume(params)
+    }
+    /// Validate an interrupt before it reaches a runtime handle.
+    fn validate_interrupt_request(&self, params: &AgentInterruptParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor()).validate_interrupt(params)
+    }
+    /// Validate structured input before it reaches the single input bridge.
+    fn validate_input_request(&self, params: &AgentInputParams) -> AgentResult<()> {
+        AgentCapabilityValidator::for_descriptor(&self.descriptor()).validate_input(params)
+    }
     /// Execute a non-streaming Agent run.
-    async fn run(&self, request: AgentRunParams) -> TalosResult<AgentRunResult>;
+    async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult>;
     /// Execute an Agent run and stream standardized AgentEvent values.
     async fn run_streamed(
         &self,
         request: AgentRunParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>>;
-    /// Take a title update generated for a completed session turn.
-    fn take_session_title_update(
+    ) -> AgentResult<mpsc::Receiver<AgentEvent>>;
+    /// Continue an existing Agent run without streaming.
+    ///
+    /// The continuation must address the original turn_id. Callers that need
+    /// product timeline recovery must use Service timeline APIs instead.
+    async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
+        self.validate_resume_request(&params)?;
+        Err(AgentError::capability_unsupported(self.id(), "resume"))
+    }
+    /// Continue an existing Agent run and stream standardized AgentEvent values.
+    ///
+    /// This API resumes the runtime loop for the same turn_id. It is not an
+    /// attach API for replaying historical events to a client.
+    async fn resume_streamed(
         &self,
-        _session_id: &str,
-        _turn_id: &str,
-    ) -> Option<SessionTitleUpdate> {
+        params: AgentResumeParams,
+    ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        self.validate_streaming_resume_request(&params)?;
+        Err(AgentError::capability_unsupported(
+            self.id(),
+            "resume_streamed",
+        ))
+    }
+    /// Take a generated title for a completed session turn.
+    fn take_generated_session_title(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
         None
     }
     /// Compact Agent-maintained session context and return token usage.
@@ -208,9 +450,9 @@ pub trait AgentHarness: Send + Sync {
     /// Check whether Harness currently owns an in-memory active run.
     fn has_active_turn(&self, session_id: &str) -> bool;
     /// Interrupt an active Agent run by product session and turn identity.
-    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptResult>;
+    async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult>;
     /// Wait for in-memory active runs to drain.
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()>;
     /// Submit structured input to the single Agent input bridge.
-    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentInputResult>;
+    async fn submit_input(&self, params: AgentInputParams) -> AgentResult<AgentInputResult>;
 }

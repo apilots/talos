@@ -4,6 +4,10 @@ use talos_error::{TalosError, TalosResult};
 use tracing::{info, warn};
 
 impl CoordinatorImpl {
+    /// Drain Coordinator-owned background work across all registered Agents.
+    ///
+    /// This lifecycle hook coordinates Harness drains only. It must not inspect
+    /// Service store records or runtime-private task handles directly.
     pub async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
         let started_at = Instant::now();
         let pending_memory_flushes = self.pending_memory_flushes().await;
@@ -34,6 +38,10 @@ impl CoordinatorImpl {
         Ok(())
     }
 
+    /// Wait for in-memory active Agent turns to finish before the deadline.
+    ///
+    /// Active turn ownership remains in each AgentHarness; Coordinator only
+    /// fans out the drain request across the registry.
     pub async fn drain_active_turns(&self, deadline: std::time::Instant) -> TalosResult<()> {
         let agents = self.registry().list().await;
 
@@ -51,6 +59,7 @@ impl CoordinatorImpl {
         Ok(())
     }
 
+    /// Sum pending Harness-owned memory flushes across registered Agents.
     pub async fn pending_memory_flushes(&self) -> usize {
         let agents = self.registry().list().await;
         agents
@@ -59,6 +68,10 @@ impl CoordinatorImpl {
             .sum()
     }
 
+    /// Drain Harness-owned memory flushes across registered Agents.
+    ///
+    /// This does not read or write Service persistence records; it only asks
+    /// each Harness to complete its own background memory work.
     pub async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
         let started_at = Instant::now();
         let pending_memory_flushes = self.pending_memory_flushes().await;

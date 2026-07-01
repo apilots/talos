@@ -59,15 +59,6 @@ trait SessionService: Send + Sync {
     async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()>;
 }
 
 fn test_model_info() -> ModelInfo {
@@ -301,25 +292,6 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
     ) -> talos_error::TalosResult<()> {
         self.service
             .cancel_active_turn(&params.session.context.session_id)
-            .await
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> talos_error::TalosResult<()> {
-        self.service
-            .submit_dynamic_tool_result(
-                &session.context.session_id,
-                call_id,
-                tool_name,
-                output,
-                success,
-            )
             .await
     }
 }

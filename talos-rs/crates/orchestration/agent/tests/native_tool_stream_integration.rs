@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{AgentHarness, AgentHarnessImpl, AgentRunParams};
+use talos_agent::{
+    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
+    AgentRunParams, AgentRunSessionState,
+};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
@@ -364,37 +367,44 @@ fn build_request(input: &str) -> AgentRunParams {
         "integration-session-{}",
         SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
     );
-    AgentRunParams {
-        session: TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "talos-test-integration-user".to_string(),
-            conf: talos_types::SessionConf::default(),
+    let turn_id = format!("turn-{session_id}");
+    let session = TalosSession {
+        title: "Untitled Session".to_string(),
+        user_id: "talos-test-integration-user".to_string(),
+        conf: talos_types::SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+        context: SessionContext {
+            session_id: session_id.clone(),
+            workspace_id: Some("default".to_string()),
             project_id: None,
             current_directory: None,
-            context: SessionContext {
-                session_id: session_id.clone(),
-                workspace_id: Some("default".to_string()),
-                project_id: None,
-                current_directory: None,
-                project_root: None,
-                source_type: TalosSourceType::System,
-                provider: TalosProvider::System,
-                user_id: "talos-test-integration-user".to_string(),
-                message_id: "integration-message".to_string(),
-                trace_id: "integration-trace".to_string(),
-                channel_id: None,
-                thread_id: None,
-                environment: None,
-            },
-            config: talos_config::Config::default(),
-            state: SessionState::default(),
+            project_root: None,
+            source_type: TalosSourceType::System,
+            provider: TalosProvider::System,
+            user_id: "talos-test-integration-user".to_string(),
+            message_id: "integration-message".to_string(),
+            trace_id: "integration-trace".to_string(),
+            channel_id: None,
+            thread_id: None,
+            environment: None,
         },
-        turn_id: None,
-        resume_context: None,
-        input: vec![TalosInputItem::Text {
+        config: talos_config::Config::default(),
+        state: SessionState::default(),
+    };
+    let context = AgentRunContext::from_session(&session, turn_id);
+    let config = AgentRunConfig::from_session(&session);
+    let session_state = AgentRunSessionState::from_session(&session);
+    let options = AgentRunOptions::from_config(&config);
+    AgentRunParams::new(
+        context,
+        config,
+        session_state,
+        options,
+        vec![TalosInputItem::Text {
             text: input.to_string(),
         }],
-    }
+    )
 }
 
 #[tokio::test]

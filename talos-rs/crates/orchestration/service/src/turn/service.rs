@@ -8,7 +8,8 @@ use talos_store::session::{
     MessageIdempotencyStore, PendingUserAction, SessionStore,
 };
 use talos_types::agent_dispatch::{
-    AgentDispatchParams, AgentDispatchResumeContext, AgentDispatchResumeToolCall,
+    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
+    AgentDispatchResumeToolCall,
 };
 use talos_types::talos::{AgentEvent, AgentEventPayload, TalosTurnErrorEvent};
 use talos_types::talos::{TalosContext, TalosInputItem};
@@ -152,8 +153,7 @@ impl TurnService {
             environment: session.context.environment.clone(),
         };
         let dispatch_request = AgentDispatchParams {
-            session_id: session_id.clone(),
-            turn_id: Some(turn_id.clone()),
+            turn_id: turn_id.clone(),
             workspace_id: submission.workspace_id.clone(),
             session: session.clone(),
             resume_context: None,
@@ -162,11 +162,7 @@ impl TurnService {
         };
         let assistant_model = session.config.llm.model.clone();
 
-        let mut stream_rx = self
-            .executor
-            .start_turn_stream(dispatch_request)
-            .await
-            .map_err(|err| TalosError::GatewayError(err.to_string()))?;
+        let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
             self.base_config
                 .agent
@@ -192,10 +188,10 @@ impl TurnService {
             }
             Err(_) => {
                 if let Err(err) = self
-                    .executor
+                    .session_runtime
                     .cancel_active_turn(talos_types::CancelActiveTurnParams {
                         session: session.clone(),
-                        turn_id: Some(turn_id.clone()),
+                        turn_id: turn_id.clone(),
                     })
                     .await
                 {
@@ -275,14 +271,16 @@ impl TurnService {
             .await?;
         let turn_id = resume.turn_id.clone();
         self.executor
-            .submit_dynamic_tool_result(
-                session.clone(),
-                &turn_id,
-                call_id,
-                tool_name,
-                output,
-                success,
-            )
+            .submit_input(AgentDispatchInputParams {
+                session: session.clone(),
+                turn_id,
+                input: AgentDispatchInput::DynamicToolResult {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    output,
+                    success,
+                },
+            })
             .await?;
         self.event_service
             .resolve_pending_user_action(&session_id)
@@ -395,8 +393,7 @@ impl TurnService {
             environment: session.context.environment.clone(),
         };
         let dispatch_request = AgentDispatchParams {
-            session_id: session_id.clone(),
-            turn_id: Some(turn_id.clone()),
+            turn_id: turn_id.clone(),
             workspace_id: None,
             session: session.clone(),
             resume_context: resume.gateway_resume,
@@ -404,11 +401,7 @@ impl TurnService {
             context,
         };
         let assistant_model = session.config.llm.model.clone();
-        let mut stream_rx = self
-            .executor
-            .start_turn_stream(dispatch_request)
-            .await
-            .map_err(|err| TalosError::GatewayError(err.to_string()))?;
+        let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
             self.base_config
                 .agent
@@ -502,15 +495,22 @@ impl TurnService {
                 pending.tool_name, pending.call_id, tool_name, call_id
             )));
         }
-        let tool_call = pending.item_id.map(|item_id| AgentDispatchResumeToolCall {
+        let item_id = pending.item_id.ok_or_else(|| {
+            TalosError::ValidationError(
+                "Pending dynamic tool result is missing its original timeline item id.".to_string(),
+            )
+        })?;
+        let tool_call = AgentDispatchResumeToolCall {
             item_id,
             call_id: pending.call_id,
             tool_name: pending.tool_name,
-        });
+        };
         Ok(ActiveResumeContext {
             turn_id: active.turn_id,
             message_id,
-            gateway_resume: Some(AgentDispatchResumeContext { tool_call }),
+            gateway_resume: Some(AgentDispatchResumeContext {
+                tool_call: Some(tool_call),
+            }),
         })
     }
 

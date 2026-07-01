@@ -487,7 +487,7 @@ impl AppServerApplication for TalosApplicationAdapter {
     ) -> ProtocolResult<SubscriptionSource> {
         request.replay_limit = Some(request.replay_limit.unwrap_or(self.replay_limit).max(1));
         self.app
-            .open_timeline_subscription(actor, request)
+            .timeline_subscription_source(actor, request)
             .await
             .map_err(AppServerErrorBody::from_talos_error)
     }

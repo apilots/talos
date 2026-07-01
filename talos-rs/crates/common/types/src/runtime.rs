@@ -2,74 +2,7 @@ use crate::agent_dispatch;
 use crate::talos;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-pub mod agents {
-    use super::*;
-
-    /// Information about an agent.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct AgentInfo {
-        pub id: String,
-        pub name: String,
-        pub description: String,
-        pub agent_type: String,
-        pub status: String,
-        pub capabilities: Vec<String>,
-    }
-}
-
-pub mod messages {
-    use super::*;
-
-    /// Different types of message payloads.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    #[serde(tag = "type", content = "data")]
-    pub enum MessagePayload {
-        Text(String),
-        Command {
-            name: String,
-            args: HashMap<String, String>,
-        },
-        ToolResult(super::tools::ToolResult),
-    }
-
-    /// A message in the system.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct Message {
-        pub id: String,
-        pub agent_id: String,
-        pub content: String,
-        pub timestamp: std::time::SystemTime,
-        pub payload: MessagePayload,
-    }
-}
-
-pub mod tools {
-    use super::*;
-
-    /// A tool call to be executed.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct ToolCall {
-        pub id: String,
-        pub name: String,
-        pub arguments: talos::ToolArguments,
-    }
-
-    /// Result of a tool execution.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct ToolResult {
-        pub id: String,
-        pub tool_call_id: String,
-        pub result: String,
-        pub success: bool,
-    }
-}
-
-pub use agents::AgentInfo;
-pub use messages::{Message, MessagePayload};
-pub use tools::{ToolCall, ToolResult};
 
 /// Return a millisecond timestamp.
 pub fn now() -> u64 {
@@ -84,9 +17,8 @@ pub fn now() -> u64 {
 pub struct CancelActiveTurnParams {
     /// Prepared session used to resolve the owning agent.
     pub session: crate::session::TalosSession,
-    /// Active turn identity from TalosService, when a persisted active turn exists.
-    #[serde(default)]
-    pub turn_id: Option<String>,
+    /// Active turn identity from TalosService.
+    pub turn_id: String,
 }
 
 /// Runtime boundary used by TalosService to dispatch work to AgentCoordinator.
@@ -110,23 +42,25 @@ pub trait AgentDispatchRuntime: Send + Sync {
         request: agent_dispatch::AgentDispatchParams,
     ) -> crate::TalosResult<tokio::sync::mpsc::Receiver<talos::AgentEvent>>;
 
-    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> crate::TalosResult<()>;
-
-    async fn submit_dynamic_tool_result(
+    /// Deliver structured input to a running Agent through Coordinator.
+    ///
+    /// The dispatch layer only routes and normalizes the input. Product state
+    /// validation and persistence stay in TalosService.
+    async fn submit_input(
         &self,
-        _session: crate::session::TalosSession,
-        _turn_id: &str,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> crate::TalosResult<()> {
-        Err(crate::TalosError::InternalError(
-            "submit_dynamic_tool_result is not supported by this request handler".to_string(),
-        ))
-    }
+        params: agent_dispatch::AgentDispatchInputParams,
+    ) -> crate::TalosResult<()>;
 
-    async fn take_session_title_update(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
+    /// Take an optional Agent-produced title for a completed session turn.
+    ///
+    /// This is a best-effort metadata hook. Implementations may return None
+    /// when no title update exists; it must not be used as a fallback dispatch
+    /// path or as required run state.
+    async fn take_generated_session_title(
+        &self,
+        _session_id: &str,
+        _turn_id: &str,
+    ) -> Option<String> {
         None
     }
 }

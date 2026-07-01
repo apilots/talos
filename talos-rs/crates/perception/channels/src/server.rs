@@ -20,7 +20,7 @@ use crate::traits::{
 
 #[async_trait::async_trait]
 pub trait ChannelTimelineSubscriptionService: Send + Sync {
-    async fn open_timeline_subscription(
+    async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
@@ -29,12 +29,12 @@ pub trait ChannelTimelineSubscriptionService: Send + Sync {
 
 #[async_trait::async_trait]
 impl ChannelTimelineSubscriptionService for TalosService {
-    async fn open_timeline_subscription(
+    async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineSubscriptionSource> {
-        TalosService::open_timeline_subscription(self, actor, request).await
+        TalosService::timeline_subscription_source(self, actor, request).await
     }
 }
 
@@ -215,7 +215,7 @@ async fn submit_channel_turn(
 ) -> TalosResult<String> {
     let response = gateway.start_turn(actor, request, None).await?;
     let mut subscription = timeline_subscriptions
-        .open_timeline_subscription(
+        .timeline_subscription_source(
             actor,
             SubscribeTimelineRequest {
                 session_id: response.session_id.clone(),

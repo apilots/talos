@@ -201,7 +201,7 @@ impl ResourceAccessService {
         &self,
         actor: &Actor,
         session_id: &str,
-        turn_id: Option<String>,
+        turn_id: String,
     ) -> TalosResult<()> {
         let session = self.get_session(actor, session_id).await?;
         self.cancel_runtime_turn(CancelActiveTurnParams { session, turn_id })

@@ -53,7 +53,7 @@ pub(super) async fn subscribe_timeline_events_handler(
 
     let subscription = state
         .app
-        .open_timeline_subscription(
+        .timeline_subscription_source(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),

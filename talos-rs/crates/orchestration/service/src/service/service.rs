@@ -405,7 +405,7 @@ impl TalosService {
             ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => return Ok(()),
         }
         self.access
-            .cancel_active_turn(actor, session_id, Some(active_turn.turn_id))
+            .cancel_active_turn(actor, session_id, active_turn.turn_id)
             .await
     }
 
@@ -455,11 +455,11 @@ impl TalosService {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<talos_types::SubscribeTimelineResponse> {
-        let source = self.open_timeline_subscription(actor, request).await?;
+        let source = self.timeline_subscription_source(actor, request).await?;
         Ok(source.response)
     }
 
-    pub async fn open_timeline_subscription(
+    pub async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,

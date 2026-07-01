@@ -46,6 +46,15 @@ pub struct AgentCapabilities {
 }
 
 impl AgentCapabilities {
+    /// Conservative default for Harness implementations that do not advertise capabilities.
+    pub fn none() -> Self {
+        Self {
+            streaming: false,
+            interrupt: false,
+            dynamic_input: false,
+        }
+    }
+
     /// Capabilities exposed by the built-in Kernel-backed Agent runtime.
     pub fn kernel() -> Self {
         Self {

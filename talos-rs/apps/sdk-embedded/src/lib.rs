@@ -429,7 +429,7 @@ impl GatewayClient for EmbeddedServerClient {
         let source = self
             .runtime
             .service
-            .open_timeline_subscription(&self.actor, request)
+            .timeline_subscription_source(&self.actor, request)
             .await?;
         let response = source.response;
         let subscription_id = response.subscription_id.clone();
