@@ -52,7 +52,7 @@ impl AgentDispatchRuntime for RecordingHandler {
                     created_at_ms: None,
                     event_type: AgentEventType::TurnStarted,
                     turn_id: turn_id.clone(),
-                    message_id: request.context.message_id,
+                    message_id: request.session.context.message_id,
                     session_id: request.session.context.session_id,
                     sequence: 0,
                     payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {

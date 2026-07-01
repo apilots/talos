@@ -239,6 +239,33 @@ take_generated_session_title(session_id, turn_id) -> Option<String>
 cancel_active_turn(CancelActiveTurnParams) -> ()
 ```
 
+Coordinator dispatch DTO 当前落地形态：
+
+```text
+AgentDispatchParams
+  turn_id
+  session
+  resume_context?
+  input
+
+AgentDispatchResult
+  output_text
+  output_items
+  reasoning
+  stop_reason
+  usage
+  model
+  session_id
+```
+
+约束：
+
+1. `AgentDispatchParams.session` 是 Service -> Coordinator 边界上唯一的 session identity 和 product context 来源。
+2. Service 必须在构造 `AgentDispatchParams` 前，把 per-turn workspace override、resume message id 等产品上下文合并进 cloned `TalosSession.context`。
+3. `AgentDispatchParams` 不再额外携带 `context`、`workspace_id`、`session_id` 或 `message_id`，避免和 `session.context` 漂移。
+4. Coordinator 只能从 prepared session 派生 routing context 和 `AgentRunContext`；不得重新解释 workspace 为 Agent selector。
+5. `AgentDispatchResult.output_text` 与 `AgentRunResult.output_text` 对齐；内部 `TalosResult<AgentDispatchResult>` 已表达成功/失败，不再保留重复 `success` 字段。
+
 AgentHarness API：
 
 ```text

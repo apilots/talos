@@ -163,7 +163,7 @@ impl CollaborationRuntime {
         let handle = tokio::spawn(async move {
             let next_status = match host.submit_input(session, message).await {
                 Ok(response) => CollaborationAgentStatus::Completed {
-                    output: response.content,
+                    output: response.output_text,
                     stop_reason: response.stop_reason,
                 },
                 Err(error) => CollaborationAgentStatus::Failed {

@@ -142,13 +142,11 @@ fn test_dispatch_params(session_id: &str, turn_id: &str) -> AgentDispatchParams 
     let context = test_context("msg-dispatch");
     AgentDispatchParams {
         turn_id: turn_id.to_string(),
-        workspace_id: None,
-        session: test_session(session_id, context.clone()),
+        session: test_session(session_id, context),
         resume_context: None,
         input: vec![TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        context,
     }
 }
 

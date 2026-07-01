@@ -73,13 +73,11 @@ async fn test_handle_stream_returns_agent_events() {
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-stream".to_string(),
-            workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-            context,
         })
         .await
         .expect("stream request should succeed");
@@ -122,18 +120,16 @@ async fn test_handle_request_uses_prepared_session() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-title".to_string(),
-            workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-            context,
         })
         .await
         .expect("request should succeed");
 
-    assert_eq!(response.content, "ok");
+    assert_eq!(response.output_text, "ok");
     assert_eq!(response.session_id, "test-session");
 }
 
@@ -163,7 +159,6 @@ async fn test_handle_request_uses_resume_api_for_resume_context() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-original".to_string(),
-            workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: Some(AgentDispatchResumeContext {
                 tool_call: Some(AgentDispatchResumeToolCall {
@@ -173,12 +168,11 @@ async fn test_handle_request_uses_resume_api_for_resume_context() {
                 }),
             }),
             input: Vec::new(),
-            context,
         })
         .await
         .expect("resume request should succeed");
 
-    assert_eq!(response.content, "ok");
+    assert_eq!(response.output_text, "ok");
     assert!(run_requests.lock().unwrap().is_empty());
     let resume_requests = resume_requests.lock().unwrap();
     let request = resume_requests
@@ -221,18 +215,16 @@ async fn test_handle_request_uses_routed_agent_from_registry() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-routed".to_string(),
-            workspace_id: None,
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-            context,
         })
         .await
         .expect("request should succeed");
 
-    assert_eq!(response.content, "ok");
+    assert_eq!(response.output_text, "ok");
     assert!(default_requests.lock().unwrap().is_empty());
     let reviewer_requests = reviewer_requests.lock().unwrap();
     let request = reviewer_requests
@@ -265,11 +257,12 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
         project_root: None,
         environment: None,
     };
+    let mut session = test_session("test-session", context);
+    session.context.workspace_id = Some("workspace-alpha".to_string());
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-original".to_string(),
-            workspace_id: Some("workspace-alpha".to_string()),
-            session: test_session("test-session", context.clone()),
+            session,
             resume_context: Some(AgentDispatchResumeContext {
                 tool_call: Some(AgentDispatchResumeToolCall {
                     item_id: "tool-original".to_string(),
@@ -278,7 +271,6 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
                 }),
             }),
             input: Vec::new(),
-            context,
         })
         .await
         .expect("stream request should succeed");

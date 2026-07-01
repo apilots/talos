@@ -11,8 +11,7 @@ use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
     AgentDispatchResumeToolCall,
 };
-use talos_types::talos::{AgentEvent, AgentEventPayload, TalosTurnErrorEvent};
-use talos_types::talos::{TalosContext, TalosInputItem};
+use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem, TalosTurnErrorEvent};
 use talos_types::{StartTurnRequest, TalosConfig, TalosSession};
 use tokio::sync::mpsc;
 use tracing::error;
@@ -65,6 +64,23 @@ impl TurnService {
             session_runtime,
             base_config,
         }
+    }
+
+    fn session_for_turn_dispatch(
+        session: &TalosSession,
+        workspace_id_override: Option<String>,
+    ) -> TalosSession {
+        let mut dispatch_session = session.clone();
+        if let Some(workspace_id) = workspace_id_override {
+            dispatch_session.context.workspace_id = Some(workspace_id);
+        }
+        dispatch_session
+    }
+
+    fn session_for_resume_dispatch(session: &TalosSession, message_id: String) -> TalosSession {
+        let mut dispatch_session = session.clone();
+        dispatch_session.context.message_id = message_id;
+        dispatch_session
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
@@ -141,24 +157,11 @@ impl TurnService {
         }
         self.reject_active_turn(&session_id).await?;
 
-        let context = TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: session.context.message_id.clone(),
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-            project_root: session.context.project_root.clone(),
-            environment: session.context.environment.clone(),
-        };
         let dispatch_request = AgentDispatchParams {
             turn_id: turn_id.clone(),
-            workspace_id: submission.workspace_id.clone(),
-            session: session.clone(),
+            session: Self::session_for_turn_dispatch(&session, submission.workspace_id.clone()),
             resume_context: None,
             input: submission.input.clone(),
-            context,
         };
         let assistant_model = session.config.llm.model.clone();
 
@@ -381,24 +384,11 @@ impl TurnService {
         let session_id = session.context.session_id.clone();
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let turn_id = resume.turn_id;
-        let context = TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: resume.message_id,
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-            project_root: session.context.project_root.clone(),
-            environment: session.context.environment.clone(),
-        };
         let dispatch_request = AgentDispatchParams {
             turn_id: turn_id.clone(),
-            workspace_id: None,
-            session: session.clone(),
+            session: Self::session_for_resume_dispatch(&session, resume.message_id),
             resume_context: resume.gateway_resume,
             input: Vec::new(),
-            context,
         };
         let assistant_model = session.config.llm.model.clone();
         let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;

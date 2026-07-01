@@ -301,10 +301,9 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                 AgentEventPayload::TurnCompleted(completed) => {
                     return Ok(AgentDispatchResult {
                         session_id: envelope.session_id,
-                        content: output,
+                        output_text: output,
                         stop_reason: completed.stop_reason,
                         usage: completed.usage,
-                        success: true,
                         model,
                         output_items: Vec::new(),
                         reasoning: Vec::new(),

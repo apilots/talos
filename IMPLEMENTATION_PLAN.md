@@ -625,3 +625,41 @@
 - `git diff --check`
 
 **状态**: 已完成
+
+## 阶段 10: Dispatch Boundary Duplicate Context Cleanup
+
+**目标**: 根据独立 subagent 的全局审查结果，收敛 Service -> Coordinator dispatch 边界仍存在的重复上下文字段和旧 result 命名。
+
+**范围**:
+
+- `AgentDispatchParams` 只保留 `turn_id`、prepared `session`、`resume_context?` 和 `input`。
+- Service 在跨 Coordinator 边界前，把 per-turn workspace override 和 resume message id 合并进 cloned `TalosSession.context`。
+- Coordinator 从 prepared `session.context` 派生 routing context 和 `AgentRunContext`，不再接收外层 `context` / `workspace_id`。
+- `AgentDispatchResult.content` 重命名为 `output_text`，对齐 `AgentRunResult.output_text`。
+- 删除 `AgentDispatchResult.success`，内部 `TalosResult<AgentDispatchResult>` 已表达成功/失败。
+
+**成功标准**:
+
+- `rg -n "pub (context|workspace_id|content|success):" talos-rs/crates/common/types/src/agent_dispatch.rs` 不再命中旧字段定义。
+- `rg -n -A8 "AgentDispatchParams \\{" talos-rs/crates/orchestration/service/src/turn/service.rs talos-rs/crates/orchestration/coordinator/src/tests/core.rs talos-rs/crates/orchestration/coordinator/src/coordinator_tests.rs` 显示所有构造点只包含 `turn_id`、`session`、`resume_context`、`input`。
+- `AgentDispatchParams` 不再定义外层 `context` / `workspace_id` 字段。
+- `AgentDispatchResult` 不再定义 `content` / `success` 字段。
+- Service / Coordinator / app-base / collaboration tool 相关 scoped 编译和测试通过。
+
+**测试**:
+
+- `just fmt`
+- `just check -p talos-types -p talos-service -p talos-coordinator -p talos-base -p talos-tools -p talos-gateway`
+- `just test -p talos-service -p talos-coordinator -p talos-base -p talos-tools -p talos-gateway`
+- `git diff --check`
+
+**验证结果**:
+
+- `just fmt`
+- `just check -p talos-types -p talos-service -p talos-coordinator -p talos-base -p talos-tools -p talos-gateway`
+- `just test -p talos-service -p talos-coordinator -p talos-base -p talos-tools -p talos-gateway`，211/211 通过。
+- `rg -n "pub (context|workspace_id|content|success):" talos-rs/crates/common/types/src/agent_dispatch.rs` 无命中。
+- `rg -n -A8 "AgentDispatchParams \\{" talos-rs/crates/orchestration/service/src/turn/service.rs talos-rs/crates/orchestration/coordinator/src/tests/core.rs talos-rs/crates/orchestration/coordinator/src/coordinator_tests.rs` 已确认所有构造点无外层 `context` / `workspace_id`。
+- `git diff --check`
+
+**状态**: 已完成

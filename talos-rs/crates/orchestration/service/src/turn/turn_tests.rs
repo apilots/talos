@@ -74,7 +74,7 @@ impl TurnExecutor for RecordingTurnExecutor {
             created_at_ms: None,
             event_type: talos_types::talos::AgentEventType::TurnCompleted,
             turn_id: request.turn_id.clone(),
-            message_id: request.context.message_id.clone(),
+            message_id: request.session.context.message_id.clone(),
             session_id: request.session.context.session_id.clone(),
             sequence: 0,
             payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
@@ -390,7 +390,7 @@ async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
         turn_executor.dynamic_turn_id.lock().unwrap().as_deref(),
         Some("turn-original")
     );
-    assert_eq!(request.context.message_id, "msg-original");
+    assert_eq!(request.session.context.message_id, "msg-original");
     assert!(request.input.is_empty());
     let tool_call = request
         .resume_context

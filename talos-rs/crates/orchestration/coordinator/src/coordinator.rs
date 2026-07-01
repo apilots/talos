@@ -64,7 +64,7 @@ impl CoordinatorImpl {
 
     fn message_id_for_dispatch(request: &AgentDispatchParams) -> String {
         if request.resume_context.is_some() {
-            request.context.message_id.clone()
+            request.session.context.message_id.clone()
         } else {
             format!("msg_{}", Uuid::new_v4().simple())
         }
@@ -77,9 +77,6 @@ impl CoordinatorImpl {
         let turn_id = request.turn_id.clone();
         let mut turn_session = request.session.clone();
         turn_session.context.message_id = message_id;
-        if let Some(workspace_id) = request.workspace_id.clone() {
-            turn_session.context.workspace_id = Some(workspace_id);
-        }
 
         let context = AgentRunContext::from_session(&turn_session, turn_id);
         let config = AgentRunConfig::from_session(&turn_session);
@@ -212,15 +209,9 @@ impl Coordinator for CoordinatorImpl {
 #[async_trait]
 impl AgentDispatchRuntime for CoordinatorImpl {
     async fn handle(&self, request: AgentDispatchParams) -> TalosResult<AgentDispatchResult> {
-        let context = request.context.clone();
-        let selection = self
-            .agent_router
-            .resolve_agent(AgentSelectionParams::for_context(context.clone()))
-            .await?;
-
         let session = request.session.clone();
         let model_for_turn = session.config.llm.model.clone();
-        let agent = selection.registration.harness;
+        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
 
         let message_id = Self::message_id_for_dispatch(&request);
         let agent_run_params = Self::agent_run_params_for_dispatch(&request, message_id)?;
@@ -234,12 +225,11 @@ impl AgentDispatchRuntime for CoordinatorImpl {
         };
 
         Ok(AgentDispatchResult {
-            content: agent_response.output_text,
+            output_text: agent_response.output_text,
             output_items: agent_response.output_items,
             reasoning: agent_response.reasoning,
             stop_reason: agent_response.stop_reason,
             usage: agent_response.usage,
-            success: true,
             model: model_for_turn,
             session_id: session.context.session_id,
         })
@@ -249,12 +239,7 @@ impl AgentDispatchRuntime for CoordinatorImpl {
         &self,
         request: AgentDispatchParams,
     ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
-        let context = request.context.clone();
-        let selection = self
-            .agent_router
-            .resolve_agent(AgentSelectionParams::for_context(context))
-            .await?;
-        let agent = selection.registration.harness;
+        let (_target_agent, agent) = self.resolve_session_agent(&request.session).await?;
 
         let message_id = Self::message_id_for_dispatch(&request);
         let agent_run_params = Self::agent_run_params_for_dispatch(&request, message_id)?;

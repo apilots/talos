@@ -1,4 +1,4 @@
-use crate::talos::{RunItem, StopReason, TalosContext, TalosInputItem, TalosReasoning, TokenUsage};
+use crate::talos::{RunItem, StopReason, TalosInputItem, TalosReasoning, TokenUsage};
 use crate::TalosSession;
 use serde::{Deserialize, Serialize};
 
@@ -7,15 +7,14 @@ use serde::{Deserialize, Serialize};
 pub struct AgentDispatchParams {
     /// Talos turn id; this is also the internal Agent run identity.
     pub turn_id: String,
-    /// Optional Agent routing key. This is not a user workspace path.
-    #[serde(default)]
-    pub workspace_id: Option<String>,
-    /// Prepared product session used as the single session identity source.
+    /// Prepared product session used as the single identity and context source.
+    ///
+    /// Service must merge per-turn product context, such as workspace override
+    /// or resume message id, into this session before crossing Coordinator.
     pub session: TalosSession,
     #[serde(default)]
     pub resume_context: Option<AgentDispatchResumeContext>,
     pub input: Vec<TalosInputItem>,
-    pub context: TalosContext,
 }
 
 /// Internal input request dispatched from TalosService to AgentCoordinator.
@@ -74,7 +73,7 @@ pub struct AgentDispatchResumeToolCall {
 /// Internal response returned from AgentCoordinator to TalosService.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchResult {
-    pub content: String,
+    pub output_text: String,
     #[serde(default)]
     pub output_items: Vec<RunItem>,
     #[serde(default)]
@@ -82,7 +81,6 @@ pub struct AgentDispatchResult {
     pub stop_reason: StopReason,
     #[serde(default)]
     pub usage: TokenUsage,
-    pub success: bool,
     pub model: String,
     pub session_id: String,
 }
