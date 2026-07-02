@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
 use super::{SessionQuery, SessionRecord, SessionStore};
@@ -44,7 +44,7 @@ impl SessionStore for MockSessionStore {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             conf: SessionConf::default(),
             workspace_id: None,
             project_id: None,

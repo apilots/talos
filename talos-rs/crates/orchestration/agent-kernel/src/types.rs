@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosSessionEnvironment;
-use talos_types::talos::{TalosContentItem, TalosOutputItem, TalosUsage, TurnExecutionMetrics};
+use talos_types::talos::{RunItem, TalosContentItem, TokenUsage, TurnExecutionMetrics};
 use talos_types::ModelInfo;
 use tokio::sync::mpsc;
 
@@ -59,9 +59,9 @@ pub struct TaskResult {
     pub status: TaskStatus,
     pub output: String,
     #[serde(default)]
-    pub output_items: Vec<TalosOutputItem>,
+    pub output_items: Vec<RunItem>,
     #[serde(default)]
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     pub warnings: Vec<KernelWarning>,
     pub tool_traces: Vec<Value>,
@@ -482,22 +482,6 @@ impl InvocationContext {
             )
         })
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentRunResult {
-    pub output_text: String,
-    #[serde(default)]
-    pub output_items: Vec<TalosOutputItem>,
-    pub stop_reason: StopReason,
-    #[serde(default)]
-    pub usage: TalosUsage,
-    #[serde(default)]
-    pub warnings: Vec<KernelWarning>,
-    pub task_results: Vec<TaskResult>,
-    pub state_delta: HashMap<String, Value>,
-    pub continue_loop: bool,
-    pub requested_transfer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

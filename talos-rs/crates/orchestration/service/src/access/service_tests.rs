@@ -6,7 +6,7 @@ use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
 use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{SessionQuery, SessionRecord, SessionStore};
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{
     ProjectPatch, SessionConf, SessionListRequest, SessionPatch, TalosConfig, DEFAULT_SESSION_TITLE,
 };
@@ -177,7 +177,7 @@ impl SessionRuntime for NoopSessionRuntime {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<talos_types::TalosUsage> {
+    ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in this test")
     }
 
@@ -193,17 +193,9 @@ impl SessionRuntime for NoopSessionRuntime {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
+        _params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
         unreachable!("not used in this test")
     }
@@ -223,7 +215,7 @@ impl SessionRuntime for RecordingSessionRuntime {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<talos_types::TalosUsage> {
+    ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in this test")
     }
 
@@ -243,17 +235,9 @@ impl SessionRuntime for RecordingSessionRuntime {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
+        _params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
         unreachable!("not used in this test")
     }
@@ -285,7 +269,7 @@ fn record_for(
         created_at: 0,
         last_activity: 0,
         message_count: 0,
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         conf,
         workspace_id: None,
         project_id,

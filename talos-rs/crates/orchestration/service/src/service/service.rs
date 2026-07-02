@@ -6,8 +6,8 @@ use talos_coordinator::SessionRuntime;
 use talos_llm_provider::LlmProvider;
 use talos_store::project::ProjectStore;
 use talos_store::session::{
-    IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore, SessionPatchAck,
-    SessionStore, TimelineEventId,
+    ActiveTurnStatus, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
+    SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
@@ -26,7 +26,7 @@ use crate::{
     AccountService, Actor, ConfigService, MemoryService, PluginManagerService,
     RuntimeConfigReloadHook, SessionHistoryService, SessionService, SkillsService,
     TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
-    TimelineSubscriptionSource, TurnExecutor, TurnRetryRequest, TurnService, WorkspaceDocService,
+    TimelineSubscriptionSource, TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
 };
 
 #[derive(Clone)]
@@ -332,7 +332,7 @@ impl TalosService {
         &self,
         actor: &Actor,
         session_id: &str,
-        request: TurnRetryRequest,
+        request: TurnRetryParams,
     ) -> ServiceResult<MessageCommandResult> {
         let session = self.access.get_session(actor, session_id).await?;
         self.turns.submit_retry(session, request).await
@@ -348,7 +348,7 @@ impl TalosService {
             .submit_retry(
                 actor,
                 &session_id,
-                TurnRetryRequest {
+                TurnRetryParams {
                     input: request.input,
                     workspace_id: request.workspace_id,
                     client_message_id: request.client_message_id,
@@ -394,7 +394,19 @@ impl TalosService {
     }
 
     pub async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
-        self.access.cancel_active_turn(actor, session_id).await
+        let _session = self.access.get_session(actor, session_id).await?;
+        let Some(active_turn) = self.events.get_active_turn(session_id).await? else {
+            return Ok(());
+        };
+        match active_turn.status {
+            ActiveTurnStatus::Running
+            | ActiveTurnStatus::WaitingUserAction
+            | ActiveTurnStatus::Cancelling => {}
+            ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => return Ok(()),
+        }
+        self.access
+            .cancel_active_turn(actor, session_id, active_turn.turn_id)
+            .await
     }
 
     pub async fn interrupt_turn(
@@ -443,11 +455,11 @@ impl TalosService {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<talos_types::SubscribeTimelineResponse> {
-        let source = self.open_timeline_subscription(actor, request).await?;
+        let source = self.timeline_subscription_source(actor, request).await?;
         Ok(source.response)
     }
 
-    pub async fn open_timeline_subscription(
+    pub async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,

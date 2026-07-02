@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_types::talos::{TalosTimelineEventType, TimelineEventEnvelope};
+use talos_types::talos::{AgentEventType, TimelineEventEnvelope};
 use ts_rs::TS;
 
 pub type EventSubscriptionId = String;
@@ -12,16 +12,16 @@ pub struct TimelineSubscriptionNotification {
     pub event: TimelineEventEnvelope,
 }
 
-pub fn canonical_method(event_type: &TalosTimelineEventType) -> &'static str {
+pub fn canonical_method(event_type: &AgentEventType) -> &'static str {
     match event_type {
-        TalosTimelineEventType::TurnStarted => "timeline.turn.started",
-        TalosTimelineEventType::ItemStarted => "timeline.item.started",
-        TalosTimelineEventType::ItemDelta => "timeline.item.delta",
-        TalosTimelineEventType::ItemCompleted => "timeline.item.completed",
-        TalosTimelineEventType::AssistantTextCommitted => "timeline.assistant_text.committed",
-        TalosTimelineEventType::TurnMetrics => "timeline.turn.metrics",
-        TalosTimelineEventType::TurnCompleted => "timeline.turn.completed",
-        TalosTimelineEventType::TurnError => "timeline.turn.error",
+        AgentEventType::TurnStarted => "timeline.turn.started",
+        AgentEventType::ItemStarted => "timeline.item.started",
+        AgentEventType::ItemDelta => "timeline.item.delta",
+        AgentEventType::ItemCompleted => "timeline.item.completed",
+        AgentEventType::AssistantTextCommitted => "timeline.assistant_text.committed",
+        AgentEventType::TurnMetrics => "timeline.turn.metrics",
+        AgentEventType::TurnCompleted => "timeline.turn.completed",
+        AgentEventType::TurnError => "timeline.turn.error",
     }
 }
 

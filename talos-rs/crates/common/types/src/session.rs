@@ -75,7 +75,7 @@ pub struct SessionState {
     pub last_activity: u64,
     pub message_count: u64,
     #[serde(default)]
-    pub usage: talos::TalosUsage,
+    pub usage: talos::TokenUsage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +156,7 @@ impl TalosSession {
         &mut self,
         assistant_model: &str,
         message_delta: u64,
-        usage: &talos::TalosUsage,
+        usage: &talos::TokenUsage,
     ) {
         self.state.last_activity = crate::now();
         self.state.message_count = self.state.message_count.saturating_add(message_delta);
@@ -196,7 +196,7 @@ pub struct SessionInfo {
     #[ts(type = "number")]
     pub message_count: u64,
     #[serde(default)]
-    pub usage: talos::TalosUsage,
+    pub usage: talos::TokenUsage,
     #[serde(default)]
     #[ts(optional)]
     pub project_id: Option<String>,

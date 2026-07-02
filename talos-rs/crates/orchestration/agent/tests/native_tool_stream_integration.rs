@@ -2,7 +2,10 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use talos_agent::{Agent, AgentHarness, AgentRequest};
+use talos_agent::{
+    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
+    AgentRunParams, AgentRunSessionState,
+};
 use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
@@ -11,7 +14,7 @@ use talos_llm_provider::{
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
-    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta, TalosTimelineEventPayload,
+    AgentEventPayload, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta,
     TalosTimelineItemKind,
 };
 use talos_types::{SessionContext, SessionState, TalosSession};
@@ -339,7 +342,7 @@ impl LlmProvider for IntegrationMockProvider {
     }
 }
 
-fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarness {
+fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
     let provider = Arc::new(IntegrationMockProvider {
         state: state.clone(),
     });
@@ -348,7 +351,7 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarness {
     registry.register(Arc::new(EchoTool {
         state: state.clone(),
     }));
-    AgentHarness::new(
+    AgentHarnessImpl::new(
         "integration_agent".to_string(),
         "Integration Agent".to_string(),
         "Agent for integration tests".to_string(),
@@ -359,42 +362,49 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarness {
     )
 }
 
-fn build_request(input: &str) -> AgentRequest {
+fn build_request(input: &str) -> AgentRunParams {
     let session_id = format!(
         "integration-session-{}",
         SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
     );
-    AgentRequest {
-        session: TalosSession {
-            title: "Untitled Session".to_string(),
-            user_id: "talos-test-integration-user".to_string(),
-            conf: talos_types::SessionConf::default(),
+    let turn_id = format!("turn-{session_id}");
+    let session = TalosSession {
+        title: "Untitled Session".to_string(),
+        user_id: "talos-test-integration-user".to_string(),
+        conf: talos_types::SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+        context: SessionContext {
+            session_id: session_id.clone(),
+            workspace_id: Some("default".to_string()),
             project_id: None,
             current_directory: None,
-            context: SessionContext {
-                session_id: session_id.clone(),
-                workspace_id: Some("default".to_string()),
-                project_id: None,
-                current_directory: None,
-                project_root: None,
-                source_type: TalosSourceType::System,
-                provider: TalosProvider::System,
-                user_id: "talos-test-integration-user".to_string(),
-                message_id: "integration-message".to_string(),
-                trace_id: "integration-trace".to_string(),
-                channel_id: None,
-                thread_id: None,
-                environment: None,
-            },
-            config: talos_config::Config::default(),
-            state: SessionState::default(),
+            project_root: None,
+            source_type: TalosSourceType::System,
+            provider: TalosProvider::System,
+            user_id: "talos-test-integration-user".to_string(),
+            message_id: "integration-message".to_string(),
+            trace_id: "integration-trace".to_string(),
+            channel_id: None,
+            thread_id: None,
+            environment: None,
         },
-        turn_id: None,
-        resume_context: None,
-        input: vec![TalosInputItem::Text {
+        config: talos_config::Config::default(),
+        state: SessionState::default(),
+    };
+    let context = AgentRunContext::from_session(&session, turn_id);
+    let config = AgentRunConfig::from_session(&session);
+    let session_state = AgentRunSessionState::from_session(&session);
+    let options = AgentRunOptions::from_config(&config);
+    AgentRunParams::new(
+        context,
+        config,
+        session_state,
+        options,
+        vec![TalosInputItem::Text {
             text: input.to_string(),
         }],
-    }
+    )
 }
 
 #[tokio::test]
@@ -417,10 +427,10 @@ async fn integration_tool_call_loop_executes_tool_and_returns_final_output() {
         .output_text
         .contains("Final answer after tool execution"));
     assert!(response.reasoning.is_empty());
-    assert!(response.output_items.iter().all(|item| !matches!(
-        item,
-        talos_types::talos::TalosOutputItem::ExecutionSummary { .. }
-    )));
+    assert!(response
+        .output_items
+        .iter()
+        .all(|item| !matches!(item, talos_types::talos::RunItem::ExecutionSummary { .. })));
     assert!(state.saw_tool_result_message.load(Ordering::SeqCst));
     assert_eq!(state.tool_executions.load(Ordering::SeqCst), 1);
     assert!(state.chat_round.load(Ordering::SeqCst) >= 2);
@@ -432,7 +442,7 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
     let agent = create_agent_with_tool(state);
 
     let mut stream = agent
-        .run_stream(build_request("Stream your response with tool events."))
+        .run_streamed(build_request("Stream your response with tool events."))
         .await
         .expect("agent should return stream receiver");
 
@@ -444,37 +454,37 @@ async fn integration_stream_exposes_reasoning_output_and_tool_events() {
     assert!(events.iter().any(|event| {
         matches!(
             &event.payload,
-            TalosTimelineEventPayload::TurnStarted(payload) if !payload.request_id.is_empty()
+            AgentEventPayload::TurnStarted(payload) if !payload.request_id.is_empty()
         )
     }));
     assert!(events.iter().any(|event| {
         matches!(
             &event.payload,
-            TalosTimelineEventPayload::ItemDelta(payload)
+            AgentEventPayload::ItemDelta(payload)
                 if matches!(&payload.delta, TalosTimelineDelta::Text { text } if text == "Need tool context first.")
         )
     }));
     assert!(events.iter().any(|event| {
         matches!(
             &event.payload,
-            TalosTimelineEventPayload::ItemDelta(payload)
+            AgentEventPayload::ItemDelta(payload)
                 if matches!(&payload.delta, TalosTimelineDelta::Text { text } if text.contains("Final answer after tool execution"))
         )
     }));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemStarted(payload)
+        AgentEventPayload::ItemStarted(payload)
             if payload.item.kind == TalosTimelineItemKind::ToolCall
     )));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id.starts_with("tool-")
     )));
     assert!(events.iter().any(|event| {
         matches!(
             &event.payload,
-            TalosTimelineEventPayload::TurnCompleted(payload)
+            AgentEventPayload::TurnCompleted(payload)
                 if payload.stop_reason == talos_types::talos::StopReason::EndTurn
         )
     }));

@@ -13,6 +13,11 @@ struct PendingFlushTask {
     handle: JoinHandle<()>,
 }
 
+/// Tracks Harness-owned asynchronous memory flush tasks.
+///
+/// The manager is an AgentHarness utility for draining background memory writes
+/// during session lifecycle operations. It does not own Service persistence
+/// records or product timeline state.
 #[derive(Clone, Default)]
 pub struct MemoryFlushManager {
     tasks: Arc<Mutex<HashMap<String, PendingFlushTask>>>,
@@ -20,6 +25,7 @@ pub struct MemoryFlushManager {
 }
 
 impl MemoryFlushManager {
+    /// Create an empty memory flush manager.
     pub fn new() -> Self {
         Self::default()
     }
@@ -28,6 +34,7 @@ impl MemoryFlushManager {
         pending_count.fetch_sub(1, Ordering::SeqCst);
     }
 
+    /// Start a memory flush for one product session if no flush is pending.
     pub async fn spawn_flush<Fut>(&self, session_id: &str, future: Fut) -> bool
     where
         Fut: Future<Output = TalosResult<()>> + Send + 'static,
@@ -84,6 +91,7 @@ impl MemoryFlushManager {
         true
     }
 
+    /// Wait for all tracked flushes to finish or fail with a timeout error.
     pub async fn drain(&self, timeout: Duration) -> TalosResult<()> {
         let deadline = Instant::now() + timeout;
         let started_at = Instant::now();
@@ -140,10 +148,12 @@ impl MemoryFlushManager {
         }
     }
 
+    /// Return the number of tracked flush tasks that have not completed.
     pub fn pending_count(&self) -> usize {
         self.pending_count.load(Ordering::SeqCst)
     }
 
+    /// Check whether a session currently has a tracked pending flush.
     pub async fn contains_session(&self, session_id: &str) -> bool {
         self.tasks.lock().await.contains_key(session_id)
     }

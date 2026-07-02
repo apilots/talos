@@ -611,10 +611,10 @@ impl TalosContentItem {
     }
 }
 
-/// Talos message output item.
+/// Structured item produced while executing an agent run.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosOutputItem {
+pub enum RunItem {
     UserInput {
         text: String,
     },
@@ -647,9 +647,9 @@ pub struct TalosReasoning {
     pub text: String,
 }
 
-/// Token usage values.
+/// Token usage values shared by runs, sessions, history, and metrics.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TalosUsage {
+pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
@@ -663,7 +663,7 @@ pub struct TalosUsage {
     pub cache_read_input_tokens: Option<u32>,
 }
 
-impl TalosUsage {
+impl TokenUsage {
     pub fn accumulate(&mut self, other: &Self) {
         self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
         self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
@@ -685,7 +685,7 @@ pub struct TurnExecutionMetrics {
     pub tool_successes: u32,
     pub tool_errors: u32,
     pub stop_reason: StopReason,
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     #[ts(type = "number | null")]
     pub duration_ms: Option<u64>,
@@ -700,10 +700,10 @@ fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
     }
 }
 
-/// Timeline stream event lifecycle type.
+/// Agent execution event lifecycle type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum TalosTimelineEventType {
+pub enum AgentEventType {
     TurnStarted,
     ItemStarted,
     ItemDelta,
@@ -901,7 +901,7 @@ pub struct TalosTurnCompletedEvent {
     #[ts(type = "number")]
     pub completed_at_ms: u64,
     pub stop_reason: StopReason,
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     pub metrics: Option<TurnExecutionMetrics>,
 }
@@ -917,7 +917,7 @@ pub struct TalosTurnErrorEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosTimelineEventPayload {
+pub enum AgentEventPayload {
     TurnStarted(TalosTurnStartedEvent),
     ItemStarted(TalosItemStartedEvent),
     ItemDelta(TalosItemDeltaEvent),
@@ -928,9 +928,9 @@ pub enum TalosTimelineEventPayload {
     TurnError(TalosTurnErrorEvent),
 }
 
-/// Domain timeline event payload.
+/// Agent execution event.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTimelineEvent {
+pub struct AgentEvent {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub event_seq: Option<i64>,
@@ -939,13 +939,13 @@ pub struct TalosTimelineEvent {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub created_at_ms: Option<i64>,
-    pub event_type: TalosTimelineEventType,
+    pub event_type: AgentEventType,
     pub turn_id: String,
     pub message_id: String,
     pub session_id: String,
     #[ts(type = "number")]
     pub sequence: u64,
-    pub payload: TalosTimelineEventPayload,
+    pub payload: AgentEventPayload,
 }
 
 /// Public recoverable timeline stream event.
@@ -959,11 +959,11 @@ pub struct TimelineEventEnvelope {
     pub session_id: String,
     pub turn_id: String,
     pub message_id: String,
-    pub event: TalosTimelineEvent,
+    pub event: AgentEvent,
 }
 
 impl TimelineEventEnvelope {
-    pub fn from_persisted_event(event: TalosTimelineEvent) -> Option<Self> {
+    pub fn from_persisted_event(event: AgentEvent) -> Option<Self> {
         Some(Self {
             event_id: event.event_id.clone()?,
             event_seq: event.event_seq?,
@@ -994,7 +994,7 @@ pub struct SessionHistoryMessage {
     pub turn_id: String,
     pub items: Vec<TalosTimelineItem>,
     pub stop_reason: StopReason,
-    pub usage: TalosUsage,
+    pub usage: TokenUsage,
     #[serde(default)]
     pub metrics: Option<TurnExecutionMetrics>,
 }

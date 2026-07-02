@@ -3,7 +3,7 @@ import type {
   TalosActiveTurn,
   TalosContentItem,
   TalosSessionHistorySnapshot,
-  TalosTimelineEvent,
+  AgentEvent,
   TimelineEventEnvelope,
 } from "@talos/sdk-core";
 
@@ -416,7 +416,7 @@ describe("timeline stream events", () => {
   });
 });
 
-function baseEvent(payload: TalosTimelineEvent["payload"], sequence: number): TimelineEventEnvelope {
+function baseEvent(payload: AgentEvent["payload"], sequence: number): TimelineEventEnvelope {
   return {
     event_seq: sequence,
     event_id: `ev_${sequence}`,

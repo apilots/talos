@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { TalosTimelineEvent, TimelineEventEnvelope } from "@talos/sdk-browser";
+import type { AgentEvent, TimelineEventEnvelope } from "@talos/sdk-browser";
 
 import {
   createInitialTurnRequest,
@@ -69,7 +69,7 @@ describe("chat message api", () => {
   it("exposes the accepted server message id before streaming timeline events", async () => {
     const onAcceptedMessageId = vi.fn();
     const onEvent = vi.fn();
-    const timelineEvent: TalosTimelineEvent = {
+    const timelineEvent: AgentEvent = {
       event_seq: 1,
       event_id: "ev_00000000000000000001",
       created_at_ms: 1,

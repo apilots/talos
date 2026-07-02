@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use talos_agent::{Agent, AgentHarness, SkillRootsResolver};
+use talos_agent::{AgentDefinitionLoader, AgentHarness, AgentHarnessFactory, SkillRootsResolver};
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_channel::{ChannelServer, TelegramChannel};
@@ -40,10 +40,10 @@ use talos_tools::{
     CollaborationAgentHost, CollaborationRuntime, McpConnectionManager, ToolRegistry,
 };
 use talos_types::talos::{
-    TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEventPayload,
+    AgentEventPayload, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
 };
 use talos_types::{
-    resolve_model_catalog, AgentDispatchResponse, AgentDispatchRuntime, McpServerDefinition,
+    resolve_model_catalog, AgentDispatchResult, AgentDispatchRuntime, McpServerDefinition,
     McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, StartTurnRequest,
     TalosContext, TalosSession,
 };
@@ -240,7 +240,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
         &self,
         session: TalosSession,
         message: String,
-    ) -> TalosResult<AgentDispatchResponse> {
+    ) -> TalosResult<AgentDispatchResult> {
         let session_id = session.context.session_id.clone();
         let model = session.config.llm.model.clone();
         let request = StartTurnRequest {
@@ -288,29 +288,28 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                 continue;
             }
             match envelope.event.payload {
-                TalosTimelineEventPayload::ItemDelta(delta) => {
+                AgentEventPayload::ItemDelta(delta) => {
                     if let TalosTimelineDelta::Text { text } = delta.delta {
                         output.push_str(&text);
                     }
                 }
-                TalosTimelineEventPayload::ItemCompleted(completed) => {
+                AgentEventPayload::ItemCompleted(completed) => {
                     if let Some(TalosTimelineContent::Text { text }) = completed.final_content {
                         output = text;
                     }
                 }
-                TalosTimelineEventPayload::TurnCompleted(completed) => {
-                    return Ok(AgentDispatchResponse {
+                AgentEventPayload::TurnCompleted(completed) => {
+                    return Ok(AgentDispatchResult {
                         session_id: envelope.session_id,
-                        content: output,
+                        output_text: output,
                         stop_reason: completed.stop_reason,
                         usage: completed.usage,
-                        success: true,
                         model,
                         output_items: Vec::new(),
                         reasoning: Vec::new(),
                     });
                 }
-                TalosTimelineEventPayload::TurnError(error) => {
+                AgentEventPayload::TurnError(error) => {
                     return Err(TalosError::GatewayError(error.error));
                 }
                 _ => {}
@@ -677,11 +676,17 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
+    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &config.llm.model)?;
+    let default_agent_id = agent_definitions
+        .iter()
+        .find(|definition| definition.enabled)
+        .map(|definition| definition.id.clone())
+        .ok_or_else(|| TalosError::ValidationError("no enabled agent definitions".to_string()))?;
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     if let Err(err) = router
         .add_binding(Binding {
             id: "default_binding".to_string(),
-            agent_id: "default".to_string(),
+            agent_id: default_agent_id,
             rule: MatchRule::Default,
             priority: 1,
         })
@@ -710,21 +715,22 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         plugins: plugin_manager_service.clone(),
     });
 
-    let agent = AgentHarness::new_with_skill_roots_resolver(
-        "default".to_string(),
-        config.agent.name.clone(),
-        "Default AI assistant".to_string(),
+    let agent_factory = AgentHarnessFactory::new(
         llm_provider.clone(),
-        config.llm.model.clone(),
         tool_registry.clone(),
-        config.agent.kernel.clone(),
         skill_roots_resolver,
     );
-    let agent: Arc<dyn Agent> = Arc::new(agent);
 
     let coordinator = Arc::new(CoordinatorImpl::new(router));
 
-    coordinator.register_agent("default", agent).await?;
+    for definition in agent_definitions {
+        if !definition.enabled {
+            continue;
+        }
+        let agent_id = definition.id.clone();
+        let agent: Arc<dyn AgentHarness> = Arc::new(agent_factory.build(&definition)?);
+        coordinator.register_agent(&agent_id, agent).await?;
+    }
 
     let agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime> = coordinator.clone();
     let session_runtime: Arc<dyn SessionRuntime> = coordinator.clone();

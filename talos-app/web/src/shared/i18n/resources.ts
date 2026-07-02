@@ -3,12 +3,9 @@ export const defaultLocale = "en" as const;
 export const resources = {
   en: {
     common: {
-      loading: "Loading…",
-      save: "Save",
-      cancel: "Cancel",
-      connected: "Connected to server",
-      connectedShort: "Connected",
-      awaitingServer: "Awaiting server",
+      loading: "Loading…", save: "Save",
+      cancel: "Cancel", connected: "Connected to server",
+      connectedShort: "Connected", awaitingServer: "Awaiting server",
       unknown: "unknown",
       noProject: "No project",
       defaultWorkspace: "Default workspace",

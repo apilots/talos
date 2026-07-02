@@ -6,7 +6,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    OptionalProjectIdPatch, ProjectPatch, SessionListRequest, SessionPatch, TalosSession,
+    CancelActiveTurnParams, OptionalProjectIdPatch, ProjectPatch, SessionListRequest, SessionPatch,
+    TalosSession,
 };
 
 use super::types::Actor;
@@ -200,9 +201,11 @@ impl ResourceAccessService {
         &self,
         actor: &Actor,
         session_id: &str,
+        turn_id: String,
     ) -> TalosResult<()> {
         let session = self.get_session(actor, session_id).await?;
-        self.cancel_runtime_turn(session).await
+        self.cancel_runtime_turn(CancelActiveTurnParams { session, turn_id })
+            .await
     }
 
     pub(crate) async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {
@@ -340,7 +343,7 @@ impl ResourceAccessService {
     async fn compact_runtime_session(
         &self,
         session: TalosSession,
-    ) -> TalosResult<talos_types::talos::TalosUsage> {
+    ) -> TalosResult<talos_types::talos::TokenUsage> {
         self.session_runtime.compact_session(session).await
     }
 
@@ -356,8 +359,8 @@ impl ResourceAccessService {
         self.session_runtime.prepare_delete_session(session).await
     }
 
-    async fn cancel_runtime_turn(&self, session: TalosSession) -> TalosResult<()> {
-        self.session_runtime.cancel_active_turn(session).await
+    async fn cancel_runtime_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
+        self.session_runtime.cancel_active_turn(params).await
     }
 }
 

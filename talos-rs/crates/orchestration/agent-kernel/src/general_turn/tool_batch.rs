@@ -306,7 +306,7 @@ pub(crate) fn collect_general_turn_tool_batch(
         if reduced.is_error {
             error_count += 1;
         }
-        output_items.push(TalosOutputItem::ToolResult {
+        output_items.push(RunItem::ToolResult {
             call_id: output.call_id.clone(),
             tool_name: output.tool_name.clone(),
             content: reduced.content_items.clone(),

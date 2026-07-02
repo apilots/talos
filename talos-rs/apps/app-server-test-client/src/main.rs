@@ -3,15 +3,14 @@ use std::{collections::HashMap, process::Stdio};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Value};
 use talos_sdk::{
-    canonical_method, AppServerClient, AppServerClientConfig, ConfigGetRequest,
-    ExpectedFileVersion, GatewayClient, MemoryFileListRequest, MemoryFileReadRequest,
-    MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest, ProjectListRequest,
-    ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest, StartTurnRequest,
-    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError,
-    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItemKind,
-    TimelineEventEnvelope, WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest,
+    canonical_method, AgentEventPayload, AgentEventType, AppServerClient, AppServerClientConfig,
+    ConfigGetRequest, ExpectedFileVersion, GatewayClient, MemoryFileListRequest,
+    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest,
+    ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest,
+    StartTurnRequest, SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext,
+    TalosError, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItemKind, TimelineEventEnvelope, WorkspaceDocKind,
+    WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
@@ -766,18 +765,18 @@ fn test_talos_context() -> TalosContext {
 fn is_terminal_event(event: &TimelineEventEnvelope) -> bool {
     matches!(
         event.event.event_type,
-        TalosTimelineEventType::TurnCompleted | TalosTimelineEventType::TurnError
+        AgentEventType::TurnCompleted | AgentEventType::TurnError
     )
 }
 
 fn is_replayable_event(event: &TimelineEventEnvelope) -> bool {
-    event.event.event_type != TalosTimelineEventType::TurnMetrics
+    event.event.event_type != AgentEventType::TurnMetrics
 }
 
 fn ensure_turn_event_flow(events: &[TimelineEventEnvelope]) -> Result<()> {
     if events
         .iter()
-        .any(|event| event.event.event_type == TalosTimelineEventType::TurnError)
+        .any(|event| event.event.event_type == AgentEventType::TurnError)
     {
         return Err(anyhow!("turn failed during app-server e2e"));
     }
@@ -801,7 +800,7 @@ fn assistant_text_from_events(events: &[TimelineEventEnvelope]) -> String {
     let mut item_kinds = HashMap::new();
     for event in events {
         match &event.event.payload {
-            TalosTimelineEventPayload::ItemStarted(started) => {
+            AgentEventPayload::ItemStarted(started) => {
                 item_kinds.insert(started.item.item_id.clone(), started.item.kind);
                 if started.item.kind == TalosTimelineItemKind::AssistantText {
                     if let TalosTimelineContent::Text { text } = &started.item.content {
@@ -809,14 +808,14 @@ fn assistant_text_from_events(events: &[TimelineEventEnvelope]) -> String {
                     }
                 }
             }
-            TalosTimelineEventPayload::ItemDelta(delta) => {
+            AgentEventPayload::ItemDelta(delta) => {
                 if item_kinds.get(&delta.item_id) == Some(&TalosTimelineItemKind::AssistantText) {
                     if let TalosTimelineDelta::Text { text } = &delta.delta {
                         output.push_str(text);
                     }
                 }
             }
-            TalosTimelineEventPayload::ItemCompleted(completed) => {
+            AgentEventPayload::ItemCompleted(completed) => {
                 if item_kinds.get(&completed.item_id) == Some(&TalosTimelineItemKind::AssistantText)
                 {
                     if let Some(TalosTimelineContent::Text { text }) = &completed.final_content {

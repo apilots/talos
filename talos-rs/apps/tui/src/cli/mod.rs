@@ -9,7 +9,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use talos_sdk::{
-    TalosContext, TalosTimelineContent, TalosTimelineDelta, TalosTimelineEventPayload,
+    AgentEventPayload, TalosContext, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
@@ -175,14 +175,14 @@ fn render_event(
 ) -> Result<bool, Box<dyn std::error::Error>> {
     let event = &envelope.event;
     match &event.payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => {
+        AgentEventPayload::ItemStarted(payload) => {
             item_phases.insert(payload.item.item_id.clone(), payload.item.phase);
             if let TalosTimelineContent::Text { text } = &payload.item.content {
                 item_texts.insert(payload.item.item_id.clone(), text.clone());
             }
             render_started_item(&payload.item);
         }
-        TalosTimelineEventPayload::ItemDelta(payload) => match &payload.delta {
+        AgentEventPayload::ItemDelta(payload) => match &payload.delta {
             TalosTimelineDelta::Text { text } => {
                 item_texts
                     .entry(payload.item_id.clone())
@@ -232,7 +232,7 @@ fn render_event(
                 eprintln!("ITEM_STATUS item={} status={:?}", payload.item_id, status);
             }
         },
-        TalosTimelineEventPayload::AssistantTextCommitted(payload) => {
+        AgentEventPayload::AssistantTextCommitted(payload) => {
             item_phases.insert(payload.item_id.clone(), payload.phase);
             if payload.phase == TalosTimelinePhase::FinalAnswer {
                 if !written_final_items.contains(&payload.item_id) {
@@ -245,7 +245,7 @@ fn render_event(
                 }
             }
         }
-        TalosTimelineEventPayload::ItemCompleted(payload) => {
+        AgentEventPayload::ItemCompleted(payload) => {
             if let Some(TalosTimelineContent::ToolCall {
                 call_id,
                 name,
@@ -262,15 +262,15 @@ fn render_event(
                 );
             }
         }
-        TalosTimelineEventPayload::TurnError(payload) => {
+        AgentEventPayload::TurnError(payload) => {
             error!("TURN_ERROR {}", payload.error);
             return Ok(true);
         }
-        TalosTimelineEventPayload::TurnCompleted(_) => {
+        AgentEventPayload::TurnCompleted(_) => {
             return Ok(true);
         }
-        TalosTimelineEventPayload::TurnMetrics(_) => {}
-        TalosTimelineEventPayload::TurnStarted(_) => {}
+        AgentEventPayload::TurnMetrics(_) => {}
+        AgentEventPayload::TurnStarted(_) => {}
     }
     Ok(false)
 }

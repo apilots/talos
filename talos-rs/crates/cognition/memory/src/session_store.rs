@@ -10,7 +10,7 @@ use crate::store::{
 };
 use crate::{RecordHeader, TalosMessageRole};
 use talos_llm_provider::Role;
-use talos_types::talos::{StopReason, TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::talos::{RunItem, StopReason, TalosContentItem, TokenUsage};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -157,12 +157,12 @@ fn synthesize_cancelled_turns_from_transcripts(
         .iter()
         .flat_map(|turn| {
             turn.items.iter().filter_map(move |item| match item {
-                TalosOutputItem::UserInput { text } => Some((text.as_str(), turn.timestamp)),
-                TalosOutputItem::Reasoning { .. }
-                | TalosOutputItem::ExecutionSummary { .. }
-                | TalosOutputItem::OutputText { .. }
-                | TalosOutputItem::ToolCall { .. }
-                | TalosOutputItem::ToolResult { .. } => None,
+                RunItem::UserInput { text } => Some((text.as_str(), turn.timestamp)),
+                RunItem::Reasoning { .. }
+                | RunItem::ExecutionSummary { .. }
+                | RunItem::OutputText { .. }
+                | RunItem::ToolCall { .. }
+                | RunItem::ToolResult { .. } => None,
             })
         })
         .collect::<Vec<_>>();
@@ -238,8 +238,8 @@ fn synthesize_cancelled_turns_from_transcripts(
                 session_id: session_id.to_string(),
                 seq: next_seq.saturating_add(index as u64),
                 timestamp: group.timestamp,
-                items: vec![TalosOutputItem::UserInput { text: user_text }],
-                usage: TalosUsage::default(),
+                items: vec![RunItem::UserInput { text: user_text }],
+                usage: TokenUsage::default(),
                 stop_reason: StopReason::Cancelled,
             })
         })
@@ -328,7 +328,7 @@ fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
         .iter()
         .enumerate()
         .filter_map(|(index, item)| match item {
-            TalosOutputItem::UserInput { text } => Some(TalosMessage {
+            RunItem::UserInput { text } => Some(TalosMessage {
                 header: RecordHeader {
                     id: format!("{}:user:{}", turn.turn_id, index),
                     session_id: turn.session_id.clone(),
@@ -338,7 +338,7 @@ fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
                 role: TalosMessageRole::User,
                 text: text.clone(),
             }),
-            TalosOutputItem::OutputText { text } => Some(TalosMessage {
+            RunItem::OutputText { text } => Some(TalosMessage {
                 header: RecordHeader {
                     id: format!("{}:assistant:{}", turn.turn_id, index),
                     session_id: turn.session_id.clone(),
@@ -348,10 +348,10 @@ fn recent_messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
                 role: TalosMessageRole::Assistant,
                 text: text.clone(),
             }),
-            TalosOutputItem::Reasoning { .. }
-            | TalosOutputItem::ExecutionSummary { .. }
-            | TalosOutputItem::ToolCall { .. }
-            | TalosOutputItem::ToolResult { .. } => None,
+            RunItem::Reasoning { .. }
+            | RunItem::ExecutionSummary { .. }
+            | RunItem::ToolCall { .. }
+            | RunItem::ToolResult { .. } => None,
         })
         .collect()
 }
@@ -395,7 +395,7 @@ fn recent_tool_results_from_turn(
         .iter()
         .enumerate()
         .filter_map(|(index, item)| match item {
-            TalosOutputItem::ToolResult {
+            RunItem::ToolResult {
                 tool_name,
                 content,
                 is_error,
@@ -423,11 +423,11 @@ fn recent_tool_results_from_turn(
                     truncated,
                 })
             }
-            TalosOutputItem::UserInput { .. }
-            | TalosOutputItem::Reasoning { .. }
-            | TalosOutputItem::ExecutionSummary { .. }
-            | TalosOutputItem::OutputText { .. }
-            | TalosOutputItem::ToolCall { .. } => None,
+            RunItem::UserInput { .. }
+            | RunItem::Reasoning { .. }
+            | RunItem::ExecutionSummary { .. }
+            | RunItem::OutputText { .. }
+            | RunItem::ToolCall { .. } => None,
         })
         .collect()
 }
@@ -473,7 +473,7 @@ fn recent_tool_exchanges_from_turn(
         .items
         .iter()
         .filter_map(|item| match item {
-            TalosOutputItem::ToolResult {
+            RunItem::ToolResult {
                 call_id,
                 tool_name,
                 content,
@@ -503,7 +503,7 @@ fn recent_tool_exchanges_from_turn(
         .iter()
         .enumerate()
         .filter_map(|(index, item)| match item {
-            TalosOutputItem::ToolCall {
+            RunItem::ToolCall {
                 call_id,
                 name,
                 arguments,

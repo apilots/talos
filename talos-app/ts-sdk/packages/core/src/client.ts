@@ -159,10 +159,12 @@ export class TalosClient {
   skills = {
     list: (query?: SkillsListRequest): Promise<SkillsListResponse> =>
       this.http.request<SkillsListResponse>(this.urlWithQuery("/v1/skills", query)),
-    refresh: (_request: SkillsRefreshRequest = {}): Promise<SkillsListResponse> =>
-      this.http.request<SkillsListResponse>(this.url("/v1/skills/refresh"), {
+    refresh: (request: SkillsRefreshRequest = {}): Promise<SkillsListResponse> => {
+      void request;
+      return this.http.request<SkillsListResponse>(this.url("/v1/skills/refresh"), {
         method: "POST",
-      }),
+      });
+    },
     suggest: (query: SkillsSuggestRequest): Promise<SkillsSuggestResponse> =>
       this.http.request<SkillsSuggestResponse>(this.urlWithQuery("/v1/skills/suggest", query)),
     read: (request: SkillsReadRequest): Promise<SkillsReadResponse> =>
@@ -332,8 +334,10 @@ export class TalosClient {
   };
 
   projects = {
-    list: (_request: ProjectListRequest = {}): Promise<ProjectListResponse> =>
-      this.http.request<ProjectListResponse>(this.url("/v1/projects")),
+    list: (request: ProjectListRequest = {}): Promise<ProjectListResponse> => {
+      void request;
+      return this.http.request<ProjectListResponse>(this.url("/v1/projects"));
+    },
     get: (request: ProjectReadRequest): Promise<ProjectReadResponse> =>
       this.http.request<ProjectReadResponse>(this.url(`/v1/projects/${request.project_id}`)),
     getById: (projectId: string): Promise<ProjectReadResponse> =>
@@ -431,10 +435,13 @@ export class TalosClient {
       }),
     retryWithIdempotencyKey: (
       request: RetryTurnRequest,
-      _idempotencyKey: string,
+      idempotencyKey: string,
     ) =>
       this.http.request<RetryTurnResponse>(this.url("/v1/turns/retry"), {
         method: "POST",
+        headers: {
+          "idempotency-key": idempotencyKey,
+        },
         body: JSON.stringify(request),
       }),
     retry: (request: RetryTurnRequest) =>

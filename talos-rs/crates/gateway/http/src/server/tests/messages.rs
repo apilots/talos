@@ -111,7 +111,7 @@ async fn test_start_turn_handler_accepts_shared_request() {
 
     let recorded = event_store.events.lock().unwrap().clone();
     assert!(!recorded.is_empty());
-    assert_eq!(recorded[0].event_type, TalosTimelineEventType::TurnStarted);
+    assert_eq!(recorded[0].event_type, AgentEventType::TurnStarted);
     assert_eq!(recorded[0].message_id, "msg_mock");
 }
 

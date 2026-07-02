@@ -44,17 +44,17 @@ import type {
   TalosContentItem as ProtocolTalosContentItem,
   TalosContext as GeneratedTalosContext,
   TalosInputItem as ProtocolTalosInputItem,
-  TalosOutputItem as ProtocolTalosOutputItem,
+  RunItem as ProtocolRunItem,
   TalosProvider as ProtocolTalosProvider,
   TalosReasoning as ProtocolTalosReasoning,
   TalosSessionEnvironment as ProtocolTalosSessionEnvironment,
   TalosSourceType as ProtocolTalosSourceType,
-  TalosTimelineEvent as ProtocolTalosTimelineEvent,
-  TalosTimelineEventPayload as ProtocolTalosTimelineEventPayload,
+  AgentEvent as ProtocolAgentEvent,
+  AgentEventPayload as ProtocolAgentEventPayload,
   TalosTimelineItem as ProtocolTalosTimelineItem,
   TalosTurnCompletedEvent as ProtocolTalosTurnCompletedEvent,
   TalosTurnMetricsEvent as ProtocolTalosTurnMetricsEvent,
-  TalosUsage as ProtocolTalosUsage,
+  TokenUsage as ProtocolTokenUsage,
   TimelineActiveTurnSnapshot as ProtocolTimelineActiveTurnSnapshot,
   TimelineActiveTurnStatus as ProtocolTimelineActiveTurnStatus,
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
@@ -76,7 +76,7 @@ export type {
   TalosItemStartedEvent,
   TalosTimelineContent,
   TalosTimelineDelta,
-  TalosTimelineEventType,
+  AgentEventType,
   TalosTimelineItem,
   TalosTimelineItemKind,
   TalosTimelineItemStatus,
@@ -266,7 +266,7 @@ export type TalosContext = GeneratedTalosContext;
 
 export type UserRole = ProtocolUserRole;
 export type UserDto = ProtocolUserDto;
-export type TalosUsage = ProtocolTalosUsage;
+export type TokenUsage = ProtocolTokenUsage;
 
 export type TalosReasoning = ProtocolTalosReasoning;
 
@@ -274,15 +274,15 @@ export type TalosInputItem = ProtocolTalosInputItem;
 
 export type TalosContentItem = ProtocolTalosContentItem;
 
-export type TalosOutputItem = ProtocolTalosOutputItem;
+export type RunItem = ProtocolRunItem;
 
-export type TalosTimelineEvent = ProtocolTalosTimelineEvent;
+export type AgentEvent = ProtocolAgentEvent;
 
 export type TalosTurnMetricsEvent = ProtocolTalosTurnMetricsEvent;
 
 export type TalosTurnCompletedEvent = ProtocolTalosTurnCompletedEvent;
 
-export type TalosTimelineEventPayload = ProtocolTalosTimelineEventPayload;
+export type AgentEventPayload = ProtocolAgentEventPayload;
 
 export type TimelineEventEnvelope = ProtocolTimelineEventEnvelope;
 

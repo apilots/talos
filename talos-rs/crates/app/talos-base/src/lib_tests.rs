@@ -4,7 +4,7 @@ use super::{
     SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
 use std::sync::Arc;
-use talos_config::{Config, LlmProtocol};
+use talos_config::{AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol};
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -44,6 +44,84 @@ async fn application_runtime_builds_when_model_key_is_missing() {
         .expect("runtime should start before model setup is complete");
 
     assert_eq!(runtime.config.llm.provider, "anthropic");
+}
+
+#[tokio::test]
+async fn application_runtime_registers_configured_default_agent() {
+    let mut config = Config::default();
+    config.gateway.auth = false;
+    config.storage.connection_string = ":memory:".to_string();
+    config.llm.model = "global-model".to_string();
+    config.agent.agents = vec![AgentDefinitionConfig {
+        id: "reviewer".to_string(),
+        name: "Reviewer".to_string(),
+        kind: AgentKind::Kernel,
+        enabled: true,
+        description: Some("Review agent".to_string()),
+        default_workspace_id: Some("default".to_string()),
+        model: None,
+        runtime_config: Some(AgentRuntimeConfig::Kernel {
+            kernel: config.agent.kernel.clone(),
+        }),
+    }];
+
+    let runtime = build_application_runtime(config)
+        .await
+        .expect("runtime should build with configured agent");
+
+    let registration = runtime
+        .coordinator
+        .registry()
+        .get("reviewer")
+        .await
+        .expect("configured agent should register");
+    assert_eq!(registration.descriptor.name, "Reviewer");
+    assert_eq!(runtime.coordinator.registry().len().await, 1);
+}
+
+#[tokio::test]
+async fn application_runtime_skips_disabled_agent_definitions() {
+    let mut config = Config::default();
+    config.gateway.auth = false;
+    config.storage.connection_string = ":memory:".to_string();
+    config.llm.model = "global-model".to_string();
+    config.agent.agents = vec![
+        AgentDefinitionConfig {
+            id: "disabled".to_string(),
+            name: "Disabled".to_string(),
+            kind: AgentKind::Kernel,
+            enabled: false,
+            description: None,
+            default_workspace_id: None,
+            model: None,
+            runtime_config: None,
+        },
+        AgentDefinitionConfig {
+            id: "enabled".to_string(),
+            name: "Enabled".to_string(),
+            kind: AgentKind::Kernel,
+            enabled: true,
+            description: None,
+            default_workspace_id: None,
+            model: None,
+            runtime_config: Some(AgentRuntimeConfig::Kernel {
+                kernel: config.agent.kernel.clone(),
+            }),
+        },
+    ];
+
+    let runtime = build_application_runtime(config)
+        .await
+        .expect("runtime should build with enabled agent");
+
+    assert!(runtime
+        .coordinator
+        .registry()
+        .get("disabled")
+        .await
+        .is_err());
+    assert!(runtime.coordinator.registry().get("enabled").await.is_ok());
+    assert_eq!(runtime.coordinator.registry().len().await, 1);
 }
 
 #[tokio::test]

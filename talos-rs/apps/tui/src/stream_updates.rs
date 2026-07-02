@@ -1,14 +1,14 @@
 use std::time::Duration;
 
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TalosUsage;
+use talos_types::talos::TokenUsage;
 use tokio::sync::mpsc::error::TryRecvError;
 
 use crate::types::{AppState, ChatRole, CommandUpdate};
 use crate::TuiApp;
 
 impl TuiApp {
-    fn append_usage_lines(lines: &mut Vec<String>, label: &str, usage: &TalosUsage) {
+    fn append_usage_lines(lines: &mut Vec<String>, label: &str, usage: &TokenUsage) {
         lines.push(format!("{label}.usage.input: {}", usage.input_tokens));
         lines.push(format!("{label}.usage.output: {}", usage.output_tokens));
         lines.push(format!("{label}.usage.total: {}", usage.total_tokens));

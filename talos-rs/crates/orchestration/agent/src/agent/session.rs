@@ -1,95 +1,18 @@
-use super::{ActiveTurnHandle, AgentHarness, QueuedTurn};
+use super::AgentHarnessImpl;
 use chrono::Utc;
-use dashmap::mapref::entry::Entry;
-use std::collections::VecDeque;
 use std::time::Duration;
 use talos_config::AgentKernelConfig;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_memory::{Memory, MemoryStore};
 use talos_memory::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
     SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
 };
-use talos_types::{talos::TalosUsage, TalosSession};
+use talos_types::{talos::TokenUsage, TalosSession};
 use uuid::Uuid;
 
-impl AgentHarness {
-    async fn ensure_session_is_idle(&self, session_id: &str, action: &str) -> TalosResult<()> {
-        if self.active_turns.contains_key(session_id) {
-            return Err(TalosError::ValidationError(format!(
-                "cannot {} session `{}` while a turn is active",
-                action, session_id
-            )));
-        }
-        if self.has_queued_turns(session_id).await {
-            return Err(TalosError::ValidationError(format!(
-                "cannot {} session `{}` while queued turns are pending",
-                action, session_id
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn try_reserve_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        match self.active_turns.entry(session_id.to_string()) {
-            Entry::Occupied(_) => Err(TalosError::ValidationError(format!(
-                "cannot start a new turn for session `{session_id}` while another turn is active"
-            ))),
-            Entry::Vacant(entry) => {
-                entry.insert(ActiveTurnHandle::Reserved);
-                Ok(())
-            }
-        }
-    }
-
-    pub(crate) fn activate_reserved_turn(
-        &self,
-        session_id: &str,
-        execution_task: tokio::task::AbortHandle,
-    ) -> TalosResult<()> {
-        match self.active_turns.entry(session_id.to_string()) {
-            Entry::Occupied(mut entry) => {
-                entry.insert(ActiveTurnHandle::Running { execution_task });
-                Ok(())
-            }
-            Entry::Vacant(_) => Err(TalosError::InternalError(format!(
-                "missing reserved active turn slot for session `{session_id}`"
-            ))),
-        }
-    }
-
-    pub(crate) fn clear_active_turn(&self, session_id: &str) {
-        self.active_turns.remove(session_id);
-    }
-
-    pub(crate) async fn enqueue_turn(&self, session_id: &str, queued_turn: QueuedTurn) -> usize {
-        let mut backlogs = self.session_backlogs.lock().await;
-        let backlog = backlogs
-            .entry(session_id.to_string())
-            .or_insert_with(VecDeque::new);
-        backlog.push_back(queued_turn);
-        backlog.len()
-    }
-
-    pub(crate) async fn dequeue_next_turn(&self, session_id: &str) -> Option<QueuedTurn> {
-        let mut backlogs = self.session_backlogs.lock().await;
-        let backlog = backlogs.get_mut(session_id)?;
-        let next = backlog.pop_front();
-        if backlog.is_empty() {
-            backlogs.remove(session_id);
-        }
-        next
-    }
-
-    pub(crate) async fn has_queued_turns(&self, session_id: &str) -> bool {
-        self.session_backlogs
-            .lock()
-            .await
-            .get(session_id)
-            .is_some_and(|backlog| !backlog.is_empty())
-    }
-
+impl AgentHarnessImpl {
     pub(crate) async fn drain_pending_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
         self.memory_flush_manager.drain(timeout).await
     }
@@ -102,51 +25,12 @@ impl AgentHarness {
         self.memory_flush_manager.contains_session(session_id).await
     }
 
-    pub(crate) fn has_active_turn(&self, session_id: &str) -> bool {
-        self.active_turns.contains_key(session_id)
-    }
-
-    pub(crate) async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()> {
-        let deadline = std::time::Instant::now() + timeout;
-        loop {
-            if self.active_turns.is_empty() {
-                return Ok(());
-            }
-            if std::time::Instant::now() >= deadline {
-                let remaining: Vec<_> = self
-                    .active_turns
-                    .iter()
-                    .map(|entry| entry.key().clone())
-                    .collect();
-                // Force-abort any remaining running turns
-                for session_id in &remaining {
-                    if let Some(handle) = self.active_turns.get(session_id) {
-                        if let ActiveTurnHandle::Running { execution_task } = handle.value() {
-                            execution_task.abort();
-                        }
-                    }
-                }
-                // Give aborted tasks a moment to observe cancellation
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                // Clear forcibly-aborted entries
-                for session_id in &remaining {
-                    self.clear_active_turn(session_id);
-                }
-                return Err(TalosError::InternalError(format!(
-                    "drain_active_turns timed out with {} sessions still active: {:?}",
-                    remaining.len(),
-                    remaining
-                )));
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
     pub(crate) async fn validate_dynamic_tool_submission(
         &self,
         memory_store: &MemoryStore,
         kernel_config: &AgentKernelConfig,
         session_id: &str,
+        turn_id: &str,
         call_id: &str,
         tool_name: &str,
     ) -> TalosResult<()> {
@@ -161,13 +45,13 @@ impl AgentHarness {
         for record in records {
             match record.payload {
                 SessionTranscriptPayload::DynamicToolRequest { payload }
-                    if payload.call_id == call_id =>
+                    if record.header.invocation_id == turn_id && payload.call_id == call_id =>
                 {
                     latest_request_timestamp = Some(record.header.timestamp);
                     latest_request_tool_name = Some(payload.tool_name);
                 }
                 SessionTranscriptPayload::DynamicToolResponse { payload }
-                    if payload.call_id == call_id =>
+                    if record.header.invocation_id == turn_id && payload.call_id == call_id =>
                 {
                     latest_response_timestamp = Some(record.header.timestamp);
                 }
@@ -177,7 +61,7 @@ impl AgentHarness {
 
         let Some(request_timestamp) = latest_request_timestamp else {
             return Err(talos_error::TalosError::ToolError(format!(
-                "dynamic tool call `{call_id}` is not pending for session `{session_id}`"
+                "dynamic tool call `{call_id}` is not pending for session `{session_id}` turn `{turn_id}`"
             )));
         };
 
@@ -213,6 +97,7 @@ impl AgentHarness {
     pub(crate) async fn submit_dynamic_tool_result(
         &self,
         session: TalosSession,
+        turn_id: &str,
         call_id: &str,
         tool_name: &str,
         output: String,
@@ -224,6 +109,7 @@ impl AgentHarness {
             memory_store.as_ref(),
             &kernel_config,
             &session_id,
+            turn_id,
             call_id,
             tool_name,
         )
@@ -232,7 +118,7 @@ impl AgentHarness {
             header: SessionTranscriptHeader {
                 id: Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
-                invocation_id: Uuid::new_v4().to_string(),
+                invocation_id: turn_id.to_string(),
                 branch: SessionTranscriptBranch::ReactiveLoop,
                 timestamp: Utc::now(),
             },
@@ -255,7 +141,7 @@ impl AgentHarness {
     pub(crate) async fn compact_session_impl(
         &self,
         session: TalosSession,
-    ) -> TalosResult<TalosUsage> {
+    ) -> TalosResult<TokenUsage> {
         let session_id = session.context.session_id.clone();
         self.ensure_session_is_idle(&session_id, "compact").await?;
         let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
@@ -276,7 +162,7 @@ impl AgentHarness {
             ),
         )
         .await?;
-        Ok(TalosUsage {
+        Ok(TokenUsage {
             input_tokens: report.input_tokens,
             output_tokens: report.output_tokens,
             total_tokens: report.total_tokens,

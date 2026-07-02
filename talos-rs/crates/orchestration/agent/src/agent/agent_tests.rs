@@ -1,4 +1,7 @@
 use super::*;
+use crate::{
+    AgentResumeParams, AgentRunConfig, AgentRunContext, AgentRunOptions, AgentRunSessionState,
+};
 use chrono::Utc;
 use serde_json::json;
 use std::future::pending;
@@ -7,8 +10,9 @@ use std::sync::{Arc, Mutex};
 use talos_agent_kernel::{
     AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
     DynamicToolRequestStreamData, ExecutionSummaryStreamData, KernelAssistantTextPhase,
-    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData,
-    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData,
+    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
+    KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData, ToolArgsDeltaStreamData,
+    ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
 };
 use talos_config::AgentKernelConfig;
 use talos_llm_provider::{
@@ -23,16 +27,17 @@ use talos_tools::{
 use talos_tools_policy::ToolPolicy;
 use talos_types::agent_dispatch::{AgentDispatchResumeContext, AgentDispatchResumeToolCall};
 use talos_types::talos::{
-    StopReason as TalosStopReason, TalosContentItem, TalosInputItem, TalosOutputItem,
-    TalosProvider, TalosSourceType, TalosTimelineEventPayload, TalosUsage,
+    AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
+    TalosProvider, TalosSourceType, TalosTimelineDelta, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
 };
 use talos_types::{SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE};
 use tempfile::TempDir;
 use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
 
-fn build_test_agent() -> AgentHarness {
-    AgentHarness::new(
+fn build_test_agent() -> AgentHarnessImpl {
+    AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -43,6 +48,40 @@ fn build_test_agent() -> AgentHarness {
     )
 }
 
+async fn submit_dynamic_tool_result(
+    agent: &AgentHarnessImpl,
+    session: TalosSession,
+    call_id: &str,
+    tool_name: &str,
+    output: &str,
+    success: bool,
+) -> AgentResult<AgentInputResult> {
+    agent
+        .submit_input(AgentInputParams {
+            session,
+            turn_id: "turn-input".to_string(),
+            input: AgentInput::DynamicToolResult {
+                call_id: call_id.to_string(),
+                tool_name: tool_name.to_string(),
+                output: output.to_string(),
+                success,
+            },
+        })
+        .await
+}
+
+async fn interrupt_session(
+    agent: &AgentHarnessImpl,
+    session_id: &str,
+) -> AgentResult<AgentInterruptResult> {
+    agent
+        .interrupt(AgentInterruptParams {
+            session_id: session_id.to_string(),
+            turn_id: "turn-active".to_string(),
+        })
+        .await
+}
+
 struct SequencedProvider {
     started: Arc<Notify>,
     calls: AtomicUsize,
@@ -50,6 +89,7 @@ struct SequencedProvider {
 
 struct CapturingMaxTokensProvider {
     seen_max_tokens: Arc<Mutex<Option<u32>>>,
+    seen_model: Arc<Mutex<Option<String>>>,
 }
 
 struct DynamicResumeAgentProvider {
@@ -132,6 +172,10 @@ impl LlmProvider for CapturingMaxTokensProvider {
         let mut seen = self.seen_max_tokens.lock().expect("capture lock poisoned");
         if seen.is_none() {
             *seen = request.max_tokens;
+        }
+        let mut seen_model = self.seen_model.lock().expect("model capture lock poisoned");
+        if seen_model.is_none() {
+            *seen_model = Some(request.model.clone());
         }
         Ok(ChatResponse {
             content: "captured".to_string(),
@@ -253,12 +297,12 @@ fn single_text_block_stream(text: &str) -> ModelBlockStream {
     ModelBlockStream::new(rx)
 }
 
-fn build_temp_agent() -> (TempDir, AgentHarness) {
+fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
     kernel_config.memory.compaction_threshold_bytes = usize::MAX;
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -297,9 +341,21 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             created_at: 1,
             last_activity: 1,
             message_count: 2,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
         },
     }
+}
+
+fn agent_run_params(
+    session: TalosSession,
+    turn_id: &str,
+    input: Vec<TalosInputItem>,
+) -> AgentRunParams {
+    let context = AgentRunContext::from_session(&session, turn_id.to_string());
+    let config = AgentRunConfig::from_session(&session);
+    let session_state = AgentRunSessionState::from_session(&session);
+    let options = AgentRunOptions::from_config(&config);
+    AgentRunParams::new(context, config, session_state, options, input)
 }
 
 #[test]
@@ -330,7 +386,7 @@ fn test_tool_call_start_reuses_item_created_by_argument_delta() {
     let tool_item_id = argument_events
         .iter()
         .find_map(|event| match &event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload) => Some(payload.item.item_id.clone()),
+            AgentEventPayload::ItemStarted(payload) => Some(payload.item.item_id.clone()),
             _ => None,
         })
         .expect("tool item should be started");
@@ -396,7 +452,7 @@ fn test_assistant_text_commentary_maps_without_final_answer() {
     )
     .expect("commentary should start");
     let item_id = match &started_events[0].payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => {
+        AgentEventPayload::ItemStarted(payload) => {
             assert_eq!(payload.item.kind, TalosTimelineItemKind::AssistantText);
             assert_eq!(payload.item.phase, TalosTimelinePhase::Commentary);
             payload.item.item_id.clone()
@@ -418,7 +474,7 @@ fn test_assistant_text_commentary_maps_without_final_answer() {
     .expect("commentary delta should append");
     assert!(delta_events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemDelta(payload)
+        AgentEventPayload::ItemDelta(payload)
             if payload.item_id == item_id
                 && matches!(&payload.delta, TalosTimelineDelta::Text { text } if text == "I will inspect the code.")
     )));
@@ -436,7 +492,7 @@ fn test_assistant_text_commentary_maps_without_final_answer() {
     .expect("commentary should complete");
     assert!(completed_events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id == item_id
                 && payload.status == TalosTimelineItemStatus::Completed
     )));
@@ -464,7 +520,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
     )
     .expect("tool call start should emit timeline events");
     let tool_item_id = match &start_events[0].payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
         _ => panic!("expected tool item start"),
     };
 
@@ -483,7 +539,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
     .expect("dynamic request should update the existing tool item");
 
     assert!(dynamic_events.iter().any(|event| match &event.payload {
-        TalosTimelineEventPayload::ItemDelta(payload) => {
+        AgentEventPayload::ItemDelta(payload) => {
             payload.item_id == tool_item_id
                 && matches!(
                     payload.delta,
@@ -495,7 +551,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
         _ => false,
     }));
     assert!(dynamic_events.iter().any(|event| match &event.payload {
-        TalosTimelineEventPayload::ItemDelta(payload) => {
+        AgentEventPayload::ItemDelta(payload) => {
             payload.item_id == tool_item_id
                 && matches!(payload.delta, TalosTimelineDelta::ToolDynamicRequest { .. })
         }
@@ -511,7 +567,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
 }
 
 #[test]
-fn test_legacy_execution_summary_does_not_gate_final_answer() {
+fn test_execution_summary_item_does_not_gate_final_answer_merge() {
     let mut timeline = TimelineBuilder::new(
         "request-summary-final",
         "turn-summary-final",
@@ -526,14 +582,14 @@ fn test_legacy_execution_summary_does_not_gate_final_answer() {
         KernelStreamEvent::new(
             KernelStreamEventType::ExecutionSummary,
             KernelStreamEventData::ExecutionSummary(ExecutionSummaryStreamData {
-                text: "Legacy execution summary.".to_string(),
+                text: "Execution summary.".to_string(),
                 round: None,
             }),
         ),
     )
     .expect("summary should map");
     let summary_id = match &summary_events[0].payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => {
+        AgentEventPayload::ItemStarted(payload) => {
             assert_eq!(payload.item.kind, TalosTimelineItemKind::ExecutionSummary);
             assert_eq!(payload.item.phase, TalosTimelinePhase::System);
             payload.item.item_id.clone()
@@ -542,7 +598,7 @@ fn test_legacy_execution_summary_does_not_gate_final_answer() {
     };
     assert!(matches!(
         &summary_events[1].payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id == summary_id
                 && payload.status == TalosTimelineItemStatus::Completed
     ));
@@ -701,11 +757,11 @@ fn test_assistant_text_completed_item_key_can_restart() {
     .expect("completed provider item key should be reusable");
 
     let first_item_id = match &first_start[0].payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
         other => panic!("expected item started, got {other:?}"),
     };
     let second_item_id = match &second_start[0].payload {
-        TalosTimelineEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+        AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
         other => panic!("expected item started, got {other:?}"),
     };
     assert_ne!(first_item_id, second_item_id);
@@ -738,7 +794,7 @@ fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
     let first_reasoning_item_id = first_reasoning_events
         .iter()
         .find_map(|event| match &event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.kind == TalosTimelineItemKind::Reasoning =>
             {
                 Some(payload.item.item_id.clone())
@@ -765,13 +821,13 @@ fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
 
     assert!(matches!(
         &tool_start_events[0].payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id == first_reasoning_item_id
                 && payload.status == TalosTimelineItemStatus::Completed
     ));
     assert!(matches!(
         &tool_start_events[1].payload,
-        TalosTimelineEventPayload::ItemStarted(payload)
+        AgentEventPayload::ItemStarted(payload)
             if payload.item.kind == TalosTimelineItemKind::ToolCall
                 && payload.item.phase == TalosTimelinePhase::Acting
     ));
@@ -815,7 +871,7 @@ fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
     let second_reasoning_item_id = second_reasoning_events
         .iter()
         .find_map(|event| match &event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.kind == TalosTimelineItemKind::Reasoning =>
             {
                 Some(payload.item.item_id.clone())
@@ -830,7 +886,7 @@ fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
 #[tokio::test]
 async fn test_generate_system_prompt() {
     let mock_provider = MockLlmProvider {};
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -854,7 +910,7 @@ async fn test_generate_system_prompt() {
 #[tokio::test]
 async fn test_add_tool() {
     let mock_provider = MockLlmProvider {};
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -873,42 +929,53 @@ async fn test_add_tool() {
 }
 
 #[tokio::test]
-async fn test_run_uses_session_kernel_config_override() {
-    let captured = Arc::new(Mutex::new(None));
+async fn test_run_uses_agent_runtime_config_and_model_override() {
+    let captured_max_tokens = Arc::new(Mutex::new(None));
+    let captured_model = Arc::new(Mutex::new(None));
     let provider = Arc::new(CapturingMaxTokensProvider {
-        seen_max_tokens: captured.clone(),
+        seen_max_tokens: captured_max_tokens.clone(),
+        seen_model: captured_model.clone(),
     });
-    let agent = AgentHarness::new(
+    let mut agent_kernel_config = AgentKernelConfig::default();
+    agent_kernel_config.output.max_tokens = 321;
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         provider,
-        "gpt-4o".to_string(),
+        "agent-model".to_string(),
         Arc::new(ToolRegistry::new()),
-        Default::default(),
+        agent_kernel_config,
     );
 
     let mut session = build_test_session("session-kernel-override", "workspace-1");
     session.config.agent.kernel.output.max_tokens = 123;
+    session.config.llm.model = "session-model".to_string();
+    session.config.agent.model = "session-model".to_string();
 
     let result = agent
-        .run(AgentRequest {
+        .run(agent_run_params(
             session,
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+            "turn-kernel-override",
+            vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-        })
+        ))
         .await
         .expect("run should succeed");
 
     assert_eq!(result.stop_reason, TalosStopReason::EndTurn);
-    let seen = captured
+    let seen = captured_max_tokens
         .lock()
         .expect("capture lock poisoned")
         .expect("provider should receive max token setting");
-    assert_eq!(seen, 123);
+    assert_eq!(seen, 321);
+    let seen_model = captured_model
+        .lock()
+        .expect("model capture lock poisoned")
+        .clone()
+        .expect("provider should receive model");
+    assert_eq!(seen_model, "agent-model");
 }
 
 #[tokio::test]
@@ -919,26 +986,24 @@ async fn test_run_generates_title_update_for_first_turn() {
     session.title = DEFAULT_SESSION_TITLE.to_string();
 
     let result = agent
-        .run(AgentRequest {
+        .run(agent_run_params(
             session,
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+            "turn-title",
+            vec![TalosInputItem::Text {
                 text: "Explain the agent harness boundary".to_string(),
             }],
-        })
+        ))
         .await
         .expect("run should succeed");
 
     let title = result
-        .session_title_update
-        .expect("first turn should produce a title update")
-        .title;
+        .generated_session_title
+        .expect("first turn should produce a generated title");
     assert_eq!(title, "Test response");
 }
 
 #[tokio::test]
-async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
+async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let provider = Arc::new(DynamicResumeAgentProvider {
         calls: AtomicUsize::new(0),
@@ -966,7 +1031,7 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -988,7 +1053,7 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
-            invocation_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: "turn-original".to_string(),
             branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
@@ -1008,7 +1073,7 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
-            invocation_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: "turn-original".to_string(),
             branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
@@ -1034,19 +1099,16 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
         .await
         .expect("dynamic response record should append");
 
+    let mut request = agent_run_params(session, "turn-original", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext {
+        tool_call: Some(AgentDispatchResumeToolCall {
+            item_id: "tool-item-original".to_string(),
+            call_id: "call-dynamic".to_string(),
+            tool_name: "echo_dynamic".to_string(),
+        }),
+    });
     let mut stream = agent
-        .run_stream(AgentRequest {
-            session,
-            turn_id: Some("turn-original".to_string()),
-            resume_context: Some(AgentDispatchResumeContext {
-                tool_call: Some(AgentDispatchResumeToolCall {
-                    item_id: "tool-item-original".to_string(),
-                    call_id: "call-dynamic".to_string(),
-                    tool_name: "echo_dynamic".to_string(),
-                }),
-            }),
-            input: Vec::new(),
-        })
+        .resume_streamed(AgentResumeParams::new(request))
         .await
         .expect("resume stream should start");
 
@@ -1054,7 +1116,7 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
     let mut saw_final_answer = false;
     while let Some(event) = stream.recv().await {
         match event.payload {
-            TalosTimelineEventPayload::ItemDelta(payload) => match payload.delta {
+            AgentEventPayload::ItemDelta(payload) => match payload.delta {
                 talos_types::talos::TalosTimelineDelta::ToolResult { content, .. } => {
                     saw_tool_result = content.iter().any(|item| {
                         matches!(
@@ -1075,11 +1137,11 @@ async fn test_run_stream_replays_dynamic_resume_into_model_loop() {
                 }
                 _ => {}
             },
-            TalosTimelineEventPayload::TurnCompleted(payload) => {
+            AgentEventPayload::TurnCompleted(payload) => {
                 assert_eq!(payload.stop_reason, TalosStopReason::EndTurn);
                 break;
             }
-            TalosTimelineEventPayload::TurnError(payload) => {
+            AgentEventPayload::TurnError(payload) => {
                 panic!("resume stream failed: {}", payload.error);
             }
             _ => {}
@@ -1157,14 +1219,14 @@ async fn test_close_session_flushes_workspace_memory() {
         seq: 1,
         timestamp,
         items: vec![
-            TalosOutputItem::UserInput {
+            RunItem::UserInput {
                 text: "Remember that I prefer tea over coffee.".to_string(),
             },
-            TalosOutputItem::OutputText {
+            RunItem::OutputText {
                 text: "Noted. You prefer tea over coffee.".to_string(),
             },
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         stop_reason: TalosStopReason::EndTurn,
     };
 
@@ -1231,7 +1293,7 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
-            invocation_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: "turn-input".to_string(),
             branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
@@ -1252,27 +1314,28 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
         .await
         .expect("request record should append");
 
-    agent
-        .submit_dynamic_tool_result(
-            session.clone(),
-            "call-1",
-            "skill_greet",
-            "hello".to_string(),
-            true,
-        )
-        .await
-        .expect("first submission should succeed");
+    submit_dynamic_tool_result(
+        &agent,
+        session.clone(),
+        "call-1",
+        "skill_greet",
+        "hello",
+        true,
+    )
+    .await
+    .expect("first submission should succeed");
 
-    let error = agent
-        .submit_dynamic_tool_result(
-            session,
-            "call-1",
-            "skill_greet",
-            "hello again".to_string(),
-            true,
-        )
-        .await
-        .expect_err("second submission should be rejected");
+    let error = submit_dynamic_tool_result(
+        &agent,
+        session,
+        "call-1",
+        "skill_greet",
+        "hello again",
+        true,
+    )
+    .await
+    .expect_err("second submission should be rejected");
+    assert_eq!(error.kind, crate::AgentErrorKind::InputRejected);
     assert!(error.to_string().contains("already been resolved"));
 }
 
@@ -1298,7 +1361,7 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
         header: talos_memory::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
-            invocation_id: uuid::Uuid::new_v4().to_string(),
+            invocation_id: "turn-input".to_string(),
             branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now() - chrono::Duration::milliseconds(10),
         },
@@ -1319,23 +1382,369 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
         .await
         .expect("request record should append");
 
-    let error = agent
-        .submit_dynamic_tool_result(
-            session,
-            "call-timeout",
-            "skill_greet",
-            "late".to_string(),
-            true,
-        )
-        .await
-        .expect_err("timed out submission should be rejected");
+    let error =
+        submit_dynamic_tool_result(&agent, session, "call-timeout", "skill_greet", "late", true)
+            .await
+            .expect_err("timed out submission should be rejected");
+    assert_eq!(error.kind, crate::AgentErrorKind::Timeout);
     assert!(error.to_string().contains("timed out"));
 }
 
 #[tokio::test]
-async fn test_cancel_active_turn_aborts_only_current_session_turn() {
+async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_response() {
+    let (_temp_dir, agent) = build_temp_agent();
+    let session_id = "session-dynamic-wrong-turn";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
+    let request_record = talos_memory::SessionTranscriptRecord {
+        header: talos_memory::SessionTranscriptHeader {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            invocation_id: "turn-pending".to_string(),
+            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            timestamp: Utc::now(),
+        },
+        author: talos_memory::SessionTranscriptAuthor::System,
+        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
+        payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
+            payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+                call_id: "call-wrong-turn".to_string(),
+                tool_name: "skill_greet".to_string(),
+                arguments: json!({}).into(),
+            },
+        },
+        actions: talos_memory::SessionTranscriptActions::default(),
+        partial: false,
+    };
+    memory_store
+        .append_transcript_record(&request_record)
+        .await
+        .expect("request record should append");
+
+    let error = agent
+        .submit_input(AgentInputParams {
+            session: session.clone(),
+            turn_id: "turn-other".to_string(),
+            input: AgentInput::DynamicToolResult {
+                call_id: "call-wrong-turn".to_string(),
+                tool_name: "skill_greet".to_string(),
+                output: "wrong turn output".to_string(),
+                success: true,
+            },
+        })
+        .await
+        .expect_err("wrong turn id should be rejected");
+
+    assert_eq!(error.kind, crate::AgentErrorKind::InputRejected);
+    assert!(error.to_string().contains("turn-other"));
+
+    let records = memory_store
+        .load_transcript_records(
+            session_id,
+            None,
+            talos_memory::SessionTranscriptBranch::ReactiveLoop,
+        )
+        .await
+        .expect("records should load");
+    assert!(records.iter().all(|record| {
+        !matches!(
+            record.payload,
+            talos_memory::SessionTranscriptPayload::DynamicToolResponse { .. }
+        )
+    }));
+}
+
+#[tokio::test]
+async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let provider = Arc::new(DynamicResumeAgentProvider {
+        calls: AtomicUsize::new(0),
+    });
+    let mut kernel_config = AgentKernelConfig::default();
+    kernel_config.prompt.bootstrap.enabled = false;
+    kernel_config.workspace_dir = temp_dir.path().display().to_string();
+    let agent = AgentHarnessImpl::new(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        provider.clone(),
+        "mock-model".to_string(),
+        Arc::new(ToolRegistry::new()),
+        kernel_config,
+    );
+    let session_id = "session-dynamic-resume-wrong-turn";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.prompt.bootstrap.enabled = false;
+    session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
+
+    for record in [
+        talos_memory::SessionTranscriptRecord {
+            header: talos_memory::SessionTranscriptHeader {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: "turn-original".to_string(),
+                branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now(),
+            },
+            author: talos_memory::SessionTranscriptAuthor::System,
+            kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
+            payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
+                payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+                    call_id: "call-dynamic".to_string(),
+                    tool_name: "echo_dynamic".to_string(),
+                    arguments: json!({ "message": "ping" }).into(),
+                },
+            },
+            actions: talos_memory::SessionTranscriptActions::default(),
+            partial: false,
+        },
+        talos_memory::SessionTranscriptRecord {
+            header: talos_memory::SessionTranscriptHeader {
+                id: uuid::Uuid::new_v4().to_string(),
+                session_id: session_id.to_string(),
+                invocation_id: "turn-original".to_string(),
+                branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+                timestamp: Utc::now(),
+            },
+            author: talos_memory::SessionTranscriptAuthor::System,
+            kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
+            payload: talos_memory::SessionTranscriptPayload::DynamicToolResponse {
+                payload: talos_memory::SessionTranscriptDynamicToolResponsePayload {
+                    call_id: "call-dynamic".to_string(),
+                    tool_name: "echo_dynamic".to_string(),
+                    output: "dynamic pong".to_string(),
+                    success: true,
+                },
+            },
+            actions: talos_memory::SessionTranscriptActions::default(),
+            partial: false,
+        },
+    ] {
+        memory_store
+            .append_transcript_record(&record)
+            .await
+            .expect("dynamic record should append");
+    }
+
+    let mut request = agent_run_params(session, "turn-other", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext {
+        tool_call: Some(AgentDispatchResumeToolCall {
+            item_id: "tool-item-original".to_string(),
+            call_id: "call-dynamic".to_string(),
+            tool_name: "echo_dynamic".to_string(),
+        }),
+    });
+    let mut stream = agent
+        .resume_streamed(AgentResumeParams::new(request))
+        .await
+        .expect("stream should start and report runtime error");
+
+    let event = stream
+        .recv()
+        .await
+        .expect("wrong-turn resume should emit an error event");
+    match event.payload {
+        AgentEventPayload::TurnError(payload) => {
+            assert!(payload.error.contains("turn-other"));
+        }
+        other => panic!("expected TurnError, got {other:?}"),
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let provider = Arc::new(DynamicResumeAgentProvider {
+        calls: AtomicUsize::new(0),
+    });
+    let mut kernel_config = AgentKernelConfig::default();
+    kernel_config.prompt.bootstrap.enabled = false;
+    kernel_config.workspace_dir = temp_dir.path().display().to_string();
+    let agent = AgentHarnessImpl::new(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        provider.clone(),
+        "mock-model".to_string(),
+        Arc::new(ToolRegistry::new()),
+        kernel_config,
+    );
+    let mut session = build_test_session("session-missing-tool-call", "workspace-1");
+    session.config.agent.kernel.prompt.bootstrap.enabled = false;
+    session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
+
+    let mut request = agent_run_params(session, "turn-missing-tool-call", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext { tool_call: None });
+    let mut stream = agent
+        .resume_streamed(AgentResumeParams::new(request))
+        .await
+        .expect("stream should start and report invalid resume context");
+
+    let event = stream
+        .recv()
+        .await
+        .expect("missing tool call should emit an error event");
+    match event.payload {
+        AgentEventPayload::TurnError(payload) => {
+            assert!(payload.error.contains("missing tool call metadata"));
+        }
+        other => panic!("expected TurnError, got {other:?}"),
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn test_resume_streamed_rejects_missing_resume_context() {
+    let agent = build_test_agent();
+    let session = build_test_session("session-no-resume-context", "workspace-1");
+    let request = agent_run_params(session, "turn-no-resume-context", Vec::new());
+
+    let error = match agent.resume_streamed(AgentResumeParams::new(request)).await {
+        Ok(_) => panic!("resume_streamed should reject a missing resume context"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("resume requires"));
+    assert!(error.to_string().contains("turn-no-resume-context"));
+}
+
+#[tokio::test]
+async fn test_run_rejects_resume_context() {
+    let agent = build_test_agent();
+    let session = build_test_session("session-run-with-resume-context", "workspace-1");
+    let mut request = agent_run_params(session, "turn-run-with-resume-context", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext {
+        tool_call: Some(AgentDispatchResumeToolCall {
+            item_id: "tool-item-original".to_string(),
+            call_id: "call-dynamic".to_string(),
+            tool_name: "echo_dynamic".to_string(),
+        }),
+    });
+
+    let error = match agent.run(request).await {
+        Ok(_) => panic!("run should reject continuation context"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("use resume API"));
+    assert!(error.to_string().contains("turn-run-with-resume-context"));
+}
+
+#[tokio::test]
+async fn test_run_streamed_rejects_resume_context() {
+    let agent = build_test_agent();
+    let session = build_test_session("session-stream-with-resume-context", "workspace-1");
+    let mut request = agent_run_params(session, "turn-stream-with-resume-context", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext {
+        tool_call: Some(AgentDispatchResumeToolCall {
+            item_id: "tool-item-original".to_string(),
+            call_id: "call-dynamic".to_string(),
+            tool_name: "echo_dynamic".to_string(),
+        }),
+    });
+
+    let error = match agent.run_streamed(request).await {
+        Ok(_) => panic!("run_streamed should reject continuation context"),
+        Err(error) => error,
+    };
+
+    assert!(error.to_string().contains("use resume API"));
+    assert!(error
+        .to_string()
+        .contains("turn-stream-with-resume-context"));
+}
+
+#[tokio::test]
+async fn test_resume_streamed_rejects_missing_request_without_model_call() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let provider = Arc::new(DynamicResumeAgentProvider {
+        calls: AtomicUsize::new(0),
+    });
+    let mut kernel_config = AgentKernelConfig::default();
+    kernel_config.prompt.bootstrap.enabled = false;
+    kernel_config.workspace_dir = temp_dir.path().display().to_string();
+    let agent = AgentHarnessImpl::new(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        provider.clone(),
+        "mock-model".to_string(),
+        Arc::new(ToolRegistry::new()),
+        kernel_config,
+    );
+    let session_id = "session-missing-dynamic-request";
+    let mut session = build_test_session(session_id, "workspace-1");
+    session.config.agent.kernel.prompt.bootstrap.enabled = false;
+    session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
+    let (_kernel_config, memory_store) = agent
+        .memory_store_for_session(&session)
+        .await
+        .expect("session memory store should build");
+    let response_record = talos_memory::SessionTranscriptRecord {
+        header: talos_memory::SessionTranscriptHeader {
+            id: uuid::Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            invocation_id: "turn-original".to_string(),
+            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            timestamp: Utc::now(),
+        },
+        author: talos_memory::SessionTranscriptAuthor::System,
+        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
+        payload: talos_memory::SessionTranscriptPayload::DynamicToolResponse {
+            payload: talos_memory::SessionTranscriptDynamicToolResponsePayload {
+                call_id: "call-dynamic".to_string(),
+                tool_name: "echo_dynamic".to_string(),
+                output: "dynamic pong".to_string(),
+                success: true,
+            },
+        },
+        actions: talos_memory::SessionTranscriptActions::default(),
+        partial: false,
+    };
+    memory_store
+        .append_transcript_record(&response_record)
+        .await
+        .expect("dynamic response record should append");
+
+    let mut request = agent_run_params(session, "turn-original", Vec::new());
+    request.resume_context = Some(AgentDispatchResumeContext {
+        tool_call: Some(AgentDispatchResumeToolCall {
+            item_id: "tool-item-original".to_string(),
+            call_id: "call-dynamic".to_string(),
+            tool_name: "echo_dynamic".to_string(),
+        }),
+    });
+    let mut stream = agent
+        .resume_streamed(AgentResumeParams::new(request))
+        .await
+        .expect("stream should start and report missing dynamic request");
+
+    let event = stream
+        .recv()
+        .await
+        .expect("missing request should emit an error event");
+    match event.payload {
+        AgentEventPayload::TurnError(payload) => {
+            assert!(payload.error.contains("no pending request"));
+        }
+        other => panic!("expected TurnError, got {other:?}"),
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn test_interrupt_aborts_only_current_session_turn() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1350,25 +1759,35 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     let session = build_test_session("session-cancel", "workspace-a");
 
     let mut first_stream = agent
-        .run_stream(AgentRequest {
-            session: session.clone(),
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+        .run_streamed(agent_run_params(
+            session.clone(),
+            "turn-cancel",
+            vec![TalosInputItem::Text {
                 text: "first".to_string(),
             }],
-        })
+        ))
         .await
         .expect("first stream should start");
     started.notified().await;
-    agent
-        .cancel_active_turn(&session.context.session_id)
+    let wrong_turn_error = agent
+        .interrupt(AgentInterruptParams {
+            session_id: session.context.session_id.clone(),
+            turn_id: "turn-other".to_string(),
+        })
         .await
-        .expect("cancel should succeed");
+        .expect_err("wrong turn id should not interrupt current run");
+    assert_eq!(wrong_turn_error.kind, crate::AgentErrorKind::RunNotFound);
+    agent
+        .interrupt(AgentInterruptParams {
+            session_id: session.context.session_id.clone(),
+            turn_id: "turn-cancel".to_string(),
+        })
+        .await
+        .expect("interrupt should succeed");
 
     let mut first_stop_reason = None;
     while let Some(event) = first_stream.recv().await {
-        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
+        if let AgentEventPayload::TurnCompleted(payload) = event.payload {
             first_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -1376,19 +1795,18 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
     assert_eq!(first_stop_reason, Some(TalosStopReason::Cancelled));
 
     let mut second_stream = agent
-        .run_stream(AgentRequest {
+        .run_streamed(agent_run_params(
             session,
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+            "turn-second",
+            vec![TalosInputItem::Text {
                 text: "second".to_string(),
             }],
-        })
+        ))
         .await
         .expect("second stream should start");
     let mut second_stop_reason = None;
     while let Some(event) = second_stream.recv().await {
-        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
+        if let AgentEventPayload::TurnCompleted(payload) = event.payload {
             second_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -1397,9 +1815,34 @@ async fn test_cancel_active_turn_aborts_only_current_session_turn() {
 }
 
 #[tokio::test]
-async fn test_run_stream_queues_second_active_turn_for_same_session() {
+async fn test_interrupt_reports_missing_runtime_state() {
+    let agent = build_test_agent();
+
+    let error = interrupt_session(&agent, "missing-session")
+        .await
+        .expect_err("missing active turn should be reported");
+
+    assert_eq!(error.kind, crate::AgentErrorKind::RunNotFound);
+}
+
+#[tokio::test]
+async fn test_interrupt_rejects_reserved_turn_without_runtime_handle() {
+    let agent = build_test_agent();
+    agent
+        .try_reserve_active_turn("reserved-session")
+        .expect("test should reserve active slot");
+
+    let error = interrupt_session(&agent, "reserved-session")
+        .await
+        .expect_err("reserved turn cannot report a successful interrupt");
+
+    assert_eq!(error.kind, crate::AgentErrorKind::RunNotFound);
+}
+
+#[tokio::test]
+async fn test_run_streamed_queues_second_active_turn_for_same_session() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1414,27 +1857,25 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
     let session = build_test_session("session-busy", "workspace-a");
 
     let mut first_stream = agent
-        .run_stream(AgentRequest {
-            session: session.clone(),
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+        .run_streamed(agent_run_params(
+            session.clone(),
+            "turn-active",
+            vec![TalosInputItem::Text {
                 text: "first".to_string(),
             }],
-        })
+        ))
         .await
         .expect("first stream should start");
     started.notified().await;
 
     let mut second_stream = agent
-        .run_stream(AgentRequest {
-            session: session.clone(),
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+        .run_streamed(agent_run_params(
+            session.clone(),
+            "turn-queued",
+            vec![TalosInputItem::Text {
                 text: "second".to_string(),
             }],
-        })
+        ))
         .await
         .expect("second stream should still return a receiver");
 
@@ -1445,14 +1886,13 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
         "queued stream should wait until the active turn finishes"
     );
 
-    agent
-        .cancel_active_turn(&session.context.session_id)
+    interrupt_session(&agent, &session.context.session_id)
         .await
-        .expect("cancel should succeed");
+        .expect("interrupt should succeed");
 
     let mut first_stop_reason = None;
     while let Some(event) = first_stream.recv().await {
-        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
+        if let AgentEventPayload::TurnCompleted(payload) = event.payload {
             first_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -1461,7 +1901,7 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
 
     let mut second_stop_reason = None;
     while let Some(event) = second_stream.recv().await {
-        if let TalosTimelineEventPayload::TurnCompleted(payload) = event.payload {
+        if let AgentEventPayload::TurnCompleted(payload) = event.payload {
             second_stop_reason = Some(payload.stop_reason);
             break;
         }
@@ -1470,19 +1910,18 @@ async fn test_run_stream_queues_second_active_turn_for_same_session() {
 }
 
 #[tokio::test]
-async fn test_run_stream_emits_user_input_and_single_final_answer() {
+async fn test_run_streamed_emits_user_input_and_single_final_answer() {
     let agent = build_test_agent();
     let session = build_test_session("session-timeline", "workspace-a");
 
     let mut stream = agent
-        .run_stream(AgentRequest {
+        .run_streamed(agent_run_params(
             session,
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+            "turn-timeline",
+            vec![TalosInputItem::Text {
                 text: "hello".to_string(),
             }],
-        })
+        ))
         .await
         .expect("stream should start");
 
@@ -1490,7 +1929,7 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
     while let Some(event) = stream.recv().await {
         let terminal = matches!(
             event.payload,
-            TalosTimelineEventPayload::TurnCompleted(_) | TalosTimelineEventPayload::TurnError(_)
+            AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnError(_)
         );
         events.push(event);
         if terminal {
@@ -1504,28 +1943,28 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
     let mut commentary_count = 0;
     for event in &events {
         match &event.payload {
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.kind == TalosTimelineItemKind::UserInput =>
             {
                 assert_eq!(payload.item.phase, TalosTimelinePhase::Input);
                 user_input_item_id = Some(payload.item.item_id.clone());
             }
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.phase == TalosTimelinePhase::FinalAnswer =>
             {
                 final_answer_item_id = Some(payload.item.item_id.clone());
             }
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.phase == TalosTimelinePhase::Unknown =>
             {
                 unknown_answer_item_id = Some(payload.item.item_id.clone());
             }
-            TalosTimelineEventPayload::AssistantTextCommitted(payload)
+            AgentEventPayload::AssistantTextCommitted(payload)
                 if payload.phase == TalosTimelinePhase::FinalAnswer =>
             {
                 final_answer_item_id = Some(payload.item_id.clone());
             }
-            TalosTimelineEventPayload::ItemStarted(payload)
+            AgentEventPayload::ItemStarted(payload)
                 if payload.item.phase == TalosTimelinePhase::Commentary =>
             {
                 commentary_count += 1;
@@ -1543,19 +1982,19 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
     assert_eq!(commentary_count, 0);
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id == user_input_item_id
                 && payload.status == TalosTimelineItemStatus::Completed
     )));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemDelta(payload)
+        AgentEventPayload::ItemDelta(payload)
             if payload.item_id == final_answer_item_id
                 && matches!(payload.delta, TalosTimelineDelta::Text { .. })
     )));
     assert!(events.iter().any(|event| matches!(
         &event.payload,
-        TalosTimelineEventPayload::ItemCompleted(payload)
+        AgentEventPayload::ItemCompleted(payload)
             if payload.item_id == final_answer_item_id
                 && payload.status == TalosTimelineItemStatus::Completed
     )));
@@ -1564,7 +2003,7 @@ async fn test_run_stream_emits_user_input_and_single_final_answer() {
 #[tokio::test]
 async fn test_run_queues_second_active_turn_for_same_session() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1583,14 +2022,13 @@ async fn test_run_queues_second_active_turn_for_same_session() {
     let first_session = session.clone();
     let first_run = tokio::spawn(async move {
         first_agent
-            .run(AgentRequest {
-                session: first_session,
-                turn_id: None,
-                resume_context: None,
-                input: vec![TalosInputItem::Text {
+            .run(agent_run_params(
+                first_session,
+                "turn-active",
+                vec![TalosInputItem::Text {
                     text: "first".to_string(),
                 }],
-            })
+            ))
             .await
     });
     started.notified().await;
@@ -1599,14 +2037,13 @@ async fn test_run_queues_second_active_turn_for_same_session() {
     let second_session = session.clone();
     let mut second_run = Box::pin(tokio::spawn(async move {
         second_agent
-            .run(AgentRequest {
-                session: second_session,
-                turn_id: None,
-                resume_context: None,
-                input: vec![TalosInputItem::Text {
+            .run(agent_run_params(
+                second_session,
+                "turn-run-queued",
+                vec![TalosInputItem::Text {
                     text: "second".to_string(),
                 }],
-            })
+            ))
             .await
     }));
 
@@ -1617,10 +2054,9 @@ async fn test_run_queues_second_active_turn_for_same_session() {
         "queued unary turn should not finish while the active turn is still running"
     );
 
-    agent
-        .cancel_active_turn(&session.context.session_id)
+    interrupt_session(&agent, &session.context.session_id)
         .await
-        .expect("cancel should succeed");
+        .expect("interrupt should succeed");
 
     let first_result = first_run
         .await

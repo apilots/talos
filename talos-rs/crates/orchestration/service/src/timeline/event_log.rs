@@ -4,7 +4,7 @@ use talos_error::TalosResult;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
 };
-use talos_types::talos::{TalosTimelineEvent, TalosTimelineEventPayload, TimelineEventEnvelope};
+use talos_types::talos::{AgentEvent, AgentEventPayload, TimelineEventEnvelope};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -56,7 +56,7 @@ impl TimelineEventService {
         session_id: &str,
         after_event_id: Option<&TimelineEventId>,
         limit: usize,
-    ) -> TalosResult<Vec<TalosTimelineEvent>> {
+    ) -> TalosResult<Vec<AgentEvent>> {
         self.event_store
             .list_events_after(session_id, after_event_id, limit)
             .await
@@ -92,9 +92,9 @@ impl TimelineEventService {
 
     pub async fn record_talos_event(
         &self,
-        event: TalosTimelineEvent,
+        event: AgentEvent,
     ) -> TalosResult<TimelineEventEnvelope> {
-        if matches!(event.payload, TalosTimelineEventPayload::TurnMetrics(_)) {
+        if matches!(event.payload, AgentEventPayload::TurnMetrics(_)) {
             let envelope = live_only_event_envelope(event);
             let _ = self.live_tx.send(envelope.clone());
             return Ok(envelope);
@@ -170,7 +170,7 @@ impl TimelineEventService {
     }
 }
 
-fn live_only_event_envelope(mut event: TalosTimelineEvent) -> TimelineEventEnvelope {
+fn live_only_event_envelope(mut event: AgentEvent) -> TimelineEventEnvelope {
     let now = chrono::Utc::now().timestamp_millis();
     let event_id = format!("live_metrics_{}_{}_{}", event.turn_id, event.sequence, now);
     event.event_id = Some(event_id.clone());

@@ -39,7 +39,7 @@ use talos_error::TalosResult;
 use talos_sdk::{
     ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
 };
-use talos_types::talos::{TalosUsage, TurnExecutionMetrics};
+use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
 use transcript::TranscriptState;
 
@@ -92,7 +92,7 @@ pub struct TuiApp {
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_model: String,
-    pub(crate) session_usage: TalosUsage,
+    pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,
     pub(crate) available_model_info: Vec<ModelInfo>,
@@ -166,7 +166,7 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
-    pub(crate) fn displayed_usage(&self) -> TalosUsage {
+    pub(crate) fn displayed_usage(&self) -> TokenUsage {
         let mut usage = self.session_usage.clone();
         if self.turn_metrics_live {
             if let Some(metrics) = &self.turn_metrics {

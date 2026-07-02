@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_storage::{Row, Storage};
-use talos_types::talos::{TalosContext, TalosUsage};
+use talos_types::talos::{TalosContext, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
 use super::{SessionQuery, SessionRecord};
@@ -70,7 +70,7 @@ impl DatabaseSessionStore {
             .unwrap_or_default();
         let usage = row
             .get_string("usage_json")
-            .and_then(|raw| serde_json::from_str::<TalosUsage>(&raw).ok())
+            .and_then(|raw| serde_json::from_str::<TokenUsage>(&raw).ok())
             .unwrap_or_default();
 
         SessionRecord {
@@ -131,7 +131,7 @@ impl DatabaseSessionStore {
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }
 
-    fn build_usage_json(usage: &TalosUsage) -> TalosResult<String> {
+    fn build_usage_json(usage: &TokenUsage) -> TalosResult<String> {
         serde_json::to_string(usage)
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use talos_types::agent_dispatch::AgentDispatchResponse;
+use talos_types::agent_dispatch::AgentDispatchResult;
 use talos_types::talos::{StopReason, TalosContext, TalosProvider, TalosSourceType};
 use talos_types::TalosSession;
 use tokio::sync::{watch, Mutex};
@@ -65,7 +65,7 @@ pub trait CollaborationAgentHost: Send + Sync {
         &self,
         session: TalosSession,
         message: String,
-    ) -> TalosResult<AgentDispatchResponse>;
+    ) -> TalosResult<AgentDispatchResult>;
 }
 
 pub struct CollaborationRuntime {
@@ -163,7 +163,7 @@ impl CollaborationRuntime {
         let handle = tokio::spawn(async move {
             let next_status = match host.submit_input(session, message).await {
                 Ok(response) => CollaborationAgentStatus::Completed {
-                    output: response.content,
+                    output: response.output_text,
                     stop_reason: response.stop_reason,
                 },
                 Err(error) => CollaborationAgentStatus::Failed {

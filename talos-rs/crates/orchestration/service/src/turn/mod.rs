@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{IdempotencyRecord, MessageCommandResult};
-use talos_types::talos::{TalosInputItem, TalosTimelineEvent, TalosTimelineEventPayload};
+use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem};
 use tokio::sync::mpsc;
 use tracing::error;
 
@@ -15,7 +15,7 @@ mod service;
 mod types;
 
 pub use service::TurnService;
-pub use types::{AgentDispatchTurnExecutor, TurnExecutor, TurnRetryRequest};
+pub use types::{AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams};
 
 fn validate_text_input(input: &[TalosInputItem]) -> TalosResult<()> {
     let has_text = input.iter().any(|item| match item {
@@ -30,7 +30,7 @@ fn validate_text_input(input: &[TalosInputItem]) -> TalosResult<()> {
     ))
 }
 
-fn validate_retry_request(request: &TurnRetryRequest) -> TalosResult<()> {
+fn validate_retry_request(request: &TurnRetryParams) -> TalosResult<()> {
     if request.client_message_id.trim().is_empty() {
         return Err(TalosError::ValidationError(
             "client_message_id is required".to_string(),
@@ -44,7 +44,7 @@ fn validate_retry_request(request: &TurnRetryRequest) -> TalosResult<()> {
     Ok(())
 }
 
-fn retry_idempotency_key(request: &TurnRetryRequest) -> String {
+fn retry_idempotency_key(request: &TurnRetryParams) -> String {
     format!(
         "retry_{}_{}",
         request.client_message_id, request.retry_of_message_id
@@ -69,7 +69,7 @@ fn spawn_event_forwarder(
     session_runtime: Arc<dyn SessionRuntime>,
     assistant_model: String,
     initial_completed_turn: Option<(String, String)>,
-    mut stream_rx: mpsc::Receiver<TalosTimelineEvent>,
+    mut stream_rx: mpsc::Receiver<AgentEvent>,
 ) {
     tokio::spawn(async move {
         let mut completed_turn = initial_completed_turn;
@@ -93,7 +93,7 @@ fn spawn_event_forwarder(
 
         if let Some((session_id, turn_id)) = completed_turn {
             if let Some(title) = turn_executor
-                .take_session_title_update(&session_id, &turn_id)
+                .take_generated_session_title(&session_id, &turn_id)
                 .await
             {
                 record_session_title(
@@ -108,8 +108,8 @@ fn spawn_event_forwarder(
     });
 }
 
-fn completed_turn_from_event(event: &TalosTimelineEvent) -> Option<(String, String)> {
-    matches!(event.payload, TalosTimelineEventPayload::TurnCompleted(_))
+fn completed_turn_from_event(event: &AgentEvent) -> Option<(String, String)> {
+    matches!(event.payload, AgentEventPayload::TurnCompleted(_))
         .then(|| (event.session_id.clone(), event.turn_id.clone()))
 }
 
@@ -142,10 +142,10 @@ async fn record_session_title(
 async fn record_completed_turn_progress(
     session_records: &SessionRecordService,
     session_runtime: &dyn SessionRuntime,
-    event: &TalosTimelineEvent,
+    event: &AgentEvent,
     assistant_model: &str,
 ) {
-    let TalosTimelineEventPayload::TurnCompleted(completed) = &event.payload else {
+    let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
         return;
     };
     if let Err(err) = session_records

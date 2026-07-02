@@ -1,43 +1,24 @@
-use super::AgentHarness;
-use crate::service::{AgentKernelRequest, AgentRequest};
+use crate::service::{AgentRunConfig, AgentRunContext, AgentRunParams};
 use talos_agent_kernel::TurnPhase;
 use talos_skills::SkillSelector;
-use talos_types::talos::{TalosInputItem, TalosOutputItem, TalosReasoning};
-use talos_types::{ModelInfo, TalosSession};
+use talos_types::talos::{RunItem, TalosInputItem, TalosReasoning};
 
-impl AgentHarness {
-    pub(crate) fn resolve_selected_model_info(&self, session: &TalosSession) -> ModelInfo {
-        let selected_model = if session.config.llm.model.trim().is_empty() {
-            self.model.clone()
-        } else {
-            session.config.llm.model.clone()
-        };
-        let provider_name = session.config.llm.provider.clone();
+/// Kernel-specific request shape derived from shared AgentRunParams.
+///
+/// This adapter object is crate-private. It can carry Kernel execution details,
+/// but it must not replace the shared Harness/Runtime AgentRunParams boundary.
+#[derive(Debug, Clone)]
+pub(crate) struct AgentKernelParams {
+    pub(crate) context: AgentRunContext,
+    pub(crate) config: AgentRunConfig,
+    pub(crate) input: Vec<TalosInputItem>,
+    pub(crate) phase: TurnPhase,
+    pub(crate) planning_instruction: Option<String>,
+    pub(crate) transfer_to: Option<String>,
+}
 
-        if let Some(provider_config) = session.config.current_provider_config() {
-            if let Some(model) = provider_config
-                .models
-                .iter()
-                .find(|m| m.id == selected_model)
-            {
-                return ModelInfo::from_provider_model(provider_name, model.clone());
-            }
-        }
-
-        ModelInfo {
-            id: selected_model.clone(),
-            name: selected_model,
-            provider: provider_name,
-            context_window: 0,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-            compat: Default::default(),
-        }
-    }
-
+impl AgentKernelParams {
+    /// Extract normalized user text from shared Agent input items.
     pub(crate) fn extract_text_input(input: &[TalosInputItem]) -> String {
         input
             .iter()
@@ -56,6 +37,7 @@ impl AgentHarness {
             .join("\n\n")
     }
 
+    /// Extract skill selections from shared Agent input items.
     pub(crate) fn extract_skill_selections(input: &[TalosInputItem]) -> Vec<SkillSelector> {
         input
             .iter()
@@ -68,24 +50,27 @@ impl AgentHarness {
             .collect()
     }
 
-    pub(crate) fn collect_reasoning(output_items: &[TalosOutputItem]) -> Vec<TalosReasoning> {
+    /// Convert shared run transcript items into Talos reasoning summaries.
+    pub(crate) fn collect_reasoning(output_items: &[RunItem]) -> Vec<TalosReasoning> {
         output_items
             .iter()
             .filter_map(|item| match item {
-                TalosOutputItem::Reasoning { text } => Some(TalosReasoning { text: text.clone() }),
+                RunItem::Reasoning { text } => Some(TalosReasoning { text: text.clone() }),
                 _ => None,
             })
             .collect()
     }
+}
 
-    pub(crate) fn to_agent_request(&self, request: AgentRequest) -> AgentKernelRequest {
-        AgentKernelRequest {
-            session: request.session,
-            input: request.input,
-            phase: TurnPhase::Execution,
-            planning_instruction: None,
-            transfer_to: None,
-        }
+/// Convert shared Agent run params into Kernel-private execution params.
+pub(crate) fn agent_run_params_to_kernel_params(request: AgentRunParams) -> AgentKernelParams {
+    AgentKernelParams {
+        context: request.context,
+        config: request.config,
+        input: request.input,
+        phase: TurnPhase::Execution,
+        planning_instruction: None,
+        transfer_to: None,
     }
 }
 

@@ -11,7 +11,7 @@ use chrono::Utc;
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatMessage, Role};
-use talos_types::talos::{TalosContentItem, TalosOutputItem};
+use talos_types::talos::{RunItem, TalosContentItem};
 
 mod compaction;
 mod contents;

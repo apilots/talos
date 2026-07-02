@@ -1,6 +1,6 @@
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::TimelineEventId;
-use talos_types::talos::{TalosTimelineEvent, TimelineEventEnvelope};
+use talos_types::talos::{AgentEvent, TimelineEventEnvelope};
 
 use super::mapping::map_active_turn_snapshot;
 use super::subscription::TimelineSubscriptionService;
@@ -72,7 +72,7 @@ impl TimelineSubscriptionService {
 
 pub(crate) fn reject_expired_cursor(
     after_event_id: Option<&TimelineEventId>,
-    first_replay_event: Option<&TalosTimelineEvent>,
+    first_replay_event: Option<&AgentEvent>,
     oldest_event_id: Option<&TimelineEventId>,
 ) -> TalosResult<()> {
     let Some(after_event_id) = after_event_id else {

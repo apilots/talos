@@ -6,7 +6,7 @@ use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
 use talos_memory::{Memory, MemoryStore, SessionPromptContextConfig, TalosMessageRole, TalosTurn};
 use talos_prompt::{PromptManager, PromptTemplate};
 use talos_tools::{Tool, ToolRegistry};
-use talos_types::talos::{StopReason, TalosOutputItem, TalosUsage};
+use talos_types::talos::{RunItem, StopReason, TokenUsage};
 
 const DEFAULT_SESSION_ID: &str = "default";
 
@@ -144,14 +144,14 @@ Based on the request and available tools, decide if a tool should be used. If ye
             seq,
             timestamp,
             items: vec![
-                TalosOutputItem::UserInput {
+                RunItem::UserInput {
                     text: user_message.to_string(),
                 },
-                TalosOutputItem::OutputText {
+                RunItem::OutputText {
                     text: response.content.clone(),
                 },
             ],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         };
         self.memory.append_turn(&talos_turn).await?;

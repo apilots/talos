@@ -237,10 +237,10 @@ async fn test_flush_session_memory_returns_early_when_transcript_is_blank() {
                 .await
                 .expect("seq should load"),
             timestamp,
-            items: vec![TalosOutputItem::UserInput {
+            items: vec![RunItem::UserInput {
                 text: "   ".to_string(),
             }],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: TalosApiStopReason::EndTurn,
         })
         .await
@@ -525,14 +525,14 @@ async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_req
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("old-to-new user message {}", idx),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!("old-to-new assistant message {}", idx),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -592,13 +592,13 @@ async fn test_flush_session_memory_trims_old_tool_outputs_before_history() {
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("user message {idx}"),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!("assistant message {idx}"),
                     },
-                    TalosOutputItem::ToolResult {
+                    RunItem::ToolResult {
                         call_id: format!("call-{idx}"),
                         tool_name: "Read".to_string(),
                         content: vec![TalosContentItem::Text {
@@ -607,7 +607,7 @@ async fn test_flush_session_memory_trims_old_tool_outputs_before_history() {
                         is_error: false,
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -679,10 +679,10 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("user message {idx}"),
                     },
-                    TalosOutputItem::ToolCall {
+                    RunItem::ToolCall {
                         call_id: format!("call-{idx}"),
                         name: "Read".to_string(),
                         arguments: serde_json::json!({
@@ -691,7 +691,7 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
                         })
                         .into(),
                     },
-                    TalosOutputItem::ToolResult {
+                    RunItem::ToolResult {
                         call_id: format!("call-{idx}"),
                         tool_name: "Read".to_string(),
                         content: vec![TalosContentItem::Text {
@@ -699,11 +699,11 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
                         }],
                         is_error: false,
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!("assistant message {idx}"),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await

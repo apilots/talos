@@ -16,11 +16,11 @@ fn typescript_generation_includes_jsonrpc_message() {
 #[test]
 fn generated_protocol_includes_timeline_types() {
     let schema = generate_json_schema();
-    assert!(schema.contains("TalosTimelineEvent"));
+    assert!(schema.contains("AgentEvent"));
     assert!(schema.contains("TalosTimelineItem"));
 
     let typescript = generate_typescript();
-    assert!(typescript.contains("TalosTimelineEvent"));
+    assert!(typescript.contains("AgentEvent"));
     assert!(typescript.contains("TalosTimelineDelta"));
 }
 

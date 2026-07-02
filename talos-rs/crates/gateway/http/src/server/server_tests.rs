@@ -21,10 +21,10 @@ use talos_store::session::{
     SessionStore, TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
-    TalosToolProgressKind, TalosTurnCompletedEvent, TalosTurnStartedEvent, TalosUsage,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosContext, TalosItemDeltaEvent,
+    TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
+    TalosTurnCompletedEvent, TalosTurnStartedEvent, TokenUsage,
 };
 use talos_types::{ModelInfo, SessionListRequest, TalosSession};
 use tower::util::ServiceExt;
@@ -59,15 +59,6 @@ trait SessionService: Send + Sync {
     async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
 
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()>;
 }
 
 fn test_model_info() -> ModelInfo {
@@ -274,8 +265,8 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
     async fn compact_session(
         &self,
         _session: TalosSession,
-    ) -> talos_error::TalosResult<talos_types::TalosUsage> {
-        Ok(talos_types::TalosUsage::default())
+    ) -> talos_error::TalosResult<talos_types::TokenUsage> {
+        Ok(talos_types::TokenUsage::default())
     }
 
     async fn clear_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
@@ -295,28 +286,12 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> talos_error::TalosResult<()> {
-        self.service
-            .cancel_active_turn(&session.context.session_id)
-            .await
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
+        params: talos_types::CancelActiveTurnParams,
     ) -> talos_error::TalosResult<()> {
         self.service
-            .submit_dynamic_tool_result(
-                &session.context.session_id,
-                call_id,
-                tool_name,
-                output,
-                success,
-            )
+            .cancel_active_turn(&params.session.context.session_id)
             .await
     }
 }
@@ -427,7 +402,7 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
 
 #[derive(Default)]
 struct RecordingEventStore {
-    events: std::sync::Mutex<Vec<TalosTimelineEvent>>,
+    events: std::sync::Mutex<Vec<AgentEvent>>,
     active_turns: std::sync::Mutex<std::collections::HashMap<String, ActiveTurnRecord>>,
     idempotency_records:
         std::sync::Mutex<std::collections::HashMap<(String, String), IdempotencyRecord>>,
@@ -435,7 +410,7 @@ struct RecordingEventStore {
 
 #[async_trait::async_trait]
 impl TimelineEventStore for RecordingEventStore {
-    async fn append_event(&self, mut event: TalosTimelineEvent) -> TalosResult<TalosTimelineEvent> {
+    async fn append_event(&self, mut event: AgentEvent) -> TalosResult<AgentEvent> {
         let mut events = self.events.lock().unwrap();
         let event_seq = (events.len() as i64) + 1;
         event.event_seq = Some(event_seq);
@@ -450,7 +425,7 @@ impl TimelineEventStore for RecordingEventStore {
         session_id: &str,
         after_event_id: Option<&TimelineEventId>,
         limit: usize,
-    ) -> TalosResult<Vec<TalosTimelineEvent>> {
+    ) -> TalosResult<Vec<AgentEvent>> {
         let after = match after_event_id {
             Some(event_id) => event_id.event_seq()?,
             None => 0,

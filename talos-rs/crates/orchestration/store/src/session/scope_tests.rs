@@ -4,7 +4,7 @@ use std::sync::Arc;
 use super::*;
 use crate::project::{ProjectStore, StorageProjectStore};
 use talos_storage::SqliteStorage;
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TalosUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
 fn sample_context() -> TalosContext {
@@ -40,7 +40,7 @@ fn record(
         created_at: 1,
         last_activity: 1,
         message_count: 0,
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         conf: SessionConf::default(),
         workspace_id: Some("workspace-alpha".to_string()),
         project_id,
@@ -108,11 +108,11 @@ async fn test_update_session_record_persists_fields() {
 
     record.title = "Custom Title".to_string();
     record.message_count = 2;
-    record.usage = TalosUsage {
+    record.usage = TokenUsage {
         input_tokens: 10,
         output_tokens: 5,
         total_tokens: 15,
-        ..TalosUsage::default()
+        ..TokenUsage::default()
     };
     record.model = "gpt-5.4".to_string();
     assert!(store.update_session_record(&record).await.unwrap());

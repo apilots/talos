@@ -7,8 +7,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
 use talos_service::{Actor, TalosService, TimelineSubscriptionMessage, TimelineSubscriptionSource};
 use talos_types::talos::{
-    TalosContext, TalosInputItem, TalosProvider, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEventPayload, TalosTimelineItemKind,
+    AgentEventPayload, TalosContext, TalosInputItem, TalosProvider, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItemKind,
 };
 use talos_types::{StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::mpsc;
@@ -20,7 +20,7 @@ use crate::traits::{
 
 #[async_trait::async_trait]
 pub trait ChannelTimelineSubscriptionService: Send + Sync {
-    async fn open_timeline_subscription(
+    async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
@@ -29,12 +29,12 @@ pub trait ChannelTimelineSubscriptionService: Send + Sync {
 
 #[async_trait::async_trait]
 impl ChannelTimelineSubscriptionService for TalosService {
-    async fn open_timeline_subscription(
+    async fn timeline_subscription_source(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<TimelineSubscriptionSource> {
-        TalosService::open_timeline_subscription(self, actor, request).await
+        TalosService::timeline_subscription_source(self, actor, request).await
     }
 }
 
@@ -215,7 +215,7 @@ async fn submit_channel_turn(
 ) -> TalosResult<String> {
     let response = gateway.start_turn(actor, request, None).await?;
     let mut subscription = timeline_subscriptions
-        .open_timeline_subscription(
+        .timeline_subscription_source(
             actor,
             SubscribeTimelineRequest {
                 session_id: response.session_id.clone(),
@@ -268,9 +268,9 @@ struct ChannelTurnReplyCollector {
 }
 
 impl ChannelTurnReplyCollector {
-    fn apply(&mut self, payload: TalosTimelineEventPayload) -> bool {
+    fn apply(&mut self, payload: AgentEventPayload) -> bool {
         match payload {
-            TalosTimelineEventPayload::ItemStarted(started) => {
+            AgentEventPayload::ItemStarted(started) => {
                 if started.item.kind == TalosTimelineItemKind::AssistantText {
                     let text = match started.item.content {
                         TalosTimelineContent::Text { text } => text,
@@ -279,27 +279,26 @@ impl ChannelTurnReplyCollector {
                     self.assistant_text_items.insert(started.item.item_id, text);
                 }
             }
-            TalosTimelineEventPayload::ItemDelta(delta) => {
+            AgentEventPayload::ItemDelta(delta) => {
                 if let TalosTimelineDelta::Text { text } = delta.delta {
                     if let Some(existing) = self.assistant_text_items.get_mut(&delta.item_id) {
                         existing.push_str(&text);
                     }
                 }
             }
-            TalosTimelineEventPayload::ItemCompleted(completed) => {
+            AgentEventPayload::ItemCompleted(completed) => {
                 if let Some(existing) = self.assistant_text_items.get_mut(&completed.item_id) {
                     if let Some(TalosTimelineContent::Text { text }) = completed.final_content {
                         *existing = text;
                     }
                 }
             }
-            TalosTimelineEventPayload::TurnCompleted(_)
-            | TalosTimelineEventPayload::TurnError(_) => {
+            AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnError(_) => {
                 return true;
             }
-            TalosTimelineEventPayload::TurnStarted(_)
-            | TalosTimelineEventPayload::AssistantTextCommitted(_)
-            | TalosTimelineEventPayload::TurnMetrics(_) => {}
+            AgentEventPayload::TurnStarted(_)
+            | AgentEventPayload::AssistantTextCommitted(_)
+            | AgentEventPayload::TurnMetrics(_) => {}
         }
         false
     }

@@ -24,7 +24,6 @@ Cargo.lock
 
 # Claude
 claude*
-AGENTS.md
 .claude
 
 # DB

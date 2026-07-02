@@ -4,7 +4,7 @@ export type {
   TalosTimelineItemStatus,
   TalosTimelinePhase,
   TalosPendingUserAction,
-  TalosOutputItem,
+  RunItem,
   SessionInfo,
   TalosToolProgressKind,
   TalosTurnExecutionMetrics,

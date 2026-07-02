@@ -11,16 +11,18 @@ use talos_store::session::{
     TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TalosUsage,
+    StopReason, TalosContext, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TokenUsage,
 };
 use talos_types::{
-    AgentDispatchRequest, SessionConf, SessionContext, SessionState, StartTurnRequest, TalosConfig,
-    TalosSession,
+    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, SessionConf, SessionContext,
+    SessionState, StartTurnRequest, TalosConfig, TalosSession,
 };
 
 #[derive(Default)]
 struct RecordingTurnExecutor {
-    stream_request: Mutex<Option<AgentDispatchRequest>>,
+    stream_request: Mutex<Option<AgentDispatchParams>>,
+    stream_error: Mutex<Option<TalosError>>,
+    dynamic_turn_id: Mutex<Option<String>>,
     title_update: Mutex<Option<String>>,
 }
 
@@ -31,7 +33,7 @@ impl SessionRuntime for NoopSessionRuntime {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<talos_types::TalosUsage> {
+    ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in turn service tests")
     }
 
@@ -47,17 +49,9 @@ impl SessionRuntime for NoopSessionRuntime {
         unreachable!("not used in turn service tests")
     }
 
-    async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in turn service tests")
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
+        _params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
         unreachable!("not used in turn service tests")
     }
@@ -67,25 +61,28 @@ impl SessionRuntime for NoopSessionRuntime {
 impl TurnExecutor for RecordingTurnExecutor {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.stream_request.lock().unwrap().replace(request.clone());
+        if let Some(error) = self.stream_error.lock().unwrap().take() {
+            return Err(error);
+        }
         let (tx, rx) = mpsc::channel(4);
-        let event = TalosTimelineEvent {
+        let event = AgentEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: None,
-            event_type: talos_types::talos::TalosTimelineEventType::TurnCompleted,
-            turn_id: request.turn_id.clone().unwrap_or_default(),
-            message_id: request.context.message_id.clone(),
-            session_id: request.session_id.clone(),
+            event_type: talos_types::talos::AgentEventType::TurnCompleted,
+            turn_id: request.turn_id.clone(),
+            message_id: request.session.context.message_id.clone(),
+            session_id: request.session.context.session_id.clone(),
             sequence: 0,
-            payload: TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+            payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
                 request_id: "req-test".to_string(),
-                turn_id: request.turn_id.unwrap_or_default(),
+                turn_id: request.turn_id,
                 completed_at_ms: 1,
                 stop_reason: StopReason::EndTurn,
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 metrics: None,
             }),
         };
@@ -93,24 +90,51 @@ impl TurnExecutor for RecordingTurnExecutor {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
+        let AgentDispatchInput::DynamicToolResult { .. } = params.input;
+        self.dynamic_turn_id.lock().unwrap().replace(params.turn_id);
         Ok(())
     }
 
-    async fn submit_dynamic_tool_result(
+    async fn take_generated_session_title(
         &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn take_session_title_update(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
+        _session_id: &str,
+        _turn_id: &str,
+    ) -> Option<String> {
         self.title_update.lock().unwrap().take()
     }
+}
+
+#[tokio::test]
+async fn submit_start_turn_preserves_executor_error_semantics() {
+    let turn_executor = Arc::new(RecordingTurnExecutor {
+        stream_error: Mutex::new(Some(TalosError::Conflict("agent busy".to_string()))),
+        ..Default::default()
+    });
+    let (service, _event_service, store) = test_service(turn_executor).await;
+    create_test_session_record(store.clone()).await;
+
+    let error = service
+        .submit_start_turn(
+            test_session(),
+            StartTurnRequest {
+                session_id: "s1".to_string(),
+                input: vec![TalosInputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                workspace_id: None,
+                context: None,
+                model: None,
+                project_id: None,
+                current_directory: None,
+                client_request_id: None,
+            },
+            None,
+        )
+        .await
+        .expect_err("executor conflict should propagate");
+
+    assert!(matches!(error, TalosError::Conflict(_)));
 }
 
 async fn test_service(
@@ -361,8 +385,12 @@ async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
         .unwrap()
         .clone()
         .expect("resume stream request should be captured");
-    assert_eq!(request.turn_id.as_deref(), Some("turn-original"));
-    assert_eq!(request.context.message_id, "msg-original");
+    assert_eq!(request.turn_id, "turn-original");
+    assert_eq!(
+        turn_executor.dynamic_turn_id.lock().unwrap().as_deref(),
+        Some("turn-original")
+    );
+    assert_eq!(request.session.context.message_id, "msg-original");
     assert!(request.input.is_empty());
     let tool_call = request
         .resume_context
@@ -375,4 +403,40 @@ async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
     let active = store.get_active_turn("s1").await.unwrap().unwrap();
     assert_eq!(active.status, ActiveTurnStatus::Completed);
     assert_eq!(active.pending_user_action, None);
+}
+
+#[tokio::test]
+async fn submit_dynamic_tool_result_requires_original_tool_item_id() {
+    let turn_executor = Arc::new(RecordingTurnExecutor::default());
+    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "s1".to_string(),
+            turn_id: "turn-original".to_string(),
+            message_id: Some("msg-original".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(TimelineEventId::from_seq(9)),
+            pending_user_action: Some(PendingUserAction::DynamicToolResult(
+                PendingDynamicToolResult {
+                    item_id: None,
+                    call_id: "call-1".to_string(),
+                    tool_name: "AskUser".to_string(),
+                },
+            )),
+            updated_at: 1,
+        })
+        .await
+        .unwrap();
+
+    let error = service
+        .submit_dynamic_tool_result(test_session(), "call-1", "AskUser", "ok".to_string(), true)
+        .await
+        .expect_err("missing item id should fail before runtime dispatch");
+
+    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(turn_executor.stream_request.lock().unwrap().is_none());
+    assert!(turn_executor.dynamic_turn_id.lock().unwrap().is_none());
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+    assert!(active.pending_user_action.is_some());
 }

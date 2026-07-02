@@ -756,10 +756,10 @@ async fn seed_recent_user_message(memory_store: &MemoryStore) {
                 .await
                 .expect("seq should load"),
             timestamp,
-            items: vec![TalosOutputItem::UserInput {
+            items: vec![RunItem::UserInput {
                 text: "history that should be dropped".to_string(),
             }],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: TalosApiStopReason::EndTurn,
         })
         .await

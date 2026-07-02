@@ -2,12 +2,12 @@ use chrono::Utc;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{
-    StopReason, TalosAssistantTextCommittedEvent, TalosContentItem, TalosItemCompletedEvent,
-    TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry,
-    TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent,
-    TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage, TurnExecutionMetrics,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosAssistantTextCommittedEvent,
+    TalosContentItem, TalosItemCompletedEvent, TalosItemDeltaEvent, TalosItemStartedEvent,
+    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
+    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
+    TalosTurnStartedEvent, TokenUsage, TurnExecutionMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -44,22 +44,22 @@ impl TimelineBuilder {
         }
     }
 
-    pub fn start_turn(&mut self) -> TalosTimelineEvent {
-        let payload = TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+    pub fn start_turn(&mut self) -> AgentEvent {
+        let payload = AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             started_at_ms: now_ms(),
         });
-        self.event(TalosTimelineEventType::TurnStarted, payload)
+        self.event(AgentEventType::TurnStarted, payload)
     }
 
     pub fn complete_turn(
         &mut self,
         stop_reason: StopReason,
-        usage: TalosUsage,
+        usage: TokenUsage,
         metrics: Option<TurnExecutionMetrics>,
-    ) -> TalosTimelineEvent {
-        let payload = TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+    ) -> AgentEvent {
+        let payload = AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             completed_at_ms: now_ms(),
@@ -67,26 +67,26 @@ impl TimelineBuilder {
             usage,
             metrics,
         });
-        self.event(TalosTimelineEventType::TurnCompleted, payload)
+        self.event(AgentEventType::TurnCompleted, payload)
     }
 
-    pub fn turn_metrics(&mut self, metrics: TurnExecutionMetrics) -> TalosTimelineEvent {
-        let payload = TalosTimelineEventPayload::TurnMetrics(TalosTurnMetricsEvent {
+    pub fn turn_metrics(&mut self, metrics: TurnExecutionMetrics) -> AgentEvent {
+        let payload = AgentEventPayload::TurnMetrics(TalosTurnMetricsEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             metrics,
         });
-        self.event(TalosTimelineEventType::TurnMetrics, payload)
+        self.event(AgentEventType::TurnMetrics, payload)
     }
 
-    pub fn fail_turn(&mut self, error: impl Into<String>) -> TalosTimelineEvent {
-        let payload = TalosTimelineEventPayload::TurnError(TalosTurnErrorEvent {
+    pub fn fail_turn(&mut self, error: impl Into<String>) -> AgentEvent {
+        let payload = AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             error: error.into(),
             failed_at_ms: now_ms(),
         });
-        self.event(TalosTimelineEventType::TurnError, payload)
+        self.event(AgentEventType::TurnError, payload)
     }
 
     pub fn start_item(
@@ -95,7 +95,7 @@ impl TimelineBuilder {
         phase: TalosTimelinePhase,
         title: Option<String>,
         content: TalosTimelineContent,
-    ) -> TalosTimelineEvent {
+    ) -> AgentEvent {
         let item_id = self.next_item_id(kind);
         let item = TalosTimelineItem {
             item_id: item_id.clone(),
@@ -112,15 +112,15 @@ impl TimelineBuilder {
         self.items
             .insert(item_id, TimelineItemState { item: item.clone() });
 
-        let payload = TalosTimelineEventPayload::ItemStarted(TalosItemStartedEvent {
+        let payload = AgentEventPayload::ItemStarted(TalosItemStartedEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             item,
         });
-        self.event(TalosTimelineEventType::ItemStarted, payload)
+        self.event(AgentEventType::ItemStarted, payload)
     }
 
-    pub fn start_reasoning(&mut self) -> TalosTimelineEvent {
+    pub fn start_reasoning(&mut self) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::Reasoning,
             TalosTimelinePhase::Thinking,
@@ -131,7 +131,7 @@ impl TimelineBuilder {
         )
     }
 
-    pub fn start_user_input(&mut self, text: impl Into<String>) -> TalosTimelineEvent {
+    pub fn start_user_input(&mut self, text: impl Into<String>) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::UserInput,
             TalosTimelinePhase::Input,
@@ -140,7 +140,7 @@ impl TimelineBuilder {
         )
     }
 
-    pub fn start_commentary(&mut self) -> TalosTimelineEvent {
+    pub fn start_commentary(&mut self) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::AssistantText,
             TalosTimelinePhase::Commentary,
@@ -151,7 +151,7 @@ impl TimelineBuilder {
         )
     }
 
-    pub fn start_unknown_assistant_text(&mut self) -> TalosTimelineEvent {
+    pub fn start_unknown_assistant_text(&mut self) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::AssistantText,
             TalosTimelinePhase::Unknown,
@@ -167,7 +167,7 @@ impl TimelineBuilder {
         call_id: impl Into<String>,
         name: impl Into<String>,
         arguments: impl Into<String>,
-    ) -> TalosTimelineEvent {
+    ) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::ToolCall,
             TalosTimelinePhase::Acting,
@@ -210,7 +210,7 @@ impl TimelineBuilder {
         self.items.insert(item_id, TimelineItemState { item });
     }
 
-    pub fn start_final_answer(&mut self) -> TalosTimelineEvent {
+    pub fn start_final_answer(&mut self) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::AssistantText,
             TalosTimelinePhase::FinalAnswer,
@@ -225,15 +225,15 @@ impl TimelineBuilder {
         &mut self,
         item_id: &str,
         delta: TalosTimelineDelta,
-    ) -> TalosResult<TalosTimelineEvent> {
+    ) -> TalosResult<AgentEvent> {
         self.apply_delta(item_id, &delta)?;
-        let payload = TalosTimelineEventPayload::ItemDelta(TalosItemDeltaEvent {
+        let payload = AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             item_id: item_id.to_string(),
             delta,
         });
-        Ok(self.event(TalosTimelineEventType::ItemDelta, payload))
+        Ok(self.event(AgentEventType::ItemDelta, payload))
     }
 
     pub fn complete_item(
@@ -241,7 +241,7 @@ impl TimelineBuilder {
         item_id: &str,
         status: TalosTimelineItemStatus,
         final_content: Option<TalosTimelineContent>,
-    ) -> TalosResult<TalosTimelineEvent> {
+    ) -> TalosResult<AgentEvent> {
         let completed_at_ms = now_ms();
         let state = self.active_item_mut(item_id)?;
         state.item.status = status;
@@ -250,7 +250,7 @@ impl TimelineBuilder {
             state.item.content = content;
         }
 
-        let payload = TalosTimelineEventPayload::ItemCompleted(TalosItemCompletedEvent {
+        let payload = AgentEventPayload::ItemCompleted(TalosItemCompletedEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
             item_id: item_id.to_string(),
@@ -258,14 +258,14 @@ impl TimelineBuilder {
             completed_at_ms,
             final_content,
         });
-        Ok(self.event(TalosTimelineEventType::ItemCompleted, payload))
+        Ok(self.event(AgentEventType::ItemCompleted, payload))
     }
 
     pub fn commit_assistant_text(
         &mut self,
         item_id: &str,
         phase: TalosTimelinePhase,
-    ) -> TalosResult<TalosTimelineEvent> {
+    ) -> TalosResult<AgentEvent> {
         let state = self.items.get_mut(item_id).ok_or_else(|| {
             TalosError::ValidationError(format!("timeline item not found: {item_id}"))
         })?;
@@ -275,20 +275,19 @@ impl TimelineBuilder {
             )));
         }
         state.item.phase = phase;
-        let payload =
-            TalosTimelineEventPayload::AssistantTextCommitted(TalosAssistantTextCommittedEvent {
-                request_id: self.request_id.clone(),
-                turn_id: self.turn_id.clone(),
-                item_id: item_id.to_string(),
-                phase,
-            });
-        Ok(self.event(TalosTimelineEventType::AssistantTextCommitted, payload))
+        let payload = AgentEventPayload::AssistantTextCommitted(TalosAssistantTextCommittedEvent {
+            request_id: self.request_id.clone(),
+            turn_id: self.turn_id.clone(),
+            item_id: item_id.to_string(),
+            phase,
+        });
+        Ok(self.event(AgentEventType::AssistantTextCommitted, payload))
     }
 
     pub fn close_active_items(
         &mut self,
         status: TalosTimelineItemStatus,
-    ) -> TalosResult<Vec<TalosTimelineEvent>> {
+    ) -> TalosResult<Vec<AgentEvent>> {
         let item_ids = self
             .items
             .iter()
@@ -365,14 +364,10 @@ impl TimelineBuilder {
         format!("{prefix}-{}", self.next_item_index)
     }
 
-    fn event(
-        &mut self,
-        event_type: TalosTimelineEventType,
-        payload: TalosTimelineEventPayload,
-    ) -> TalosTimelineEvent {
+    fn event(&mut self, event_type: AgentEventType, payload: AgentEventPayload) -> AgentEvent {
         let sequence = self.next_sequence;
         self.next_sequence += 1;
-        TalosTimelineEvent {
+        AgentEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: None,

@@ -55,7 +55,7 @@ pub use tool_execution::{
 };
 pub use traits::Planner;
 pub use types::{
-    AgentRunResult, AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
+    AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextStartedStreamData, ContextStateBags,
     DynamicToolRequestStreamData, ExecutionSummaryStreamData, FinalResponseEventData, FlowProfile,
     InvocationContext, InvocationExecutionState, InvocationLimits, IterationEventData,

@@ -34,6 +34,347 @@
       ],
       "type": "object"
     },
+    "AgentEvent": {
+      "description": "Agent execution event.",
+      "properties": {
+        "created_at_ms": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event_seq": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "event_type": {
+          "$ref": "#/definitions/AgentEventType"
+        },
+        "message_id": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/definitions/AgentEventPayload"
+        },
+        "sequence": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "session_id": {
+          "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_type",
+        "message_id",
+        "payload",
+        "sequence",
+        "session_id",
+        "turn_id"
+      ],
+      "type": "object"
+    },
+    "AgentEventPayload": {
+      "oneOf": [
+        {
+          "properties": {
+            "request_id": {
+              "type": "string"
+            },
+            "started_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "started_at_ms",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item": {
+              "$ref": "#/definitions/TalosTimelineItem"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_started"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "item",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "delta": {
+              "$ref": "#/definitions/TalosTimelineDelta"
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_delta"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "delta",
+            "item_id",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "final_content": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TalosTimelineContent"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "item_id": {
+              "type": "string"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "status": {
+              "$ref": "#/definitions/TalosTimelineItemStatus"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "item_completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "completed_at_ms",
+            "item_id",
+            "request_id",
+            "status",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "item_id": {
+              "type": "string"
+            },
+            "phase": {
+              "$ref": "#/definitions/TalosTimelinePhase"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "assistant_text_committed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "item_id",
+            "phase",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "metrics": {
+              "$ref": "#/definitions/TurnExecutionMetrics"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_metrics"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "metrics",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "completed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "metrics": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TurnExecutionMetrics"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "stop_reason": {
+              "$ref": "#/definitions/StopReason"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_completed"
+              ],
+              "type": "string"
+            },
+            "usage": {
+              "$ref": "#/definitions/TokenUsage"
+            }
+          },
+          "required": [
+            "completed_at_ms",
+            "request_id",
+            "stop_reason",
+            "turn_id",
+            "type",
+            "usage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "failed_at_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "request_id": {
+              "type": "string"
+            },
+            "turn_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "turn_error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "failed_at_ms",
+            "request_id",
+            "turn_id",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentEventType": {
+      "description": "Agent execution event lifecycle type.",
+      "enum": [
+        "turn_started",
+        "item_started",
+        "item_delta",
+        "item_completed",
+        "assistant_text_committed",
+        "turn_metrics",
+        "turn_completed",
+        "turn_error"
+      ],
+      "type": "string"
+    },
     "AppServerErrorBody": {
       "properties": {
         "code": {
@@ -2948,7 +3289,7 @@
           "type": "string"
         },
         "usage": {
-          "$ref": "#/definitions/TalosUsage"
+          "$ref": "#/definitions/TokenUsage"
         }
       },
       "required": [
@@ -4308,347 +4649,6 @@
         }
       ]
     },
-    "TalosTimelineEvent": {
-      "description": "Domain timeline event payload.",
-      "properties": {
-        "created_at_ms": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "event_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "event_seq": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "event_type": {
-          "$ref": "#/definitions/TalosTimelineEventType"
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "payload": {
-          "$ref": "#/definitions/TalosTimelineEventPayload"
-        },
-        "sequence": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "event_type",
-        "message_id",
-        "payload",
-        "sequence",
-        "session_id",
-        "turn_id"
-      ],
-      "type": "object"
-    },
-    "TalosTimelineEventPayload": {
-      "oneOf": [
-        {
-          "properties": {
-            "request_id": {
-              "type": "string"
-            },
-            "started_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "turn_started"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "request_id",
-            "started_at_ms",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "item": {
-              "$ref": "#/definitions/TalosTimelineItem"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "item_started"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "item",
-            "request_id",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "delta": {
-              "$ref": "#/definitions/TalosTimelineDelta"
-            },
-            "item_id": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "item_delta"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "delta",
-            "item_id",
-            "request_id",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "completed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "final_content": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TalosTimelineContent"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "item_id": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "status": {
-              "$ref": "#/definitions/TalosTimelineItemStatus"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "item_completed"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "completed_at_ms",
-            "item_id",
-            "request_id",
-            "status",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "item_id": {
-              "type": "string"
-            },
-            "phase": {
-              "$ref": "#/definitions/TalosTimelinePhase"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "assistant_text_committed"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "item_id",
-            "phase",
-            "request_id",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "metrics": {
-              "$ref": "#/definitions/TurnExecutionMetrics"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "turn_metrics"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "metrics",
-            "request_id",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "completed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "metrics": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TurnExecutionMetrics"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "stop_reason": {
-              "$ref": "#/definitions/StopReason"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "turn_completed"
-              ],
-              "type": "string"
-            },
-            "usage": {
-              "$ref": "#/definitions/TalosUsage"
-            }
-          },
-          "required": [
-            "completed_at_ms",
-            "request_id",
-            "stop_reason",
-            "turn_id",
-            "type",
-            "usage"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "error": {
-              "type": "string"
-            },
-            "failed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "turn_error"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "error",
-            "failed_at_ms",
-            "request_id",
-            "turn_id",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TalosTimelineEventType": {
-      "description": "Timeline stream event lifecycle type.",
-      "enum": [
-        "turn_started",
-        "item_started",
-        "item_delta",
-        "item_completed",
-        "assistant_text_committed",
-        "turn_metrics",
-        "turn_completed",
-        "turn_error"
-      ],
-      "type": "string"
-    },
     "TalosTimelineItem": {
       "properties": {
         "completed_at_ms": {
@@ -4988,50 +4988,6 @@
       ],
       "type": "string"
     },
-    "TalosUsage": {
-      "description": "Token usage values.",
-      "properties": {
-        "cache_creation_input_tokens": {
-          "default": null,
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cache_read_input_tokens": {
-          "default": null,
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "input_tokens": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "output_tokens": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "total_tokens": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "input_tokens",
-        "output_tokens",
-        "total_tokens"
-      ],
-      "type": "object"
-    },
     "TimelineActiveTurnSnapshot": {
       "properties": {
         "last_event_id": {
@@ -5109,7 +5065,7 @@
           "type": "integer"
         },
         "event": {
-          "$ref": "#/definitions/TalosTimelineEvent"
+          "$ref": "#/definitions/AgentEvent"
         },
         "event_id": {
           "type": "string"
@@ -5243,6 +5199,50 @@
       ],
       "type": "object"
     },
+    "TokenUsage": {
+      "description": "Token usage values shared by runs, sessions, history, and metrics.",
+      "properties": {
+        "cache_creation_input_tokens": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cache_read_input_tokens": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "input_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "output_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "total_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "input_tokens",
+        "output_tokens",
+        "total_tokens"
+      ],
+      "type": "object"
+    },
     "TurnCommandStatus": {
       "enum": [
         "pending",
@@ -5288,7 +5288,7 @@
           "type": "integer"
         },
         "usage": {
-          "$ref": "#/definitions/TalosUsage"
+          "$ref": "#/definitions/TokenUsage"
         }
       },
       "required": [
@@ -5416,7 +5416,7 @@
       "$ref": "#/definitions/SubscribeTimelineResponse"
     },
     "timeline_event": {
-      "$ref": "#/definitions/TalosTimelineEvent"
+      "$ref": "#/definitions/AgentEvent"
     },
     "timeline_event_envelope": {
       "$ref": "#/definitions/TimelineEventEnvelope"

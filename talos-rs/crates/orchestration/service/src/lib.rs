@@ -32,7 +32,7 @@ pub use timeline::{
     TimelineSubscriptionSource,
 };
 pub use turn::{
-    turn_submission_hash, AgentDispatchTurnExecutor, TurnExecutor, TurnRetryRequest, TurnService,
+    turn_submission_hash, AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams, TurnService,
 };
 pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;

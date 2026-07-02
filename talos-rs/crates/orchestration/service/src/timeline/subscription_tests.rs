@@ -14,9 +14,9 @@ use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineEventType,
-    TalosTurnCompletedEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent, TalosUsage,
-    TimelineEventEnvelope, TurnExecutionMetrics,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosTurnCompletedEvent,
+    TalosTurnMetricsEvent, TalosTurnStartedEvent, TimelineEventEnvelope, TokenUsage,
+    TurnExecutionMetrics,
 };
 use tokio::sync::mpsc;
 
@@ -46,17 +46,17 @@ fn replay_cursor_rejects_empty_retention_gap() {
     assert!(matches!(err, talos_error::TalosError::ResourceExpired(_)));
 }
 
-fn event_record(event_seq: i64) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn event_record(event_seq: i64) -> AgentEvent {
+    AgentEvent {
         event_seq: Some(event_seq),
         event_id: Some(TimelineEventId::from_seq(event_seq).to_string()),
         created_at_ms: Some(1),
-        event_type: TalosTimelineEventType::TurnStarted,
+        event_type: AgentEventType::TurnStarted,
         turn_id: "turn-1".to_string(),
         message_id: "msg-1".to_string(),
         session_id: "s1".to_string(),
         sequence: 0,
-        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: "req-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 1,
@@ -64,21 +64,21 @@ fn event_record(event_seq: i64) -> TalosTimelineEvent {
     }
 }
 
-fn unpersisted_event(sequence: u64) -> TalosTimelineEvent {
+fn unpersisted_event(sequence: u64) -> AgentEvent {
     unpersisted_event_for_turn(sequence, "turn-1")
 }
 
-fn unpersisted_event_for_turn(sequence: u64, turn_id: &str) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn unpersisted_event_for_turn(sequence: u64, turn_id: &str) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: Some(100 + sequence as i64),
-        event_type: TalosTimelineEventType::TurnStarted,
+        event_type: AgentEventType::TurnStarted,
         turn_id: turn_id.to_string(),
         message_id: format!("msg-{turn_id}"),
         session_id: "s1".to_string(),
         sequence,
-        payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
             request_id: "req-1".to_string(),
             turn_id: turn_id.to_string(),
             started_at_ms: 1,
@@ -86,38 +86,38 @@ fn unpersisted_event_for_turn(sequence: u64, turn_id: &str) -> TalosTimelineEven
     }
 }
 
-fn terminal_event(sequence: u64) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn terminal_event(sequence: u64) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: Some(100 + sequence as i64),
-        event_type: TalosTimelineEventType::TurnCompleted,
+        event_type: AgentEventType::TurnCompleted,
         turn_id: "turn-1".to_string(),
         message_id: "msg-1".to_string(),
         session_id: "s1".to_string(),
         sequence,
-        payload: TalosTimelineEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+        payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: "req-1".to_string(),
             turn_id: "turn-1".to_string(),
             completed_at_ms: 1,
             stop_reason: StopReason::EndTurn,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             metrics: None,
         }),
     }
 }
 
-fn metrics_event(sequence: u64) -> TalosTimelineEvent {
-    TalosTimelineEvent {
+fn metrics_event(sequence: u64) -> AgentEvent {
+    AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: Some(100 + sequence as i64),
-        event_type: TalosTimelineEventType::TurnMetrics,
+        event_type: AgentEventType::TurnMetrics,
         turn_id: "turn-1".to_string(),
         message_id: "msg-1".to_string(),
         session_id: "s1".to_string(),
         sequence,
-        payload: TalosTimelineEventPayload::TurnMetrics(TalosTurnMetricsEvent {
+        payload: AgentEventPayload::TurnMetrics(TalosTurnMetricsEvent {
             request_id: "req-1".to_string(),
             turn_id: "turn-1".to_string(),
             metrics: TurnExecutionMetrics::default(),
@@ -217,16 +217,17 @@ async fn live_metrics_events_are_not_replayed_or_used_as_cursor_progress() {
     assert_eq!(replay.event_id, first.event_id);
     assert!(matches!(
         metrics.event.payload,
-        TalosTimelineEventPayload::TurnMetrics(_)
+        AgentEventPayload::TurnMetrics(_)
     ));
     assert_eq!(live.event_id, second.event_id);
 
     let recovered = events.recover_timeline("s1", None, 32).await.unwrap();
     assert_eq!(recovered.replay.events.len(), 2);
-    assert!(recovered.replay.events.iter().all(|event| !matches!(
-        event.event.payload,
-        TalosTimelineEventPayload::TurnMetrics(_)
-    )));
+    assert!(recovered
+        .replay
+        .events
+        .iter()
+        .all(|event| !matches!(event.event.payload, AgentEventPayload::TurnMetrics(_))));
 }
 
 #[tokio::test]
@@ -402,16 +403,13 @@ async fn recover_timeline_returns_active_turn_snapshot() {
 
 #[derive(Default)]
 struct MockStore {
-    events: Mutex<Vec<TalosTimelineEvent>>,
+    events: Mutex<Vec<AgentEvent>>,
     active_turn: Mutex<Option<ActiveTurnRecord>>,
 }
 
 #[async_trait]
 impl TimelineEventStore for MockStore {
-    async fn append_event(
-        &self,
-        mut event: TalosTimelineEvent,
-    ) -> talos_error::TalosResult<TalosTimelineEvent> {
+    async fn append_event(&self, mut event: AgentEvent) -> talos_error::TalosResult<AgentEvent> {
         let mut events = self.events.lock().expect("events lock");
         let event_seq = events.len() as i64 + 1;
         event.event_seq = Some(event_seq);
@@ -426,7 +424,7 @@ impl TimelineEventStore for MockStore {
         session_id: &str,
         after_event_id: Option<&TimelineEventId>,
         limit: usize,
-    ) -> talos_error::TalosResult<Vec<TalosTimelineEvent>> {
+    ) -> talos_error::TalosResult<Vec<AgentEvent>> {
         let after_seq = after_event_id
             .map(TimelineEventId::event_seq)
             .transpose()?

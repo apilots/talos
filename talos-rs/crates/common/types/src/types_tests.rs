@@ -16,16 +16,16 @@ fn test_session_id() {
 
 #[test]
 fn test_talos_timeline_tool_progress_updates_same_item() {
-    let event = talos::TalosTimelineEvent {
+    let event = talos::AgentEvent {
         event_seq: None,
         event_id: None,
         created_at_ms: None,
-        event_type: talos::TalosTimelineEventType::ItemDelta,
+        event_type: talos::AgentEventType::ItemDelta,
         turn_id: "turn-1".to_string(),
         message_id: "message-1".to_string(),
         session_id: "session-1".to_string(),
         sequence: 2,
-        payload: talos::TalosTimelineEventPayload::ItemDelta(talos::TalosItemDeltaEvent {
+        payload: talos::AgentEventPayload::ItemDelta(talos::TalosItemDeltaEvent {
             request_id: "request-1".to_string(),
             turn_id: "turn-1".to_string(),
             item_id: "tool-1".to_string(),
@@ -41,10 +41,10 @@ fn test_talos_timeline_tool_progress_updates_same_item() {
     assert!(encoded.contains("\"item_id\":\"tool-1\""));
     assert!(!encoded.contains("tool_progress_item"));
 
-    let decoded: talos::TalosTimelineEvent =
+    let decoded: talos::AgentEvent =
         serde_json::from_str(&encoded).expect("timeline event should decode");
     match decoded.payload {
-        talos::TalosTimelineEventPayload::ItemDelta(payload) => {
+        talos::AgentEventPayload::ItemDelta(payload) => {
             assert_eq!(payload.item_id, "tool-1");
             assert!(matches!(
                 payload.delta,
@@ -102,7 +102,7 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
             created_at: 100,
             last_activity: 200,
             message_count: 3,
-            usage: talos::TalosUsage {
+            usage: talos::TokenUsage {
                 input_tokens: 1,
                 output_tokens: 2,
                 total_tokens: 3,
@@ -115,7 +115,7 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
     session.apply_turn_progress(
         "qwen-plus",
         2,
-        &talos::TalosUsage {
+        &talos::TokenUsage {
             input_tokens: 4,
             output_tokens: 5,
             total_tokens: 9,
@@ -226,7 +226,7 @@ fn test_resolve_effective_project_root_prefers_project_directory() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TalosUsage::default(),
+            usage: talos::TokenUsage::default(),
         },
     };
 
@@ -270,7 +270,7 @@ fn test_resolve_effective_project_root_uses_embedded_current_directory() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TalosUsage::default(),
+            usage: talos::TokenUsage::default(),
         },
     };
 
@@ -311,7 +311,7 @@ fn test_resolve_effective_project_root_uses_workspace_root() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TalosUsage::default(),
+            usage: talos::TokenUsage::default(),
         },
     };
 

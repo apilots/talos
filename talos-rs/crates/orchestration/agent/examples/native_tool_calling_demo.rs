@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use talos_agent::{Agent, AgentHarness, AgentRequest};
+use talos_agent::{
+    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
+    AgentRunParams, AgentRunSessionState,
+};
 use talos_error::TalosResult;
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
 use talos_tools::{ToolRegistry, WebSearchTool};
@@ -10,6 +13,18 @@ use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
 use talos_types::{SessionContext, SessionState, TalosSession};
 
 struct NativeToolMockProvider;
+
+fn agent_run_params_from_session(
+    session: &TalosSession,
+    turn_id: &str,
+    input: Vec<TalosInputItem>,
+) -> AgentRunParams {
+    let context = AgentRunContext::from_session(session, turn_id.to_string());
+    let config = AgentRunConfig::from_session(session);
+    let session_state = AgentRunSessionState::from_session(session);
+    let options = AgentRunOptions::from_config(&config);
+    AgentRunParams::new(context, config, session_state, options, input)
+}
 
 #[async_trait::async_trait]
 impl LlmProvider for NativeToolMockProvider {
@@ -70,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
     registry.register(Arc::new(WebSearchTool));
 
-    let agent = AgentHarness::new(
+    let agent = AgentHarnessImpl::new(
         "demo-native-tool-agent".to_string(),
         "NativeToolAgent".to_string(),
         "Demonstrates native tool calling flow".to_string(),
@@ -80,38 +95,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Default::default(),
     );
 
+    let session = TalosSession {
+        title: "Untitled Session".to_string(),
+        user_id: "demo-user".to_string(),
+        conf: talos_types::SessionConf::default(),
+        project_id: None,
+        current_directory: None,
+        context: SessionContext {
+            session_id: "demo-session".to_string(),
+            workspace_id: Some("default".to_string()),
+            project_id: None,
+            current_directory: None,
+            project_root: None,
+            source_type: TalosSourceType::System,
+            provider: TalosProvider::System,
+            user_id: "demo-user".to_string(),
+            message_id: "demo-message".to_string(),
+            trace_id: "demo-trace".to_string(),
+            channel_id: None,
+            thread_id: None,
+            environment: None,
+        },
+        config: talos_config::Config::default(),
+        state: SessionState::default(),
+    };
     let response = agent
-        .run(AgentRequest {
-            session: TalosSession {
-                title: "Untitled Session".to_string(),
-                user_id: "demo-user".to_string(),
-                conf: talos_types::SessionConf::default(),
-                project_id: None,
-                current_directory: None,
-                context: SessionContext {
-                    session_id: "demo-session".to_string(),
-                    workspace_id: Some("default".to_string()),
-                    project_id: None,
-                    current_directory: None,
-                    project_root: None,
-                    source_type: TalosSourceType::System,
-                    provider: TalosProvider::System,
-                    user_id: "demo-user".to_string(),
-                    message_id: "demo-message".to_string(),
-                    trace_id: "demo-trace".to_string(),
-                    channel_id: None,
-                    thread_id: None,
-                    environment: None,
-                },
-                config: talos_config::Config::default(),
-                state: SessionState::default(),
-            },
-            turn_id: None,
-            resume_context: None,
-            input: vec![TalosInputItem::Text {
+        .run(agent_run_params_from_session(
+            &session,
+            "turn-demo-native-tool",
+            vec![TalosInputItem::Text {
                 text: "Find latest Rust async best practices".to_string(),
             }],
-        })
+        ))
         .await?;
 
     println!("Final response: {}", response.output_text);

@@ -8,10 +8,10 @@ use talos_store::session::{
     MessageIdempotencyStore, PendingUserAction, SessionStore,
 };
 use talos_types::agent_dispatch::{
-    AgentDispatchRequest, AgentDispatchResumeContext, AgentDispatchResumeToolCall,
+    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
+    AgentDispatchResumeToolCall,
 };
-use talos_types::talos::{TalosContext, TalosInputItem};
-use talos_types::talos::{TalosTimelineEvent, TalosTimelineEventPayload, TalosTurnErrorEvent};
+use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem, TalosTurnErrorEvent};
 use talos_types::{StartTurnRequest, TalosConfig, TalosSession};
 use tokio::sync::mpsc;
 use tracing::error;
@@ -23,7 +23,7 @@ use crate::timeline::TimelineEventService;
 use super::{
     completed_turn_from_event, record_completed_turn_progress, result_from_idempotency_record,
     retry_idempotency_key, spawn_event_forwarder, turn_submission_hash, validate_retry_request,
-    validate_text_input, TurnExecutor, TurnRetryRequest,
+    validate_text_input, TurnExecutor, TurnRetryParams,
 };
 
 #[derive(Clone)]
@@ -64,6 +64,23 @@ impl TurnService {
             session_runtime,
             base_config,
         }
+    }
+
+    fn session_for_turn_dispatch(
+        session: &TalosSession,
+        workspace_id_override: Option<String>,
+    ) -> TalosSession {
+        let mut dispatch_session = session.clone();
+        if let Some(workspace_id) = workspace_id_override {
+            dispatch_session.context.workspace_id = Some(workspace_id);
+        }
+        dispatch_session
+    }
+
+    fn session_for_resume_dispatch(session: &TalosSession, message_id: String) -> TalosSession {
+        let mut dispatch_session = session.clone();
+        dispatch_session.context.message_id = message_id;
+        dispatch_session
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
@@ -140,33 +157,15 @@ impl TurnService {
         }
         self.reject_active_turn(&session_id).await?;
 
-        let context = TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: session.context.message_id.clone(),
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-            project_root: session.context.project_root.clone(),
-            environment: session.context.environment.clone(),
-        };
-        let dispatch_request = AgentDispatchRequest {
-            session_id: session_id.clone(),
-            turn_id: Some(turn_id.clone()),
-            workspace_id: submission.workspace_id.clone(),
-            session: Some(Box::new(session.clone())),
+        let dispatch_request = AgentDispatchParams {
+            turn_id: turn_id.clone(),
+            session: Self::session_for_turn_dispatch(&session, submission.workspace_id.clone()),
             resume_context: None,
             input: submission.input.clone(),
-            context,
         };
         let assistant_model = session.config.llm.model.clone();
 
-        let mut stream_rx = self
-            .executor
-            .start_turn_stream(dispatch_request)
-            .await
-            .map_err(|err| TalosError::GatewayError(err.to_string()))?;
+        let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
             self.base_config
                 .agent
@@ -191,7 +190,14 @@ impl TurnService {
                     .await;
             }
             Err(_) => {
-                if let Err(err) = self.executor.cancel_active_turn(session.clone()).await {
+                if let Err(err) = self
+                    .session_runtime
+                    .cancel_active_turn(talos_types::CancelActiveTurnParams {
+                        session: session.clone(),
+                        turn_id: turn_id.clone(),
+                    })
+                    .await
+                {
                     error!(
                         session_id = %session_id,
                         turn_id = %turn_id,
@@ -266,8 +272,18 @@ impl TurnService {
         let resume = self
             .pending_dynamic_resume_context(&session_id, call_id, tool_name)
             .await?;
+        let turn_id = resume.turn_id.clone();
         self.executor
-            .submit_dynamic_tool_result(session.clone(), call_id, tool_name, output, success)
+            .submit_input(AgentDispatchInputParams {
+                session: session.clone(),
+                turn_id,
+                input: AgentDispatchInput::DynamicToolResult {
+                    call_id: call_id.to_string(),
+                    tool_name: tool_name.to_string(),
+                    output,
+                    success,
+                },
+            })
             .await?;
         self.event_service
             .resolve_pending_user_action(&session_id)
@@ -279,7 +295,7 @@ impl TurnService {
     pub async fn submit_retry(
         &self,
         session: TalosSession,
-        request: TurnRetryRequest,
+        request: TurnRetryParams,
     ) -> TalosResult<MessageCommandResult> {
         validate_retry_request(&request)?;
         validate_text_input(&request.input)?;
@@ -316,7 +332,7 @@ impl TurnService {
     async fn validate_retry_attempt(
         &self,
         session_id: &str,
-        request: &TurnRetryRequest,
+        request: &TurnRetryParams,
     ) -> TalosResult<()> {
         let Some(active_turn) = self.event_service.get_active_turn(session_id).await? else {
             return Ok(());
@@ -368,32 +384,14 @@ impl TurnService {
         let session_id = session.context.session_id.clone();
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let turn_id = resume.turn_id;
-        let context = TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: resume.message_id,
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-            project_root: session.context.project_root.clone(),
-            environment: session.context.environment.clone(),
-        };
-        let dispatch_request = AgentDispatchRequest {
-            session_id: session_id.clone(),
-            turn_id: Some(turn_id.clone()),
-            workspace_id: None,
-            session: Some(Box::new(session.clone())),
+        let dispatch_request = AgentDispatchParams {
+            turn_id: turn_id.clone(),
+            session: Self::session_for_resume_dispatch(&session, resume.message_id),
             resume_context: resume.gateway_resume,
             input: Vec::new(),
-            context,
         };
         let assistant_model = session.config.llm.model.clone();
-        let mut stream_rx = self
-            .executor
-            .start_turn_stream(dispatch_request)
-            .await
-            .map_err(|err| TalosError::GatewayError(err.to_string()))?;
+        let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
             self.base_config
                 .agent
@@ -487,15 +485,22 @@ impl TurnService {
                 pending.tool_name, pending.call_id, tool_name, call_id
             )));
         }
-        let tool_call = pending.item_id.map(|item_id| AgentDispatchResumeToolCall {
+        let item_id = pending.item_id.ok_or_else(|| {
+            TalosError::ValidationError(
+                "Pending dynamic tool result is missing its original timeline item id.".to_string(),
+            )
+        })?;
+        let tool_call = AgentDispatchResumeToolCall {
             item_id,
             call_id: pending.call_id,
             tool_name: pending.tool_name,
-        });
+        };
         Ok(ActiveResumeContext {
             turn_id: active.turn_id,
             message_id,
-            gateway_resume: Some(AgentDispatchResumeContext { tool_call }),
+            gateway_resume: Some(AgentDispatchResumeContext {
+                tool_call: Some(tool_call),
+            }),
         })
     }
 
@@ -506,19 +511,19 @@ impl TurnService {
         request_id: &str,
         idempotency_key: Option<&str>,
         assistant_model: &str,
-        stream_rx: mpsc::Receiver<TalosTimelineEvent>,
+        stream_rx: mpsc::Receiver<AgentEvent>,
         message: &str,
     ) -> TalosResult<MessageCommandResult> {
-        let error_event = TalosTimelineEvent {
+        let error_event = AgentEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: None,
-            event_type: talos_types::talos::TalosTimelineEventType::TurnError,
+            event_type: talos_types::talos::AgentEventType::TurnError,
             turn_id: turn_id.to_string(),
             message_id: format!("msg_{}", Uuid::new_v4().simple()),
             session_id: session_id.to_string(),
             sequence: 0,
-            payload: TalosTimelineEventPayload::TurnError(TalosTurnErrorEvent {
+            payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
                 request_id: request_id.to_string(),
                 turn_id: turn_id.to_string(),
                 error: message.to_string(),
@@ -577,11 +582,7 @@ impl TurnService {
         Err(TalosError::Timeout(message.to_string()))
     }
 
-    async fn record_completed_turn_progress(
-        &self,
-        event: &TalosTimelineEvent,
-        assistant_model: &str,
-    ) {
+    async fn record_completed_turn_progress(&self, event: &AgentEvent, assistant_model: &str) {
         record_completed_turn_progress(
             self.session_records.as_ref(),
             self.session_runtime.as_ref(),

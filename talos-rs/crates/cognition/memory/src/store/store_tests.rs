@@ -11,7 +11,7 @@ use crate::{
     SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
     SessionTranscriptRecord, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
 };
-use talos_types::talos::{StopReason, TalosContentItem, TalosOutputItem, TalosUsage};
+use talos_types::talos::{RunItem, StopReason, TalosContentItem, TokenUsage};
 
 fn new_temp_store() -> (TempDir, MemoryStore) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
@@ -36,14 +36,14 @@ async fn test_turn_roundtrip_and_context_dedup() {
         seq: seq1,
         timestamp: Utc::now(),
         items: vec![
-            TalosOutputItem::UserInput {
+            RunItem::UserInput {
                 text: "hello".to_string(),
             },
-            TalosOutputItem::OutputText {
+            RunItem::OutputText {
                 text: "world".to_string(),
             },
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
     };
 
@@ -168,7 +168,7 @@ async fn test_session_turns_project_cancelled_transcript_user_input() {
     assert_eq!(turns[0].stop_reason, StopReason::Cancelled);
     assert!(matches!(
         turns[0].items.first(),
-        Some(TalosOutputItem::UserInput { text }) if text == "keep this cancelled input visible"
+        Some(RunItem::UserInput { text }) if text == "keep this cancelled input visible"
     ));
 }
 
@@ -210,14 +210,14 @@ async fn test_session_turns_do_not_duplicate_completed_transcripts() {
                 .expect("seq should load"),
             timestamp: timestamp + chrono::Duration::seconds(1),
             items: vec![
-                TalosOutputItem::UserInput {
+                RunItem::UserInput {
                     text: "completed input".to_string(),
                 },
-                TalosOutputItem::OutputText {
+                RunItem::OutputText {
                     text: "completed output".to_string(),
                 },
             ],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         })
         .await
@@ -247,18 +247,18 @@ async fn test_turn_schema_items_roundtrip() {
             .expect("seq should load"),
         timestamp: Utc::now(),
         items: vec![
-            TalosOutputItem::UserInput {
+            RunItem::UserInput {
                 text: "user".to_string(),
             },
-            TalosOutputItem::Reasoning {
+            RunItem::Reasoning {
                 text: "think".to_string(),
             },
-            TalosOutputItem::ToolCall {
+            RunItem::ToolCall {
                 call_id: "call-1".to_string(),
                 name: "Read".to_string(),
                 arguments: serde_json::json!({"path":"/tmp/a.txt"}).into(),
             },
-            TalosOutputItem::ToolResult {
+            RunItem::ToolResult {
                 call_id: "call-1".to_string(),
                 tool_name: "Read".to_string(),
                 content: vec![TalosContentItem::Text {
@@ -266,14 +266,14 @@ async fn test_turn_schema_items_roundtrip() {
                 }],
                 is_error: false,
             },
-            TalosOutputItem::OutputText {
+            RunItem::OutputText {
                 text: "first answer".to_string(),
             },
-            TalosOutputItem::OutputText {
+            RunItem::OutputText {
                 text: "second answer".to_string(),
             },
         ],
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
     };
 
@@ -291,27 +291,27 @@ async fn test_turn_schema_items_roundtrip() {
     assert_eq!(turns[0].items.len(), 6);
     assert!(matches!(
         turns[0].items.first(),
-        Some(TalosOutputItem::UserInput { text }) if text == "user"
+        Some(RunItem::UserInput { text }) if text == "user"
     ));
     assert!(matches!(
         turns[0].items.get(1),
-        Some(TalosOutputItem::Reasoning { text }) if text == "think"
+        Some(RunItem::Reasoning { text }) if text == "think"
     ));
     assert!(matches!(
         turns[0].items.get(2),
-        Some(TalosOutputItem::ToolCall { name, .. }) if name == "Read"
+        Some(RunItem::ToolCall { name, .. }) if name == "Read"
     ));
     assert!(matches!(
         turns[0].items.get(3),
-        Some(TalosOutputItem::ToolResult { tool_name, .. }) if tool_name == "Read"
+        Some(RunItem::ToolResult { tool_name, .. }) if tool_name == "Read"
     ));
     assert!(matches!(
         turns[0].items.get(4),
-        Some(TalosOutputItem::OutputText { text }) if text == "first answer"
+        Some(RunItem::OutputText { text }) if text == "first answer"
     ));
     assert!(matches!(
         turns[0].items.get(5),
-        Some(TalosOutputItem::OutputText { text }) if text == "second answer"
+        Some(RunItem::OutputText { text }) if text == "second answer"
     ));
 }
 
@@ -359,10 +359,10 @@ async fn test_reset_session_clears_turns_summaries_and_sequence_cache() {
                 .await
                 .expect("seq should load"),
             timestamp,
-            items: vec![TalosOutputItem::UserInput {
+            items: vec![RunItem::UserInput {
                 text: "hello".to_string(),
             }],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         })
         .await
@@ -474,10 +474,10 @@ async fn test_build_prompt_context_includes_summary() {
                 .await
                 .expect("seq should load"),
             timestamp,
-            items: vec![TalosOutputItem::UserInput {
+            items: vec![RunItem::UserInput {
                 text: "remember this".to_string(),
             }],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         })
         .await
@@ -538,18 +538,18 @@ async fn test_prompt_context_still_builds_after_schema_change() {
                 .expect("seq should load"),
             timestamp,
             items: vec![
-                TalosOutputItem::UserInput {
+                RunItem::UserInput {
                     text: "hello".to_string(),
                 },
-                TalosOutputItem::Reasoning {
+                RunItem::Reasoning {
                     text: "internal".to_string(),
                 },
-                TalosOutputItem::ToolCall {
+                RunItem::ToolCall {
                     call_id: "call-context".to_string(),
                     name: "Read".to_string(),
                     arguments: serde_json::json!({"path":"/tmp/example.txt"}).into(),
                 },
-                TalosOutputItem::ToolResult {
+                RunItem::ToolResult {
                     call_id: "call-context".to_string(),
                     tool_name: "Read".to_string(),
                     content: vec![TalosContentItem::Text {
@@ -557,11 +557,11 @@ async fn test_prompt_context_still_builds_after_schema_change() {
                     }],
                     is_error: false,
                 },
-                TalosOutputItem::OutputText {
+                RunItem::OutputText {
                     text: "world".to_string(),
                 },
             ],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         })
         .await
@@ -620,10 +620,10 @@ async fn test_session_size_bytes_after_append_and_summary() {
                 .await
                 .expect("seq should load"),
             timestamp,
-            items: vec![TalosOutputItem::UserInput {
+            items: vec![RunItem::UserInput {
                 text: "payload".to_string(),
             }],
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
         })
         .await
@@ -670,7 +670,7 @@ async fn test_latest_seq_tracks_appended_turns() {
                     .expect("seq should load"),
                 timestamp,
                 items: Vec::new(),
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: StopReason::EndTurn,
             })
             .await

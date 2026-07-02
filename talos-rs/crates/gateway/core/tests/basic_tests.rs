@@ -14,14 +14,14 @@ use talos_store::session::{
     ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
     TimelineEventStore,
 };
-use talos_types::agent_dispatch::AgentDispatchRequest;
+use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{
-    TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,
-    TalosTimelineEventPayload, TalosTimelineEventType, TalosTurnStartedEvent,
+    AgentEvent, AgentEventPayload, AgentEventType, TalosContext, TalosInputItem, TalosProvider,
+    TalosSourceType, TalosTurnStartedEvent,
 };
 use talos_types::{
     AgentDispatchRuntime, SessionPatchRequest, StartTurnRequest, TalosConfig, TalosSession,
-    TalosUsage, TurnCommandStatus,
+    TokenUsage, TurnCommandStatus,
 };
 use tokio::sync::mpsc;
 
@@ -33,32 +33,29 @@ struct TestAuthService;
 impl AgentDispatchRuntime for RecordingHandler {
     async fn handle(
         &self,
-        _request: AgentDispatchRequest,
-    ) -> TalosResult<talos_types::agent_dispatch::AgentDispatchResponse> {
+        _request: AgentDispatchParams,
+    ) -> TalosResult<talos_types::agent_dispatch::AgentDispatchResult> {
         unreachable!("gateway start_turn should use stream execution")
     }
 
     async fn handle_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         let (tx, rx) = mpsc::channel(1);
         tokio::spawn(async move {
-            let turn_id = request
-                .turn_id
-                .clone()
-                .unwrap_or_else(|| "turn_test".to_string());
+            let turn_id = request.turn_id.clone();
             let _ = tx
-                .send(TalosTimelineEvent {
+                .send(AgentEvent {
                     event_seq: None,
                     event_id: None,
                     created_at_ms: None,
-                    event_type: TalosTimelineEventType::TurnStarted,
+                    event_type: AgentEventType::TurnStarted,
                     turn_id: turn_id.clone(),
-                    message_id: request.context.message_id,
-                    session_id: request.session_id,
+                    message_id: request.session.context.message_id,
+                    session_id: request.session.context.session_id,
                     sequence: 0,
-                    payload: TalosTimelineEventPayload::TurnStarted(TalosTurnStartedEvent {
+                    payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
                         request_id: "req_test".to_string(),
                         turn_id,
                         started_at_ms: 0,
@@ -69,18 +66,7 @@ impl AgentDispatchRuntime for RecordingHandler {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -91,8 +77,8 @@ impl SessionRuntime for RecordingHandler {
         Ok("default".to_string())
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TalosUsage> {
-        Ok(TalosUsage::default())
+    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+        Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
@@ -107,17 +93,9 @@ impl SessionRuntime for RecordingHandler {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
+        _params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
         Ok(())
     }

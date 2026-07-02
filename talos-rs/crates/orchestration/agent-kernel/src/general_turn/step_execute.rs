@@ -42,7 +42,7 @@ pub(crate) struct StreamRound {
     pub(crate) tool_calls: Vec<FunctionCall>,
     pub(crate) streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub(crate) finish_reason: Option<String>,
-    pub(crate) usage: TalosUsage,
+    pub(crate) usage: TokenUsage,
     pub(crate) assistant_text_streamed: bool,
     pub(crate) final_answer_streamed: bool,
     pub(crate) execution_summary_streamed: bool,
@@ -80,8 +80,8 @@ fn normalized_tool_call_id(round: u32, index: usize, id: Option<String>) -> Stri
         .unwrap_or_else(|| format!("tool-{}-{}", round, index))
 }
 
-fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TalosUsage {
-    TalosUsage {
+fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TokenUsage {
+    TokenUsage {
         input_tokens: usage.prompt_tokens,
         output_tokens: usage.completion_tokens,
         total_tokens: usage.total_tokens,
@@ -172,7 +172,7 @@ pub(crate) async fn stream_round(
     let mut active_blocks = BTreeMap::<String, ActiveModelBlock>::new();
     let mut completed_blocks = BTreeSet::<String>::new();
     let mut streamed_tool_outputs = Vec::new();
-    let mut usage = TalosUsage::default();
+    let mut usage = TokenUsage::default();
     let mut assistant_text_streamed = false;
     let mut final_answer_streamed = false;
     let execution_summary_streamed = false;
@@ -682,14 +682,14 @@ pub async fn execute_general_turn_step(
     let mut reasoning = Vec::new();
     if !round_response.reasoning.trim().is_empty() {
         let reasoning_text = round_response.reasoning.trim().to_string();
-        output_items.push(TalosOutputItem::Reasoning {
+        output_items.push(RunItem::Reasoning {
             text: reasoning_text.clone(),
         });
         reasoning.push(reasoning_text);
     }
 
     for call in &round_response.tool_calls {
-        output_items.push(TalosOutputItem::ToolCall {
+        output_items.push(RunItem::ToolCall {
             call_id: call.id.clone(),
             name: call.name.clone(),
             arguments: call.arguments.clone().into(),

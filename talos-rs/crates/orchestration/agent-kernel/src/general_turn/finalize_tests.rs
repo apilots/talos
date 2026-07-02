@@ -8,7 +8,7 @@ fn build_turn_execution_metrics_includes_elapsed_duration() {
         messages: Vec::new(),
         round: 0,
         output_items: Vec::new(),
-        usage: TalosUsage::default(),
+        usage: TokenUsage::default(),
         reasoning_log: Vec::new(),
         tool_call_log: Vec::new(),
         tool_result_log: Vec::new(),

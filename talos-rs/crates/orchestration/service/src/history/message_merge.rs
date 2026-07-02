@@ -1,10 +1,10 @@
 use chrono::Utc;
 use talos_memory::TalosTurn;
 use talos_types::talos::{
-    SessionHistoryMessage, StopReason, TalosContentItem, TalosOutputItem, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineEvent, TalosTimelineEventPayload, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry,
-    TalosToolResult, TalosUsage,
+    AgentEvent, AgentEventPayload, RunItem, SessionHistoryMessage, StopReason, TalosContentItem,
+    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
+    TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry, TalosToolResult,
+    TokenUsage,
 };
 
 pub(crate) fn merge_completed_timeline_message(
@@ -56,7 +56,7 @@ fn first_input_text(message: &SessionHistoryMessage) -> Option<&str> {
 }
 
 pub(crate) fn history_messages_from_completed_events(
-    events: Vec<TalosTimelineEvent>,
+    events: Vec<AgentEvent>,
 ) -> Vec<SessionHistoryMessage> {
     let mut messages = Vec::new();
     let mut current = Vec::new();
@@ -95,25 +95,25 @@ pub(crate) fn history_messages_from_completed_events(
 fn history_message_from_completed_turn_events(
     turn_id: &str,
     message_id: &str,
-    events: Vec<TalosTimelineEvent>,
+    events: Vec<AgentEvent>,
 ) -> Option<SessionHistoryMessage> {
     let mut items: Vec<TalosTimelineItem> = Vec::new();
-    let mut usage = TalosUsage::default();
+    let mut usage = TokenUsage::default();
     let mut metrics = None;
     let mut stop_reason = StopReason::EndTurn;
     let mut completed = false;
 
     for event in events {
         match event.payload {
-            TalosTimelineEventPayload::ItemStarted(started) => {
+            AgentEventPayload::ItemStarted(started) => {
                 items.push(started.item);
             }
-            TalosTimelineEventPayload::ItemDelta(delta) => {
+            AgentEventPayload::ItemDelta(delta) => {
                 if let Some(item) = items.iter_mut().find(|item| item.item_id == delta.item_id) {
                     apply_history_delta(item, delta.delta);
                 }
             }
-            TalosTimelineEventPayload::ItemCompleted(item_completed) => {
+            AgentEventPayload::ItemCompleted(item_completed) => {
                 if let Some(item) = items
                     .iter_mut()
                     .find(|item| item.item_id == item_completed.item_id)
@@ -125,7 +125,7 @@ fn history_message_from_completed_turn_events(
                     }
                 }
             }
-            TalosTimelineEventPayload::AssistantTextCommitted(committed) => {
+            AgentEventPayload::AssistantTextCommitted(committed) => {
                 if let Some(item) = items
                     .iter_mut()
                     .find(|item| item.item_id == committed.item_id)
@@ -133,15 +133,15 @@ fn history_message_from_completed_turn_events(
                     item.phase = committed.phase;
                 }
             }
-            TalosTimelineEventPayload::TurnCompleted(turn_completed) => {
+            AgentEventPayload::TurnCompleted(turn_completed) => {
                 usage = turn_completed.usage;
                 metrics = turn_completed.metrics;
                 stop_reason = turn_completed.stop_reason;
                 completed = true;
             }
-            TalosTimelineEventPayload::TurnStarted(_)
-            | TalosTimelineEventPayload::TurnMetrics(_)
-            | TalosTimelineEventPayload::TurnError(_) => {}
+            AgentEventPayload::TurnStarted(_)
+            | AgentEventPayload::TurnMetrics(_)
+            | AgentEventPayload::TurnError(_) => {}
         }
     }
 
@@ -224,7 +224,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
 
     for (index, output) in turn.items.iter().enumerate() {
         match output {
-            TalosOutputItem::UserInput { text } => {
+            RunItem::UserInput { text } => {
                 items.push(history_text_item(
                     turn,
                     index,
@@ -235,7 +235,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
                     timestamp_ms,
                 ));
             }
-            TalosOutputItem::Reasoning { text } => {
+            RunItem::Reasoning { text } => {
                 items.push(history_text_item(
                     turn,
                     index,
@@ -246,7 +246,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
                     timestamp_ms,
                 ));
             }
-            TalosOutputItem::ExecutionSummary { text } => {
+            RunItem::ExecutionSummary { text } => {
                 items.push(TalosTimelineItem {
                     item_id: history_item_id(turn, index, "summary"),
                     parent_item_id: None,
@@ -261,7 +261,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
                     },
                 });
             }
-            TalosOutputItem::OutputText { text } => {
+            RunItem::OutputText { text } => {
                 items.push(history_text_item(
                     turn,
                     index,
@@ -272,7 +272,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
                     timestamp_ms,
                 ));
             }
-            TalosOutputItem::ToolCall {
+            RunItem::ToolCall {
                 call_id,
                 name,
                 arguments,
@@ -295,7 +295,7 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
                     },
                 });
             }
-            TalosOutputItem::ToolResult {
+            RunItem::ToolResult {
                 call_id,
                 tool_name,
                 content,

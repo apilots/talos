@@ -4,12 +4,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, GatewayClient, MarketplaceSourceInput, PluginDocumentMediaType,
-    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallId, PluginInstallRequest,
-    PluginInstallTarget, PluginKind, PluginListRequest, PluginListStatusFilter, PluginReadRequest,
-    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
-    PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus, PluginUninstallRequest,
-    TalosTimelineContent, TalosTimelineEventPayload, TalosTimelineItemKind, TimelineEventEnvelope,
+    AgentEventPayload, AppServerClient, GatewayClient, MarketplaceSourceInput,
+    PluginDocumentMediaType, PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallId,
+    PluginInstallRequest, PluginInstallTarget, PluginKind, PluginListRequest,
+    PluginListStatusFilter, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
+    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceRefreshRequest, PluginStatus,
+    PluginUninstallRequest, TalosTimelineContent, TalosTimelineItemKind, TimelineEventEnvelope,
 };
 
 const SERVER_NAME: &str = "playwright";
@@ -364,7 +364,7 @@ fn called_mcp_tools_from_events(events: &[talos_sdk::TimelineEventEnvelope]) -> 
     let mut tools = BTreeSet::new();
     for event in events {
         match &event.event.payload {
-            TalosTimelineEventPayload::ItemStarted(started)
+            AgentEventPayload::ItemStarted(started)
                 if started.item.kind == TalosTimelineItemKind::ToolCall =>
             {
                 if let TalosTimelineContent::ToolCall { name, .. } = &started.item.content {
@@ -373,7 +373,7 @@ fn called_mcp_tools_from_events(events: &[talos_sdk::TimelineEventEnvelope]) -> 
                     }
                 }
             }
-            TalosTimelineEventPayload::ItemCompleted(completed) => {
+            AgentEventPayload::ItemCompleted(completed) => {
                 if let Some(TalosTimelineContent::ToolCall { name, .. }) = &completed.final_content
                 {
                     if name.starts_with("mcp__") {

@@ -399,7 +399,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
-    app.session_usage = TalosUsage {
+    app.session_usage = TokenUsage {
         input_tokens: 20,
         output_tokens: 10,
         total_tokens: 30,
@@ -421,7 +421,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
 
     assert!(!should_quit);
     assert_eq!(state.lock().unwrap().clear_calls, 1);
-    assert_eq!(app.session_usage, TalosUsage::default());
+    assert_eq!(app.session_usage, TokenUsage::default());
     assert!(!app
         .chat_blocks
         .iter()
@@ -435,7 +435,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
 #[tokio::test]
 async fn test_status_command_displays_cache_usage_metrics() {
     let client = Arc::new(MockGatewayClient::new());
-    client.state.lock().unwrap().session_usage = TalosUsage {
+    client.state.lock().unwrap().session_usage = TokenUsage {
         input_tokens: 120,
         output_tokens: 45,
         total_tokens: 165,
@@ -446,7 +446,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
-    app.session_usage = TalosUsage {
+    app.session_usage = TokenUsage {
         input_tokens: 12,
         output_tokens: 5,
         total_tokens: 17,
@@ -710,9 +710,9 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
             "msg-recovered",
             "sess-test",
             3,
-            TalosUsage {
+            TokenUsage {
                 total_tokens: 25,
-                ..TalosUsage::default()
+                ..TokenUsage::default()
             },
         ),
     ];
@@ -879,7 +879,7 @@ async fn test_turn_completed_finishes_stream_without_output_delta() {
         "msg-new",
         "sess-test",
         1,
-        TalosUsage::default(),
+        TokenUsage::default(),
     ));
 
     assert!(!app.in_flight);
@@ -1069,7 +1069,7 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
         "msg-tools",
         "sess-test",
         5,
-        TalosUsage::default(),
+        TokenUsage::default(),
     ));
 
     let assistant_after_complete = app

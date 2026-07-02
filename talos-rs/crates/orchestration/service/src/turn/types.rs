@@ -2,30 +2,25 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use talos_error::TalosResult;
-use talos_types::agent_dispatch::AgentDispatchRequest;
-use talos_types::talos::{TalosInputItem, TalosTimelineEvent};
-use talos_types::{AgentDispatchRuntime, TalosSession};
+use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
+use talos_types::talos::{AgentEvent, TalosInputItem};
+use talos_types::AgentDispatchRuntime;
 use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait TurnExecutor: Send + Sync {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>>;
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>>;
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> TalosResult<()>;
+    async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()>;
 
-    async fn submit_dynamic_tool_result(
+    async fn take_generated_session_title(
         &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()>;
-
-    async fn take_session_title_update(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
+        _session_id: &str,
+        _turn_id: &str,
+    ) -> Option<String> {
         None
     }
 }
@@ -45,37 +40,28 @@ impl AgentDispatchTurnExecutor {
 impl TurnExecutor for AgentDispatchTurnExecutor {
     async fn start_turn_stream(
         &self,
-        request: AgentDispatchRequest,
-    ) -> TalosResult<mpsc::Receiver<TalosTimelineEvent>> {
+        request: AgentDispatchParams,
+    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.handler.handle_stream(request).await
     }
 
-    async fn cancel_active_turn(&self, session: TalosSession) -> TalosResult<()> {
-        self.handler.cancel_active_turn(session).await
+    async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
+        self.handler.submit_input(params).await
     }
 
-    async fn submit_dynamic_tool_result(
+    async fn take_generated_session_title(
         &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()> {
+        session_id: &str,
+        turn_id: &str,
+    ) -> Option<String> {
         self.handler
-            .submit_dynamic_tool_result(session, call_id, tool_name, output, success)
-            .await
-    }
-
-    async fn take_session_title_update(&self, session_id: &str, turn_id: &str) -> Option<String> {
-        self.handler
-            .take_session_title_update(session_id, turn_id)
+            .take_generated_session_title(session_id, turn_id)
             .await
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct TurnRetryRequest {
+pub struct TurnRetryParams {
     pub input: Vec<TalosInputItem>,
     pub workspace_id: Option<String>,
     pub client_message_id: String,

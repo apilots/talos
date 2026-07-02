@@ -147,20 +147,20 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!(
                             "historical user message {} requesting additional repository evidence and continuity details",
                             idx
                         ),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!(
                             "historical assistant message {} with enough content to stress the prompt window and preserve a larger review trail across repeated follow-up turns",
                             idx
                         ),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -290,16 +290,16 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("historical user message {idx} with continuity"),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!(
                             "historical assistant message {idx} with enough content to cross the preemptive compaction trigger without exhausting the full prompt budget"
                         ),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -379,17 +379,17 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("historical user message {}", idx),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!(
                             "historical assistant message {} with enough content to stress the prompt window and preserve continuity",
                             idx
                         ),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -463,17 +463,17 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("historical user message {}", idx),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!(
                             "historical assistant message {} with enough content to stress the compacted prompt window",
                             idx
                         ),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -554,17 +554,17 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("historical user message {}", idx),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!(
                             "historical assistant message {} with enough content to stress the compacted prompt window",
                             idx
                         ),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await
@@ -730,14 +730,14 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
                     .expect("seq should load"),
                 timestamp,
                 items: vec![
-                    TalosOutputItem::UserInput {
+                    RunItem::UserInput {
                         text: format!("historical user message {} {}", idx, "x".repeat(48)),
                     },
-                    TalosOutputItem::OutputText {
+                    RunItem::OutputText {
                         text: format!("historical assistant message {} {}", idx, "y".repeat(48)),
                     },
                 ],
-                usage: TalosUsage::default(),
+                usage: TokenUsage::default(),
                 stop_reason: TalosApiStopReason::EndTurn,
             })
             .await

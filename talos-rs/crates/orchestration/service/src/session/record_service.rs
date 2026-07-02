@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{SessionPatchAck, SessionRecord, SessionStore};
-use talos_types::talos::{TalosContext, TalosUsage};
+use talos_types::talos::{TalosContext, TokenUsage};
 use talos_types::{
     OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConf,
     SessionConfigOverridePolicy, SessionPatch, DEFAULT_SESSION_TITLE,
@@ -118,7 +118,7 @@ impl SessionRecordService {
             .try_into()
             .unwrap_or_default();
         record.message_count = 0;
-        record.usage = TalosUsage::default();
+        record.usage = TokenUsage::default();
         let success = self.session_store.update_session_record(&record).await?;
         Ok(SessionPatchAck { success })
     }
@@ -154,7 +154,7 @@ impl SessionRecordService {
         &self,
         session_id: &str,
         message_delta: u64,
-        usage: &TalosUsage,
+        usage: &TokenUsage,
         model: Option<&str>,
     ) -> TalosResult<()> {
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
@@ -208,7 +208,7 @@ impl SessionRecordService {
             created_at: now.try_into().unwrap_or_default(),
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
-            usage: TalosUsage::default(),
+            usage: TokenUsage::default(),
             conf: effective_conf,
             project_id,
             current_directory,

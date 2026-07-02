@@ -53,7 +53,7 @@ pub(super) async fn subscribe_timeline_events_handler(
 
     let subscription = state
         .app
-        .open_timeline_subscription(
+        .timeline_subscription_source(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),
@@ -86,7 +86,7 @@ fn timeline_sse_event(
     let event_id = record.event_id.clone();
     let is_live_metrics = matches!(
         record.event.payload,
-        talos_types::talos::TalosTimelineEventPayload::TurnMetrics(_)
+        talos_types::talos::AgentEventPayload::TurnMetrics(_)
     );
     let data = serde_json::to_string(&record)?;
     let event = Event::default().event(event_name).data(data);

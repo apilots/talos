@@ -1,7 +1,7 @@
 use super::*;
 use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
@@ -13,9 +13,9 @@ use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
     IdempotencyReservation, MessageIdempotencyStore, SessionStore, TimelineEventStore,
 };
-use talos_types::agent_dispatch::AgentDispatchRequest;
+use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{
-    TalosContext, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineEvent,
+    AgentEvent, TalosContext, TalosInputItem, TalosProvider, TalosSourceType,
 };
 
 enum TestTurnExecutorMode {
@@ -27,7 +27,17 @@ struct TestTurnExecutor {
     mode: TestTurnExecutorMode,
 }
 
-struct TestSessionRuntime;
+struct TestSessionRuntime {
+    cancel_mode: TestCancelMode,
+    cancelled_turn_ids: Arc<Mutex<Vec<String>>>,
+}
+
+#[derive(Clone, Copy)]
+enum TestCancelMode {
+    Ok,
+    MissingRuntimeTurn,
+}
+
 struct TestLlmProvider;
 struct TestAuthService;
 
@@ -35,8 +45,8 @@ struct TestAuthService;
 impl TurnExecutor for TestTurnExecutor {
     async fn start_turn_stream(
         &self,
-        _request: AgentDispatchRequest,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<TalosTimelineEvent>> {
+        _request: AgentDispatchParams,
+    ) -> TalosResult<tokio::sync::mpsc::Receiver<AgentEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         match self.mode {
             TestTurnExecutorMode::Timeout => {
@@ -50,18 +60,7 @@ impl TurnExecutor for TestTurnExecutor {
         Ok(rx)
     }
 
-    async fn cancel_active_turn(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
-        &self,
-        _session: TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
-    ) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
         Ok(())
     }
 }
@@ -75,7 +74,7 @@ impl SessionRuntime for TestSessionRuntime {
     async fn compact_session(
         &self,
         _session: talos_types::TalosSession,
-    ) -> TalosResult<talos_types::TalosUsage> {
+    ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in this test")
     }
 
@@ -91,19 +90,17 @@ impl SessionRuntime for TestSessionRuntime {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_dynamic_tool_result(
+    async fn cancel_active_turn(
         &self,
-        _session: talos_types::TalosSession,
-        _call_id: &str,
-        _tool_name: &str,
-        _output: String,
-        _success: bool,
+        params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
-        unreachable!("not used in this test")
+        self.cancelled_turn_ids.lock().unwrap().push(params.turn_id);
+        match self.cancel_mode {
+            TestCancelMode::Ok => Ok(()),
+            TestCancelMode::MissingRuntimeTurn => Err(TalosError::ResourceNotFound(
+                "active turn for session session-interrupt-runtime-missing".to_string(),
+            )),
+        }
     }
 }
 
@@ -174,6 +171,22 @@ async fn test_application(
     turn_executor: Arc<dyn TurnExecutor>,
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
+    test_application_with_runtime(
+        turn_executor,
+        Arc::new(TestSessionRuntime {
+            cancel_mode: TestCancelMode::Ok,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+        }),
+        config,
+    )
+    .await
+}
+
+async fn test_application_with_runtime(
+    turn_executor: Arc<dyn TurnExecutor>,
+    session_runtime: Arc<dyn SessionRuntime>,
+    config: TalosConfig,
+) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
@@ -193,7 +206,7 @@ async fn test_application(
     let user_service: Arc<dyn UserService> = auth;
     let service = TalosService::new_with_session_store(
         turn_executor,
-        Arc::new(TestSessionRuntime),
+        session_runtime,
         store.clone(),
         project_store,
         event_service,
@@ -416,4 +429,128 @@ async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
 
     assert!(result.is_err());
     assert_session_creation_rolled_back(&service, &store, "session-active-conflict", None).await;
+}
+
+#[tokio::test]
+async fn interrupt_turn_without_active_turn_is_idempotent() {
+    let (service, _store) = test_application_with_runtime(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        Arc::new(TestSessionRuntime {
+            cancel_mode: TestCancelMode::MissingRuntimeTurn,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+        }),
+        TalosConfig::default(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            "session-interrupt-idempotent",
+            request_context(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("session should be created");
+
+    let response = service
+        .interrupt_turn(
+            &actor,
+            talos_types::InterruptTurnRequest {
+                session_id: "session-interrupt-idempotent".to_string(),
+            },
+        )
+        .await
+        .expect("interrupt without active turn should be idempotent");
+
+    assert!(response.success);
+}
+
+#[tokio::test]
+async fn interrupt_turn_unknown_session_returns_not_found() {
+    let (service, _store) = test_application_with_runtime(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        Arc::new(TestSessionRuntime {
+            cancel_mode: TestCancelMode::MissingRuntimeTurn,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+        }),
+        TalosConfig::default(),
+    )
+    .await;
+
+    let error = service
+        .interrupt_turn(
+            &Actor::regular("member-user"),
+            talos_types::InterruptTurnRequest {
+                session_id: "missing-session".to_string(),
+            },
+        )
+        .await
+        .expect_err("unknown session should be rejected");
+
+    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+}
+
+#[tokio::test]
+async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
+    let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
+    let (service, store) = test_application_with_runtime(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        Arc::new(TestSessionRuntime {
+            cancel_mode: TestCancelMode::MissingRuntimeTurn,
+            cancelled_turn_ids: cancelled_turn_ids.clone(),
+        }),
+        TalosConfig::default(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            "session-interrupt-runtime-missing",
+            request_context(),
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("session should be created");
+    store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "session-interrupt-runtime-missing".to_string(),
+            turn_id: "turn-existing".to_string(),
+            message_id: Some("msg-existing".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: None,
+            pending_user_action: None,
+            updated_at: 1,
+        })
+        .await
+        .expect("active turn should be inserted");
+
+    let error = service
+        .interrupt_turn(
+            &actor,
+            talos_types::InterruptTurnRequest {
+                session_id: "session-interrupt-runtime-missing".to_string(),
+            },
+        )
+        .await
+        .expect_err("runtime state mismatch should be reported");
+
+    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert_eq!(
+        *cancelled_turn_ids.lock().unwrap(),
+        vec!["turn-existing".to_string()]
+    );
 }
