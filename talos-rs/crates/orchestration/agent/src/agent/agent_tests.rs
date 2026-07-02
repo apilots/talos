@@ -89,6 +89,7 @@ struct SequencedProvider {
 
 struct CapturingMaxTokensProvider {
     seen_max_tokens: Arc<Mutex<Option<u32>>>,
+    seen_model: Arc<Mutex<Option<String>>>,
 }
 
 struct DynamicResumeAgentProvider {
@@ -171,6 +172,10 @@ impl LlmProvider for CapturingMaxTokensProvider {
         let mut seen = self.seen_max_tokens.lock().expect("capture lock poisoned");
         if seen.is_none() {
             *seen = request.max_tokens;
+        }
+        let mut seen_model = self.seen_model.lock().expect("model capture lock poisoned");
+        if seen_model.is_none() {
+            *seen_model = Some(request.model.clone());
         }
         Ok(ChatResponse {
             content: "captured".to_string(),
@@ -924,23 +929,29 @@ async fn test_add_tool() {
 }
 
 #[tokio::test]
-async fn test_run_uses_session_kernel_config_override() {
-    let captured = Arc::new(Mutex::new(None));
+async fn test_run_uses_agent_runtime_config_and_model_override() {
+    let captured_max_tokens = Arc::new(Mutex::new(None));
+    let captured_model = Arc::new(Mutex::new(None));
     let provider = Arc::new(CapturingMaxTokensProvider {
-        seen_max_tokens: captured.clone(),
+        seen_max_tokens: captured_max_tokens.clone(),
+        seen_model: captured_model.clone(),
     });
+    let mut agent_kernel_config = AgentKernelConfig::default();
+    agent_kernel_config.output.max_tokens = 321;
     let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         provider,
-        "gpt-4o".to_string(),
+        "agent-model".to_string(),
         Arc::new(ToolRegistry::new()),
-        Default::default(),
+        agent_kernel_config,
     );
 
     let mut session = build_test_session("session-kernel-override", "workspace-1");
     session.config.agent.kernel.output.max_tokens = 123;
+    session.config.llm.model = "session-model".to_string();
+    session.config.agent.model = "session-model".to_string();
 
     let result = agent
         .run(agent_run_params(
@@ -954,11 +965,17 @@ async fn test_run_uses_session_kernel_config_override() {
         .expect("run should succeed");
 
     assert_eq!(result.stop_reason, TalosStopReason::EndTurn);
-    let seen = captured
+    let seen = captured_max_tokens
         .lock()
         .expect("capture lock poisoned")
         .expect("provider should receive max token setting");
-    assert_eq!(seen, 123);
+    assert_eq!(seen, 321);
+    let seen_model = captured_model
+        .lock()
+        .expect("model capture lock poisoned")
+        .clone()
+        .expect("provider should receive model");
+    assert_eq!(seen_model, "agent-model");
 }
 
 #[tokio::test]

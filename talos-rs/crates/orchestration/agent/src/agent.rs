@@ -235,6 +235,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
         Ok(())
     }
 
+    fn prepare_run_params(&self, mut request: AgentRunParams) -> AgentRunParams {
+        if !self.model.trim().is_empty() {
+            request.config.llm.model = self.model.clone();
+            request.config.agent.model = self.model.clone();
+            request.options.current_model = Some(self.model.clone());
+        }
+        request
+    }
+
     fn map_dynamic_input_error(error: TalosError) -> AgentError {
         match error {
             TalosError::ToolError(message) if message.contains("timed out") => {
@@ -420,6 +429,7 @@ impl AgentHarness for AgentHarnessImpl {
     }
 
     async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
+        let request = self.prepare_run_params(request);
         Self::validate_run_identity(&request)?;
         self.validate_run_request(&request)?;
         if let Some(response_rx) = self
@@ -439,6 +449,7 @@ impl AgentHarness for AgentHarnessImpl {
         &self,
         request: AgentRunParams,
     ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        let request = self.prepare_run_params(request);
         Self::validate_run_identity(&request)?;
         self.validate_streaming_run_request(&request)?;
         let (tx, rx) = mpsc::channel(256);
@@ -452,6 +463,7 @@ impl AgentHarness for AgentHarnessImpl {
     }
 
     async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
+        let params = AgentResumeParams::new(self.prepare_run_params(params.run));
         Self::validate_run_identity(&params.run)?;
         self.validate_resume_request(&params)?;
         let request = params.run;
@@ -472,6 +484,7 @@ impl AgentHarness for AgentHarnessImpl {
         &self,
         params: AgentResumeParams,
     ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
+        let params = AgentResumeParams::new(self.prepare_run_params(params.run));
         Self::validate_run_identity(&params.run)?;
         self.validate_streaming_resume_request(&params)?;
         let request = params.run;
