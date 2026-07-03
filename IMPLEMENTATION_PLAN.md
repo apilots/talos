@@ -86,4 +86,4 @@
 - Pull and run `linux/arm64` image smoke on arm runner.
 - Public GHCR package visibility is verified after first publish.
 
-**状态**: 进行中
+**状态**: 已完成
