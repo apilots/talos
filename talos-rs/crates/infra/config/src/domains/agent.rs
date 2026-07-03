@@ -37,6 +37,16 @@ pub enum AgentRuntimeConfig {
     },
 }
 
+/// Config-file model selection for Agent defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelRefConfig {
+    /// LLM provider name configured under `llm`.
+    pub provider: String,
+    /// Provider-specific model id.
+    pub id: String,
+}
+
 impl Default for AgentRuntimeConfig {
     fn default() -> Self {
         Self::Kernel {
@@ -78,7 +88,7 @@ pub struct AgentDefinitionConfig {
 
     /// Optional model override for this Agent.
     #[serde(default)]
-    pub model: Option<String>,
+    pub model_ref: Option<ModelRefConfig>,
 
     /// Optional runtime-specific configuration matched with kind.
     #[serde(default)]
@@ -97,9 +107,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub workspace: Option<String>,
 
-    /// Default model
+    /// Default model override for the synthesized Agent.
     #[serde(default)]
-    pub model: String,
+    pub model_ref: Option<ModelRefConfig>,
 
     /// Persona file
     #[serde(default)]
@@ -123,7 +133,7 @@ impl Default for AgentConfig {
         Self {
             name: default_agent_name(),
             workspace: None,
-            model: String::new(),
+            model_ref: None,
             identity: None,
             kernel: AgentKernelConfig::default(),
             agents: Vec::new(),

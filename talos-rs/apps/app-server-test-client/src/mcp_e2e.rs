@@ -695,7 +695,7 @@ fn clean_playwright_snapshots(output_dir: &Path) -> Result<()> {
 
 fn clean_file(path: &Path) -> Result<()> {
     if path.exists() {
-        std::fs::remove_file(&path)
+        std::fs::remove_file(path)
             .with_context(|| format!("remove stale MCP E2E artifact {}", path.display()))?;
     }
     Ok(())

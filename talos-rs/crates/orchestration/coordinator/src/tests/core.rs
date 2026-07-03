@@ -84,7 +84,7 @@ async fn test_handle_stream_returns_agent_events() {
 
     let mut event_types = Vec::new();
     while let Some(event) = stream.recv().await {
-        event_types.push(event.event_type.clone());
+        event_types.push(event.event_type);
         if event.event_type == talos_types::talos::AgentEventType::TurnCompleted {
             break;
         }

@@ -269,6 +269,58 @@ async fn test_submit_input_sends_structured_skill_selection() {
     ));
 }
 
+#[tokio::test]
+async fn test_submit_input_sends_turn_metadata_after_first_turn() {
+    let client = Arc::new(MockGatewayClient::new());
+    let state = client.state.clone();
+    let gateway_client: Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
+    app.initialize_session().await;
+    app.session_id = Some("sess-test".to_string());
+    app.session_usage = TokenUsage {
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+        cache_creation_input_tokens: None,
+        cache_read_input_tokens: None,
+    };
+    app.current_model = "qwen-plus".to_string();
+    app.startup_directory = PathBuf::from("/tmp/talos-tui");
+    app.input_buffer = "check current weather".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+    for _ in 0..10 {
+        app.on_tick().await;
+        tokio::task::yield_now().await;
+        if !state.lock().unwrap().sent_requests.is_empty() {
+            break;
+        }
+    }
+
+    assert!(!should_quit);
+    let state = state.lock().unwrap();
+    let request = state.sent_requests.last().expect("expected sent request");
+    assert_eq!(
+        request
+            .context
+            .as_ref()
+            .map(|context| context.channel_id.as_deref()),
+        Some(Some("terminal"))
+    );
+    assert_eq!(
+        request
+            .model_ref
+            .as_ref()
+            .map(|model_ref| (model_ref.provider.as_str(), model_ref.id.as_str())),
+        Some(("mock", "qwen-plus"))
+    );
+    assert_eq!(
+        request.current_directory.as_deref(),
+        Some(std::path::Path::new("/tmp/talos-tui"))
+    );
+}
+
 #[test]
 fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
     let mut app = create_embedded_app();

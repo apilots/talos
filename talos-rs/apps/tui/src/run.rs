@@ -66,10 +66,8 @@ async fn run_event_loop<B: Backend>(
         if event::poll(std::time::Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) => {
-                    if key.kind == KeyEventKind::Press {
-                        if app.handle_input(key).await? {
-                            return Ok(());
-                        }
+                    if key.kind == KeyEventKind::Press && app.handle_input(key).await? {
+                        return Ok(());
                     }
                 }
                 Event::Paste(text) => app.handle_paste(text),

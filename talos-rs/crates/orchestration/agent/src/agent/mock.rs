@@ -30,6 +30,12 @@ impl MockAgent {
     }
 }
 
+impl Default for MockAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl AgentHarness for MockAgent {
     fn id(&self) -> &str {

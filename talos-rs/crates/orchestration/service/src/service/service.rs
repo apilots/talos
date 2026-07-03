@@ -10,16 +10,17 @@ use talos_store::session::{
     SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
-    InterruptTurnRequest, InterruptTurnResponse, ModelInfo, ProjectInfo, ProjectPatch,
-    RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse,
-    SessionListRequest, SessionPatch, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
-    TalosConfig, TalosSession, TimelineActiveTurnSnapshot,
+    InterruptTurnRequest, InterruptTurnResponse, ModelInfo, OptionalCurrentDirectoryPatch,
+    ProjectInfo, ProjectPatch, RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest,
+    RetryTurnResponse, SessionConfigOverridePolicy, SessionListRequest, SessionPatch,
+    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
+    TimelineActiveTurnSnapshot,
 };
 
 use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
 use super::types::ServiceResult;
-use crate::access::ResourceAccessService;
+use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::fs::FsService;
 use crate::project::ProjectService;
 use crate::{
@@ -91,23 +92,19 @@ impl TalosService {
         user_service: Arc<dyn UserService>,
         reload_hook: Option<RuntimeConfigReloadHook>,
     ) -> Self {
-        let mut session_records = SessionService::new(
+        let mut sessions = SessionService::new(
             session_store.clone(),
             project_store.clone(),
             base_config.clone(),
         );
-        session_records = session_records
+        sessions = sessions
             .with_default_workspace_id(base_config.agent.kernel.default_workspace_id.clone());
-        session_records = session_records.with_channel_dm_scope(
-            "telegram",
-            base_config.channels.telegram.dm_scope.to_string(),
-        );
-        let session_records = Arc::new(session_records);
+        let sessions = Arc::new(sessions);
         let projects = Arc::new(ProjectService::new(project_store));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
-            let session_records = session_records.clone();
+            let sessions = sessions.clone();
             Some(Arc::new(move |llm: &talos_config::LlmConfig| {
-                session_records.update_base_llm(llm);
+                sessions.update_base_llm(llm);
                 if let Some(hook) = &reload_hook {
                     hook(llm)?;
                 }
@@ -125,9 +122,9 @@ impl TalosService {
         .with_plugin_manager(plugins.clone());
 
         Self {
-            access: ResourceAccessService::with_records(
+            access: ResourceAccessService::with_services(
                 session_runtime.clone(),
-                session_records,
+                sessions.clone(),
                 projects,
             ),
             account: AccountService::new(
@@ -139,7 +136,7 @@ impl TalosService {
                 turn_executor,
                 event_service.clone(),
                 idempotency_store,
-                session_store,
+                sessions,
                 session_runtime,
                 base_config.clone(),
             ),
@@ -191,8 +188,8 @@ impl TalosService {
         session_id: &str,
         patch: SessionPatch,
     ) -> ServiceResult<SessionPatchAck> {
-        if let Some(model) = patch.agent_model()? {
-            self.config.validate_model_supported(&model)?;
+        if let Some(model_ref) = patch.model_ref()? {
+            self.config.validate_model_ref_supported(&model_ref)?;
         }
         self.access.patch_session(actor, session_id, patch).await
     }
@@ -216,27 +213,12 @@ impl TalosService {
     pub async fn create_session(
         &self,
         actor: &Actor,
-        session_id: &str,
-        context: talos_types::talos::TalosContext,
-        model: Option<String>,
-        workspace_id: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<std::path::PathBuf>,
+        params: CreateSessionRequest,
     ) -> ServiceResult<TalosSession> {
-        if let Some(model) = model.as_deref() {
-            self.config.validate_model_supported(model)?;
+        if let Some(model_ref) = params.model_ref.as_ref() {
+            self.config.validate_model_ref_supported(model_ref)?;
         }
-        self.access
-            .get_or_create_session(
-                actor,
-                session_id,
-                context,
-                model,
-                workspace_id,
-                project_id,
-                current_directory,
-            )
-            .await
+        self.access.get_or_create_session(actor, params).await
     }
 
     pub async fn get_session_history(
@@ -264,12 +246,17 @@ impl TalosService {
         idempotency_key: Option<String>,
     ) -> ServiceResult<MessageCommandResult> {
         TurnService::validate_start_turn_request(&request)?;
-        if let Some(model) = request.model.as_deref() {
-            self.config.validate_model_supported(model)?;
+        if let Some(model_ref) = request.model_ref.as_ref() {
+            self.config.validate_model_ref_supported(model_ref)?;
         }
         let session_id = request.session_id.clone();
         let (session, created_session) = match self.access.get_session(actor, &session_id).await {
-            Ok(session) => (session, false),
+            Ok(session) => {
+                let session = self
+                    .apply_existing_turn_metadata(actor, session, &request)
+                    .await?;
+                (session, false)
+            }
             Err(talos_error::TalosError::ResourceNotFound(_)) => {
                 let context = request.context.clone().ok_or_else(|| {
                     talos_error::TalosError::ValidationError(
@@ -280,12 +267,14 @@ impl TalosService {
                     .access
                     .get_or_create_session(
                         actor,
-                        &session_id,
-                        context,
-                        request.model.clone(),
-                        request.workspace_id.clone(),
-                        request.project_id.clone(),
-                        request.current_directory.clone(),
+                        CreateSessionRequest {
+                            session_id: session_id.clone(),
+                            context,
+                            model_ref: request.model_ref.clone(),
+                            workspace_id: request.workspace_id.clone(),
+                            project_id: request.project_id.clone(),
+                            current_directory: request.current_directory.clone(),
+                        },
                     )
                     .await?;
                 (session, true)
@@ -308,6 +297,47 @@ impl TalosService {
             }
         }
         result
+    }
+
+    async fn apply_existing_turn_metadata(
+        &self,
+        actor: &Actor,
+        session: TalosSession,
+        request: &StartTurnRequest,
+    ) -> ServiceResult<TalosSession> {
+        let mut patch = SessionPatch::default();
+        if let Some(model_ref) = request.model_ref.as_ref() {
+            patch.conf = Some(SessionConfigOverridePolicy::single_model_ref_conf(
+                model_ref,
+            ));
+        }
+        if let Some(current_directory) = request.current_directory.clone() {
+            match session.current_directory.as_ref() {
+                Some(bound) if bound != &current_directory => {
+                    return Err(talos_error::TalosError::ValidationError(format!(
+                        "session {} is bound to current_directory {}, but request used {}",
+                        session.context.session_id,
+                        bound.display(),
+                        current_directory.display()
+                    )));
+                }
+                None => {
+                    patch.current_directory = Some(OptionalCurrentDirectoryPatch::Set {
+                        path: current_directory,
+                    });
+                }
+                Some(_) => {}
+            }
+        }
+        if patch.conf.is_none() && patch.current_directory.is_none() {
+            return Ok(session);
+        }
+        self.access
+            .patch_session(actor, &session.context.session_id, patch)
+            .await?;
+        self.access
+            .get_session(actor, &session.context.session_id)
+            .await
     }
 
     pub async fn start_turn(

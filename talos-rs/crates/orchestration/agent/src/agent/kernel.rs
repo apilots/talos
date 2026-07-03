@@ -28,11 +28,23 @@ impl AgentHarnessImpl {
         session: &TalosSession,
     ) -> TalosResult<(AgentKernelConfig, Arc<MemoryStore>)> {
         let kernel_config = Self::kernel_config_for_session(session)?;
+        let llm_provider = self.llm_provider_for_session(session)?;
         let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &kernel_config,
-            self.llm_provider.clone(),
+            llm_provider,
         ));
         Ok((kernel_config, memory_store))
+    }
+
+    pub(crate) fn llm_provider_for_session(
+        &self,
+        session: &TalosSession,
+    ) -> TalosResult<Arc<dyn LlmProvider>> {
+        self.llm_provider_router
+            .provider_for(&talos_types::ModelRef {
+                provider: session.config.llm.provider.clone(),
+                id: session.config.llm.model.clone(),
+            })
     }
 
     pub(crate) fn build_memory_store_from_kernel_config(
@@ -40,13 +52,6 @@ impl AgentHarnessImpl {
         llm_provider: Arc<dyn LlmProvider>,
     ) -> MemoryStore {
         MemoryStore::from_config_with_llm(kernel_config, llm_provider)
-    }
-
-    pub(crate) fn rebuild_memory_store(&mut self) {
-        self.memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
-            &self.kernel_config,
-            self.llm_provider.clone(),
-        ));
     }
 }
 

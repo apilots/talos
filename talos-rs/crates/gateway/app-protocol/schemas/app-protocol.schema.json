@@ -2158,9 +2158,6 @@
             "null"
           ]
         },
-        "enabled": {
-          "type": "boolean"
-        },
         "models": {
           "default": [],
           "items": {
@@ -2180,9 +2177,6 @@
           "default": null
         }
       },
-      "required": [
-        "enabled"
-      ],
       "type": "object"
     },
     "LlmReasoningEffort": {
@@ -2366,6 +2360,22 @@
       "type": "object"
     },
     "ModelListRequest": {
+      "type": "object"
+    },
+    "ModelRef": {
+      "description": "Identifies a concrete model under a provider for request-time selection.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "provider"
+      ],
       "type": "object"
     },
     "OptionalCurrentDirectoryPatch": {
@@ -3176,18 +3186,6 @@
       ],
       "type": "object"
     },
-    "SessionAgentConf": {
-      "properties": {
-        "model": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
-    },
     "SessionClearRequest": {
       "properties": {
         "session_id": {
@@ -3222,11 +3220,12 @@
       "type": "object"
     },
     "SessionConf": {
+      "description": "Configuration override stored with a session.",
       "properties": {
-        "agent": {
+        "model_ref": {
           "anyOf": [
             {
-              "$ref": "#/definitions/SessionAgentConf"
+              "$ref": "#/definitions/ModelRef"
             },
             {
               "type": "null"
@@ -3503,6 +3502,7 @@
       "type": "object"
     },
     "StartTurnRequest": {
+      "description": "Request payload used by clients to start a turn in a session.",
       "properties": {
         "client_request_id": {
           "default": null,
@@ -3535,12 +3535,17 @@
           },
           "type": "array"
         },
-        "model": {
+        "model_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ModelRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "description": "Explicit model selection for this turn; absent means use the session or configured default."
         },
         "project_id": {
           "default": null,

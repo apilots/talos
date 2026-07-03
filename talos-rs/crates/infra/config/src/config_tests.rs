@@ -26,7 +26,9 @@ agent:
       enabled: true
       description: Review-focused agent
       default_workspace_id: default
-      model: qwen-plus
+      model_ref:
+        provider: ollama
+        id: qwen-plus
       runtime_config:
         type: kernel
         kernel:
@@ -39,7 +41,6 @@ llm:
   provider: ollama
   model: qwen-plus
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
 
@@ -53,7 +54,13 @@ llm:
     assert_eq!(definition.name, "Reviewer");
     assert_eq!(definition.kind, AgentKind::Kernel);
     assert_eq!(definition.default_workspace_id.as_deref(), Some("default"));
-    assert_eq!(definition.model.as_deref(), Some("qwen-plus"));
+    assert_eq!(
+        definition.model_ref,
+        Some(ModelRefConfig {
+            provider: "ollama".to_string(),
+            id: "qwen-plus".to_string(),
+        })
+    );
     match definition
         .runtime_config
         .as_ref()
@@ -81,7 +88,6 @@ llm:
   provider: ollama
   model: qwen-plus
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
 
@@ -233,7 +239,6 @@ fn test_prompt_config_rejects_unknown_legacy_fields() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
   kernel:
     prompt:
       bootstrap:
@@ -255,11 +260,10 @@ storage:
 llm:
   provider: ollama
   model: qwen-plus
-  anthropic: { enabled: false }
-  openai: { enabled: false }
-  bailian: { enabled: false }
+  anthropic: {}
+  openai: {}
+  bailian: {}
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
 
@@ -279,12 +283,10 @@ fn test_expand_env_in_string() {
 fn test_validate_runtime_requires_cloud_when_auth_enabled() {
     let mut config = Config::default();
     config.gateway.auth = true;
-    assert!(config.validate_runtime().is_err());
 
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
-    config.agent.model = "qwen-max".to_string();
     assert!(config.validate_runtime().is_ok());
 }
 
@@ -295,7 +297,6 @@ fn test_validate_runtime_allows_cloud_auth_without_local_secret() {
     config.llm.provider = "ollama".to_string();
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
-    config.agent.model = "qwen-max".to_string();
 
     assert!(config.validate_runtime().is_ok());
 }
@@ -306,7 +307,6 @@ fn test_model_readiness_reports_missing_provider_api_key() {
     config.gateway.auth = false;
     config.llm.provider = "openai".to_string();
     config.llm.model = "gpt-4o".to_string();
-    config.agent.model = "gpt-4o".to_string();
     config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
     config.llm.openai.api_key = None;
     assert!(config.validate_runtime().is_ok());
@@ -366,7 +366,6 @@ fn test_model_readiness_reports_unsupported_provider_protocol() {
     config.gateway.auth = false;
     config.llm.provider = "bailian".to_string();
     config.llm.model = "qwen-max".to_string();
-    config.agent.model = "qwen-max".to_string();
     config.llm.bailian.api_key = Some("sk-test".to_string());
     config.llm.bailian.base_url =
         Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string());
@@ -387,7 +386,6 @@ fn test_validate_runtime_rejects_invalid_timezone() {
     config.gateway.auth = false;
     config.llm.provider = "openai".to_string();
     config.llm.model = "gpt-4o".to_string();
-    config.agent.model = "gpt-4o".to_string();
     config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
     config.llm.openai.api_key = Some("sk-test".to_string());
     config.timezone = "Mars/Olympus".to_string();
@@ -399,7 +397,6 @@ fn test_validate_runtime_rejects_invalid_timezone() {
 #[test]
 fn test_provider_models_are_strongly_typed() {
     let yaml = r#"
-enabled: true
 api_key: sk-test
 base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 protocol: chat
@@ -429,13 +426,11 @@ models:
         vec![ModelInputKind::Text, ModelInputKind::Image]
     );
     assert_eq!(model.compat.thinking_format, Some(ThinkingFormat::Qwen));
-    assert!(provider.enabled);
 }
 
 #[test]
 fn test_provider_models_reject_legacy_output_metadata() {
     let yaml = r#"
-enabled: true
 api_key: sk-test
 base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
 models:
@@ -494,7 +489,6 @@ fn test_load_from_path_uses_prompt_defaults_when_prompt_block_is_missing() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -509,11 +503,10 @@ storage:
 llm:
   provider: ollama
   model: qwen-plus
-  anthropic: { enabled: false }
-  openai: { enabled: false }
-  bailian: { enabled: false }
+  anthropic: {}
+  openai: {}
+  bailian: {}
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
     let temp_file = std::env::temp_dir().join(format!(
@@ -607,7 +600,6 @@ fn test_compacted_char_budgets_cannot_exceed_normal_budgets() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
   kernel:
     compaction:
       recent_messages_max_chars: 100
@@ -629,11 +621,10 @@ storage:
 llm:
   provider: ollama
   model: qwen-plus
-  anthropic: { enabled: false }
-  openai: { enabled: false }
-  bailian: { enabled: false }
+  anthropic: {}
+  openai: {}
+  bailian: {}
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
     let temp_file = std::env::temp_dir().join(format!(
@@ -656,7 +647,6 @@ fn test_load_from_path_uses_optional_block_defaults_when_omitted() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -665,7 +655,6 @@ llm:
   provider: ollama
   model: qwen-plus
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
     let temp_file = std::env::temp_dir().join(format!(
@@ -713,7 +702,6 @@ fn test_forbidden_path_config_is_rejected() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
   kernel:
     prompt:
       window:
@@ -742,11 +730,10 @@ storage:
 llm:
   provider: ollama
   model: qwen-plus
-  anthropic: { enabled: false }
-  openai: { enabled: false }
-  bailian: { enabled: false }
+  anthropic: {}
+  openai: {}
+  bailian: {}
   ollama:
-enabled: true
 base_url: http://localhost:11434
 "#;
     let temp_file = std::env::temp_dir().join(format!(
@@ -768,7 +755,6 @@ fn test_kernel_config_rejects_legacy_binding_field() {
     let yaml = r#"
 agent:
   name: talos
-  model: qwen-plus
   kernel:
     binding:
       default_agent_kind: llm
@@ -780,7 +766,6 @@ llm:
   provider: ollama
   model: qwen-plus
   ollama:
-    enabled: true
     base_url: http://localhost:11434
 "#;
 

@@ -31,11 +31,11 @@ use runtime::{AgentRuntime, AgentRuntimeAbortHandle, KernelAgent, KernelAgentPar
 use talos_agent_kernel::TimelineBuilder;
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::{ChatMessage, ChatRequest, LlmProvider};
+use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
-use talos_types::normalize_session_title;
 use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
+use talos_types::{normalize_session_title, ModelRef};
 use tracing::warn;
 
 const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the conversation.
@@ -61,10 +61,12 @@ pub struct AgentHarnessImpl {
     pub name: String,
     /// Human-readable Agent description.
     pub description: String,
-    /// LLM provider shared with the built-in runtime.
-    pub llm_provider: Arc<dyn LlmProvider>,
+    /// LLM provider router shared with the built-in runtime.
+    pub llm_provider_router: Arc<dyn LlmProviderRouter>,
     /// Default model for this Harness.
-    pub model: String,
+    pub model_ref: ModelRef,
+    /// Agent-specific model override applied to new product sessions.
+    pub model_ref_override: Option<ModelRef>,
     /// Memory store used by current Kernel-backed behavior.
     pub memory_store: Arc<MemoryStore>,
     /// Tool registry shared by Harness and runtime execution.
@@ -77,52 +79,74 @@ pub struct AgentHarnessImpl {
     runtime: KernelAgent,
 }
 
+/// Internal constructor inputs for the default Harness implementation.
+///
+/// The Agent module owns runtime construction. Callers provide already-merged
+/// Agent definition data and shared services, but must not pass runtime-private
+/// state through this boundary.
+pub(crate) struct AgentHarnessParams {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
+    pub(crate) model_ref: ModelRef,
+    pub(crate) model_ref_override: Option<ModelRef>,
+    pub(crate) tool_registry: Arc<ToolRegistry>,
+    pub(crate) kernel_config: AgentKernelConfig,
+    pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+}
+
 impl AgentHarnessImpl {
     /// Construct the default Kernel-backed Harness implementation.
     pub fn new(
         id: String,
         name: String,
         description: String,
-        llm_provider: Arc<dyn LlmProvider>,
-        model: String,
+        llm_provider_router: Arc<dyn LlmProviderRouter>,
+        model_ref: ModelRef,
         tool_registry: Arc<ToolRegistry>,
         kernel_config: AgentKernelConfig,
-    ) -> Self {
-        Self::new_with_skill_roots_resolver(
+    ) -> TalosResult<Self> {
+        Self::new_with_skill_roots_resolver(AgentHarnessParams {
             id,
             name,
             description,
-            llm_provider,
-            model,
+            llm_provider_router,
+            model_ref: model_ref.clone(),
+            model_ref_override: Some(model_ref),
             tool_registry,
             kernel_config,
-            empty_skill_roots_resolver(),
-        )
+            skill_roots_resolver: empty_skill_roots_resolver(),
+        })
     }
 
     /// Construct the default Harness with an explicit skill roots resolver.
-    pub fn new_with_skill_roots_resolver(
-        id: String,
-        name: String,
-        description: String,
-        llm_provider: Arc<dyn LlmProvider>,
-        model: String,
-        tool_registry: Arc<ToolRegistry>,
-        kernel_config: AgentKernelConfig,
-        skill_roots_resolver: Arc<dyn SkillRootsResolver>,
-    ) -> Self {
+    pub(crate) fn new_with_skill_roots_resolver(params: AgentHarnessParams) -> TalosResult<Self> {
+        let AgentHarnessParams {
+            id,
+            name,
+            description,
+            llm_provider_router,
+            model_ref,
+            model_ref_override,
+            tool_registry,
+            kernel_config,
+            skill_roots_resolver,
+        } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
+        let llm_provider = llm_provider_router.provider_for(&model_ref)?;
         let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &kernel_config,
             llm_provider.clone(),
         ));
 
-        Self {
+        Ok(Self {
             id: id.clone(),
             name: name.clone(),
             description: description.clone(),
-            llm_provider: llm_provider.clone(),
-            model: model.clone(),
+            llm_provider_router: llm_provider_router.clone(),
+            model_ref: model_ref.clone(),
+            model_ref_override,
             memory_store,
             tool_registry: tool_registry.clone(),
             kernel_config: kernel_config.clone(),
@@ -134,13 +158,12 @@ impl AgentHarnessImpl {
                 id,
                 name,
                 description,
-                llm_provider,
-                model: model.clone(),
+                llm_provider_router,
                 tool_registry,
                 kernel_config,
                 skill_roots_resolver,
             }),
-        }
+        })
     }
 
     /// Register a tool in the Harness-owned tool registry.
@@ -163,10 +186,17 @@ impl AgentHarnessImpl {
     }
 
     /// Replace Kernel runtime configuration and rebuild dependent Harness state.
-    pub fn update_kernel_config(&mut self, config: AgentKernelConfig) {
-        self.kernel_config = Self::normalized_kernel_config(config);
+    pub fn update_kernel_config(&mut self, config: AgentKernelConfig) -> TalosResult<()> {
+        let kernel_config = Self::normalized_kernel_config(config);
+        let llm_provider = self.llm_provider_router.provider_for(&self.model_ref)?;
+        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
+            &kernel_config,
+            llm_provider,
+        ));
+        self.kernel_config = kernel_config;
         self.runtime.set_kernel_config(self.kernel_config.clone());
-        self.rebuild_memory_store();
+        self.memory_store = memory_store;
+        Ok(())
     }
 
     /// Generate the default Kernel system prompt from Harness metadata and tools.
@@ -213,7 +243,23 @@ After receiving tool outputs, continue reasoning and provide the final response.
             ])
             .build();
 
-        match self.llm_provider.chat(request).await {
+        let llm_provider = match self
+            .llm_provider_router
+            .provider_for(&talos_types::ModelRef {
+                provider: run_config.llm.provider.clone(),
+                id: run_config.llm.model.clone(),
+            }) {
+            Ok(llm_provider) => llm_provider,
+            Err(error) => {
+                warn!(
+                    ?error,
+                    "failed to resolve provider for session title generation"
+                );
+                return None;
+            }
+        };
+
+        match llm_provider.chat(request).await {
             Ok(response) => normalize_session_title(&response.content),
             Err(error) => {
                 warn!(?error, "failed to generate session title");
@@ -233,15 +279,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
             ));
         }
         Ok(())
-    }
-
-    fn prepare_run_params(&self, mut request: AgentRunParams) -> AgentRunParams {
-        if !self.model.trim().is_empty() {
-            request.config.llm.model = self.model.clone();
-            request.config.agent.model = self.model.clone();
-            request.options.current_model = Some(self.model.clone());
-        }
-        request
     }
 
     fn map_dynamic_input_error(error: TalosError) -> AgentError {
@@ -411,6 +448,10 @@ impl AgentHarness for AgentHarnessImpl {
         &self.id
     }
 
+    fn default_model_ref(&self) -> Option<ModelRef> {
+        self.model_ref_override.clone()
+    }
+
     fn descriptor(&self) -> AgentDescriptor {
         AgentDescriptor {
             agent_id: self.id.clone(),
@@ -429,7 +470,6 @@ impl AgentHarness for AgentHarnessImpl {
     }
 
     async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
-        let request = self.prepare_run_params(request);
         Self::validate_run_identity(&request)?;
         self.validate_run_request(&request)?;
         if let Some(response_rx) = self
@@ -449,7 +489,6 @@ impl AgentHarness for AgentHarnessImpl {
         &self,
         request: AgentRunParams,
     ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
-        let request = self.prepare_run_params(request);
         Self::validate_run_identity(&request)?;
         self.validate_streaming_run_request(&request)?;
         let (tx, rx) = mpsc::channel(256);
@@ -463,7 +502,6 @@ impl AgentHarness for AgentHarnessImpl {
     }
 
     async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
-        let params = AgentResumeParams::new(self.prepare_run_params(params.run));
         Self::validate_run_identity(&params.run)?;
         self.validate_resume_request(&params)?;
         let request = params.run;
@@ -484,7 +522,6 @@ impl AgentHarness for AgentHarnessImpl {
         &self,
         params: AgentResumeParams,
     ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
-        let params = AgentResumeParams::new(self.prepare_run_params(params.run));
         Self::validate_run_identity(&params.run)?;
         self.validate_streaming_resume_request(&params)?;
         let request = params.run;

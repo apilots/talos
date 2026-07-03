@@ -306,10 +306,7 @@ impl SessionStoreAdapter {
     }
 
     fn to_record(&self, session: TalosSession) -> talos_error::TalosResult<SessionRecord> {
-        Ok(SessionRecord::from_session(
-            &session,
-            session.config.llm.model.as_str(),
-        ))
+        Ok(SessionRecord::from_session(&session))
     }
 }
 
@@ -651,7 +648,7 @@ impl UserService for FakeAuthService {
 }
 
 fn test_auth_services() -> (Arc<dyn AuthService>, Arc<dyn UserService>) {
-    let service = Arc::new(FakeAuthService::default());
+    let service = Arc::new(FakeAuthService);
     let auth_service: Arc<dyn AuthService> = service.clone();
     let user_service: Arc<dyn UserService> = service;
     (auth_service, user_service)

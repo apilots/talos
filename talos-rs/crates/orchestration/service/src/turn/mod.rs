@@ -8,7 +8,7 @@ use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem};
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::session::SessionRecordService;
+use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
 
 mod service;
@@ -65,7 +65,7 @@ fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<Mess
 fn spawn_event_forwarder(
     event_service: Arc<TimelineEventService>,
     turn_executor: Arc<dyn TurnExecutor>,
-    session_records: Arc<SessionRecordService>,
+    sessions: Arc<SessionService>,
     session_runtime: Arc<dyn SessionRuntime>,
     assistant_model: String,
     initial_completed_turn: Option<(String, String)>,
@@ -80,7 +80,7 @@ fn spawn_event_forwarder(
                 continue;
             }
             record_completed_turn_progress(
-                session_records.as_ref(),
+                sessions.as_ref(),
                 session_runtime.as_ref(),
                 &progress_event,
                 &assistant_model,
@@ -97,7 +97,7 @@ fn spawn_event_forwarder(
                 .await
             {
                 record_session_title(
-                    session_records.as_ref(),
+                    sessions.as_ref(),
                     session_runtime.as_ref(),
                     &session_id,
                     &title,
@@ -114,15 +114,12 @@ fn completed_turn_from_event(event: &AgentEvent) -> Option<(String, String)> {
 }
 
 async fn record_session_title(
-    session_records: &SessionRecordService,
+    sessions: &SessionService,
     session_runtime: &dyn SessionRuntime,
     session_id: &str,
     title: &str,
 ) {
-    if let Err(err) = session_records
-        .update_session_title(session_id, title)
-        .await
-    {
+    if let Err(err) = sessions.update_session_title(session_id, title).await {
         error!(
             session_id = %session_id,
             error = %err,
@@ -140,7 +137,7 @@ async fn record_session_title(
 }
 
 async fn record_completed_turn_progress(
-    session_records: &SessionRecordService,
+    sessions: &SessionService,
     session_runtime: &dyn SessionRuntime,
     event: &AgentEvent,
     assistant_model: &str,
@@ -148,13 +145,8 @@ async fn record_completed_turn_progress(
     let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
         return;
     };
-    if let Err(err) = session_records
-        .record_session_progress(
-            &event.session_id,
-            2,
-            &completed.usage,
-            Some(assistant_model),
-        )
+    if let Err(err) = sessions
+        .record_turn_progress(&event.session_id, 2, assistant_model, &completed.usage)
         .await
     {
         error!(

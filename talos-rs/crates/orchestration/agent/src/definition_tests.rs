@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
 use talos_config::{
-    AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
+    AgentConfig, AgentDefinitionConfig, AgentKernelConfig, AgentKind as ConfigAgentKind,
+    AgentRuntimeConfig, ModelRefConfig,
 };
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_llm_provider::{
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, Usage,
+};
 use talos_tools::ToolRegistry;
+use talos_types::ModelRef;
 
 use super::*;
 use crate::{empty_skill_roots_resolver, AgentHarness};
@@ -38,15 +42,41 @@ impl LlmProvider for TestLlmProvider {
     }
 }
 
+struct TestLlmProviderRouter;
+
+impl LlmProviderRouter for TestLlmProviderRouter {
+    fn provider_for(
+        &self,
+        _model_ref: &ModelRef,
+    ) -> talos_error::TalosResult<Arc<dyn LlmProvider>> {
+        Ok(Arc::new(TestLlmProvider))
+    }
+}
+
+fn default_model_ref() -> ModelRef {
+    ModelRef {
+        provider: "test".to_string(),
+        id: "global-model".to_string(),
+    }
+}
+
 #[test]
 fn loader_builds_synthesized_default_definition() {
-    let mut config = AgentConfig::default();
-    config.name = "Talos".to_string();
-    config.model = "agent-model".to_string();
-    config.kernel.default_workspace_id = "workspace-default".to_string();
+    let config = AgentConfig {
+        name: "Talos".to_string(),
+        model_ref: Some(ModelRefConfig {
+            provider: "test".to_string(),
+            id: "agent-model".to_string(),
+        }),
+        kernel: AgentKernelConfig {
+            default_workspace_id: "workspace-default".to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
 
-    let definitions =
-        AgentDefinitionLoader::load(&config, "global-model").expect("definitions should load");
+    let definitions = AgentDefinitionLoader::load(&config, &default_model_ref())
+        .expect("definitions should load");
 
     assert_eq!(definitions.len(), 1);
     let definition = &definitions[0];
@@ -57,28 +87,42 @@ fn loader_builds_synthesized_default_definition() {
         definition.default_workspace_id.as_deref(),
         Some("workspace-default")
     );
-    assert_eq!(definition.model.as_deref(), Some("agent-model"));
+    assert_eq!(
+        definition.model_ref,
+        ModelRef {
+            provider: "test".to_string(),
+            id: "agent-model".to_string(),
+        }
+    );
+    assert_eq!(
+        definition.model_ref_override,
+        Some(definition.model_ref.clone())
+    );
 }
 
 #[test]
 fn loader_resolves_explicit_agent_definition() {
-    let mut config = AgentConfig::default();
-    config.kernel.default_workspace_id = "base-workspace".to_string();
-    config.agents = vec![AgentDefinitionConfig {
-        id: "reviewer".to_string(),
-        name: "Reviewer".to_string(),
-        kind: ConfigAgentKind::Kernel,
-        enabled: true,
-        description: None,
-        default_workspace_id: None,
-        model: None,
-        runtime_config: Some(AgentRuntimeConfig::Kernel {
-            kernel: config.kernel.clone(),
-        }),
-    }];
+    let kernel = AgentKernelConfig {
+        default_workspace_id: "base-workspace".to_string(),
+        ..Default::default()
+    };
+    let config = AgentConfig {
+        kernel: kernel.clone(),
+        agents: vec![AgentDefinitionConfig {
+            id: "reviewer".to_string(),
+            name: "Reviewer".to_string(),
+            kind: ConfigAgentKind::Kernel,
+            enabled: true,
+            description: None,
+            default_workspace_id: None,
+            model_ref: None,
+            runtime_config: Some(AgentRuntimeConfig::Kernel { kernel }),
+        }],
+        ..Default::default()
+    };
 
-    let definitions =
-        AgentDefinitionLoader::load(&config, "global-model").expect("definitions should load");
+    let definitions = AgentDefinitionLoader::load(&config, &default_model_ref())
+        .expect("definitions should load");
 
     assert_eq!(definitions.len(), 1);
     let definition = &definitions[0];
@@ -89,56 +133,61 @@ fn loader_resolves_explicit_agent_definition() {
         definition.default_workspace_id.as_deref(),
         Some("base-workspace")
     );
-    assert_eq!(definition.model.as_deref(), Some("global-model"));
+    assert_eq!(definition.model_ref, default_model_ref());
+    assert_eq!(definition.model_ref_override, None);
 }
 
 #[test]
 fn loader_rejects_duplicate_agent_ids() {
-    let mut config = AgentConfig::default();
-    config.agents = vec![
-        AgentDefinitionConfig {
-            id: "duplicate".to_string(),
-            name: "First".to_string(),
-            kind: ConfigAgentKind::Kernel,
-            enabled: true,
-            description: None,
-            default_workspace_id: None,
-            model: None,
-            runtime_config: None,
-        },
-        AgentDefinitionConfig {
-            id: "duplicate".to_string(),
-            name: "Second".to_string(),
-            kind: ConfigAgentKind::Kernel,
-            enabled: true,
-            description: None,
-            default_workspace_id: None,
-            model: None,
-            runtime_config: None,
-        },
-    ];
+    let config = AgentConfig {
+        agents: vec![
+            AgentDefinitionConfig {
+                id: "duplicate".to_string(),
+                name: "First".to_string(),
+                kind: ConfigAgentKind::Kernel,
+                enabled: true,
+                description: None,
+                default_workspace_id: None,
+                model_ref: None,
+                runtime_config: None,
+            },
+            AgentDefinitionConfig {
+                id: "duplicate".to_string(),
+                name: "Second".to_string(),
+                kind: ConfigAgentKind::Kernel,
+                enabled: true,
+                description: None,
+                default_workspace_id: None,
+                model_ref: None,
+                runtime_config: None,
+            },
+        ],
+        ..Default::default()
+    };
 
-    let error =
-        AgentDefinitionLoader::load(&config, "global-model").expect_err("duplicate id should fail");
+    let error = AgentDefinitionLoader::load(&config, &default_model_ref())
+        .expect_err("duplicate id should fail");
 
     assert!(error.to_string().contains("duplicate"));
 }
 
 #[test]
 fn loader_rejects_kind_runtime_mismatch() {
-    let mut config = AgentConfig::default();
-    config.agents = vec![AgentDefinitionConfig {
-        id: "codex".to_string(),
-        name: "Codex".to_string(),
-        kind: ConfigAgentKind::Codex,
-        enabled: true,
-        description: None,
-        default_workspace_id: None,
-        model: None,
-        runtime_config: None,
-    }];
+    let config = AgentConfig {
+        agents: vec![AgentDefinitionConfig {
+            id: "codex".to_string(),
+            name: "Codex".to_string(),
+            kind: ConfigAgentKind::Codex,
+            enabled: true,
+            description: None,
+            default_workspace_id: None,
+            model_ref: None,
+            runtime_config: None,
+        }],
+        ..Default::default()
+    };
 
-    let error = AgentDefinitionLoader::load(&config, "global-model")
+    let error = AgentDefinitionLoader::load(&config, &default_model_ref())
         .expect_err("kind/runtime mismatch should fail");
 
     assert!(error.to_string().contains("does not match"));
@@ -146,22 +195,24 @@ fn loader_rejects_kind_runtime_mismatch() {
 
 #[test]
 fn factory_rejects_disabled_definition() {
-    let mut config = AgentConfig::default();
-    config.agents = vec![AgentDefinitionConfig {
-        id: "disabled".to_string(),
-        name: "Disabled".to_string(),
-        kind: ConfigAgentKind::Kernel,
-        enabled: false,
-        description: None,
-        default_workspace_id: None,
-        model: None,
-        runtime_config: None,
-    }];
-    let definition = AgentDefinitionLoader::load(&config, "global-model")
+    let config = AgentConfig {
+        agents: vec![AgentDefinitionConfig {
+            id: "disabled".to_string(),
+            name: "Disabled".to_string(),
+            kind: ConfigAgentKind::Kernel,
+            enabled: false,
+            description: None,
+            default_workspace_id: None,
+            model_ref: None,
+            runtime_config: None,
+        }],
+        ..Default::default()
+    };
+    let definition = AgentDefinitionLoader::load(&config, &default_model_ref())
         .expect("definitions should load")
         .remove(0);
     let factory = AgentHarnessFactory::new(
-        Arc::new(TestLlmProvider),
+        Arc::new(TestLlmProviderRouter),
         Arc::new(ToolRegistry::new()),
         empty_skill_roots_resolver(),
     );
@@ -177,11 +228,11 @@ fn factory_rejects_disabled_definition() {
 #[test]
 fn factory_builds_kernel_agent_with_descriptor() {
     let config = AgentConfig::default();
-    let definition = AgentDefinitionLoader::load(&config, "global-model")
+    let definition = AgentDefinitionLoader::load(&config, &default_model_ref())
         .expect("definitions should load")
         .remove(0);
     let factory = AgentHarnessFactory::new(
-        Arc::new(TestLlmProvider),
+        Arc::new(TestLlmProviderRouter),
         Arc::new(ToolRegistry::new()),
         empty_skill_roots_resolver(),
     );

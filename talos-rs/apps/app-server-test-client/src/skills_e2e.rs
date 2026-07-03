@@ -268,9 +268,7 @@ async fn run_selected_skill_turn(
             ],
             workspace_id: None,
             context: Some(super::test_talos_context()),
-            model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
+            model_ref: super::test_model_ref(),
             project_id: None,
             current_directory: None,
             client_request_id: Some(format!(

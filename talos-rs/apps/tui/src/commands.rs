@@ -431,6 +431,12 @@ impl TuiApp {
     }
 
     pub(crate) fn switch_model_command(&mut self, requested: String) -> TalosResult<()> {
+        let Some(model_ref) = self.model_ref_for_id(&requested) else {
+            return Err(TalosError::ClientError(format!(
+                "model '{}' is not available in the current model catalog",
+                requested
+            )));
+        };
         if self.session_id.is_none() {
             self.current_model = requested.clone();
             self.push_right_event(format!("draft model set: {}", requested));
@@ -443,9 +449,19 @@ impl TuiApp {
         };
         let session_id = self.session_id.clone().expect("session checked above");
         self.spawn_command_task(format!("model switch started: {}", requested), async move {
-            let result = client.update_session_model(&session_id, &requested).await;
+            let result = client.update_session_model(&session_id, &model_ref).await;
             CommandUpdate::ModelSwitched { requested, result }
         })
+    }
+
+    fn model_ref_for_id(&self, model_id: &str) -> Option<talos_sdk::ModelRef> {
+        self.available_model_info
+            .iter()
+            .find(|model| model.id == model_id)
+            .map(|model| talos_sdk::ModelRef {
+                provider: model.provider.clone(),
+                id: model.id.clone(),
+            })
     }
 
     pub(crate) fn open_history(&mut self) {
@@ -502,7 +518,7 @@ impl TuiApp {
 
     pub(crate) fn load_session_history(&mut self, session: SessionInfo) {
         let session_id = session.id.clone();
-        let model = session.model.clone();
+        let model = session.model_ref.id.clone();
         self.session_id = Some(session_id.clone());
         self.current_model = model;
         self.session_usage = session.usage.clone();
@@ -557,7 +573,10 @@ impl TuiApp {
                 }
                 Err(err) => Err(err),
             };
-            CommandUpdate::SessionHistoryLoaded { result, session }
+            CommandUpdate::SessionHistoryLoaded {
+                result: Box::new(result),
+                session,
+            }
         });
     }
 
@@ -600,10 +619,21 @@ impl TuiApp {
         };
         let session_id = self.session_id.clone().expect("session checked above");
         let requested = model.clone();
+        let Some(model_ref) = self.model_ref_for_id(&requested) else {
+            self.show_model_picker = false;
+            self.push_block(
+                ChatRole::System,
+                format!(
+                    "Model `{}` is not available in the current catalog.",
+                    requested
+                ),
+            );
+            return;
+        };
         let _ = self.spawn_command_task(
             format!("model picker switching to: {}", model),
             async move {
-                let result = client.update_session_model(&session_id, &requested).await;
+                let result = client.update_session_model(&session_id, &model_ref).await;
                 CommandUpdate::ModelPickerSwitched { requested, result }
             },
         );

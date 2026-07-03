@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use talos_config::{LlmConfig, LlmConfigService};
+use talos_config::{provider_config_for_llm, LlmConfig, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
     resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
@@ -39,17 +39,34 @@ impl ConfigService {
         self.models.read().await.clone()
     }
 
-    pub fn validate_model_supported(&self, model: &str) -> TalosResult<()> {
-        if self
-            .models
-            .try_read()
-            .map(|models| models.iter().any(|entry| entry.id == model))
-            .unwrap_or(false)
+    pub fn validate_model_ref_supported(
+        &self,
+        model_ref: &talos_types::ModelRef,
+    ) -> TalosResult<()> {
+        if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
+            return Err(TalosError::UnsupportedModel(format!(
+                "{}:{}",
+                model_ref.provider, model_ref.id
+            )));
+        }
+        let llm = self.llm_config_service.get()?;
+        let provider_name = model_ref.provider.trim().to_ascii_lowercase();
+        let Some(provider) = provider_config_for_llm(&llm, &provider_name) else {
+            return Err(TalosError::UnsupportedModel(format!(
+                "{}:{}",
+                model_ref.provider, model_ref.id
+            )));
+        };
+        if provider.models.is_empty()
+            || provider.models.iter().any(|entry| entry.id == model_ref.id)
         {
             return Ok(());
         }
 
-        Err(TalosError::UnsupportedModel(model.to_string()))
+        Err(TalosError::UnsupportedModel(format!(
+            "{}:{}",
+            model_ref.provider, model_ref.id
+        )))
     }
 
     pub fn get_llm(&self) -> TalosResult<LlmConfig> {

@@ -20,6 +20,7 @@ import type {
   ModelInfo as ProtocolModelInfo,
   ModelListResponse as ProtocolModelListResponse,
   ModelReadiness as ProtocolModelReadiness,
+  ModelRef as ProtocolModelRef,
   ProviderKeyStatus as ProtocolProviderKeyStatus,
   SessionClearResponse as ProtocolSessionClearResponse,
   SessionCloseResponse as ProtocolSessionCloseResponse,
@@ -305,6 +306,7 @@ export type TalosPendingUserAction = ProtocolTimelinePendingUserAction;
 export type TalosActiveTurn = ProtocolTimelineActiveTurnSnapshot;
 
 export type ModelInfo = ProtocolModelInfo;
+export type ModelRef = ProtocolModelRef;
 export type ModelListResponse = ProtocolModelListResponse;
 export type SessionInfo = ProtocolSessionInfo;
 export type SessionListRequest = ProtocolSessionListRequest;
@@ -334,7 +336,6 @@ export interface PaginatedResponse<T> {
   pagination: PaginationMeta;
 }
 
-export type SessionAgentConf = import("./generated/app-protocol").SessionAgentConf;
 export type SessionConf = import("./generated/app-protocol").SessionConf;
 export type OptionalProjectIdPatch = import("./generated/app-protocol").OptionalProjectIdPatch;
 export type OptionalCurrentDirectoryPatch = import("./generated/app-protocol").OptionalCurrentDirectoryPatch;

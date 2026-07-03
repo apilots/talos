@@ -15,14 +15,14 @@ pub mod turn;
 mod workspace;
 mod workspace_docs;
 
-pub use access::Actor;
+pub use access::{Actor, CreateSessionRequest};
 pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListCommand, MemorySearchCommand, MemoryService};
 pub use plugin::PluginManagerService;
 pub use service::{ServiceResult, TalosService};
-pub use session::{scope as session_scope, SessionService};
+pub use session::{scope as session_scope, CreateSessionParams, SessionService};
 pub use skills::SkillsService;
 pub use timeline::{
     ApplicationEvent, ApplicationEventStream, EventReplay, TimelineCursorStatus,

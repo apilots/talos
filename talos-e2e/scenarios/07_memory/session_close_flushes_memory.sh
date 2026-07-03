@@ -33,11 +33,13 @@ mkdir -p "${WORKSPACE_DIR}"
 
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 primary_model="$(select_e2e_model_from_json "${models_json}")"
-if [[ -z "${primary_model}" ]]; then
+primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
+if [[ -z "${primary_model}" || -z "${primary_provider}" ]]; then
   echo "CASE close_flush_select_model FAIL models=${models_json}"
   exit 1
 fi
 export PRIMARY_MODEL="${primary_model}"
+export PRIMARY_PROVIDER="${primary_provider}"
 echo "CASE close_flush_select_model PASS model=${primary_model}"
 
 pre_size=0
@@ -61,7 +63,7 @@ payload = {
         "message_id": "msg-session-close-flush",
         "trace_id": "trace-session-close-flush",
     },
-    "model": os.environ["PRIMARY_MODEL"],
+    "model_ref": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

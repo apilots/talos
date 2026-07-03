@@ -7,6 +7,12 @@ use super::{SessionQuery, SessionRecord, SessionStore};
 
 pub struct MockSessionStore;
 
+impl Default for MockSessionStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockSessionStore {
     pub fn new() -> Self {
         Self

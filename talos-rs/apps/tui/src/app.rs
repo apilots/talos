@@ -8,7 +8,7 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 
-use talos_sdk::{SessionInfo, TalosContext, TalosProvider, TalosSourceType};
+use talos_sdk::{ModelRef, SessionInfo, TalosContext, TalosProvider, TalosSourceType};
 use talos_types::talos::TokenUsage;
 
 use crate::client::GatewayClient;
@@ -141,6 +141,16 @@ impl TuiApp {
         }
     }
 
+    pub(crate) fn current_model_ref(&self) -> Option<ModelRef> {
+        self.available_model_info
+            .iter()
+            .find(|model| model.id == self.current_model)
+            .map(|model| ModelRef {
+                provider: model.provider.clone(),
+                id: model.id.clone(),
+            })
+    }
+
     pub async fn initialize_session(&mut self) {
         self.connection_status = "connecting".to_string();
         self.push_right_event("connecting to embedded runtime".to_string());
@@ -221,7 +231,7 @@ impl TuiApp {
 
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
-        self.current_model = session.model.clone();
+        self.current_model = session.model_ref.id.clone();
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

@@ -18,7 +18,7 @@ use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResult,
 };
 use talos_types::talos::{AgentEvent, TalosContext};
-use talos_types::{AgentDispatchRuntime, CancelActiveTurnParams, TalosSession};
+use talos_types::{AgentDispatchRuntime, CancelActiveTurnParams, ModelRef, TalosSession};
 
 use crate::{AgentRegistry, AgentRouter, AgentSelectionParams, SessionRuntime};
 use tokio::sync::mpsc;
@@ -286,6 +286,17 @@ impl AgentDispatchRuntime for CoordinatorImpl {
 impl SessionRuntime for CoordinatorImpl {
     async fn resolve_target_agent(&self, context: &TalosContext) -> TalosResult<String> {
         self.resolve_target_agent_id(context).await
+    }
+
+    async fn resolve_target_agent_model_ref(
+        &self,
+        context: &TalosContext,
+    ) -> TalosResult<Option<ModelRef>> {
+        let selection = self
+            .agent_router
+            .resolve_agent(AgentSelectionParams::for_context(context.clone()))
+            .await?;
+        Ok(selection.registration.harness.default_model_ref())
     }
 
     async fn invalidate_cached_session(&self, session_id: &str) -> TalosResult<()> {

@@ -359,7 +359,7 @@ pub fn llm_provider_supports_protocol(provider: &str, protocol: LlmProtocol) -> 
 }
 
 /// Provider config
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProviderConfig {
     /// API key
     #[serde(default)]
@@ -369,10 +369,6 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub base_url: Option<String>,
 
-    /// Enabled flag
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-
     /// Wire protocol used for this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol: Option<LlmProtocol>,
@@ -380,18 +376,6 @@ pub struct ProviderConfig {
     /// Provider-specific model metadata
     #[serde(default)]
     pub models: Vec<ProviderModelConfig>,
-}
-
-impl Default for ProviderConfig {
-    fn default() -> Self {
-        Self {
-            api_key: None,
-            base_url: None,
-            enabled: true,
-            protocol: None,
-            models: Vec::new(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -490,8 +474,4 @@ pub enum ThinkingFormat {
     OpenAi,
     Anthropic,
     Qwen,
-}
-
-fn default_true() -> bool {
-    true
 }

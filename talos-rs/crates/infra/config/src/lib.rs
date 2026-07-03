@@ -38,7 +38,7 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
-    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, PlannerMode,
+    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, ModelRefConfig, PlannerMode,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
@@ -271,10 +271,6 @@ pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
             issues,
         };
     };
-
-    if !provider.enabled {
-        issues.push(format!("llm provider '{}' is disabled", provider_name));
-    }
 
     if let Some(protocol) = provider.protocol {
         if !llm_provider_supports_protocol(&provider_name, protocol) {

@@ -1,4 +1,4 @@
-use super::{Actor, ResourceAccessService};
+use super::{Actor, CreateSessionRequest, ResourceAccessService};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -20,7 +20,7 @@ struct RecordingSessionStore {
 }
 
 impl RecordingSessionStore {
-    fn with_records(records: Vec<SessionRecord>) -> Self {
+    fn from_records(records: Vec<SessionRecord>) -> Self {
         Self {
             listed_queries: Mutex::new(Vec::new()),
             records: Mutex::new(records),
@@ -44,9 +44,9 @@ fn recording_access_service(
     runtime: Arc<dyn SessionRuntime>,
     store: Arc<RecordingSessionStore>,
 ) -> ResourceAccessService {
-    let session_records = recording_session_service(store.clone());
+    let sessions = recording_session_service(store.clone());
     let projects = Arc::new(crate::project::ProjectService::new(store));
-    ResourceAccessService::with_records(runtime, session_records, projects)
+    ResourceAccessService::with_services(runtime, sessions, projects)
 }
 
 #[async_trait]
@@ -299,7 +299,7 @@ async fn list_sessions_scopes_query_to_actor() {
 
 #[tokio::test]
 async fn regular_actor_cannot_read_or_patch_other_user_session() {
-    let store = Arc::new(RecordingSessionStore::with_records(vec![record_for(
+    let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
         "other-user",
         "session-1",
         SessionConf::default(),
@@ -333,7 +333,7 @@ async fn regular_actor_cannot_read_or_patch_other_user_session() {
 
 #[tokio::test]
 async fn delete_session_prepares_runtime_then_deletes_record() {
-    let store = Arc::new(RecordingSessionStore::with_records(vec![record_for(
+    let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
         "member-user",
         "session-1",
         SessionConf::default(),
@@ -362,7 +362,7 @@ async fn delete_session_prepares_runtime_then_deletes_record() {
 
 #[tokio::test]
 async fn open_mode_actor_only_sees_anonymous_sessions() {
-    let store = Arc::new(RecordingSessionStore::with_records(vec![
+    let store = Arc::new(RecordingSessionStore::from_records(vec![
         record_for(
             "anonymous",
             "session-anonymous",
@@ -408,12 +408,14 @@ async fn creating_session_uses_actor_user_id() {
     let session = access
         .get_or_create_session(
             &Actor::regular("member-user"),
-            "session-created",
-            context,
-            None,
-            None,
-            None,
-            None,
+            CreateSessionRequest {
+                session_id: "session-created".to_string(),
+                context,
+                model_ref: None,
+                workspace_id: None,
+                project_id: None,
+                current_directory: None,
+            },
         )
         .await
         .expect("session should be created");

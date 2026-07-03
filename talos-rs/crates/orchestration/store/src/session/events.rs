@@ -121,7 +121,7 @@ pub(crate) fn parse_event_row(row: &Row) -> TalosResult<AgentEvent> {
 #[async_trait]
 impl TimelineEventStore for DatabaseSessionStore {
     async fn append_event(&self, event: AgentEvent) -> TalosResult<AgentEvent> {
-        let event_type = serde_json::to_value(&event.event_type)
+        let event_type = serde_json::to_value(event.event_type)
             .map_err(|err| TalosError::SerializationError(err.to_string()))?
             .as_str()
             .ok_or_else(|| TalosError::SerializationError("event type is not a string".into()))?

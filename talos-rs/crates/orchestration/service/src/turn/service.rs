@@ -5,7 +5,7 @@ use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{
     ActiveTurnStatus, IdempotencyReservation, IdempotencyStatus, MessageCommandResult,
-    MessageIdempotencyStore, PendingUserAction, SessionStore,
+    MessageIdempotencyStore, PendingUserAction,
 };
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::session::SessionRecordService;
+use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
 
 use super::{
@@ -31,7 +31,7 @@ pub struct TurnService {
     executor: Arc<dyn TurnExecutor>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
-    session_records: Arc<SessionRecordService>,
+    sessions: Arc<SessionService>,
     session_runtime: Arc<dyn SessionRuntime>,
     base_config: TalosConfig,
 }
@@ -52,7 +52,7 @@ impl TurnService {
         executor: Arc<dyn TurnExecutor>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
-        session_store: Arc<dyn SessionStore>,
+        sessions: Arc<SessionService>,
         session_runtime: Arc<dyn SessionRuntime>,
         base_config: TalosConfig,
     ) -> Self {
@@ -60,7 +60,7 @@ impl TurnService {
             executor,
             event_service,
             idempotency_store,
-            session_records: Arc::new(SessionRecordService::new(session_store)),
+            sessions,
             session_runtime,
             base_config,
         }
@@ -229,7 +229,7 @@ impl TurnService {
         spawn_event_forwarder(
             self.event_service.clone(),
             self.executor.clone(),
-            self.session_records.clone(),
+            self.sessions.clone(),
             self.session_runtime.clone(),
             assistant_model,
             completed_turn_from_event(&progress_event),
@@ -441,7 +441,7 @@ impl TurnService {
         spawn_event_forwarder(
             self.event_service.clone(),
             self.executor.clone(),
-            self.session_records.clone(),
+            self.sessions.clone(),
             self.session_runtime.clone(),
             assistant_model,
             completed_turn_from_event(&progress_event),
@@ -542,7 +542,7 @@ impl TurnService {
         spawn_event_forwarder(
             self.event_service.clone(),
             self.executor.clone(),
-            self.session_records.clone(),
+            self.sessions.clone(),
             self.session_runtime.clone(),
             assistant_model.to_string(),
             None,
@@ -584,7 +584,7 @@ impl TurnService {
 
     async fn record_completed_turn_progress(&self, event: &AgentEvent, assistant_model: &str) {
         record_completed_turn_progress(
-            self.session_records.as_ref(),
+            self.sessions.as_ref(),
             self.session_runtime.as_ref(),
             event,
             assistant_model,

@@ -95,7 +95,7 @@ impl TuiApp {
     pub(crate) fn replay_recovery_snapshot(&mut self, response: TimelineRecoveryResponse) -> usize {
         let snapshot = response.snapshot;
         let mut events = snapshot.replay.events;
-        events.sort_by(|a, b| a.event_seq.cmp(&b.event_seq));
+        events.sort_by_key(|a| a.event_seq);
         let count = events.len();
         for envelope in events {
             if self.active_stream_message_id.as_deref() != Some(envelope.message_id.as_str()) {
@@ -325,10 +325,8 @@ impl TuiApp {
                 TalosTimelineItemKind::SystemNotice,
                 TalosTimelinePhase::System,
                 TalosTimelineContent::SystemNotice { message, .. },
-            ) => {
-                if !message.trim().is_empty() {
-                    self.push_right_event(message.trim().to_string());
-                }
+            ) if !message.trim().is_empty() => {
+                self.push_right_event(message.trim().to_string());
             }
             _ => {}
         }

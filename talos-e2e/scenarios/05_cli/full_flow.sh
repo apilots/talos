@@ -20,8 +20,9 @@ run_cli() {
 models_json="$(run_cli models --format json)"
 log_case_json "cli_select_models" "{}" "${models_json}"
 primary_model="$(select_e2e_model_from_json "${models_json}")"
+primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
 secondary_model="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); arr=payload.get("models", payload.get("data", payload)) if isinstance(payload, dict) else payload; print((arr[1].get("id") if len(arr) > 1 else (arr[0].get("id") if arr else "")))' <<< "${models_json}")"
-if [[ -z "${primary_model}" || -z "${secondary_model}" ]]; then
+if [[ -z "${primary_model}" || -z "${primary_provider}" || -z "${secondary_model}" ]]; then
   echo "CASE cli_select_models FAIL models=${models_json}"
   exit 1
 fi

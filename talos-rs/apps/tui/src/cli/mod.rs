@@ -9,7 +9,7 @@ use std::io::Write;
 use std::sync::Arc;
 
 use talos_sdk::{
-    AgentEventPayload, TalosContext, TalosTimelineContent, TalosTimelineDelta,
+    AgentEventPayload, ModelInfo, ModelRef, TalosContext, TalosTimelineContent, TalosTimelineDelta,
     TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
@@ -60,6 +60,11 @@ async fn execute_exec_command(
     let session_id = cmd
         .session
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let model_ref = if let Some(model) = cmd.model.as_deref() {
+        Some(resolve_cli_model_ref(client.as_ref(), model).await?)
+    } else {
+        None
+    };
     let request = TerminalTurnRequest {
         session_id,
         message,
@@ -67,7 +72,7 @@ async fn execute_exec_command(
         context: Some(default_terminal_context(
             cmd.user.as_deref().unwrap_or("cli-user"),
         )),
-        model: cmd.model,
+        model_ref,
         current_directory: current_terminal_directory(),
         client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
     }
@@ -75,6 +80,30 @@ async fn execute_exec_command(
     let events = client.start_turn_stream(request).await?;
     render_timeline_events(events).await?;
     Ok(())
+}
+
+async fn resolve_cli_model_ref(
+    client: &dyn TerminalGatewayClient,
+    model_id: &str,
+) -> Result<ModelRef, Box<dyn std::error::Error>> {
+    let models = client.list_models().await?;
+    model_ref_for_id(&models, model_id).ok_or_else(|| {
+        format!(
+            "model '{}' is not available in the current model catalog",
+            model_id
+        )
+        .into()
+    })
+}
+
+fn model_ref_for_id(models: &[ModelInfo], model_id: &str) -> Option<ModelRef> {
+    models
+        .iter()
+        .find(|model| model.id == model_id)
+        .map(|model| ModelRef {
+            provider: model.provider.clone(),
+            id: model.id.clone(),
+        })
 }
 
 async fn execute_models_command(
@@ -104,7 +133,7 @@ async fn execute_session_command(
             for (i, session) in sessions.iter().take(limit).enumerate() {
                 println!(
                     "{}. ID: {} | Model: {} | Messages: {}",
-                    i, session.id, session.model, session.message_count
+                    i, session.id, session.model_ref.id, session.message_count
                 );
             }
         }
@@ -112,14 +141,15 @@ async fn execute_session_command(
             let session = client.get_session(&session_id).await?;
             println!("Session Info:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model);
+            println!("  Model: {}", session.model_ref.id);
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let session = client.update_session_model(&session_id, &model).await?;
+            let model_ref = resolve_cli_model_ref(client.as_ref(), &model).await?;
+            let session = client.update_session_model(&session_id, &model_ref).await?;
             println!("Session model updated:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model);
+            println!("  Model: {}", session.model_ref.id);
         }
     }
     Ok(())
@@ -234,14 +264,14 @@ fn render_event(
         },
         AgentEventPayload::AssistantTextCommitted(payload) => {
             item_phases.insert(payload.item_id.clone(), payload.phase);
-            if payload.phase == TalosTimelinePhase::FinalAnswer {
-                if !written_final_items.contains(&payload.item_id) {
-                    if let Some(text) = item_texts.get(&payload.item_id) {
-                        written_final_items.insert(payload.item_id.clone());
-                        output_text.push_str(text);
-                        write!(output_stream, "{}", text)?;
-                        output_stream.flush()?;
-                    }
+            if payload.phase == TalosTimelinePhase::FinalAnswer
+                && !written_final_items.contains(&payload.item_id)
+            {
+                if let Some(text) = item_texts.get(&payload.item_id) {
+                    written_final_items.insert(payload.item_id.clone());
+                    output_text.push_str(text);
+                    write!(output_stream, "{}", text)?;
+                    output_stream.flush()?;
                 }
             }
         }

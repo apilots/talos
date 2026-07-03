@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    GatewayClient as SdkGatewayClient, InterruptTurnRequest, ModelInfo, ModelListRequest,
-    RecoverTimelineRequest, SessionActiveTurnRequest, SessionAgentConf, SessionClearRequest,
-    SessionCloseRequest, SessionCompactRequest, SessionConf, SessionDeleteRequest,
-    SessionGetRequest, SessionHistoryRequest, SessionHistorySnapshot, SessionInfo,
-    SessionListRequest, SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest,
-    StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
+    GatewayClient as SdkGatewayClient, InterruptTurnRequest, ModelInfo, ModelListRequest, ModelRef,
+    RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
+    SessionCompactRequest, SessionConf, SessionDeleteRequest, SessionGetRequest,
+    SessionHistoryRequest, SessionHistorySnapshot, SessionInfo, SessionListRequest,
+    SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest, StartTurnRequest,
+    SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
     TimelineRecoveryResponse,
 };
 use tokio::sync::mpsc;
@@ -21,8 +21,11 @@ pub trait GatewayClient: Send + Sync {
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
     async fn delete_session(&self, session_id: &str) -> TalosResult<()>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-    async fn update_session_model(&self, session_id: &str, model: &str)
-        -> TalosResult<SessionInfo>;
+    async fn update_session_model(
+        &self,
+        session_id: &str,
+        model_ref: &ModelRef,
+    ) -> TalosResult<SessionInfo>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot>;
@@ -128,7 +131,7 @@ where
     async fn update_session_model(
         &self,
         session_id: &str,
-        model: &str,
+        model_ref: &ModelRef,
     ) -> TalosResult<SessionInfo> {
         let mut client = self.lock().await;
         SdkGatewayClient::patch_session(
@@ -136,9 +139,7 @@ where
             SessionPatchRequest {
                 session_id: session_id.to_string(),
                 conf: Some(SessionConf {
-                    agent: Some(SessionAgentConf {
-                        model: Some(model.to_string()),
-                    }),
+                    model_ref: Some(model_ref.clone()),
                 }),
                 project_id: None,
                 current_directory: None,

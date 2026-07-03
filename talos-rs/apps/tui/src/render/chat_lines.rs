@@ -277,7 +277,7 @@ impl TuiApp {
                 lines.push(RenderedChatLine {
                     display: Line::from(
                         std::iter::once(Span::raw(" ".repeat(CHAT_BLOCK_BODY_INDENT)))
-                            .chain(colored_spans.into_iter())
+                            .chain(colored_spans)
                             .collect::<Vec<_>>(),
                     ),
                     copy_projection: Some(CopyProjection {

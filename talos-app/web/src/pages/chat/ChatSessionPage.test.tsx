@@ -54,7 +54,7 @@ vi.mock("@/features/chat", () => ({
     stopResponse: vi.fn(),
     streamError: undefined,
   }),
-  useModelsQuery: () => ({ data: [{ id: "model-1", name: "Model 1" }] }),
+  useModelsQuery: () => ({ data: [{ id: "model-1", name: "Model 1", provider: "mock" }] }),
   useProjectsQuery: () => ({ data: [] }),
   useSessionQuery: () => ({
     data: mocks.session,
@@ -164,7 +164,7 @@ describe("ChatSessionPage", () => {
 
     await waitFor(() => {
       expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        model: undefined,
+        modelRef: undefined,
         project: undefined,
       });
     });
@@ -180,7 +180,7 @@ describe("ChatSessionPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(mocks.sendTurn).toHaveBeenCalledWith({
-      model: "model-1",
+      modelRef: { provider: "mock", id: "model-1" },
       project: undefined,
     });
   });
@@ -205,7 +205,7 @@ describe("ChatSessionPage", () => {
 
     await waitFor(() => {
       expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        model: undefined,
+        modelRef: undefined,
         project: undefined,
       });
     });

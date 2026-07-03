@@ -1,6 +1,7 @@
 use crate::model::TalosConfig;
 use crate::talos;
 use crate::turn_api::TimelineActiveTurnSnapshot;
+use crate::ModelRef;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -93,54 +94,60 @@ pub struct TalosSession {
     pub state: SessionState,
 }
 
+/// Applies and validates per-session configuration overrides.
 pub struct SessionConfigOverridePolicy;
 
 impl SessionConfigOverridePolicy {
-    pub fn validate_conf(_conf: &SessionConf) -> crate::TalosResult<()> {
+    /// Ensures overrides only contain complete provider/model pairs.
+    pub fn validate_conf(conf: &SessionConf) -> crate::TalosResult<()> {
+        if let Some(model_ref) = conf.model_ref.as_ref() {
+            if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
+                return Err(talos_error::TalosError::ValidationError(
+                    "session model_ref provider and id must not be empty".to_string(),
+                ));
+            }
+        }
         Ok(())
     }
 
-    pub fn extract_agent_model(conf: &SessionConf) -> crate::TalosResult<Option<String>> {
+    /// Reads the explicit provider/model override stored on a session.
+    pub fn extract_model_ref(conf: &SessionConf) -> crate::TalosResult<Option<ModelRef>> {
         Self::validate_conf(conf)?;
-        Ok(conf.agent.as_ref().and_then(|agent| agent.model.clone()))
+        Ok(conf.model_ref.clone())
     }
 
-    pub fn build_conf_for_model(base_model: &str, effective_model: &str) -> SessionConf {
-        if effective_model == base_model {
-            return SessionConf::default();
-        }
-        Self::single_model_conf(effective_model)
-    }
-
-    pub fn single_model_conf(model: &str) -> SessionConf {
+    /// Builds a session override for a concrete provider/model pair.
+    pub fn single_model_ref_conf(model_ref: &ModelRef) -> SessionConf {
         SessionConf {
-            agent: Some(SessionAgentConf {
-                model: Some(model.to_string()),
-            }),
+            model_ref: Some(model_ref.clone()),
         }
     }
 
+    /// Merges a partial session patch into the persisted override.
     pub fn merge_conf(base: &SessionConf, patch: &SessionConf) -> SessionConf {
         let mut merged = base.clone();
-
-        if let Some(agent_patch) = patch.agent.as_ref() {
-            let agent = merged.agent.get_or_insert_with(SessionAgentConf::default);
-            if let Some(model) = agent_patch.model.clone() {
-                agent.model = Some(model);
-            }
+        if let Some(model_ref) = patch.model_ref.clone() {
+            merged.model_ref = Some(model_ref);
         }
-
         merged
     }
 
+    /// Applies session overrides on top of the current base runtime config.
     pub fn apply_to_config(
         base_config: &TalosConfig,
-        record_model: &str,
         conf: &SessionConf,
     ) -> crate::TalosResult<TalosConfig> {
         let mut config = base_config.clone();
-        let model = Self::extract_agent_model(conf)?.unwrap_or_else(|| record_model.to_string());
-        config.agent.model = model.clone();
+        let model_ref = Self::extract_model_ref(conf)?;
+        if let Some(provider) = model_ref
+            .as_ref()
+            .map(|model_ref| model_ref.provider.clone())
+        {
+            config.llm.provider = provider;
+        }
+        let model = model_ref
+            .map(|model_ref| model_ref.id)
+            .unwrap_or_else(|| base_config.llm.model.clone());
         config.llm.model = model;
         Ok(config)
     }
@@ -161,7 +168,6 @@ impl TalosSession {
         self.state.last_activity = crate::now();
         self.state.message_count = self.state.message_count.saturating_add(message_delta);
         self.state.usage.accumulate(usage);
-        self.config.agent.model = assistant_model.to_string();
         self.config.llm.model = assistant_model.to_string();
     }
 }
@@ -188,7 +194,7 @@ pub struct SessionInfo {
     pub user_id: String,
     pub source_type: talos::TalosSourceType,
     pub provider: talos::TalosProvider,
-    pub model: String,
+    pub model_ref: ModelRef,
     #[ts(type = "number")]
     pub created_at: u64,
     #[ts(type = "number")]
@@ -213,7 +219,10 @@ impl From<&TalosSession> for SessionInfo {
             user_id: session.user_id.clone(),
             source_type: session.context.source_type.clone(),
             provider: session.context.provider.clone(),
-            model: session.config.llm.model.clone(),
+            model_ref: ModelRef {
+                provider: session.config.llm.provider.clone(),
+                id: session.config.llm.model.clone(),
+            },
             created_at: session.state.created_at,
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,
@@ -332,9 +341,9 @@ pub struct SessionPatch {
 }
 
 impl SessionPatch {
-    pub fn agent_model(&self) -> crate::TalosResult<Option<String>> {
+    pub fn model_ref(&self) -> crate::TalosResult<Option<ModelRef>> {
         let conf = self.conf.as_ref().cloned().unwrap_or_default();
-        SessionConfigOverridePolicy::extract_agent_model(&conf)
+        SessionConfigOverridePolicy::extract_model_ref(&conf)
     }
 }
 
@@ -353,15 +362,10 @@ pub enum OptionalCurrentDirectoryPatch {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct SessionAgentConf {
-    #[serde(default)]
-    pub model: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+/// Configuration override stored with a session.
 pub struct SessionConf {
     #[serde(default)]
-    pub agent: Option<SessionAgentConf>,
+    pub model_ref: Option<ModelRef>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]

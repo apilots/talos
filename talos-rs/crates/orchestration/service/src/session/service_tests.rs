@@ -1,10 +1,65 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use async_trait::async_trait;
+use talos_error::TalosResult;
 use talos_store::project::MockProjectStore;
-use talos_store::session::MockSessionStore;
+use talos_store::session::{MockSessionStore, SessionQuery, SessionRecord, SessionStore};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+use talos_types::{ModelRef, SessionConf};
 
-use super::SessionService;
+use super::{CreateSessionParams, SessionService};
+
+#[derive(Default)]
+struct RecordingSessionStore {
+    records: Mutex<Vec<SessionRecord>>,
+}
+
+#[async_trait]
+impl SessionStore for RecordingSessionStore {
+    async fn insert_session_record(
+        &self,
+        record: &SessionRecord,
+        _agent_id: &str,
+        _scope: &str,
+    ) -> TalosResult<()> {
+        self.records.lock().unwrap().push(record.clone());
+        Ok(())
+    }
+
+    async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
+        Ok(self
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| record.id == session_id)
+            .cloned())
+    }
+
+    async fn list_session_records(&self, _query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
+        Ok(self.records.lock().unwrap().clone())
+    }
+
+    async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
+        Ok(self.records.lock().unwrap().len())
+    }
+
+    async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
+            return Ok(false);
+        };
+        *stored = record.clone();
+        Ok(true)
+    }
+
+    async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let len_before = records.len();
+        records.retain(|record| record.id != session_id);
+        Ok(records.len() != len_before)
+    }
+}
 
 fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
     talos_config::ProviderModelConfig {
@@ -34,6 +89,56 @@ fn context() -> TalosContext {
     }
 }
 
+fn create_session_params(
+    context: TalosContext,
+    target_agent: &str,
+    model_ref: Option<ModelRef>,
+) -> CreateSessionParams {
+    CreateSessionParams {
+        session_id: None,
+        context,
+        target_agent: target_agent.to_string(),
+        model_ref,
+        agent_model_ref: None,
+        conf: None,
+        workspace_id: None,
+        project_id: None,
+        current_directory: None,
+    }
+}
+
+#[tokio::test]
+async fn create_session_uses_agent_model_ref_before_global_default() {
+    let mut base_config = talos_types::TalosConfig::default();
+    base_config.llm.provider = "anthropic".to_string();
+    base_config.llm.model = "global-model".to_string();
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        base_config,
+    );
+    let mut params = create_session_params(context(), "default", None);
+    params.agent_model_ref = Some(ModelRef {
+        provider: "openai".to_string(),
+        id: "agent-model".to_string(),
+    });
+
+    let session = service
+        .create_session(params)
+        .await
+        .expect("session should be created");
+
+    assert_eq!(session.config.llm.provider, "openai");
+    assert_eq!(session.config.llm.model, "agent-model");
+    assert_eq!(
+        session.conf.model_ref,
+        Some(ModelRef {
+            provider: "openai".to_string(),
+            id: "agent-model".to_string(),
+        })
+    );
+}
+
 #[tokio::test]
 async fn update_base_llm_changes_new_session_default_model() {
     let mut base_config = talos_types::TalosConfig::default();
@@ -44,13 +149,15 @@ async fn update_base_llm_changes_new_session_default_model() {
         Arc::new(MockProjectStore::new()),
         base_config,
     );
-    let mut llm = talos_config::LlmConfig::default();
-    llm.provider = "openai".to_string();
-    llm.model = "new-model".to_string();
+    let llm = talos_config::LlmConfig {
+        provider: "openai".to_string(),
+        model: "new-model".to_string(),
+        ..Default::default()
+    };
 
     service.update_base_llm(&llm);
     let session = service
-        .create_session(None, context(), "default", None, None, None, None, None)
+        .create_session(create_session_params(context(), "default", None))
         .await
         .expect("session should be created");
 
@@ -69,9 +176,11 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
         Arc::new(MockProjectStore::new()),
         base_config,
     );
-    let mut llm = talos_config::LlmConfig::default();
-    llm.provider = "anthropic".to_string();
-    llm.model = "new-default".to_string();
+    let mut llm = talos_config::LlmConfig {
+        provider: "anthropic".to_string(),
+        model: "new-default".to_string(),
+        ..Default::default()
+    };
     llm.anthropic.models = vec![
         provider_model("new-default"),
         provider_model("session-model"),
@@ -79,16 +188,14 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
 
     service.update_base_llm(&llm);
     let session = service
-        .create_session(
-            None,
+        .create_session(create_session_params(
             context(),
             "default",
-            Some("session-model".to_string()),
-            None,
-            None,
-            None,
-            None,
-        )
+            Some(ModelRef {
+                provider: "anthropic".to_string(),
+                id: "session-model".to_string(),
+            }),
+        ))
         .await
         .expect("session should be created");
 
@@ -97,14 +204,41 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
 }
 
 #[tokio::test]
-async fn provider_switch_resets_existing_session_model_to_new_default() {
+async fn create_session_conf_model_ref_matches_stored_model() {
+    let mut base_config = talos_types::TalosConfig::default();
+    base_config.llm.provider = "anthropic".to_string();
+    base_config.llm.model = "default-model".to_string();
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        base_config,
+    );
+    let mut params = create_session_params(context(), "default", None);
+    params.conf = Some(SessionConf {
+        model_ref: Some(ModelRef {
+            provider: "openai".to_string(),
+            id: "conf-model".to_string(),
+        }),
+    });
+
+    let session = service
+        .create_session(params)
+        .await
+        .expect("session should be created");
+
+    assert_eq!(session.config.llm.provider, "openai");
+    assert_eq!(session.config.llm.model, "conf-model");
+    let records = store.records.lock().unwrap();
+    assert_eq!(records[0].model, "conf-model");
+}
+
+#[tokio::test]
+async fn existing_session_without_model_ref_tracks_new_default() {
     let mut base_config = talos_types::TalosConfig::default();
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "old-default".to_string();
-    base_config.llm.anthropic.models = vec![
-        provider_model("old-default"),
-        provider_model("session-model"),
-    ];
+    base_config.llm.anthropic.models = vec![provider_model("old-default")];
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
@@ -112,23 +246,17 @@ async fn provider_switch_resets_existing_session_model_to_new_default() {
     );
 
     let original = service
-        .create_session(
-            None,
-            context(),
-            "default",
-            Some("session-model".to_string()),
-            None,
-            None,
-            None,
-            None,
-        )
+        .create_session(create_session_params(context(), "default", None))
         .await
         .expect("session should be created");
-    assert_eq!(original.config.llm.model, "session-model");
+    assert_eq!(original.config.llm.provider, "anthropic");
+    assert_eq!(original.config.llm.model, "old-default");
 
-    let mut llm = talos_config::LlmConfig::default();
-    llm.provider = "openai".to_string();
-    llm.model = "new-default".to_string();
+    let mut llm = talos_config::LlmConfig {
+        provider: "openai".to_string(),
+        model: "new-default".to_string(),
+        ..Default::default()
+    };
     llm.openai.models = vec![provider_model("new-default")];
     service.update_base_llm(&llm);
 
@@ -151,16 +279,10 @@ async fn create_session_preserves_workspace_routing_key() {
     );
 
     let session = service
-        .create_session(
-            None,
-            context(),
-            "default",
-            None,
-            None,
-            Some("workspace-alpha".to_string()),
-            None,
-            None,
-        )
+        .create_session(CreateSessionParams {
+            workspace_id: Some("workspace-alpha".to_string()),
+            ..create_session_params(context(), "default", None)
+        })
         .await
         .expect("session should be created");
 

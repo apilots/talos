@@ -16,11 +16,7 @@ impl TuiApp {
     pub fn poll_stream_events(&mut self) {
         let mut should_drop_stream = false;
 
-        loop {
-            let Some(stream) = self.pending_stream.as_mut() else {
-                break;
-            };
-
+        while let Some(stream) = self.pending_stream.as_mut() {
             match stream.try_recv() {
                 Ok(event) => {
                     self.last_stream_event_at = Some(Instant::now());
@@ -71,10 +67,8 @@ impl TuiApp {
                 self.push_right_event("stream channel connected".to_string());
             }
             Some(Err(err)) => {
-                if is_active_turn_conflict(&err) {
-                    if self.reconnect_active_stream().await {
-                        return;
-                    }
+                if is_active_turn_conflict(&err) && self.reconnect_active_stream().await {
+                    return;
                 }
                 let retry_message = self.active_message_raw.clone();
                 let retry_skills = self.active_message_skills.clone();
@@ -175,16 +169,16 @@ impl TuiApp {
 
         if self.in_flight {
             if let Some(last_event_at) = self.last_stream_event_at {
-                if last_event_at.elapsed() > STREAM_STALL_TIMEOUT {
-                    if !self.reconnect_active_stream().await {
-                        self.finish_active_stream("stream stalled and timed out", true, true);
-                        self.active_message_raw = None;
-                        self.active_retry_count = 0;
-                        self.show_status_hint(
-                            "Current response timed out. Moving to next queued message.",
-                            Duration::from_secs(4),
-                        );
-                    }
+                if last_event_at.elapsed() > STREAM_STALL_TIMEOUT
+                    && !self.reconnect_active_stream().await
+                {
+                    self.finish_active_stream("stream stalled and timed out", true, true);
+                    self.active_message_raw = None;
+                    self.active_retry_count = 0;
+                    self.show_status_hint(
+                        "Current response timed out. Moving to next queued message.",
+                        Duration::from_secs(4),
+                    );
                 }
             }
         }

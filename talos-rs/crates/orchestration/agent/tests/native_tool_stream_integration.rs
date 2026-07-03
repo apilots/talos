@@ -8,8 +8,9 @@ use talos_agent::{
 };
 use talos_error::TalosResult;
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ModelBlockCompleted,
-    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, Role, Usage,
+    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, Role, Usage,
 };
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
@@ -17,7 +18,7 @@ use talos_types::talos::{
     AgentEventPayload, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta,
     TalosTimelineItemKind,
 };
-use talos_types::{SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
 use tokio::sync::mpsc;
 
 static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -98,6 +99,16 @@ impl Tool for EchoTool {
 
 struct IntegrationMockProvider {
     state: Arc<IntegrationState>,
+}
+
+struct StaticLlmProviderRouter {
+    provider: Arc<dyn LlmProvider>,
+}
+
+impl LlmProviderRouter for StaticLlmProviderRouter {
+    fn provider_for(&self, _model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
+        Ok(self.provider.clone())
+    }
 }
 
 #[async_trait]
@@ -355,11 +366,15 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
         "integration_agent".to_string(),
         "Integration Agent".to_string(),
         "Agent for integration tests".to_string(),
-        provider,
-        "mock-model".to_string(),
+        Arc::new(StaticLlmProviderRouter { provider }),
+        ModelRef {
+            provider: "mock".to_string(),
+            id: "mock-model".to_string(),
+        },
         registry,
         Default::default(),
     )
+    .expect("agent harness should build")
 }
 
 fn build_request(input: &str) -> AgentRunParams {

@@ -129,7 +129,7 @@ impl TuiApp {
                     Self::append_usage_lines(&mut lines, "local", &self.displayed_usage());
                     if let Some(info) = session_info {
                         self.apply_session_snapshot(&info);
-                        lines.push(format!("server.model: {}", info.model));
+                        lines.push(format!("server.model: {}", info.model_ref.id));
                         lines.push(format!("server.messages: {}", info.message_count));
                         Self::append_usage_lines(&mut lines, "server", &info.usage);
                     }
@@ -227,10 +227,10 @@ impl TuiApp {
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
-            CommandUpdate::SessionHistoryLoaded { session, result } => match result {
+            CommandUpdate::SessionHistoryLoaded { session, result } => match *result {
                 Ok(load) => {
                     let sid = &session.id;
-                    let model = &session.model;
+                    let model = &session.model_ref.id;
                     let title = &session.title;
                     self.push_block(
                         ChatRole::System,

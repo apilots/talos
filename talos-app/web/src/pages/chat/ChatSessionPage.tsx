@@ -19,7 +19,7 @@ import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { Panel } from "@/shared/ui/Panel";
 import { Button } from "@/shared/ui/Button";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
-import type { SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
@@ -31,6 +31,14 @@ interface SessionLocationState {
 
 function selectedSkillsOption(skills?: SkillSuggestion[]) {
   return skills && skills.length > 0 ? skills : undefined;
+}
+
+function modelRefForId(models: ModelInfo[] | undefined, modelId: string | undefined): ModelRef | undefined {
+  if (!modelId) {
+    return undefined;
+  }
+  const model = models?.find((entry) => entry.id === modelId);
+  return model ? { provider: model.provider, id: model.id } : undefined;
 }
 
 export function ChatSessionPage() {
@@ -124,7 +132,7 @@ export function ChatSessionPage() {
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
     void sendText(initialPrompt, {
-      model: locationState?.initialModel,
+      modelRef: modelRefForId(models, locationState?.initialModel),
       project: initialProject,
       skills: selectedSkillsOption(locationState?.initialSkills),
     })
@@ -141,6 +149,7 @@ export function ChatSessionPage() {
     locationState?.initialProjectId,
     locationState?.initialPrompt,
     locationState?.initialSkills,
+    models,
     navigate,
     projects,
     sendText,
@@ -271,7 +280,10 @@ export function ChatSessionPage() {
                 setDraftModel(model);
                 return;
               }
-              updateModel.mutate(model);
+              const modelRef = modelRefForId(models, model);
+              if (modelRef) {
+                updateModel.mutate(modelRef);
+              }
             }}
             onProjectChange={(projectId) => {
               setActiveProjectId(projectId);
@@ -295,7 +307,7 @@ export function ChatSessionPage() {
               if (!session) {
                 const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
                 return sendTurn({
-                  model: currentModel,
+                  modelRef: modelRefForId(models, currentModel),
                   project: selectedProject,
                   skills: selectedSkillsOption(skills),
                 });

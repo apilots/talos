@@ -16,8 +16,9 @@ use talos_agent_kernel::{
 };
 use talos_config::AgentKernelConfig;
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockCompleted, ModelBlockDelta,
-    ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, Role, ToolDefinition, Usage,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
+    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, Role,
+    ToolDefinition, Usage,
 };
 use talos_memory::{Memory, TalosTurn};
 use talos_tools::{
@@ -31,7 +32,9 @@ use talos_types::talos::{
     TalosProvider, TalosSourceType, TalosTimelineDelta, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
 };
-use talos_types::{SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{
+    ModelRef, SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE,
+};
 use tempfile::TempDir;
 use tokio::sync::Notify;
 use tokio::time::{timeout, Duration};
@@ -41,11 +44,36 @@ fn build_test_agent() -> AgentHarnessImpl {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(MockLlmProvider {}),
-        "gpt-4o".to_string(),
+        static_router(Arc::new(MockLlmProvider {})),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
+    .expect("agent harness should build")
+}
+
+struct StaticLlmProviderRouter {
+    provider: Arc<dyn LlmProvider>,
+}
+
+impl LlmProviderRouter for StaticLlmProviderRouter {
+    fn provider_for(
+        &self,
+        _model_ref: &ModelRef,
+    ) -> talos_error::TalosResult<Arc<dyn LlmProvider>> {
+        Ok(self.provider.clone())
+    }
+}
+
+fn static_router(provider: Arc<dyn LlmProvider>) -> Arc<dyn LlmProviderRouter> {
+    Arc::new(StaticLlmProviderRouter { provider })
+}
+
+fn model_ref(id: &str) -> ModelRef {
+    ModelRef {
+        provider: "test".to_string(),
+        id: id.to_string(),
+    }
 }
 
 async fn submit_dynamic_tool_result(
@@ -94,6 +122,96 @@ struct CapturingMaxTokensProvider {
 
 struct DynamicResumeAgentProvider {
     calls: AtomicUsize,
+}
+
+struct NamedRecordingProvider {
+    provider_name: &'static str,
+    seen_provider: Arc<Mutex<Option<String>>>,
+    seen_model: Arc<Mutex<Option<String>>>,
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for NamedRecordingProvider {
+    fn name(&self) -> &str {
+        self.provider_name
+    }
+
+    fn default_model(&self) -> String {
+        "default-model".to_string()
+    }
+
+    async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
+        *self.seen_provider.lock().expect("provider lock poisoned") =
+            Some(self.provider_name.to_string());
+        *self.seen_model.lock().expect("model lock poisoned") = Some(request.model.clone());
+        Ok(ChatResponse {
+            content: "provider selected".to_string(),
+            reasoning: Vec::new(),
+            model: request.model,
+            usage: Usage::default(),
+            finish_reason: Some("stop".to_string()),
+            tool_calls: None,
+        })
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Ok(ChatStream { rx })
+    }
+
+    async fn stream_model_blocks(
+        &self,
+        request: ChatRequest,
+    ) -> talos_error::TalosResult<ModelBlockStream> {
+        *self.seen_provider.lock().expect("provider lock poisoned") =
+            Some(self.provider_name.to_string());
+        *self.seen_model.lock().expect("model lock poisoned") = Some(request.model.clone());
+        let (tx, rx) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move {
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockStarted(
+                    ModelBlockStarted::assistant_text(None, None),
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockDelta {
+                    model_item_id: "assistant_text".to_string(),
+                    delta: ModelBlockDelta::AssistantText {
+                        delta: "provider selected".to_string(),
+                    },
+                }))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::BlockCompleted(
+                    ModelBlockCompleted {
+                        model_item_id: "assistant_text".to_string(),
+                    },
+                )))
+                .await;
+            let _ = tx
+                .send(Ok(ModelBlockStreamEvent::Done {
+                    finish_reason: Some("stop".to_string()),
+                    usage: None,
+                }))
+                .await;
+        });
+        Ok(ModelBlockStream::new(rx))
+    }
+}
+
+struct RecordingLlmProviderRouter {
+    primary: Arc<dyn LlmProvider>,
+    secondary: Arc<dyn LlmProvider>,
+}
+
+impl LlmProviderRouter for RecordingLlmProviderRouter {
+    fn provider_for(&self, model_ref: &ModelRef) -> talos_error::TalosResult<Arc<dyn LlmProvider>> {
+        if model_ref.provider == "secondary" {
+            Ok(self.secondary.clone())
+        } else {
+            Ok(self.primary.clone())
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -299,18 +417,24 @@ fn single_text_block_stream(text: &str) -> ModelBlockStream {
 
 fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let mut kernel_config = AgentKernelConfig::default();
-    kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    kernel_config.memory.compaction_threshold_bytes = usize::MAX;
+    let kernel_config = AgentKernelConfig {
+        workspace_dir: temp_dir.path().display().to_string(),
+        memory: talos_config::AgentKernelMemoryConfig {
+            compaction_threshold_bytes: usize::MAX,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
     let agent = AgentHarnessImpl::new(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(MockLlmProvider {}),
-        "gpt-4o".to_string(),
+        static_router(Arc::new(MockLlmProvider {})),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
-    );
+    )
+    .expect("agent harness should build");
     (temp_dir, agent)
 }
 
@@ -890,11 +1014,12 @@ async fn test_generate_system_prompt() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(mock_provider),
-        "gpt-4o".to_string(),
+        static_router(Arc::new(mock_provider)),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
-    );
+    )
+    .expect("agent harness should build");
 
     agent.add_tool(Arc::new(WebSearchTool));
     agent.add_tool(Arc::new(ReadTool));
@@ -914,11 +1039,12 @@ async fn test_add_tool() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(mock_provider),
-        "gpt-4o".to_string(),
+        static_router(Arc::new(mock_provider)),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
-    );
+    )
+    .expect("agent harness should build");
 
     assert_eq!(agent.tool_registry.list_tool_names().len(), 0);
 
@@ -929,7 +1055,7 @@ async fn test_add_tool() {
 }
 
 #[tokio::test]
-async fn test_run_uses_agent_runtime_config_and_model_override() {
+async fn test_run_uses_agent_runtime_config_and_session_model() {
     let captured_max_tokens = Arc::new(Mutex::new(None));
     let captured_model = Arc::new(Mutex::new(None));
     let provider = Arc::new(CapturingMaxTokensProvider {
@@ -942,16 +1068,16 @@ async fn test_run_uses_agent_runtime_config_and_model_override() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        provider,
-        "agent-model".to_string(),
+        static_router(provider),
+        model_ref("agent-model"),
         Arc::new(ToolRegistry::new()),
         agent_kernel_config,
-    );
+    )
+    .expect("agent harness should build");
 
     let mut session = build_test_session("session-kernel-override", "workspace-1");
     session.config.agent.kernel.output.max_tokens = 123;
     session.config.llm.model = "session-model".to_string();
-    session.config.agent.model = "session-model".to_string();
 
     let result = agent
         .run(agent_run_params(
@@ -975,7 +1101,64 @@ async fn test_run_uses_agent_runtime_config_and_model_override() {
         .expect("model capture lock poisoned")
         .clone()
         .expect("provider should receive model");
-    assert_eq!(seen_model, "agent-model");
+    assert_eq!(seen_model, "session-model");
+}
+
+#[tokio::test]
+async fn test_run_uses_session_provider_for_llm_routing() {
+    let seen_provider = Arc::new(Mutex::new(None));
+    let seen_model = Arc::new(Mutex::new(None));
+    let primary = Arc::new(NamedRecordingProvider {
+        provider_name: "primary",
+        seen_provider: seen_provider.clone(),
+        seen_model: seen_model.clone(),
+    });
+    let secondary = Arc::new(NamedRecordingProvider {
+        provider_name: "secondary",
+        seen_provider: seen_provider.clone(),
+        seen_model: seen_model.clone(),
+    });
+    let agent = AgentHarnessImpl::new(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        Arc::new(RecordingLlmProviderRouter { primary, secondary }),
+        ModelRef {
+            provider: "primary".to_string(),
+            id: "primary-model".to_string(),
+        },
+        Arc::new(ToolRegistry::new()),
+        AgentKernelConfig::default(),
+    )
+    .expect("agent harness should build");
+
+    let mut session = build_test_session("session-provider-routing", "workspace-1");
+    session.config.llm.provider = "secondary".to_string();
+    session.config.llm.model = "secondary-model".to_string();
+
+    let result = agent
+        .run(agent_run_params(
+            session,
+            "turn-provider-routing",
+            vec![TalosInputItem::Text {
+                text: "hello".to_string(),
+            }],
+        ))
+        .await
+        .expect("run should succeed");
+
+    assert_eq!(result.stop_reason, TalosStopReason::EndTurn);
+    assert_eq!(
+        seen_provider
+            .lock()
+            .expect("provider lock poisoned")
+            .as_deref(),
+        Some("secondary")
+    );
+    assert_eq!(
+        seen_model.lock().expect("model lock poisoned").as_deref(),
+        Some("secondary-model")
+    );
 }
 
 #[tokio::test]
@@ -1035,11 +1218,12 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        provider.clone(),
-        "mock-model".to_string(),
+        static_router(provider.clone()),
+        model_ref("mock-model"),
         registry,
         kernel_config,
-    );
+    )
+    .expect("agent harness should build");
     let session_id = "session-dynamic-main-resume";
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
@@ -1130,10 +1314,10 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
                         )
                     });
                 }
-                talos_types::talos::TalosTimelineDelta::Text { text } => {
-                    if text.contains("Final answer after dynamic pong.") {
-                        saw_final_answer = true;
-                    }
+                talos_types::talos::TalosTimelineDelta::Text { text }
+                    if text.contains("Final answer after dynamic pong.") =>
+                {
+                    saw_final_answer = true;
                 }
                 _ => {}
             },
@@ -1471,11 +1655,12 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        provider.clone(),
-        "mock-model".to_string(),
+        static_router(provider.clone()),
+        model_ref("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
-    );
+    )
+    .expect("agent harness should build");
     let session_id = "session-dynamic-resume-wrong-turn";
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
@@ -1573,11 +1758,12 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        provider.clone(),
-        "mock-model".to_string(),
+        static_router(provider.clone()),
+        model_ref("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
-    );
+    )
+    .expect("agent harness should build");
     let mut session = build_test_session("session-missing-tool-call", "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
@@ -1676,11 +1862,12 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        provider.clone(),
-        "mock-model".to_string(),
+        static_router(provider.clone()),
+        model_ref("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
-    );
+    )
+    .expect("agent harness should build");
     let session_id = "session-missing-dynamic-request";
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
@@ -1748,14 +1935,15 @@ async fn test_interrupt_aborts_only_current_session_turn() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(SequencedProvider {
+        static_router(Arc::new(SequencedProvider {
             started: started.clone(),
             calls: AtomicUsize::new(0),
-        }),
-        "gpt-4o".to_string(),
+        })),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
-    );
+    )
+    .expect("agent harness should build");
     let session = build_test_session("session-cancel", "workspace-a");
 
     let mut first_stream = agent
@@ -1846,14 +2034,15 @@ async fn test_run_streamed_queues_second_active_turn_for_same_session() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(SequencedProvider {
+        static_router(Arc::new(SequencedProvider {
             started: started.clone(),
             calls: AtomicUsize::new(0),
-        }),
-        "gpt-4o".to_string(),
+        })),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
-    );
+    )
+    .expect("agent harness should build");
     let session = build_test_session("session-busy", "workspace-a");
 
     let mut first_stream = agent
@@ -2007,14 +2196,15 @@ async fn test_run_queues_second_active_turn_for_same_session() {
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        Arc::new(SequencedProvider {
+        static_router(Arc::new(SequencedProvider {
             started: started.clone(),
             calls: AtomicUsize::new(0),
-        }),
-        "gpt-4o".to_string(),
+        })),
+        model_ref("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
-    );
+    )
+    .expect("agent harness should build");
     let agent = Arc::new(agent);
     let session = build_test_session("session-run-queue", "workspace-a");
 

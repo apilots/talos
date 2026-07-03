@@ -5,10 +5,10 @@ use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AgentEventPayload, AgentEventType, AppServerClient, AppServerClientConfig,
     ConfigGetRequest, ExpectedFileVersion, GatewayClient, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest,
-    ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest,
-    StartTurnRequest, SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext,
-    TalosError, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
+    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ModelRef,
+    ProjectDeleteRequest, ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest,
+    SessionGetRequest, StartTurnRequest, SubmitDynamicToolResultRequest, SubscribeTimelineRequest,
+    TalosContext, TalosError, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineItemKind, TimelineEventEnvelope, WorkspaceDocKind,
     WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
 };
@@ -591,13 +591,21 @@ fn start_turn_request(
         }],
         workspace_id: None,
         context: Some(test_talos_context()),
-        model: std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-            .ok()
-            .filter(|value| !value.trim().is_empty()),
+        model_ref: test_model_ref(),
         project_id: None,
         current_directory: None,
         client_request_id,
     }
+}
+
+fn test_model_ref() -> Option<ModelRef> {
+    let provider = std::env::var("TALOS_APP_SERVER_TEST_PROVIDER")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    let id = std::env::var("TALOS_APP_SERVER_TEST_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())?;
+    Some(ModelRef { provider, id })
 }
 
 async fn collect_until_terminal(
@@ -815,13 +823,13 @@ fn assistant_text_from_events(events: &[TimelineEventEnvelope]) -> String {
                     }
                 }
             }
-            AgentEventPayload::ItemCompleted(completed) => {
-                if item_kinds.get(&completed.item_id) == Some(&TalosTimelineItemKind::AssistantText)
-                {
-                    if let Some(TalosTimelineContent::Text { text }) = &completed.final_content {
-                        if !text.is_empty() && !output.contains(text) {
-                            output.push_str(text);
-                        }
+            AgentEventPayload::ItemCompleted(completed)
+                if item_kinds.get(&completed.item_id)
+                    == Some(&TalosTimelineItemKind::AssistantText) =>
+            {
+                if let Some(TalosTimelineContent::Text { text }) = &completed.final_content {
+                    if !text.is_empty() && !output.contains(text) {
+                        output.push_str(text);
                     }
                 }
             }

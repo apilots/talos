@@ -12,6 +12,13 @@ pub struct ModelListResponse {
     pub models: Vec<ModelInfo>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+/// Identifies a concrete model under a provider for request-time selection.
+pub struct ModelRef {
+    pub provider: String,
+    pub id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct LlmConfig {
     pub provider: String,
@@ -31,7 +38,6 @@ pub struct LlmProviderConfig {
     #[serde(default)]
     #[ts(optional)]
     pub base_url: Option<String>,
-    pub enabled: bool,
     #[serde(default)]
     #[ts(optional)]
     pub protocol: Option<LlmProtocol>,
@@ -193,7 +199,6 @@ impl From<talos_config::ProviderConfig> for LlmProviderConfig {
         Self {
             api_key: value.api_key,
             base_url: value.base_url,
-            enabled: value.enabled,
             protocol: value.protocol.map(Into::into),
             models: value.models.into_iter().map(Into::into).collect(),
         }
@@ -205,7 +210,6 @@ impl From<LlmProviderConfig> for talos_config::ProviderConfig {
         Self {
             api_key: value.api_key,
             base_url: value.base_url,
-            enabled: value.enabled,
             protocol: value.protocol.map(Into::into),
             models: value.models.into_iter().map(Into::into).collect(),
         }

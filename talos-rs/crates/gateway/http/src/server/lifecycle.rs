@@ -32,6 +32,12 @@ pub struct ServerLifecycle {
     updates_tx: watch::Sender<ServerLifecycleState>,
 }
 
+impl Default for ServerLifecycle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ServerLifecycle {
     pub fn new() -> Self {
         let (updates_tx, _updates_rx) = watch::channel(ServerLifecycleState::Running);

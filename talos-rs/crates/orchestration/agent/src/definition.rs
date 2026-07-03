@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
+    ModelRefConfig,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::LlmProvider;
+use talos_llm_provider::LlmProviderRouter;
 use talos_tools::ToolRegistry;
+use talos_types::ModelRef;
 
-use crate::{AgentHarnessImpl, SkillRootsResolver};
+use crate::{agent::AgentHarnessParams, AgentHarnessImpl, SkillRootsResolver};
 
 /// Supported Agent runtime families.
 ///
@@ -93,8 +95,12 @@ pub struct AgentDefinition {
     pub description: String,
     /// Default execution workspace key, not a filesystem path and not an Agent selector.
     pub default_workspace_id: Option<String>,
-    /// Optional model override for this Agent.
-    pub model: Option<String>,
+    /// Concrete model used to initialize this Agent runtime.
+    pub model_ref: ModelRef,
+    /// Agent-specific model override applied when creating new product sessions.
+    ///
+    /// None means sessions inherit the current service-level LLM default.
+    pub model_ref_override: Option<ModelRef>,
     /// Typed runtime configuration matched with kind.
     pub runtime_config: AgentRuntimeConfig,
 }
@@ -127,9 +133,15 @@ pub struct AgentDefinitionLoader;
 
 impl AgentDefinitionLoader {
     /// Load explicit definitions or synthesize the default Kernel Agent.
-    pub fn load(config: &AgentConfig, default_model: &str) -> TalosResult<Vec<AgentDefinition>> {
+    pub fn load(
+        config: &AgentConfig,
+        default_model_ref: &ModelRef,
+    ) -> TalosResult<Vec<AgentDefinition>> {
         if config.agents.is_empty() {
-            return Ok(vec![synthesized_default_definition(config, default_model)]);
+            return Ok(vec![synthesized_default_definition(
+                config,
+                default_model_ref,
+            )]);
         }
 
         let mut seen_ids = HashSet::new();
@@ -137,7 +149,7 @@ impl AgentDefinitionLoader {
             .agents
             .iter()
             .map(|definition| {
-                let definition = definition_from_config(config, default_model, definition)?;
+                let definition = definition_from_config(config, default_model_ref, definition)?;
                 if !seen_ids.insert(definition.id.clone()) {
                     return Err(TalosError::ValidationError(format!(
                         "duplicate agent definition id: {}",
@@ -156,7 +168,7 @@ impl AgentDefinitionLoader {
 /// and selects the concrete runtime implementation without leaking runtime
 /// internals to Coordinator.
 pub struct AgentHarnessFactory {
-    llm_provider: Arc<dyn LlmProvider>,
+    llm_provider_router: Arc<dyn LlmProviderRouter>,
     tool_registry: Arc<ToolRegistry>,
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
 }
@@ -164,12 +176,12 @@ pub struct AgentHarnessFactory {
 impl AgentHarnessFactory {
     /// Create a factory with shared Harness infrastructure.
     pub fn new(
-        llm_provider: Arc<dyn LlmProvider>,
+        llm_provider_router: Arc<dyn LlmProviderRouter>,
         tool_registry: Arc<ToolRegistry>,
         skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     ) -> Self {
         Self {
-            llm_provider,
+            llm_provider_router,
             tool_registry,
             skill_roots_resolver,
         }
@@ -188,21 +200,17 @@ impl AgentHarnessFactory {
         }
         match (&definition.kind, &definition.runtime_config) {
             (AgentKind::Kernel, AgentRuntimeConfig::Kernel { kernel }) => {
-                Ok(AgentHarnessImpl::new_with_skill_roots_resolver(
-                    definition.id.clone(),
-                    definition.name.clone(),
-                    definition.description.clone(),
-                    self.llm_provider.clone(),
-                    definition.model.clone().ok_or_else(|| {
-                        TalosError::ValidationError(format!(
-                            "agent `{}` is missing a model",
-                            definition.id
-                        ))
-                    })?,
-                    self.tool_registry.clone(),
-                    kernel.clone(),
-                    self.skill_roots_resolver.clone(),
-                ))
+                AgentHarnessImpl::new_with_skill_roots_resolver(AgentHarnessParams {
+                    id: definition.id.clone(),
+                    name: definition.name.clone(),
+                    description: definition.description.clone(),
+                    llm_provider_router: self.llm_provider_router.clone(),
+                    model_ref: definition.model_ref.clone(),
+                    model_ref_override: definition.model_ref_override.clone(),
+                    tool_registry: self.tool_registry.clone(),
+                    kernel_config: kernel.clone(),
+                    skill_roots_resolver: self.skill_roots_resolver.clone(),
+                })
             }
             (kind, _) => Err(TalosError::UnsupportedModel(format!(
                 "agent runtime kind is not implemented: {:?}",
@@ -237,7 +245,10 @@ impl AgentDefinition {
     }
 }
 
-fn synthesized_default_definition(config: &AgentConfig, default_model: &str) -> AgentDefinition {
+fn synthesized_default_definition(
+    config: &AgentConfig,
+    default_model_ref: &ModelRef,
+) -> AgentDefinition {
     AgentDefinition {
         id: "default".to_string(),
         name: config.name.clone(),
@@ -245,7 +256,8 @@ fn synthesized_default_definition(config: &AgentConfig, default_model: &str) -> 
         enabled: true,
         description: "Default AI assistant".to_string(),
         default_workspace_id: Some(config.kernel.default_workspace_id.clone()),
-        model: model_or_default(Some(config.model.as_str()), default_model),
+        model_ref: model_ref_or_default(config.model_ref.as_ref(), default_model_ref),
+        model_ref_override: model_ref_from_config(config.model_ref.as_ref()),
         runtime_config: AgentRuntimeConfig::Kernel {
             kernel: config.kernel.clone(),
         },
@@ -254,7 +266,7 @@ fn synthesized_default_definition(config: &AgentConfig, default_model: &str) -> 
 
 fn definition_from_config(
     config: &AgentConfig,
-    default_model: &str,
+    default_model_ref: &ModelRef,
     definition: &AgentDefinitionConfig,
 ) -> TalosResult<AgentDefinition> {
     let id = definition.id.trim();
@@ -292,16 +304,24 @@ fn definition_from_config(
             .default_workspace_id
             .clone()
             .or_else(|| Some(config.kernel.default_workspace_id.clone())),
-        model: model_or_default(definition.model.as_deref(), default_model),
+        model_ref: model_ref_or_default(definition.model_ref.as_ref(), default_model_ref),
+        model_ref_override: model_ref_from_config(definition.model_ref.as_ref()),
         runtime_config,
     })
 }
 
-fn model_or_default(model: Option<&str>, default_model: &str) -> Option<String> {
-    model
-        .filter(|value| !value.trim().is_empty())
-        .map(|value| value.trim().to_string())
-        .or_else(|| Some(default_model.to_string()).filter(|value| !value.trim().is_empty()))
+fn model_ref_or_default(
+    model_ref: Option<&ModelRefConfig>,
+    default_model_ref: &ModelRef,
+) -> ModelRef {
+    model_ref_from_config(model_ref).unwrap_or_else(|| default_model_ref.clone())
+}
+
+fn model_ref_from_config(model_ref: Option<&ModelRefConfig>) -> Option<ModelRef> {
+    model_ref.map(|model_ref| ModelRef {
+        provider: model_ref.provider.trim().to_string(),
+        id: model_ref.id.trim().to_string(),
+    })
 }
 
 fn non_empty_or(value: &str, fallback: &str) -> String {

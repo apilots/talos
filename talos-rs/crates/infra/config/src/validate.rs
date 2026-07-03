@@ -6,7 +6,6 @@ use crate::{Config, DatabaseType};
 
 const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "agent.name",
-    "agent.model",
     "gateway.host",
     "gateway.port",
     "gateway.auth",
@@ -89,10 +88,13 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.name is empty or unresolved placeholder".to_string(),
         ));
     }
-    if config.agent.model.trim().is_empty() || is_unresolved_placeholder(&config.agent.model) {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.model is empty or unresolved placeholder".to_string(),
-        ));
+    validate_agent_model_ref(config.agent.model_ref.as_ref(), "agent.model_ref", config)?;
+    for definition in &config.agent.agents {
+        validate_agent_model_ref(
+            definition.model_ref.as_ref(),
+            &format!("agent.agents.{}.model_ref", definition.id),
+            config,
+        )?;
     }
     if config.agent.kernel.tool_parallelism == 0 {
         return Err(TalosError::InvalidConfiguration(
@@ -475,5 +477,47 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
+    Ok(())
+}
+
+fn validate_agent_model_ref(
+    model_ref: Option<&crate::ModelRefConfig>,
+    path: &str,
+    config: &Config,
+) -> TalosResult<()> {
+    use talos_error::TalosError;
+
+    let Some(model_ref) = model_ref else {
+        return Ok(());
+    };
+    let provider = model_ref.provider.trim();
+    let model = model_ref.id.trim();
+    if provider.is_empty()
+        || model.is_empty()
+        || is_unresolved_placeholder(provider)
+        || is_unresolved_placeholder(model)
+    {
+        return Err(TalosError::InvalidConfiguration(format!(
+            "{path} provider and id must not be empty or unresolved placeholder"
+        )));
+    }
+    let provider_key = provider.to_ascii_lowercase();
+    let Some(provider_config) = crate::provider_config_for_llm(&config.llm, &provider_key) else {
+        return Err(TalosError::InvalidConfiguration(format!(
+            "{path} provider '{}' is not configured under llm",
+            model_ref.provider
+        )));
+    };
+    if !provider_config.models.is_empty()
+        && !provider_config
+            .models
+            .iter()
+            .any(|entry| entry.id == model_ref.id)
+    {
+        return Err(TalosError::InvalidConfiguration(format!(
+            "{path} id '{}' is not configured under llm.{}.models",
+            model_ref.id, provider_key
+        )));
+    }
     Ok(())
 }

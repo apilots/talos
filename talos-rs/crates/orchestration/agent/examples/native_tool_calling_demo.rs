@@ -6,13 +6,25 @@ use talos_agent::{
     AgentRunParams, AgentRunSessionState,
 };
 use talos_error::TalosResult;
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
+use talos_llm_provider::{
+    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter, Usage,
+};
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
-use talos_types::{SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
 
 struct NativeToolMockProvider;
+
+struct StaticLlmProviderRouter {
+    provider: Arc<dyn LlmProvider>,
+}
+
+impl LlmProviderRouter for StaticLlmProviderRouter {
+    fn provider_for(&self, _model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
+        Ok(self.provider.clone())
+    }
+}
 
 fn agent_run_params_from_session(
     session: &TalosSession,
@@ -89,11 +101,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "demo-native-tool-agent".to_string(),
         "NativeToolAgent".to_string(),
         "Demonstrates native tool calling flow".to_string(),
-        provider,
-        "mock-model".to_string(),
+        Arc::new(StaticLlmProviderRouter { provider }),
+        ModelRef {
+            provider: "mock".to_string(),
+            id: "mock-model".to_string(),
+        },
         registry,
         Default::default(),
-    );
+    )?;
 
     let session = TalosSession {
         title: "Untitled Session".to_string(),

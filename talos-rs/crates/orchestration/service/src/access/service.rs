@@ -6,30 +6,40 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    CancelActiveTurnParams, OptionalProjectIdPatch, ProjectPatch, SessionListRequest, SessionPatch,
-    TalosSession,
+    CancelActiveTurnParams, ModelRef, OptionalProjectIdPatch, ProjectPatch, SessionListRequest,
+    SessionPatch, TalosSession,
 };
 
 use super::types::Actor;
 use crate::project::ProjectService;
-use crate::session::SessionService;
+use crate::session::{CreateSessionParams, SessionService};
 
 #[derive(Clone)]
 pub(crate) struct ResourceAccessService {
     session_runtime: Arc<dyn SessionRuntime>,
-    session_records: Arc<SessionService>,
+    sessions: Arc<SessionService>,
     projects: Arc<ProjectService>,
 }
 
+/// Request accepted by `TalosService` when a caller needs a session handle.
+pub struct CreateSessionRequest {
+    pub session_id: String,
+    pub context: talos_types::talos::TalosContext,
+    pub model_ref: Option<ModelRef>,
+    pub workspace_id: Option<String>,
+    pub project_id: Option<String>,
+    pub current_directory: Option<PathBuf>,
+}
+
 impl ResourceAccessService {
-    pub(crate) fn with_records(
+    pub(crate) fn with_services(
         session_runtime: Arc<dyn SessionRuntime>,
-        session_records: Arc<SessionService>,
+        sessions: Arc<SessionService>,
         projects: Arc<ProjectService>,
     ) -> Self {
         Self {
             session_runtime,
-            session_records,
+            sessions,
             projects,
         }
     }
@@ -37,40 +47,42 @@ impl ResourceAccessService {
     pub(crate) async fn get_or_create_session(
         &self,
         actor: &Actor,
-        session_id: &str,
-        mut context: talos_types::talos::TalosContext,
-        model: Option<String>,
-        workspace_id: Option<String>,
-        project_id: Option<String>,
-        current_directory: Option<PathBuf>,
+        params: CreateSessionRequest,
     ) -> TalosResult<TalosSession> {
-        match self.get_session(actor, session_id).await {
+        match self.get_session(actor, &params.session_id).await {
             Ok(session) => return Ok(session),
             Err(TalosError::ResourceNotFound(_)) => {}
             Err(error) => return Err(error),
         }
 
+        let mut context = params.context;
         if context.project_root.is_some() {
             return Err(TalosError::ValidationError(
                 "context.project_root is not supported".to_string(),
             ));
         }
         context.user_id = actor.user_id.clone();
-        if let Some(project_id_ref) = project_id.as_deref() {
+        if let Some(project_id_ref) = params.project_id.as_deref() {
             self.ensure_project_access(actor, project_id_ref).await?;
         }
         let target_agent = self.resolve_target_agent(&context).await?;
-        self.session_records
-            .create_session(
-                Some(session_id),
+        let agent_model_ref = if params.model_ref.is_none() {
+            self.resolve_target_agent_model_ref(&context).await?
+        } else {
+            None
+        };
+        self.sessions
+            .create_session(CreateSessionParams {
+                session_id: Some(params.session_id),
                 context,
-                &target_agent,
-                model,
-                None,
-                workspace_id,
-                project_id,
-                current_directory,
-            )
+                target_agent,
+                model_ref: params.model_ref,
+                agent_model_ref,
+                conf: None,
+                workspace_id: params.workspace_id,
+                project_id: params.project_id,
+                current_directory: params.current_directory,
+            })
             .await
     }
 
@@ -87,7 +99,7 @@ impl ResourceAccessService {
             limit: request.limit,
             offset: request.offset,
         };
-        let sessions = self.session_records.list_sessions(query).await?;
+        let sessions = self.sessions.list_sessions(query).await?;
         Ok(self.filter_sessions(actor, sessions))
     }
 
@@ -111,10 +123,7 @@ impl ResourceAccessService {
         if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
             self.ensure_project_access(actor, project_id).await?;
         }
-        let ack = self
-            .session_records
-            .patch_session(session_id, patch)
-            .await?;
+        let ack = self.sessions.patch_session(session_id, patch).await?;
         if !ack.success {
             return Err(TalosError::ResourceNotFound(format!(
                 "session {}",
@@ -132,8 +141,8 @@ impl ResourceAccessService {
     ) -> TalosResult<TalosSession> {
         let session = self.get_session(actor, session_id).await?;
         let usage = self.compact_runtime_session(session.clone()).await?;
-        self.session_records
-            .record_session_usage(session_id, &session.config.llm.model, &usage)
+        self.sessions
+            .record_turn_progress(session_id, 0, &session.config.llm.model, &usage)
             .await?;
         self.invalidate_cached_session(session_id).await?;
         self.get_session(actor, session_id).await
@@ -146,7 +155,7 @@ impl ResourceAccessService {
     ) -> TalosResult<TalosSession> {
         let session = self.get_session(actor, session_id).await?;
         self.clear_runtime_session(session).await?;
-        let ack = self.session_records.reset_session(session_id).await?;
+        let ack = self.sessions.reset_session(session_id).await?;
         if !ack.success {
             return Err(TalosError::ResourceNotFound(format!(
                 "session {}",
@@ -169,7 +178,7 @@ impl ResourceAccessService {
     ) -> TalosResult<SessionPatchAck> {
         let session = self.get_session(actor, session_id).await?;
         self.prepare_runtime_delete_session(session).await?;
-        let ack = self.session_records.delete_session(session_id).await?;
+        let ack = self.sessions.delete_session(session_id).await?;
         if !ack.success {
             return Err(TalosError::ResourceNotFound(format!(
                 "session {}",
@@ -186,7 +195,7 @@ impl ResourceAccessService {
         session_id: &str,
     ) -> TalosResult<SessionPatchAck> {
         let _session = self.get_session(actor, session_id).await?;
-        let ack = self.session_records.delete_session(session_id).await?;
+        let ack = self.sessions.delete_session(session_id).await?;
         if !ack.success {
             return Err(TalosError::ResourceNotFound(format!(
                 "session {}",
@@ -301,7 +310,7 @@ impl ResourceAccessService {
     }
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<TalosSession> {
-        self.session_records
+        self.sessions
             .get_session(session_id)
             .await?
             .ok_or_else(|| TalosError::ResourceNotFound(format!("session {}", session_id)))
@@ -319,7 +328,7 @@ impl ResourceAccessService {
             project_id: Some(project_id.to_string()),
             ..SessionQuery::default()
         };
-        let sessions = self.session_records.list_sessions(query).await?;
+        let sessions = self.sessions.list_sessions(query).await?;
         for session in sessions {
             self.invalidate_cached_session(&session.context.session_id)
                 .await?;
@@ -332,6 +341,15 @@ impl ResourceAccessService {
         context: &talos_types::talos::TalosContext,
     ) -> TalosResult<String> {
         self.session_runtime.resolve_target_agent(context).await
+    }
+
+    async fn resolve_target_agent_model_ref(
+        &self,
+        context: &talos_types::talos::TalosContext,
+    ) -> TalosResult<Option<ModelRef>> {
+        self.session_runtime
+            .resolve_target_agent_model_ref(context)
+            .await
     }
 
     async fn invalidate_cached_session(&self, session_id: &str) -> TalosResult<()> {

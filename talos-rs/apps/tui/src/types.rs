@@ -302,6 +302,6 @@ pub(crate) enum CommandUpdate {
     },
     SessionHistoryLoaded {
         session: SessionInfo,
-        result: TalosResult<SessionHistoryLoad>,
+        result: Box<TalosResult<SessionHistoryLoad>>,
     },
 }

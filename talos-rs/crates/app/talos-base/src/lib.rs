@@ -20,13 +20,14 @@ use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
 use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, PromptCacheSupport, ReasoningSupport,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelRef,
+    PromptCacheSupport, ReasoningSupport, ReloadableLlmProviderRouter,
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    Actor, AgentDispatchTurnExecutor, PluginManagerService, TalosService, TimelineSubscribeCommand,
-    TimelineSubscriptionMessage,
+    Actor, AgentDispatchTurnExecutor, CreateSessionRequest, PluginManagerService, TalosService,
+    TimelineSubscribeCommand, TimelineSubscriptionMessage,
 };
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::{create_storage, StorageConfig};
@@ -194,7 +195,17 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
         let actor = Self::actor_for_user(&user_id);
         let session = self
             .service
-            .create_session(&actor, &session_id, context, None, None, None, None)
+            .create_session(
+                &actor,
+                CreateSessionRequest {
+                    session_id,
+                    context,
+                    model_ref: None,
+                    workspace_id: None,
+                    project_id: None,
+                    current_directory: None,
+                },
+            )
             .await?;
         self.session_users
             .write()
@@ -258,7 +269,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                 project_root: session.context.project_root.clone(),
                 environment: session.context.environment.clone(),
             }),
-            model: None,
+            model_ref: None,
             project_id: None,
             current_directory: None,
             client_request_id: None,
@@ -653,7 +664,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
 
 pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
     let storage_impl = create_storage(&StorageConfig {
-        database_type: config.storage.database_type.clone(),
+        database_type: config.storage.database_type,
         connection_string: config.storage.connection_string.clone(),
         max_connections: config.storage.max_connections,
     })
@@ -676,7 +687,11 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
-    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &config.llm.model)?;
+    let default_model_ref = ModelRef {
+        provider: config.llm.provider.clone(),
+        id: config.llm.model.clone(),
+    };
+    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &default_model_ref)?;
     let default_agent_id = agent_definitions
         .iter()
         .find(|definition| definition.enabled)
@@ -698,6 +713,21 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let initial_llm_provider = create_llm_provider(&config)?;
     let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
     let llm_provider: Arc<dyn LlmProvider> = reloadable_llm_provider.clone();
+    let llm_router_config = Arc::new(RwLock::new(config.clone()));
+    let llm_router_config_for_factory = llm_router_config.clone();
+    let reloadable_llm_provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
+        move |model_ref: &ModelRef| {
+            let provider_name = model_ref.provider.trim().to_ascii_lowercase();
+            let mut provider_config = llm_router_config_for_factory
+                .read()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            provider_config.llm.provider = provider_name;
+            provider_config.llm.model = model_ref.id.clone();
+            create_llm_provider(&provider_config)
+        },
+    )));
+    let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
@@ -716,7 +746,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     });
 
     let agent_factory = AgentHarnessFactory::new(
-        llm_provider.clone(),
+        llm_provider_router,
         tool_registry.clone(),
         skill_roots_resolver,
     );
@@ -751,11 +781,17 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
 
     let model_catalog = resolve_model_catalog(&config.llm);
     let provider_reloader = reloadable_llm_provider.clone();
+    let provider_router_reloader = reloadable_llm_provider_router.clone();
+    let provider_router_config_reloader = llm_router_config.clone();
     let runtime_reload_hook: talos_service::RuntimeConfigReloadHook = Arc::new(move |_| {
         let reloaded_config = Config::load()?;
         reloaded_config.validate_runtime()?;
         let reloaded_provider = create_llm_provider(&reloaded_config)?;
         provider_reloader.reload(reloaded_provider);
+        *provider_router_config_reloader
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config;
+        provider_router_reloader.reload();
         Ok(())
     });
 
@@ -854,7 +890,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
     }
 
     match config.llm.provider.as_str() {
-        "anthropic" if config.llm.anthropic.enabled => {
+        "anthropic" => {
             let api_key = config.llm.anthropic.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.anthropic.api_key is required".to_string())
             })?;
@@ -869,7 +905,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .with_default_model(&config.llm.model);
             Ok(Arc::new(AnthropicProvider::new(anthropic_config)))
         }
-        "openai" if config.llm.openai.enabled => {
+        "openai" => {
             let api_key = config.llm.openai.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.openai.api_key is required".to_string())
             })?;
@@ -877,7 +913,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .with_protocol(openai_protocol("openai", &config.llm.openai)?);
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
-        "bailian" if config.llm.bailian.enabled => {
+        "bailian" => {
             let api_key = config.llm.bailian.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.bailian.api_key is required".to_string())
             })?;
@@ -888,7 +924,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
             Ok(Arc::new(BailianProvider::new(bailian_config)))
         }
-        "ollama" if config.llm.ollama.enabled => {
+        "ollama" => {
             let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.ollama.base_url is required".to_string())
             })?;
@@ -902,7 +938,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             )?;
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
-        "openrouter" if config.llm.openrouter.enabled => {
+        "openrouter" => {
             let api_key = config.llm.openrouter.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.openrouter.api_key is required".to_string())
             })?;
@@ -923,7 +959,7 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
         _ => Err(TalosError::InvalidConfiguration(format!(
-            "unsupported or disabled provider '{}'",
+            "unsupported provider '{}'",
             config.llm.provider
         ))),
     }

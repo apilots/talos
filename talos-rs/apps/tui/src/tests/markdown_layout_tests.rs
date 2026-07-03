@@ -355,7 +355,10 @@ async fn test_history_enter_switches_session() {
         user_id: "u".to_string(),
         source_type: talos_types::talos::TalosSourceType::Http,
         provider: talos_types::talos::TalosProvider::Sdk,
-        model: "claude-3".to_string(),
+        model_ref: talos_sdk::ModelRef {
+            provider: "mock".to_string(),
+            id: "claude-3".to_string(),
+        },
         created_at: 0,
         last_activity: 0,
         message_count: 3,

@@ -6,14 +6,26 @@ use talos_agent::{
     AgentRunParams, AgentRunSessionState,
 };
 use talos_error::TalosResult;
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
+use talos_llm_provider::{
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, Usage,
+};
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
-use talos_types::{SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
 
 /// Simple mock LLM provider for demo purposes
 struct DemoLlmProvider;
+
+struct StaticLlmProviderRouter {
+    provider: Arc<dyn LlmProvider>,
+}
+
+impl LlmProviderRouter for StaticLlmProviderRouter {
+    fn provider_for(&self, _model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
+        Ok(self.provider.clone())
+    }
+}
 
 fn agent_run_params_from_session(
     session: &TalosSession,
@@ -78,11 +90,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "demo_agent_1".to_string(),
         "Demo Agent".to_string(),
         "An agent for demonstration purposes".to_string(),
-        llm_provider,
-        "demo-model".to_string(),
+        Arc::new(StaticLlmProviderRouter {
+            provider: llm_provider,
+        }),
+        ModelRef {
+            provider: "demo".to_string(),
+            id: "demo-model".to_string(),
+        },
         tool_registry,
         Default::default(),
-    );
+    )?;
 
     println!("1. Agent created successfully");
 

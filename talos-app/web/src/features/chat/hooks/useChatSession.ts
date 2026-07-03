@@ -13,10 +13,10 @@ import { createInitialTurnRequest } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import type { PendingInput, ProjectView, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
-import type { SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 
 interface SendTextOptions {
-  model?: string;
+  modelRef?: ModelRef;
   project?: ProjectView;
   skills?: SkillSuggestion[];
 }
@@ -155,7 +155,7 @@ export function useChatSession(
           sessionId,
           useAppStore.getState().connection.userId,
           content,
-          options.model,
+          options.modelRef,
           options.project,
           options.skills,
         )
@@ -180,7 +180,7 @@ export function useChatSession(
             sessionId,
             useAppStore.getState().connection.userId,
             text,
-            options.model,
+            options.modelRef,
             options.project,
             options.skills,
           )

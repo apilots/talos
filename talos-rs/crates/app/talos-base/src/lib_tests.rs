@@ -59,7 +59,7 @@ async fn application_runtime_registers_configured_default_agent() {
         enabled: true,
         description: Some("Review agent".to_string()),
         default_workspace_id: Some("default".to_string()),
-        model: None,
+        model_ref: None,
         runtime_config: Some(AgentRuntimeConfig::Kernel {
             kernel: config.agent.kernel.clone(),
         }),
@@ -93,7 +93,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: false,
             description: None,
             default_workspace_id: None,
-            model: None,
+            model_ref: None,
             runtime_config: None,
         },
         AgentDefinitionConfig {
@@ -103,7 +103,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model: None,
+            model_ref: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel {
                 kernel: config.agent.kernel.clone(),
             }),
@@ -178,7 +178,6 @@ async fn openrouter_provider_uses_chat_completions_path_and_identity() {
     let mut config = Config::default();
     config.llm.provider = "openrouter".to_string();
     config.llm.model = "test-model".to_string();
-    config.llm.openrouter.enabled = true;
     config.llm.openrouter.api_key = Some("test-key".to_string());
     config.llm.openrouter.base_url = Some(format!("http://{addr}"));
 
@@ -232,7 +231,6 @@ async fn openai_provider_uses_responses_path_when_protocol_selected() {
     let mut config = Config::default();
     config.llm.provider = "openai".to_string();
     config.llm.model = "gpt-test".to_string();
-    config.llm.openai.enabled = true;
     config.llm.openai.api_key = Some("test-key".to_string());
     config.llm.openai.base_url = Some(format!("http://{addr}"));
     config.llm.openai.protocol = Some(LlmProtocol::Responses);

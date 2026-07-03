@@ -454,11 +454,7 @@ function toProtocolSessionConf(
     return null;
   }
   return {
-    agent: conf.agent
-      ? {
-          model: conf.agent.model ?? null,
-        }
-      : null,
+    model_ref: conf.model_ref ?? null,
   };
 }
 

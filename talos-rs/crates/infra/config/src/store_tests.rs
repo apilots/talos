@@ -19,19 +19,14 @@ llm:
   model: claude-3-5-sonnet
   anthropic:
     api_key: {api_key}
-    enabled: true
     models: []
   openai:
-    enabled: false
     models: []
   bailian:
-    enabled: false
     models: []
   ollama:
-    enabled: false
     models: []
   openrouter:
-    enabled: false
     models: []
 "#
     )

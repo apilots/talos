@@ -70,7 +70,10 @@ impl MockGatewayState {
             user_id: "test-user".to_string(),
             source_type: talos_types::talos::TalosSourceType::Http,
             provider: talos_types::talos::TalosProvider::Sdk,
-            model: self.current_model.clone(),
+            model_ref: talos_sdk::ModelRef {
+                provider: "mock".to_string(),
+                id: self.current_model.clone(),
+            },
             created_at: 1,
             last_activity: 2,
             message_count,
@@ -635,11 +638,11 @@ impl GatewayClient for MockGatewayClient {
     async fn update_session_model(
         &self,
         _session_id: &str,
-        model: &str,
+        model_ref: &talos_sdk::ModelRef,
     ) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
-        state.current_model = model.to_string();
-        state.updated_model = Some(model.to_string());
+        state.current_model = model_ref.id.clone();
+        state.updated_model = Some(model_ref.id.clone());
         Ok(state.session_info(3))
     }
 

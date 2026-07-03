@@ -23,7 +23,7 @@ fn start_turn_request(
             project_root: None,
             environment,
         }),
-        model: None,
+        model_ref: None,
         project_id: None,
         current_directory,
         client_request_id: None,

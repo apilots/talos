@@ -54,7 +54,7 @@ export type SessionClearRequest = { session_id: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model: string, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
+export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model_ref: ModelRef, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
 
 export type SessionActiveTurnRequest = { session_id: string, };
 
@@ -128,7 +128,11 @@ export type FsEntryKind = "directory";
 
 export type FsDirectoryCreateResponse = { path: string, };
 
-export type StartTurnRequest = { session_id: string, input: Array<TalosInputItem>, workspace_id?: string, context?: TalosContext, model?: string, project_id?: string, current_directory?: string, client_request_id?: string, };
+export type StartTurnRequest = { session_id: string, input: Array<TalosInputItem>, workspace_id?: string, context?: TalosContext,
+/**
+ * Explicit model selection for this turn; absent means use the session or configured default.
+ */
+model_ref?: ModelRef, project_id?: string, current_directory?: string, client_request_id?: string, };
 
 export type StartTurnResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: TurnCommandStatus, };
 
@@ -178,9 +182,11 @@ export type ModelListResponse = { models: Array<ModelInfo>, };
 
 export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
 
+export type ModelRef = { provider: string, id: string, };
+
 export type LlmConfig = { provider: string, model: string, anthropic: LlmProviderConfig, openai: LlmProviderConfig, bailian: LlmProviderConfig, ollama: LlmProviderConfig, openrouter: LlmProviderConfig, };
 
-export type LlmProviderConfig = { api_key?: string, base_url?: string, enabled: boolean, protocol?: LlmProtocol, models: Array<LlmModelConfig>, };
+export type LlmProviderConfig = { api_key?: string, base_url?: string, protocol?: LlmProtocol, models: Array<LlmModelConfig>, };
 
 export type LlmModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
 
@@ -500,9 +506,7 @@ export type OptionalProjectIdPatch = { "type": "set", project_id: string, } | { 
 
 export type OptionalCurrentDirectoryPatch = { "type": "set", path: string, } | { "type": "clear" };
 
-export type SessionConf = { agent: SessionAgentConf | null, };
-
-export type SessionAgentConf = { model: string | null, };
+export type SessionConf = { model_ref: ModelRef | null, };
 
 export type AgentEvent = { event_seq: number | null, event_id: string | null, created_at_ms: number | null, event_type: AgentEventType, turn_id: string, message_id: string, session_id: string, sequence: number, payload: AgentEventPayload, };
 

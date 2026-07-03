@@ -1,17 +1,18 @@
 use super::*;
-use crate::session::SessionRecordService;
+use crate::session::SessionService;
 use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_storage::SqliteStorage;
+use talos_store::project::MockProjectStore;
 use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
     MessageIdempotencyStore, PendingDynamicToolResult, PendingUserAction, SessionStore,
     TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
-    StopReason, TalosContext, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TokenUsage,
+    StopReason, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TokenUsage,
 };
 use talos_types::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, SessionConf, SessionContext,
@@ -124,7 +125,7 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
                 }],
                 workspace_id: None,
                 context: None,
-                model: None,
+                model_ref: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: None,
@@ -154,14 +155,18 @@ async fn test_service(
         TimelineEventRetentionConfig::default(),
     ));
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
-    let session_store: Arc<dyn SessionStore> = store.clone();
+    let sessions = Arc::new(SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        TalosConfig::default(),
+    ));
     let session_runtime: Arc<dyn SessionRuntime> = Arc::new(NoopSessionRuntime);
     (
         TurnService::new(
             turn_executor,
             event_service.clone(),
             idempotency_store,
-            session_store,
+            sessions,
             session_runtime,
             TalosConfig::default(),
         ),
@@ -199,30 +204,9 @@ fn test_session() -> TalosSession {
 
 async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
     let session = test_session();
-    let context = TalosContext {
-        source_type: session.context.source_type,
-        provider: session.context.provider,
-        user_id: session.context.user_id,
-        message_id: session.context.message_id,
-        trace_id: session.context.trace_id,
-        channel_id: session.context.channel_id,
-        thread_id: session.context.thread_id,
-        project_root: session.context.project_root,
-        environment: session.context.environment,
-    };
-    SessionRecordService::new(store)
-        .create_session_record(
-            Some("s1"),
-            &context,
-            "default",
-            "default-model",
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+    let record = talos_store::session::SessionRecord::from_session(&session);
+    store
+        .insert_session_record(&record, "default", "api")
         .await
         .expect("session record should be created");
 }
@@ -243,7 +227,7 @@ async fn submit_start_turn_records_completed_turn_progress() {
                 }],
                 workspace_id: None,
                 context: None,
-                model: None,
+                model_ref: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: None,
@@ -273,7 +257,7 @@ async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result(
         }],
         workspace_id: None,
         context: None,
-        model: None,
+        model_ref: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,
@@ -321,7 +305,7 @@ async fn submit_start_turn_persists_agent_title_update() {
                 }],
                 workspace_id: None,
                 context: None,
-                model: None,
+                model_ref: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: None,

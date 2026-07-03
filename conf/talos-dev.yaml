@@ -20,7 +20,6 @@ fs:
 
 agent:
   name: "talos"
-  model: "qwen3.6-flash"
   kernel:
     tool_parallelism: 1
     max_tool_rounds: 8
@@ -191,7 +190,6 @@ llm:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"
     protocol: "messages"
-    enabled: false
     models:
       - id: "claude-opus-4-8"
         name: "Claude Opus 4.8"
@@ -236,7 +234,6 @@ llm:
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
     base_url: "https://api.openai.com/v1"
     protocol: "chat"
-    enabled: false
     models:
       - id: "gpt-5.5"
         name: "GPT-5.5"
@@ -281,7 +278,6 @@ llm:
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
     protocol: "chat"
-    enabled: true
     models:
       - id: "qwen3.7-max"
         name: "Qwen 3.7 Max"
@@ -329,7 +325,6 @@ llm:
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: "https://openrouter.ai/api/v1"
     protocol: "chat"
-    enabled: false
     models:
       - id: "openai/gpt-oss-120b:free"
         name: "GPT OSS 120B Free"
@@ -358,7 +353,6 @@ llm:
           cache_write: 0
         compat: {}
   ollama:
-    enabled: false
     base_url: "http://localhost:11434"
     protocol: "chat"
 

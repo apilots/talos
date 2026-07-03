@@ -14,12 +14,15 @@ trap stop_server EXIT
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "select_models" "{}" "${models_json}"
 primary_model="$(select_e2e_model_from_json "${models_json}")"
-secondary_model="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("models", data.get("data", [])); print((arr[1].get("id") if len(arr) > 1 else (arr[0].get("id") if arr else "")))' <<< "${models_json}")"
-if [[ -z "${primary_model}" || -z "${secondary_model}" ]]; then
+primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
+secondary_ref="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("models", data.get("data", [])); item=(arr[1] if len(arr) > 1 else (arr[0] if arr else {})); print(item.get("provider", "") + "\t" + item.get("id", ""))' <<< "${models_json}")"
+secondary_provider="${secondary_ref%%$'\t'*}"
+secondary_model="${secondary_ref#*$'\t'}"
+if [[ -z "${primary_model}" || -z "${primary_provider}" || -z "${secondary_provider}" || -z "${secondary_model}" ]]; then
   echo "CASE select_models FAIL models=${models_json}"
   exit 1
 fi
-echo "CASE select_models PASS primary=${primary_model} secondary=${secondary_model}"
+echo "CASE select_models PASS primary=${primary_provider}:${primary_model} secondary=${secondary_provider}:${secondary_model}"
 
 create_payload='{
   "context": {
@@ -31,9 +34,10 @@ create_payload='{
     "message_id": "msg-session-lifecycle",
     "trace_id": "trace-session-lifecycle"
   },
-  "model": "__PRIMARY_MODEL__"
+  "model_ref": {"provider": "__PRIMARY_PROVIDER__", "id": "__PRIMARY_MODEL__"}
 }'
 create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
+create_payload="${create_payload/__PRIMARY_PROVIDER__/${primary_provider}}"
 create_id="$(new_session_id)"
 remember_session_context "${create_id}" "${create_payload}"
 create_json="{\"id\":\"${create_id}\"}"
@@ -70,8 +74,8 @@ echo "CASE get_session PASS id=${detail_id}"
 
 patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
-  -d "{\"conf\":{\"agent.model\":\"${secondary_model}\"}}")"
-log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"agent.model\":\"${secondary_model}\"}}" "${patch_json}"
+  -d "{\"conf\":{\"model_ref\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"}}}")"
+log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"model_ref\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"}}}" "${patch_json}"
 patch_session_id="$(json_get "${patch_json}" "session.id")"
 if [[ "${patch_session_id}" != "${session_id}" ]]; then
   echo "CASE patch_session_model FAIL response=${patch_json}"

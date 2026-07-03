@@ -14,12 +14,18 @@ import {
 
 describe("chat api initial turn request", () => {
   it("builds first-turn metadata without session create configuration", () => {
-    const request = createInitialTurnRequest("sess-1", "user-1", "hello", "qwen-max", undefined);
+    const request = createInitialTurnRequest(
+      "sess-1",
+      "user-1",
+      "hello",
+      { provider: "bailian", id: "qwen-max" },
+      undefined,
+    );
 
     expect(request).toMatchObject({
       session_id: "sess-1",
       input: [{ type: "text", text: "hello" }],
-      model: "qwen-max",
+      model_ref: { provider: "bailian", id: "qwen-max" },
       context: expect.objectContaining({
         user_id: "user-1",
         source_type: "http",

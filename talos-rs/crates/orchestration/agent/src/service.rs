@@ -10,7 +10,7 @@ use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     RunItem, StopReason, TalosInputItem, TalosReasoning, TalosSessionEnvironment, TokenUsage,
 };
-use talos_types::{TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{ModelRef, TalosSession, DEFAULT_SESSION_TITLE};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -366,6 +366,13 @@ pub fn empty_skill_roots_resolver() -> Arc<dyn SkillRootsResolver> {
 pub trait AgentHarness: Send + Sync {
     /// Stable Agent identity registered in Coordinator.
     fn id(&self) -> &str;
+    /// Concrete default model selected for this Agent, when the Harness owns one.
+    ///
+    /// Coordinators use this only to initialize new product sessions. Runtime
+    /// execution must still read the resolved model from AgentRunConfig.
+    fn default_model_ref(&self) -> Option<ModelRef> {
+        None
+    }
     /// Descriptor used for routing, validation, and management surfaces.
     fn descriptor(&self) -> AgentDescriptor {
         AgentDescriptor {

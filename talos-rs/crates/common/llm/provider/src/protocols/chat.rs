@@ -72,6 +72,7 @@ struct ModelToolAcc {
     id: Option<String>,
     name: Option<String>,
     arguments: String,
+    emitted_arguments_len: usize,
 }
 
 pub fn request(
@@ -482,35 +483,32 @@ pub fn model_blocks(
                         if let Some(reasoning_delta) = delta_object
                             .and_then(|delta| reasoning_delta(delta, options.reasoning_keys))
                         {
-                            if options.ignore_empty_text && reasoning_delta.trim().is_empty() {
-                                continue;
-                            }
-                            if options.ignore_reasoning_after_assistant
-                                && has_seen_assistant_text(&state, choice_index)
-                            {
-                                continue;
-                            }
-                            if !ensure_reasoning_model_block(
-                                &tx,
-                                &mut state,
-                                choice_index,
-                                &options,
-                            )
-                            .await
-                                || !send_model_block_event(
+                            let should_emit = (!options.ignore_empty_text
+                                || !reasoning_delta.trim().is_empty())
+                                && (!options.ignore_reasoning_after_assistant
+                                    || !has_seen_assistant_text(&state, choice_index));
+                            if should_emit
+                                && (!ensure_reasoning_model_block(
                                     &tx,
-                                    ModelBlockStreamEvent::BlockDelta {
-                                        model_item_id: current_reasoning_model_item_id(
-                                            &state,
-                                            choice_index,
-                                            &options,
-                                        ),
-                                        delta: ModelBlockDelta::ReasoningText {
-                                            delta: reasoning_delta,
-                                        },
-                                    },
+                                    &mut state,
+                                    choice_index,
+                                    &options,
                                 )
                                 .await
+                                    || !send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: current_reasoning_model_item_id(
+                                                &state,
+                                                choice_index,
+                                                &options,
+                                            ),
+                                            delta: ModelBlockDelta::ReasoningText {
+                                                delta: reasoning_delta,
+                                            },
+                                        },
+                                    )
+                                    .await)
                             {
                                 return;
                             }
@@ -520,30 +518,28 @@ pub fn model_blocks(
                             .and_then(|d| d.get("content"))
                             .and_then(|t| t.as_str())
                         {
-                            if options.ignore_empty_text && delta.is_empty() {
-                                continue;
-                            }
-                            if !ensure_assistant_model_block(
-                                &tx,
-                                &mut state,
-                                choice_index,
-                                &options,
-                            )
-                            .await
-                                || !send_model_block_event(
+                            if (!options.ignore_empty_text || !delta.is_empty())
+                                && (!ensure_assistant_model_block(
                                     &tx,
-                                    ModelBlockStreamEvent::BlockDelta {
-                                        model_item_id: current_assistant_model_item_id(
-                                            &state,
-                                            choice_index,
-                                            &options,
-                                        ),
-                                        delta: ModelBlockDelta::AssistantText {
-                                            delta: delta.to_string(),
-                                        },
-                                    },
+                                    &mut state,
+                                    choice_index,
+                                    &options,
                                 )
                                 .await
+                                    || !send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::BlockDelta {
+                                            model_item_id: current_assistant_model_item_id(
+                                                &state,
+                                                choice_index,
+                                                &options,
+                                            ),
+                                            delta: ModelBlockDelta::AssistantText {
+                                                delta: delta.to_string(),
+                                            },
+                                        },
+                                    )
+                                    .await)
                             {
                                 return;
                             }
@@ -565,15 +561,16 @@ pub fn model_blocks(
                                     if let Some(id) = tool_call_delta
                                         .get("id")
                                         .and_then(|v| v.as_str())
+                                        .filter(|value| !value.trim().is_empty())
                                         .map(str::to_string)
                                     {
                                         entry.id = Some(id);
-                                        should_start = true;
                                     }
                                     if let Some(name) = tool_call_delta
                                         .get("function")
                                         .and_then(|f| f.get("name"))
                                         .and_then(|v| v.as_str())
+                                        .filter(|value| !value.trim().is_empty())
                                         .map(str::to_string)
                                     {
                                         entry.name = Some(name);
@@ -586,9 +583,11 @@ pub fn model_blocks(
                                     .and_then(|f| f.get("arguments"))
                                     .and_then(|v| v.as_str())
                                     .map(str::to_string);
-                                if arguments_delta.is_some() {
-                                    should_start = true;
-                                }
+                                let entry_has_name = tool_acc
+                                    .get(&index)
+                                    .and_then(|entry| entry.name.as_deref())
+                                    .is_some();
+                                should_start = should_start || entry_has_name;
 
                                 if should_start {
                                     let entry = tool_acc.entry(index).or_default();
@@ -604,13 +603,22 @@ pub fn model_blocks(
                                 if let Some(arguments_delta) = arguments_delta {
                                     let entry = tool_acc.entry(index).or_default();
                                     entry.arguments.push_str(&arguments_delta);
+                                }
+
+                                let Some(entry) = tool_acc.get_mut(&index) else {
+                                    continue;
+                                };
+                                if state.tool_started.get(&index) == Some(&true)
+                                    && entry.emitted_arguments_len < entry.arguments.len()
+                                {
+                                    let delta =
+                                        entry.arguments[entry.emitted_arguments_len..].to_string();
+                                    entry.emitted_arguments_len = entry.arguments.len();
                                     if !send_model_block_event(
                                         &tx,
                                         ModelBlockStreamEvent::BlockDelta {
                                             model_item_id: tool_model_item_id(index, &options),
-                                            delta: ModelBlockDelta::ToolArguments {
-                                                delta: arguments_delta,
-                                            },
+                                            delta: ModelBlockDelta::ToolArguments { delta },
                                         },
                                     )
                                     .await

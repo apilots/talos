@@ -110,16 +110,7 @@ function ProviderTab({ providerKey, config, keyConfigured, onChange }: ProviderT
 
   return (
     <>
-      {/* Enabled (status) + API Key + Base URL */}
       <div className="mb-5 space-y-3">
-        {/* Enabled — read-only status, controlled by Active Provider selection */}
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
-          <span className="w-24 text-sm text-muted">{t("modelsPanel.enabled")}</span>
-          <span className={["text-sm font-semibold", config.enabled ? "text-accent" : "text-muted"].join(" ")}>
-            {config.enabled ? t("modelsPanel.on") : t("modelsPanel.off")}
-          </span>
-        </div>
-
         <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
           <span className="w-24 text-sm text-muted">{t("modelsPanel.protocol")}</span>
           {protocols.length > 1 ? (
@@ -266,8 +257,7 @@ export function SettingsModelsEditor() {
 
   function setDefaultProvider(key: ProviderKey) {
     if (!draft) return;
-    // selecting active provider implies enabled=true for that provider
-    setDraft({ ...draft, provider: key, [key]: { ...draft[key], enabled: true } });
+    setDraft({ ...draft, provider: key });
   }
 
   function setDefaultModel(modelId: string) {
@@ -336,7 +326,6 @@ export function SettingsModelsEditor() {
       <div className="mb-5 flex gap-1 rounded-[1rem] border border-border/70 bg-background/40 p-1">
         {PROVIDERS.map(({ key, label }) => {
           const isActive = activeProvider === key;
-          const isEnabled = draft[key].enabled;
           return (
             <button
               key={key}
@@ -348,7 +337,6 @@ export function SettingsModelsEditor() {
               ].join(" ")}
             >
               {label}
-              {isEnabled && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
             </button>
           );
         })}

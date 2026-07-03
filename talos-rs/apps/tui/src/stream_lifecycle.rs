@@ -38,16 +38,14 @@ impl TuiApp {
                 session_id
             }
         };
-        let is_first_turn =
-            self.session_usage.total_tokens == 0 && self.active_stream_message_id.is_none();
         let active_summary = summarize_for_queue(&user_message);
         let request = TerminalTurnRequest {
             session_id: session_id.clone(),
             message: user_message.clone(),
             skills: skills.clone(),
-            context: is_first_turn.then(|| self.build_talos_context()),
-            model: is_first_turn.then(|| self.current_model.clone()),
-            current_directory: is_first_turn.then(|| self.startup_directory.clone()),
+            context: Some(self.build_talos_context()),
+            model_ref: self.current_model_ref(),
+            current_directory: Some(self.startup_directory.clone()),
             client_request_id: None,
         }
         .build();

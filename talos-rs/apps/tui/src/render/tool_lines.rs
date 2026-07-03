@@ -814,7 +814,7 @@ impl TuiApp {
             .as_ref()
             .and_then(|value| value.get("output"))
             .and_then(|value| value.as_str())
-            .unwrap_or_else(|| block.content.as_str());
+            .unwrap_or(block.content.as_str());
         let status = parsed
             .as_ref()
             .and_then(|value| value.get("status"))
@@ -896,7 +896,7 @@ impl TuiApp {
                     .and_then(|value| value.get("error"))
                     .and_then(|value| value.as_str())
             })
-            .unwrap_or_else(|| block.content.as_str());
+            .unwrap_or(block.content.as_str());
         let line_count = primary_text.lines().count();
         let timing = Self::timing_suffix(block.timing_ms);
         let summary = match block.tool_status {
@@ -985,7 +985,7 @@ impl TuiApp {
             .as_ref()
             .and_then(|value| value.get("content"))
             .and_then(|value| value.as_str())
-            .unwrap_or_else(|| block.content.as_str());
+            .unwrap_or(block.content.as_str());
         let matches_found = parsed
             .as_ref()
             .and_then(|value| value.get("matches_found"))

@@ -1,4 +1,5 @@
 use super::*;
+use crate::access::CreateSessionRequest;
 use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
@@ -243,11 +244,59 @@ fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
         }],
         workspace_id: None,
         context: Some(request_context()),
-        model: None,
+        model_ref: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,
     }
+}
+
+fn create_session_params(
+    session_id: &str,
+    context: TalosContext,
+    current_directory: Option<std::path::PathBuf>,
+) -> CreateSessionRequest {
+    CreateSessionRequest {
+        session_id: session_id.to_string(),
+        context,
+        model_ref: None,
+        workspace_id: None,
+        project_id: None,
+        current_directory,
+    }
+}
+
+#[tokio::test]
+async fn existing_session_start_turn_applies_model_ref_before_dispatch() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        TalosConfig::default(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-model-ref", request_context(), None),
+        )
+        .await
+        .expect("session should be created");
+
+    let mut request = start_turn_request("session-model-ref", "hello");
+    request.model_ref = Some(talos_types::ModelRef {
+        provider: "anthropic".to_string(),
+        id: "turn-model".to_string(),
+    });
+    let _ = service.start_turn(&actor, request, None).await;
+
+    let session = service
+        .get_session(&actor, "session-model-ref")
+        .await
+        .expect("session should still be readable");
+    assert_eq!(session.config.llm.provider, "anthropic");
+    assert_eq!(session.config.llm.model, "turn-model");
 }
 
 async fn assert_session_absent(store: &DatabaseSessionStore, session_id: &str) {
@@ -448,12 +497,7 @@ async fn interrupt_turn_without_active_turn_is_idempotent() {
     service
         .create_session(
             &actor,
-            "session-interrupt-idempotent",
-            request_context(),
-            None,
-            None,
-            None,
-            None,
+            create_session_params("session-interrupt-idempotent", request_context(), None),
         )
         .await
         .expect("session should be created");
@@ -516,12 +560,7 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
     service
         .create_session(
             &actor,
-            "session-interrupt-runtime-missing",
-            request_context(),
-            None,
-            None,
-            None,
-            None,
+            create_session_params("session-interrupt-runtime-missing", request_context(), None),
         )
         .await
         .expect("session should be created");

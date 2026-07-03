@@ -139,6 +139,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ModelListRequest>());
     output.push_str(&export::<talos_types::ModelListResponse>());
     output.push_str(&export::<talos_types::ModelInfo>());
+    output.push_str(&export::<talos_types::ModelRef>());
     output.push_str(&export::<talos_types::LlmConfig>());
     output.push_str(&export::<talos_types::LlmProviderConfig>());
     output.push_str(&export::<talos_types::LlmModelConfig>());
@@ -301,7 +302,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::OptionalProjectIdPatch>());
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());
-    output.push_str(&export::<talos_types::SessionAgentConf>());
     output.push_str(&export::<talos_types::talos::AgentEvent>());
     output.push_str(&export::<talos_types::talos::TimelineEventEnvelope>());
     output.push_str(&export::<talos_types::talos::AgentEventType>());
@@ -354,6 +354,11 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::jsonrpc::JsonRpcNotification>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcErrorResponse>());
     output.push_str(&export::<crate::jsonrpc::JsonRpcMessage>());
+    let mut output = output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
     output.truncate(output.trim_end().len());
     output.push('\n');
     output

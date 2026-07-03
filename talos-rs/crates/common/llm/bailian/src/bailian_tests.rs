@@ -125,6 +125,115 @@ async fn test_stream_model_blocks_maps_chat_completion_chunks() {
 }
 
 #[tokio::test]
+async fn test_stream_model_blocks_waits_for_tool_name_before_starting_tool_block() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\"}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"Read\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\"\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\":\\\"README.md\\\"}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let stream = provider
+        .stream_model_blocks(ChatRequest::new_user("test", "qwen-test"))
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "bailian-tool-0"
+                && started.provider_item_id.as_deref() == Some("call_1")
+                && started
+                    .tool_call
+                    .as_ref()
+                    .and_then(|tool_call| tool_call.tool_name.as_deref())
+                    == Some("Read")
+    )));
+    let tool_arguments = events.iter().fold(String::new(), |mut arguments, event| {
+        match event {
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id,
+                delta: ModelBlockDelta::ToolArguments { delta },
+            } if model_item_id == "bailian-tool-0" => arguments.push_str(delta),
+            _ => {}
+        }
+        arguments
+    });
+    assert_eq!(tool_arguments, "{\"path\":\"README.md\"}");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockCompleted(completed)
+            if completed.model_item_id == "bailian-tool-0"
+    )));
+}
+
+#[tokio::test]
+async fn test_stream_model_blocks_preserves_tool_calls_with_empty_text_fields() {
+    let body = concat!(
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\",\"reasoning_content\":\"\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"Read\",\"arguments\":\"\"}}],\"content\":\"\",\"reasoning_content\":\"\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"type\":\"function\",\"function\":{\"arguments\":\"{\\\"path\\\": \\\"\"}}],\"content\":\"\",\"reasoning_content\":\"\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"type\":\"function\",\"function\":{\"arguments\":\"README.md\"}}],\"content\":\"\",\"reasoning_content\":\"\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"\",\"type\":\"function\",\"function\":{\"arguments\":\"\\\"}\"}}],\"content\":\"\",\"reasoning_content\":\"\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}],\"usage\":null}\n\n",
+        "data: [DONE]\n\n"
+    )
+    .to_string();
+    let base_url = spawn_sse_server(body).await;
+    let provider = BailianProvider::new(BailianConfig::new("test-api-key").with_base_url(base_url));
+    let request = ChatRequest::builder()
+        .model("qwen3.7-plus")
+        .messages(vec![ChatMessage::user("read README")])
+        .tools(vec![talos_llm_provider::ToolDefinition::new(
+            "Read",
+            "Read a file",
+            Some(serde_json::json!({
+                "type": "object",
+                "required": ["path"],
+                "properties": {
+                    "path": {"type": "string"}
+                }
+            })),
+        )])
+        .build();
+    let stream = provider
+        .stream_model_blocks(request)
+        .await
+        .expect("stream should start");
+
+    let events = collect_model_events(stream).await;
+
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "bailian-tool-0"
+                && started.provider_item_id.as_deref() == Some("call_1")
+                && started
+                    .tool_call
+                    .as_ref()
+                    .and_then(|tool_call| tool_call.tool_name.as_deref())
+                    == Some("Read")
+    )));
+    let tool_arguments = events.iter().fold(String::new(), |mut arguments, event| {
+        match event {
+            ModelBlockStreamEvent::BlockDelta {
+                model_item_id,
+                delta: ModelBlockDelta::ToolArguments { delta },
+            } if model_item_id == "bailian-tool-0" => arguments.push_str(delta),
+            _ => {}
+        }
+        arguments
+    });
+    assert_eq!(tool_arguments, "{\"path\": \"README.md\"}");
+}
+
+#[tokio::test]
 async fn test_stream_model_blocks_segments_assistant_text_after_tool_boundary() {
     let body = concat!(
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"before\"}}]}\n\n",

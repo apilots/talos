@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
 use talos_error::TalosError;
-use talos_types::{ModelCompatConfig, ModelCostConfig, ModelInfo};
+use talos_types::{ModelCompatConfig, ModelCostConfig, ModelInfo, ModelRef};
 
 use super::ConfigService;
 
@@ -29,12 +29,15 @@ fn test_service() -> ConfigService {
 }
 
 #[test]
-fn validate_model_supported_rejects_unknown_model() {
+fn validate_model_ref_supported_rejects_unknown_provider() {
     let service = test_service();
 
     let error = service
-        .validate_model_supported("unknown-model")
-        .expect_err("unknown model should be rejected");
+        .validate_model_ref_supported(&ModelRef {
+            provider: "missing".to_string(),
+            id: "unknown-model".to_string(),
+        })
+        .expect_err("unknown provider should be rejected");
 
     assert!(matches!(error, TalosError::UnsupportedModel(_)));
 }

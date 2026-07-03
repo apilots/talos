@@ -230,7 +230,7 @@ fn list_child_directories(path: &Path, show_hidden: bool) -> TalosResult<Vec<FsD
             is_symlink,
         });
     }
-    entries.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    entries.sort_by_key(|left| left.name.to_lowercase());
     Ok(entries)
 }
 

@@ -44,7 +44,7 @@ describe("AppServerClient", () => {
     await client.listModels();
     await client.patchSession({
       session_id: "session-1",
-      conf: { agent: { model: "MiniMax-M2.5" } },
+      conf: { model_ref: { provider: "bailian", id: "MiniMax-M2.5" } },
       project_id: null,
       current_directory: null,
     });
@@ -83,7 +83,7 @@ describe("AppServerClient", () => {
         method: "session.patch",
         params: {
           session_id: "session-1",
-          conf: { agent: { model: "MiniMax-M2.5" } },
+          conf: { model_ref: { provider: "bailian", id: "MiniMax-M2.5" } },
           project_id: null,
           current_directory: null,
         },
@@ -139,7 +139,6 @@ describe("AppServerClient", () => {
 });
 
 const emptyProvider = {
-  enabled: false,
   models: [],
 };
 

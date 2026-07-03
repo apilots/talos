@@ -260,7 +260,6 @@ impl SessionService for MockSessionService {
             current_directory: None,
             config: {
                 let mut config = talos_types::TalosConfig::default();
-                config.agent.model = "qwen-plus".to_string();
                 config.llm.model = "qwen-plus".to_string();
                 config
             },

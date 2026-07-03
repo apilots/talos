@@ -3,8 +3,9 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
-pub use talos_types::{ModelSpeed, ReasoningEffort};
+pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -167,6 +168,15 @@ pub trait LlmProvider: Send + Sync {
             self.name()
         )))
     }
+}
+
+/// Resolves the concrete provider that should execute a run.
+///
+/// Implementations own provider construction, reload, and lookup. Callers pass
+/// the effective provider selected by configuration or session state and must
+/// not infer providers from model ids.
+pub trait LlmProviderRouter: Send + Sync {
+    fn provider_for(&self, model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>>;
 }
 
 /// Chat request.

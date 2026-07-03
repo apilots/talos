@@ -2,7 +2,7 @@ use super::AgentHarnessImpl;
 use chrono::Utc;
 use std::time::Duration;
 use talos_config::AgentKernelConfig;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_memory::{Memory, MemoryStore};
 use talos_memory::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
@@ -13,6 +13,16 @@ use talos_types::{talos::TokenUsage, TalosSession};
 use uuid::Uuid;
 
 impl AgentHarnessImpl {
+    fn session_model(session: &TalosSession) -> TalosResult<String> {
+        let model = session.config.llm.model.trim();
+        if model.is_empty() {
+            return Err(TalosError::ValidationError(
+                "session llm model is required".to_string(),
+            ));
+        }
+        Ok(model.to_string())
+    }
+
     pub(crate) async fn drain_pending_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
         self.memory_flush_manager.drain(timeout).await
     }
@@ -145,15 +155,12 @@ impl AgentHarnessImpl {
         let session_id = session.context.session_id.clone();
         self.ensure_session_is_idle(&session_id, "compact").await?;
         let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
-        let selected_model = if session.config.llm.model.trim().is_empty() {
-            self.model.clone()
-        } else {
-            session.config.llm.model.clone()
-        };
+        let selected_model = Self::session_model(&session)?;
+        let llm_provider = self.llm_provider_for_session(&session)?;
         let report = talos_agent_kernel::flush_session_memory_with_report(
             &session_id,
             &selected_model,
-            self.llm_provider.clone(),
+            llm_provider,
             memory_store.as_ref(),
             &kernel_config,
             talos_agent_kernel::MemoryFlushPolicy::for_compaction(
@@ -179,14 +186,10 @@ impl AgentHarnessImpl {
     }
 
     pub(crate) async fn close_session_impl(&self, session: TalosSession) -> TalosResult<()> {
-        let selected_model = if session.config.llm.model.trim().is_empty() {
-            self.model.clone()
-        } else {
-            session.config.llm.model.clone()
-        };
+        let selected_model = Self::session_model(&session)?;
         let session_id = session.context.session_id.clone();
         let task_session_id = session_id.clone();
-        let llm_provider = self.llm_provider.clone();
+        let llm_provider = self.llm_provider_for_session(&session)?;
         let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
         let accepted = self
             .memory_flush_manager

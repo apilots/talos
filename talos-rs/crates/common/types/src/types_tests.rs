@@ -130,15 +130,15 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
     assert_eq!(session.state.usage.output_tokens, 7);
     assert_eq!(session.state.usage.total_tokens, 12);
     assert_eq!(session.state.usage.cache_creation_input_tokens, Some(7));
-    assert_eq!(session.config.agent.model, "qwen-plus");
     assert_eq!(session.config.llm.model, "qwen-plus");
 }
 
 #[test]
 fn test_session_override_policy_rejects_unknown_keys() {
     let conf = SessionConf {
-        agent: Some(SessionAgentConf {
-            model: Some("gpt-4o".to_string()),
+        model_ref: Some(ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-4o".to_string(),
         }),
     };
     SessionConfigOverridePolicy::validate_conf(&conf)
@@ -146,12 +146,21 @@ fn test_session_override_policy_rejects_unknown_keys() {
 }
 
 #[test]
-fn test_session_override_policy_builds_model_conf() {
-    let conf = SessionConfigOverridePolicy::single_model_conf("gpt-4o");
-    let model = SessionConfigOverridePolicy::extract_agent_model(&conf)
+fn test_session_override_policy_builds_model_ref_conf() {
+    let conf = SessionConfigOverridePolicy::single_model_ref_conf(&ModelRef {
+        provider: "openai".to_string(),
+        id: "gpt-4o".to_string(),
+    });
+    let model_ref = SessionConfigOverridePolicy::extract_model_ref(&conf)
         .expect("conf extraction should succeed");
 
-    assert_eq!(model.as_deref(), Some("gpt-4o"));
+    assert_eq!(
+        model_ref,
+        Some(ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-4o".to_string(),
+        })
+    );
 }
 
 #[test]

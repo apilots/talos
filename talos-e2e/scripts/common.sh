@@ -133,6 +133,34 @@ print(ids[0] if ids else "")
 PY
 }
 
+select_e2e_model_provider_from_json() {
+  local models_json="$1"
+  local model_id="$2"
+
+  MODELS_JSON="${models_json}" MODEL_ID="${model_id}" python3 - <<'PY'
+import json
+import os
+
+try:
+    payload = json.loads(os.environ.get("MODELS_JSON", ""))
+except Exception:
+    print("")
+    raise SystemExit(0)
+
+models = payload.get("models", payload.get("data", payload)) if isinstance(payload, dict) else payload
+if not isinstance(models, list):
+    print("")
+    raise SystemExit(0)
+
+model_id = os.environ.get("MODEL_ID", "")
+for item in models:
+    if isinstance(item, dict) and item.get("id") == model_id:
+        print(item.get("provider", ""))
+        raise SystemExit(0)
+print("")
+PY
+}
+
 default_talos_home() {
   local scenario_name="${TALOS_SCENARIO_NAME:-manual}"
   local safe_name
@@ -479,7 +507,7 @@ message_payload = json.loads(os.environ["MESSAGE_PAYLOAD"])
 session_payload = json.loads(Path(os.environ["SESSION_PAYLOAD_PATH"]).read_text())
 message_payload["session_id"] = os.environ["SESSION_ID"]
 
-for key in ("context", "model", "project_id", "current_directory"):
+for key in ("context", "model_ref", "project_id", "current_directory"):
     if key in session_payload and message_payload.get(key) is None:
         message_payload[key] = session_payload[key]
 

@@ -4,10 +4,11 @@ pub const SESSION_SCOPE_MAIN: &str = "main";
 pub const SESSION_SCOPE_PER_CHANNEL_PEER: &str = "per_channel_peer";
 pub const SESSION_SCOPE_PER_CHANNEL_PEER_TOPIC: &str = "per_channel_peer_topic";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SessionScope {
     Main,
     PerChannelPeer,
+    #[default]
     PerChannelPeerTopic,
 }
 
@@ -18,12 +19,6 @@ impl SessionScope {
             Self::PerChannelPeer => SESSION_SCOPE_PER_CHANNEL_PEER,
             Self::PerChannelPeerTopic => SESSION_SCOPE_PER_CHANNEL_PEER_TOPIC,
         }
-    }
-}
-
-impl Default for SessionScope {
-    fn default() -> Self {
-        Self::PerChannelPeerTopic
     }
 }
 

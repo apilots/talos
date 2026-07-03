@@ -27,7 +27,7 @@ use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::LlmProvider;
+use talos_llm_provider::{LlmProvider, LlmProviderRouter};
 use talos_memory::{Memory, MemoryStore, SessionTranscriptBranch, SessionTranscriptPayload};
 use talos_tools::ToolRegistry;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
@@ -139,8 +139,7 @@ pub(crate) struct KernelAgent {
     id: String,
     name: String,
     description: String,
-    llm_provider: Arc<dyn LlmProvider>,
-    model: String,
+    llm_provider_router: Arc<dyn LlmProviderRouter>,
     tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
@@ -153,8 +152,7 @@ impl KernelAgent {
             id: params.id,
             name: params.name,
             description: params.description,
-            llm_provider: params.llm_provider,
-            model: params.model,
+            llm_provider_router: params.llm_provider_router,
             tool_registry: params.tool_registry,
             kernel_config: params.kernel_config,
             skill_roots_resolver: params.skill_roots_resolver,
@@ -184,24 +182,29 @@ impl KernelAgent {
         )
     }
 
+    fn llm_provider_for_run(&self, config: &AgentRunConfig) -> TalosResult<Arc<dyn LlmProvider>> {
+        self.llm_provider_router
+            .provider_for(&talos_types::ModelRef {
+                provider: config.llm.provider.clone(),
+                id: config.llm.model.clone(),
+            })
+    }
+
     async fn memory_store_for_run(
         &self,
         context: &AgentRunContext,
+        llm_provider: Arc<dyn LlmProvider>,
     ) -> TalosResult<(AgentKernelConfig, Arc<MemoryStore>)> {
         let kernel_config = self.kernel_config_for_run(context)?;
         let memory_store = Arc::new(MemoryStore::from_config_with_llm(
             &kernel_config,
-            self.llm_provider.clone(),
+            llm_provider,
         ));
         Ok((kernel_config, memory_store))
     }
 
     fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> ModelInfo {
-        let selected_model = if self.model.trim().is_empty() {
-            config.llm.model.clone()
-        } else {
-            self.model.clone()
-        };
+        let selected_model = config.llm.model.clone();
         let provider_name = config.llm.provider.clone();
 
         if let Some(provider_config) = config.current_provider_config() {
@@ -333,14 +336,12 @@ impl KernelAgent {
                 SessionTranscriptPayload::DynamicToolResponse { payload }
                     if record.header.invocation_id.as_str() == turn_id
                         && payload.call_id.as_str() == tool_call.call_id.as_str()
-                        && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
+                        && payload.tool_name.as_str() == tool_call.tool_name.as_str()
+                        && response
+                            .as_ref()
+                            .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp) =>
                 {
-                    if response
-                        .as_ref()
-                        .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp)
-                    {
-                        response = Some((record.header.timestamp, payload));
-                    }
+                    response = Some((record.header.timestamp, payload));
                 }
                 _ => {}
             }
@@ -411,11 +412,13 @@ impl KernelAgent {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
+        let llm_provider = self.llm_provider_for_run(&agent_request.config)?;
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = turn_id.clone();
         let session_id = agent_request.context.session_id.clone();
-        let (kernel_config, memory_store) =
-            self.memory_store_for_run(&agent_request.context).await?;
+        let (kernel_config, memory_store) = self
+            .memory_store_for_run(&agent_request.context, llm_provider.clone())
+            .await?;
         let skill_options = self.build_skill_options(&agent_request.input, &kernel_config)?;
         let resume = Self::build_general_turn_resume(
             memory_store.as_ref(),
@@ -437,7 +440,7 @@ impl KernelAgent {
             &self.name,
             &self.description,
             &input,
-            self.llm_provider.clone(),
+            llm_provider,
             self.tool_registry.clone(),
             self.tool_registry.clone(),
             memory_store,
@@ -477,14 +480,23 @@ impl KernelAgent {
         let task_abort_handle = abort_handle.clone();
         let task_inner_abort_handle = inner_abort_handle.clone();
         let task: JoinHandle<AgentResult<AgentRunResult>> = tokio::spawn(async move {
-            let (kernel_config, memory_store) =
-                match this.memory_store_for_run(&agent_request.context).await {
-                    Ok(value) => value,
-                    Err(err) => {
-                        let _ = tx.send(timeline.fail_turn(err.to_string())).await;
-                        return Err(err.into());
-                    }
-                };
+            let llm_provider = match this.llm_provider_for_run(&agent_request.config) {
+                Ok(llm_provider) => llm_provider,
+                Err(err) => {
+                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    return Err(err.into());
+                }
+            };
+            let (kernel_config, memory_store) = match this
+                .memory_store_for_run(&agent_request.context, llm_provider.clone())
+                .await
+            {
+                Ok(value) => value,
+                Err(err) => {
+                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    return Err(err.into());
+                }
+            };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
             let kernel_ctx = this.build_invocation_context(
                 &agent_request,
@@ -545,7 +557,7 @@ impl KernelAgent {
                         &this.name,
                         &this.description,
                         &input,
-                        this.llm_provider.clone(),
+                        llm_provider,
                         this.tool_registry.clone(),
                         this.tool_registry.clone(),
                         memory_store,
@@ -902,11 +914,10 @@ pub(crate) fn emit_kernel_timeline_events(
                 TalosTimelineItemStatus::Completed,
                 None,
             )?])
-            .map(|events| {
+            .inspect(|_events| {
                 state
                     .completed_assistant_text_items
                     .insert(data.item_key, item_id);
-                events
             })
         }
         (
@@ -1373,8 +1384,7 @@ pub(crate) struct KernelAgentParams {
     pub(crate) id: String,
     pub(crate) name: String,
     pub(crate) description: String,
-    pub(crate) llm_provider: Arc<dyn LlmProvider>,
-    pub(crate) model: String,
+    pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
     pub(crate) tool_registry: Arc<ToolRegistry>,
     pub(crate) kernel_config: AgentKernelConfig,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,

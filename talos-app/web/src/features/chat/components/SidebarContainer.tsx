@@ -29,7 +29,7 @@ export function SidebarContainer() {
       id: sessionId,
       label: aliases[sessionId] ?? session.title,
       status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
-      model: session.model || "unknown",
+      model: session.model_ref?.id || "unknown",
       lastActivityAt: session.last_activity,
       createdAt: session.created_at,
     };

@@ -21,6 +21,7 @@ SESSION_SNAPSHOT="$(scenario_report_path "tui_write_session.json")"
 TALOS_LOG_FILE="${TALOS_HOME}/logs/talos.log"
 TUI_SESSION_NAME="talos-tui-write-$$"
 MARKER="TUI_EMBEDDED_WRITE_${RANDOM}_$$"
+WARMUP_MARKER="TUI_EMBEDDED_WARMUP_${RANDOM}_$$"
 
 cleanup() {
   if [[ -n "${TUI_SESSION_NAME:-}" ]] && tmux has-session -t "${TUI_SESSION_NAME}" 2>/dev/null; then
@@ -101,6 +102,24 @@ mkdir -p "${TARGET_DIR}"
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
   "cd '${TALOS_RS_DIR}' && TALOS_HOME='${TALOS_HOME}' ./target/debug/talos"
 wait_for_tui_ready
+
+warmup_prompt="Reply exactly TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}. Do not call any tools."
+send_tui_input "${warmup_prompt}"
+
+for _ in $(seq 1 120); do
+  capture_tui >"${PANE_SNAPSHOT}" || true
+  if grep -Fq "TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}" "${PANE_SNAPSHOT}"; then
+    echo "CASE embedded_tui_write_warmup PASS marker=${WARMUP_MARKER}"
+    break
+  fi
+  sleep 0.5
+done
+
+if ! grep -Fq "TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}" "${PANE_SNAPSHOT}"; then
+  dump_failure_context
+  echo "CASE embedded_tui_write_warmup FAIL marker=${WARMUP_MARKER}"
+  exit 1
+fi
 
 prompt="Use the Write tool exactly once to create the absolute path ${TARGET_FILE}. The file content must be a minimal standalone HTML calculator page, include marker ${MARKER}, include buttons for 1, +, 2, =, and show result 3 for 1+2. After the tool call completes, reply exactly TUI_EMBEDDED_WRITE_OK:${MARKER}. Do not only describe the file; actually write it."
 send_tui_input "${prompt}"

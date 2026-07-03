@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{SessionConf, SessionConfigOverridePolicy, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{SessionConf, TalosSession, DEFAULT_SESSION_TITLE};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionRecord {
@@ -27,9 +27,8 @@ pub struct SessionRecord {
 }
 
 impl SessionRecord {
-    pub fn from_session(session: &TalosSession, base_model: &str) -> Self {
+    pub fn from_session(session: &TalosSession) -> Self {
         let effective_model = session.config.llm.model.clone();
-        let conf = SessionConfigOverridePolicy::build_conf_for_model(base_model, &effective_model);
 
         Self {
             id: session.context.session_id.clone(),
@@ -52,7 +51,7 @@ impl SessionRecord {
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,
             usage: session.state.usage.clone(),
-            conf,
+            conf: session.conf.clone(),
             project_id: session.project_id.clone(),
             current_directory: session.current_directory.clone(),
         }
