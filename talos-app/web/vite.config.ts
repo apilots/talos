@@ -5,6 +5,7 @@ import path from "node:path";
 
 const defaultProjectRoot =
   process.env.VITE_DEFAULT_PROJECT_ROOT ?? path.join(os.homedir(), ".talos", "workspace-talos");
+const devApiProxyTarget = process.env.VITE_API_PROXY_TARGET ?? "http://127.0.0.1:8080";
 
 export default defineConfig({
   base: process.env.TALOS_WEB_BASE ?? "/",
@@ -54,5 +55,15 @@ export default defineConfig({
   server: {
     port: 5173,
     host: "127.0.0.1",
+    proxy: {
+      "/health": {
+        target: devApiProxyTarget,
+        changeOrigin: true,
+      },
+      "/v1": {
+        target: devApiProxyTarget,
+        changeOrigin: true,
+      },
+    },
   },
 });

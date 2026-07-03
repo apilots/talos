@@ -1,5 +1,6 @@
 import { createBrowserTalosClient } from "@talos/sdk-browser";
 
+import { resolveServerBaseUrl } from "@/features/connection/store";
 import { createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { getConnectionSettings } from "@/shared/store/app-store";
 
@@ -14,9 +15,8 @@ function createDefaultBrowserClient() {
     return createDesktopTalosClient(desktopBridge, getAuthTokenForRequests);
   }
 
-  const { serverUrl } = getConnectionSettings();
   return createBrowserTalosClient({
-    baseUrl: serverUrl,
+    baseUrl: resolveServerBaseUrl(),
     getToken: getAuthTokenForRequests,
   });
 }

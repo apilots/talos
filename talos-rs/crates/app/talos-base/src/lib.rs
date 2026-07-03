@@ -53,6 +53,8 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
+const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
+
 #[derive(Clone)]
 struct AgentSkillRootsResolver {
     plugins: PluginManagerService,
@@ -355,12 +357,10 @@ pub async fn run_app_server() -> TalosResult<()> {
 pub async fn run_server() -> TalosResult<()> {
     let config = load_runtime_config()?;
     let config_source = resolve_config_source_path();
-    let server_options = TalosServerOptions {
-        webui_dir: resolve_packaged_webui_dir(),
-        ..TalosServerOptions::default()
-    };
+    let mut server_options = TalosServerOptions::default();
     let _log_guard = init_logging(&config, Some(&server_options))?;
     log_config_source(config_source);
+    server_options.webui_dir = resolve_packaged_webui_dir();
     info!(
         "Starting Talos server at {}:{}",
         config.gateway.host, config.gateway.port
@@ -395,11 +395,85 @@ fn resolve_config_source_path() -> Option<PathBuf> {
 }
 
 fn resolve_packaged_webui_dir() -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|path| path.parent().map(PathBuf::from))?;
-    let webui_dir = exe_dir.join("webui");
-    webui_dir.join("index.html").exists().then_some(webui_dir)
+    let resolution = resolve_webui_dir(WebuiLookupInput {
+        env_dir: std::env::var_os(TALOS_WEBUI_DIR_ENV).map(PathBuf::from),
+        current_exe: std::env::current_exe().ok(),
+        current_dir: std::env::current_dir().ok(),
+    });
+    match resolution {
+        WebuiLookupResult::Found(path) => {
+            info!("Serving Talos WebUI from {}", path.display());
+            Some(path)
+        }
+        WebuiLookupResult::InvalidEnv(path) => {
+            let index_path = path.join("index.html");
+            warn!(
+                "{} is set but {} was not found; starting API-only server.",
+                TALOS_WEBUI_DIR_ENV,
+                index_path.display()
+            );
+            None
+        }
+        WebuiLookupResult::Missing => {
+            warn!(
+                "Talos WebUI bundle not found; starting API-only server. Set {} to serve a WebUI bundle.",
+                TALOS_WEBUI_DIR_ENV
+            );
+            None
+        }
+    }
+}
+
+#[derive(Debug)]
+struct WebuiLookupInput {
+    env_dir: Option<PathBuf>,
+    current_exe: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum WebuiLookupResult {
+    Found(PathBuf),
+    InvalidEnv(PathBuf),
+    Missing,
+}
+
+fn resolve_webui_dir(input: WebuiLookupInput) -> WebuiLookupResult {
+    if let Some(path) = input.env_dir {
+        return if is_webui_dir(&path) {
+            WebuiLookupResult::Found(canonical_or_original(path))
+        } else {
+            WebuiLookupResult::InvalidEnv(path)
+        };
+    }
+
+    for candidate in webui_dir_candidates(&input) {
+        if is_webui_dir(&candidate) {
+            return WebuiLookupResult::Found(canonical_or_original(candidate));
+        }
+    }
+
+    WebuiLookupResult::Missing
+}
+
+fn webui_dir_candidates(input: &WebuiLookupInput) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(exe_dir) = input
+        .current_exe
+        .as_ref()
+        .and_then(|path| path.parent().map(PathBuf::from))
+    {
+        candidates.push(exe_dir.join("webui"));
+        candidates.push(exe_dir.join("..").join("webui"));
+    }
+    if let Some(current_dir) = input.current_dir.as_ref() {
+        candidates.push(current_dir.join("webui"));
+    }
+    candidates
+}
+
+fn is_webui_dir(path: &std::path::Path) -> bool {
+    path.join("index.html").is_file()
 }
 
 fn canonical_or_original(path: PathBuf) -> PathBuf {

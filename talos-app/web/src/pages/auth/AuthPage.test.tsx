@@ -7,7 +7,9 @@ import { createJSONStorage } from "zustand/middleware";
 
 import "@/shared/i18n/setup";
 import {
+  closePreparedExternalWindow,
   getCloudLoginStatus,
+  prepareExternalAuthWindow,
   redirectToExternalUrl,
   startCloudLogin,
 } from "@/features/auth";
@@ -15,12 +17,16 @@ import { useAppStore } from "@/shared/store/app-store";
 import { AuthPage } from "./AuthPage";
 
 vi.mock("@/features/auth", () => ({
+  closePreparedExternalWindow: vi.fn(),
   getCloudLoginStatus: vi.fn(),
+  prepareExternalAuthWindow: vi.fn(),
   redirectToExternalUrl: vi.fn(),
   startCloudLogin: vi.fn(),
 }));
 
+const closePreparedExternalWindowMock = vi.mocked(closePreparedExternalWindow);
 const getCloudLoginStatusMock = vi.mocked(getCloudLoginStatus);
+const prepareExternalAuthWindowMock = vi.mocked(prepareExternalAuthWindow);
 const startCloudLoginMock = vi.mocked(startCloudLogin);
 const redirectToExternalUrlMock = vi.mocked(redirectToExternalUrl);
 
@@ -38,7 +44,12 @@ function renderAuthPage(initialEntry: string) {
 }
 
 describe("AuthPage", () => {
+  const preparedWindow = { closed: false } as Window;
+
   beforeEach(() => {
+    closePreparedExternalWindowMock.mockReset();
+    prepareExternalAuthWindowMock.mockReset();
+    prepareExternalAuthWindowMock.mockReturnValue(preparedWindow);
     startCloudLoginMock.mockResolvedValue({
       login_id: "dls_1",
       login_url: "https://cloud.talos.love/device?session_id=dls_1&user_code=ABCD-EFGH",
@@ -106,9 +117,14 @@ describe("AuthPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue with talos cloud/i }));
 
     await waitFor(() => expect(startCloudLoginMock).toHaveBeenCalledTimes(1));
+    expect(prepareExternalAuthWindowMock).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1));
     const target = new URL(redirectToExternalUrlMock.mock.calls[0]?.[0] as string);
 
+    expect(redirectToExternalUrlMock).toHaveBeenCalledWith(
+      "https://cloud.talos.love/device?session_id=dls_1&user_code=ABCD-EFGH",
+      preparedWindow,
+    );
     expect(target.origin).toBe("https://cloud.talos.love");
     expect(target.pathname).toBe("/device");
     expect(target.searchParams.get("session_id")).toBe("dls_1");
@@ -124,6 +140,16 @@ describe("AuthPage", () => {
     expect(useAppStore.getState().connection.authUsername).toBe("xiliu");
     expect(useAppStore.getState().connection.authToken).toBe("web-token");
     expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the prepared Cloud tab when device login cannot be started", async () => {
+    startCloudLoginMock.mockRejectedValue(new Error("offline"));
+    renderAuthPage("/auth/login?next=/settings");
+
+    fireEvent.click(screen.getByRole("button", { name: /continue with talos cloud/i }));
+
+    await waitFor(() => expect(closePreparedExternalWindowMock).toHaveBeenCalledWith(preparedWindow));
+    expect(screen.getByText("Cloud login could not be started.")).toBeTruthy();
   });
 
   it("shows logout success without starting device login", async () => {

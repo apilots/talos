@@ -7,6 +7,7 @@ import {
   getGatewayHealth,
   readDesktopCloudSession,
 } from "../api";
+import { resolveServerBaseUrl } from "@/features/connection/store";
 import { useConnectionSettings } from "@/features/connection";
 
 export function useAuthBootstrap() {
@@ -19,7 +20,8 @@ export function useAuthBootstrap() {
       return;
     }
 
-    const attemptKey = `${connection.serverUrl}::${connection.authToken || "__anonymous__"}`;
+    const serverBaseUrl = resolveServerBaseUrl();
+    const attemptKey = `${serverBaseUrl}::${connection.authToken || "__anonymous__"}`;
     if (attemptedKeyRef.current === attemptKey || inflightKeyRef.current === attemptKey) {
       return;
     }
@@ -56,7 +58,7 @@ export function useAuthBootstrap() {
         if (canceled) {
           return;
         }
-        attemptedKeyRef.current = `${connection.serverUrl}::${restoredToken || connection.authToken || "__anonymous__"}`;
+        attemptedKeyRef.current = `${serverBaseUrl}::${restoredToken || connection.authToken || "__anonymous__"}`;
         setConnection({
           ...(restoredToken ? { authToken: restoredToken } : {}),
           authStatus: "authenticated",
@@ -91,5 +93,5 @@ export function useAuthBootstrap() {
         inflightKeyRef.current = null;
       }
     };
-  }, [connection.authStatus, connection.authToken, connection.serverUrl, setConnection]);
+  }, [connection.authStatus, connection.authToken, setConnection]);
 }

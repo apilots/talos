@@ -5,5 +5,5 @@ import { useAppStore } from "@/shared/store/app-store";
 
 export function useTalosClient() {
   const connection = useAppStore((state) => state.connection);
-  return useMemo(() => getTalosClient(), [connection.serverUrl, connection.authToken]);
+  return useMemo(() => getTalosClient(), [connection.authToken]);
 }

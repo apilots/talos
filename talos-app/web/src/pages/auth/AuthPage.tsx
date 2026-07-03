@@ -3,7 +3,9 @@ import { LogIn } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
+  closePreparedExternalWindow,
   getCloudLoginStatus,
+  prepareExternalAuthWindow,
   redirectToExternalUrl,
   startCloudLogin,
 } from "@/features/auth";
@@ -27,9 +29,9 @@ export function AuthPage() {
 
   useEffect(() => {
     if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
-      navigate("/");
+      navigate(nextPath, { replace: true });
     }
-  }, [connection.authStatus, navigate]);
+  }, [connection.authStatus, navigate, nextPath]);
 
   useEffect(() => {
     setIsLoadingConfig(false);
@@ -92,14 +94,16 @@ export function AuthPage() {
   }, [isCompleting, loginId, navigate, nextPath, setConnection]);
 
   async function openCloudAuth() {
+    const authWindow = prepareExternalAuthWindow();
     setIsCompleting(true);
     setError("");
     setConnection({ authToken: "", authStatus: "loading" });
     try {
       const response = await startCloudLogin();
       setLoginId(response.login_id);
-      redirectToExternalUrl(response.login_url);
+      redirectToExternalUrl(response.login_url, authWindow);
     } catch {
+      closePreparedExternalWindow(authWindow);
       setError("Cloud login could not be started.");
       setConnection({ authStatus: "unauthenticated" });
     } finally {

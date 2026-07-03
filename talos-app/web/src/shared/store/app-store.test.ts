@@ -24,7 +24,6 @@ describe("app store persistence", () => {
     useAppStore.setState((state) => ({
       ...state,
       connection: {
-        serverUrl: "http://localhost:8080",
         authToken: "",
         authStatus: "unknown",
         authRole: "user",
@@ -60,7 +59,6 @@ describe("app store persistence", () => {
       authRole: "admin",
       authUsername: "ada",
       userId: "user-1",
-      serverUrl: "http://127.0.0.1:8080",
     });
 
     const raw = storage.get("talos-web-ui");
@@ -70,7 +68,6 @@ describe("app store persistence", () => {
     };
 
     expect(persisted.state?.connection).toEqual({
-      serverUrl: "http://127.0.0.1:8080",
       runtimeMode: "local",
     });
   });
@@ -97,7 +94,6 @@ describe("app store persistence", () => {
     await useAppStore.persist.rehydrate();
 
     expect(useAppStore.getState().connection).toMatchObject({
-      serverUrl: "http://127.0.0.1:8080",
       authToken: "",
       authStatus: "unknown",
       authRole: "user",
@@ -105,6 +101,25 @@ describe("app store persistence", () => {
       userId: "anonymous",
       runtimeMode: "local",
     });
+  });
+
+  it("ignores previously persisted server URL during rehydration", async () => {
+    storage.set(
+      "talos-web-ui",
+      JSON.stringify({
+        state: {
+          connection: {
+            serverUrl: "http://localhost:8080",
+            runtimeMode: "local",
+          },
+        },
+        version: 0,
+      }),
+    );
+
+    await useAppStore.persist.rehydrate();
+
+    expect(useAppStore.getState().connection).not.toHaveProperty("serverUrl");
   });
 
   it("drops previously persisted transient chat runtime state during rehydration", async () => {

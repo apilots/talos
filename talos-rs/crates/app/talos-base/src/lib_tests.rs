@@ -1,9 +1,14 @@
 use super::{
-    apply_runtime_options, build_application_runtime, create_llm_provider,
+    apply_runtime_options, build_application_runtime, create_llm_provider, resolve_webui_dir,
     ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
-    SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
-use std::sync::Arc;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use talos_config::{AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol};
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
@@ -12,6 +17,87 @@ use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
+
+static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+#[test]
+fn resolve_webui_dir_uses_explicit_env_dir() {
+    let root = temp_test_dir("webui-env");
+    let webui = root.join("custom-webui");
+    create_webui_bundle(&webui);
+
+    let result = resolve_webui_dir(WebuiLookupInput {
+        env_dir: Some(webui.clone()),
+        current_exe: None,
+        current_dir: None,
+    });
+
+    assert_eq!(result, WebuiLookupResult::Found(canonical(webui)));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_webui_dir_reports_invalid_explicit_env_dir() {
+    let root = temp_test_dir("webui-invalid-env");
+    let webui = root.join("missing-webui");
+
+    let result = resolve_webui_dir(WebuiLookupInput {
+        env_dir: Some(webui.clone()),
+        current_exe: None,
+        current_dir: None,
+    });
+
+    assert_eq!(result, WebuiLookupResult::InvalidEnv(webui));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_webui_dir_supports_installed_bin_sibling_layout() {
+    let root = temp_test_dir("webui-installed");
+    let bin = root.join("bin");
+    let webui = root.join("webui");
+    fs::create_dir_all(&bin).expect("bin dir should be created");
+    create_webui_bundle(&webui);
+
+    let result = resolve_webui_dir(WebuiLookupInput {
+        env_dir: None,
+        current_exe: Some(bin.join("talos-server")),
+        current_dir: None,
+    });
+
+    assert_eq!(result, WebuiLookupResult::Found(canonical(webui)));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_webui_dir_supports_current_dir_webui_layout() {
+    let root = temp_test_dir("webui-current-dir");
+    let webui = root.join("webui");
+    create_webui_bundle(&webui);
+
+    let result = resolve_webui_dir(WebuiLookupInput {
+        env_dir: None,
+        current_exe: None,
+        current_dir: Some(root.clone()),
+    });
+
+    assert_eq!(result, WebuiLookupResult::Found(canonical(webui)));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn resolve_webui_dir_returns_missing_without_candidates() {
+    let root = temp_test_dir("webui-missing");
+
+    let result = resolve_webui_dir(WebuiLookupInput {
+        env_dir: None,
+        current_exe: Some(root.join("bin").join("talos-server")),
+        current_dir: Some(root.clone()),
+    });
+
+    assert_eq!(result, WebuiLookupResult::Missing);
+    let _ = fs::remove_dir_all(root);
+}
 
 #[test]
 fn apply_runtime_options_updates_gateway_and_logging() {
@@ -30,6 +116,22 @@ fn apply_runtime_options_updates_gateway_and_logging() {
     assert_eq!(updated.gateway.host, "127.0.0.1");
     assert_eq!(updated.gateway.port, 18080);
     assert!(!updated.logging.stdout);
+}
+
+fn temp_test_dir(label: &str) -> PathBuf {
+    let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("talos-base-{label}-{}-{id}", std::process::id()));
+    fs::create_dir_all(&path).expect("temp test dir should be created");
+    path
+}
+
+fn create_webui_bundle(path: &Path) {
+    fs::create_dir_all(path).expect("webui dir should be created");
+    fs::write(path.join("index.html"), "<!doctype html>").expect("index.html should be written");
+}
+
+fn canonical(path: PathBuf) -> PathBuf {
+    path.canonicalize().unwrap_or(path)
 }
 
 #[tokio::test]

@@ -35,7 +35,6 @@ function buildSettingsState(
       authRole,
       authUsername: authRole,
       userId: `${authRole}-1`,
-      serverUrl: "http://127.0.0.1:8080",
       runtimeMode: "local",
     },
     setConnection: vi.fn(),
@@ -44,7 +43,6 @@ function buildSettingsState(
     locale: "en",
     setLocale: vi.fn(),
     draft: {
-      serverUrl: "http://127.0.0.1:8080",
       runtimeMode: "local",
     },
     setDraft: vi.fn(),

@@ -53,14 +53,6 @@ export function SettingsServerConnectionPanel({
           void models.refetch();
         }}
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <FieldBlock label={t("settings:fields.serverUrl")}>
-            <Input
-              onChange={(event) => setDraft((current) => ({ ...current, serverUrl: event.target.value }))}
-              value={draft.serverUrl}
-            />
-          </FieldBlock>
-        </div>
         <FieldBlock label={t("settings:fields.authToken")}>
           <Input autoComplete="current-password" readOnly title={t("settings:fields.authManagedByLogin")} type="password" value="" />
         </FieldBlock>

@@ -47,7 +47,6 @@ describe("useAuthBootstrap", () => {
     useAppStore.setState((state) => ({
       ...state,
       connection: {
-        serverUrl: "http://127.0.0.1:8080",
         authToken: "",
         authStatus: "unknown",
         authRole: "user",

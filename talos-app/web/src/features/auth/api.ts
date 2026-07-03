@@ -2,9 +2,9 @@ import type { AppProtocol } from "@talos/sdk-core";
 import type { UserDto } from "@talos/sdk-browser";
 import { getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
 
+import { resolveServerBaseUrl } from "@/features/connection/store";
 import { getTalosClient } from "@/shared/api/client";
 import { getDesktopBridge, isDesktopRuntime } from "@/shared/api/desktop-client";
-import { getConnectionSettings } from "@/shared/store/app-store";
 
 export interface HealthResponse {
   status: string;
@@ -49,8 +49,7 @@ export async function getCurrentUserWithToken(accessToken: string): Promise<User
     return response.user;
   }
 
-  const { serverUrl } = getConnectionSettings();
-  const response = await fetch(new URL("/v1/user", serverUrl).toString(), {
+  const response = await fetch(new URL("/v1/user", resolveServerBaseUrl()).toString(), {
     headers: {
       Accept: "application/json",
       Authorization: `Bearer ${accessToken}`,
@@ -79,8 +78,7 @@ export async function getGatewayHealth(): Promise<HealthResponse> {
     };
   }
 
-  const { serverUrl } = getConnectionSettings();
-  const response = await fetch(new URL("/health", serverUrl).toString(), {
+  const response = await fetch(new URL("/health", resolveServerBaseUrl()).toString(), {
     headers: {
       Accept: "application/json",
     },
@@ -131,8 +129,7 @@ export async function startCloudLogin(): Promise<CloudLoginStartResponse> {
     });
   }
 
-  const { serverUrl } = getConnectionSettings();
-  const response = await fetch(new URL("/v1/auth/login/start", serverUrl).toString(), {
+  const response = await fetch(new URL("/v1/auth/login/start", resolveServerBaseUrl()).toString(), {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -160,8 +157,7 @@ export async function getCloudLoginStatus(loginId: string): Promise<CloudLoginSt
     });
   }
 
-  const { serverUrl } = getConnectionSettings();
-  const url = new URL("/v1/auth/login/status", serverUrl);
+  const url = new URL("/v1/auth/login/status", resolveServerBaseUrl());
   url.searchParams.set("login_id", loginId);
   const response = await fetch(url.toString(), {
     headers: {

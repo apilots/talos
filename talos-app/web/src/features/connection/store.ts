@@ -1,6 +1,5 @@
 import type { RuntimeMode } from "@/shared/types/ui";
 
-const defaultServerUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 type UserRole = "user" | "admin";
 type AuthStatus =
   | "unknown"
@@ -11,7 +10,6 @@ type AuthStatus =
   | "open";
 
 export interface ConnectionState {
-  serverUrl: string;
   authToken: string;
   authStatus: AuthStatus;
   authRole: UserRole;
@@ -32,7 +30,6 @@ export type ConnectionSliceSetter = (
 export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSlice {
   return {
     connection: {
-      serverUrl: defaultServerUrl,
       authToken: "",
       authStatus: "unknown",
       authRole: "user",
@@ -67,4 +64,15 @@ export function createConnectionSlice(set: ConnectionSliceSetter): ConnectionSli
 
 function normalizeRuntimeMode(value: RuntimeMode): RuntimeMode {
   return value === "local" ? "local" : "local";
+}
+
+export function resolveServerBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim();
+  if (configured) {
+    return configured;
+  }
+  if (typeof window !== "undefined" && window.location.origin !== "null") {
+    return window.location.origin;
+  }
+  return "http://localhost:8080";
 }

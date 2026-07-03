@@ -9,4 +9,9 @@ export {
   readDesktopCloudSession,
   startCloudLogin,
 } from "./api";
-export { redirectToExternalUrl } from "./navigation";
+export {
+  closePreparedExternalWindow,
+  prepareExternalAuthWindow,
+  redirectToExternalUrl,
+  type PreparedExternalWindow,
+} from "./navigation";

@@ -24,7 +24,6 @@ function buildConnection(
     authToken: authStatus === "authenticated" ? "cloud-token" : "",
     authUsername: authRole,
     runtimeMode: "local",
-    serverUrl: "http://127.0.0.1:8080",
     userId: `${authRole}-1`,
   };
 }

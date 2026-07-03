@@ -37,7 +37,7 @@ export const chatKeys = {
 
 export function useConnectionKey() {
   return useAppStore((state) =>
-    `${state.connection.serverUrl}|${state.connection.authToken}|${state.connection.userId}`,
+    `${state.connection.authToken}|${state.connection.userId}`,
   );
 }
 

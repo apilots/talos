@@ -35,7 +35,6 @@ describe("useSettingsPage", () => {
       ...state,
       connection: {
         ...state.connection,
-        serverUrl: "http://localhost:8080",
         authToken: "",
         userId: "web-user",
         runtimeMode: "local",
@@ -48,11 +47,10 @@ describe("useSettingsPage", () => {
   it("tracks connection changes into the local draft", async () => {
     const { result, rerender } = renderHook(() => useSettingsPage());
 
-    useAppStore.getState().setConnection({ serverUrl: "http://127.0.0.1:9000", userId: "alice" });
+    useAppStore.getState().setConnection({ userId: "alice" });
     rerender();
 
     await waitFor(() => {
-      expect(result.current.draft.serverUrl).toBe("http://127.0.0.1:9000");
       expect(result.current.draft.userId).toBe("alice");
     });
   });

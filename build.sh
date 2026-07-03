@@ -12,12 +12,13 @@ PRODUCT_DIR="${PRODUCT_DIR:-${REPO_ROOT}/dist/products/${PROFILE}}"
 
 usage() {
   cat <<'EOF'
-Usage: ./build.sh [all|server|server-webui|tui|webui|desktop|desktop-mac|desktop-linux]
+Usage: ./build.sh [all|server|server-bin|server-webui|tui|webui|desktop|desktop-mac|desktop-linux]
 
 Targets:
   all      Build deployable server+WebUI, TUI, and packaged Desktop products.
-  server   Build the Talos server binary.
-  server-webui  Build a deployable server+WebUI tarball.
+  server   Build a deployable server+WebUI tarball, and optionally a Docker image.
+  server-bin  Build only the Talos server binary.
+  server-webui  Compatibility alias for server.
   tui      Build the terminal UI binary.
   webui    Build the browser WebUI bundle.
   desktop      Build the unpackaged Electron Desktop shell for local debug.
@@ -27,6 +28,12 @@ Targets:
 Environment:
   PROFILE=release  Build Rust targets in release mode.
   PRODUCT_DIR=path  Override unified product output directory.
+  SERVER_IMAGE=1  Build the Talos server Docker image from source after packaging.
+  SERVER_IMAGE_NAME=name  Docker image name. Defaults to talos-server.
+  SERVER_IMAGE_TAGS="tag1 tag2"  Docker image tags. Defaults to the workspace version.
+  SERVER_IMAGE_PLATFORMS=linux/amd64,linux/arm64  Optional buildx platforms.
+  SERVER_IMAGE_PUSH=1  Push image instead of loading it into the local Docker daemon.
+  DOCKER_BUILD_CONTEXT=path  Context containing talos/ and talos-cloud/. Defaults to the parent of this repo.
 EOF
 }
 
@@ -48,6 +55,17 @@ require_pnpm() {
   fi
   echo "pnpm is required to build WebUI/Desktop." >&2
   exit 1
+}
+
+require_docker() {
+  command -v docker >/dev/null 2>&1 || {
+    echo "docker is required to build the server image." >&2
+    exit 1
+  }
+  docker buildx version >/dev/null 2>&1 || {
+    echo "docker buildx is required to build the server image." >&2
+    exit 1
+  }
 }
 
 cargo_profile_args() {
@@ -177,12 +195,65 @@ build_server_webui() {
 
   if [[ -d "${BUILD_ASSET_DIR}/server" ]]; then
     cp -R "${BUILD_ASSET_DIR}/server/." "${staging_dir}/"
+    rm -f "${staging_dir}/Dockerfile" "${staging_dir}/Dockerfile.dockerignore"
   fi
   copy_rust_binary_as "talos-server" "${staging_dir}/bin/talos-server"
   copy_conf_resource "${staging_dir}"
   cp -R "${REPO_ROOT}/talos-app/web/dist/." "${staging_dir}/webui/"
   tar -czf "${archive_path}" -C "${staging_dir}" .
   rm -rf "${PRODUCT_DIR}/.staging"
+}
+
+build_server_image() {
+  require_docker
+
+  local context_dir="${DOCKER_BUILD_CONTEXT:-$(dirname "${REPO_ROOT}")}"
+  local image_name="${SERVER_IMAGE_NAME:-talos-server}"
+  local version="${SERVER_PACKAGE_VERSION:-$(workspace_version)}"
+  local tags="${SERVER_IMAGE_TAGS:-${version}}"
+  local platforms="${SERVER_IMAGE_PLATFORMS:-}"
+  local push="${SERVER_IMAGE_PUSH:-0}"
+  local revision
+  revision="$(git -C "${REPO_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+  if [[ ! -d "${context_dir}/talos" || ! -d "${context_dir}/talos-cloud" ]]; then
+    echo "Docker build context must contain talos/ and talos-cloud/: ${context_dir}" >&2
+    exit 1
+  fi
+  if [[ "${push}" != "1" && "${platforms}" == *,* ]]; then
+    echo "Multi-platform Docker builds require SERVER_IMAGE_PUSH=1." >&2
+    exit 1
+  fi
+
+  local args=(
+    build
+    -f "${BUILD_ASSET_DIR}/server/Dockerfile"
+    --build-arg "VERSION=${version}"
+    --build-arg "REVISION=${revision}"
+  )
+  if [[ -n "${platforms}" ]]; then
+    args+=(--platform "${platforms}")
+  fi
+  for tag in ${tags//,/ }; do
+    [[ -n "${tag}" ]] || continue
+    args+=(-t "${image_name}:${tag}")
+  done
+  if [[ "${push}" == "1" ]]; then
+    args+=(--push)
+  else
+    args+=(--load)
+  fi
+  args+=("${context_dir}")
+
+  echo "Building Talos server Docker image..."
+  docker buildx "${args[@]}"
+}
+
+build_server_product() {
+  build_server_webui
+  if [[ "${SERVER_IMAGE:-0}" == "1" ]]; then
+    build_server_image
+  fi
 }
 
 build_tui() {
@@ -242,16 +313,19 @@ reset_product_dir
 
 case "${TARGET}" in
   all)
-    build_server_webui
+    build_server_product
     build_tui
     build_desktop_dmg
     build_desktop_linux
     ;;
   server)
+    build_server_product
+    ;;
+  server-bin)
     build_server
     ;;
   server-webui)
-    build_server_webui
+    build_server_product
     ;;
   tui)
     build_tui
