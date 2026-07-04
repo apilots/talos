@@ -8,7 +8,6 @@ use talos_config::{AgentKernelConfig, PlannerMode};
 ///
 /// Default values per specification:
 /// - tool_parallelism: 1
-/// - max_tool_rounds: 8
 /// - planner_mode: "built_in"
 #[test]
 fn test_default_values() {
@@ -17,10 +16,6 @@ fn test_default_values() {
     assert_eq!(
         config.tool_parallelism, 1,
         "tool_parallelism should default to 1"
-    );
-    assert_eq!(
-        config.max_tool_rounds, 8,
-        "max_tool_rounds should default to 8"
     );
     assert_eq!(
         config.planner_mode,
@@ -33,14 +28,12 @@ fn test_default_values() {
 ///
 /// Valid boundaries:
 /// - tool_parallelism: must be > 0
-/// - max_tool_rounds: must be > 0
 /// - planner_mode: must be "built_in"
 #[test]
 fn test_boundary_validation() {
     let config = AgentKernelConfig::default();
 
     assert!(config.tool_parallelism > 0, "tool_parallelism must be > 0");
-    assert!(config.max_tool_rounds > 0, "max_tool_rounds must be > 0");
 
     assert_eq!(config.planner_mode, PlannerMode::BuiltIn);
 

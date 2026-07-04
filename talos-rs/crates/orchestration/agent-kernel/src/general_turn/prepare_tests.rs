@@ -3,7 +3,9 @@ use super::*;
 
 use crate::{KernelWarning, PromptDynamicSectionDroppedWarning};
 use serde_json::json;
+use talos_error::TalosError;
 use talos_prompt::PromptSectionKind;
+use talos_types::talos::ContextCompactionOutcome;
 
 fn build_executed_turn_artifacts(
     tool_call_log: Vec<ToolCallRecord>,
@@ -114,5 +116,19 @@ fn test_prompt_warning_key_includes_dynamic_dropped_sections() {
     assert_eq!(
         prompt_warning_key(&warning).as_deref(),
         Some("dynamic_dropped:ExpandedToolCatalog,RecentMessages")
+    );
+}
+
+#[test]
+fn test_context_compaction_failure_outcome_separates_provider_and_internal_errors() {
+    assert_eq!(
+        context_compaction_failure_outcome(&TalosError::ToolError(
+            "parse summary json after retries".to_string()
+        )),
+        ContextCompactionOutcome::FailedProviderError
+    );
+    assert_eq!(
+        context_compaction_failure_outcome(&TalosError::StorageError("save summary".to_string())),
+        ContextCompactionOutcome::FailedInternalError
     );
 }

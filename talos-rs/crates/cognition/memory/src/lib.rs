@@ -11,9 +11,10 @@ pub use mapper::SessionTranscriptMapper;
 pub use r#trait::Memory;
 pub use retrieval::{memory_search_response_into_retrieved_items, strip_json_fences};
 pub use store::{
-    MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery, MemorySearchResult,
-    MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary, SessionPromptContext,
-    SessionPromptContextConfig, SessionToolExchangeContext, SessionToolExchangeOutcome,
+    CompactPromptCursor, MemoryGetResult, MemoryIndexFile, MemoryIndexSection, MemorySearchQuery,
+    MemorySearchResult, MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary,
+    SessionPromptContext, SessionPromptContextConfig, SessionPromptContextDiagnostics,
+    SessionPromptRecentWindow, SessionToolExchangeContext, SessionToolExchangeOutcome,
     SessionToolResultContext, SessionTranscriptActions, SessionTranscriptAuthPayload,
     SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptCompaction,
     SessionTranscriptCompactionPayload, SessionTranscriptDynamicToolRequestPayload,

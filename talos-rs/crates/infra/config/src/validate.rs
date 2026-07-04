@@ -101,11 +101,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.tool_parallelism must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.max_tool_rounds == 0 {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.max_tool_rounds must be > 0".to_string(),
-        ));
-    }
     if config.agent.kernel.tool_result_max_bytes == 0 {
         return Err(TalosError::InvalidConfiguration(
             "agent.kernel.tool_result_max_bytes must be > 0".to_string(),

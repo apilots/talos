@@ -22,7 +22,8 @@ use talos_llm_provider::{
 use talos_memory::{
     memory_search_response_into_retrieved_items, strip_json_fences, Memory, MemoryGetResult,
     MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary,
-    SessionPromptContextConfig, SummaryRecord, TalosMessageRole, TalosTurn, ToolCallRecord,
+    SessionPromptContextConfig, SessionPromptRecentWindow, SummaryRecord, TalosMessageRole,
+    TalosTurn, ToolCallRecord,
 };
 use talos_prompt::{
     render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
@@ -56,8 +57,6 @@ Schema:
 Omit any field whose array would be empty. Keep total under 200 words.
 Use the same language as the conversation transcript for all field values."#;
 
-#[cfg(test)]
-mod convergence_tests;
 mod finalize;
 mod guard;
 mod loop_run;
@@ -74,6 +73,9 @@ mod step_request;
 mod tests;
 mod tool_batch;
 mod types;
+mod working_context;
+#[cfg(test)]
+mod working_context_tests;
 
 pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
@@ -120,3 +122,4 @@ pub(crate) use types::{
     ForcedFinalizationCause, PendingDynamicToolRequest, ReadOnlyRoundFingerprint,
     ToolCallFingerprint, ToolLoopGuardState, ToolResultLog,
 };
+pub(crate) use working_context::enforce_working_context_budget;

@@ -66,6 +66,8 @@ pub struct MemoryFlushUsageReport {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
+    pub covers_from_seq: Option<u64>,
+    pub covers_until_seq: Option<u64>,
     pub trimmed_context_unit_count: u32,
     pub trimmed_context_unit_kind: Option<CompactionTrimUnitKind>,
     pub cache_creation_input_tokens: Option<u32>,
@@ -149,6 +151,13 @@ struct CompactableTranscriptUnit {
     turn_id: Option<String>,
     timestamp: chrono::DateTime<chrono::Utc>,
     rendered: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CompactSummaryCoverage {
+    covers_from_seq: u64,
+    covers_until_seq: u64,
+    source_turn_count: usize,
 }
 
 fn render_summary_body(summary: &SessionMemorySummary) -> String {
@@ -298,7 +307,7 @@ fn estimate_transcript_tokens(text: &str) -> usize {
     if chars == 0 {
         0
     } else {
-        (chars + 3) / 4
+        chars.div_ceil(4)
     }
 }
 
@@ -453,18 +462,49 @@ fn trim_transcript_units_to_budget(
 
         if let Some(index) = units
             .iter()
-            .position(|unit| unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
+            .rposition(|unit| unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
         {
             units.remove(index);
             trimmed_units += 1;
             if trimmed_kind.is_none() {
-                trimmed_kind = Some(CompactionTrimUnitKind::OldestHistoryItem);
+                trimmed_kind = Some(CompactionTrimUnitKind::HistoryTurn);
             }
             continue;
         }
 
         return (units, trimmed_units, trimmed_kind);
     }
+}
+
+fn compact_summary_coverage(
+    previous_covers_until_seq: u64,
+    units: &[CompactableTranscriptUnit],
+    turn_seq_by_id: &std::collections::HashMap<String, u64>,
+) -> Option<CompactSummaryCoverage> {
+    let source_seqs = units
+        .iter()
+        .filter(|unit| unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
+        .filter_map(|unit| unit.turn_id.as_ref())
+        .filter_map(|turn_id| turn_seq_by_id.get(turn_id).copied())
+        .filter(|seq| *seq > previous_covers_until_seq)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut covers_until_seq = previous_covers_until_seq;
+    let mut source_turn_count = 0;
+
+    loop {
+        let next_seq = covers_until_seq.saturating_add(1);
+        if !source_seqs.contains(&next_seq) {
+            break;
+        }
+        covers_until_seq = next_seq;
+        source_turn_count += 1;
+    }
+
+    (source_turn_count > 0).then_some(CompactSummaryCoverage {
+        covers_from_seq: previous_covers_until_seq.saturating_add(1),
+        covers_until_seq,
+        source_turn_count,
+    })
 }
 
 pub(crate) fn build_sanitized_memory_decision_input(
@@ -614,7 +654,7 @@ where
                         session_id = %session_id,
                         attempt,
                         error = %err,
-                        raw_response = %response.content,
+                        response_chars = response.content.chars().count(),
                         label,
                         "received invalid structured content from memory helper model response"
                     );
@@ -630,7 +670,7 @@ where
                     session_id = %session_id,
                     attempt,
                     error = %err,
-                    raw_response = %response.content,
+                    response_chars = response.content.chars().count(),
                     label,
                     "received invalid json from memory helper model response"
                 );
@@ -664,6 +704,25 @@ async fn decide_memory_persistence(
         "memory persistence decision",
     )
     .await
+}
+
+async fn latest_summary_compact_cursor(
+    memory_store: &MemoryStore,
+    session_id: &str,
+    enabled: bool,
+) -> TalosResult<Option<talos_memory::CompactPromptCursor>> {
+    if !enabled {
+        return Ok(None);
+    }
+
+    Ok(memory_store
+        .load_summaries(session_id, 1)
+        .await?
+        .into_iter()
+        .last()
+        .map(|summary| talos_memory::CompactPromptCursor {
+            covers_until_seq: summary.covers_until_seq,
+        }))
 }
 
 pub async fn flush_session_memory_with_report(
@@ -703,10 +762,18 @@ pub async fn flush_session_memory_with_report(
         return Ok(usage_report);
     }
 
+    let compact_cursor =
+        latest_summary_compact_cursor(memory_store, session_id, policy.persist_session_summary)
+            .await?;
+    let previous_covers_until_seq = compact_cursor
+        .map(|cursor| cursor.covers_until_seq)
+        .unwrap_or_default();
     let context = memory_store
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
+                compact_cursor,
+                recent_window: SessionPromptRecentWindow::OldestUncovered,
                 recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
                 recent_tool_results_limit: kernel_config
                     .compaction
@@ -749,11 +816,12 @@ pub async fn flush_session_memory_with_report(
         }
         usage_report.trimmed_context_unit_count = trimmed_unit_count as u32;
         usage_report.trimmed_context_unit_kind = trimmed_unit_kind;
-        let kept_history_message_ids = trimmed_units
+        let kept_history_turn_ids = trimmed_units
             .iter()
             .filter_map(|unit| {
                 (unit.kind == CompactableTranscriptUnitKind::HistoryTurn)
-                    .then_some(unit.record_id.clone())
+                    .then(|| unit.turn_id.clone())
+                    .flatten()
             })
             .collect::<std::collections::HashSet<_>>();
         let kept_tool_result_ids = trimmed_units
@@ -770,9 +838,13 @@ pub async fn flush_session_memory_with_report(
                     .then_some(unit.record_id.clone())
             })
             .collect::<std::collections::HashSet<_>>();
-        compaction_context
-            .recent_messages
-            .retain(|message| kept_history_message_ids.contains(&message.header.id));
+        compaction_context.recent_messages.retain(|message| {
+            message
+                .header
+                .turn_id
+                .as_ref()
+                .is_some_and(|turn_id| kept_history_turn_ids.contains(turn_id))
+        });
         compaction_context
             .recent_tool_results
             .retain(|result| kept_tool_result_ids.contains(&result.header.id));
@@ -780,7 +852,8 @@ pub async fn flush_session_memory_with_report(
             .recent_tool_exchanges
             .retain(|exchange| kept_tool_exchange_ids.contains(&exchange.header.id));
     }
-    let transcript = render_transcript(&build_compactable_transcript_units(&compaction_context));
+    let compacted_units = build_compactable_transcript_units(&compaction_context);
+    let transcript = render_transcript(&compacted_units);
     if transcript.trim().is_empty() {
         tracing::debug!(session_id = %session_id, "skip memory flush because transcript is empty");
         return Ok(usage_report);
@@ -847,28 +920,48 @@ pub async fn flush_session_memory_with_report(
     if persistence.decision == MemoryPersistenceKind::Skip {
         return Ok(usage_report);
     }
-    let latest_seq = memory_store.latest_seq(session_id).await?;
-    let source_turn_count = compaction_context
-        .recent_messages
-        .iter()
-        .filter_map(|item| item.header.turn_id.as_deref())
-        .collect::<std::collections::HashSet<_>>()
-        .len();
+    let turn_seq_by_id = memory_store
+        .load_session_turns(session_id)
+        .await?
+        .into_iter()
+        .map(|turn| (turn.turn_id, turn.seq))
+        .collect::<std::collections::HashMap<_, _>>();
+    let coverage =
+        compact_summary_coverage(previous_covers_until_seq, &compacted_units, &turn_seq_by_id);
     if policy.persist_session_summary {
-        memory_store
-            .save_summary(&SummaryRecord {
-                version: 2,
-                header: RecordHeader {
-                    id: Uuid::new_v4().to_string(),
-                    session_id: session_id.to_string(),
-                    turn_id: None,
-                    timestamp: Utc::now(),
-                },
-                covers_until_seq: latest_seq,
-                source_turn_count,
-                content: session_summary_content,
-            })
-            .await?;
+        if let Some(coverage) = coverage {
+            tracing::debug!(
+                session_id = %session_id,
+                previous_covers_until_seq,
+                covers_from_seq = coverage.covers_from_seq,
+                covers_until_seq = coverage.covers_until_seq,
+                source_turn_count = coverage.source_turn_count,
+                compacted_unit_count = compacted_units.len(),
+                "compact summary coverage advanced"
+            );
+            usage_report.covers_from_seq = Some(coverage.covers_from_seq);
+            usage_report.covers_until_seq = Some(coverage.covers_until_seq);
+            memory_store
+                .save_summary(&SummaryRecord {
+                    version: 2,
+                    header: RecordHeader {
+                        id: Uuid::new_v4().to_string(),
+                        session_id: session_id.to_string(),
+                        turn_id: None,
+                        timestamp: Utc::now(),
+                    },
+                    covers_until_seq: coverage.covers_until_seq,
+                    source_turn_count: coverage.source_turn_count,
+                    content: session_summary_content,
+                })
+                .await?;
+        } else {
+            tracing::debug!(
+                session_id = %session_id,
+                previous_covers_until_seq,
+                "skip session summary persistence because compact input has no contiguous uncovered history"
+            );
+        }
     }
 
     let should_append_workspace_memory = policy.flush_workspace_memory

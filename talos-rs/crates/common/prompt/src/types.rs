@@ -411,7 +411,7 @@ pub struct PromptWindowUsage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionTrimUnitKind {
-    OldestHistoryItem,
+    HistoryTurn,
     OldToolOutput,
     OldAssistantToolExchange,
 }
@@ -436,6 +436,10 @@ pub enum SessionHistoryCompactionOutcome {
 pub struct SessionHistoryCompaction {
     pub trigger: SessionHistoryCompactionTrigger,
     pub outcome: SessionHistoryCompactionOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covers_from_seq: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub covers_until_seq: Option<u64>,
     pub pre_compaction_total_tokens: usize,
     pub post_compaction_total_tokens: usize,
     pub recent_messages_before: usize,
@@ -531,6 +535,8 @@ fn derive_reserved_output_tokens(context_window: usize) -> usize {
 /// Prompt context loading policy.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptLoadPolicy {
+    #[serde(default)]
+    pub compact_cursor: Option<talos_memory::CompactPromptCursor>,
     pub include_session_summary: bool,
     pub include_recent_messages: bool,
     pub include_recent_tool_history: bool,
@@ -552,6 +558,7 @@ pub struct PromptLoadPolicy {
 impl Default for PromptLoadPolicy {
     fn default() -> Self {
         Self {
+            compact_cursor: None,
             include_session_summary: true,
             include_recent_messages: true,
             include_recent_tool_history: true,

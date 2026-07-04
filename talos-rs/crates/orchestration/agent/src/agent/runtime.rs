@@ -32,9 +32,10 @@ use talos_memory::{Memory, MemoryStore, SessionTranscriptBranch, SessionTranscri
 use talos_tools::ToolRegistry;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
-    AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TalosToolProgressKind, TokenUsage, TurnExecutionMetrics,
+    AgentEventPayload, ContextCompactionStage, RunItem, StopReason as TalosStopReason,
+    TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
+    TokenUsage, TurnExecutionMetrics,
 };
 use talos_types::ModelInfo;
 
@@ -747,6 +748,7 @@ pub(crate) struct KernelTimelineState {
     pub(crate) active_tool_items: HashMap<String, String>,
     pub(crate) tool_item_by_call_id: HashMap<String, String>,
     pub(crate) completed_tool_call_ids: HashSet<String>,
+    pub(crate) context_compaction_item_id: Option<String>,
 }
 
 fn execution_from_general_turn_result(
@@ -981,6 +983,10 @@ pub(crate) fn emit_kernel_timeline_events(
             events.push(completed);
             Ok(events)
         }
+        (
+            KernelStreamEventType::ContextCompaction,
+            KernelStreamEventData::ContextCompaction(data),
+        ) => emit_context_compaction_timeline_events(timeline, state, data),
         (KernelStreamEventType::ToolCallStart, KernelStreamEventData::ToolCallStart(data)) => {
             reject_after_final_answer(state, "tool call start")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
@@ -1182,6 +1188,49 @@ fn close_active_reasoning_item(
     let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
     state.reasoning_item_id = None;
     Ok(vec![completed])
+}
+
+fn emit_context_compaction_timeline_events(
+    timeline: &mut TimelineBuilder,
+    state: &mut KernelTimelineState,
+    data: talos_agent_kernel::ContextCompactionStreamData,
+) -> TalosResult<Vec<AgentEvent>> {
+    reject_after_final_answer(state, "context compaction")?;
+    let mut events = close_active_reasoning_item(timeline, state)?;
+    let item_id = match state.context_compaction_item_id.clone() {
+        Some(item_id) => item_id,
+        None => {
+            let started =
+                timeline.start_context_compaction(data.trigger, data.stage, data.message.clone());
+            let item_id = item_id_from_started(&started)?;
+            state.context_compaction_item_id = Some(item_id.clone());
+            events.push(started);
+            item_id
+        }
+    };
+    events.push(timeline.append_delta(
+        &item_id,
+        TalosTimelineDelta::ContextCompaction {
+            stage: Some(data.stage),
+            outcome: data.outcome,
+            metrics: data.metrics.clone(),
+            message: data.message.clone(),
+        },
+    )?);
+    let status = match data.stage {
+        ContextCompactionStage::Completed => Some(TalosTimelineItemStatus::Completed),
+        ContextCompactionStage::Failed => Some(TalosTimelineItemStatus::Failed),
+        ContextCompactionStage::Preparing
+        | ContextCompactionStage::Summarizing
+        | ContextCompactionStage::RebuildingPrompt
+        | ContextCompactionStage::Trimming => None,
+    };
+    if let Some(status) = status {
+        let final_content = timeline.item(&item_id).map(|item| item.content.clone());
+        events.push(timeline.complete_item(&item_id, status, final_content)?);
+        state.context_compaction_item_id = None;
+    }
+    Ok(events)
 }
 
 fn append_text_item_delta(

@@ -11,7 +11,8 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    AgentEvent, AgentEventPayload, AgentEventType, SessionHistorySnapshot, SkillSuggestion,
+    AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionOutcome,
+    ContextCompactionStage, ContextCompactionTrigger, SessionHistorySnapshot, SkillSuggestion,
     StartTurnRequest, StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent,
     TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
     TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
@@ -389,6 +390,69 @@ pub(crate) fn execution_summary_event(
                 content: TalosTimelineContent::ExecutionSummary {
                     summary: summary.into(),
                 },
+            },
+        }),
+    )
+}
+
+pub(crate) fn context_compaction_started_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    stage: ContextCompactionStage,
+    message: impl Into<String>,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        AgentEventType::ItemStarted,
+        AgentEventPayload::ItemStarted(talos_sdk::TalosItemStartedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item: TalosTimelineItem {
+                item_id: "context-compaction".to_string(),
+                parent_item_id: None,
+                kind: TalosTimelineItemKind::ContextCompaction,
+                phase: TalosTimelinePhase::System,
+                status: TalosTimelineItemStatus::Running,
+                title: None,
+                started_at_ms: sequence,
+                completed_at_ms: None,
+                content: TalosTimelineContent::ContextCompaction {
+                    trigger: ContextCompactionTrigger::ThresholdExceeded,
+                    stage,
+                    outcome: None,
+                    metrics: None,
+                    message: Some(message.into()),
+                },
+            },
+        }),
+    )
+}
+
+pub(crate) fn context_compaction_delta_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    stage: ContextCompactionStage,
+    outcome: Option<ContextCompactionOutcome>,
+    message: impl Into<String>,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        AgentEventType::ItemDelta,
+        AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "context-compaction".to_string(),
+            delta: TalosTimelineDelta::ContextCompaction {
+                stage: Some(stage),
+                outcome,
+                metrics: None,
+                message: Some(message.into()),
             },
         }),
     )

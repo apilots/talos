@@ -45,6 +45,12 @@ async fn test_run_general_turn_forces_summary_when_final_response_is_empty_after
         "forced summary should replace placeholder fallback"
     );
     assert!(provider.round.load(Ordering::SeqCst) >= 3);
+    assert!(
+        provider
+            .finalization_context_had_tool_result
+            .load(Ordering::SeqCst),
+        "forced summary should be grounded in prior tool results"
+    );
 }
 
 #[tokio::test]

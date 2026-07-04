@@ -83,6 +83,7 @@ fn test_build_sanitized_memory_decision_input_does_not_duplicate_facts() {
         }],
         recent_tool_results: Vec::new(),
         recent_tool_exchanges: Vec::new(),
+        diagnostics: Default::default(),
     };
     let summary = SessionMemorySummary {
         title: "Architecture findings".to_string(),
@@ -507,7 +508,7 @@ async fn test_flush_session_memory_retries_structurally_invalid_summary_before_s
 }
 
 #[tokio::test]
-async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_request() {
+async fn test_flush_session_memory_trims_newest_history_turns_to_preserve_coverage() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
     let memory_store = MemoryStore::new(workspace_dir.clone());
@@ -543,7 +544,7 @@ async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_req
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
 
     let provider = Arc::new(RecordingSummaryProvider::new(vec![
-        "{\"title\":\"Trimmed summary\",\"facts\":[\"kept newest turns\"]}".to_string(),
+        "{\"title\":\"Trimmed summary\",\"facts\":[\"kept earliest uncovered turns\"]}".to_string(),
         "{\"decision\":\"skip\",\"rationale\":\"low value\"}".to_string(),
     ]));
 
@@ -564,12 +565,12 @@ async fn test_flush_session_memory_trims_oldest_history_turns_before_summary_req
         .next()
         .expect("summary request should be recorded");
     assert!(
-        !first_prompt.contains("old-to-new user message 0"),
-        "oldest turn should be trimmed from compact input"
+        first_prompt.contains("old-to-new user message 0"),
+        "oldest uncovered turn should stay in compact input"
     );
     assert!(
-        first_prompt.contains("old-to-new user message 5"),
-        "newest turn should remain in compact input"
+        !first_prompt.contains("old-to-new user message 5"),
+        "newest turn should be trimmed before oldest uncovered history"
     );
 }
 
@@ -757,6 +758,276 @@ async fn test_flush_session_memory_trims_old_tool_exchanges_before_history() {
     assert!(
         first_prompt.contains("user message 0"),
         "history should still be present when trimming old tool exchanges is sufficient"
+    );
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_compacts_only_turns_after_latest_summary() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+
+    for idx in 1..=4 {
+        let timestamp = Utc::now();
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: format!("turn-{idx}"),
+                message_id: format!("msg-{idx}"),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp,
+                items: vec![
+                    RunItem::UserInput {
+                        text: format!("user message {idx}"),
+                    },
+                    RunItem::OutputText {
+                        text: format!("assistant message {idx}"),
+                    },
+                ],
+                usage: TokenUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+    memory_store
+        .save_summary(&talos_memory::SummaryRecord {
+            version: 2,
+            header: talos_memory::RecordHeader {
+                id: "summary-covered".to_string(),
+                session_id: "s1".to_string(),
+                turn_id: None,
+                timestamp: Utc::now(),
+            },
+            covers_until_seq: 2,
+            source_turn_count: 2,
+            content: "Title: Covered history\n\n**Facts:**\n- old window covered".to_string(),
+        })
+        .await
+        .expect("summary should save");
+
+    let config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        compaction: talos_config::AgentKernelCompactionConfig {
+            source_recent_messages_limit: 8,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let provider = Arc::new(RecordingSummaryProvider::new(vec![
+        "{\"title\":\"Fresh window\",\"facts\":[\"new turns only\"]}".to_string(),
+        "{\"decision\":\"session_only\",\"rationale\":\"near-term compacted context\"}".to_string(),
+    ]));
+
+    flush_session_memory_with_report(
+        "s1",
+        "summary-model",
+        provider.clone(),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, false),
+    )
+    .await
+    .expect("incremental compaction should succeed");
+
+    let first_prompt = provider
+        .recorded_user_prompts()
+        .into_iter()
+        .next()
+        .expect("summary request should be recorded");
+    assert!(
+        !first_prompt.contains("user message 1"),
+        "covered history should not be compacted again"
+    );
+    assert!(
+        !first_prompt.contains("assistant message 2"),
+        "covered assistant output should not be compacted again"
+    );
+    assert!(
+        first_prompt.contains("user message 3"),
+        "first uncovered turn should be compacted"
+    );
+    assert!(
+        first_prompt.contains("assistant message 4"),
+        "latest uncovered turn should be compacted"
+    );
+
+    let summaries = memory_store
+        .load_summaries("s1", 10)
+        .await
+        .expect("summaries should load");
+    let latest_summary = summaries.last().expect("latest summary should exist");
+    assert_eq!(latest_summary.covers_until_seq, 4);
+    assert_eq!(latest_summary.source_turn_count, 2);
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_advances_only_contiguous_compacted_window() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+
+    for idx in 1..=6 {
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: format!("turn-{idx}"),
+                message_id: format!("msg-{idx}"),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp: Utc::now(),
+                items: vec![
+                    RunItem::UserInput {
+                        text: format!("user message {idx}"),
+                    },
+                    RunItem::OutputText {
+                        text: format!("assistant message {idx}"),
+                    },
+                ],
+                usage: TokenUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+    memory_store
+        .save_summary(&talos_memory::SummaryRecord {
+            version: 2,
+            header: talos_memory::RecordHeader {
+                id: "summary-covered".to_string(),
+                session_id: "s1".to_string(),
+                turn_id: None,
+                timestamp: Utc::now(),
+            },
+            covers_until_seq: 2,
+            source_turn_count: 2,
+            content: "Title: Covered history\n\n**Facts:**\n- old window covered".to_string(),
+        })
+        .await
+        .expect("summary should save");
+
+    let config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        compaction: talos_config::AgentKernelCompactionConfig {
+            source_recent_messages_limit: 2,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let provider = Arc::new(RecordingSummaryProvider::new(vec![
+        "{\"title\":\"Next window\",\"facts\":[\"turn three only\"]}".to_string(),
+        "{\"decision\":\"session_only\",\"rationale\":\"advance compact window\"}".to_string(),
+    ]));
+
+    let usage = flush_session_memory_with_report(
+        "s1",
+        "summary-model",
+        provider.clone(),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, false),
+    )
+    .await
+    .expect("incremental compaction should succeed");
+
+    let first_prompt = provider
+        .recorded_user_prompts()
+        .into_iter()
+        .next()
+        .expect("summary request should be recorded");
+    assert!(first_prompt.contains("user message 3"));
+    assert!(!first_prompt.contains("user message 5"));
+    assert_eq!(usage.covers_from_seq, Some(3));
+    assert_eq!(usage.covers_until_seq, Some(3));
+
+    let summaries = memory_store
+        .load_summaries("s1", 10)
+        .await
+        .expect("summaries should load");
+    let latest_summary = summaries.last().expect("latest summary should exist");
+    assert_eq!(latest_summary.covers_until_seq, 3);
+    assert_eq!(latest_summary.source_turn_count, 1);
+}
+
+#[tokio::test]
+async fn test_flush_session_memory_skips_when_latest_summary_covers_all_turns() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = MemoryStore::new(workspace_dir.clone());
+
+    for idx in 1..=2 {
+        memory_store
+            .append_turn(&TalosTurn {
+                turn_id: format!("covered-turn-{idx}"),
+                message_id: format!("covered-msg-{idx}"),
+                session_id: "s1".to_string(),
+                seq: memory_store
+                    .next_turn_seq("s1")
+                    .await
+                    .expect("seq should load"),
+                timestamp: Utc::now(),
+                items: vec![RunItem::UserInput {
+                    text: format!("covered user message {idx}"),
+                }],
+                usage: TokenUsage::default(),
+                stop_reason: TalosApiStopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+    memory_store
+        .save_summary(&talos_memory::SummaryRecord {
+            version: 2,
+            header: talos_memory::RecordHeader {
+                id: "summary-covers-all".to_string(),
+                session_id: "s1".to_string(),
+                turn_id: None,
+                timestamp: Utc::now(),
+            },
+            covers_until_seq: 2,
+            source_turn_count: 2,
+            content: "Title: Covered all\n\n**Facts:**\n- all turns covered".to_string(),
+        })
+        .await
+        .expect("summary should save");
+
+    let config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
+
+    let provider = Arc::new(RecordingSummaryProvider::new(Vec::new()));
+    let usage = flush_session_memory_with_report(
+        "s1",
+        "summary-model",
+        provider.clone(),
+        &memory_store,
+        &config,
+        MemoryFlushPolicy::new(false, true, false),
+    )
+    .await
+    .expect("empty compact range should skip");
+
+    assert_eq!(usage.request_count, 0);
+    assert!(
+        provider.recorded_user_prompts().is_empty(),
+        "empty compact range should not call helper model"
+    );
+    assert_eq!(
+        memory_store
+            .load_summaries("s1", 10)
+            .await
+            .expect("summaries should load")
+            .len(),
+        1,
+        "empty compact range should not write duplicate summary"
     );
 }
 

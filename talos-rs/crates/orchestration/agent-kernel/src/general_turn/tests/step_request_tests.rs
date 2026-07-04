@@ -16,6 +16,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         speed: ModelSpeed::Fast,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current user input")],
+        maintenance_usage: TokenUsage::default(),
         tool_definitions: Vec::new(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {

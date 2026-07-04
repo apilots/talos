@@ -61,7 +61,6 @@ pub(crate) fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> 
     }
 
     kernel_config.tool_parallelism = kernel_config.tool_parallelism.max(1);
-    kernel_config.max_tool_rounds = kernel_config.max_tool_rounds.max(1);
     kernel_config.tool_result_max_bytes = kernel_config.tool_result_max_bytes.max(1024);
     kernel_config.context_compaction_max_bytes =
         kernel_config.context_compaction_max_bytes.max(8 * 1024);
@@ -133,7 +132,6 @@ pub(crate) fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
     match stop_reason {
         StopReason::EndTurn => TalosStopReason::EndTurn,
         StopReason::ModelOutputLimit => TalosStopReason::ModelOutputLimit,
-        StopReason::ToolRoundLimit => TalosStopReason::ToolRoundLimit,
         StopReason::WaitingDynamicInput => TalosStopReason::WaitingDynamicInput,
         StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
     }

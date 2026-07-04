@@ -1,8 +1,8 @@
 use talos_sdk::{
-    AgentEventPayload, SessionHistorySnapshot, TalosContentItem, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TalosToolProgressKind, TimelineEventEnvelope, TimelineRecoveryResponse,
-    ToolArguments,
+    AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage, SessionHistorySnapshot,
+    TalosContentItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
+    TimelineEventEnvelope, TimelineRecoveryResponse, ToolArguments,
 };
 
 use crate::types::{ChatRole, ToolCallStatus};
@@ -240,6 +240,14 @@ impl TuiApp {
                 true
             }
             (
+                TalosTimelineItemKind::ContextCompaction,
+                TalosTimelinePhase::System,
+                TalosTimelineContent::ContextCompaction { .. },
+            ) => {
+                self.push_right_event(context_compaction_text(&item.content));
+                true
+            }
+            (
                 TalosTimelineItemKind::SystemNotice,
                 TalosTimelinePhase::System,
                 TalosTimelineContent::SystemNotice { message, .. },
@@ -320,6 +328,13 @@ impl TuiApp {
                 if !summary.trim().is_empty() {
                     self.push_right_event(format!("execution summary: {}", summary.trim()));
                 }
+            }
+            (
+                TalosTimelineItemKind::ContextCompaction,
+                TalosTimelinePhase::System,
+                TalosTimelineContent::ContextCompaction { .. },
+            ) => {
+                self.push_right_event(context_compaction_text(&item.content));
             }
             (
                 TalosTimelineItemKind::SystemNotice,
@@ -411,6 +426,41 @@ impl TuiApp {
                 );
                 self.update_tool_call_status(&call_id, ToolCallStatus::PendingDynamicInput);
             }
+            TalosTimelineDelta::ContextCompaction {
+                stage,
+                outcome,
+                metrics,
+                message,
+            } => {
+                let event_text = self.timeline_items.get_mut(item_id).and_then(|item| {
+                    if let TalosTimelineContent::ContextCompaction {
+                        stage: current_stage,
+                        outcome: current_outcome,
+                        metrics: current_metrics,
+                        message: current_message,
+                        ..
+                    } = &mut item.content
+                    {
+                        if let Some(stage) = stage {
+                            *current_stage = stage;
+                        }
+                        if outcome.is_some() {
+                            *current_outcome = outcome;
+                        }
+                        if metrics.is_some() {
+                            *current_metrics = metrics;
+                        }
+                        if message.is_some() {
+                            *current_message = message;
+                        }
+                        return Some(context_compaction_text(&item.content));
+                    }
+                    None
+                });
+                if let Some(event_text) = event_text {
+                    self.push_right_event(event_text);
+                }
+            }
             TalosTimelineDelta::Status { status } => {
                 if let Some(call_id) = self.tool_call_id(item_id) {
                     self.update_tool_call_status(&call_id, timeline_tool_status(status));
@@ -432,6 +482,10 @@ impl TuiApp {
             if let Some(content) = final_content.clone() {
                 item.content = content;
             }
+        }
+        if let Some(content @ TalosTimelineContent::ContextCompaction { .. }) = &final_content {
+            self.push_right_event(context_compaction_text(content));
+            return;
         }
         let Some(TalosTimelineContent::ToolCall {
             call_id,
@@ -608,5 +662,50 @@ fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {
         TalosTimelineItemStatus::Completed => ToolCallStatus::Completed { exit_ok: true },
         TalosTimelineItemStatus::Failed => ToolCallStatus::Completed { exit_ok: false },
         TalosTimelineItemStatus::Cancelled => ToolCallStatus::Completed { exit_ok: false },
+    }
+}
+
+fn context_compaction_text(content: &TalosTimelineContent) -> String {
+    let TalosTimelineContent::ContextCompaction {
+        stage,
+        outcome,
+        message,
+        ..
+    } = content
+    else {
+        return "context compaction".to_string();
+    };
+    if let Some(message) = message.as_ref().filter(|value| !value.trim().is_empty()) {
+        return message.trim().to_string();
+    }
+    let outcome = outcome
+        .map(|value| format!(" ({})", context_compaction_outcome_label(value)))
+        .unwrap_or_default();
+    format!(
+        "context compaction: {}{}",
+        context_compaction_stage_label(*stage),
+        outcome
+    )
+}
+
+fn context_compaction_stage_label(stage: ContextCompactionStage) -> &'static str {
+    match stage {
+        ContextCompactionStage::Preparing => "preparing",
+        ContextCompactionStage::Summarizing => "summarizing",
+        ContextCompactionStage::RebuildingPrompt => "rebuilding prompt",
+        ContextCompactionStage::Trimming => "trimming",
+        ContextCompactionStage::Completed => "completed",
+        ContextCompactionStage::Failed => "failed",
+    }
+}
+
+fn context_compaction_outcome_label(outcome: ContextCompactionOutcome) -> &'static str {
+    match outcome {
+        ContextCompactionOutcome::Applied => "applied",
+        ContextCompactionOutcome::RejectedMissingSummary => "missing summary",
+        ContextCompactionOutcome::TrimmedFallbackApplied => "trimmed fallback applied",
+        ContextCompactionOutcome::FailedContextStillTooLarge => "context still too large",
+        ContextCompactionOutcome::FailedProviderError => "provider error",
+        ContextCompactionOutcome::FailedInternalError => "internal error",
     }
 }

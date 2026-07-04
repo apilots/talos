@@ -6,6 +6,7 @@ use talos_prompt::{
     SessionHistoryCompactionTrigger,
 };
 use talos_skills::SkillSelector;
+use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
 
 #[tokio::test]
 async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
@@ -178,7 +179,8 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     config.output.upper_limit = 2_000;
     config.compaction.recent_messages_keep = 24;
 
-    let mut ctx = build_ctx_with_stream(None);
+    let (stream_tx, mut stream_rx) = mpsc::channel(16);
+    let mut ctx = build_ctx_with_stream(Some(stream_tx));
     ctx.selected_model_info.context_window = 3_000;
 
     let prepared = prepare_general_turn(
@@ -236,11 +238,44 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     assert!(compaction.trimmed_context_unit_count > 0);
     assert_eq!(
         compaction.trimmed_context_unit_kind,
-        Some(CompactionTrimUnitKind::OldestHistoryItem)
+        Some(CompactionTrimUnitKind::HistoryTurn)
     );
     assert!(!compaction.fallback_section_drop_applied);
     assert_eq!(compaction.compaction_cache_creation_input_tokens, Some(6));
     assert_eq!(compaction.compaction_cache_read_input_tokens, Some(22));
+    let mut stream_stages = Vec::new();
+    let mut stream_outcomes = Vec::new();
+    let mut stream_metrics = Vec::new();
+    while let Ok(event) = stream_rx.try_recv() {
+        if let KernelStreamEventData::ContextCompaction(data) = event.data {
+            stream_stages.push(data.stage);
+            stream_outcomes.push(data.outcome);
+            stream_metrics.push(data.metrics);
+        }
+    }
+    assert_eq!(
+        stream_stages,
+        vec![
+            ContextCompactionStage::Preparing,
+            ContextCompactionStage::Summarizing,
+            ContextCompactionStage::RebuildingPrompt,
+            ContextCompactionStage::Completed,
+        ]
+    );
+    assert!(stream_outcomes.contains(&Some(ContextCompactionOutcome::Applied)));
+    let completed_metrics = stream_metrics
+        .into_iter()
+        .flatten()
+        .find(|metrics| metrics.covers_until_seq.is_some())
+        .expect("completed compaction metrics should include coverage");
+    assert_eq!(
+        completed_metrics.covers_from_seq,
+        compaction.covers_from_seq
+    );
+    assert_eq!(
+        completed_metrics.covers_until_seq,
+        compaction.covers_until_seq
+    );
     assert!(
         prepared
             .prompt_diagnostics
@@ -424,6 +459,12 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     .expect("general turn should succeed");
 
     assert_eq!(result.output_text, "ok");
+    assert_eq!(result.usage.input_tokens, 39);
+    assert_eq!(result.usage.output_tokens, 21);
+    assert_eq!(result.usage.total_tokens, 60);
+    assert_eq!(result.usage.cache_creation_input_tokens, Some(9));
+    assert_eq!(result.usage.cache_read_input_tokens, Some(33));
+    assert_eq!(result.metrics.usage, result.usage);
     let compaction_state_value = ctx
         .session
         .state

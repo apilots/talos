@@ -55,6 +55,102 @@ async fn test_recent_messages_render_as_single_xml_region() {
 }
 
 #[tokio::test]
+async fn test_compact_prompt_cursor_filters_raw_recent_and_keeps_summary_first() {
+    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
+    for idx in 1..=4 {
+        memory
+            .append_turn(&TalosTurn {
+                turn_id: format!("compact-turn-{idx}"),
+                message_id: format!("msg-{idx}"),
+                session_id: "compact-session".to_string(),
+                seq: memory
+                    .next_turn_seq("compact-session")
+                    .await
+                    .expect("seq should load"),
+                timestamp: Utc::now(),
+                items: vec![RunItem::UserInput {
+                    text: format!("user says {idx}"),
+                }],
+                usage: TokenUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("append should succeed");
+    }
+    memory
+        .save_summary(&talos_memory::SummaryRecord {
+            version: 2,
+            header: talos_memory::RecordHeader {
+                id: "summary-compact-session".to_string(),
+                session_id: "compact-session".to_string(),
+                turn_id: None,
+                timestamp: Utc::now(),
+            },
+            covers_until_seq: 3,
+            source_turn_count: 3,
+            content: "summary window content".to_string(),
+        })
+        .await
+        .expect("summary should save");
+
+    let mut config = PromptBuildConfig::default();
+    config.load_policy.compact_cursor = Some(talos_memory::CompactPromptCursor {
+        covers_until_seq: 3,
+    });
+    config.load_policy.session_recent_limit = 3;
+    config.load_policy.session_summary_recent_count = 1;
+
+    let assembly = PromptBuilder::new()
+        .config(config)
+        .memory_store("compact-session", &memory)
+        .user_input("latest")
+        .assemble()
+        .await
+        .expect("prompt assembly should succeed");
+
+    let summary_index = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .position(|section| section.kind == PromptSectionKind::SessionSummary)
+        .expect("session summary section should exist");
+    let recent_index = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .position(|section| section.kind == PromptSectionKind::RecentMessages)
+        .expect("recent messages section should exist");
+    assert!(
+        summary_index < recent_index,
+        "compact summary should render before raw recent tail"
+    );
+
+    let recent = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::RecentMessages)
+        .expect("recent messages section should exist");
+    assert!(!recent.payload.contains("user says 1"));
+    assert!(
+        recent.payload.contains("user says 2"),
+        "fresh tail backfill should fill the configured recent window"
+    );
+    assert!(
+        recent.payload.contains("user says 3"),
+        "fresh tail backfill should preserve short-term context"
+    );
+    assert!(
+        recent.payload.contains("user says 4"),
+        "uncovered raw tail should remain in prompt view"
+    );
+
+    let summary = assembly
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::SessionSummary)
+        .expect("session summary section should exist");
+    assert!(summary.payload.contains("summary window content"));
+}
+
+#[tokio::test]
 async fn test_recent_tool_history_renders_as_single_xml_region() {
     let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
     for idx in 0..2 {

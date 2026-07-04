@@ -8,7 +8,7 @@ use chrono::Utc;
 use serde_json::json;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use talos_config::{resolve_runtime_path, AgentKernelConfig, PluginRootConfig, PluginRootKind};
 use talos_llm_provider::{
@@ -48,6 +48,7 @@ struct LengthFinishProvider;
 #[derive(Default)]
 struct EmptyFinalAfterToolsProvider {
     round: AtomicUsize,
+    finalization_context_had_tool_result: AtomicBool,
     dir_path: String,
 }
 
@@ -526,14 +527,27 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
                 finish_reason: Some("stop".to_string()),
                 tool_calls: None,
             }),
-            _ => Ok(ChatResponse {
-                content: "Final architecture summary based on verified tool results.".to_string(),
-                reasoning: Vec::new(),
-                model: request.model,
-                usage: Usage::default(),
-                finish_reason: Some("stop".to_string()),
-                tool_calls: None,
-            }),
+            _ => {
+                let has_tool_result = request
+                    .messages
+                    .iter()
+                    .any(|message| message.role == talos_llm_provider::Role::Tool);
+                self.finalization_context_had_tool_result
+                    .store(has_tool_result, Ordering::SeqCst);
+                assert!(
+                    has_tool_result,
+                    "forced finalization should retain tool results as evidence"
+                );
+                Ok(ChatResponse {
+                    content: "Final architecture summary based on verified tool results."
+                        .to_string(),
+                    reasoning: Vec::new(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: None,
+                })
+            }
         }
     }
 

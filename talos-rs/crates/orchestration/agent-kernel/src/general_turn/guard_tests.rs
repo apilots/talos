@@ -121,7 +121,7 @@ async fn forced_finalization_disables_reasoning_effort_for_visible_answer_phase(
         None,
         Some(ReasoningEffort::High),
         None,
-        ForcedFinalizationCause::ToolRoundBudget,
+        ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
     )
     .await
     .expect("forced finalization should succeed");

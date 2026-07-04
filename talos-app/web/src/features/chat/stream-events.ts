@@ -376,6 +376,24 @@ function applyItemDelta(
       });
       state.setSessionStatus(sessionId, "running");
       return;
+    case "context_compaction":
+      if (!item || item.item.content.type !== "context_compaction") {
+        return;
+      }
+      if (delta.stage) {
+        item.item.content.stage = delta.stage;
+      }
+      if (delta.outcome) {
+        item.item.content.outcome = delta.outcome;
+      }
+      if (delta.metrics) {
+        item.item.content.metrics = delta.metrics;
+      }
+      if (delta.message) {
+        item.item.content.message = delta.message;
+      }
+      state.upsertTimelineItem(sessionId, messageId, toChatTimelineItem(item.item));
+      return;
     case "status":
       if (item?.callId) {
         state.updateTimelineTool(sessionId, messageId, itemId, { status: delta.status });
@@ -516,12 +534,32 @@ function timelineText(content: TalosTimelineContent) {
       return content.text;
     case "execution_summary":
       return content.summary;
+    case "context_compaction":
+      return contextCompactionText(content);
     case "system_notice":
       return content.message;
     case "empty":
     case "tool_call":
       return "";
   }
+}
+
+function contextCompactionText(content: Extract<TalosTimelineContent, { type: "context_compaction" }>) {
+  const message = content.message?.trim();
+  if (message) {
+    return message;
+  }
+  const stage = formatProtocolLabel(content.stage);
+  const outcome = content.outcome ? ` (${formatProtocolLabel(content.outcome)})` : "";
+  return `Context compaction: ${stage}${outcome}`;
+}
+
+function formatProtocolLabel(value: string) {
+  return value
+    .split("_")
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
 }
 
 function ensureTimelineToolForRequest(

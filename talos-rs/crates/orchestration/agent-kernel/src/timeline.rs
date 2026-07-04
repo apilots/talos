@@ -2,8 +2,10 @@ use chrono::Utc;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosAssistantTextCommittedEvent,
-    TalosContentItem, TalosItemCompletedEvent, TalosItemDeltaEvent, TalosItemStartedEvent,
+    AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionMetrics,
+    ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger, StopReason,
+    TalosAssistantTextCommittedEvent, TalosContentItem, TalosItemCompletedEvent,
+    TalosItemDeltaEvent, TalosItemStartedEvent, TalosRunErrorCode, TalosRunErrorInfo,
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
     TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
@@ -80,10 +82,12 @@ impl TimelineBuilder {
     }
 
     pub fn fail_turn(&mut self, error: impl Into<String>) -> AgentEvent {
+        let error = error.into();
         let payload = AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
-            error: error.into(),
+            error_info: classify_turn_error(&error),
+            error,
             failed_at_ms: now_ms(),
         });
         self.event(AgentEventType::TurnError, payload)
@@ -178,6 +182,26 @@ impl TimelineBuilder {
                 arguments: arguments.into(),
                 progress: Vec::new(),
                 result: None,
+            },
+        )
+    }
+
+    pub fn start_context_compaction(
+        &mut self,
+        trigger: ContextCompactionTrigger,
+        stage: ContextCompactionStage,
+        message: Option<String>,
+    ) -> AgentEvent {
+        self.start_item(
+            TalosTimelineItemKind::ContextCompaction,
+            TalosTimelinePhase::System,
+            Some("Context compaction".to_string()),
+            TalosTimelineContent::ContextCompaction {
+                trigger,
+                stage,
+                outcome: None,
+                metrics: None,
+                message,
             },
         )
     }
@@ -327,6 +351,18 @@ impl TimelineBuilder {
                 state.item.status = TalosTimelineItemStatus::WaitingDynamicInput;
                 Ok(())
             }
+            TalosTimelineDelta::ContextCompaction {
+                stage,
+                outcome,
+                metrics,
+                message,
+            } => apply_context_compaction_delta(
+                &mut state.item.content,
+                *stage,
+                *outcome,
+                metrics.clone(),
+                message.clone(),
+            ),
             TalosTimelineDelta::Status { status } => {
                 state.item.status = *status;
                 Ok(())
@@ -359,6 +395,7 @@ impl TimelineBuilder {
             TalosTimelineItemKind::AssistantText => "assistant",
             TalosTimelineItemKind::ToolCall => "tool",
             TalosTimelineItemKind::ExecutionSummary => "summary",
+            TalosTimelineItemKind::ContextCompaction => "compaction",
             TalosTimelineItemKind::SystemNotice => "system",
         };
         format!("{prefix}-{}", self.next_item_index)
@@ -390,6 +427,42 @@ fn should_close_item(current: TalosTimelineItemStatus, terminal: TalosTimelineIt
         TalosTimelineItemStatus::Completed
         | TalosTimelineItemStatus::Failed
         | TalosTimelineItemStatus::Cancelled => false,
+    }
+}
+
+fn apply_context_compaction_delta(
+    content: &mut TalosTimelineContent,
+    stage: Option<ContextCompactionStage>,
+    outcome: Option<ContextCompactionOutcome>,
+    metrics: Option<ContextCompactionMetrics>,
+    message: Option<String>,
+) -> TalosResult<()> {
+    match content {
+        TalosTimelineContent::ContextCompaction {
+            stage: current_stage,
+            outcome: current_outcome,
+            metrics: current_metrics,
+            message: current_message,
+            ..
+        } => {
+            if let Some(stage) = stage {
+                *current_stage = stage;
+            }
+            if outcome.is_some() {
+                *current_outcome = outcome;
+            }
+            if metrics.is_some() {
+                *current_metrics = metrics;
+            }
+            if message.is_some() {
+                *current_message = message;
+            }
+            Ok(())
+        }
+        _ => Err(TalosError::ValidationError(
+            "context compaction delta can only update context compaction timeline content"
+                .to_string(),
+        )),
     }
 }
 
@@ -467,6 +540,44 @@ fn set_tool_result(
 
 fn now_ms() -> u64 {
     Utc::now().timestamp_millis().max(0) as u64
+}
+
+fn classify_turn_error(error: &str) -> Option<TalosRunErrorInfo> {
+    let lower = error.to_ascii_lowercase();
+    let code = if lower.contains("prompt budget remains exhausted after compaction")
+        || lower.contains("session history compaction failed")
+        || lower.contains("compaction failed")
+        || lower.contains("compact failed")
+    {
+        TalosRunErrorCode::ContextCompactionFailed
+    } else if lower.contains("context budget")
+        || lower.contains("prompt budget")
+        || lower.contains("context window")
+    {
+        TalosRunErrorCode::ContextWindowExceeded
+    } else if lower.contains("compaction") || lower.contains("compact") {
+        TalosRunErrorCode::ContextCompactionFailed
+    } else if lower.starts_with("runtime unavailable:")
+        || lower.starts_with("transport unavailable:")
+        || lower.starts_with("unsupported model:")
+    {
+        TalosRunErrorCode::ProviderUnavailable
+    } else if lower.starts_with("authorization denied")
+        || lower.starts_with("authentication failed:")
+        || lower.starts_with("auth error:")
+    {
+        TalosRunErrorCode::PermissionDenied
+    } else if lower.starts_with("tool error:") || lower.starts_with("tool not found:") {
+        TalosRunErrorCode::ToolFailure
+    } else if lower.starts_with("internal error:") {
+        TalosRunErrorCode::InternalError
+    } else {
+        return None;
+    };
+    Some(TalosRunErrorInfo {
+        code,
+        message: error.to_string(),
+    })
 }
 
 #[cfg(test)]

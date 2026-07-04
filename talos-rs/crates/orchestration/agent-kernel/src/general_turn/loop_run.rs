@@ -59,7 +59,6 @@ pub async fn execute_general_turn_loop_with_policy(
     resume: Option<GeneralTurnResume>,
     policy: Arc<dyn GeneralTurnPolicy>,
 ) -> TalosResult<ExecutedTurnArtifacts> {
-    let max_tool_rounds = kernel_config.max_tool_rounds.max(1);
     let mut state = GeneralTurnLoopState::new(&prepared);
     let execution_settings =
         crate::KernelExecutionSettings::try_from(kernel_config).unwrap_or_default();
@@ -83,6 +82,7 @@ pub async fn execute_general_turn_loop_with_policy(
     }
 
     let (final_text, stop_reason) = loop {
+        enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
         let tool_definitions =
             tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
         let mut step_request = build_general_turn_step_request(
@@ -202,26 +202,6 @@ pub async fn execute_general_turn_loop_with_policy(
 
         if !tool_batch.pending_dynamic_requests.is_empty() {
             break (String::new(), StopReason::WaitingDynamicInput);
-        }
-
-        if state.round >= max_tool_rounds {
-            let mut messages = prepared.messages.clone();
-            messages.extend(state.messages.clone());
-            let forced_step = run_forced_finalization_step(
-                messages,
-                prepared.selected_model.clone(),
-                llm_provider.clone(),
-                prepared.stream_tx.clone(),
-                None,
-                None,
-                ForcedFinalizationCause::ToolRoundBudget,
-            )
-            .await?;
-            apply_general_turn_step(&mut state, &forced_step);
-            break (
-                forced_step.text.clone(),
-                stop_reason_for_forced_finalization(ForcedFinalizationCause::ToolRoundBudget),
-            );
         }
     };
 

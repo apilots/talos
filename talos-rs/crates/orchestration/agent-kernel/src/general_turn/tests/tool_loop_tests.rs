@@ -1,8 +1,8 @@
 use super::*;
 use talos_llm_provider::ToolDefinition;
 use talos_tools::{
-    default_governance_for_source, handlers::dynamic::DynamicToolFn, RegisteredToolSpec,
-    ToolOutputPayload, ToolParallelism, ToolPayloadKind, ToolSource,
+    default_governance_for_source, handlers::dynamic::DynamicToolFn, RegisteredToolSpec, Tool,
+    ToolContext, ToolOutputPayload, ToolParallelism, ToolPayloadKind, ToolSource,
 };
 
 #[derive(Default)]
@@ -26,10 +26,17 @@ struct PolicyStepProvider {
 }
 
 #[derive(Default)]
+struct WorkingContextBudgetProvider {
+    round: AtomicUsize,
+}
+
+#[derive(Default)]
 struct RecordingStepPolicy {
     before_step_count: AtomicUsize,
     after_step_count: AtomicUsize,
 }
+
+struct LargeOutputTool;
 
 #[async_trait]
 impl LlmProvider for DynamicLoopProvider {
@@ -259,6 +266,66 @@ impl GeneralTurnPolicy for RecordingStepPolicy {
     }
 }
 
+#[async_trait]
+impl Tool for LargeOutputTool {
+    fn name(&self) -> &str {
+        "LargeOutput"
+    }
+
+    fn description(&self) -> &str {
+        "Return a large deterministic payload for working context budget tests"
+    }
+
+    async fn execute_payload(
+        &self,
+        _input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        Ok(ToolOutputPayload::success_text(
+            "large-output ".repeat(1_000),
+        ))
+    }
+}
+
+#[async_trait]
+impl LlmProvider for WorkingContextBudgetProvider {
+    fn name(&self) -> &str {
+        "working-context-budget"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.chat_with_tools(request).await
+    }
+
+    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        let round = self.round.fetch_add(1, Ordering::SeqCst);
+        match round {
+            0 => Ok(ChatResponse {
+                content: "Call the large output tool.".to_string(),
+                reasoning: Vec::new(),
+                model: request.model,
+                usage: Usage::default(),
+                finish_reason: Some("tool_calls".to_string()),
+                tool_calls: Some(vec![FunctionCall::new(
+                    "call-large-output",
+                    "LargeOutput",
+                    json!({}),
+                )]),
+            }),
+            _ => panic!("working context budget should fail before another provider request"),
+        }
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    fn default_model(&self) -> String {
+        "working-context-budget".to_string()
+    }
+}
+
 #[tokio::test]
 async fn test_run_general_turn_bash_then_task_output() {
     let provider = Arc::new(ExecLoopProvider::default());
@@ -295,6 +362,54 @@ async fn test_run_general_turn_bash_then_task_output() {
         .iter()
         .any(|item| matches!(item, talos_types::talos::RunItem::ToolResult { .. })));
     assert!(provider.round.load(Ordering::SeqCst) >= 3);
+}
+
+#[tokio::test]
+async fn test_run_general_turn_fails_before_provider_when_working_context_remains_too_large() {
+    let provider = Arc::new(WorkingContextBudgetProvider::default());
+    let tool_registry = Arc::new(ToolRegistry::new());
+    tool_registry.register(Arc::new(LargeOutputTool));
+
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let mut config = AgentKernelConfig::default();
+    config.prompt.bootstrap.enabled = false;
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    config.prompt.window.compaction_buffer_tokens = 8;
+    config.prompt.window.reserved_output_tokens =
+        talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
+    config.compaction.tool_output_keep_last = 1;
+    configure_test_skill_root(&mut config, &workspace_dir);
+    let mut ctx = build_ctx_with_stream_for_session("working-context-budget", None);
+    ctx.selected_model_info.context_window = 1_536;
+
+    let error = run_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Call the large output tool and continue.",
+        provider.clone(),
+        tool_registry.clone(),
+        tool_registry,
+        memory_store,
+        &config,
+        skill_options_from_config(&workspace_dir, &config),
+    )
+    .await
+    .expect_err("oversized working context should fail before the next provider request");
+
+    assert!(
+        error
+            .to_string()
+            .contains("working context budget remains exhausted before model request"),
+        "{error}"
+    );
+    assert_eq!(
+        provider.round.load(Ordering::SeqCst),
+        1,
+        "provider should only receive the initial tool-call request"
+    );
 }
 
 #[tokio::test]
@@ -444,6 +559,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
+        maintenance_usage: TokenUsage::default(),
         tool_definitions: tool_registry.get_tool_definitions(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
             .with_session_id("s-policy"),
@@ -527,6 +643,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         messages: vec![ChatMessage::user(
             "Continue after external dynamic tool result.",
         )],
+        maintenance_usage: TokenUsage::default(),
         tool_definitions: tool_registry.get_tool_definitions(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default()
             .with_session_id("s-dynamic-resume"),

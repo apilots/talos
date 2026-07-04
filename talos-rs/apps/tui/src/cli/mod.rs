@@ -258,6 +258,20 @@ fn render_event(
                     call_id
                 );
             }
+            TalosTimelineDelta::ContextCompaction {
+                stage,
+                outcome,
+                message,
+                ..
+            } => {
+                eprintln!(
+                    "CONTEXT_COMPACTION item={} stage={:?} outcome={:?} message={}",
+                    payload.item_id,
+                    stage,
+                    outcome,
+                    message.as_deref().unwrap_or("")
+                );
+            }
             TalosTimelineDelta::Status { status } => {
                 eprintln!("ITEM_STATUS item={} status={:?}", payload.item_id, status);
             }
@@ -318,6 +332,18 @@ fn render_started_item(item: &talos_sdk::TalosTimelineItem) {
             if !summary.trim().is_empty() {
                 eprintln!("SUMMARY {}", summary);
             }
+        }
+        (
+            TalosTimelineItemKind::ContextCompaction,
+            _,
+            TalosTimelineContent::ContextCompaction { stage, message, .. },
+        ) => {
+            eprintln!(
+                "CONTEXT_COMPACTION_STARTED item={} stage={:?} message={}",
+                item.item_id,
+                stage,
+                message.as_deref().unwrap_or("")
+            );
         }
         (
             TalosTimelineItemKind::ToolCall,

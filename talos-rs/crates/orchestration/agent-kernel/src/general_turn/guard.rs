@@ -116,9 +116,8 @@ fn batch_has_recoverable_tool_failure(batch: &GeneralTurnToolBatch) -> bool {
 
 pub(crate) fn stop_reason_for_forced_finalization(_cause: ForcedFinalizationCause) -> StopReason {
     match _cause {
-        ForcedFinalizationCause::EmptyFinalResponseAfterTools => StopReason::EndTurn,
-        ForcedFinalizationCause::ToolRoundBudget
-        | ForcedFinalizationCause::RepeatedReadOnlyInvestigation => StopReason::ToolRoundLimit,
+        ForcedFinalizationCause::EmptyFinalResponseAfterTools
+        | ForcedFinalizationCause::RepeatedReadOnlyInvestigation => StopReason::EndTurn,
     }
 }
 
@@ -141,9 +140,6 @@ pub(crate) async fn run_forced_finalization_step(
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
     let cause_note = match cause {
-        ForcedFinalizationCause::ToolRoundBudget => {
-            "Reason: the tool round budget has been exhausted."
-        }
         ForcedFinalizationCause::RepeatedReadOnlyInvestigation => {
             "Reason: the model repeated an equivalent read-only investigation."
         }

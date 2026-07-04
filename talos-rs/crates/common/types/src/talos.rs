@@ -31,7 +31,6 @@ pub enum StopReason {
     #[default]
     EndTurn,
     ModelOutputLimit,
-    ToolRoundLimit,
     WaitingDynamicInput,
     TransferUnresolved,
     Cancelled,
@@ -723,6 +722,7 @@ pub enum TalosTimelineItemKind {
     AssistantText,
     ToolCall,
     ExecutionSummary,
+    ContextCompaction,
     SystemNotice,
 }
 
@@ -756,6 +756,72 @@ pub enum TalosTimelineNoticeLevel {
     Info,
     Warning,
     Error,
+}
+
+/// Reason a run entered the context compaction maintenance stage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCompactionTrigger {
+    ThresholdExceeded,
+    HardThresholdExceeded,
+    BudgetExceeded,
+    HistorySectionsDropped,
+    WorkingContextExceeded,
+}
+
+/// Current stage of a context compaction timeline item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCompactionStage {
+    Preparing,
+    Summarizing,
+    RebuildingPrompt,
+    Trimming,
+    Completed,
+    Failed,
+}
+
+/// Terminal result of a context compaction maintenance item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextCompactionOutcome {
+    Applied,
+    RejectedMissingSummary,
+    TrimmedFallbackApplied,
+    FailedContextStillTooLarge,
+    FailedProviderError,
+    FailedInternalError,
+}
+
+/// Public metrics for a context compaction maintenance item.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ContextCompactionMetrics {
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub covers_from_seq: Option<u64>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub covers_until_seq: Option<u64>,
+    pub pre_compaction_total_tokens: u32,
+    pub post_compaction_total_tokens: u32,
+    pub compaction_input_tokens: u32,
+    pub compaction_output_tokens: u32,
+    pub trimmed_context_unit_count: u32,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub raw_tail_preferred_count: Option<u32>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub raw_tail_backfilled_count: Option<u32>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub working_context_input_messages: Option<u32>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub working_context_compacted_messages: Option<u32>,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub working_context_preserved_recent_exchanges: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -792,6 +858,19 @@ pub enum TalosTimelineContent {
     ExecutionSummary {
         summary: String,
     },
+    ContextCompaction {
+        trigger: ContextCompactionTrigger,
+        stage: ContextCompactionStage,
+        #[serde(default)]
+        #[ts(type = "ContextCompactionOutcome | null")]
+        outcome: Option<ContextCompactionOutcome>,
+        #[serde(default)]
+        #[ts(type = "ContextCompactionMetrics | null")]
+        metrics: Option<ContextCompactionMetrics>,
+        #[serde(default)]
+        #[ts(type = "string | null")]
+        message: Option<String>,
+    },
     SystemNotice {
         level: TalosTimelineNoticeLevel,
         message: String,
@@ -820,6 +899,20 @@ pub enum TalosTimelineDelta {
         call_id: String,
         tool_name: String,
         arguments: DynamicToolArguments,
+    },
+    ContextCompaction {
+        #[serde(default)]
+        #[ts(type = "ContextCompactionStage | null")]
+        stage: Option<ContextCompactionStage>,
+        #[serde(default)]
+        #[ts(type = "ContextCompactionOutcome | null")]
+        outcome: Option<ContextCompactionOutcome>,
+        #[serde(default)]
+        #[ts(type = "ContextCompactionMetrics | null")]
+        metrics: Option<ContextCompactionMetrics>,
+        #[serde(default)]
+        #[ts(type = "string | null")]
+        message: Option<String>,
     },
     Status {
         status: TalosTimelineItemStatus,
@@ -906,11 +999,35 @@ pub struct TalosTurnCompletedEvent {
     pub metrics: Option<TurnExecutionMetrics>,
 }
 
+/// Stable machine-readable category for a failed Agent run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosRunErrorCode {
+    ContextWindowExceeded,
+    SessionBudgetExceeded,
+    UsageLimitExceeded,
+    ContextCompactionFailed,
+    ProviderUnavailable,
+    PermissionDenied,
+    ToolFailure,
+    InternalError,
+}
+
+/// Optional structured error details carried by turn failure events.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct TalosRunErrorInfo {
+    pub code: TalosRunErrorCode,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct TalosTurnErrorEvent {
     pub request_id: String,
     pub turn_id: String,
     pub error: String,
+    #[serde(default)]
+    #[ts(type = "TalosRunErrorInfo | null")]
+    pub error_info: Option<TalosRunErrorInfo>,
     #[ts(type = "number")]
     pub failed_at_ms: u64,
 }

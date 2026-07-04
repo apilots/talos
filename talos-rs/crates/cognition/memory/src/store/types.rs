@@ -281,10 +281,48 @@ pub struct SessionPromptContext {
     pub recent_tool_results: Vec<SessionToolResultContext>,
     #[serde(default)]
     pub recent_tool_exchanges: Vec<SessionToolExchangeContext>,
+    #[serde(default)]
+    pub diagnostics: SessionPromptContextDiagnostics,
 }
 
+/// Cursor that marks the canonical turn range already covered by compacted summaries.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompactPromptCursor {
+    /// Inclusive canonical turn sequence covered by the latest compacted summary.
+    pub covers_until_seq: u64,
+}
+
+/// Diagnostics describing how a session prompt context was loaded from MemoryStore.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SessionPromptContextDiagnostics {
+    #[serde(default)]
+    pub latest_compacted_seq: Option<u64>,
+    #[serde(default)]
+    pub raw_tail_preferred_count: usize,
+    #[serde(default)]
+    pub raw_tail_backfilled_count: usize,
+    #[serde(default)]
+    pub summary_records_included_count: usize,
+}
+
+/// Selects which bounded transcript window MemoryStore should return for prompt context.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionPromptRecentWindow {
+    /// Return the newest bounded window for normal prompt rendering.
+    #[default]
+    Latest,
+    /// Return the oldest uncovered window so compaction can advance contiguous coverage.
+    OldestUncovered,
+}
+
+/// Policy for loading MemoryStore-backed session context into PromptBuilder.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionPromptContextConfig {
+    #[serde(default)]
+    pub compact_cursor: Option<CompactPromptCursor>,
+    #[serde(default)]
+    pub recent_window: SessionPromptRecentWindow,
     pub recent_messages_limit: usize,
     pub recent_tool_results_limit: usize,
     pub tool_output_max_chars: usize,
@@ -298,6 +336,8 @@ pub struct SessionPromptContextConfig {
 impl Default for SessionPromptContextConfig {
     fn default() -> Self {
         Self {
+            compact_cursor: None,
+            recent_window: SessionPromptRecentWindow::Latest,
             recent_messages_limit: 24,
             recent_tool_results_limit: 8,
             tool_output_max_chars: 2_000,

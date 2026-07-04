@@ -4,7 +4,8 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::path_policy;
 use crate::store::{
-    MemoryStore, SessionPromptContext, SessionPromptContextConfig, SessionToolExchangeContext,
+    CompactPromptCursor, MemoryStore, SessionPromptContext, SessionPromptContextConfig,
+    SessionPromptContextDiagnostics, SessionPromptRecentWindow, SessionToolExchangeContext,
     SessionToolExchangeOutcome, SessionToolResultContext, SessionTranscriptBranch,
     SessionTranscriptPayload, SessionTranscriptRecord, SummaryRecord, TalosMessage, TalosTurn,
 };
@@ -664,8 +665,41 @@ pub(crate) async fn build_session_prompt_context(
     config: &SessionPromptContextConfig,
 ) -> TalosResult<SessionPromptContext> {
     let target_recent_messages = config.recent_messages_limit;
+    let compact_cursor = config.compact_cursor;
+    let mut diagnostics = SessionPromptContextDiagnostics {
+        latest_compacted_seq: compact_cursor.map(|cursor| cursor.covers_until_seq),
+        ..Default::default()
+    };
     let recent_messages = if target_recent_messages == 0 {
         Vec::new()
+    } else if let Some(cursor) = compact_cursor {
+        let turns = load_turns(store, session_id).await?;
+        let (messages, preferred_count, backfilled_count) = recent_messages_with_compact_cursor(
+            &turns,
+            target_recent_messages,
+            cursor,
+            config.recent_window,
+        );
+        diagnostics.raw_tail_preferred_count = preferred_count;
+        diagnostics.raw_tail_backfilled_count = backfilled_count;
+        messages
+    } else if config.recent_window == SessionPromptRecentWindow::OldestUncovered {
+        let turns = load_turns(store, session_id).await?;
+        let mut from_disk = turns
+            .into_iter()
+            .flat_map(|turn| recent_messages_from_turn(&turn))
+            .collect::<Vec<_>>();
+        if from_disk.is_empty() {
+            from_disk = load_all_transcript_records(store, session_id)
+                .await?
+                .iter()
+                .filter_map(recent_message_from_transcript)
+                .collect::<Vec<_>>();
+        }
+        let messages =
+            select_recent_window(from_disk, target_recent_messages, config.recent_window);
+        diagnostics.raw_tail_preferred_count = messages.len();
+        messages
     } else {
         let hot = {
             let cache = store.hot_cache.read().await;
@@ -711,6 +745,9 @@ pub(crate) async fn build_session_prompt_context(
             }
         }
     };
+    if compact_cursor.is_none() {
+        diagnostics.raw_tail_preferred_count = recent_messages.len();
+    }
 
     let recent_tool_results = if config.recent_tool_results_limit == 0 {
         Vec::new()
@@ -718,9 +755,14 @@ pub(crate) async fn build_session_prompt_context(
         let turns = load_turns(store, session_id).await?;
         let mut tool_results = turns
             .into_iter()
+            .filter(|turn| {
+                compact_cursor
+                    .map(|cursor| turn.seq > cursor.covers_until_seq)
+                    .unwrap_or(true)
+            })
             .flat_map(|turn| recent_tool_results_from_turn(&turn, config.tool_output_max_chars))
             .collect::<Vec<_>>();
-        if tool_results.is_empty() {
+        if tool_results.is_empty() && compact_cursor.is_none() {
             tool_results = load_all_transcript_records(store, session_id)
                 .await?
                 .iter()
@@ -729,30 +771,31 @@ pub(crate) async fn build_session_prompt_context(
                 })
                 .collect::<Vec<_>>();
         }
-        if tool_results.len() > config.recent_tool_results_limit {
-            let start = tool_results
-                .len()
-                .saturating_sub(config.recent_tool_results_limit);
-            tool_results = tool_results.split_off(start);
-        }
-        tool_results
+        select_recent_window(
+            tool_results,
+            config.recent_tool_results_limit,
+            config.recent_window,
+        )
     };
 
     let recent_tool_exchanges = if config.recent_tool_exchanges_limit == 0 {
         Vec::new()
     } else {
         let turns = load_turns(store, session_id).await?;
-        let mut tool_exchanges = turns
+        let tool_exchanges = turns
             .into_iter()
+            .filter(|turn| {
+                compact_cursor
+                    .map(|cursor| turn.seq > cursor.covers_until_seq)
+                    .unwrap_or(true)
+            })
             .flat_map(|turn| recent_tool_exchanges_from_turn(&turn, config.tool_exchange_max_chars))
             .collect::<Vec<_>>();
-        if tool_exchanges.len() > config.recent_tool_exchanges_limit {
-            let start = tool_exchanges
-                .len()
-                .saturating_sub(config.recent_tool_exchanges_limit);
-            tool_exchanges = tool_exchanges.split_off(start);
-        }
-        tool_exchanges
+        select_recent_window(
+            tool_exchanges,
+            config.recent_tool_exchanges_limit,
+            config.recent_window,
+        )
     };
 
     let summaries = if config.include_summary && config.summary_recent_count > 0 {
@@ -766,13 +809,76 @@ pub(crate) async fn build_session_prompt_context(
     } else {
         Vec::new()
     };
+    diagnostics.summary_records_included_count = summaries.len();
 
     Ok(SessionPromptContext {
         summaries,
         recent_messages,
         recent_tool_results,
         recent_tool_exchanges,
+        diagnostics,
     })
+}
+
+fn recent_messages_with_compact_cursor(
+    turns: &[TalosTurn],
+    target_recent_messages: usize,
+    cursor: CompactPromptCursor,
+    recent_window: SessionPromptRecentWindow,
+) -> (Vec<TalosMessage>, usize, usize) {
+    let mut preferred = turns
+        .iter()
+        .filter(|turn| turn.seq > cursor.covers_until_seq)
+        .flat_map(recent_messages_from_turn)
+        .collect::<Vec<_>>();
+    preferred = select_recent_window(preferred, target_recent_messages, recent_window);
+    let preferred_count = preferred.len();
+    if recent_window == SessionPromptRecentWindow::OldestUncovered {
+        return (preferred, preferred_count, 0);
+    }
+
+    let desired_tail = target_recent_messages.saturating_sub(preferred.len());
+    if desired_tail == 0 {
+        return (preferred, preferred_count, 0);
+    }
+
+    let mut backfill = turns
+        .iter()
+        .filter(|turn| turn.seq <= cursor.covers_until_seq)
+        .flat_map(recent_messages_from_turn)
+        .collect::<Vec<_>>();
+    if backfill.len() > desired_tail {
+        let start = backfill.len().saturating_sub(desired_tail);
+        backfill = backfill.split_off(start);
+    }
+    let backfilled_count = backfill.len();
+    backfill.extend(preferred);
+    if backfill.len() > target_recent_messages {
+        let start = backfill.len().saturating_sub(target_recent_messages);
+        backfill = backfill.split_off(start);
+    }
+    (backfill, preferred_count, backfilled_count)
+}
+
+fn select_recent_window<T>(
+    mut items: Vec<T>,
+    limit: usize,
+    recent_window: SessionPromptRecentWindow,
+) -> Vec<T> {
+    if items.len() <= limit {
+        return items;
+    }
+
+    match recent_window {
+        SessionPromptRecentWindow::Latest => {
+            let start = items.len().saturating_sub(limit);
+            items.split_off(start)
+        }
+        SessionPromptRecentWindow::OldestUncovered => {
+            items.truncate(limit);
+            items
+        }
+    }
 }
 
 pub(crate) async fn save_summary(store: &MemoryStore, record: &SummaryRecord) -> TalosResult<()> {

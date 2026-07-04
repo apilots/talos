@@ -518,7 +518,7 @@ export type AgentEventPayload = { "type": "turn_started" } & TalosTurnStartedEve
 
 export type TalosTimelineItem = { item_id: string, parent_item_id: string | null, kind: TalosTimelineItemKind, phase: TalosTimelinePhase, status: TalosTimelineItemStatus, title: string | null, started_at_ms: number, completed_at_ms: number | null, content: TalosTimelineContent, };
 
-export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text" | "tool_call" | "execution_summary" | "system_notice";
+export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text" | "tool_call" | "execution_summary" | "context_compaction" | "system_notice";
 
 export type TalosTimelinePhase = "input" | "thinking" | "acting" | "unknown" | "commentary" | "final_answer" | "system";
 
@@ -526,9 +526,17 @@ export type TalosTimelineItemStatus = "running" | "waiting_dynamic_input" | "com
 
 export type TalosTimelineNoticeLevel = "info" | "warning" | "error";
 
-export type TalosTimelineContent = { "type": "empty" } | { "type": "text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: string, progress: Array<TalosToolProgressEntry>, result: TalosToolResult | null, } | { "type": "execution_summary", summary: string, } | { "type": "system_notice", level: TalosTimelineNoticeLevel, message: string, };
+export type ContextCompactionTrigger = "threshold_exceeded" | "hard_threshold_exceeded" | "budget_exceeded" | "history_sections_dropped" | "working_context_exceeded";
 
-export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: DynamicToolArguments, } | { "type": "status", status: TalosTimelineItemStatus, };
+export type ContextCompactionStage = "preparing" | "summarizing" | "rebuilding_prompt" | "trimming" | "completed" | "failed";
+
+export type ContextCompactionOutcome = "applied" | "rejected_missing_summary" | "trimmed_fallback_applied" | "failed_context_still_too_large" | "failed_provider_error" | "failed_internal_error";
+
+export type ContextCompactionMetrics = { covers_from_seq: number | null, covers_until_seq: number | null, pre_compaction_total_tokens: number, post_compaction_total_tokens: number, compaction_input_tokens: number, compaction_output_tokens: number, trimmed_context_unit_count: number, raw_tail_preferred_count: number | null, raw_tail_backfilled_count: number | null, working_context_input_messages: number | null, working_context_compacted_messages: number | null, working_context_preserved_recent_exchanges: number | null, };
+
+export type TalosTimelineContent = { "type": "empty" } | { "type": "text", text: string, } | { "type": "tool_call", call_id: string, name: string, arguments: string, progress: Array<TalosToolProgressEntry>, result: TalosToolResult | null, } | { "type": "execution_summary", summary: string, } | { "type": "context_compaction", trigger: ContextCompactionTrigger, stage: ContextCompactionStage, outcome: ContextCompactionOutcome | null, metrics: ContextCompactionMetrics | null, message: string | null, } | { "type": "system_notice", level: TalosTimelineNoticeLevel, message: string, };
+
+export type TalosTimelineDelta = { "type": "text", text: string, } | { "type": "tool_arguments", arguments_delta: string, } | { "type": "tool_progress", progress_kind: TalosToolProgressKind, text_delta: string, } | { "type": "tool_result", content: Array<TalosContentItem>, is_error: boolean, } | { "type": "tool_dynamic_request", call_id: string, tool_name: string, arguments: DynamicToolArguments, } | { "type": "context_compaction", stage: ContextCompactionStage | null, outcome: ContextCompactionOutcome | null, metrics: ContextCompactionMetrics | null, message: string | null, } | { "type": "status", status: TalosTimelineItemStatus, };
 
 export type TalosToolProgressEntry = { progress_kind: TalosToolProgressKind, text: string, timestamp_ms: number, };
 
@@ -548,7 +556,11 @@ export type TalosTurnMetricsEvent = { request_id: string, turn_id: string, metri
 
 export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TokenUsage, metrics: TurnExecutionMetrics | null, };
 
-export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, failed_at_ms: number, };
+export type TalosRunErrorCode = "context_window_exceeded" | "session_budget_exceeded" | "usage_limit_exceeded" | "context_compaction_failed" | "provider_unavailable" | "permission_denied" | "tool_failure" | "internal_error";
+
+export type TalosRunErrorInfo = { code: TalosRunErrorCode, message: string, };
+
+export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, error_info: TalosRunErrorInfo | null, failed_at_ms: number, };
 
 export type JsonContentValue = { value: unknown, };
 
@@ -574,7 +586,7 @@ export type TokenUsage = { input_tokens: number, output_tokens: number, total_to
 
 export type TurnExecutionMetrics = { model_rounds: number, tool_calls: number, tool_successes: number, tool_errors: number, stop_reason: StopReason, usage: TokenUsage, duration_ms: number | null, };
 
-export type StopReason = "end_turn" | "model_output_limit" | "tool_round_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "cancelled";
+export type StopReason = "end_turn" | "model_output_limit" | "waiting_dynamic_input" | "transfer_unresolved" | "cancelled";
 
 export type TalosToolProgressKind = "status" | "stdout" | "stderr";
 

@@ -77,6 +77,8 @@ Based on the request and available tools, decide if a tool should be used. If ye
             .build_session_prompt_context(
                 DEFAULT_SESSION_ID,
                 &SessionPromptContextConfig {
+                    compact_cursor: None,
+                    recent_window: Default::default(),
                     recent_messages_limit: 5,
                     recent_tool_results_limit: 0,
                     tool_output_max_chars: 0,

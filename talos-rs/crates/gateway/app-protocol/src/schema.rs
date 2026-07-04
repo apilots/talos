@@ -311,6 +311,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosTimelinePhase>());
     output.push_str(&export::<talos_types::talos::TalosTimelineItemStatus>());
     output.push_str(&export::<talos_types::talos::TalosTimelineNoticeLevel>());
+    output.push_str(&export::<talos_types::talos::ContextCompactionTrigger>());
+    output.push_str(&export::<talos_types::talos::ContextCompactionStage>());
+    output.push_str(&export::<talos_types::talos::ContextCompactionOutcome>());
+    output.push_str(&export::<talos_types::talos::ContextCompactionMetrics>());
     output.push_str(&export::<talos_types::talos::TalosTimelineContent>());
     output.push_str(&export::<talos_types::talos::TalosTimelineDelta>());
     output.push_str(&export::<talos_types::talos::TalosToolProgressEntry>());
@@ -324,6 +328,8 @@ pub fn generate_typescript() -> String {
     >());
     output.push_str(&export::<talos_types::talos::TalosTurnMetricsEvent>());
     output.push_str(&export::<talos_types::talos::TalosTurnCompletedEvent>());
+    output.push_str(&export::<talos_types::talos::TalosRunErrorCode>());
+    output.push_str(&export::<talos_types::talos::TalosRunErrorInfo>());
     output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
     output.push_str(&export::<talos_types::talos::JsonContentValue>());
     output.push_str(&export::<talos_types::talos::ToolArguments>());

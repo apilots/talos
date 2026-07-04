@@ -92,6 +92,7 @@ pub struct PreparedGeneralTurn {
     pub speed: ModelSpeed,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
+    pub maintenance_usage: TokenUsage,
     pub tool_definitions: Vec<ToolDefinition>,
     pub tool_selection_request: talos_tools::ToolSelectionRequest,
     pub prompt_diagnostics: PromptDiagnostics,
@@ -255,7 +256,6 @@ pub struct GeneralTurnLoopState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForcedFinalizationCause {
-    ToolRoundBudget,
     RepeatedReadOnlyInvestigation,
     EmptyFinalResponseAfterTools,
 }
@@ -278,13 +278,13 @@ pub struct ToolLoopGuardState {
 }
 
 impl GeneralTurnLoopState {
-    pub fn new(_prepared: &PreparedGeneralTurn) -> Self {
+    pub fn new(prepared: &PreparedGeneralTurn) -> Self {
         Self {
             started_at: Instant::now(),
             messages: Vec::new(),
             round: 0,
             output_items: Vec::new(),
-            usage: TokenUsage::default(),
+            usage: prepared.maintenance_usage.clone(),
             reasoning_log: Vec::new(),
             tool_call_log: Vec::new(),
             tool_result_log: Vec::new(),

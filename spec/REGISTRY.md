@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 029 |
 | `fix` | 004 |
-| `refactor` | 034 |
+| `refactor` | 035 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -34,6 +34,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-031 | `refactor-031-api-concept-alignment` | implemented |
 | refactor-032 | `refactor-032-agent-harness-api` | implemented |
 | refactor-033 | `refactor-033-agent-framework-api-standardization` | draft |
+| refactor-034 | `refactor-034-model-driven-agent-loop` | draft |
 
 ## Archived Specs
 

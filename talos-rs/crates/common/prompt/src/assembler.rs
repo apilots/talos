@@ -749,6 +749,8 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
             .build_session_prompt_context(
                 session_id,
                 &SessionPromptContextConfig {
+                    compact_cursor: builder.config.load_policy.compact_cursor,
+                    recent_window: Default::default(),
                     recent_messages_limit: if include_recent {
                         builder.config.load_policy.session_recent_limit
                     } else {

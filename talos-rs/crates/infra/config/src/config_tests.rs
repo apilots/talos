@@ -32,7 +32,7 @@ agent:
       runtime_config:
         type: kernel
         kernel:
-          max_tool_rounds: 4
+          tool_result_max_bytes: 4096
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -66,7 +66,7 @@ llm:
         .as_ref()
         .expect("runtime config should exist")
     {
-        AgentRuntimeConfig::Kernel { kernel } => assert_eq!(kernel.max_tool_rounds, 4),
+        AgentRuntimeConfig::Kernel { kernel } => assert_eq!(kernel.tool_result_max_bytes, 4096),
     }
 }
 
@@ -98,7 +98,6 @@ llm:
 #[test]
 fn test_kernel_defaults() {
     let config = Config::default();
-    assert_eq!(config.agent.kernel.max_tool_rounds, 8);
     assert_eq!(config.agent.kernel.tool_result_max_bytes, 64 * 1024);
     assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
     assert_eq!(config.agent.kernel.default_workspace_id, "default");

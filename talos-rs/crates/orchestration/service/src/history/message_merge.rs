@@ -50,6 +50,7 @@ fn first_input_text(message: &SessionHistoryMessage) -> Option<&str> {
             TalosTimelineContent::Empty
             | TalosTimelineContent::ToolCall { .. }
             | TalosTimelineContent::ExecutionSummary { .. }
+            | TalosTimelineContent::ContextCompaction { .. }
             | TalosTimelineContent::SystemNotice { .. } => None,
         }
     })
@@ -168,6 +169,7 @@ fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) 
             }
             TalosTimelineContent::ToolCall { .. }
             | TalosTimelineContent::ExecutionSummary { .. }
+            | TalosTimelineContent::ContextCompaction { .. }
             | TalosTimelineContent::SystemNotice { .. } => {}
         },
         TalosTimelineDelta::ToolArguments { arguments_delta } => {
@@ -194,6 +196,34 @@ fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) 
         }
         TalosTimelineDelta::ToolDynamicRequest { .. } => {
             item.status = TalosTimelineItemStatus::WaitingDynamicInput;
+        }
+        TalosTimelineDelta::ContextCompaction {
+            stage,
+            outcome,
+            metrics,
+            message,
+        } => {
+            if let TalosTimelineContent::ContextCompaction {
+                stage: current_stage,
+                outcome: current_outcome,
+                metrics: current_metrics,
+                message: current_message,
+                ..
+            } = &mut item.content
+            {
+                if let Some(stage) = stage {
+                    *current_stage = stage;
+                }
+                if outcome.is_some() {
+                    *current_outcome = outcome;
+                }
+                if metrics.is_some() {
+                    *current_metrics = metrics;
+                }
+                if message.is_some() {
+                    *current_message = message;
+                }
+            }
         }
         TalosTimelineDelta::Status { status } => {
             item.status = status;
@@ -405,6 +435,7 @@ fn item_prefix(kind: TalosTimelineItemKind) -> &'static str {
         TalosTimelineItemKind::AssistantText => "assistant",
         TalosTimelineItemKind::ToolCall => "tool",
         TalosTimelineItemKind::ExecutionSummary => "summary",
+        TalosTimelineItemKind::ContextCompaction => "compaction",
         TalosTimelineItemKind::SystemNotice => "system",
     }
 }

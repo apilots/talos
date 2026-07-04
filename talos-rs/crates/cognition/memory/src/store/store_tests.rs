@@ -6,10 +6,11 @@ use tempfile::TempDir;
 use crate::Memory;
 use crate::TalosMessageRole;
 use crate::{
-    MemorySearchQuery, MemoryStore, RecordHeader, SessionPromptContextConfig,
-    SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
-    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
-    SessionTranscriptRecord, SummaryRecord, TalosTurn, WorkspaceMemoryRecord,
+    CompactPromptCursor, MemorySearchQuery, MemoryStore, RecordHeader, SessionPromptContextConfig,
+    SessionPromptRecentWindow, SessionTranscriptActions, SessionTranscriptAuthor,
+    SessionTranscriptBranch, SessionTranscriptEventKind, SessionTranscriptHeader,
+    SessionTranscriptPayload, SessionTranscriptRecord, SummaryRecord, TalosTurn,
+    WorkspaceMemoryRecord,
 };
 use talos_types::talos::{RunItem, StopReason, TalosContentItem, TokenUsage};
 
@@ -62,6 +63,8 @@ async fn test_turn_roundtrip_and_context_dedup() {
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
+                compact_cursor: None,
+                recent_window: Default::default(),
                 recent_messages_limit: 8,
                 recent_tool_results_limit: 0,
                 tool_output_max_chars: 0,
@@ -114,6 +117,8 @@ async fn test_prompt_context_falls_back_to_transcript_records() {
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
+                compact_cursor: None,
+                recent_window: Default::default(),
                 recent_messages_limit: 8,
                 recent_tool_results_limit: 8,
                 tool_output_max_chars: 1024,
@@ -503,6 +508,8 @@ async fn test_build_prompt_context_includes_summary() {
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
+                compact_cursor: None,
+                recent_window: Default::default(),
                 recent_messages_limit: 10,
                 recent_tool_results_limit: 0,
                 tool_output_max_chars: 0,
@@ -519,6 +526,156 @@ async fn test_build_prompt_context_includes_summary() {
     assert_eq!(context.recent_messages[0].text, "remember this");
     assert_eq!(context.summaries.len(), 1);
     assert_eq!(context.summaries[0].header.id, "summary-1");
+}
+
+#[tokio::test]
+async fn test_prompt_context_filters_compacted_tail_and_backfills_fresh_messages() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "cursor-session";
+    for seq in 1..=6 {
+        let mut items = vec![RunItem::UserInput {
+            text: format!("message-{seq}"),
+        }];
+        if seq == 3 || seq == 5 {
+            items.extend([
+                RunItem::ToolCall {
+                    call_id: format!("call-{seq}"),
+                    name: "Read".to_string(),
+                    arguments: serde_json::json!({ "path": format!("file-{seq}.txt") }).into(),
+                },
+                RunItem::ToolResult {
+                    call_id: format!("call-{seq}"),
+                    tool_name: "Read".to_string(),
+                    content: vec![TalosContentItem::Text {
+                        text: format!("tool-output-{seq}"),
+                    }],
+                    is_error: false,
+                },
+            ]);
+        }
+        store
+            .append_turn(&TalosTurn {
+                turn_id: format!("turn-{seq}"),
+                message_id: format!("message-{seq}"),
+                session_id: session_id.to_string(),
+                seq,
+                timestamp: Utc::now(),
+                items,
+                usage: TokenUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("turn should append");
+    }
+    store
+        .save_summary(&SummaryRecord {
+            version: 2,
+            header: RecordHeader {
+                id: "summary-1".to_string(),
+                session_id: session_id.to_string(),
+                turn_id: None,
+                timestamp: Utc::now(),
+            },
+            covers_until_seq: 4,
+            source_turn_count: 4,
+            content: "summary covers early turns".to_string(),
+        })
+        .await
+        .expect("summary should save");
+
+    let context = store
+        .build_session_prompt_context(
+            session_id,
+            &SessionPromptContextConfig {
+                compact_cursor: Some(CompactPromptCursor {
+                    covers_until_seq: 4,
+                }),
+                recent_window: Default::default(),
+                recent_messages_limit: 4,
+                recent_tool_results_limit: 10,
+                tool_output_max_chars: 128,
+                recent_tool_exchanges_limit: 10,
+                tool_exchange_max_chars: 128,
+                include_summary: true,
+                summary_recent_count: 2,
+                summary_max_chars: 0,
+            },
+        )
+        .await
+        .expect("context should build with compact cursor");
+
+    assert_eq!(
+        context
+            .recent_messages
+            .iter()
+            .map(|message| message.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["message-3", "message-4", "message-5", "message-6"]
+    );
+    assert_eq!(context.recent_tool_results.len(), 1);
+    assert_eq!(context.recent_tool_results[0].content, "tool-output-5");
+    assert_eq!(context.recent_tool_exchanges.len(), 1);
+    assert_eq!(context.recent_tool_exchanges[0].call_id, "call-5");
+    assert_eq!(context.summaries.len(), 1);
+    assert_eq!(context.diagnostics.latest_compacted_seq, Some(4));
+    assert_eq!(context.diagnostics.raw_tail_preferred_count, 2);
+    assert_eq!(context.diagnostics.raw_tail_backfilled_count, 2);
+    assert_eq!(context.diagnostics.summary_records_included_count, 1);
+}
+
+#[tokio::test]
+async fn test_prompt_context_oldest_uncovered_window_advances_compaction_source() {
+    let (_guard, store) = new_temp_store();
+    let session_id = "oldest-uncovered-session";
+    for seq in 1..=6 {
+        store
+            .append_turn(&TalosTurn {
+                turn_id: format!("turn-{seq}"),
+                message_id: format!("message-{seq}"),
+                session_id: session_id.to_string(),
+                seq,
+                timestamp: Utc::now(),
+                items: vec![RunItem::UserInput {
+                    text: format!("message-{seq}"),
+                }],
+                usage: TokenUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            })
+            .await
+            .expect("turn should append");
+    }
+
+    let context = store
+        .build_session_prompt_context(
+            session_id,
+            &SessionPromptContextConfig {
+                compact_cursor: Some(CompactPromptCursor {
+                    covers_until_seq: 2,
+                }),
+                recent_window: SessionPromptRecentWindow::OldestUncovered,
+                recent_messages_limit: 2,
+                recent_tool_results_limit: 0,
+                tool_output_max_chars: 0,
+                recent_tool_exchanges_limit: 0,
+                tool_exchange_max_chars: 0,
+                include_summary: false,
+                summary_recent_count: 0,
+                summary_max_chars: 0,
+            },
+        )
+        .await
+        .expect("context should build oldest uncovered window");
+
+    assert_eq!(
+        context
+            .recent_messages
+            .iter()
+            .map(|message| message.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["message-3", "message-4"]
+    );
+    assert_eq!(context.diagnostics.raw_tail_preferred_count, 2);
+    assert_eq!(context.diagnostics.raw_tail_backfilled_count, 0);
 }
 
 #[tokio::test]
@@ -571,6 +728,8 @@ async fn test_prompt_context_still_builds_after_schema_change() {
         .build_session_prompt_context(
             session_id,
             &SessionPromptContextConfig {
+                compact_cursor: None,
+                recent_window: Default::default(),
                 recent_messages_limit: 10,
                 recent_tool_results_limit: 10,
                 tool_output_max_chars: 32,

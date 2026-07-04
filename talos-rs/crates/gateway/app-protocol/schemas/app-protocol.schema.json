@@ -332,6 +332,17 @@
             "error": {
               "type": "string"
             },
+            "error_info": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/TalosRunErrorInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "failed_at_ms": {
               "format": "uint64",
               "minimum": 0.0,
@@ -1732,6 +1743,142 @@
           "type": "object"
         }
       ]
+    },
+    "ContextCompactionMetrics": {
+      "description": "Public metrics for a context compaction maintenance item.",
+      "properties": {
+        "compaction_input_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "compaction_output_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "covers_from_seq": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "covers_until_seq": {
+          "default": null,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "post_compaction_total_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "pre_compaction_total_tokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "raw_tail_backfilled_count": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "raw_tail_preferred_count": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "trimmed_context_unit_count": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "working_context_compacted_messages": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "working_context_input_messages": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "working_context_preserved_recent_exchanges": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "compaction_input_tokens",
+        "compaction_output_tokens",
+        "post_compaction_total_tokens",
+        "pre_compaction_total_tokens",
+        "trimmed_context_unit_count"
+      ],
+      "type": "object"
+    },
+    "ContextCompactionOutcome": {
+      "description": "Terminal result of a context compaction maintenance item.",
+      "enum": [
+        "applied",
+        "rejected_missing_summary",
+        "trimmed_fallback_applied",
+        "failed_context_still_too_large",
+        "failed_provider_error",
+        "failed_internal_error"
+      ],
+      "type": "string"
+    },
+    "ContextCompactionStage": {
+      "description": "Current stage of a context compaction timeline item.",
+      "enum": [
+        "preparing",
+        "summarizing",
+        "rebuilding_prompt",
+        "trimming",
+        "completed",
+        "failed"
+      ],
+      "type": "string"
+    },
+    "ContextCompactionTrigger": {
+      "description": "Reason a run entered the context compaction maintenance stage.",
+      "enum": [
+        "threshold_exceeded",
+        "hard_threshold_exceeded",
+        "budget_exceeded",
+        "history_sections_dropped",
+        "working_context_exceeded"
+      ],
+      "type": "string"
     },
     "DynamicToolArguments": {
       "properties": {
@@ -3605,7 +3752,6 @@
       "enum": [
         "end_turn",
         "model_output_limit",
-        "tool_round_limit",
         "waiting_dynamic_input",
         "transfer_unresolved",
         "cancelled"
@@ -4370,6 +4516,36 @@
       ],
       "type": "string"
     },
+    "TalosRunErrorCode": {
+      "description": "Stable machine-readable category for a failed Agent run.",
+      "enum": [
+        "context_window_exceeded",
+        "session_budget_exceeded",
+        "usage_limit_exceeded",
+        "context_compaction_failed",
+        "provider_unavailable",
+        "permission_denied",
+        "tool_failure",
+        "internal_error"
+      ],
+      "type": "string"
+    },
+    "TalosRunErrorInfo": {
+      "description": "Optional structured error details carried by turn failure events.",
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/TalosRunErrorCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
     "TalosSessionEnvironment": {
       "properties": {
         "connection_mode": {
@@ -4494,6 +4670,57 @@
           },
           "required": [
             "summary",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metrics": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContextCompactionMetrics"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContextCompactionOutcome"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "$ref": "#/definitions/ContextCompactionStage"
+            },
+            "trigger": {
+              "$ref": "#/definitions/ContextCompactionTrigger"
+            },
+            "type": {
+              "enum": [
+                "context_compaction"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "stage",
+            "trigger",
             "type"
           ],
           "type": "object"
@@ -4636,6 +4863,60 @@
         },
         {
           "properties": {
+            "message": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "metrics": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContextCompactionMetrics"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContextCompactionOutcome"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "stage": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/ContextCompactionStage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "type": {
+              "enum": [
+                "context_compaction"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "status": {
               "$ref": "#/definitions/TalosTimelineItemStatus"
             },
@@ -4718,6 +4999,7 @@
         "assistant_text",
         "tool_call",
         "execution_summary",
+        "context_compaction",
         "system_notice"
       ],
       "type": "string"

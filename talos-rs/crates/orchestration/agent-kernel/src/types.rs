@@ -5,7 +5,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TalosSessionEnvironment;
+use talos_types::talos::{
+    ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
+    ContextCompactionTrigger, TalosSessionEnvironment,
+};
 use talos_types::talos::{RunItem, TalosContentItem, TokenUsage, TurnExecutionMetrics};
 use talos_types::ModelInfo;
 use tokio::sync::mpsc;
@@ -183,6 +186,7 @@ pub enum KernelStreamEventType {
     ToolResult,
     PromptWarning,
     DynamicToolRequest,
+    ContextCompaction,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +224,7 @@ pub enum KernelStreamEventData {
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
     DynamicToolRequest(DynamicToolRequestStreamData),
+    ContextCompaction(ContextCompactionStreamData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -283,6 +288,19 @@ pub struct DynamicToolRequestStreamData {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: Value,
+}
+
+/// Kernel stream payload for run-internal context compaction lifecycle updates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextCompactionStreamData {
+    pub trigger: ContextCompactionTrigger,
+    pub stage: ContextCompactionStage,
+    #[serde(default)]
+    pub outcome: Option<ContextCompactionOutcome>,
+    #[serde(default)]
+    pub metrics: Option<ContextCompactionMetrics>,
+    #[serde(default)]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,7 +402,6 @@ pub enum KernelThinkingStage {
 pub enum StopReason {
     EndTurn,
     ModelOutputLimit,
-    ToolRoundLimit,
     WaitingDynamicInput,
     TransferUnresolved,
 }

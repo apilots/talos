@@ -93,6 +93,37 @@ describe("timeline stream events", () => {
     });
   });
 
+  it("renders live context compaction timeline status", () => {
+    applyStreamEvent("sess-1", contextCompactionStarted(
+      "compact-1",
+      "preparing",
+      "Preparing session history compaction.",
+      1,
+    ));
+    applyStreamEvent("sess-1", contextCompactionDelta(
+      "compact-1",
+      "completed",
+      "applied",
+      "Session history compaction finished.",
+      2,
+    ));
+    applyStreamEvent("sess-1", itemCompleted("compact-1", 3));
+
+    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
+    expect(timeline).toMatchObject({
+      kind: "timeline",
+      items: [
+        expect.objectContaining({
+          itemId: "compact-1",
+          kind: "context_compaction",
+          phase: "system",
+          status: "completed",
+          text: "Session history compaction finished.",
+        }),
+      ],
+    });
+  });
+
   it("applies live turn metrics to the timeline block without advancing stream cursor", () => {
     applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 1));
     applyStreamEvent("sess-1", turnMetrics(2, { model_rounds: 1, tool_calls: 1, total_tokens: 42 }));
@@ -552,6 +583,59 @@ function toolResult(
       type: "tool_result",
       content: typeof content === "string" ? [{ type: "text", text: content }] : content,
       is_error: false,
+    },
+  }, sequence);
+}
+
+function contextCompactionStarted(
+  itemId: string,
+  stage: "preparing" | "summarizing" | "rebuilding_prompt" | "trimming" | "completed" | "failed",
+  message: string | null,
+  sequence: number,
+): TimelineEventEnvelope {
+  return baseEvent({
+    type: "item_started",
+    request_id: "req-1",
+    turn_id: "turn-1",
+    item: {
+      item_id: itemId,
+      parent_item_id: null,
+      kind: "context_compaction",
+      phase: "system",
+      status: "running",
+      title: null,
+      started_at_ms: sequence,
+      completed_at_ms: null,
+      content: {
+        type: "context_compaction",
+        trigger: "threshold_exceeded",
+        stage,
+        outcome: null,
+        metrics: null,
+        message,
+      },
+    },
+  }, sequence);
+}
+
+function contextCompactionDelta(
+  itemId: string,
+  stage: "preparing" | "summarizing" | "rebuilding_prompt" | "trimming" | "completed" | "failed",
+  outcome: "applied" | "rejected_missing_summary" | "trimmed_fallback_applied" | "failed_context_still_too_large" | "failed_provider_error" | null,
+  message: string | null,
+  sequence: number,
+): TimelineEventEnvelope {
+  return baseEvent({
+    type: "item_delta",
+    request_id: "req-1",
+    turn_id: "turn-1",
+    item_id: itemId,
+    delta: {
+      type: "context_compaction",
+      stage,
+      outcome,
+      metrics: null,
+      message,
     },
   }, sequence);
 }

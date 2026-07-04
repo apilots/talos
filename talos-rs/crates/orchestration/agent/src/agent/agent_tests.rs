@@ -9,10 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::{
     AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
-    DynamicToolRequestStreamData, ExecutionSummaryStreamData, KernelAssistantTextPhase,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
-    KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData, ToolArgsDeltaStreamData,
-    ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
+    ContextCompactionStreamData, DynamicToolRequestStreamData, ExecutionSummaryStreamData,
+    KernelAssistantTextPhase, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData,
+    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
 };
 use talos_config::AgentKernelConfig;
 use talos_llm_provider::{
@@ -28,9 +28,10 @@ use talos_tools::{
 use talos_tools_policy::ToolPolicy;
 use talos_types::agent_dispatch::{AgentDispatchResumeContext, AgentDispatchResumeToolCall};
 use talos_types::talos::{
-    AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
-    TalosProvider, TalosSourceType, TalosTimelineDelta, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
+    AgentEventPayload, ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
+    ContextCompactionTrigger, RunItem, StopReason as TalosStopReason, TalosContentItem,
+    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
 };
 use talos_types::{
     ModelRef, SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE,
@@ -746,6 +747,108 @@ fn test_execution_summary_item_does_not_gate_final_answer_merge() {
     .expect("final answer should start");
 
     assert!(summary_events[1].sequence < final_events[0].sequence);
+}
+
+#[test]
+fn test_context_compaction_stream_events_map_to_single_timeline_item() {
+    let mut timeline = TimelineBuilder::new(
+        "request-compaction",
+        "turn-compaction",
+        "message-1",
+        "session-1",
+    );
+    let mut state = KernelTimelineState::default();
+
+    let started_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ContextCompaction,
+            KernelStreamEventData::ContextCompaction(ContextCompactionStreamData {
+                trigger: ContextCompactionTrigger::ThresholdExceeded,
+                stage: ContextCompactionStage::Preparing,
+                outcome: None,
+                metrics: None,
+                message: Some("Preparing context compaction.".to_string()),
+            }),
+        ),
+    )
+    .expect("context compaction start should map");
+
+    let compaction_id = match &started_events[0].payload {
+        AgentEventPayload::ItemStarted(payload) => {
+            assert_eq!(payload.item.kind, TalosTimelineItemKind::ContextCompaction);
+            assert_eq!(payload.item.phase, TalosTimelinePhase::System);
+            assert!(matches!(
+                payload.item.content,
+                TalosTimelineContent::ContextCompaction {
+                    trigger: ContextCompactionTrigger::ThresholdExceeded,
+                    stage: ContextCompactionStage::Preparing,
+                    ..
+                }
+            ));
+            payload.item.item_id.clone()
+        }
+        _ => panic!("expected context compaction item start"),
+    };
+
+    let completed_events = emit_kernel_timeline_events(
+        &mut timeline,
+        &mut state,
+        KernelStreamEvent::new(
+            KernelStreamEventType::ContextCompaction,
+            KernelStreamEventData::ContextCompaction(ContextCompactionStreamData {
+                trigger: ContextCompactionTrigger::ThresholdExceeded,
+                stage: ContextCompactionStage::Completed,
+                outcome: Some(ContextCompactionOutcome::Applied),
+                metrics: Some(ContextCompactionMetrics {
+                    covers_until_seq: Some(12),
+                    pre_compaction_total_tokens: 9000,
+                    post_compaction_total_tokens: 3000,
+                    compaction_input_tokens: 6000,
+                    compaction_output_tokens: 500,
+                    ..Default::default()
+                }),
+                message: Some("Context compaction complete.".to_string()),
+            }),
+        ),
+    )
+    .expect("context compaction completion should map");
+
+    assert!(completed_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentEventPayload::ItemDelta(payload)
+            if payload.item_id == compaction_id
+                && matches!(
+                    payload.delta,
+                    TalosTimelineDelta::ContextCompaction {
+                        stage: Some(ContextCompactionStage::Completed),
+                        outcome: Some(ContextCompactionOutcome::Applied),
+                        ..
+                    }
+                )
+    )));
+    assert!(completed_events.iter().any(|event| matches!(
+        &event.payload,
+        AgentEventPayload::ItemCompleted(payload)
+            if payload.item_id == compaction_id
+                && payload.status == TalosTimelineItemStatus::Completed
+    )));
+    assert!(matches!(
+        timeline
+            .item(&compaction_id)
+            .expect("compaction item should exist")
+            .content,
+        TalosTimelineContent::ContextCompaction {
+            stage: ContextCompactionStage::Completed,
+            outcome: Some(ContextCompactionOutcome::Applied),
+            metrics: Some(ContextCompactionMetrics {
+                covers_until_seq: Some(12),
+                ..
+            }),
+            ..
+        }
+    ));
 }
 
 #[test]

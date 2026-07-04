@@ -527,6 +527,7 @@ impl TurnService {
                 request_id: request_id.to_string(),
                 turn_id: turn_id.to_string(),
                 error: message.to_string(),
+                error_info: None,
                 failed_at_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
             }),
         };
