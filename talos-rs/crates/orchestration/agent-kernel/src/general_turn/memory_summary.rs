@@ -1,5 +1,6 @@
 use super::*;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use talos_error::TalosMemoryErrorKind;
 use talos_llm_provider::Usage;
 
 const MEMORY_PERSISTENCE_DECISION_PROMPT: &str = r#"Decide whether this sanitized session summary should be persisted.
@@ -607,6 +608,7 @@ async fn request_json_with_retries<T>(
     system_prompt: &str,
     user_prompt: String,
     label: &str,
+    parse_error_kind: TalosMemoryErrorKind,
 ) -> TalosResult<(T, Usage)>
 where
     T: DeserializeOwned + MemoryJsonValidator,
@@ -683,10 +685,13 @@ where
         }
     }
 
-    Err(talos_error::TalosError::ToolError(format!(
-        "parse {label} json after {MEMORY_JSON_RETRY_LIMIT} attempts: {}",
-        last_error.unwrap_or_else(|| "unknown parse error".to_string())
-    )))
+    Err(talos_error::TalosError::MemoryError {
+        kind: parse_error_kind,
+        message: format!(
+            "parse {label} json after {MEMORY_JSON_RETRY_LIMIT} attempts: {}",
+            last_error.unwrap_or_else(|| "unknown parse error".to_string())
+        ),
+    })
 }
 
 async fn decide_memory_persistence(
@@ -702,6 +707,7 @@ async fn decide_memory_persistence(
         MEMORY_PERSISTENCE_DECISION_PROMPT,
         sanitized_input.to_string(),
         "memory persistence decision",
+        TalosMemoryErrorKind::PersistenceDecisionParseFailed,
     )
     .await
 }
@@ -873,6 +879,7 @@ pub async fn flush_session_memory_with_report(
         MEMORY_SUMMARY_PROMPT,
         transcript_prompt,
         "memory summary",
+        TalosMemoryErrorKind::SummaryParseFailed,
     )
     .await?;
     usage_report.record_usage(&summary_usage);

@@ -283,9 +283,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
     fn map_dynamic_input_error(error: TalosError) -> AgentError {
         match error {
-            TalosError::ToolError(message) if message.contains("timed out") => {
-                AgentError::new(AgentErrorKind::Timeout, message)
-            }
+            TalosError::Timeout(message) => AgentError::new(AgentErrorKind::Timeout, message),
             TalosError::ToolError(message) | TalosError::ValidationError(message) => {
                 AgentError::input_rejected(message)
             }
@@ -382,7 +380,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
                         message_id.clone(),
                         session_id.clone(),
                     );
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let talos_error = err.clone().into_talos_error();
+                    let _ = tx.send(timeline.fail_turn(&talos_error)).await;
                     this.finish_active_turn_and_dispatch_next(&session_id).await;
                     return;
                 }
@@ -400,7 +399,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     message_id.clone(),
                     session_id.clone(),
                 );
-                let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                let _ = tx.send(timeline.fail_turn(&err)).await;
                 this.finish_active_turn_and_dispatch_next(&session_id).await;
                 return;
             }

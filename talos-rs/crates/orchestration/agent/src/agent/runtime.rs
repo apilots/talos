@@ -484,7 +484,7 @@ impl KernelAgent {
             let llm_provider = match this.llm_provider_for_run(&agent_request.config) {
                 Ok(llm_provider) => llm_provider,
                 Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
                     return Err(err.into());
                 }
             };
@@ -494,7 +494,7 @@ impl KernelAgent {
             {
                 Ok(value) => value,
                 Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
                     return Err(err.into());
                 }
             };
@@ -516,7 +516,7 @@ impl KernelAgent {
             {
                 Ok(resume) => resume,
                 Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
                     return Err(err.into());
                 }
             };
@@ -533,7 +533,7 @@ impl KernelAgent {
                         }
                     }
                     Err(err) => {
-                        let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                        let _ = tx.send(timeline.fail_turn(&err)).await;
                         return Err(err.into());
                     }
                 }
@@ -543,7 +543,7 @@ impl KernelAgent {
             {
                 Ok(skill_options) => skill_options,
                 Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
                     return Err(err.into());
                 }
             };
@@ -593,7 +593,7 @@ impl KernelAgent {
                             TalosTimelineItemStatus::Failed,
                         )
                         .await;
-                        let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                        let _ = tx.send(timeline.fail_turn(&err)).await;
                         stream_failed = true;
                         run_handle.abort();
                         break;
@@ -619,7 +619,7 @@ impl KernelAgent {
                             }
                         }
                         Err(err) => {
-                            let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
                             return Err(err.into());
                         }
                     }
@@ -680,7 +680,7 @@ impl KernelAgent {
                         TalosTimelineItemStatus::Failed,
                     )
                     .await;
-                    let _ = tx.send(timeline.fail_turn(err.to_string())).await;
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
                     Err(err.into())
                 }
                 Err(err) => {
@@ -694,7 +694,8 @@ impl KernelAgent {
                         "kernel stream task join failed: {}",
                         err
                     ));
-                    let _ = tx.send(timeline.fail_turn(error.to_string())).await;
+                    let talos_error = error.clone().into_talos_error();
+                    let _ = tx.send(timeline.fail_turn(&talos_error)).await;
                     Err(error)
                 }
             }

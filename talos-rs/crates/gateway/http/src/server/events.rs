@@ -16,7 +16,7 @@ use talos_service::TimelineSubscriptionMessage;
 use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize)]
@@ -148,18 +148,24 @@ fn parse_cursor(
 
 fn map_event_replay_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::ResourceExpired(message) => {
-            ApiError::new(StatusCode::GONE, "event_cursor_expired", message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_cursor", message)
-        }
-        talos_error::TalosError::ResourceNotFound(message) => {
-            ApiError::new(StatusCode::NOT_FOUND, "session_not_found", message)
-        }
+        talos_error::TalosError::ResourceExpired(message) => ApiError::new(
+            StatusCode::GONE,
+            HttpApiErrorCode::EventCursorExpired,
+            message,
+        ),
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidCursor,
+            message,
+        ),
+        talos_error::TalosError::ResourceNotFound(message) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            HttpApiErrorCode::SessionNotFound,
+            message,
+        ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "event_replay_failed",
+            HttpApiErrorCode::EventReplayFailed,
             other.to_string(),
         ),
     }
@@ -182,7 +188,7 @@ pub(super) async fn get_active_turn_handler(
     let value = serde_json::to_value(snapshot).map_err(|err| {
         ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "active_turn_serialize_failed",
+            HttpApiErrorCode::ActiveTurnSerializeFailed,
             format!("failed to serialize active turn snapshot: {err}"),
         )
     })?;
@@ -193,12 +199,12 @@ fn map_active_turn_error(error: talos_error::TalosError) -> ApiError {
     match error {
         talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
             StatusCode::NOT_FOUND,
-            "session_not_found",
+            HttpApiErrorCode::SessionNotFound,
             "session not found",
         ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "active_turn_failed",
+            HttpApiErrorCode::ActiveTurnFailed,
             other.to_string(),
         ),
     }

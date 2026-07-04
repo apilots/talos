@@ -1,7 +1,7 @@
 use crate::loader::{read_skill_contents, same_path};
 use crate::model::{
     SkillDocument, SkillRoots, SkillSelector, SkillSnapshot, SkillSuggestion, SkillSummary,
-    SkillWarning,
+    SkillWarning, SkillWarningCode,
 };
 use crate::state::load_skill_state;
 use std::collections::HashSet;
@@ -139,7 +139,7 @@ pub fn resolve(
                 warnings.append(&mut selector_warnings);
             }
             Err(err) => warnings.push(SkillWarning {
-                code: "skill_not_found".to_string(),
+                code: SkillWarningCode::SkillNotFound,
                 message: err.to_string(),
             }),
         }
@@ -154,7 +154,7 @@ pub fn resolve(
                 warnings.append(&mut selector_warnings);
             }
             Err(err) => warnings.push(SkillWarning {
-                code: "skill_not_found".to_string(),
+                code: SkillWarningCode::SkillNotFound,
                 message: err.to_string(),
             }),
         }
@@ -195,7 +195,7 @@ pub(crate) fn select_skill(
         Vec::new()
     } else {
         vec![SkillWarning {
-            code: "ambiguous_skill_name".to_string(),
+            code: SkillWarningCode::AmbiguousSkillName,
             message: format!(
                 "skill `{}` matched multiple sources; selected `{}`",
                 selected.name,

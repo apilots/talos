@@ -2,7 +2,7 @@ use crate::documents::{readme_document_refs, relative_path, skill_document_ref};
 use crate::source::plugin_id_for;
 use std::path::Path;
 use talos_error::TalosResult;
-use talos_skills::{loader::parse_skill_dir, SkillRoot, SkillState, SkillSummary};
+use talos_skills::{loader::parse_skill_dir, SkillLoadError, SkillRoot, SkillState, SkillSummary};
 use talos_types::{
     MarketplaceSource, Plugin, PluginDefinition, PluginKind, PluginMetadata, PluginStatus,
     SkillManifestMetadata, SkillPlugin,
@@ -15,7 +15,7 @@ pub(crate) fn plugin_from_skill_dir(
     source_root: &Path,
     scan_root: &Path,
     skill_dir: &Path,
-) -> TalosResult<Result<Plugin, String>> {
+) -> TalosResult<Result<Plugin, SkillLoadError>> {
     let skill_root = SkillRoot::configured(scan_root);
     let state = SkillState::default();
     let summary = match parse_skill_dir(
@@ -25,7 +25,7 @@ pub(crate) fn plugin_from_skill_dir(
         MAX_MARKETPLACE_SKILL_MD_BYTES,
     ) {
         Ok(summary) => summary,
-        Err(error) => return Ok(Err(error.message)),
+        Err(error) => return Ok(Err(error)),
     };
     let path_in_source = relative_path(source_root, skill_dir)?;
     plugin_from_skill_summary(source, source_root, skill_dir, path_in_source, summary).map(Ok)

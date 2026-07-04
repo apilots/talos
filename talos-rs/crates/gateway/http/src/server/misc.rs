@@ -13,7 +13,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn health_handler(State(state): State<Arc<HttpApiState>>) -> Json<Value> {
@@ -82,12 +82,12 @@ fn map_config_error(error: talos_error::TalosError) -> ApiError {
     match error {
         talos_error::TalosError::ValidationError(message) => ApiError::new(
             axum::http::StatusCode::BAD_REQUEST,
-            "invalid_request",
+            HttpApiErrorCode::InvalidRequest,
             message,
         ),
         other => ApiError::new(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }

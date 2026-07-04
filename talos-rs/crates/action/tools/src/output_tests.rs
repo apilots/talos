@@ -1,4 +1,5 @@
 use super::*;
+use talos_error::TalosToolErrorKind;
 
 #[test]
 fn tool_result_envelope_preserves_structured_success_payload() {
@@ -92,7 +93,7 @@ fn tool_dispatch_outcome_pending_maps_to_pending_meta() {
 }
 
 #[test]
-fn tagged_error_builds_next_turn_failure_payload() {
+fn structured_error_builds_next_turn_failure_payload() {
     let envelope = ToolOutputPayload::Function {
         content: String::new(),
         success: false,
@@ -114,7 +115,7 @@ fn tagged_error_builds_next_turn_failure_payload() {
         .expect("next turn payload should exist");
     assert_eq!(
         next_turn_failure.error_kind,
-        ToolFailureKind::ValidationFailure
+        TalosToolErrorKind::ValidationFailure
     );
     assert!(next_turn_failure.retryable);
     assert_eq!(next_turn_failure.strategy, "retry");
@@ -122,4 +123,12 @@ fn tagged_error_builds_next_turn_failure_payload() {
         next_turn_failure.gate_source.as_deref(),
         Some("tool_semantic")
     );
+}
+
+#[test]
+fn unstructured_error_message_defaults_to_runtime_failure() {
+    let error = ToolResultError::from_message("path is required");
+
+    assert_eq!(error.error_kind, TalosToolErrorKind::RuntimeFailure);
+    assert!(error.retryable);
 }

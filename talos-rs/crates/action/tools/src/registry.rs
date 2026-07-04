@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_llm_provider::ToolDefinition;
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
 use talos_tools_sandbox::{ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode};
@@ -29,8 +29,6 @@ const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
 const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
 const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
 const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
-const ERROR_KIND_PERMISSION_REJECTION: &str = "permission_rejection";
-const ERROR_KIND_VALIDATION_FAILURE: &str = "validation_failure";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPromptEntry {
@@ -178,35 +176,29 @@ impl ToolRegistry {
         (output, true, raw_size, returned_size)
     }
 
-    fn tagged_gate_message(error_kind: &str, gate_source: &str, message: &str) -> String {
-        format!("[error_kind={error_kind}][gate_source={gate_source}] {message}")
-    }
-
     fn annotate_policy_error(error: TalosError) -> TalosError {
         match error {
-            TalosError::AuthorizationDenied => TalosError::ToolError(Self::tagged_gate_message(
-                ERROR_KIND_PERMISSION_REJECTION,
-                GATE_SOURCE_ALLOW_LIST,
-                "authorization denied",
-            )),
+            TalosError::AuthorizationDenied => TalosError::ToolFailure {
+                kind: TalosToolErrorKind::PermissionRejection,
+                message: "authorization denied".to_string(),
+                gate_source: Some(GATE_SOURCE_ALLOW_LIST.to_string()),
+            },
             other => other,
         }
     }
 
     fn annotate_pre_execute_error(error: TalosError) -> TalosError {
         match error {
-            TalosError::ValidationError(message) => {
-                TalosError::ValidationError(Self::tagged_gate_message(
-                    ERROR_KIND_VALIDATION_FAILURE,
-                    GATE_SOURCE_TOOL_SEMANTIC,
-                    message.as_str(),
-                ))
-            }
-            TalosError::AuthorizationDenied => TalosError::ToolError(Self::tagged_gate_message(
-                ERROR_KIND_PERMISSION_REJECTION,
-                GATE_SOURCE_TOOL_SEMANTIC,
-                "authorization denied",
-            )),
+            TalosError::ValidationError(message) => TalosError::ToolFailure {
+                kind: TalosToolErrorKind::ValidationFailure,
+                message,
+                gate_source: Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+            },
+            TalosError::AuthorizationDenied => TalosError::ToolFailure {
+                kind: TalosToolErrorKind::PermissionRejection,
+                message: "authorization denied".to_string(),
+                gate_source: Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+            },
             other => other,
         }
     }

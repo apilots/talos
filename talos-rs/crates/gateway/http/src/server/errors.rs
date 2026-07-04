@@ -1,10 +1,78 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::Serialize;
+use talos_error::TalosFsErrorKind;
+
+/// Stable REST API error codes owned by the HTTP gateway.
+///
+/// This enum only contains HTTP, transport, and resource-boundary codes. Domain
+/// codes such as filesystem errors must be passed through their domain kind
+/// instead of being duplicated here.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum HttpApiErrorCode {
+    ActiveTurnFailed,
+    ActiveTurnRunning,
+    ActiveTurnSerializeFailed,
+    Conflict,
+    EventCursorExpired,
+    EventRecordFailed,
+    EventReplayFailed,
+    FirstEventTimeout,
+    Forbidden,
+    IdempotencyConflict,
+    IdempotencyFailed,
+    InternalError,
+    InvalidCursor,
+    InvalidRequest,
+    InvalidRetryRequest,
+    NotFound,
+    PermissionDenied,
+    RetryActiveTurnRunning,
+    RetrySourceCompleted,
+    RetrySourceMismatch,
+    ServerShuttingDown,
+    SessionNotFound,
+    Unauthorized,
+}
+
+/// Public HTTP error code payload.
+///
+/// The HTTP response may expose a gateway-owned code or a lower domain code
+/// that intentionally crosses the boundary, such as `TalosFsErrorKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ApiErrorCode {
+    Http(HttpApiErrorCode),
+    Fs(TalosFsErrorKind),
+}
+
+impl Serialize for ApiErrorCode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Http(code) => code.serialize(serializer),
+            Self::Fs(kind) => kind.serialize(serializer),
+        }
+    }
+}
+
+impl From<HttpApiErrorCode> for ApiErrorCode {
+    fn from(code: HttpApiErrorCode) -> Self {
+        Self::Http(code)
+    }
+}
+
+impl From<TalosFsErrorKind> for ApiErrorCode {
+    fn from(kind: TalosFsErrorKind) -> Self {
+        Self::Fs(kind)
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub(super) struct ApiErrorBody {
-    code: String,
+    code: ApiErrorCode,
     message: String,
 }
 
@@ -17,7 +85,7 @@ pub(super) struct ApiError {
 impl ApiError {
     pub(super) fn new(
         status: StatusCode,
-        code: impl Into<String>,
+        code: impl Into<ApiErrorCode>,
         message: impl Into<String>,
     ) -> Self {
         Self {
@@ -31,21 +99,53 @@ impl ApiError {
 
     pub(super) fn from_talos_error(error: talos_error::TalosError) -> Self {
         match error {
-            talos_error::TalosError::AuthError(message) => {
-                Self::new(StatusCode::UNAUTHORIZED, "unauthorized", message)
-            }
-            talos_error::TalosError::ValidationError(message) => {
-                Self::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-            }
+            talos_error::TalosError::AuthError(message) => Self::new(
+                StatusCode::UNAUTHORIZED,
+                HttpApiErrorCode::Unauthorized,
+                message,
+            ),
+            talos_error::TalosError::AuthenticationFailed(message) => Self::new(
+                StatusCode::UNAUTHORIZED,
+                HttpApiErrorCode::Unauthorized,
+                message,
+            ),
+            talos_error::TalosError::AuthorizationDenied => Self::new(
+                StatusCode::FORBIDDEN,
+                HttpApiErrorCode::Forbidden,
+                "authorization denied",
+            ),
+            talos_error::TalosError::ValidationError(message) => Self::new(
+                StatusCode::BAD_REQUEST,
+                HttpApiErrorCode::InvalidRequest,
+                message,
+            ),
             talos_error::TalosError::ResourceNotFound(message) => {
-                Self::new(StatusCode::NOT_FOUND, "not_found", message)
+                Self::new(StatusCode::NOT_FOUND, HttpApiErrorCode::NotFound, message)
+            }
+            talos_error::TalosError::Conflict(message) => {
+                Self::new(StatusCode::CONFLICT, HttpApiErrorCode::Conflict, message)
+            }
+            talos_error::TalosError::FsError { kind, message } => {
+                Self::new(fs_status(kind), kind, message)
             }
             other => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
         }
+    }
+}
+
+fn fs_status(kind: TalosFsErrorKind) -> StatusCode {
+    match kind {
+        TalosFsErrorKind::FsDisabled | TalosFsErrorKind::PathOutsideRoot => StatusCode::FORBIDDEN,
+        TalosFsErrorKind::PathNotFound => StatusCode::NOT_FOUND,
+        TalosFsErrorKind::AlreadyExists => StatusCode::CONFLICT,
+        TalosFsErrorKind::InvalidPath
+        | TalosFsErrorKind::SymlinkNotSupported
+        | TalosFsErrorKind::NotDirectory
+        | TalosFsErrorKind::InvalidName => StatusCode::BAD_REQUEST,
     }
 }
 

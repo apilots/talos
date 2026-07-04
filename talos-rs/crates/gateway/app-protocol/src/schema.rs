@@ -194,8 +194,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SkillMetadata>());
     output.push_str(&export::<talos_types::SkillSummary>());
     output.push_str(&export::<talos_types::SkillSuggestion>());
+    output.push_str(&export::<talos_types::SkillLoadErrorKind>());
     output.push_str(&export::<talos_types::SkillLoadError>());
     output.push_str(&export::<talos_types::SkillDocument>());
+    output.push_str(&export::<talos_types::SkillWarningCode>());
     output.push_str(&export::<talos_types::SkillWarning>());
     output.push_str(&export::<talos_types::SkillsListResponse>());
     output.push_str(&export::<talos_types::SkillsReadResponse>());

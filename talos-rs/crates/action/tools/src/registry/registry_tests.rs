@@ -7,7 +7,7 @@ use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::TalosError;
+use talos_error::{TalosError, TalosToolErrorKind};
 use talos_tools_policy::ToolPolicy;
 
 struct LargeErrorTool;
@@ -19,47 +19,26 @@ struct PermissionGateTool {
 }
 struct FakeMcpHandler;
 
-fn assert_tagged_validation_error(
+fn assert_tool_failure(
     error: TalosError,
+    expected_kind: TalosToolErrorKind,
     expected_gate_source: &str,
     expected_fragment: &str,
 ) {
     match error {
-        TalosError::ValidationError(message) => {
-            assert!(
-                message.contains("[error_kind=validation_failure]"),
-                "missing validation error_kind tag: {message}"
-            );
-            assert!(
-                message.contains(&format!("[gate_source={expected_gate_source}]")),
-                "missing gate_source tag: {message}"
-            );
+        TalosError::ToolFailure {
+            kind,
+            message,
+            gate_source,
+        } => {
+            assert_eq!(kind, expected_kind);
+            assert_eq!(gate_source.as_deref(), Some(expected_gate_source));
             assert!(
                 message.contains(expected_fragment),
                 "missing expected fragment '{expected_fragment}': {message}"
             );
         }
-        other => panic!("expected ValidationError, got {other:?}"),
-    }
-}
-
-fn assert_tagged_permission_error(error: TalosError, expected_gate_source: &str) {
-    match error {
-        TalosError::ToolError(message) => {
-            assert!(
-                message.contains("[error_kind=permission_rejection]"),
-                "missing permission error_kind tag: {message}"
-            );
-            assert!(
-                message.contains(&format!("[gate_source={expected_gate_source}]")),
-                "missing gate_source tag: {message}"
-            );
-            assert!(
-                message.contains("authorization denied"),
-                "missing authorization fragment: {message}"
-            );
-        }
-        other => panic!("expected ToolError, got {other:?}"),
+        other => panic!("expected ToolFailure, got {other:?}"),
     }
 }
 
@@ -206,7 +185,12 @@ async fn test_registry_policy_enforcement() {
         .execute_invocation_with_context(invocation, ToolContext::default())
         .await;
 
-    assert_tagged_permission_error(result.unwrap_err(), GATE_SOURCE_ALLOW_LIST);
+    assert_tool_failure(
+        result.unwrap_err(),
+        TalosToolErrorKind::PermissionRejection,
+        GATE_SOURCE_ALLOW_LIST,
+        "authorization denied",
+    );
 }
 
 #[tokio::test]
@@ -332,8 +316,9 @@ async fn test_registry_pre_execute_validation_gate_runs_before_execute() {
         .await
         .unwrap_err();
 
-    assert_tagged_validation_error(
+    assert_tool_failure(
         error,
+        TalosToolErrorKind::ValidationFailure,
         GATE_SOURCE_TOOL_SEMANTIC,
         "validation gate rejected input",
     );
@@ -363,12 +348,17 @@ async fn test_registry_pre_execute_permission_gate_runs_after_allow_list() {
         .await
         .unwrap_err();
 
-    assert_tagged_permission_error(error, GATE_SOURCE_TOOL_SEMANTIC);
+    assert_tool_failure(
+        error,
+        TalosToolErrorKind::PermissionRejection,
+        GATE_SOURCE_TOOL_SEMANTIC,
+        "authorization denied",
+    );
     assert_eq!(executes.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]
-async fn test_read_tool_validation_returns_tagged_metadata() {
+async fn test_read_tool_validation_returns_structured_failure() {
     let policy = ToolPolicy::allow_list(vec!["Read"]);
     let registry = ToolRegistry::new_with_policy(policy);
     register_core_local_tools(&registry);
@@ -382,11 +372,16 @@ async fn test_read_tool_validation_returns_tagged_metadata() {
         .await
         .unwrap_err();
 
-    assert_tagged_validation_error(error, GATE_SOURCE_TOOL_SEMANTIC, "path is required");
+    assert_tool_failure(
+        error,
+        TalosToolErrorKind::ValidationFailure,
+        GATE_SOURCE_TOOL_SEMANTIC,
+        "path is required",
+    );
 }
 
 #[tokio::test]
-async fn test_edit_tool_validation_returns_tagged_metadata() {
+async fn test_edit_tool_validation_returns_structured_failure() {
     let policy = ToolPolicy::allow_list(vec!["Edit"]);
     let registry = ToolRegistry::new_with_policy(policy);
     register_core_local_tools(&registry);
@@ -404,15 +399,16 @@ async fn test_edit_tool_validation_returns_tagged_metadata() {
         .await
         .unwrap_err();
 
-    assert_tagged_validation_error(
+    assert_tool_failure(
         error,
+        TalosToolErrorKind::ValidationFailure,
         GATE_SOURCE_TOOL_SEMANTIC,
         "find/old_string is required",
     );
 }
 
 #[tokio::test]
-async fn test_bash_tool_semantic_permission_returns_tagged_metadata() {
+async fn test_bash_tool_semantic_permission_returns_structured_failure() {
     let policy = ToolPolicy::allow_list(vec!["Bash"]);
     let registry = ToolRegistry::new_with_policy(policy);
     register_core_local_tools(&registry);
@@ -433,7 +429,12 @@ async fn test_bash_tool_semantic_permission_returns_tagged_metadata() {
         .await
         .unwrap_err();
 
-    assert_tagged_permission_error(error, GATE_SOURCE_TOOL_SEMANTIC);
+    assert_tool_failure(
+        error,
+        TalosToolErrorKind::PermissionRejection,
+        GATE_SOURCE_TOOL_SEMANTIC,
+        "authorization denied",
+    );
 }
 
 #[tokio::test]
@@ -452,7 +453,12 @@ async fn test_outer_allow_list_and_semantic_gate_sources_are_distinguishable() {
         .execute_invocation_with_context(allow_list_invocation, ToolContext::default())
         .await
         .unwrap_err();
-    assert_tagged_permission_error(allow_list_error, GATE_SOURCE_ALLOW_LIST);
+    assert_tool_failure(
+        allow_list_error,
+        TalosToolErrorKind::PermissionRejection,
+        GATE_SOURCE_ALLOW_LIST,
+        "authorization denied",
+    );
 
     let semantic_registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
     register_core_local_tools(&semantic_registry);
@@ -471,7 +477,12 @@ async fn test_outer_allow_list_and_semantic_gate_sources_are_distinguishable() {
         .execute_invocation_with_context(semantic_invocation, ToolContext::default())
         .await
         .unwrap_err();
-    assert_tagged_permission_error(semantic_error, GATE_SOURCE_TOOL_SEMANTIC);
+    assert_tool_failure(
+        semantic_error,
+        TalosToolErrorKind::PermissionRejection,
+        GATE_SOURCE_TOOL_SEMANTIC,
+        "authorization denied",
+    );
 }
 
 #[tokio::test]

@@ -1,6 +1,6 @@
 use crate::catalog::{refresh, resolve};
 use crate::loader::read_skill_contents;
-use crate::model::{SkillSelector, SkillWarning};
+use crate::model::{SkillSelector, SkillWarning, SkillWarningCode};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use talos_error::{TalosError, TalosResult};
@@ -49,7 +49,7 @@ pub struct SkillPromptInjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillPromptWarning {
-    pub code: String,
+    pub code: SkillWarningCode,
     pub message: String,
 }
 
@@ -102,7 +102,7 @@ impl SkillProvider for LocalSkillProvider {
                     contents,
                 }),
                 Err(err) => prompt_warnings.push(SkillPromptWarning {
-                    code: "skill_injection_failed".to_string(),
+                    code: SkillWarningCode::SkillInjectionFailed,
                     message: format!(
                         "failed to read skill `{}` at `{}`: {err}",
                         skill.name,

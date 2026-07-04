@@ -203,7 +203,7 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
         ))
         .await
         .expect_err("second turn should conflict");
-    if matches!(err, talos_sdk::TalosError::Conflict(_)) {
+    if matches!(err, talos_sdk::TalosError::ActiveTurnRunning(_)) {
         Ok(())
     } else {
         Err(anyhow!("expected active turn conflict, got {err}"))

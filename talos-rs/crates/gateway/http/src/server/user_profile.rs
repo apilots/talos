@@ -8,7 +8,7 @@ use talos_auth::RequestIdentity;
 use talos_types::{AuthLogoutRequest, AuthLogoutResponse, UserCurrentRequest, UserCurrentResponse};
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn logout_handler(
@@ -39,18 +39,24 @@ pub(super) async fn current_user_handler(
 
 fn map_auth_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::AuthError(message) => {
-            ApiError::new(StatusCode::UNAUTHORIZED, "unauthorized", message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        talos_error::TalosError::ResourceNotFound(message) => {
-            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", message)
-        }
+        talos_error::TalosError::AuthError(message) => ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            HttpApiErrorCode::Unauthorized,
+            message,
+        ),
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        talos_error::TalosError::ResourceNotFound(message) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }

@@ -3,14 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getTalosClient } from "@/shared/api/client";
 import { useConnectionKey } from "@/features/chat";
-import type {
-  MemoryFileDetail,
-} from "@talos/sdk-browser";
+import { TalosHttpError, type MemoryFileDetail } from "@talos/sdk-browser";
 
 const MEMORY_SEARCH_TIMEOUT_MS = 30000;
 
 function isNotFoundError(error: unknown) {
-  return error instanceof Error && error.message.includes("status 404");
+  return error instanceof TalosHttpError && error.status === 404;
 }
 
 function buildMissingDetail(date: string): MemoryFileDetail {

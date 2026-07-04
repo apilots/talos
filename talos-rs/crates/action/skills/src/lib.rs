@@ -6,8 +6,9 @@ pub mod state;
 
 pub use catalog::{read_document, refresh, resolve, suggest};
 pub use model::{
-    SkillDocument, SkillLoadError, SkillMetadata, SkillRoot, SkillRoots, SkillScope, SkillSelector,
-    SkillSnapshot, SkillSource, SkillSuggestion, SkillSummary, SkillWarning,
+    SkillDocument, SkillLoadError, SkillLoadErrorKind, SkillMetadata, SkillRoot, SkillRoots,
+    SkillScope, SkillSelector, SkillSnapshot, SkillSource, SkillSuggestion, SkillSummary,
+    SkillWarning, SkillWarningCode,
 };
 pub use prompt::{
     LocalSkillProvider, SkillPromptBudget, SkillPromptContext, SkillPromptInjection,

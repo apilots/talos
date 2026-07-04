@@ -368,7 +368,7 @@ impl TurnService {
         match active_turn.status {
             ActiveTurnStatus::Running
             | ActiveTurnStatus::WaitingUserAction
-            | ActiveTurnStatus::Cancelling => Err(TalosError::Conflict(
+            | ActiveTurnStatus::Cancelling => Err(TalosError::ActiveTurnRunning(
                 "A turn is already active for this session; reconnect to the existing event stream instead."
                     .to_string(),
             )),

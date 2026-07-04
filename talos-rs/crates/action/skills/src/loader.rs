@@ -1,4 +1,6 @@
-use crate::model::{SkillLoadError, SkillMetadata, SkillRoot, SkillSnapshot, SkillSummary};
+use crate::model::{
+    SkillLoadError, SkillLoadErrorKind, SkillMetadata, SkillRoot, SkillSnapshot, SkillSummary,
+};
 use crate::state::{plugin_skill_state_key, SkillState};
 use serde::Deserialize;
 use std::fs;
@@ -44,11 +46,12 @@ pub fn load_skills_from_roots(
         let entries = match fs::read_dir(&root.path) {
             Ok(entries) => entries,
             Err(err) => {
-                errors.push(SkillLoadError {
-                    root: root.path.clone(),
-                    path: None,
-                    message: format!("failed to read skill root: {err}"),
-                });
+                errors.push(skill_load_error(
+                    SkillLoadErrorKind::SkillRootReadFailed,
+                    root.path.clone(),
+                    None,
+                    format!("failed to read skill root: {err}"),
+                ));
                 continue;
             }
         };
@@ -90,11 +93,12 @@ fn scan_skill_dir(
     let entries = match fs::read_dir(candidate) {
         Ok(entries) => entries,
         Err(err) => {
-            errors.push(SkillLoadError {
-                root: candidate.to_path_buf(),
-                path: None,
-                message: format!("failed to read skill directory: {err}"),
-            });
+            errors.push(skill_load_error(
+                SkillLoadErrorKind::SkillDirectoryReadFailed,
+                candidate.to_path_buf(),
+                None,
+                format!("failed to read skill directory: {err}"),
+            ));
             return;
         }
     };
@@ -115,46 +119,61 @@ pub fn parse_skill_dir(
     let skill_path = skill_root.join("SKILL.md");
     let root = skill_root.to_path_buf();
     if !skill_path.exists() {
-        return Err(SkillLoadError {
+        return Err(skill_load_error(
+            SkillLoadErrorKind::MissingSkillFile,
             root,
-            path: Some(skill_path),
-            message: "missing SKILL.md".to_string(),
-        });
+            Some(skill_path),
+            "missing SKILL.md",
+        ));
     }
-    let metadata = fs::metadata(&skill_path).map_err(|err| SkillLoadError {
-        root: root.clone(),
-        path: Some(skill_path.clone()),
-        message: format!("failed to read SKILL.md metadata: {err}"),
+    let metadata = fs::metadata(&skill_path).map_err(|err| {
+        skill_load_error(
+            SkillLoadErrorKind::SkillFileMetadataReadFailed,
+            root.clone(),
+            Some(skill_path.clone()),
+            format!("failed to read SKILL.md metadata: {err}"),
+        )
     })?;
     if metadata.len() as usize > max_skill_md_bytes {
-        return Err(SkillLoadError {
+        return Err(skill_load_error(
+            SkillLoadErrorKind::SkillFileTooLarge,
             root,
-            path: Some(skill_path),
-            message: format!("SKILL.md exceeds {max_skill_md_bytes} bytes"),
-        });
+            Some(skill_path),
+            format!("SKILL.md exceeds {max_skill_md_bytes} bytes"),
+        ));
     }
-    let contents = fs::read_to_string(&skill_path).map_err(|err| SkillLoadError {
-        root: root.clone(),
-        path: Some(skill_path.clone()),
-        message: format!("failed to read SKILL.md: {err}"),
+    let contents = fs::read_to_string(&skill_path).map_err(|err| {
+        skill_load_error(
+            SkillLoadErrorKind::SkillFileReadFailed,
+            root.clone(),
+            Some(skill_path.clone()),
+            format!("failed to read SKILL.md: {err}"),
+        )
     })?;
-    let frontmatter = parse_frontmatter(&contents).map_err(|message| SkillLoadError {
-        root: root.clone(),
-        path: Some(skill_path.clone()),
-        message,
+    let frontmatter = parse_frontmatter(&contents).map_err(|message| {
+        skill_load_error(
+            SkillLoadErrorKind::InvalidFrontmatter,
+            root.clone(),
+            Some(skill_path.clone()),
+            message,
+        )
     })?;
-    let name = required_field(frontmatter.name, "name").map_err(|message| SkillLoadError {
-        root: root.clone(),
-        path: Some(skill_path.clone()),
-        message,
+    let name = required_field(frontmatter.name, "name").map_err(|message| {
+        skill_load_error(
+            SkillLoadErrorKind::MissingRequiredField,
+            root.clone(),
+            Some(skill_path.clone()),
+            message,
+        )
     })?;
     let description =
         required_field(frontmatter.description, "description").map_err(|message| {
-            SkillLoadError {
-                root: root.clone(),
-                path: Some(skill_path.clone()),
+            skill_load_error(
+                SkillLoadErrorKind::MissingRequiredField,
+                root.clone(),
+                Some(skill_path.clone()),
                 message,
-            }
+            )
         })?;
     let metadata = parse_extra_metadata(frontmatter.metadata, &frontmatter.unknown);
     let host_metadata = parse_host_metadata(skill_root);
@@ -189,6 +208,20 @@ pub fn parse_skill_dir(
         read_only: source.read_only,
         metadata,
     })
+}
+
+fn skill_load_error(
+    kind: SkillLoadErrorKind,
+    root: PathBuf,
+    path: Option<PathBuf>,
+    message: impl Into<String>,
+) -> SkillLoadError {
+    SkillLoadError {
+        kind,
+        root,
+        path,
+        message: message.into(),
+    }
 }
 
 pub fn read_skill_contents(path: &Path, max_skill_md_bytes: usize) -> Result<String, String> {

@@ -248,8 +248,23 @@ pub struct SkillDocument {
     pub contents: String,
 }
 
+/// Classifies skill loading failures at the skills domain boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillLoadErrorKind {
+    SkillRootReadFailed,
+    SkillDirectoryReadFailed,
+    MissingSkillFile,
+    SkillFileMetadataReadFailed,
+    SkillFileTooLarge,
+    SkillFileReadFailed,
+    InvalidFrontmatter,
+    MissingRequiredField,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SkillLoadError {
+    pub kind: SkillLoadErrorKind,
     pub root: PathBuf,
     #[serde(default)]
     pub path: Option<PathBuf>,
@@ -262,9 +277,34 @@ pub struct SkillSnapshot {
     pub errors: Vec<SkillLoadError>,
 }
 
+/// Stable warning codes emitted by skill selection and prompt injection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillWarningCode {
+    SkillNotFound,
+    AmbiguousSkillName,
+    SkillInjectionFailed,
+}
+
+impl SkillWarningCode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SkillNotFound => "skill_not_found",
+            Self::AmbiguousSkillName => "ambiguous_skill_name",
+            Self::SkillInjectionFailed => "skill_injection_failed",
+        }
+    }
+}
+
+impl std::fmt::Display for SkillWarningCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct SkillWarning {
-    pub code: String,
+    pub code: SkillWarningCode,
     pub message: String,
 }
 

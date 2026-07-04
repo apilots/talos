@@ -19,7 +19,7 @@ pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHan
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
 pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};
 pub use output::{
-    NextTurnFailurePayload, ToolDispatchOutcome, ToolFailureKind, ToolOutputPayload, ToolPending,
+    NextTurnFailurePayload, ToolDispatchOutcome, ToolOutputPayload, ToolPending,
     ToolResultEnvelope, ToolResultError, ToolResultPendingMeta, ToolResultPolicyMeta,
     ToolResultStatus,
 };

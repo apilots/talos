@@ -13,7 +13,7 @@ use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientHandler, RoleClient};
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_types::{
     McpCallToolRequest, McpCallToolResponse, McpContent, McpReadResourceRequest,
     McpReadResourceResponse, McpResourceContents, McpResourceDescriptor,
@@ -450,7 +450,11 @@ fn map_resource_contents(content: rmcp::model::ResourceContents) -> McpResourceC
 }
 
 fn map_service_error(error: ServiceError) -> TalosError {
-    TalosError::ToolError(format!("MCP service error: {error}"))
+    TalosError::ToolFailure {
+        kind: TalosToolErrorKind::RuntimeFailure,
+        message: format!("MCP service error: {error}"),
+        gate_source: None,
+    }
 }
 
 pub fn mcp_tool_name(server: &str, tool: &str) -> String {

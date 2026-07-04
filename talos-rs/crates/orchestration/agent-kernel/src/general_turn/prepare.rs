@@ -255,9 +255,14 @@ fn determine_history_compaction_trigger(
 }
 
 fn is_recoverable_compaction_parse_error(error: &talos_error::TalosError) -> bool {
-    let message = error.to_string();
-    message.contains("parse memory summary json after")
-        || message.contains("parse memory persistence decision json after")
+    matches!(
+        error,
+        talos_error::TalosError::MemoryError {
+            kind: talos_error::TalosMemoryErrorKind::SummaryParseFailed
+                | talos_error::TalosMemoryErrorKind::PersistenceDecisionParseFailed,
+            ..
+        }
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -578,7 +583,7 @@ fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &
 }
 
 pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
-    talos_error::TalosError::ValidationError(format!(
+    talos_error::TalosError::ContextCompactionFailed(format!(
         "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
     ))
 }

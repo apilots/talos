@@ -13,7 +13,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn list_sessions_handler(
@@ -28,7 +28,7 @@ pub(super) async fn list_sessions_handler(
         .map_err(|e| {
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 e.to_string(),
             )
         })?;
@@ -94,12 +94,12 @@ pub(super) async fn close_session_handler(
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
                 StatusCode::NOT_FOUND,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "session not found",
             ),
             other => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
         })?;
@@ -118,15 +118,17 @@ pub(super) async fn delete_session_handler(
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
                 StatusCode::NOT_FOUND,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "session not found",
             ),
-            talos_error::TalosError::ValidationError(message) => {
-                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-            }
+            talos_error::TalosError::ValidationError(message) => ApiError::new(
+                StatusCode::CONFLICT,
+                HttpApiErrorCode::InvalidRequest,
+                message,
+            ),
             other => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
         })?;
@@ -148,15 +150,17 @@ pub(super) async fn compact_session_handler(
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
                 StatusCode::NOT_FOUND,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "session not found",
             ),
-            talos_error::TalosError::ValidationError(message) => {
-                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-            }
+            talos_error::TalosError::ValidationError(message) => ApiError::new(
+                StatusCode::CONFLICT,
+                HttpApiErrorCode::InvalidRequest,
+                message,
+            ),
             other => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
         })?;
@@ -175,15 +179,17 @@ pub(super) async fn clear_session_handler(
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
                 StatusCode::NOT_FOUND,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "session not found",
             ),
-            talos_error::TalosError::ValidationError(message) => {
-                ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-            }
+            talos_error::TalosError::ValidationError(message) => ApiError::new(
+                StatusCode::CONFLICT,
+                HttpApiErrorCode::InvalidRequest,
+                message,
+            ),
             other => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
         })?;
@@ -192,15 +198,19 @@ pub(super) async fn clear_session_handler(
 
 fn map_session_error(error: talos_error::TalosError, not_found_message: &str) -> ApiError {
     match error {
-        talos_error::TalosError::ResourceNotFound(_) => {
-            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", not_found_message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-        }
+        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            HttpApiErrorCode::InvalidRequest,
+            not_found_message,
+        ),
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }
@@ -208,18 +218,24 @@ fn map_session_error(error: talos_error::TalosError, not_found_message: &str) ->
 
 fn map_patch_session_error(error: talos_error::TalosError, not_found_message: &str) -> ApiError {
     match error {
-        talos_error::TalosError::ResourceNotFound(_) => {
-            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", not_found_message)
-        }
-        talos_error::TalosError::UnsupportedModel(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-        }
+        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            HttpApiErrorCode::InvalidRequest,
+            not_found_message,
+        ),
+        talos_error::TalosError::UnsupportedModel(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }

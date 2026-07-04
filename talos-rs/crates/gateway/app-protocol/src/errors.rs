@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_error::TalosError;
+use talos_error::{TalosError, TalosFsErrorKind};
 use ts_rs::TS;
 
 pub type AppServerErrorCode = i32;
@@ -23,6 +23,7 @@ pub const RUNTIME_UNAVAILABLE: AppServerErrorCode = -32009;
 pub const TRANSPORT_UNAVAILABLE: AppServerErrorCode = -32010;
 pub const REQUEST_TIMEOUT: AppServerErrorCode = -32011;
 pub const CANCELLED: AppServerErrorCode = -32012;
+pub const ACTIVE_TURN_RUNNING: AppServerErrorCode = -32013;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AppServerErrorBody {
@@ -71,6 +72,7 @@ impl AppServerErrorBody {
             | TalosError::ToolNotFound(resource) => {
                 Self::new(NOT_FOUND, format!("resource not found: {resource}"))
             }
+            TalosError::ActiveTurnRunning(message) => Self::new(ACTIVE_TURN_RUNNING, message),
             TalosError::Conflict(message)
             | TalosError::IdempotencyConflict(message)
             | TalosError::RetryActiveTurnRunning(message) => Self::new(CONFLICT, message),
@@ -78,6 +80,9 @@ impl AppServerErrorBody {
             | TalosError::UnsupportedModel(message)
             | TalosError::InvalidConfiguration(message)
             | TalosError::ConfigError(message) => Self::new(VALIDATION_FAILED, message),
+            TalosError::FsError { kind, message } => {
+                Self::new(app_server_code_for_fs(kind), message)
+            }
             TalosError::ResourceExpired(message) => Self::new(RESOURCE_EXPIRED, message),
             TalosError::Timeout(message) => Self::new(REQUEST_TIMEOUT, message),
             TalosError::RuntimeUnavailable(message) => Self::new(RUNTIME_UNAVAILABLE, message),
@@ -89,6 +94,18 @@ impl AppServerErrorBody {
             TalosError::Cancelled(message) => Self::new(CANCELLED, message),
             other => Self::new(INTERNAL_ERROR, other.to_string()),
         }
+    }
+}
+
+fn app_server_code_for_fs(kind: TalosFsErrorKind) -> AppServerErrorCode {
+    match kind {
+        TalosFsErrorKind::FsDisabled | TalosFsErrorKind::PathOutsideRoot => FORBIDDEN,
+        TalosFsErrorKind::PathNotFound => NOT_FOUND,
+        TalosFsErrorKind::AlreadyExists => CONFLICT,
+        TalosFsErrorKind::InvalidPath
+        | TalosFsErrorKind::SymlinkNotSupported
+        | TalosFsErrorKind::NotDirectory
+        | TalosFsErrorKind::InvalidName => VALIDATION_FAILED,
     }
 }
 

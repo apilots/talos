@@ -292,11 +292,15 @@ export type SkillSummary = { name: string, description: string, short_descriptio
 
 export type SkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, };
 
-export type SkillLoadError = { root: string, path: string | null, message: string, };
+export type SkillLoadErrorKind = "skill_root_read_failed" | "skill_directory_read_failed" | "missing_skill_file" | "skill_file_metadata_read_failed" | "skill_file_too_large" | "skill_file_read_failed" | "invalid_frontmatter" | "missing_required_field";
+
+export type SkillLoadError = { kind: SkillLoadErrorKind, root: string, path: string | null, message: string, };
 
 export type SkillDocument = { summary: SkillSummary, contents: string, };
 
-export type SkillWarning = { code: string, message: string, };
+export type SkillWarningCode = "skill_not_found" | "ambiguous_skill_name" | "skill_injection_failed";
+
+export type SkillWarning = { code: SkillWarningCode, message: string, };
 
 export type SkillsListResponse = { data: Array<SkillSummary>, errors: Array<SkillLoadError>, };
 

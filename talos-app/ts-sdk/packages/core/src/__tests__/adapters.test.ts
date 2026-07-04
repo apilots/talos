@@ -11,13 +11,13 @@ describe("TalosHttpError", () => {
       statusText: "Not Found",
       body: JSON.stringify({
         code: "path_not_found",
-        message: "path_not_found: path not found: /missing",
+        message: "path not found: /missing",
       }),
     });
 
     expect(error.code).toBe("path_not_found");
-    expect(error.responseMessage).toBe("path_not_found: path not found: /missing");
-    expect(error.message).toBe("path_not_found: path not found: /missing");
+    expect(error.responseMessage).toBe("path not found: /missing");
+    expect(error.message).toBe("path not found: /missing");
   });
 
   it("falls back to status text for non-structured errors", () => {

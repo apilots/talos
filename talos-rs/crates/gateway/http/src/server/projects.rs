@@ -12,7 +12,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn list_projects_handler(
@@ -84,15 +84,19 @@ pub(super) async fn delete_project_handler(
 
 fn map_project_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::ResourceNotFound(message) => {
-            ApiError::new(StatusCode::NOT_FOUND, "invalid_request", message)
-        }
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
+        talos_error::TalosError::ResourceNotFound(message) => ApiError::new(
+            StatusCode::NOT_FOUND,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }
@@ -100,9 +104,11 @@ fn map_project_error(error: talos_error::TalosError) -> ApiError {
 
 fn map_project_delete_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-        }
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         other => map_project_error(other),
     }
 }

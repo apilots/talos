@@ -1,19 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_types::talos::{JsonContentValue, TalosContentItem};
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolFailureKind {
-    ValidationFailure,
-    PermissionRejection,
-    GovernanceRejection,
-    StaleWriteFailure,
-    DeferredToolUnavailable,
-    RuntimeFailure,
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -49,7 +38,7 @@ pub struct ToolResultPolicyMeta {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolResultError {
     pub message: String,
-    pub error_kind: ToolFailureKind,
+    pub error_kind: TalosToolErrorKind,
     pub retryable: bool,
     pub suggested_action: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +56,7 @@ pub struct ToolResultPendingMeta {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NextTurnFailurePayload {
-    pub error_kind: ToolFailureKind,
+    pub error_kind: TalosToolErrorKind,
     pub retryable: bool,
     pub suggested_action: String,
     pub strategy: String,
@@ -553,14 +542,13 @@ fn extract_error_message(value: Option<&Value>) -> Option<String> {
 
 impl ToolResultError {
     pub fn from_message(message: impl AsRef<str>) -> Self {
-        let (cleaned, explicit_kind, gate_source) = extract_error_tags(message.as_ref());
-        let error_kind = explicit_kind.unwrap_or_else(|| classify_error_kind(cleaned.as_str()));
+        let error_kind = TalosToolErrorKind::RuntimeFailure;
         Self {
-            message: cleaned,
+            message: message.as_ref().trim().to_string(),
             error_kind,
             retryable: is_retryable(error_kind),
             suggested_action: suggested_action_for_error(error_kind).to_string(),
-            gate_source,
+            gate_source: None,
         }
     }
 
@@ -598,8 +586,8 @@ fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
         .to_string();
     let error_kind = value
         .get("error_kind")
-        .and_then(|kind| serde_json::from_value::<ToolFailureKind>(kind.clone()).ok())
-        .unwrap_or_else(|| classify_error_kind(message.as_str()));
+        .and_then(|kind| serde_json::from_value::<TalosToolErrorKind>(kind.clone()).ok())
+        .unwrap_or(TalosToolErrorKind::RuntimeFailure);
     let retryable = value
         .get("retryable")
         .and_then(Value::as_bool)
@@ -612,10 +600,9 @@ fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
     let gate_source = value
         .get("gate_source")
         .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| extract_error_tags(message.as_str()).2);
+        .map(str::to_string);
     Some(ToolResultError {
-        message: extract_error_tags(message.as_str()).0,
+        message,
         error_kind,
         retryable,
         suggested_action,
@@ -623,111 +610,49 @@ fn structured_error_from_value(value: &Value) -> Option<ToolResultError> {
     })
 }
 
-fn extract_error_tags(error: &str) -> (String, Option<ToolFailureKind>, Option<String>) {
-    let mut remainder = error.trim();
-    let mut explicit_kind = None;
-    let mut gate_source = None;
-
-    while let Some(stripped) = remainder.strip_prefix('[') {
-        let Some(end) = stripped.find(']') else {
-            break;
-        };
-        let (segment, tail) = stripped.split_at(end);
-        if let Some((key, value)) = segment.split_once('=') {
-            match key {
-                "error_kind" => explicit_kind = tool_failure_kind_from_tag(value),
-                "gate_source" => gate_source = Some(value.to_string()),
-                _ => {}
-            }
-            remainder = tail.trim_start_matches(']').trim_start();
-            continue;
-        }
-        break;
-    }
-
-    (remainder.to_string(), explicit_kind, gate_source)
-}
-
-fn tool_failure_kind_from_tag(tag: &str) -> Option<ToolFailureKind> {
-    match tag {
-        "validation_failure" => Some(ToolFailureKind::ValidationFailure),
-        "permission_rejection" => Some(ToolFailureKind::PermissionRejection),
-        "governance_rejection" => Some(ToolFailureKind::GovernanceRejection),
-        "stale_write_failure" => Some(ToolFailureKind::StaleWriteFailure),
-        "deferred_tool_unavailable" => Some(ToolFailureKind::DeferredToolUnavailable),
-        "runtime_failure" => Some(ToolFailureKind::RuntimeFailure),
-        _ => None,
-    }
-}
-
-fn classify_error_kind(error: &str) -> ToolFailureKind {
-    let (cleaned, explicit_kind, _) = extract_error_tags(error);
-    if let Some(kind) = explicit_kind {
-        return kind;
-    }
-    let normalized = cleaned.to_ascii_lowercase();
-    if normalized.contains("validation_failure")
-        || normalized.contains("invalid")
-        || normalized.contains("required")
-    {
-        ToolFailureKind::ValidationFailure
-    } else if normalized.contains("permission_rejection")
-        || normalized.contains("authorization denied")
-        || normalized.contains("permission denied")
-    {
-        ToolFailureKind::PermissionRejection
-    } else if normalized.contains("governance") {
-        ToolFailureKind::GovernanceRejection
-    } else if normalized.contains("stale") {
-        ToolFailureKind::StaleWriteFailure
-    } else if normalized.contains("deferred") || normalized.contains("not yet visible") {
-        ToolFailureKind::DeferredToolUnavailable
-    } else {
-        ToolFailureKind::RuntimeFailure
-    }
-}
-
-fn is_retryable(kind: ToolFailureKind) -> bool {
+fn is_retryable(kind: TalosToolErrorKind) -> bool {
     matches!(
         kind,
-        ToolFailureKind::ValidationFailure
-            | ToolFailureKind::RuntimeFailure
-            | ToolFailureKind::StaleWriteFailure
+        TalosToolErrorKind::ValidationFailure
+            | TalosToolErrorKind::RuntimeFailure
+            | TalosToolErrorKind::StaleWriteFailure
     )
 }
 
-fn status_for_error_kind(kind: ToolFailureKind) -> ToolResultStatus {
+fn status_for_error_kind(kind: TalosToolErrorKind) -> ToolResultStatus {
     match kind {
-        ToolFailureKind::PermissionRejection
-        | ToolFailureKind::GovernanceRejection
-        | ToolFailureKind::DeferredToolUnavailable => ToolResultStatus::Rejected,
-        ToolFailureKind::ValidationFailure
-        | ToolFailureKind::StaleWriteFailure
-        | ToolFailureKind::RuntimeFailure => ToolResultStatus::Failure,
+        TalosToolErrorKind::PermissionRejection
+        | TalosToolErrorKind::GovernanceRejection
+        | TalosToolErrorKind::DeferredToolUnavailable => ToolResultStatus::Rejected,
+        TalosToolErrorKind::ValidationFailure
+        | TalosToolErrorKind::StaleWriteFailure
+        | TalosToolErrorKind::RuntimeFailure => ToolResultStatus::Failure,
     }
 }
 
-fn suggested_action_for_error(kind: ToolFailureKind) -> &'static str {
+fn suggested_action_for_error(kind: TalosToolErrorKind) -> &'static str {
     match kind {
-        ToolFailureKind::ValidationFailure => "fix the arguments and retry",
-        ToolFailureKind::PermissionRejection | ToolFailureKind::GovernanceRejection => {
+        TalosToolErrorKind::ValidationFailure => "fix the arguments and retry",
+        TalosToolErrorKind::PermissionRejection | TalosToolErrorKind::GovernanceRejection => {
             "choose a less privileged tool or adjust the configured tool policy"
         }
-        ToolFailureKind::StaleWriteFailure => "re-read the target file before retrying",
-        ToolFailureKind::DeferredToolUnavailable => {
+        TalosToolErrorKind::StaleWriteFailure => "re-read the target file before retrying",
+        TalosToolErrorKind::DeferredToolUnavailable => {
             "use ToolSearch or start a new turn to activate the deferred tool"
         }
-        ToolFailureKind::RuntimeFailure => "narrow scope, retry, or choose a different tool",
+        TalosToolErrorKind::RuntimeFailure => "narrow scope, retry, or choose a different tool",
     }
 }
 
-fn strategy_for_error(kind: ToolFailureKind) -> &'static str {
+fn strategy_for_error(kind: TalosToolErrorKind) -> &'static str {
     match kind {
-        ToolFailureKind::ValidationFailure => "retry",
-        ToolFailureKind::PermissionRejection | ToolFailureKind::GovernanceRejection => "reject",
-        ToolFailureKind::StaleWriteFailure => "retry",
-        ToolFailureKind::DeferredToolUnavailable => "replan",
-        ToolFailureKind::RuntimeFailure => "retry",
+        TalosToolErrorKind::ValidationFailure => "retry",
+        TalosToolErrorKind::PermissionRejection | TalosToolErrorKind::GovernanceRejection => {
+            "reject"
+        }
+        TalosToolErrorKind::StaleWriteFailure => "retry",
+        TalosToolErrorKind::DeferredToolUnavailable => "replan",
+        TalosToolErrorKind::RuntimeFailure => "retry",
     }
 }
 

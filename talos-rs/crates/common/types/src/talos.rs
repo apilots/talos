@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use ts_rs::TS;
 use uuid::Uuid;
 
+pub use talos_error::{TalosRunErrorCode, TalosRunErrorInfo};
+
 /// Talos gateway protocol types shared by server and client components.
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema, TS)]
@@ -997,27 +999,6 @@ pub struct TalosTurnCompletedEvent {
     pub usage: TokenUsage,
     #[serde(default)]
     pub metrics: Option<TurnExecutionMetrics>,
-}
-
-/// Stable machine-readable category for a failed Agent run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosRunErrorCode {
-    ContextWindowExceeded,
-    SessionBudgetExceeded,
-    UsageLimitExceeded,
-    ContextCompactionFailed,
-    ProviderUnavailable,
-    PermissionDenied,
-    ToolFailure,
-    InternalError,
-}
-
-/// Optional structured error details carried by turn failure events.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TalosRunErrorInfo {
-    pub code: TalosRunErrorCode,
-    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]

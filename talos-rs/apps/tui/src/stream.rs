@@ -9,7 +9,7 @@ use crate::types::ChatRole;
 use crate::{TuiApp, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 fn is_active_turn_conflict(error: &TalosError) -> bool {
-    matches!(error, TalosError::Conflict(message) if message.contains("turn is already active"))
+    matches!(error, TalosError::ActiveTurnRunning(_))
 }
 
 impl TuiApp {

@@ -7,7 +7,7 @@ use axum::response::{IntoResponse, Response};
 
 use talos_auth::RequestIdentity;
 
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn lifecycle_gate_middleware(
@@ -22,7 +22,7 @@ pub(super) async fn lifecycle_gate_middleware(
     if state.lifecycle.is_quiescing_or_later() {
         return Ok(ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "server_shutting_down",
+            HttpApiErrorCode::ServerShuttingDown,
             "server is shutting down",
         )
         .into_response());

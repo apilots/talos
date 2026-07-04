@@ -191,7 +191,23 @@ TalosTurnErrorEvent {
 }
 ```
 
-本轮可以先增加最小必要错误分类，不需要一次性实现完整 error mapping framework。但删除 `ToolRoundLimit` 后不能把错误语义退化为模糊字符串长期存在。
+错误分类采用 Codex 风格的极简 typed error 方案：`talos-error` 拥有 `TalosRunErrorCode` / `TalosRunErrorInfo` 和 `TalosError::to_run_error_info()` 显式映射；Timeline、Service、Gateway、SDK、Web、TUI 只能消费结构化 `error_info`，不得从 `error` 展示文案中解析 code。
+
+当前已启用的 run error code：
+
+1. `ContextWindowExceeded`
+2. `ContextCompactionFailed`
+3. `ProviderUnavailable`
+4. `PermissionDenied`
+5. `ToolFailure`
+6. `InternalError`
+
+当前 reserved code：
+
+1. `UsageLimitExceeded`
+2. `SessionBudgetExceeded`
+
+reserved code 只有在真实 usage / session budget policy 落地后才能启用；本阶段不得通过字符串匹配或泛化错误推断。
 
 目标映射：
 
@@ -200,9 +216,9 @@ TalosTurnErrorEvent {
 | provider output length | `timeline.turn.completed` | `StopReason::ModelOutputLimit` |
 | user interrupt | `timeline.turn.completed` 或 cancelled error | `StopReason::Cancelled` |
 | dynamic input required | `timeline.turn.completed` 或 active waiting state | `StopReason::WaitingDynamicInput` |
-| budget exhausted | `timeline.turn.error` + active turn failed | `UsageLimitExceeded` 或 `SessionBudgetExceeded` |
+| budget exhausted | `timeline.turn.error` + active turn failed | reserved：等真实 budget policy 落地后启用 `UsageLimitExceeded` 或 `SessionBudgetExceeded` |
 | context unrecoverable | `timeline.turn.error` + active turn failed | `ContextWindowExceeded` |
-| compaction unrecoverable | `timeline.turn.error` + active turn failed | `ContextCompactionFailed` 或 `ContextWindowExceeded` |
+| compaction unrecoverable | `timeline.turn.error` + active turn failed | `ContextCompactionFailed` 或明确的 `ContextWindowExceeded` |
 | permission denied | `timeline.turn.error` 或 waiting approval state | `PermissionDenied` |
 | repeated tool failure | `timeline.turn.error` 或 finalization | `ToolFailure` |
 | repeated low-value loop | nudge / finalization / explicit error | `InternalError` 或 domain-specific guard error |
@@ -799,7 +815,7 @@ usage 规则：
 
 1. main model usage、tool-mediated model usage、compaction usage、memory usage 都必须进入 run-level accounting。
 2. usage breakdown 可以增加内部字段，但对外 DTO 不应暴露 runtime-private provider shape。
-3. usage 超限时统一映射为 structured run error；本 spec 不新增 public `UsageLimited` stop reason。
+3. usage 超限未来统一映射为 structured run error；本 spec 不新增 public `UsageLimited` stop reason，也不在 budget policy 缺失时启用 `UsageLimitExceeded`。
 
 聚合落点：
 
@@ -878,6 +894,6 @@ E2E 验证：
 2. 没有固定轮次后，provider/tool 成本控制必须依赖 budget、timeout、context、permission 和 structured error，不能缺位。
 3. runaway guard 的 cause 命名必须准确，否则会把旧 `max_tool_rounds` 语义换壳保留。
 4. context compaction 已有实现偏 Kernel 内部，第一阶段应保持 compaction 算法在 Kernel / MemoryStore 边界内，不要上移到 Service。
-5. `TalosRunErrorInfo` 需要和现有 `TalosError` / `AgentErrorKind` 做最小映射，避免新旧错误体系并存。
+5. `TalosRunErrorInfo` 由 `talos-error` 统一管理，`TalosError` / `AgentErrorKind` 必须通过显式映射接入，避免新旧错误体系并存。
 6. subagent topology 仍需独立 spec 或后续阶段细化，避免一次改造过大。
 7. tracing 与 error mapping 可以独立演进；本 spec 不把 tracing 作为阻塞项。

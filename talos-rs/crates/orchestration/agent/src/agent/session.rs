@@ -95,7 +95,7 @@ impl AgentHarnessImpl {
                 .num_milliseconds()
                 .max(0) as u64;
             if elapsed_ms >= timeout_ms {
-                return Err(talos_error::TalosError::ToolError(format!(
+                return Err(talos_error::TalosError::Timeout(format!(
                     "dynamic tool call `{call_id}` timed out after {timeout_ms} ms"
                 )));
             }

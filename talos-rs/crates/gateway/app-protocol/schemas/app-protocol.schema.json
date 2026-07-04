@@ -4517,7 +4517,7 @@
       "type": "string"
     },
     "TalosRunErrorCode": {
-      "description": "Stable machine-readable category for a failed Agent run.",
+      "description": "Stable machine-readable category for a failed Agent run.\n\nThis public run-level code is owned by `talos-error`. Protocol, SDK, UI, and TUI layers may expose or render it, but they must not derive it from error message text.",
       "enum": [
         "context_window_exceeded",
         "session_budget_exceeded",
@@ -4531,7 +4531,7 @@
       "type": "string"
     },
     "TalosRunErrorInfo": {
-      "description": "Optional structured error details carried by turn failure events.",
+      "description": "Optional structured error details carried by turn failure events.\n\nThe message is for display and diagnostics only. Callers must branch on `code`, never parse `message`.",
       "properties": {
         "code": {
           "$ref": "#/definitions/TalosRunErrorCode"

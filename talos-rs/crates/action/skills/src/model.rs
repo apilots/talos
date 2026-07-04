@@ -1,4 +1,5 @@
 pub use talos_types::skills::{
-    SkillDocument, SkillLoadError, SkillMetadata, SkillRoot, SkillRoots, SkillScope, SkillSelector,
-    SkillSnapshot, SkillSource, SkillSuggestion, SkillSummary, SkillWarning,
+    SkillDocument, SkillLoadError, SkillLoadErrorKind, SkillMetadata, SkillRoot, SkillRoots,
+    SkillScope, SkillSelector, SkillSnapshot, SkillSource, SkillSuggestion, SkillSummary,
+    SkillWarning, SkillWarningCode,
 };

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use talos_error::TalosError;
+use talos_error::{TalosError, TalosRunErrorCode};
 use thiserror::Error;
 
 /// Agent-domain result used inside Harness, Runtime, and Coordinator adapters.
@@ -18,6 +18,7 @@ pub enum AgentErrorKind {
     RuntimeUnavailable,
     CapabilityUnsupported,
     InvalidExecutionContext,
+    RunFailure(TalosRunErrorCode),
     RunNotFound,
     RunConflict,
     InputRejected,
@@ -142,6 +143,26 @@ impl AgentError {
             AgentErrorKind::AgentUnavailable
             | AgentErrorKind::RuntimeUnavailable
             | AgentErrorKind::BackendTaskLost => TalosError::RuntimeUnavailable(self.message),
+            AgentErrorKind::RunFailure(TalosRunErrorCode::ProviderUnavailable) => {
+                TalosError::RuntimeUnavailable(self.message)
+            }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::ContextWindowExceeded) => {
+                TalosError::ContextWindowExceeded(self.message)
+            }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::ContextCompactionFailed) => {
+                TalosError::ContextCompactionFailed(self.message)
+            }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::PermissionDenied) => {
+                TalosError::AuthError(self.message)
+            }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::ToolFailure) => {
+                TalosError::ToolError(self.message)
+            }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::InternalError)
+            | AgentErrorKind::RunFailure(TalosRunErrorCode::UsageLimitExceeded)
+            | AgentErrorKind::RunFailure(TalosRunErrorCode::SessionBudgetExceeded) => {
+                TalosError::InternalError(self.message)
+            }
             AgentErrorKind::RuntimeError => TalosError::InternalError(self.message),
         }
     }
@@ -154,17 +175,45 @@ impl From<TalosError> for AgentError {
             TalosError::ResourceNotFound(message) => Self::run_not_found(message),
             TalosError::Conflict(message)
             | TalosError::IdempotencyConflict(message)
+            | TalosError::ActiveTurnRunning(message)
             | TalosError::RetryActiveTurnRunning(message) => Self::run_conflict(message),
             TalosError::ValidationError(message)
             | TalosError::RetrySourceCompleted(message)
             | TalosError::RetrySourceMismatch(message) => Self::invalid_execution_context(message),
-            TalosError::ToolError(message) => Self::runtime_error(message),
-            TalosError::Timeout(message) => Self::new(AgentErrorKind::Timeout, message),
-            TalosError::UnsupportedModel(message) => {
-                Self::new(AgentErrorKind::RuntimeUnavailable, message)
+            TalosError::ContextWindowExceeded(message) => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::ContextWindowExceeded),
+                message,
+            ),
+            TalosError::ContextCompactionFailed(message) => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::ContextCompactionFailed),
+                message,
+            ),
+            TalosError::AuthorizationDenied => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::PermissionDenied),
+                "authorization denied",
+            ),
+            TalosError::AuthenticationFailed(message) | TalosError::AuthError(message) => {
+                Self::new(
+                    AgentErrorKind::RunFailure(TalosRunErrorCode::PermissionDenied),
+                    message,
+                )
             }
+            TalosError::ToolError(message)
+            | TalosError::ToolFailure { message, .. }
+            | TalosError::ToolNotFound(message) => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::ToolFailure),
+                message,
+            ),
+            TalosError::Timeout(message) => Self::new(AgentErrorKind::Timeout, message),
+            TalosError::UnsupportedModel(message) => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::ProviderUnavailable),
+                message,
+            ),
             TalosError::RuntimeUnavailable(message) | TalosError::TransportUnavailable(message) => {
-                Self::new(AgentErrorKind::RuntimeUnavailable, message)
+                Self::new(
+                    AgentErrorKind::RunFailure(TalosRunErrorCode::ProviderUnavailable),
+                    message,
+                )
             }
             TalosError::Cancelled(message) => Self::new(AgentErrorKind::Interrupted, message),
             other => Self::runtime_error(other.to_string()).with_source(other.to_string()),

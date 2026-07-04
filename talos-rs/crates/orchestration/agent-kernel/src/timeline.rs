@@ -5,11 +5,11 @@ use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionMetrics,
     ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger, StopReason,
     TalosAssistantTextCommittedEvent, TalosContentItem, TalosItemCompletedEvent,
-    TalosItemDeltaEvent, TalosItemStartedEvent, TalosRunErrorCode, TalosRunErrorInfo,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind,
-    TalosToolResult, TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent,
-    TalosTurnStartedEvent, TokenUsage, TurnExecutionMetrics,
+    TalosItemDeltaEvent, TalosItemStartedEvent, TalosRunErrorInfo, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult,
+    TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent,
+    TokenUsage, TurnExecutionMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -81,13 +81,24 @@ impl TimelineBuilder {
         self.event(AgentEventType::TurnMetrics, payload)
     }
 
-    pub fn fail_turn(&mut self, error: impl Into<String>) -> AgentEvent {
-        let error = error.into();
+    pub fn fail_turn(&mut self, error: &TalosError) -> AgentEvent {
+        self.fail_turn_with_info(error.to_string(), error.to_run_error_info())
+    }
+
+    pub fn fail_turn_message(&mut self, error: impl Into<String>) -> AgentEvent {
+        self.fail_turn_with_info(error.into(), None)
+    }
+
+    pub fn fail_turn_with_info(
+        &mut self,
+        error: impl Into<String>,
+        error_info: Option<TalosRunErrorInfo>,
+    ) -> AgentEvent {
         let payload = AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
-            error_info: classify_turn_error(&error),
-            error,
+            error_info,
+            error: error.into(),
             failed_at_ms: now_ms(),
         });
         self.event(AgentEventType::TurnError, payload)
@@ -540,44 +551,6 @@ fn set_tool_result(
 
 fn now_ms() -> u64 {
     Utc::now().timestamp_millis().max(0) as u64
-}
-
-fn classify_turn_error(error: &str) -> Option<TalosRunErrorInfo> {
-    let lower = error.to_ascii_lowercase();
-    let code = if lower.contains("prompt budget remains exhausted after compaction")
-        || lower.contains("session history compaction failed")
-        || lower.contains("compaction failed")
-        || lower.contains("compact failed")
-    {
-        TalosRunErrorCode::ContextCompactionFailed
-    } else if lower.contains("context budget")
-        || lower.contains("prompt budget")
-        || lower.contains("context window")
-    {
-        TalosRunErrorCode::ContextWindowExceeded
-    } else if lower.contains("compaction") || lower.contains("compact") {
-        TalosRunErrorCode::ContextCompactionFailed
-    } else if lower.starts_with("runtime unavailable:")
-        || lower.starts_with("transport unavailable:")
-        || lower.starts_with("unsupported model:")
-    {
-        TalosRunErrorCode::ProviderUnavailable
-    } else if lower.starts_with("authorization denied")
-        || lower.starts_with("authentication failed:")
-        || lower.starts_with("auth error:")
-    {
-        TalosRunErrorCode::PermissionDenied
-    } else if lower.starts_with("tool error:") || lower.starts_with("tool not found:") {
-        TalosRunErrorCode::ToolFailure
-    } else if lower.starts_with("internal error:") {
-        TalosRunErrorCode::InternalError
-    } else {
-        return None;
-    };
-    Some(TalosRunErrorInfo {
-        code,
-        message: error.to_string(),
-    })
 }
 
 #[cfg(test)]

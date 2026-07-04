@@ -83,7 +83,7 @@ pub(crate) async fn enforce_working_context_budget(
     .await;
 
     if report.post_tokens > window_usage.effective_prompt_budget {
-        return Err(TalosError::ValidationError(format!(
+        return Err(TalosError::ContextWindowExceeded(format!(
             "working context budget remains exhausted before model request: estimated_tokens={}, effective_prompt_budget={}",
             report.post_tokens, window_usage.effective_prompt_budget
         )));

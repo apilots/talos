@@ -10,7 +10,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn start_turn_handler(
@@ -55,12 +55,12 @@ pub(super) async fn interrupt_turn_handler(
         .map_err(|err| match err {
             talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
                 StatusCode::NOT_FOUND,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "session not found",
             ),
             _ => ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
+                HttpApiErrorCode::InternalError,
                 err.to_string(),
             ),
         })
@@ -80,7 +80,7 @@ fn start_turn_idempotency_key(
         if header != body {
             return Err(ApiError::new(
                 StatusCode::BAD_REQUEST,
-                "invalid_request",
+                HttpApiErrorCode::InvalidRequest,
                 "idempotency-key header must match client_request_id",
             ));
         }
@@ -103,21 +103,31 @@ pub(super) async fn submit_dynamic_tool_result_handler(
 
 fn map_retry_submit_error(error: talos_error::TalosError) -> ApiError {
     match error {
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_retry_request", message)
-        }
-        talos_error::TalosError::RetryActiveTurnRunning(message) => {
-            ApiError::new(StatusCode::CONFLICT, "retry_active_turn_running", message)
-        }
-        talos_error::TalosError::RetrySourceCompleted(message) => {
-            ApiError::new(StatusCode::CONFLICT, "retry_source_completed", message)
-        }
-        talos_error::TalosError::RetrySourceMismatch(message) => {
-            ApiError::new(StatusCode::CONFLICT, "retry_source_mismatch", message)
-        }
-        talos_error::TalosError::IdempotencyConflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, "idempotency_conflict", message)
-        }
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRetryRequest,
+            message,
+        ),
+        talos_error::TalosError::RetryActiveTurnRunning(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::RetryActiveTurnRunning,
+            message,
+        ),
+        talos_error::TalosError::RetrySourceCompleted(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::RetrySourceCompleted,
+            message,
+        ),
+        talos_error::TalosError::RetrySourceMismatch(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::RetrySourceMismatch,
+            message,
+        ),
+        talos_error::TalosError::IdempotencyConflict(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::IdempotencyConflict,
+            message,
+        ),
         other => map_turn_submit_error(other),
     }
 }
@@ -126,37 +136,50 @@ fn map_turn_submit_error(error: talos_error::TalosError) -> ApiError {
     match error {
         talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
             StatusCode::NOT_FOUND,
-            "invalid_request",
+            HttpApiErrorCode::InvalidRequest,
             "session not found",
         ),
-        talos_error::TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        talos_error::TalosError::IdempotencyConflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, "idempotency_conflict", message)
-        }
+        talos_error::TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        talos_error::TalosError::IdempotencyConflict(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::IdempotencyConflict,
+            message,
+        ),
+        talos_error::TalosError::ActiveTurnRunning(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::ActiveTurnRunning,
+            message,
+        ),
         talos_error::TalosError::Conflict(message) => {
-            ApiError::new(StatusCode::CONFLICT, "active_turn_running", message)
+            ApiError::new(StatusCode::CONFLICT, HttpApiErrorCode::Conflict, message)
         }
-        talos_error::TalosError::SerializationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        talos_error::TalosError::Timeout(message) => {
-            ApiError::new(StatusCode::GATEWAY_TIMEOUT, "first_event_timeout", message)
-        }
+        talos_error::TalosError::SerializationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        talos_error::TalosError::Timeout(message) => ApiError::new(
+            StatusCode::GATEWAY_TIMEOUT,
+            HttpApiErrorCode::FirstEventTimeout,
+            message,
+        ),
         talos_error::TalosError::StorageError(message) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "event_record_failed",
+            HttpApiErrorCode::EventRecordFailed,
             message,
         ),
         talos_error::TalosError::IdempotencyError(message) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "idempotency_failed",
+            HttpApiErrorCode::IdempotencyFailed,
             message,
         ),
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }

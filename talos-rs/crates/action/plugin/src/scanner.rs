@@ -8,7 +8,10 @@ use crate::PluginStateStore;
 use chrono::Utc;
 use std::path::Path;
 use talos_error::TalosResult;
-use talos_types::{MarketplaceSource, Plugin, PluginKind, PluginWarning, PluginWarningCode};
+use talos_types::{
+    MarketplaceSource, Plugin, PluginKind, PluginWarning, PluginWarningCode, SkillLoadError,
+    SkillLoadErrorKind,
+};
 
 use discovery::{ensure_contained_dir, mcp_manifest_paths, scan_roots, skill_dirs};
 use materialize::materialize_source;
@@ -49,9 +52,7 @@ fn scan_materialized_plugins(
         for skill_dir in skill_dirs(source, root, &scan_root, &mut scan_warnings)? {
             match plugin_from_skill_dir(source, root, &scan_root, &skill_dir)? {
                 Ok(plugin) => plugins.push(plugin),
-                Err(message) => {
-                    warnings.push(skill_load_warning(source, root, &skill_dir, &message))
-                }
+                Err(error) => warnings.push(skill_load_warning(source, root, &skill_dir, &error)),
             }
         }
         for manifest_path in mcp_manifest_paths(source, root, &scan_root, &mut scan_warnings)? {
@@ -82,20 +83,29 @@ fn skill_load_warning(
     source: &MarketplaceSource,
     root: &Path,
     skill_dir: &Path,
-    message: &str,
+    error: &SkillLoadError,
 ) -> PluginWarning {
-    let code = if message.contains("missing required frontmatter field") {
-        PluginWarningCode::MissingRequiredField
-    } else {
-        PluginWarningCode::InvalidManifest
-    };
+    let code = skill_load_warning_code(error.kind);
     let path = relative_path(root, skill_dir).unwrap_or_else(|_| skill_dir.display().to_string());
     PluginWarning {
         code,
-        message: format!("failed to load skill `{path}`: {message}"),
+        message: format!("failed to load skill `{path}`: {}", error.message),
         kind: Some(PluginKind::Skill),
         source_id: Some(source.id.clone()),
         path: Some(path),
+    }
+}
+
+fn skill_load_warning_code(kind: SkillLoadErrorKind) -> PluginWarningCode {
+    match kind {
+        SkillLoadErrorKind::MissingRequiredField => PluginWarningCode::MissingRequiredField,
+        SkillLoadErrorKind::SkillRootReadFailed
+        | SkillLoadErrorKind::SkillDirectoryReadFailed
+        | SkillLoadErrorKind::MissingSkillFile
+        | SkillLoadErrorKind::SkillFileMetadataReadFailed
+        | SkillLoadErrorKind::SkillFileTooLarge
+        | SkillLoadErrorKind::SkillFileReadFailed
+        | SkillLoadErrorKind::InvalidFrontmatter => PluginWarningCode::InvalidManifest,
     }
 }
 

@@ -1,4 +1,5 @@
 use super::*;
+use talos_types::talos::TalosRunErrorCode;
 
 fn item_id(event: &AgentEvent) -> String {
     match &event.payload {
@@ -167,36 +168,36 @@ fn timeline_builder_closes_running_items_before_turn_terminal() {
 }
 
 #[test]
-fn timeline_builder_classifies_context_budget_turn_errors() {
+fn timeline_builder_uses_structured_context_budget_turn_errors() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
-    let event = builder.fail_turn(
-        "working context budget remains exhausted before model request: estimated_tokens=100, effective_prompt_budget=80",
-    );
+    let event = builder.fail_turn(&TalosError::ContextWindowExceeded(
+        "estimated_tokens=100, effective_prompt_budget=80".to_string(),
+    ));
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
             let error_info = payload.error_info.expect("error info should be classified");
             assert_eq!(error_info.code, TalosRunErrorCode::ContextWindowExceeded);
-            assert!(error_info.message.contains("working context budget"));
+            assert!(!error_info.message.trim().is_empty());
         }
         _ => panic!("expected turn error payload"),
     }
 }
 
 #[test]
-fn timeline_builder_classifies_compaction_blocked_turn_errors() {
+fn timeline_builder_uses_structured_compaction_blocked_turn_errors() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
-    let event = builder.fail_turn(
-        "session `session-1` is blocked because prompt budget remains exhausted after compaction",
-    );
+    let event = builder.fail_turn(&TalosError::ContextCompactionFailed(
+        "session `session-1` remains blocked after compaction".to_string(),
+    ));
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
             let error_info = payload.error_info.expect("error info should be classified");
             assert_eq!(error_info.code, TalosRunErrorCode::ContextCompactionFailed);
-            assert!(error_info.message.contains("after compaction"));
+            assert!(!error_info.message.trim().is_empty());
         }
         _ => panic!("expected turn error payload"),
     }
@@ -206,7 +207,7 @@ fn timeline_builder_classifies_compaction_blocked_turn_errors() {
 fn timeline_builder_leaves_unknown_turn_errors_unclassified() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
-    let event = builder.fail_turn("provider returned a transient unknown failure");
+    let event = builder.fail_turn_message("provider returned a transient unknown failure");
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {

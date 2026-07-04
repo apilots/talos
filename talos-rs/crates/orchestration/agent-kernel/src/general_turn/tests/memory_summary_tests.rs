@@ -2,6 +2,7 @@ use super::*;
 use crate::general_turn::memory_summary::build_sanitized_memory_decision_input;
 use std::collections::VecDeque;
 use std::sync::Mutex;
+use talos_error::{TalosError, TalosMemoryErrorKind};
 
 struct ModelRecordingProvider {
     responses: Mutex<VecDeque<String>>,
@@ -128,12 +129,7 @@ async fn test_flush_session_memory_rejects_blank_summary_title() {
     )
     .await
     .expect_err("blank summary title should fail after exhausting retries");
-    assert!(
-        error
-            .to_string()
-            .contains("parse memory summary json after 3 attempts"),
-        "{error}"
-    );
+    assert_memory_error_kind(&error, TalosMemoryErrorKind::SummaryParseFailed);
     assert!(
         !workspace_dir.join("memory").exists(),
         "blank summary title should not persist workspace memory"
@@ -1134,12 +1130,7 @@ async fn test_flush_session_memory_errors_after_invalid_summary_retry_budget() {
     .await
     .expect_err("summary parsing should fail after retry budget");
 
-    assert!(
-        error
-            .to_string()
-            .contains("parse memory summary json after 3 attempts"),
-        "{error}"
-    );
+    assert_memory_error_kind(&error, TalosMemoryErrorKind::SummaryParseFailed);
 }
 
 #[tokio::test]
@@ -1168,10 +1159,12 @@ async fn test_flush_session_memory_errors_after_invalid_persistence_retry_budget
     .await
     .expect_err("persistence parsing should fail after retry budget");
 
-    assert!(
-        error
-            .to_string()
-            .contains("parse memory persistence decision json after 3 attempts"),
-        "{error}"
-    );
+    assert_memory_error_kind(&error, TalosMemoryErrorKind::PersistenceDecisionParseFailed);
+}
+
+fn assert_memory_error_kind(error: &TalosError, expected: TalosMemoryErrorKind) {
+    let TalosError::MemoryError { kind, .. } = error else {
+        panic!("expected memory error, got {error}");
+    };
+    assert_eq!(*kind, expected);
 }

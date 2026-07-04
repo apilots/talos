@@ -14,7 +14,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{ApiError, HttpApiErrorCode};
 use super::state::HttpApiState;
 
 pub(super) async fn list_workspace_docs_handler(
@@ -90,18 +90,22 @@ fn expected_file_version_token(value: ExpectedFileVersion) -> Option<String> {
 
 fn map_workspace_doc_error(error: TalosError) -> ApiError {
     match error {
-        TalosError::ValidationError(message) => {
-            ApiError::new(StatusCode::BAD_REQUEST, "invalid_request", message)
-        }
-        TalosError::Conflict(message) | TalosError::ResourceNotFound(message) => {
-            ApiError::new(StatusCode::CONFLICT, "invalid_request", message)
-        }
+        TalosError::ValidationError(message) => ApiError::new(
+            StatusCode::BAD_REQUEST,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
+        TalosError::Conflict(message) | TalosError::ResourceNotFound(message) => ApiError::new(
+            StatusCode::CONFLICT,
+            HttpApiErrorCode::InvalidRequest,
+            message,
+        ),
         TalosError::AuthError(message) => {
-            ApiError::new(StatusCode::FORBIDDEN, "forbidden", message)
+            ApiError::new(StatusCode::FORBIDDEN, HttpApiErrorCode::Forbidden, message)
         }
         other => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
-            "internal_error",
+            HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
     }

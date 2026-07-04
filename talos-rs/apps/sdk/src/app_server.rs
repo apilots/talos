@@ -962,15 +962,16 @@ fn decode_event_notification(
 
 fn map_app_server_error(error: talos_app_protocol::errors::AppServerErrorBody) -> TalosError {
     use talos_app_protocol::errors::{
-        CANCELLED, CONFLICT, FORBIDDEN, INVALID_PARAMS, NOT_FOUND, REQUEST_TIMEOUT,
-        RESOURCE_EXPIRED, RUNTIME_UNAVAILABLE, TRANSPORT_UNAVAILABLE, UNAUTHORIZED,
-        VALIDATION_FAILED,
+        ACTIVE_TURN_RUNNING, CANCELLED, CONFLICT, FORBIDDEN, INVALID_PARAMS, NOT_FOUND,
+        REQUEST_TIMEOUT, RESOURCE_EXPIRED, RUNTIME_UNAVAILABLE, TRANSPORT_UNAVAILABLE,
+        UNAUTHORIZED, VALIDATION_FAILED,
     };
 
     match error.code {
         UNAUTHORIZED => TalosError::AuthError(error.message),
         FORBIDDEN => TalosError::AuthorizationDenied,
         NOT_FOUND => TalosError::ResourceNotFound(error.message),
+        ACTIVE_TURN_RUNNING => TalosError::ActiveTurnRunning(error.message),
         CONFLICT => TalosError::Conflict(error.message),
         VALIDATION_FAILED | INVALID_PARAMS => TalosError::ValidationError(error.message),
         RESOURCE_EXPIRED => TalosError::ResourceExpired(error.message),

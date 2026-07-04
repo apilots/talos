@@ -2,12 +2,12 @@ use crate::execution::ReplayDynamicToolResult;
 use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_memory::MemoryStore;
 use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload};
 use tokio::sync::mpsc;
@@ -111,13 +111,44 @@ async fn execute_single_tool_call(
         Err(error) => ToolExecutionOutput {
             call_id: call.call_id,
             tool_name: call.tool_name,
-            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-                content: error.to_string(),
-                is_error: true,
-            }),
+            outcome: tool_error_outcome(error),
             is_error: true,
         },
     }
+}
+
+fn tool_error_outcome(error: TalosError) -> ToolDispatchOutcome {
+    match error {
+        TalosError::ToolFailure {
+            kind,
+            message,
+            gate_source,
+        } => structured_tool_failure(kind, message, gate_source),
+        other => ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
+            content: other.to_string(),
+            is_error: true,
+        }),
+    }
+}
+
+fn structured_tool_failure(
+    kind: TalosToolErrorKind,
+    message: String,
+    gate_source: Option<String>,
+) -> ToolDispatchOutcome {
+    let mut payload = json!({
+        "error": message.clone(),
+        "error_kind": kind,
+    });
+    if let Some(gate_source) = gate_source {
+        if let Some(object) = payload.as_object_mut() {
+            object.insert("gate_source".to_string(), Value::String(gate_source));
+        }
+    }
+    ToolDispatchOutcome::executed(ToolOutputPayload::failure_structured(
+        message,
+        Some(payload),
+    ))
 }
 
 #[async_trait]
@@ -202,10 +233,7 @@ impl ToolExecutor for ParallelToolExecutor {
                     Err(error) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
-                        outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-                            content: error.to_string(),
-                            is_error: true,
-                        }),
+                        outcome: tool_error_outcome(error),
                         is_error: true,
                     },
                 };
