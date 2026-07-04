@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    GatewayClient as SdkGatewayClient, InterruptTurnRequest, ModelInfo, ModelListRequest, ModelRef,
-    RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
-    SessionCompactRequest, SessionConf, SessionDeleteRequest, SessionGetRequest,
-    SessionHistoryRequest, SessionHistorySnapshot, SessionInfo, SessionListRequest,
-    SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest, StartTurnRequest,
-    SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
-    TimelineRecoveryResponse,
+    AuthSessionReadRequest, AuthSessionReadResponse, GatewayClient as SdkGatewayClient,
+    InterruptTurnRequest, ModelInfo, ModelListRequest, ModelRef, RecoverTimelineRequest,
+    SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
+    SessionConf, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
+    SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
+    SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
+    TimelineEventEnvelope, TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -15,6 +15,8 @@ use tokio::sync::Mutex;
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
+    async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse>;
+    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse>;
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>>;
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
@@ -58,6 +60,16 @@ where
         SdkGatewayClient::list_models(&mut *client, ModelListRequest {})
             .await
             .map(|response| response.models)
+    }
+
+    async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::read_auth_session(&mut *client, AuthSessionReadRequest {}).await
+    }
+
+    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::workspace_info(&mut *client, WorkspaceInfoRequest {}).await
     }
 
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>> {

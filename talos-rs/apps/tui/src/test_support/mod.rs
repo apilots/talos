@@ -11,12 +11,14 @@ pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
 pub(crate) use talos_sdk::{
-    AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionOutcome,
-    ContextCompactionStage, ContextCompactionTrigger, SessionHistorySnapshot, SkillSuggestion,
-    StartTurnRequest, StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    AgentEvent, AgentEventPayload, AgentEventType, AuthSessionReadResponse, AuthSessionSnapshot,
+    AuthSessionUserSnapshot, ContextCompactionOutcome, ContextCompactionStage,
+    ContextCompactionTrigger, SessionHistorySnapshot, SkillSuggestion, StartTurnRequest,
+    StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
+    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
+    UserRole, WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
 
@@ -26,6 +28,8 @@ pub(crate) struct MockGatewayState {
     pub(crate) session_id: String,
     pub(crate) current_model: String,
     pub(crate) current_project_root: Option<PathBuf>,
+    pub(crate) auth_email: Option<String>,
+    pub(crate) workspace_root: PathBuf,
     pub(crate) updated_model: Option<String>,
     pub(crate) stream_counter: u64,
     pub(crate) list_models_failures_remaining: u8,
@@ -582,6 +586,8 @@ impl MockGatewayClient {
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
                 current_project_root: None,
+                auth_email: Some("talos@example.com".to_string()),
+                workspace_root: PathBuf::from("/tmp/talos-workspace"),
                 updated_model: None,
                 stream_counter: 0,
                 list_models_failures_remaining: 0,
@@ -645,6 +651,36 @@ impl GatewayClient for MockGatewayClient {
             ));
         }
         Ok(state.models.clone())
+    }
+
+    async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {
+        let state = self.state.lock().unwrap();
+        Ok(AuthSessionReadResponse {
+            session: Some(AuthSessionSnapshot {
+                schema_version: 1,
+                cloud_api_base_url: "https://cloud.example.test".to_string(),
+                access_token: "test-token".to_string(),
+                token_type: "Bearer".to_string(),
+                expires_at_ms: None,
+                last_used_at_ms: "1".to_string(),
+                user: AuthSessionUserSnapshot {
+                    user_id: "test-user".to_string(),
+                    username: "talos-user".to_string(),
+                    email: state.auth_email.clone(),
+                    role: UserRole::User,
+                },
+            }),
+        })
+    }
+
+    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse> {
+        let state = self.state.lock().unwrap();
+        Ok(WorkspaceInfoResponse {
+            user_id: "test-user".to_string(),
+            username: Some("talos-user".to_string()),
+            base_workspace_dir: state.workspace_root.to_string_lossy().to_string(),
+            user_workspace_dir: state.workspace_root.to_string_lossy().to_string(),
+        })
     }
 
     async fn suggest_skills(&self, _query: &str) -> TalosResult<Vec<SkillSuggestion>> {

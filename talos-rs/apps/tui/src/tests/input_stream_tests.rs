@@ -521,16 +521,20 @@ async fn test_status_command_displays_cache_usage_metrics() {
     let status_text = app
         .chat_blocks
         .iter()
-        .filter(|block| block.role == ChatRole::System)
+        .filter(|block| block.role == ChatRole::Status)
         .map(|block| block.content.as_str())
-        .find(|content| content.contains("local.usage.input: 12"))
+        .find(|content| content.starts_with("/status"))
         .unwrap_or_default()
         .to_string();
-    assert!(status_text.contains("local.usage.cache_create: 2"));
-    assert!(status_text.contains("local.usage.cache_read: 3"));
-    assert!(status_text.contains("server.usage.input: 120"));
-    assert!(status_text.contains("server.usage.cache_create: 9"));
-    assert!(status_text.contains("server.usage.cache_read: 21"));
+    assert!(status_text.contains("Talos TUI"));
+    assert!(
+        status_text.contains("Model:            qwen-plus (mock, reasoning off, summaries auto)")
+    );
+    assert!(status_text.contains("Agent Workspace:  /tmp/talos-workspace"));
+    assert!(status_text.contains("Account:          talos@example.com"));
+    assert!(status_text.contains("Session:          sess-test"));
+    assert!(status_text.contains("Runtime:          embedded ● connected"));
+    assert!(status_text.contains("165 tokens · cache read 21"));
 }
 
 #[tokio::test]

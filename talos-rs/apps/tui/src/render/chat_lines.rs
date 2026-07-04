@@ -6,6 +6,7 @@ use ratatui::{
 
 use crate::markdown::render_markdown_lines;
 use crate::render::helpers;
+use crate::status::render_status_card_lines;
 use crate::types::{ChatBlock, ChatRole, CopyProjection, RenderedChatLine, RoundFooterButton};
 use crate::utils::{
     highlight_line_columns, line_display_width, line_plain_text, text_display_width,
@@ -82,6 +83,12 @@ impl TuiApp {
             return false;
         }
         if self.chat_blocks[round_start].role != ChatRole::User {
+            return false;
+        }
+        if self.chat_blocks[round_start..round_end_exclusive]
+            .iter()
+            .any(|block| block.role == ChatRole::Status)
+        {
             return false;
         }
         if round_end_exclusive < self.chat_blocks.len() {
@@ -194,6 +201,7 @@ impl TuiApp {
             ChatRole::Assistant => self.assistant_block_lines(block, content_width),
             ChatRole::Thinking => self.thinking_block_lines(block, content_width),
             ChatRole::System => self.system_block_lines(block, content_width),
+            ChatRole::Status => self.status_block_lines(block),
         }
     }
 
@@ -203,6 +211,23 @@ impl TuiApp {
         content_width: usize,
     ) -> Vec<RenderedChatLine> {
         let mut lines = vec![];
+        if block.content.trim_start().starts_with('/') {
+            let command = block.content.clone();
+            lines.push(RenderedChatLine {
+                display: Line::from(Span::styled(
+                    command.clone(),
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                copy_projection: Some(CopyProjection {
+                    text: command,
+                    display_start_col: 0,
+                }),
+            });
+            return lines;
+        }
+
         let label_style = Style::default()
             .fg(Color::Cyan)
             .add_modifier(Modifier::BOLD);
@@ -398,6 +423,10 @@ impl TuiApp {
         }
 
         lines
+    }
+
+    pub(crate) fn status_block_lines(&self, block: &ChatBlock) -> Vec<RenderedChatLine> {
+        render_status_card_lines(&block.content)
     }
 
     pub(crate) fn decorate_chat_line(

@@ -11,6 +11,7 @@ mod markdown;
 mod render;
 pub mod run;
 mod selection;
+mod status;
 mod stream;
 mod stream_events;
 mod stream_lifecycle;

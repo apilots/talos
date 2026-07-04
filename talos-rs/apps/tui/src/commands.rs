@@ -6,7 +6,9 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
-use crate::types::{AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad};
+use crate::types::{
+    AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad,
+};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
 use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
@@ -375,11 +377,21 @@ impl TuiApp {
         };
         let session_id = self.session_id.clone();
         self.spawn_command_task("status request started", async move {
-            let result = if let Some(session_id) = session_id {
-                client.get_session(&session_id).await.map(Some)
-            } else {
-                Ok(None)
-            };
+            let result = async {
+                let session = if let Some(session_id) = session_id {
+                    Some(client.get_session(&session_id).await?)
+                } else {
+                    None
+                };
+                let auth = client.read_auth_session().await?;
+                let workspace = client.workspace_info().await?;
+                Ok(StatusLoad {
+                    session,
+                    auth,
+                    workspace,
+                })
+            }
+            .await;
             CommandUpdate::StatusLoaded(result)
         })
     }

@@ -111,6 +111,7 @@ pub(crate) enum ChatRole {
     Thinking,
     Assistant,
     System,
+    Status,
     Tool,
 }
 
@@ -121,6 +122,7 @@ impl ChatRole {
             Self::Thinking => "Thinking",
             Self::Assistant => "Assistant",
             Self::System => "System",
+            Self::Status => "Status",
             Self::Tool => "Tool",
         }
     }
@@ -284,11 +286,17 @@ pub(crate) struct SessionHistoryLoad {
     pub(crate) live_recovery: Option<TalosResult<TimelineRecoveryResponse>>,
 }
 
+pub(crate) struct StatusLoad {
+    pub(crate) session: Option<SessionInfo>,
+    pub(crate) auth: talos_sdk::AuthSessionReadResponse,
+    pub(crate) workspace: talos_sdk::WorkspaceInfoResponse,
+}
+
 // ── Command update ───────────────────────────────────────────────────────────
 
 pub(crate) enum CommandUpdate {
     ModelsLoaded(TalosResult<Vec<ModelInfo>>),
-    StatusLoaded(TalosResult<Option<SessionInfo>>),
+    StatusLoaded(TalosResult<StatusLoad>),
     SessionCompacted(TalosResult<SessionInfo>),
     SessionCleared(TalosResult<SessionInfo>),
     ModelSwitched {

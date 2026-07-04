@@ -1,0 +1,170 @@
+use std::path::PathBuf;
+
+use talos_sdk::{
+    AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, LlmReasoningEffort,
+    ModelRef, SessionInfo, UserRole, WorkspaceInfoResponse,
+};
+use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
+
+use ratatui::style::Color;
+
+use super::{render_status_card, render_status_card_lines, TuiStatusSnapshot};
+use crate::test_support::{line_plain_text, mock_model_info, set_test_model_info};
+use crate::TuiApp;
+
+fn session_info() -> SessionInfo {
+    SessionInfo {
+        id: "sess-status".to_string(),
+        title: "Status Session".to_string(),
+        user_id: "status-user".to_string(),
+        source_type: talos_types::talos::TalosSourceType::Cli,
+        provider: talos_types::talos::TalosProvider::Cli,
+        model_ref: ModelRef {
+            provider: "mock".to_string(),
+            id: "qwen-plus".to_string(),
+        },
+        created_at: 1,
+        last_activity: 2,
+        message_count: 3,
+        usage: TokenUsage {
+            input_tokens: 120_000,
+            output_tokens: 40_000,
+            total_tokens: 160_000,
+            cache_creation_input_tokens: Some(3_000),
+            cache_read_input_tokens: Some(21_000),
+        },
+        project_id: None,
+        current_directory: Some(PathBuf::from("/tmp/talos-project")),
+    }
+}
+
+fn auth_session() -> AuthSessionReadResponse {
+    AuthSessionReadResponse {
+        session: Some(AuthSessionSnapshot {
+            schema_version: 1,
+            cloud_api_base_url: "https://cloud.example.test".to_string(),
+            access_token: "test-token".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_at_ms: None,
+            last_used_at_ms: "1".to_string(),
+            user: AuthSessionUserSnapshot {
+                user_id: "status-user".to_string(),
+                username: "status".to_string(),
+                email: Some("status@example.com".to_string()),
+                role: UserRole::User,
+            },
+        }),
+    }
+}
+
+fn workspace_info() -> WorkspaceInfoResponse {
+    WorkspaceInfoResponse {
+        user_id: "status-user".to_string(),
+        username: Some("status".to_string()),
+        base_workspace_dir: "/tmp/talos-workspace".to_string(),
+        user_workspace_dir: "/tmp/talos-workspace".to_string(),
+    }
+}
+
+#[test]
+fn test_status_snapshot_renders_card_from_real_state() {
+    let mut app = TuiApp::build(None);
+    set_test_model_info(&mut app, "qwen-plus", 200_000);
+    app.available_model_info[0].provider = "bailian".to_string();
+    app.available_model_info[0].reasoning = true;
+    app.available_model_info[0].reasoning_effort = LlmReasoningEffort::High;
+    app.current_model = "qwen-plus".to_string();
+    app.connection_status = "connected".to_string();
+    app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
+    app.trace_event_count = 128;
+    app.turn_metrics = Some(TurnExecutionMetrics {
+        model_rounds: 4,
+        tool_calls: 7,
+        tool_successes: 6,
+        tool_errors: 1,
+        stop_reason: StopReason::EndTurn,
+        usage: TokenUsage::default(),
+        duration_ms: Some(9_600),
+    });
+
+    let session = session_info();
+    let snapshot =
+        TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
+            .unwrap();
+    let card = render_status_card(&snapshot);
+
+    assert!(card.contains("/status"));
+    assert!(card.contains("Talos TUI"));
+    assert!(card.contains("Model:            qwen-plus (bailian, reasoning high, summaries auto)"));
+    assert!(card.contains("Agent Workspace:  /tmp/talos-workspace"));
+    assert!(card.contains("Directory:        /tmp/talos-project"));
+    assert!(card.contains("Account:          status@example.com"));
+    assert!(card.contains("Session:          sess-status"));
+    assert!(card.contains("Runtime:          embedded ● connected"));
+    assert!(card.contains("[■■■■■■■■■■■■■■■■□□□□] 80% used"));
+    assert!(card.contains("160.0K used / 200.0K total · 40.0K left"));
+    assert!(card.contains("160.0K tokens · cache read 21.0K"));
+    assert!(card.contains("last · 4 rounds · 7 tools · 6 ok · 1 err · 9.6s"));
+    assert!(card.contains("Events:           128"));
+}
+
+#[test]
+fn test_status_card_lines_style_command_and_context_bar() {
+    let mut app = TuiApp::build(None);
+    set_test_model_info(&mut app, "qwen-plus", 200_000);
+    app.current_model = "qwen-plus".to_string();
+    app.connection_status = "connected".to_string();
+
+    let session = session_info();
+    let snapshot =
+        TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
+            .unwrap();
+    let lines = render_status_card_lines(&render_status_card(&snapshot));
+
+    assert_eq!(lines[0].display.spans[0].style.fg, Some(Color::Blue));
+    let context_line = lines
+        .iter()
+        .find(|line| {
+            line.display
+                .spans
+                .iter()
+                .any(|span| span.content.contains("Context:"))
+        })
+        .expect("context line should render");
+    assert!(context_line
+        .display
+        .spans
+        .iter()
+        .any(|span| span.content.contains('■') && span.style.fg == Some(Color::Cyan)));
+    let raw_card = render_status_card(&snapshot);
+    let raw_runtime = raw_card
+        .lines()
+        .find(|line| line.contains("Runtime:"))
+        .expect("raw runtime line should render");
+    let styled_runtime = lines
+        .iter()
+        .find(|line| {
+            line.display
+                .spans
+                .iter()
+                .any(|span| span.content.contains("Runtime:"))
+        })
+        .expect("styled runtime line should render");
+    let styled_runtime_text = line_plain_text(&styled_runtime.display);
+    assert_eq!(styled_runtime_text, raw_runtime);
+    assert!(styled_runtime_text.ends_with("│"));
+}
+
+#[test]
+fn test_status_snapshot_rejects_missing_model_metadata() {
+    let mut app = TuiApp::build(None);
+    app.available_model_info = vec![mock_model_info("other-model", 128_000)];
+    app.current_model = "qwen-plus".to_string();
+
+    let err =
+        TuiStatusSnapshot::from_app(&app, None, &auth_session(), &workspace_info()).unwrap_err();
+
+    assert!(err
+        .to_string()
+        .contains("status model metadata missing for qwen-plus"));
+}

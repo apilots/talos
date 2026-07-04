@@ -228,6 +228,31 @@ fn test_metrics_line_renders_above_input_without_border() {
     assert!(inner_metrics.trim_end().ends_with("12.3s"));
 }
 
+#[test]
+fn test_status_block_renders_without_system_header_or_round_footer() {
+    let mut app = create_embedded_app();
+    app.chat_blocks = vec![
+        ChatBlock::new(ChatRole::User, "/status".to_string()),
+        ChatBlock::new(
+            ChatRole::Status,
+            "/status\n┌────┐\n│ Model:            qwen-plus │\n└────┘".to_string(),
+        ),
+    ];
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 100, 20));
+
+    let rendered = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered.contains("/status"));
+    assert!(rendered.contains("Model:"));
+    assert!(!rendered.contains("System"));
+    assert!(!rendered.contains(COPY_ROUND_BUTTON_TEXT));
+}
+
 fn buffer_lines(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
     (0..buffer.area.height)
         .map(|y| {

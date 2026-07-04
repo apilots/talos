@@ -60,6 +60,7 @@ impl TuiApp {
             ChatRole::Assistant => format!("## Assistant\n\n{}", block.content),
             ChatRole::Thinking => format!("## Thinking\n\n{}", block.content),
             ChatRole::System => format!("## System\n\n{}", block.content),
+            ChatRole::Status => block.content.clone(),
         }
     }
 

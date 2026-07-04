@@ -1,33 +1,13 @@
 use std::time::Duration;
 
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::TokenUsage;
 use tokio::sync::mpsc::error::TryRecvError;
 
+use crate::status::{render_status_card, TuiStatusSnapshot};
 use crate::types::{AppState, ChatRole, CommandUpdate};
 use crate::TuiApp;
 
 impl TuiApp {
-    fn append_usage_lines(lines: &mut Vec<String>, label: &str, usage: &TokenUsage) {
-        lines.push(format!("{label}.usage.input: {}", usage.input_tokens));
-        lines.push(format!("{label}.usage.output: {}", usage.output_tokens));
-        lines.push(format!("{label}.usage.total: {}", usage.total_tokens));
-        lines.push(format!(
-            "{label}.usage.cache_create: {}",
-            usage
-                .cache_creation_input_tokens
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "none".to_string())
-        ));
-        lines.push(format!(
-            "{label}.usage.cache_read: {}",
-            usage
-                .cache_read_input_tokens
-                .map(|value| value.to_string())
-                .unwrap_or_else(|| "none".to_string())
-        ));
-    }
-
     fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::SessionInfo) {
         self.apply_session_snapshot(session);
         self.input_buffer.clear();
@@ -101,40 +81,29 @@ impl TuiApp {
                 }
             },
             CommandUpdate::StatusLoaded(result) => match result {
-                Ok(session_info) => {
-                    let working_directory = session_info
-                        .as_ref()
-                        .and_then(|session| session.current_directory.as_ref())
-                        .cloned()
-                        .or_else(|| self.current_project_root.clone());
-                    let mut lines = vec![
-                        "mode: embedded".to_string(),
-                        format!("model: {}", self.current_model),
-                        format!(
-                            "working_directory: {}",
-                            working_directory
-                                .map(|path| path.display().to_string())
-                                .unwrap_or_else(|| "(server-managed)".to_string())
-                        ),
-                        format!(
-                            "session: {}",
-                            self.session_id
-                                .clone()
-                                .unwrap_or_else(|| "none".to_string())
-                        ),
-                        format!("connection: {}", self.connection_status),
-                        format!("in_flight: {}", self.in_flight),
-                        format!("events: {}", self.trace_event_count),
-                    ];
-                    Self::append_usage_lines(&mut lines, "local", &self.displayed_usage());
-                    if let Some(info) = session_info {
+                Ok(status) => {
+                    let snapshot = TuiStatusSnapshot::from_app(
+                        self,
+                        status.session.as_ref(),
+                        &status.auth,
+                        &status.workspace,
+                    );
+                    if let Some(info) = status.session {
                         self.apply_session_snapshot(&info);
-                        lines.push(format!("server.model: {}", info.model_ref.id));
-                        lines.push(format!("server.messages: {}", info.message_count));
-                        Self::append_usage_lines(&mut lines, "server", &info.usage);
                     }
-                    self.push_block(ChatRole::System, lines.join("\n"));
-                    self.push_right_event("status loaded".to_string());
+                    match snapshot {
+                        Ok(snapshot) => {
+                            self.push_block(ChatRole::Status, render_status_card(&snapshot));
+                            self.push_right_event("status loaded".to_string());
+                        }
+                        Err(err) => {
+                            self.push_block(
+                                ChatRole::System,
+                                format!("Failed to render status: {}", err),
+                            );
+                            self.push_right_event("status render failed".to_string());
+                        }
+                    }
                 }
                 Err(err) => {
                     self.push_block(ChatRole::System, format!("Failed to fetch status: {}", err));
