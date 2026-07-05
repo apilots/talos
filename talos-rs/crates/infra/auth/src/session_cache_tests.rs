@@ -14,6 +14,7 @@ fn test_entry(now_ms: i64) -> CloudSessionCacheEntry {
             username: "ada".to_string(),
             email: Some("ada@example.com".to_string()),
             role: UserRole::User,
+            r#type: UserType::Free,
         },
     }
 }

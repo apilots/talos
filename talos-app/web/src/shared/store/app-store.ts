@@ -54,7 +54,6 @@ export const useAppStore = create<AppState>()(
           ...typedState,
           uiTheme: typedState?.uiTheme ?? currentState.uiTheme,
           locale: typedState?.locale ?? currentState.locale,
-          threadFilter: "all",
           projects,
           activeProjectId: activeProjectExists ? typedState?.activeProjectId ?? projects[0].id : projects[0].id,
           transientStatuses: {},

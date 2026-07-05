@@ -377,7 +377,7 @@ export function ChatComposer({
 
   return (
     <div className="relative">
-      <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card/95 p-0 backdrop-blur">
+      <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card p-0 backdrop-blur-none">
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <select
@@ -582,7 +582,7 @@ export function ChatComposer({
 
       {showCollapsibleProject && projectOpen && (
         <div
-          className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card/98 px-2 pb-2 pt-1 shadow-lg backdrop-blur"
+          className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card px-2 pb-2 pt-1 shadow-lg"
           ref={projectPickerRef}
         >
           {projectMode === "list" ? (

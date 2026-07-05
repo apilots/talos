@@ -7,7 +7,7 @@ import {
   generateSessionId,
   useCreateProjectMutation,
   useModelsQuery,
-  useProjectsQuery,
+  useProjectsView,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
@@ -28,11 +28,11 @@ export function ChatHomePage() {
   const location = useLocation();
   const locationState = location.state as HomeLocationState | null;
   const { data: models } = useModelsQuery();
-  useProjectsQuery();
+  const projectsView = useProjectsView();
   const createProject = useCreateProjectMutation();
-  const projects = useAppStore((state) => state.projects);
-  const activeProjectId = useAppStore((state) => state.activeProjectId);
-  const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
+  const projects = projectsView.projects;
+  const activeProjectId = projectsView.activeProjectId;
+  const setActiveProjectId = projectsView.setActiveProjectId;
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");

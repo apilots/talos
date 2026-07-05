@@ -7,9 +7,9 @@ use talos_error::{TalosError, TalosResult};
 use talos_fs::{FilePermissions, FileSystem, WriteOptions};
 use ts_rs::TS;
 
-use crate::{AuthResponse, UserDto, UserRole};
+use crate::{AuthResponse, UserDto, UserRole, UserType};
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 const CACHE_RELATIVE_PATH: &[&str] = &["auth", "cloud-session.json"];
 const LOCK_EXTENSION: &str = "lock";
 const FILE_PERMISSION_MODE: u32 = 0o600;
@@ -91,6 +91,7 @@ pub struct CloudSessionUserSnapshot {
     #[serde(default)]
     pub email: Option<String>,
     pub role: UserRole,
+    pub r#type: UserType,
 }
 
 impl CloudSessionUserSnapshot {
@@ -100,6 +101,7 @@ impl CloudSessionUserSnapshot {
             username: user.username.clone(),
             email: user.email.clone(),
             role: user.role,
+            r#type: user.r#type,
         }
     }
 }

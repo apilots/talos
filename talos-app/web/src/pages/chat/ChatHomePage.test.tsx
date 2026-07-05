@@ -11,6 +11,9 @@ import { createDefaultProjects } from "@/shared/types/domain";
 import { ChatHomePage } from "./ChatHomePage";
 
 const createProjectMutateAsync = vi.fn();
+const setActiveProjectIdMock = vi.fn((projectId: string) => {
+  useAppStore.setState({ activeProjectId: projectId });
+});
 
 vi.mock("@/features/chat", () => ({
   ChatComposer: ({ activeProjectId }: { activeProjectId: string }) => (
@@ -23,8 +26,10 @@ vi.mock("@/features/chat", () => ({
   useModelsQuery: () => ({
     data: [{ id: "glm-5", name: "GLM-5" }],
   }),
-  useProjectsQuery: () => ({
-    data: [],
+  useProjectsView: () => ({
+    activeProjectId: useAppStore.getState().activeProjectId,
+    projects: useAppStore.getState().projects,
+    setActiveProjectId: setActiveProjectIdMock,
   }),
 }));
 
@@ -72,7 +77,7 @@ describe("ChatHomePage", () => {
     );
 
     await waitFor(() => {
-      expect(useAppStore.getState().activeProjectId).toBe(createDefaultProjects()[0]?.id);
+      expect(setActiveProjectIdMock).toHaveBeenCalledWith(createDefaultProjects()[0]?.id);
     });
 
     expect(screen.getByTestId("composer-project").textContent).toBe(createDefaultProjects()[0]?.id);

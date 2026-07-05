@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { resolveServerBaseUrl } from "./store";
+import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 
 describe("connection store", () => {
   it("uses the current browser origin as the default server URL", () => {

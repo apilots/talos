@@ -22,6 +22,7 @@ function buildConnection(
     authRole,
     authStatus,
     authToken: authStatus === "authenticated" ? "cloud-token" : "",
+    accountType: "Pro",
     authUsername: authRole,
     runtimeMode: "local",
     userId: `${authRole}-1`,

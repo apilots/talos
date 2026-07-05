@@ -1,7 +1,7 @@
 import { createBrowserTalosClient } from "@talos/sdk-browser";
 
-import { resolveServerBaseUrl } from "@/features/connection/store";
 import { createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
+import { resolveServerBaseUrl } from "./server-base-url";
 import { getConnectionSettings } from "@/shared/store/app-store";
 
 export type TalosWebClient = ReturnType<typeof createBrowserTalosClient>;

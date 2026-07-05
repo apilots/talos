@@ -126,6 +126,7 @@ write_cloud_session_cache() {
   local username="$3"
   local email="$4"
   local role="$5"
+  local user_type="$6"
   mkdir -p "${TALOS_HOME}/auth"
   CLOUD_TOKEN="${token}" \
   CLOUD_BASE_URL="${CLOUD_BASE_URL}" \
@@ -133,6 +134,7 @@ write_cloud_session_cache() {
   CLOUD_USERNAME="${username}" \
   CLOUD_EMAIL="${email}" \
   CLOUD_ROLE="${role}" \
+  CLOUD_USER_TYPE="${user_type}" \
   CACHE_PATH="${TALOS_HOME}/auth/cloud-session.json" \
   python3 - <<'PY'
 import json
@@ -142,7 +144,7 @@ from pathlib import Path
 
 now_ms = int(time.time() * 1000)
 entry = {
-    "schema_version": 1,
+    "schema_version": 2,
     "cloud_api_base_url": os.environ["CLOUD_BASE_URL"],
     "access_token": os.environ["CLOUD_TOKEN"],
     "token_type": "Bearer",
@@ -153,6 +155,7 @@ entry = {
         "username": os.environ["CLOUD_USERNAME"],
         "email": os.environ["CLOUD_EMAIL"],
         "role": os.environ["CLOUD_ROLE"],
+        "type": os.environ["CLOUD_USER_TYPE"],
     },
 }
 path = Path(os.environ["CACHE_PATH"])
@@ -181,6 +184,7 @@ CLOUD_TOKEN="$(json_get "${LAST_BODY}" "access_token")"
 CLOUD_USER_ID="$(json_get "${LAST_BODY}" "user.user_id")"
 CLOUD_USERNAME="$(json_get "${LAST_BODY}" "user.username")"
 CLOUD_ROLE="$(json_get "${LAST_BODY}" "user.role")"
+CLOUD_USER_TYPE="$(json_get "${LAST_BODY}" "user.type")"
 
 request_json "${CLOUD_BASE_URL}" POST "/v1/auth/introspect" 200 "{\"token\":\"${CLOUD_TOKEN}\"}"
 cloud_active="$(json_get "${LAST_BODY}" "active")"
@@ -206,11 +210,12 @@ echo "CASE talos_user_rejects_invalid_cloud_token PASS"
 request_json "${GATEWAY_URL}" GET "/v1/user" 200 "" "${CLOUD_TOKEN}"
 talos_user_id="$(json_get "${LAST_BODY}" "user.user_id")"
 talos_user_role="$(json_get "${LAST_BODY}" "user.role")"
-if [[ "${talos_user_id}" != "${CLOUD_USER_ID}" || "${talos_user_role}" != "${CLOUD_ROLE}" ]]; then
+talos_user_type="$(json_get "${LAST_BODY}" "user.type")"
+if [[ "${talos_user_id}" != "${CLOUD_USER_ID}" || "${talos_user_role}" != "${CLOUD_ROLE}" || "${talos_user_type}" != "${CLOUD_USER_TYPE}" ]]; then
   fail_case "talos /v1/user mismatch body=${LAST_BODY}"
 fi
 log_case_json "talos_cloud_user" "{\"path\":\"/v1/user\"}" "${LAST_BODY}"
-echo "CASE talos_user_accepts_real_cloud_token PASS user_id=${talos_user_id}"
+echo "CASE talos_user_accepts_real_cloud_token PASS user_id=${talos_user_id} type=${talos_user_type}"
 
 stop_server
 
@@ -219,7 +224,8 @@ write_cloud_session_cache \
   "${CLOUD_USER_ID}" \
   "${CLOUD_USERNAME}" \
   "${ADMIN_EMAIL}" \
-  "${CLOUD_ROLE}"
+  "${CLOUD_ROLE}" \
+  "${CLOUD_USER_TYPE}"
 
 build_app_server_binaries
 export TALOS_APP_SERVER_BIN="${TALOS_RS_DIR}/target/debug/app-server"

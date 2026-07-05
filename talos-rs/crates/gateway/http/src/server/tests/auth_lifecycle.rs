@@ -95,23 +95,29 @@ fn test_cloud_session_entry(
     token: &str,
     last_used_at_ms: i64,
 ) -> talos_auth::CloudSessionCacheEntry {
-    talos_auth::CloudSessionCacheEntry {
-        schema_version: 1,
-        cloud_api_base_url: "http://127.0.0.1:8080".to_string(),
-        access_token: token.to_string(),
-        token_type: "Bearer".to_string(),
-        expires_at_ms: Some(
+    let user = talos_auth::UserDto {
+        user_id: "user-1".to_string(),
+        username: "user-1".to_string(),
+        email: Some("user@example.com".to_string()),
+        role: talos_auth::UserRole::User,
+        r#type: talos_auth::UserType::Free,
+        disabled: false,
+        created_at: 0,
+        updated_at: 0,
+    };
+    let mut entry = talos_auth::CloudSessionCacheEntry::from_verified_user(
+        "http://127.0.0.1:8080",
+        token,
+        "Bearer",
+        Some(
             talos_auth::CloudSessionCache::now_ms()
                 + talos_auth::DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS,
         ),
-        last_used_at_ms,
-        user: talos_auth::CloudSessionUserSnapshot {
-            user_id: "user-1".to_string(),
-            username: "user-1".to_string(),
-            email: Some("user@example.com".to_string()),
-            role: talos_auth::UserRole::User,
-        },
-    }
+        &user,
+        talos_auth::CloudSessionCache::now_ms(),
+    );
+    entry.last_used_at_ms = last_used_at_ms;
+    entry
 }
 
 #[tokio::test]

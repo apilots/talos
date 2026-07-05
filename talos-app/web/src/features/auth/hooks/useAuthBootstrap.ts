@@ -7,7 +7,7 @@ import {
   getGatewayHealth,
   readDesktopCloudSession,
 } from "../api";
-import { resolveServerBaseUrl } from "@/features/connection/store";
+import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { useConnectionSettings } from "@/features/connection";
 
 export function useAuthBootstrap() {
@@ -42,6 +42,7 @@ export function useAuthBootstrap() {
             authToken: "",
             authUsername: "Anonymous",
             authRole: "user",
+            accountType: "Free",
             userId: "anonymous",
           });
           return;
@@ -64,6 +65,7 @@ export function useAuthBootstrap() {
           authStatus: "authenticated",
           authUsername: user.username,
           authRole: user.role,
+          accountType: user.type,
           userId: user.user_id,
         });
       })
@@ -78,6 +80,7 @@ export function useAuthBootstrap() {
           authToken: "",
           authUsername: "Anonymous",
           authRole: "user",
+          accountType: "Free",
           userId: "anonymous",
         });
       })

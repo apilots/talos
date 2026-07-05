@@ -1,7 +1,5 @@
 use super::*;
-use talos_auth::{
-    CloudSessionCacheEntry, CloudSessionUserSnapshot, UserDto, UserRole, UserService,
-};
+use talos_auth::{CloudSessionCacheEntry, UserDto, UserRole, UserService, UserType};
 use talos_error::{TalosError, TalosResult};
 
 #[derive(Default)]
@@ -38,6 +36,7 @@ impl UserService for FakeAuthService {
                 .unwrap_or_else(|| actor.user_id.clone()),
             email: None,
             role: actor.role,
+            r#type: UserType::Free,
             disabled: false,
             created_at: 0,
             updated_at: 0,
@@ -119,20 +118,24 @@ async fn rejected_existing_token_clears_cache() {
 }
 
 fn test_entry(token: &str, last_used_at_ms: i64) -> CloudSessionCacheEntry {
-    CloudSessionCacheEntry {
-        schema_version: 1,
-        cloud_api_base_url: "http://127.0.0.1:8080".to_string(),
-        access_token: token.to_string(),
-        token_type: "Bearer".to_string(),
-        expires_at_ms: Some(
-            CloudSessionCache::now_ms() + talos_auth::DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS,
-        ),
-        last_used_at_ms,
-        user: CloudSessionUserSnapshot {
-            user_id: "user-1".to_string(),
-            username: "user-1".to_string(),
-            email: Some("user@example.com".to_string()),
-            role: UserRole::User,
-        },
-    }
+    let user = UserDto {
+        user_id: "user-1".to_string(),
+        username: "user-1".to_string(),
+        email: Some("user@example.com".to_string()),
+        role: UserRole::User,
+        r#type: UserType::Free,
+        disabled: false,
+        created_at: 0,
+        updated_at: 0,
+    };
+    let mut entry = CloudSessionCacheEntry::from_verified_user(
+        "http://127.0.0.1:8080",
+        token,
+        "Bearer",
+        Some(CloudSessionCache::now_ms() + talos_auth::DEFAULT_CLOUD_SESSION_IDLE_TIMEOUT_MS),
+        &user,
+        CloudSessionCache::now_ms(),
+    );
+    entry.last_used_at_ms = last_used_at_ms;
+    entry
 }

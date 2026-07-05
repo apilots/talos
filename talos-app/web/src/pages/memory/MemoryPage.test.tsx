@@ -65,6 +65,11 @@ describe("MemoryPage", () => {
       connection: {
         authStatus: "authenticated",
         authRole: "user",
+        accountType: "Free",
+        authToken: "",
+        authUsername: "user",
+        runtimeMode: "local",
+        userId: "user",
       },
     });
     useMemoryPageMock.mockReturnValue(buildMemoryState());

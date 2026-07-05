@@ -34,6 +34,15 @@ impl UserRole {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+pub enum UserType {
+    #[default]
+    Free,
+    Plus,
+    Pro,
+    Max,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestIdentity {
     pub user_id: String,
@@ -70,6 +79,7 @@ pub struct UserDto {
     pub username: String,
     pub email: Option<String>,
     pub role: UserRole,
+    pub r#type: UserType,
     pub disabled: bool,
     #[ts(type = "number")]
     pub created_at: i64,

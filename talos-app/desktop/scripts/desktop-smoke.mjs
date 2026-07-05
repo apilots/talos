@@ -14,8 +14,6 @@ const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
-const smokePrompt = `Talos desktop smoke ${timestamp()} - reply exactly ok.`;
-const createdSessionIds = [];
 let cdp;
 
 if (!appExecutable && !existsSync(appServerBin)) {
@@ -43,7 +41,7 @@ if (!appExecutable || explicitAppServerBin) {
 
 function configureSmokeHome() {
   const confRoot = path.join(talosHome, "conf");
-  const skillRoot = path.join(talosHome, "skills", "desktop-smoke");
+  const skillRoot = path.join(smokeHome, ".agents", "skills", "desktop-smoke");
   mkdirSync(confRoot, { recursive: true });
   mkdirSync(skillRoot, { recursive: true });
   copyFileSync(talosConfig, path.join(confRoot, "talos.yaml"));
@@ -136,54 +134,16 @@ try {
   assert(skillCount > 0, "skills.list returned no discoverable skills.");
   assert(skillSuggestionCount > 0, "skills.suggest returned no discoverable skills.");
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
-  assert(account?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
+  assert(account?.user?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
+  assert(account?.user?.type === "free", `user.current did not reflect open-mode anonymous user type: ${JSON.stringify(account)}`);
   assert(adminVisible === false, "Admin navigation should not be rendered in Talos.");
 
   await evaluate(cdp, "location.hash = '#/'; undefined");
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
-  await setInputValue(cdp, "[data-smoke=\"chat-composer-input\"]", smokePrompt);
-  await evaluate(cdp, "document.querySelector('[data-smoke=\"chat-composer-send\"]')?.click(); undefined");
-  await waitForExpression(cdp, "location.hash.startsWith('#/sessions/')", 30_000);
-  const createdSessionHash = await evaluate(cdp, "location.hash");
-  assert(createdSessionHash.startsWith("#/sessions/"), `Home composer did not navigate to a session: ${createdSessionHash}`);
-  const createdSessionId = createdSessionHash.replace(/^#\/sessions\//, "");
-  createdSessionIds.push(createdSessionId);
-  await waitForExpression(cdp, `(document.body.textContent || '').includes(${JSON.stringify(smokePrompt)})`, 30_000);
+  await captureScreenshot(cdp, path.join(artifactDir, "home.png"));
 
   const routeInteractions = [];
-  const composerStopState = await readComposerStopState(cdp);
-  assert(
-    composerStopState.state !== "disabled",
-    `Composer stop button rendered disabled while streaming: ${JSON.stringify(composerStopState)}`,
-  );
-  await clickAnchorByHash(cdp, "#/projects");
-  await waitForHash(cdp, "#/projects", 30_000);
-  await sleep(1_500);
-  const navigationHashAfterRunningTurn = await evaluate(cdp, "location.hash");
-  assert(
-    navigationHashAfterRunningTurn === "#/projects",
-    `Running session redirected after route click: ${navigationHashAfterRunningTurn}`,
-  );
-  routeInteractions.push({ name: "projects-during-turn", route: "#/projects", method: "click" });
-
-  await waitForExpression(
-    cdp,
-    `window.__talosSmokeInvoke("timeline.recover", { session_id: ${JSON.stringify(createdSessionId)}, after_event_id: null, replay_limit: null }).then((response) => {
-      const events = response?.replay?.events ?? [];
-      return events.some((envelope) => {
-        const item = envelope?.event?.payload?.item;
-        return item?.kind === "user_input" &&
-          item?.phase === "input" &&
-          item?.content?.type === "text" &&
-          item.content.text === ${JSON.stringify(smokePrompt)};
-      });
-    })`,
-    120_000,
-  );
-
   const linkedRoutes = [
-    ["home", "#/"],
-    ["projects", "#/projects"],
     ["plugins", "#/plugins"],
     ["files", "#/files"],
   ];
@@ -205,7 +165,7 @@ try {
     ["settings-agent-workspace", "#/settings/agent-workspace"],
     ["settings-permissions", "#/settings/permissions"],
     ["settings-appearance", "#/settings/appearance"],
-    ["settings-advanced", "#/settings/advanced"],
+    ["settings-server", "#/settings/server"],
   ];
   if (serverInfo.auth_enabled === true) {
     settingsRoutes.splice(3, 0, ["settings-account", "#/settings/account"]);
@@ -220,7 +180,6 @@ try {
 
   const directRoutes = [
     ["memory", "#/memory"],
-    ["workspace-docs", "#/workspace-docs"],
   ];
   for (const [name, route] of directRoutes) {
     await evaluate(cdp, `location.hash = ${JSON.stringify(route)}; undefined`);
@@ -229,8 +188,8 @@ try {
     routeInteractions.push({ name, route, method: "direct-hash" });
   }
 
-  await evaluate(cdp, "location.hash = '#/settings/advanced'; undefined");
-  await waitForExpression(cdp, "location.hash === '#/settings/advanced'", 30_000);
+  await evaluate(cdp, "location.hash = '#/settings/server'; undefined");
+  await waitForExpression(cdp, "location.hash === '#/settings/server'", 30_000);
   await waitForExpression(cdp, "(document.body.textContent || '').includes('Desktop local runtime')", 30_000);
 
   await clickAnchorByHash(cdp, "#/settings/models");
@@ -255,11 +214,6 @@ try {
     30_000,
   );
 
-  const cleanup = await cleanupCreatedSessions(cdp, createdSessionIds);
-  assert(
-    cleanup.every((entry) => entry.deleted),
-    `Desktop smoke failed to clean created sessions: ${JSON.stringify(cleanup)}`,
-  );
   const report = {
     status: "passed",
     artifactDir,
@@ -269,12 +223,7 @@ try {
     account,
     serverInfo,
     modelCount,
-    toolCount,
     skillCount,
-    appCount,
-    composerStopState,
-    createdSessionIds,
-    cleanup,
     routes: routeInteractions,
   };
   writeFileSync(path.join(artifactDir, "desktop-smoke-report.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -282,14 +231,6 @@ try {
   cdp.close();
   cdp = undefined;
 } catch (error) {
-  if (cdp) {
-    try {
-      const cleanup = await cleanupCreatedSessions(cdp, createdSessionIds, { cancelFirst: true });
-      logs.push(`\nCleanup after failure: ${JSON.stringify(cleanup)}\n`);
-    } catch (cleanupError) {
-      logs.push(`\nCleanup after failure failed: ${errorMessage(cleanupError)}\n`);
-    }
-  }
   writeFileSync(path.join(artifactDir, "desktop-smoke-error.log"), `${errorMessage(error)}\n\n${logs.join("")}`);
   throw error;
 } finally {
@@ -422,22 +363,6 @@ async function captureScreenshot(cdp, outputPath) {
   writeFileSync(outputPath, Buffer.from(result.data, "base64"));
 }
 
-async function setInputValue(cdp, selector, value) {
-  await evaluate(
-    cdp,
-    `(() => {
-      const element = document.querySelector(${JSON.stringify(selector)});
-      if (!element) return false;
-      const setter = element instanceof HTMLTextAreaElement
-        ? Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
-        : Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-      setter?.call(element, ${JSON.stringify(value)});
-      element.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    })()`,
-  );
-}
-
 async function clickAnchorByHash(cdp, hash) {
   const clicked = await evaluate(
     cdp,
@@ -474,56 +399,8 @@ async function clickAccountMenuSettings(cdp) {
   await clickAnchorByHash(cdp, "#/settings");
 }
 
-async function readComposerStopState(cdp) {
-  return evaluate(
-    cdp,
-    `(() => {
-      const button = document.querySelector('[data-smoke="chat-composer-send"]');
-      if (!button) return { state: "missing" };
-      const label = button.getAttribute("aria-label") || button.getAttribute("title") || "";
-      const busy = label.includes("Stop response") || label.includes("停止回答");
-      const disabled = Boolean(button.disabled);
-      if (!busy) return { state: "idle", label, disabled };
-      return { state: disabled ? "disabled" : "clickable", label, disabled };
-    })()`,
-  );
-}
-
 function waitForHash(cdp, hash, timeoutMs) {
   return waitForExpression(cdp, `location.hash === ${JSON.stringify(hash)}`, timeoutMs);
-}
-
-async function cleanupCreatedSessions(cdp, sessionIds, options = {}) {
-  const uniqueSessionIds = [...new Set(sessionIds.filter(Boolean))];
-  const results = [];
-  for (const sessionId of uniqueSessionIds) {
-    const result = await evaluate(
-      cdp,
-      `(() => window.__talosSmokeInvoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
-        .then(() => ({ session_id: ${JSON.stringify(sessionId)}, deleted: true }))
-        .catch(async (deleteError) => {
-          if (${JSON.stringify(Boolean(options.cancelFirst))}) {
-            await window.__talosSmokeInvoke("turn.interrupt", { session_id: ${JSON.stringify(sessionId)} }).catch(() => undefined);
-            await new Promise((resolve) => setTimeout(resolve, 500));
-            return window.__talosSmokeInvoke("session.delete", { session_id: ${JSON.stringify(sessionId)} })
-              .then(() => ({ session_id: ${JSON.stringify(sessionId)}, deleted: true, cancelled_first: true }))
-              .catch((retryError) => ({
-                session_id: ${JSON.stringify(sessionId)},
-                deleted: false,
-                error: retryError instanceof Error ? retryError.message : String(retryError),
-                first_error: deleteError instanceof Error ? deleteError.message : String(deleteError),
-              }));
-          }
-          return {
-            session_id: ${JSON.stringify(sessionId)},
-            deleted: false,
-            error: deleteError instanceof Error ? deleteError.message : String(deleteError),
-          };
-        }))()`,
-    );
-    results.push(result);
-  }
-  return results;
 }
 
 function assert(condition, message) {

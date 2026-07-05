@@ -6,7 +6,7 @@ use cloud_sdk_rs::cloud_types::{
     AuthResponseDto, CurrentUserDto, DeviceClientKindDto, DeviceLoginCancelRequestDto,
     DeviceLoginPollRequestDto, DeviceLoginPollResponseDto, DeviceLoginStartRequestDto,
     IntrospectionRequestDto, IntrospectionResponseDto, LogoutResponseDto, UserRoleDto,
-    UserStatusDto,
+    UserStatusDto, UserTypeDto,
 };
 use cloud_sdk_rs::{CloudSdkError, TalosCloudClient};
 use schemars::JsonSchema;
@@ -16,7 +16,7 @@ use ts_rs::TS;
 
 use crate::{
     AuthResponse, AuthService, CloudSessionCache, CloudSessionCacheEntry, CloudSessionCacheManager,
-    RequestIdentity, UserDto, UserRole, UserService,
+    RequestIdentity, UserDto, UserRole, UserService, UserType,
 };
 
 #[derive(Debug, Clone)]
@@ -379,6 +379,7 @@ fn map_user(user: CurrentUserDto) -> UserDto {
         username: user.username,
         email: Some(user.email),
         role: map_role(user.role),
+        r#type: map_user_type(user.user_type),
         disabled: user.disabled,
         created_at: user.created_at_ms,
         updated_at: user.updated_at_ms,
@@ -389,6 +390,15 @@ fn map_role(value: UserRoleDto) -> UserRole {
     match value {
         UserRoleDto::User => UserRole::User,
         UserRoleDto::Admin => UserRole::Admin,
+    }
+}
+
+fn map_user_type(value: UserTypeDto) -> UserType {
+    match value {
+        UserTypeDto::Free => UserType::Free,
+        UserTypeDto::Plus => UserType::Plus,
+        UserTypeDto::Pro => UserType::Pro,
+        UserTypeDto::Max => UserType::Max,
     }
 }
 

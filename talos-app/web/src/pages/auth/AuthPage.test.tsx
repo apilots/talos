@@ -66,6 +66,7 @@ describe("AuthPage", () => {
         username: "xiliu",
         email: null,
         role: "user",
+        type: "Pro",
         disabled: false,
         created_at: 0,
         updated_at: 0,
@@ -91,6 +92,7 @@ describe("AuthPage", () => {
         authToken: "",
         authStatus: "unauthenticated",
         authRole: "user",
+        accountType: "Free",
         authUsername: "Anonymous",
         userId: "anonymous",
       },
@@ -138,6 +140,7 @@ describe("AuthPage", () => {
     await waitFor(() => expect(getCloudLoginStatusMock).toHaveBeenCalledWith("dls_1"));
     await waitFor(() => expect(useAppStore.getState().connection.authStatus).toBe("authenticated"));
     expect(useAppStore.getState().connection.authUsername).toBe("xiliu");
+    expect(useAppStore.getState().connection.accountType).toBe("Pro");
     expect(useAppStore.getState().connection.authToken).toBe("web-token");
     expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1);
   });

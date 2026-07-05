@@ -46,9 +46,6 @@ export function useSessionQueryInvalidation(sessionId: string) {
       });
       updateCachedSessionLists(session);
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-      await queryClient.invalidateQueries({
-        queryKey: [...chatKeys.all, connectionKey, "projectSessions"],
-      });
       await queryClient.refetchQueries({
         queryKey: chatKeys.sessions(connectionKey),
         type: "active",
@@ -63,13 +60,6 @@ export function useSessionQueryInvalidation(sessionId: string) {
   function updateCachedSessionLists(session: SessionInfo) {
     queryClient.setQueriesData<SessionInfo[]>(
       { queryKey: chatKeys.sessions(connectionKey) },
-      (sessions) =>
-        sessions?.map((entry) =>
-          entry.id === session.id ? session : entry,
-        ),
-    );
-    queryClient.setQueriesData<SessionInfo[]>(
-      { queryKey: [...chatKeys.all, connectionKey, "projectSessions"] },
       (sessions) =>
         sessions?.map((entry) =>
           entry.id === session.id ? session : entry,

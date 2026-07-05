@@ -2,8 +2,8 @@ import type { AppProtocol } from "@talos/sdk-core";
 import type { UserDto } from "@talos/sdk-browser";
 import { getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
 
-import { resolveServerBaseUrl } from "@/features/connection/store";
 import { getTalosClient } from "@/shared/api/client";
+import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { getDesktopBridge, isDesktopRuntime } from "@/shared/api/desktop-client";
 
 export interface HealthResponse {

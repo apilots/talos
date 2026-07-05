@@ -494,7 +494,7 @@ export type AuthSessionClearResponse = { success: boolean, };
 
 export type AuthSessionSnapshot = { schema_version: number, cloud_api_base_url: string, access_token: string, token_type: string, expires_at_ms: string | null, last_used_at_ms: string, user: AuthSessionUserSnapshot, };
 
-export type AuthSessionUserSnapshot = { user_id: string, username: string, email: string | null, role: UserRole, };
+export type AuthSessionUserSnapshot = { user_id: string, username: string, email: string | null, role: UserRole, type: UserType, };
 
 export type UserCurrentRequest = Record<string, never>;
 
@@ -504,7 +504,9 @@ export type MemorySearchRequest = { query: string, limit?: number, date_from?: s
 
 export type UserRole = "user" | "admin";
 
-export type UserDto = { user_id: string, username: string, email: string | null, role: UserRole, disabled: boolean, created_at: number, updated_at: number, };
+export type UserType = "Free" | "Plus" | "Pro" | "Max";
+
+export type UserDto = { user_id: string, username: string, email: string | null, role: UserRole, type: UserType, disabled: boolean, created_at: number, updated_at: number, };
 
 export type OptionalProjectIdPatch = { "type": "set", project_id: string, } | { "type": "clear" };
 

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -6,7 +6,7 @@ import {
   ChatComposer,
   useChatSession,
   useModelsQuery,
-  useProjectsQuery,
+  useProjectsView,
   useSessionQuery,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
@@ -16,9 +16,9 @@ import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
-import { Panel } from "@/shared/ui/Panel";
-import { Button } from "@/shared/ui/Button";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
+import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
+import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import type { ModelInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
@@ -48,21 +48,16 @@ export function ChatSessionPage() {
   const location = useLocation();
   const sessionId = params.sessionId ?? "";
   const initialPromptHandledRef = useRef(false);
-  const messageViewportRef = useRef<HTMLDivElement | null>(null);
-  const messageContentRef = useRef<HTMLDivElement | null>(null);
-  const messageEndRef = useRef<HTMLDivElement | null>(null);
   const mountedRef = useRef(false);
   const activeSessionIdRef = useRef(sessionId);
-  const stickToBottomRef = useRef(true);
   const locationState = location.state as SessionLocationState | null;
   const [draftModel, setDraftModel] = useState<string | undefined>(locationState?.initialModel);
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
     locationState?.initialProjectId,
   );
-
   const { data: session } = useSessionQuery(sessionId);
   const { data: models } = useModelsQuery();
-  useProjectsQuery();
+  const projectsView = useProjectsView();
   const {
     blocks,
     draft,
@@ -78,15 +73,21 @@ export function ChatSessionPage() {
     showReconnectControls,
     stopResponse,
     streamError,
+    sessionHistoryQuery,
   } = useChatSession(sessionId, session?.message_count, session?.title);
   const updateModel = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
-  const projects = useAppStore((state) => state.projects);
-  const activeProjectId = useAppStore((state) => state.activeProjectId);
-  const setActiveProjectId = useAppStore((state) => state.setActiveProjectId);
+  const projects = projectsView.projects;
+  const sidebarOpen = useAppStore((state) => state.sidebarOpen);
+  const activeProjectId = projectsView.activeProjectId;
+  const setActiveProjectId = projectsView.setActiveProjectId;
   const currentModel = session ? getSessionModel(session) : draftModel ?? models?.[0]?.id;
+  const sessionHistoryError = sessionHistoryQuery.error;
+  const shouldShowMessageList =
+    blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
+  const autoScroll = useChatSessionAutoScroll({ blocks, sessionId, streamError });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -98,15 +99,6 @@ export function ChatSessionPage() {
   useEffect(() => {
     activeSessionIdRef.current = sessionId;
   }, [sessionId]);
-
-  const scrollToBottom = () => {
-    const viewport = messageViewportRef.current;
-    if (!viewport) {
-      return;
-    }
-    viewport.scrollTop = viewport.scrollHeight;
-    messageEndRef.current?.scrollIntoView({ block: "end" });
-  };
 
   const selectedProjectId = useMemo(() => {
     if (!session) {
@@ -126,8 +118,8 @@ export function ChatSessionPage() {
       return;
     }
     initialPromptHandledRef.current = true;
-    stickToBottomRef.current = true;
-    window.requestAnimationFrame(scrollToBottom);
+    autoScroll.stickToBottomRef.current = true;
+    window.requestAnimationFrame(autoScroll.scrollToBottom);
     const initialProject =
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
@@ -143,6 +135,8 @@ export function ChatSessionPage() {
         }
       });
   }, [
+    autoScroll.scrollToBottom,
+    autoScroll.stickToBottomRef,
     location.pathname,
     locationState?.initialModel,
     locationState?.initialProject,
@@ -156,54 +150,6 @@ export function ChatSessionPage() {
     sessionId,
   ]);
 
-  useEffect(() => {
-    stickToBottomRef.current = true;
-  }, [sessionId]);
-
-  useEffect(() => {
-    const content = messageContentRef.current;
-    if (!content || typeof ResizeObserver === "undefined") {
-      return;
-    }
-
-    const observer = new ResizeObserver(() => {
-      if (!stickToBottomRef.current) {
-        return;
-      }
-
-      const viewport = messageViewportRef.current;
-      if (!viewport) {
-        return;
-      }
-
-      viewport.scrollTop = viewport.scrollHeight;
-      messageEndRef.current?.scrollIntoView({ block: "end" });
-    });
-
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, []);
-
-  useLayoutEffect(() => {
-    const viewport = messageViewportRef.current;
-    if (!viewport || !stickToBottomRef.current) {
-      return;
-    }
-
-    const scrollToBottom = () => {
-      viewport.scrollTop = viewport.scrollHeight;
-      messageEndRef.current?.scrollIntoView({ block: "end" });
-    };
-
-    scrollToBottom();
-    const frameId = window.requestAnimationFrame(scrollToBottom);
-    const timeoutId = window.setTimeout(scrollToBottom, 120);
-    return () => {
-      window.cancelAnimationFrame(frameId);
-      window.clearTimeout(timeoutId);
-    };
-  }, [blocks, streamError, sessionId]);
-
   if (!sessionId) {
     navigate("/");
     return null;
@@ -211,45 +157,45 @@ export function ChatSessionPage() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
-      <ChatContextBar
-        loading={!session}
-        onProjectClick={
-          boundProject
-            ? () => {
-                navigate(`/projects/${boundProject.id}`);
-              }
-            : undefined
-        }
-        projectName={boundProject?.name}
-        sessionTitle={session?.title}
-      />
+      {sidebarOpen ? (
+        <ChatContextBar
+          loading={!session}
+          onProjectClick={
+            boundProject
+              ? () => {
+                  setActiveProjectId(boundProject.id);
+                  navigate("/");
+                }
+              : undefined
+          }
+          projectName={boundProject?.name}
+          sessionTitle={session?.title}
+        />
+      ) : null}
       <div
         className="min-h-0 flex-1 overflow-y-auto"
-        onScroll={(event) => {
-          const viewport = event.currentTarget;
-          const distanceToBottom =
-            viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
-          stickToBottomRef.current = distanceToBottom < 80;
-        }}
-        ref={messageViewportRef}
+        onScroll={(event) => autoScroll.handleScroll(event.currentTarget)}
+        ref={autoScroll.viewportRef}
       >
-        <div className="mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2 pt-5" ref={messageContentRef}>
-          <MessageList
-            actions={
-              <>
-                <Button onClick={() => navigate("/files")} variant="secondary">{t("chat:openFiles")}</Button>
-                <Button onClick={() => navigate("/settings/agent-workspace")} variant="secondary">{t("chat:openMemory")}</Button>
-                <Button onClick={() => navigate("/settings")} variant="secondary">{t("chat:openSettings")}</Button>
-              </>
-            }
-            blocks={blocks}
-            emptyDetail={t("chat:emptyReadyDetail")}
-            emptyTitle={t("chat:emptyReadyTitle")}
-          />
+        <div className="mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2 pt-5" ref={autoScroll.contentRef}>
+          {shouldShowMessageList ? (
+            <MessageList
+              actions={<ChatSessionMessageActions />}
+              blocks={blocks}
+              emptyDetail={t("chat:emptyReadyDetail")}
+              emptyTitle={t("chat:emptyReadyTitle")}
+            />
+          ) : null}
           {streamError ? (
-            <Panel className="rounded-[1.5rem] border-danger/30 bg-danger/5 p-4">
-              <div className="text-sm text-danger">{streamError}</div>
-            </Panel>
+            <ChatSessionErrorPanel title={streamError} />
+          ) : null}
+          {sessionHistoryError ? (
+            <ChatSessionErrorPanel
+              detail={sessionHistoryError instanceof Error
+                ? sessionHistoryError.message
+                : t("chat:unknownSessionHistoryError")}
+              title={t("chat:sessionHistoryFailed")}
+            />
           ) : null}
           {showReconnectControls ? (
             <ChatSessionReconnectPanel
@@ -260,7 +206,7 @@ export function ChatSessionPage() {
               onStopResponse={() => void stopResponse()}
             />
           ) : null}
-          <div aria-hidden="true" ref={messageEndRef} />
+          <div aria-hidden="true" ref={autoScroll.endRef} />
         </div>
       </div>
       <div className="mt-4 shrink-0">
@@ -302,8 +248,8 @@ export function ChatSessionPage() {
               }
             }}
             onSend={(skills) => {
-              stickToBottomRef.current = true;
-              window.requestAnimationFrame(scrollToBottom);
+              autoScroll.stickToBottomRef.current = true;
+              window.requestAnimationFrame(autoScroll.scrollToBottom);
               if (!session) {
                 const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
                 return sendTurn({

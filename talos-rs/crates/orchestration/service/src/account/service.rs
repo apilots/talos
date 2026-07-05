@@ -212,6 +212,7 @@ fn auth_session_snapshot_from_cache_entry(entry: CloudSessionCacheEntry) -> Auth
             username: entry.user.username,
             email: entry.user.email,
             role: entry.user.role,
+            r#type: entry.user.r#type,
         },
     }
 }

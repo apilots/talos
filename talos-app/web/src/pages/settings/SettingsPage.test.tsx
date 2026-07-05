@@ -17,8 +17,10 @@ vi.mock("@/features/settings", async () => {
     SettingsAccountSection: () => <div>Account content</div>,
     SettingsAppearanceSection: () => <div>Appearance content</div>,
     SettingsGeneralSection: () => <div>General content</div>,
+    SettingsMcpServersSection: () => <div>MCP servers content</div>,
     SettingsModelsSection: () => <div>Models content</div>,
     SettingsPermissionsSection: () => <div>Permissions content</div>,
+    SettingsProfileSection: () => <div>Profile content</div>,
     SettingsServerSection: () => <div>Advanced content</div>,
     useSettingsPage: () => useSettingsPageMock(),
   };
@@ -33,6 +35,7 @@ function buildSettingsState(
       authStatus,
       authToken: authStatus === "authenticated" ? "cloud-token" : "",
       authRole,
+      accountType: "Pro",
       authUsername: authRole,
       userId: `${authRole}-1`,
       runtimeMode: "local",
@@ -100,6 +103,27 @@ describe("SettingsPage", () => {
 
   it("shows model settings for regular authenticated users", () => {
     renderSettings("/settings");
+
+    expect(screen.getByText("Profile content")).toBeTruthy();
+    expect(screen.getByText("Models")).toBeTruthy();
+  });
+
+  it("renders the mcp servers settings section", () => {
+    renderSettings("/settings/mcp-servers");
+
+    expect(screen.getByText("MCP servers content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "MCP servers" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("renders the server settings section", () => {
+    renderSettings("/settings/server");
+
+    expect(screen.getByText("Advanced content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Server" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("renders the general settings section", () => {
+    renderSettings("/settings/general");
 
     expect(screen.getByText("Models")).toBeTruthy();
     expect(screen.getByText("General content")).toBeTruthy();

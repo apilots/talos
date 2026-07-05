@@ -50,6 +50,7 @@ describe("useAuthBootstrap", () => {
         authToken: "",
         authStatus: "unknown",
         authRole: "user",
+        accountType: "Free",
         authUsername: "Anonymous",
         userId: "anonymous",
         runtimeMode: "local",
@@ -63,6 +64,7 @@ describe("useAuthBootstrap", () => {
       username: "ada",
       email: "ada@example.com",
       role: "admin",
+      type: "Max",
       disabled: false,
       created_at: 0,
       updated_at: 0,
@@ -75,6 +77,7 @@ describe("useAuthBootstrap", () => {
         user_id: "user-1",
         username: "ada",
         role: "admin",
+        type: "Max",
       },
     });
     getCurrentUserWithTokenMock.mockResolvedValue(user);
@@ -87,6 +90,7 @@ describe("useAuthBootstrap", () => {
     expect(getCurrentUserWithTokenMock).toHaveBeenCalledWith("cached-token");
     expect(getCurrentUserMock).not.toHaveBeenCalled();
     expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
+    expect(useAppStore.getState().connection.accountType).toBe("Max");
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 
@@ -96,6 +100,7 @@ describe("useAuthBootstrap", () => {
       username: "linus",
       email: null,
       role: "user",
+      type: "Plus",
       disabled: false,
       created_at: 0,
       updated_at: 0,
@@ -113,6 +118,7 @@ describe("useAuthBootstrap", () => {
     expect(getCurrentUserWithTokenMock).toHaveBeenCalledWith("memory-token");
     expect(getCurrentUserMock).not.toHaveBeenCalled();
     expect(readDesktopCloudSessionMock).not.toHaveBeenCalled();
+    expect(useAppStore.getState().connection.accountType).toBe("Plus");
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 

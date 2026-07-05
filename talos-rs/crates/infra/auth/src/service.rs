@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 
-use crate::{RequestIdentity, UserDto};
+use crate::{RequestIdentity, UserDto, UserType};
 
 #[async_trait]
 pub trait AuthService: Send + Sync {
@@ -28,6 +28,7 @@ impl UserService for OpenModeUserService {
                 .unwrap_or_else(|| actor.user_id.clone()),
             email: None,
             role: actor.role,
+            r#type: UserType::Free,
             disabled: false,
             created_at: 0,
             updated_at: 0,

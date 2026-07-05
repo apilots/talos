@@ -60,6 +60,7 @@ export function AuthPage() {
             authStatus: "authenticated",
             authUsername: response.user.username,
             authRole: response.user.role,
+            accountType: response.user.type,
             userId: response.user.user_id,
           });
           navigate(nextPath, { replace: true });
@@ -70,6 +71,7 @@ export function AuthPage() {
           authStatus: "unauthenticated",
           authUsername: "Anonymous",
           authRole: "user",
+          accountType: "Free",
           userId: "anonymous",
         });
         setError(response.status === "expired" ? "Cloud login expired." : "Cloud login was denied.");
@@ -80,6 +82,7 @@ export function AuthPage() {
           authStatus: "unauthenticated",
           authUsername: "Anonymous",
           authRole: "user",
+          accountType: "Free",
           userId: "anonymous",
         });
         setError("Cloud login status could not be verified.");

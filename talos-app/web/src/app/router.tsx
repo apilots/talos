@@ -11,17 +11,8 @@ const ChatHomePage = lazy(() =>
 const ChatSessionPage = lazy(() =>
   import("@/pages/chat/ChatSessionPage").then((module) => ({ default: module.ChatSessionPage })),
 );
-const ProjectsPage = lazy(() =>
-  import("@/pages/projects/ProjectsPage").then((module) => ({ default: module.ProjectsPage })),
-);
-const ProjectSessionsPage = lazy(() =>
-  import("@/pages/projects/ProjectSessionsPage").then((module) => ({ default: module.ProjectSessionsPage })),
-);
 const MemoryPage = lazy(() =>
   import("@/pages/memory/MemoryPage").then((module) => ({ default: module.MemoryPage })),
-);
-const WorkspaceDocsPage = lazy(() =>
-  import("@/pages/workspace-docs/WorkspaceDocsPage").then((module) => ({ default: module.WorkspaceDocsPage })),
 );
 const FilesPage = lazy(() =>
   import("@/pages/files/FilesPage").then((module) => ({ default: module.FilesPage })),
@@ -92,20 +83,8 @@ export const router = createRouter([
         element: withSuspense(<ChatSessionPage />),
       },
       {
-        path: "projects",
-        element: withSuspense(<ProjectsPage />),
-      },
-      {
-        path: "projects/:projectId",
-        element: withSuspense(<ProjectSessionsPage />),
-      },
-      {
         path: "memory",
         element: withSuspense(<MemoryPage />),
-      },
-      {
-        path: "workspace-docs",
-        element: withSuspense(<WorkspaceDocsPage />),
       },
       {
         path: "files",

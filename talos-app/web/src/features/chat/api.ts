@@ -71,15 +71,6 @@ export async function listSessions() {
   return response.sessions;
 }
 
-export async function listSessionsByProject(projectId: string) {
-  const response = await getTalosClient().sessions.list({
-    project_id: projectId,
-    limit: null,
-    offset: null,
-  });
-  return response.sessions;
-}
-
 export async function getSession(sessionId: string) {
   const response = await getTalosClient().sessions.get({ session_id: sessionId });
   return response.session;
@@ -150,6 +141,14 @@ export async function deleteProject(projectId: string) {
     }
     throw error;
   }
+}
+
+export async function updateProjectName(projectId: string, name: string) {
+  const response = await getTalosClient().projects.patch({
+    project_id: projectId,
+    name,
+  });
+  return mapProjectView(response.project);
 }
 
 export async function updateSessionProject(sessionId: string, project?: ProjectView) {

@@ -1,39 +1,58 @@
 import { useLocation, useNavigate } from "react-router-dom";
 
 import {
-  useDeleteSessionMutation,
+  useDeleteProjectMutation,
+  useProjectsView,
   useSessionsQuery,
+  useUpdateProjectNameMutation,
 } from "../hooks/useChatQueries";
 import { logoutUser } from "@/features/auth";
 import { useAppStore } from "@/shared/store/app-store";
-import { getEffectiveSessionStatus } from "@/shared/types/domain";
+import { getEffectiveSessionStatus, isUnboundProject } from "@/shared/types/domain";
 import { Sidebar } from "@/widgets/sidebar/Sidebar";
+import type { SidebarProjectGroup } from "@/widgets/sidebar/SidebarProjectSection";
+import type { SidebarSessionItem } from "@/widgets/sidebar/SidebarSessionRow";
 
 export function SidebarContainer() {
   const location = useLocation();
   const navigate = useNavigate();
-  const deleteSession = useDeleteSessionMutation();
-  const threadFilter = useAppStore((state) => state.threadFilter);
-  const setThreadFilter = useAppStore((state) => state.setThreadFilter);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
+  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
   const streams = useAppStore((state) => state.streams);
   const sessionsQuery = useSessionsQuery();
+  const deleteProject = useDeleteProjectMutation();
+  const updateProjectName = useUpdateProjectNameMutation();
+  const projectsView = useProjectsView();
+  const projects = projectsView.projects;
 
   const sessions = sessionsQuery.data ?? [];
-  const threads = sessions.map((session) => {
+  const threads: SidebarSessionItem[] = sessions.map((session) => {
     const sessionId = session.id;
     return {
       id: sessionId,
       label: aliases[sessionId] ?? session.title,
       status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
       model: session.model_ref?.id || "unknown",
+      projectId: session.project_id ?? null,
       lastActivityAt: session.last_activity,
       createdAt: session.created_at,
     };
   });
+  const projectIds = new Set(projects.map((project) => project.id));
+  const chats = threads.filter(
+    (thread) =>
+      isUnboundProject(thread.projectId) ||
+      (thread.projectId !== null && thread.projectId !== undefined && !projectIds.has(thread.projectId)),
+  );
+  const projectGroups: SidebarProjectGroup[] = projects
+    .filter((project) => !isUnboundProject(project.id))
+    .map((project) => ({
+      project,
+      sessions: threads.filter((thread) => thread.projectId === project.id),
+    }));
 
   async function handleLogout() {
     try {
@@ -43,6 +62,7 @@ export function SidebarContainer() {
         authToken: "",
         authStatus: "logged_out",
         authRole: "user",
+        accountType: "Free",
         authUsername: "Anonymous",
         userId: "anonymous",
       });
@@ -52,30 +72,27 @@ export function SidebarContainer() {
 
   return (
     <Sidebar
+      chats={chats}
       connection={connection}
       currentPath={location.pathname}
-      isHomePage={location.pathname === "/"}
-      onDeleteThread={async (sessionId) => {
-        await deleteSession.mutateAsync(sessionId);
-        if (location.pathname === `/sessions/${sessionId}`) {
-          navigate("/");
-        }
-      }}
+      onCollapse={() => setSidebarOpen(false)}
       onCreateThread={async () => {
         navigate("/");
       }}
-      onCycleThreadFilter={() =>
-        setThreadFilter(
-          threadFilter === "all"
-            ? "running"
-            : "all",
-        )
-      }
+      onCreateProjectThread={(projectId) => {
+        projectsView.setActiveProjectId(projectId);
+        navigate("/");
+      }}
+      onRemoveProject={async (projectId) => {
+        await deleteProject.mutateAsync(projectId);
+      }}
+      onRenameProject={async (projectId, name) => {
+        await updateProjectName.mutateAsync({ projectId, name });
+      }}
       onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}
-      threadCount={sessions.length}
-      threadFilter={threadFilter}
-      threads={threads}
       onLogout={handleLogout}
+      projectActionPending={deleteProject.isPending || updateProjectName.isPending}
+      projectGroups={projectGroups}
     />
   );
 }

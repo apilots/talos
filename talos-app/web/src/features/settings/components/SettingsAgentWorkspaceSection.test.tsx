@@ -15,7 +15,11 @@ vi.mock("@/features/connection", () => ({
     connection: {
       authStatus: "authenticated",
       authRole: "user",
+      accountType: "Free",
+      authToken: "",
+      authUsername: "alice",
       userId: "alice",
+      runtimeMode: "local",
     },
   }),
 }));

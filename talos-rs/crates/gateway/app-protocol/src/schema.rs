@@ -39,6 +39,13 @@ pub struct AppProtocolSchemaRoot {
     pub session_history_response: talos_types::SessionHistoryResponse,
     pub timeline_recovery_response: talos_types::TimelineRecoveryResponse,
     pub event_unsubscribe_response: talos_types::EventUnsubscribeResponse,
+    pub auth_logout_response: talos_types::AuthLogoutResponse,
+    pub cloud_login_start_response: talos_auth::CloudLoginStartResponse,
+    pub cloud_login_status_response: talos_auth::CloudLoginStatusResponse,
+    pub cloud_login_cancel_response: talos_types::CloudLoginCancelResponse,
+    pub auth_session_read_response: talos_types::AuthSessionReadResponse,
+    pub auth_session_clear_response: talos_types::AuthSessionClearResponse,
+    pub user_current_response: talos_types::UserCurrentResponse,
 }
 
 pub fn generate_json_schema() -> String {
@@ -300,6 +307,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::UserCurrentResponse>());
     output.push_str(&export::<talos_types::MemorySearchRequest>());
     output.push_str(&export::<talos_auth::UserRole>());
+    output.push_str(&export::<talos_auth::UserType>());
     output.push_str(&export::<talos_auth::UserDto>());
     output.push_str(&export::<talos_types::OptionalProjectIdPatch>());
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());

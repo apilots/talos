@@ -1,4 +1,4 @@
-export { ProjectRow } from "./components/ProjectRow";
-export { ProjectSessionRow } from "./components/ProjectSessionRow";
-export { useProjectSessionsPageState } from "./hooks/useProjectSessionsPageState";
-export { useProjectsPageState, type ProjectSort } from "./hooks/useProjectsPageState";
+export { ProjectDirectoryActions } from "./components/ProjectDirectoryActions";
+export { ProjectDirectoryBrowser } from "./components/ProjectDirectoryBrowser";
+export { ProjectDirectoryDialog } from "./components/ProjectDirectoryDialog";
+export type { ProjectDirectoryDialogMode } from "./components/ProjectDirectoryDialog";

@@ -52,6 +52,7 @@ pub struct AuthSessionUserSnapshot {
     #[serde(default)]
     pub email: Option<String>,
     pub role: talos_auth::UserRole,
+    pub r#type: talos_auth::UserType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]

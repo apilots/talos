@@ -1,5 +1,5 @@
 import { createDefaultProjects, getProjectViewKey } from "@/shared/types/domain";
-import type { ProjectView, ThreadFilter } from "@/shared/types/ui";
+import type { ProjectView } from "@/shared/types/ui";
 
 export type UiTheme = "dark" | "light";
 export type Locale = "en" | "zh-CN";
@@ -8,13 +8,11 @@ export interface UiSlice {
   uiTheme: UiTheme;
   locale: Locale;
   sidebarOpen: boolean;
-  threadFilter: ThreadFilter;
   activeProjectId: string;
   projects: ProjectView[];
   setUiTheme: (theme: UiTheme) => void;
   setLocale: (locale: Locale) => void;
   setSidebarOpen: (open: boolean) => void;
-  setThreadFilter: (filter: ThreadFilter) => void;
   setActiveProjectId: (projectId: string) => void;
   addProject: (project: ProjectView) => void;
   mergeProjects: (projects: ProjectView[], preferredProjectId?: string) => void;
@@ -91,13 +89,11 @@ export function createUiSlice(set: UiSliceSetter): UiSlice {
     uiTheme: "light",
     locale: "en",
     sidebarOpen: true,
-    threadFilter: "all",
     activeProjectId: defaultProjects[0].id,
     projects: defaultProjects,
     setUiTheme: (uiTheme) => set(() => ({ uiTheme })),
     setLocale: (locale) => set(() => ({ locale })),
     setSidebarOpen: (sidebarOpen) => set(() => ({ sidebarOpen })),
-    setThreadFilter: (threadFilter) => set(() => ({ threadFilter })),
     setActiveProjectId: (activeProjectId) => set(() => ({ activeProjectId })),
     addProject: (project) =>
       set((state) => ({

@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   mutateModel: vi.fn(),
   mutateProject: vi.fn(),
   session: undefined as unknown,
+  sessionHistoryError: undefined as Error | undefined,
+  sessionHistoryIsSuccess: true,
   composerProps: undefined as unknown,
 }));
 
@@ -53,9 +55,25 @@ vi.mock("@/features/chat", () => ({
     showReconnectControls: false,
     stopResponse: vi.fn(),
     streamError: undefined,
+    sessionHistoryQuery: {
+      error: mocks.sessionHistoryError,
+      isError: Boolean(mocks.sessionHistoryError),
+      isLoading: false,
+      isSuccess: mocks.sessionHistoryIsSuccess,
+    },
   }),
   useModelsQuery: () => ({ data: [{ id: "model-1", name: "Model 1", provider: "mock" }] }),
-  useProjectsQuery: () => ({ data: [] }),
+  useProjectsView: () => ({
+    activeProjectId: "__unbound_project__",
+    projects: [
+      {
+        id: "project-1",
+        name: "Project 1",
+        directory: "/tmp/project-1",
+      },
+    ],
+    setActiveProjectId: vi.fn(),
+  }),
   useSessionQuery: () => ({
     data: mocks.session,
   }),
@@ -66,18 +84,9 @@ vi.mock("@/features/chat", () => ({
 vi.mock("@/shared/store/app-store", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
-      activeProjectId: "__unbound_project__",
       connection: {
         runtimeMode: "local",
       },
-      projects: [
-        {
-          id: "project-1",
-          name: "Project 1",
-          directory: "/tmp/project-1",
-        },
-      ],
-      setActiveProjectId: vi.fn(),
       setConnection: vi.fn(),
     }),
 }));
@@ -85,8 +94,8 @@ vi.mock("@/shared/store/app-store", () => ({
 function NavigateAwayButton() {
   const navigate = useNavigate();
   return (
-    <button onClick={() => navigate("/projects")} type="button">
-      Projects
+    <button onClick={() => navigate("/settings")} type="button">
+      Settings
     </button>
   );
 }
@@ -104,6 +113,8 @@ describe("ChatSessionPage", () => {
       config: { llm: { model: "model-1" } },
       state: { message_count: 0 },
     };
+    mocks.sessionHistoryError = undefined;
+    mocks.sessionHistoryIsSuccess = true;
     mocks.composerProps = undefined;
     mocks.sendText.mockImplementation(
       () =>
@@ -198,7 +209,7 @@ describe("ChatSessionPage", () => {
             }
             path="/sessions/:sessionId"
           />
-          <Route element={<div>Projects page</div>} path="/projects" />
+          <Route element={<div>Settings page</div>} path="/settings" />
         </Routes>
       </MemoryRouter>,
     );
@@ -210,14 +221,44 @@ describe("ChatSessionPage", () => {
       });
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Projects" }));
-    expect(screen.getByText("Projects page")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByText("Settings page")).toBeTruthy();
 
     await act(async () => {
       resolveSend();
       await Promise.resolve();
     });
 
-    expect(screen.getByText("Projects page")).toBeTruthy();
+    expect(screen.getByText("Settings page")).toBeTruthy();
+  });
+
+  it("shows history errors instead of the empty ready state", () => {
+    mocks.sessionHistoryError = new Error("history parse failed");
+    mocks.sessionHistoryIsSuccess = false;
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Session history failed to load.")).toBeTruthy();
+    expect(screen.getByText("history parse failed")).toBeTruthy();
+    expect(screen.queryByText("This chat is ready.")).toBeNull();
+  });
+
+  it("shows the empty ready state after history loads successfully with no blocks", () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("This chat is ready.")).toBeTruthy();
+    expect(screen.queryByText("Session history failed to load.")).toBeNull();
   });
 });

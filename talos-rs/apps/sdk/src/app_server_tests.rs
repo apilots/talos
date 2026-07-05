@@ -195,6 +195,7 @@ fn authenticated_login_response(access_token: &str) -> CloudLoginStatusResponse 
             username: "ada".to_string(),
             email: None,
             role: talos_auth::UserRole::User,
+            r#type: talos_auth::UserType::Pro,
             disabled: false,
             created_at: 0,
             updated_at: 0,

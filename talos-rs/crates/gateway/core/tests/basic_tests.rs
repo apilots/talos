@@ -156,6 +156,7 @@ impl UserService for TestAuthService {
                 .unwrap_or_else(|| actor.user_id.clone()),
             email: None,
             role: actor.role,
+            r#type: talos_auth::UserType::Free,
             disabled: false,
             created_at: 0,
             updated_at: 0,

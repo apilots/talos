@@ -4,22 +4,26 @@ import { useModelsQuery } from "@/features/chat";
 import { useConnectionSettings } from "@/features/connection";
 
 export type SettingsSection =
+  | "profile"
   | "general"
   | "account"
+  | "appearance"
   | "models"
   | "agent-workspace"
   | "permissions"
-  | "appearance"
-  | "advanced";
+  | "mcp-servers"
+  | "server";
 
 export const settingsSections: SettingsSection[] = [
+  "profile",
   "general",
   "account",
+  "appearance",
   "models",
   "agent-workspace",
   "permissions",
-  "appearance",
-  "advanced",
+  "mcp-servers",
+  "server",
 ];
 
 export function isSettingsSection(section?: string): section is SettingsSection {

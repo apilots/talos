@@ -405,10 +405,118 @@
     "AuthLogoutRequest": {
       "type": "object"
     },
+    "AuthLogoutResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
     "AuthSessionClearRequest": {
       "type": "object"
     },
+    "AuthSessionClearResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
     "AuthSessionReadRequest": {
+      "type": "object"
+    },
+    "AuthSessionReadResponse": {
+      "properties": {
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuthSessionSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "AuthSessionSnapshot": {
+      "properties": {
+        "access_token": {
+          "type": "string"
+        },
+        "cloud_api_base_url": {
+          "type": "string"
+        },
+        "expires_at_ms": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "last_used_at_ms": {
+          "type": "string"
+        },
+        "schema_version": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "token_type": {
+          "type": "string"
+        },
+        "user": {
+          "$ref": "#/definitions/AuthSessionUserSnapshot"
+        }
+      },
+      "required": [
+        "access_token",
+        "cloud_api_base_url",
+        "last_used_at_ms",
+        "schema_version",
+        "token_type",
+        "user"
+      ],
+      "type": "object"
+    },
+    "AuthSessionUserSnapshot": {
+      "properties": {
+        "email": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/UserRole"
+        },
+        "type": {
+          "$ref": "#/definitions/UserType"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "type",
+        "user_id",
+        "username"
+      ],
       "type": "object"
     },
     "ClientCapabilities": {
@@ -1646,6 +1754,17 @@
       ],
       "type": "object"
     },
+    "CloudLoginCancelResponse": {
+      "properties": {
+        "success": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "type": "object"
+    },
     "CloudLoginClientKind": {
       "enum": [
         "web",
@@ -1670,6 +1789,36 @@
       ],
       "type": "object"
     },
+    "CloudLoginStartResponse": {
+      "properties": {
+        "expires_at_ms": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "interval_ms": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "login_id": {
+          "type": "string"
+        },
+        "login_url": {
+          "type": "string"
+        },
+        "user_code": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "expires_at_ms",
+        "interval_ms",
+        "login_id",
+        "login_url",
+        "user_code"
+      ],
+      "type": "object"
+    },
     "CloudLoginStatusRequest": {
       "properties": {
         "login_id": {
@@ -1680,6 +1829,84 @@
         "login_id"
       ],
       "type": "object"
+    },
+    "CloudLoginStatusResponse": {
+      "oneOf": [
+        {
+          "properties": {
+            "interval_ms": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "pending"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "interval_ms",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "access_token": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "authenticated"
+              ],
+              "type": "string"
+            },
+            "token_type": {
+              "type": "string"
+            },
+            "user": {
+              "$ref": "#/definitions/UserDto"
+            }
+          },
+          "required": [
+            "access_token",
+            "status",
+            "token_type",
+            "user"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "denied"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "expired"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "ConfigDeleteRequest": {
       "properties": {
@@ -5591,6 +5818,76 @@
     "UserCurrentRequest": {
       "type": "object"
     },
+    "UserCurrentResponse": {
+      "properties": {
+        "user": {
+          "$ref": "#/definitions/UserDto"
+        }
+      },
+      "required": [
+        "user"
+      ],
+      "type": "object"
+    },
+    "UserDto": {
+      "properties": {
+        "created_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "disabled": {
+          "type": "boolean"
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/definitions/UserRole"
+        },
+        "type": {
+          "$ref": "#/definitions/UserType"
+        },
+        "updated_at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "user_id": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "created_at",
+        "disabled",
+        "role",
+        "type",
+        "updated_at",
+        "user_id",
+        "username"
+      ],
+      "type": "object"
+    },
+    "UserRole": {
+      "enum": [
+        "user",
+        "admin"
+      ],
+      "type": "string"
+    },
+    "UserType": {
+      "enum": [
+        "Free",
+        "Plus",
+        "Pro",
+        "Max"
+      ],
+      "type": "string"
+    },
     "WorkspaceDocKind": {
       "enum": [
         "soul",
@@ -5642,11 +5939,29 @@
     }
   },
   "properties": {
+    "auth_logout_response": {
+      "$ref": "#/definitions/AuthLogoutResponse"
+    },
+    "auth_session_clear_response": {
+      "$ref": "#/definitions/AuthSessionClearResponse"
+    },
+    "auth_session_read_response": {
+      "$ref": "#/definitions/AuthSessionReadResponse"
+    },
     "client_request": {
       "$ref": "#/definitions/ClientRequest"
     },
     "client_request_params": {
       "$ref": "#/definitions/ClientRequestParams"
+    },
+    "cloud_login_cancel_response": {
+      "$ref": "#/definitions/CloudLoginCancelResponse"
+    },
+    "cloud_login_start_response": {
+      "$ref": "#/definitions/CloudLoginStartResponse"
+    },
+    "cloud_login_status_response": {
+      "$ref": "#/definitions/CloudLoginStatusResponse"
     },
     "error": {
       "$ref": "#/definitions/AppServerErrorBody"
@@ -5713,11 +6028,20 @@
     },
     "turn_start_response": {
       "$ref": "#/definitions/StartTurnResponse"
+    },
+    "user_current_response": {
+      "$ref": "#/definitions/UserCurrentResponse"
     }
   },
   "required": [
+    "auth_logout_response",
+    "auth_session_clear_response",
+    "auth_session_read_response",
     "client_request",
     "client_request_params",
+    "cloud_login_cancel_response",
+    "cloud_login_start_response",
+    "cloud_login_status_response",
     "error",
     "event_unsubscribe_response",
     "initialize_response",
@@ -5739,7 +6063,8 @@
     "timeline_event",
     "timeline_event_envelope",
     "timeline_recovery_response",
-    "turn_start_response"
+    "turn_start_response",
+    "user_current_response"
   ],
   "title": "AppProtocolSchemaRoot",
   "type": "object"
