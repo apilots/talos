@@ -49,3 +49,6 @@ talos-e2e/.tmp/
 # node
 node_modules/
 *.tsbuildinfo
+
+# desigin
+design
