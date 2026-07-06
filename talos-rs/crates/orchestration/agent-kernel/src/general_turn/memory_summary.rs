@@ -1013,28 +1013,6 @@ pub async fn flush_session_memory(
     Ok(())
 }
 
-pub(crate) async fn compact_workspace_context_if_needed(
-    session_id: &str,
-    selected_model: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    memory_store: &MemoryStore,
-    kernel_config: &AgentKernelConfig,
-) -> TalosResult<()> {
-    let _ = flush_session_memory_with_report(
-        session_id,
-        selected_model,
-        llm_provider,
-        memory_store,
-        kernel_config,
-        MemoryFlushPolicy::for_compaction(
-            kernel_config.memory.workspace_memory_flush_enabled
-                && kernel_config.memory.workspace_memory_flush_on_compaction,
-        ),
-    )
-    .await?;
-    Ok(())
-}
-
 fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
     match (left, right) {
         (Some(left), Some(right)) => Some(left.saturating_add(right)),

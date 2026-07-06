@@ -14,7 +14,7 @@ pub mod r#trait;
 pub mod trait_impl;
 
 pub use collaboration::{CollaborationAgentHost, CollaborationAgentStatus, CollaborationRuntime};
-pub use context::ToolContext;
+pub use context::{ToolContext, ToolProgressEmitter, ToolProgressEvent, ToolProgressKind};
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
 pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};
@@ -50,8 +50,6 @@ pub mod tools {
     pub mod memory_get;
     pub mod memory_search;
     pub mod read;
-    pub mod task_output;
-    pub mod task_stop;
     pub mod todo_write;
     pub mod tool_search;
     pub mod web_fetch;
@@ -64,9 +62,9 @@ pub use tools::{
     agent::AgentTool, apply_patch::ApplyPatchTool, ask_user_question::AskUserQuestionTool,
     bash::BashTool, edit::EditTool, enter_plan_mode::EnterPlanModeTool,
     exit_plan_mode::ExitPlanModeTool, glob::GlobTool, grep::GrepTool, memory_get::MemoryGetTool,
-    memory_search::MemorySearchTool, read::ReadTool, task_output::TaskOutputTool,
-    task_stop::TaskStopTool, todo_write::TodoWriteTool, tool_search::ToolSearchTool,
-    web_fetch::WebFetchTool, web_search::WebSearchTool, write::WriteTool,
+    memory_search::MemorySearchTool, read::ReadTool, todo_write::TodoWriteTool,
+    tool_search::ToolSearchTool, web_fetch::WebFetchTool, web_search::WebSearchTool,
+    write::WriteTool,
 };
 
 use std::sync::Arc;
@@ -81,8 +79,6 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(GrepTool));
     // Exec tools (runtime-based)
     registry.register(Arc::new(BashTool));
-    registry.register(Arc::new(TaskOutputTool));
-    registry.register(Arc::new(TaskStopTool));
     // Memory tools
     registry.register(Arc::new(MemorySearchTool));
     registry.register(Arc::new(MemoryGetTool));

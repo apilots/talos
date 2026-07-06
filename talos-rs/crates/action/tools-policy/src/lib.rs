@@ -34,8 +34,6 @@ impl Default for ToolPolicy {
                 "ApplyPatch".to_string(),
                 // Exec tools
                 "Bash".to_string(),
-                "TaskOutput".to_string(),
-                "TaskStop".to_string(),
                 // Memory tools
                 "MemorySearch".to_string(),
                 "MemoryGet".to_string(),

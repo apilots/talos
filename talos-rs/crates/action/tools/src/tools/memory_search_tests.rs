@@ -61,9 +61,10 @@ fn temp_workspace_dir() -> std::path::PathBuf {
 }
 
 fn test_kernel_config(workspace_dir: &std::path::Path) -> Arc<AgentKernelConfig> {
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-    Arc::new(config)
+    Arc::new(AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    })
 }
 
 #[tokio::test]
@@ -141,8 +142,10 @@ async fn test_memory_search_input_overrides_structured_defaults() {
         .expect("indexes should rebuild");
 
     let tool = MemorySearchTool;
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     config.memory.search_max_results = 1;
     let context =
         ToolContext::new_with_kernel_config("session-1", "user-1", Some(Arc::new(config)))

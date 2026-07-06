@@ -3,9 +3,10 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 
 fn test_kernel_config(workspace_dir: &std::path::Path) -> Arc<AgentKernelConfig> {
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-    Arc::new(config)
+    Arc::new(AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    })
 }
 
 #[tokio::test]

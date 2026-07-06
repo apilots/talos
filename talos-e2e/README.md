@@ -44,8 +44,6 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `enter_plan_mode.sh`
   - `exit_plan_mode.sh`
   - `agent.sh`
-  - `task_output.sh`
-  - `task_stop.sh`
 
 7. `scenarios/07_memory/`
 - Scope: memory flush and workspace docs

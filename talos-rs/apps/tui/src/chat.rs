@@ -4,12 +4,6 @@ use talos_types::talos::TalosToolTaskStatus;
 use crate::types::{ChatBlock, ChatRole, ToolCallBlockUpdate, ToolCallStatus};
 use crate::TuiApp;
 
-#[derive(Clone, Copy)]
-enum ToolContentMergeMode {
-    Replace,
-    Append,
-}
-
 struct CompletedToolBlockUpdate<'a> {
     idx: usize,
     item_id: Option<&'a str>,
@@ -18,7 +12,6 @@ struct CompletedToolBlockUpdate<'a> {
     content_items: Vec<TalosContentItem>,
     exit_ok: bool,
     timing_ms: Option<u64>,
-    merge_mode: ToolContentMergeMode,
 }
 
 impl TuiApp {
@@ -192,33 +185,7 @@ impl TuiApp {
         exit_ok: bool,
         timing_ms: Option<u64>,
     ) {
-        let bash_session_id = Self::bash_session_id(&content_items);
         let existing_idx = self.resolve_tool_call_block_idx(item_id, call_id);
-        if let Some(session_id) = bash_session_id {
-            if let Some(&target_idx) = self.transcript.active_bash_sessions.get(&session_id) {
-                if existing_idx != Some(target_idx) {
-                    self.update_completed_tool_block(CompletedToolBlockUpdate {
-                        idx: target_idx,
-                        item_id,
-                        call_id,
-                        output,
-                        content_items,
-                        exit_ok,
-                        timing_ms,
-                        merge_mode: ToolContentMergeMode::Append,
-                    });
-                    if let Some(idx) = existing_idx {
-                        self.remove_chat_block(idx);
-                    }
-                    self.transcript.active_tool_calls.remove(call_id);
-                    if let Some(item_id) = item_id {
-                        self.transcript.active_tool_items.remove(item_id);
-                    }
-                    self.request_follow_bottom();
-                    return;
-                }
-            }
-        }
 
         if let Some(idx) = existing_idx {
             self.update_completed_tool_block(CompletedToolBlockUpdate {
@@ -229,7 +196,6 @@ impl TuiApp {
                 content_items,
                 exit_ok,
                 timing_ms,
-                merge_mode: ToolContentMergeMode::Replace,
             });
             self.transcript.active_tool_calls.remove(call_id);
             if let Some(item_id) = item_id {
@@ -248,21 +214,13 @@ impl TuiApp {
             content_items,
             exit_ok,
             timing_ms,
-            merge_mode,
         } = update;
         if let Some(block) = self.chat_blocks.get_mut(idx) {
             if block.tool_item_id.is_none() {
                 block.tool_item_id = item_id.map(str::to_string);
             }
-            match merge_mode {
-                ToolContentMergeMode::Append => block.tool_content_items.extend(content_items),
-                ToolContentMergeMode::Replace => block.tool_content_items = content_items,
-            }
-            block.content = if matches!(merge_mode, ToolContentMergeMode::Append) {
-                Self::tool_result_output_text(&block.tool_content_items)
-            } else {
-                output
-            };
+            block.tool_content_items = content_items;
+            block.content = output;
             block.tool_status = Some(Self::tool_status_from_content(
                 &block.tool_content_items,
                 exit_ok,
@@ -271,28 +229,10 @@ impl TuiApp {
                 block.timing_ms = timing_ms;
             }
         }
-        if let Some(session_id) = Self::bash_session_id(
-            self.chat_blocks
-                .get(idx)
-                .map(|block| block.tool_content_items.as_slice())
-                .unwrap_or(&[]),
-        ) {
-            self.transcript.active_bash_sessions.insert(session_id, idx);
-        }
         self.transcript.active_tool_calls.remove(call_id);
         if let Some(item_id) = item_id {
             self.transcript.active_tool_items.remove(item_id);
         }
-    }
-
-    fn bash_session_id(content_items: &[TalosContentItem]) -> Option<i64> {
-        content_items.iter().find_map(|item| {
-            if let TalosContentItem::BashOutput { session_id, .. } = item {
-                *session_id
-            } else {
-                None
-            }
-        })
     }
 
     fn tool_status_from_content(
@@ -366,6 +306,5 @@ impl TuiApp {
         self.transcript.open_final_answer_items.clear();
         self.transcript.active_tool_items.clear();
         self.transcript.active_tool_calls.clear();
-        self.transcript.active_bash_sessions.clear();
     }
 }

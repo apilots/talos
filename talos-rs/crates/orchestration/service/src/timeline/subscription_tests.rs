@@ -309,6 +309,36 @@ async fn session_scoped_subscription_continues_after_terminal_event() {
 }
 
 #[tokio::test]
+async fn close_on_terminal_closes_after_replayed_terminal_event() {
+    let (timeline, _store) = service();
+    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
+    let terminal = timeline
+        .record_talos_event(terminal_event(1))
+        .await
+        .unwrap();
+
+    let mut subscription = events
+        .subscribe(TimelineSubscribeCommand {
+            session_id: "s1".to_string(),
+            turn_id: Some("turn-1".to_string()),
+            after_event_id: None,
+            replay_limit: 32,
+            close_when_idle: false,
+            close_on_terminal: true,
+        })
+        .await
+        .unwrap();
+
+    let replay = recv_event(&mut subscription.events).await;
+    assert_eq!(replay.event_id, terminal.event_id);
+    let message = subscription.events.recv().await.expect("close message");
+    let TimelineSubscriptionMessage::Closed(closed) = message else {
+        panic!("expected subscription close message");
+    };
+    assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
+}
+
+#[tokio::test]
 async fn lagged_subscription_closes_without_sending_later_events() {
     let (timeline, _store) = service();
     let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));

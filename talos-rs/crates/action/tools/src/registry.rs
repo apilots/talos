@@ -134,8 +134,6 @@ impl ToolRegistry {
             "Read" => 1,
             "Glob" => 2,
             "Bash" => 3,
-            "TaskOutput" => 4,
-            "TaskStop" => 5,
             _ => 100,
         }
     }
@@ -224,18 +222,10 @@ impl ToolRegistry {
         value: &mut Option<Value>,
         max_output_bytes: usize,
     ) -> Option<(usize, usize)> {
-        let Some(payload) = value.as_mut() else {
-            return None;
-        };
-        let Some(object) = payload.as_object_mut() else {
-            return None;
-        };
-        let Some(error_value) = object.get_mut("error") else {
-            return None;
-        };
-        let Some(error_text) = error_value.as_str() else {
-            return None;
-        };
+        let payload = value.as_mut()?;
+        let object = payload.as_object_mut()?;
+        let error_value = object.get_mut("error")?;
+        let error_text = error_value.as_str()?;
 
         let (limited, truncated, raw_size, returned_size) =
             Self::truncate_text(error_text, max_output_bytes);
@@ -365,9 +355,7 @@ impl ToolRegistry {
         }
 
         match name {
-            "Bash" | "Read" | "Grep" | "Glob" | "Edit" | "Write" | "TaskOutput" | "TaskStop" => {
-                true
-            }
+            "Bash" | "Read" | "Grep" | "Glob" | "Edit" | "Write" => true,
             "ToolSearch" => false,
             "WebFetch" | "WebSearch" => Self::input_contains_any(
                 request,
@@ -520,7 +508,7 @@ impl ToolRegistry {
         func: crate::handlers::dynamic::DynamicToolFn,
     ) {
         let tool_name = spec.internal_name.clone();
-        let handler = Arc::new(DynamicToolHandler::new(spec.source.clone(), func));
+        let handler = Arc::new(DynamicToolHandler::new(spec.source, func));
         self.register_handler(tool_name, spec, handler);
     }
 
@@ -567,7 +555,7 @@ impl ToolRegistry {
         context: ToolContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         if let Some(spec) = self.tool_catalog().find(invocation.tool_name.as_str()) {
-            if !Self::is_static_policy_exempt(&spec) {
+            if !Self::is_static_policy_exempt(spec) {
                 self.policy_checker
                     .check_tool_access(spec.definition.name.as_str())
                     .map_err(Self::annotate_policy_error)?;
@@ -660,7 +648,7 @@ impl ToolRegistry {
         self.tool_catalog()
             .find(name)
             .map(|spec| {
-                Self::is_static_policy_exempt(&spec)
+                Self::is_static_policy_exempt(spec)
                     || self.policy_checker.policy.is_allowed(&spec.definition.name)
             })
             .unwrap_or(false)

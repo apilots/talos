@@ -327,7 +327,7 @@ impl LlmProvider for WorkingContextBudgetProvider {
 }
 
 #[tokio::test]
-async fn test_run_general_turn_bash_then_task_output() {
+async fn test_run_general_turn_bash_completes_directly() {
     let provider = Arc::new(ExecLoopProvider::default());
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
@@ -339,13 +339,13 @@ async fn test_run_general_turn_bash_then_task_output() {
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
     configure_test_skill_root(&mut config, &workspace_dir);
-    let mut ctx = build_ctx_with_stream_for_session("tool-loop-bash-task-output", None);
+    let mut ctx = build_ctx_with_stream_for_session("tool-loop-bash-direct", None);
 
     let result = run_general_turn(
         &mut ctx,
         "talos",
         "assistant",
-        "Use Bash, then continue with TaskOutput.",
+        "Use Bash and continue from its completed result.",
         provider.clone(),
         tool_registry.clone(),
         tool_registry,
@@ -361,7 +361,7 @@ async fn test_run_general_turn_bash_then_task_output() {
         .output_items
         .iter()
         .any(|item| matches!(item, talos_types::talos::RunItem::ToolResult { .. })));
-    assert!(provider.round.load(Ordering::SeqCst) >= 3);
+    assert_eq!(provider.round.load(Ordering::SeqCst), 2);
 }
 
 #[tokio::test]

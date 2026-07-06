@@ -89,7 +89,6 @@ pub use loop_run::{
     execute_general_turn_loop, execute_general_turn_loop_with_policy,
     execute_general_turn_loop_with_resume,
 };
-pub(crate) use memory_summary::compact_workspace_context_if_needed;
 pub use memory_summary::{
     flush_session_memory, flush_session_memory_with_report, MemoryFlushPolicy,
     MemoryFlushUsageReport,

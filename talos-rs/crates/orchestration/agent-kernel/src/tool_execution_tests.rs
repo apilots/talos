@@ -1,10 +1,12 @@
 use super::*;
+use crate::{KernelStreamEventData, ToolProgressKind, ToolStreamKey};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use talos_tools::spec::ToolBehaviorFlags;
-use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
+use talos_tools::{register_core_local_tools, Tool, ToolContext, ToolOutputPayload, ToolRegistry};
+use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
 struct ObservedDelayTool {
@@ -173,4 +175,57 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
     assert_eq!(outputs[0].call_id, "call_1");
     assert_eq!(outputs[1].call_id, "call_2");
     assert_eq!(max_concurrent.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn test_streaming_scheduler_forwards_tool_progress() {
+    let registry = Arc::new(ToolRegistry::new());
+    register_core_local_tools(&registry);
+    let (stream_tx, mut stream_rx) = mpsc::channel(16);
+    let execution_context = ToolExecutionContext {
+        session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
+        project_root: None,
+        kernel_config: Arc::new(AgentKernelConfig::default()),
+        memory_store: Arc::new(MemoryStore::new(
+            std::env::temp_dir().join("tool-executor-progress"),
+        )),
+        dynamic_tool_results: HashMap::new(),
+    };
+    let mut scheduler = StreamingToolScheduler::new(
+        ToolExecutionMode::Sequential,
+        execution_context,
+        registry,
+        Some(stream_tx),
+    );
+
+    scheduler
+        .push_call(
+            ToolStreamKey { round: 0, index: 0 },
+            ToolExecutionInput {
+                call_id: "call_progress".to_string(),
+                tool_name: "Bash".to_string(),
+                arguments: json!({
+                    "command": "printf 'hello from progress\\n'",
+                }),
+            },
+        )
+        .await
+        .expect("tool should schedule");
+    let outputs = scheduler.finish().await.expect("tool should finish");
+
+    assert_eq!(outputs.len(), 1);
+    assert!(!outputs[0].output.is_error);
+    let mut saw_tool_progress = false;
+    while let Ok(event) = stream_rx.try_recv() {
+        if let KernelStreamEventData::ToolProgressDelta(data) = event.data {
+            if data.call_id == "call_progress"
+                && data.progress_kind == ToolProgressKind::Stdout
+                && data.message.contains("hello from progress")
+            {
+                saw_tool_progress = true;
+            }
+        }
+    }
+    assert!(saw_tool_progress);
 }

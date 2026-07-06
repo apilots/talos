@@ -42,6 +42,7 @@ async fn execute_payload_uses_truncated_output_chunk_for_typed_result() {
         panic!("expected function payload");
     };
     let Some(TalosContentItem::BashOutput {
+        session_id,
         stdout,
         stderr,
         truncated,
@@ -52,9 +53,44 @@ async fn execute_payload_uses_truncated_output_chunk_for_typed_result() {
     };
 
     assert!(stderr.is_empty());
+    assert_eq!(*session_id, None);
     assert!(*truncated);
     assert!(
         stdout.len() < 20_000,
         "typed output should use the returned chunk, not cumulative stdout"
     );
+}
+
+#[tokio::test]
+async fn execute_payload_returns_timeout_without_running_session() {
+    let tool = BashTool;
+    let context = ToolContext::default()
+        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let payload = tool
+        .execute_payload(
+            serde_json::json!({
+                "command": "sleep 1",
+                "timeout": 50
+            }),
+            context,
+        )
+        .await
+        .expect("Bash should return timeout payload");
+
+    let ToolOutputPayload::Function { content_items, .. } = payload else {
+        panic!("expected function payload");
+    };
+    let Some(TalosContentItem::BashOutput {
+        session_id,
+        status,
+        exit_code,
+        ..
+    }) = content_items.first()
+    else {
+        panic!("expected BashOutput content item");
+    };
+
+    assert_eq!(*session_id, None);
+    assert_eq!(*status, TalosToolTaskStatus::TimedOut);
+    assert_eq!(*exit_code, Some(124));
 }

@@ -228,7 +228,7 @@ impl LlmProvider for ExecLoopProvider {
         let round = self.round.fetch_add(1, Ordering::SeqCst);
         match round {
             0 => Ok(ChatResponse {
-                content: "Start a background bash task first.".to_string(),
+                content: "Run bash and use its final output.".to_string(),
                 reasoning: Vec::new(),
                 model: request.model,
                 usage: Usage::default(),
@@ -237,10 +237,9 @@ impl LlmProvider for ExecLoopProvider {
                     "call_bash",
                     "Bash",
                     json!({
-                        "command": "sleep 0.2; printf 'done:ok\\n'",
-                        "description": "Run a short background task for verification.",
-                        "run_in_background": true,
-                        "timeout": 50
+                        "command": "sleep 0.02; printf 'done:ok\\n'",
+                        "description": "Run a short command for verification.",
+                        "timeout": 5_000
                     }),
                 )]),
             }),
@@ -255,54 +254,21 @@ impl LlmProvider for ExecLoopProvider {
                     .expect("Bash tool message should exist");
                 let payload: Value =
                     serde_json::from_str(&tool_message.content).expect("Bash payload should parse");
-                let session_id = payload
-                    .get("session_id")
-                    .and_then(Value::as_i64)
-                    .expect("session_id should exist");
                 assert_eq!(
                     payload.get("type").and_then(Value::as_str),
                     Some("bash_output")
                 );
                 assert_eq!(
                     payload.get("status").and_then(Value::as_str),
-                    Some("running")
+                    Some("completed")
                 );
-                assert!(payload.get("stdout").and_then(Value::as_str).is_some());
-                Ok(ChatResponse {
-                    content: "Check the background task output.".to_string(),
-                    reasoning: Vec::new(),
-                    model: request.model,
-                    usage: Usage::default(),
-                    finish_reason: Some("tool_calls".to_string()),
-                    tool_calls: Some(vec![FunctionCall::new(
-                        "call_output",
-                        "TaskOutput",
-                        json!({
-                            "task_id": session_id,
-                            "offset": 0,
-                            "max_output_tokens": 2000
-                        }),
-                    )]),
-                })
-            }
-            _ => {
-                let tool_message = request
-                    .messages
-                    .iter()
-                    .find(|msg| {
-                        msg.role == talos_llm_provider::Role::Tool
-                            && msg.tool_call_id.as_deref() == Some("call_output")
-                    })
-                    .expect("TaskOutput tool message should exist");
-                let payload: Value = serde_json::from_str(&tool_message.content)
-                    .expect("TaskOutput payload should parse");
                 let output = payload
                     .get("stdout")
                     .and_then(Value::as_str)
                     .unwrap_or_default()
                     .to_string();
                 Ok(ChatResponse {
-                    content: format!("Final answer after task output: {}", output.trim()),
+                    content: format!("Final answer after bash output: {}", output.trim()),
                     reasoning: Vec::new(),
                     model: request.model,
                     usage: Usage::default(),
@@ -310,6 +276,7 @@ impl LlmProvider for ExecLoopProvider {
                     tool_calls: None,
                 })
             }
+            _ => panic!("unexpected provider round"),
         }
     }
 

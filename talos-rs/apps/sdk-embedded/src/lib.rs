@@ -769,11 +769,11 @@ impl GatewayClient for EmbeddedServerClient {
     }
 
     async fn shutdown(&mut self) -> TalosResult<()> {
-        self.runtime.shutdown().await?;
         for (_, task) in self.subscriptions.drain() {
             task.abort();
             let _ = task.await;
         }
+        self.runtime.shutdown().await?;
         Ok(())
     }
 }

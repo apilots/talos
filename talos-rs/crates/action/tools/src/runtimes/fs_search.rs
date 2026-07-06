@@ -26,16 +26,12 @@ fn default_timeout_ms() -> u64 {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum GrepOutputMode {
     Content,
+    #[default]
     FilesWithMatches,
     Count,
-}
-
-impl Default for GrepOutputMode {
-    fn default() -> Self {
-        Self::FilesWithMatches
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

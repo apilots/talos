@@ -9,13 +9,15 @@ async fn test_read_file_runtime_reads_numbered_lines() {
         .await
         .expect("write should succeed");
 
-    let mut config = talos_config::AgentKernelConfig::default();
-    config.workspace_dir = file
-        .path()
-        .parent()
-        .expect("parent should exist")
-        .to_string_lossy()
-        .to_string();
+    let config = talos_config::AgentKernelConfig {
+        workspace_dir: file
+            .path()
+            .parent()
+            .expect("parent should exist")
+            .to_string_lossy()
+            .to_string(),
+        ..Default::default()
+    };
     let context =
         crate::ToolContext::new_with_kernel_config("session", "user", Some(Arc::new(config)));
 

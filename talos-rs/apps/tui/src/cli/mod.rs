@@ -305,6 +305,16 @@ fn render_event(
                     result.as_ref().map(|value| value.is_error).unwrap_or(false)
                 );
             }
+            if item_phases.get(&payload.item_id) == Some(&TalosTimelinePhase::FinalAnswer) {
+                if let Some(TalosTimelineContent::Text { text }) = &payload.final_content {
+                    if !written_final_items.contains(&payload.item_id) {
+                        written_final_items.insert(payload.item_id.clone());
+                        output_text.push_str(text);
+                        write!(output_stream, "{}", text)?;
+                        output_stream.flush()?;
+                    }
+                }
+            }
         }
         AgentEventPayload::TurnError(payload) => {
             error!("TURN_ERROR {}", payload.error);

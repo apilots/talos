@@ -569,44 +569,45 @@ impl KernelAgent {
                     .await
                 }
             });
+            let run_abort_handle = run_handle.abort_handle();
             task_inner_abort_handle
                 .lock()
                 .unwrap()
-                .replace(run_handle.abort_handle());
+                .replace(run_abort_handle.clone());
             if task_abort_handle.cancelled.load(Ordering::SeqCst) {
-                run_handle.abort();
+                run_abort_handle.abort();
             }
 
-            let mut stream_failed = false;
-            while let Some(kernel_event) = kernel_rx.recv().await {
-                match emit_kernel_timeline_events(&mut timeline, &mut timeline_state, kernel_event)
-                {
-                    Ok(events) => {
-                        for event in events {
-                            let _ = tx.send(event).await;
+            tokio::pin!(run_handle);
+            let run_result = loop {
+                tokio::select! {
+                    kernel_event = kernel_rx.recv() => {
+                        let Some(kernel_event) = kernel_event else {
+                            break (&mut run_handle).await;
+                        };
+                        if let Err(err) = forward_kernel_event(
+                            &mut timeline,
+                            &mut timeline_state,
+                            &tx,
+                            kernel_event,
+                        )
+                        .await
+                        {
+                            run_abort_handle.abort();
+                            return Err(err.into());
                         }
                     }
-                    Err(err) => {
-                        emit_terminal_item_closures(
-                            &mut timeline,
-                            &tx,
-                            TalosTimelineItemStatus::Failed,
-                        )
-                        .await;
-                        let _ = tx.send(timeline.fail_turn(&err)).await;
-                        stream_failed = true;
-                        run_handle.abort();
-                        break;
-                    }
+                    result = &mut run_handle => break result,
                 }
-            }
-            if stream_failed {
-                return Err(AgentError::runtime_error(
-                    "kernel stream event mapping failed".to_string(),
-                ));
+            };
+
+            while let Ok(kernel_event) = kernel_rx.try_recv() {
+                forward_kernel_event(&mut timeline, &mut timeline_state, &tx, kernel_event)
+                    .await
+                    .map_err(AgentError::from)?;
             }
 
-            match run_handle.await {
+            match run_result {
                 Ok(Ok(result)) => {
                     match emit_missing_tool_items_from_result(
                         &mut timeline,
@@ -717,6 +718,27 @@ fn emit_user_input_item(
     let item_id = item_id_from_started(&started)?;
     let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
     Ok(vec![started, completed])
+}
+
+async fn forward_kernel_event(
+    timeline: &mut TimelineBuilder,
+    state: &mut KernelTimelineState,
+    tx: &mpsc::Sender<AgentEvent>,
+    kernel_event: KernelStreamEvent,
+) -> TalosResult<()> {
+    match emit_kernel_timeline_events(timeline, state, kernel_event) {
+        Ok(events) => {
+            for event in events {
+                let _ = tx.send(event).await;
+            }
+            Ok(())
+        }
+        Err(err) => {
+            emit_terminal_item_closures(timeline, tx, TalosTimelineItemStatus::Failed).await;
+            let _ = tx.send(timeline.fail_turn(&err)).await;
+            Err(err)
+        }
+    }
 }
 
 async fn emit_terminal_item_closures(

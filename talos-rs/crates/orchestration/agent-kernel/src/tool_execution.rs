@@ -9,7 +9,10 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_memory::MemoryStore;
-use talos_tools::{ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload};
+use talos_tools::{
+    ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolProgressEmitter,
+    ToolProgressEvent,
+};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
@@ -60,6 +63,7 @@ fn build_tool_context(
     execution_context: &ToolExecutionContext,
     registry: &dyn ToolExecutorPort,
     call_id: &str,
+    progress_emitter: Option<ToolProgressEmitter>,
 ) -> talos_tools::ToolContext {
     let ctx = registry.build_context(
         execution_context.session_id.clone(),
@@ -81,15 +85,25 @@ fn build_tool_context(
             },
         );
     }
-    ctx
+    if let Some(emitter) = progress_emitter {
+        ctx.with_progress_emitter(emitter)
+    } else {
+        ctx
+    }
 }
 
 async fn execute_single_tool_call(
     registry: Arc<dyn ToolExecutorPort>,
     execution_context: &ToolExecutionContext,
     call: ToolExecutionInput,
+    progress_emitter: Option<ToolProgressEmitter>,
 ) -> ToolExecutionOutput {
-    let tool_context = build_tool_context(execution_context, registry.as_ref(), &call.call_id);
+    let tool_context = build_tool_context(
+        execution_context,
+        registry.as_ref(),
+        &call.call_id,
+        progress_emitter,
+    );
     let result = match call.build_invocation(registry.as_ref()) {
         Ok(invocation) => {
             registry
@@ -166,7 +180,8 @@ impl ToolExecutor for SequentialToolExecutor {
         let mut outputs = Vec::with_capacity(calls.len());
         for call in calls {
             outputs.push(
-                execute_single_tool_call(registry.clone(), execution_context, call.clone()).await,
+                execute_single_tool_call(registry.clone(), execution_context, call.clone(), None)
+                    .await,
             );
         }
         Ok(outputs)
@@ -210,7 +225,7 @@ impl ToolExecutor for ParallelToolExecutor {
         for (index, call) in calls.iter().cloned().enumerate() {
             let registry = registry.clone();
             let tool_context =
-                build_tool_context(execution_context, registry.as_ref(), &call.call_id);
+                build_tool_context(execution_context, registry.as_ref(), &call.call_id, None);
             join_set.spawn(async move {
                 let result = match call.build_invocation(registry.as_ref()) {
                     Ok(invocation) => {
@@ -461,15 +476,46 @@ impl StreamingToolScheduler {
 
         let registry = self.registry.clone();
         let execution_context = self.execution_context.clone();
+        let progress_emitter = self.progress_emitter(&scheduled);
         let running_call = RunningStreamingToolCall {
             stream_key: scheduled.stream_key.clone(),
             scheduling_class: scheduled.scheduling_class,
         };
         self.running_tasks.spawn(async move {
-            let output =
-                execute_single_tool_call(registry, &execution_context, scheduled.input).await;
+            let output = execute_single_tool_call(
+                registry,
+                &execution_context,
+                scheduled.input,
+                progress_emitter,
+            )
+            .await;
             (running_call, output)
         });
+    }
+
+    fn progress_emitter(
+        &self,
+        scheduled: &ScheduledStreamingToolCall,
+    ) -> Option<ToolProgressEmitter> {
+        let stream_tx = self.stream_tx.clone()?;
+        let stream_key = scheduled.stream_key.clone();
+        let call_id = scheduled.input.call_id.clone();
+        let tool_name = scheduled.input.tool_name.clone();
+        Some(ToolProgressEmitter::new(move |event: ToolProgressEvent| {
+            let progress_kind = map_tool_progress_kind(event.kind);
+            let _ = stream_tx.try_send(crate::KernelStreamEvent::new(
+                crate::KernelStreamEventType::ToolProgressDelta,
+                crate::KernelStreamEventData::ToolProgressDelta(
+                    crate::ToolProgressDeltaStreamData {
+                        stream_key: stream_key.clone(),
+                        call_id: call_id.clone(),
+                        tool_name: tool_name.clone(),
+                        message: event.text,
+                        progress_kind,
+                    },
+                ),
+            ));
+        }))
     }
 
     fn mark_completed(&mut self, running_call: &RunningStreamingToolCall) {
@@ -547,6 +593,14 @@ async fn emit_stream_event(
         let _ = tx
             .send(crate::KernelStreamEvent::new(event_type, data))
             .await;
+    }
+}
+
+fn map_tool_progress_kind(kind: talos_tools::ToolProgressKind) -> crate::ToolProgressKind {
+    match kind {
+        talos_tools::ToolProgressKind::Status => crate::ToolProgressKind::Status,
+        talos_tools::ToolProgressKind::Stdout => crate::ToolProgressKind::Stdout,
+        talos_tools::ToolProgressKind::Stderr => crate::ToolProgressKind::Stderr,
     }
 }
 

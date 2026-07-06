@@ -19,10 +19,7 @@ fn workflow_tools_are_visible_while_compatibility_tools_stay_deferred() {
     assert!(visible_names.contains("ExitPlanMode"));
     assert!(visible_names.contains("AskUserQuestion"));
     assert!(visible_names.contains("Bash"));
-    assert!(visible_names.contains("TaskOutput"));
-    assert!(visible_names.contains("TaskStop"));
 
-    assert!(!visible_names.contains("task_output"));
     assert!(!visible_names.contains("bash"));
     assert!(!visible_names.contains("Skill"));
 }

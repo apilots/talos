@@ -125,6 +125,10 @@ struct DynamicResumeAgentProvider {
     calls: AtomicUsize,
 }
 
+struct BlockingPostTurnFlushProvider {
+    chat_calls: Arc<AtomicUsize>,
+}
+
 struct NamedRecordingProvider {
     provider_name: &'static str,
     seen_provider: Arc<Mutex<Option<String>>>,
@@ -267,6 +271,34 @@ impl LlmProvider for SequencedProvider {
         }
 
         Ok(single_text_block_stream("provider ok"))
+    }
+}
+
+#[async_trait::async_trait]
+impl LlmProvider for BlockingPostTurnFlushProvider {
+    fn name(&self) -> &str {
+        "blocking-post-turn-flush"
+    }
+
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
+        self.chat_calls.fetch_add(1, Ordering::SeqCst);
+        pending::<talos_error::TalosResult<ChatResponse>>().await
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Ok(ChatStream { rx })
+    }
+
+    async fn stream_model_blocks(
+        &self,
+        _request: ChatRequest,
+    ) -> talos_error::TalosResult<ModelBlockStream> {
+        Ok(single_text_block_stream("final answer"))
     }
 }
 
@@ -2290,6 +2322,59 @@ async fn test_run_streamed_emits_user_input_and_single_final_answer() {
             if payload.item_id == final_answer_item_id
                 && payload.status == TalosTimelineItemStatus::Completed
     )));
+}
+
+#[tokio::test]
+async fn test_run_streamed_completes_before_post_turn_memory_flush() {
+    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
+    let chat_calls = Arc::new(AtomicUsize::new(0));
+    let agent = AgentHarnessImpl::new(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        static_router(Arc::new(BlockingPostTurnFlushProvider {
+            chat_calls: chat_calls.clone(),
+        })),
+        model_ref("gpt-4o"),
+        Arc::new(ToolRegistry::new()),
+        AgentKernelConfig {
+            workspace_dir: temp_dir.path().display().to_string(),
+            memory: talos_config::AgentKernelMemoryConfig {
+                compaction_threshold_bytes: 1,
+                workspace_memory_flush_enabled: true,
+                workspace_memory_flush_on_compaction: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    )
+    .expect("agent harness should build");
+    let session = build_test_session("session-post-turn-flush", "workspace-a");
+
+    let mut stream = agent
+        .run_streamed(agent_run_params(
+            session,
+            "turn-post-flush",
+            vec![TalosInputItem::Text {
+                text: "complete even if post-turn flush blocks".to_string(),
+            }],
+        ))
+        .await
+        .expect("stream should start");
+
+    let stop_reason = timeout(Duration::from_millis(500), async {
+        while let Some(event) = stream.recv().await {
+            if let AgentEventPayload::TurnCompleted(payload) = event.payload {
+                return payload.stop_reason;
+            }
+        }
+        panic!("stream ended before TurnCompleted");
+    })
+    .await
+    .expect("TurnCompleted should not wait for post-turn memory flush");
+
+    assert_eq!(stop_reason, TalosStopReason::EndTurn);
+    assert_eq!(chat_calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

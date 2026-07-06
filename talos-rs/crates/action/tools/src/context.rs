@@ -1,4 +1,5 @@
 use dashmap::DashMap;
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
@@ -12,6 +13,45 @@ use crate::state::{
     ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 
+/// Classifies best-effort progress emitted while a tool is still running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ToolProgressKind {
+    Status,
+    Stdout,
+    Stderr,
+}
+
+/// A best-effort progress event produced by a tool runtime before final output is available.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ToolProgressEvent {
+    pub kind: ToolProgressKind,
+    pub text: String,
+}
+
+/// Emits tool progress into the owning runtime without coupling tools to a transport.
+#[derive(Clone)]
+pub struct ToolProgressEmitter {
+    sink: Arc<dyn Fn(ToolProgressEvent) + Send + Sync>,
+}
+
+impl ToolProgressEmitter {
+    pub fn new(sink: impl Fn(ToolProgressEvent) + Send + Sync + 'static) -> Self {
+        Self {
+            sink: Arc::new(sink),
+        }
+    }
+
+    pub fn emit(&self, event: ToolProgressEvent) {
+        (self.sink)(event);
+    }
+}
+
+impl fmt::Debug for ToolProgressEmitter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("ToolProgressEmitter")
+    }
+}
+
 /// Execution context passed to tools.
 #[derive(Clone, Debug)]
 pub struct ToolContext {
@@ -23,6 +63,7 @@ pub struct ToolContext {
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
     memory_store: Option<Arc<MemoryStore>>,
     session_state: Arc<SessionToolState>,
+    progress_emitter: Option<ToolProgressEmitter>,
 }
 
 impl ToolContext {
@@ -45,6 +86,7 @@ impl ToolContext {
             collaboration_runtime: None,
             memory_store: None,
             session_state: get_session_tool_state(&session_id),
+            progress_emitter: None,
         }
     }
 
@@ -60,6 +102,11 @@ impl ToolContext {
 
     pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
         self.project_root = Some(project_root.into());
+        self
+    }
+
+    pub fn with_progress_emitter(mut self, emitter: ToolProgressEmitter) -> Self {
+        self.progress_emitter = Some(emitter);
         self
     }
 
@@ -148,6 +195,21 @@ impl ToolContext {
 
     pub fn replace_tasks(&self, tasks: Vec<TaskStateEntry>) {
         self.task_state_store().replace(tasks);
+    }
+
+    /// Emits a best-effort progress event for interactive clients.
+    pub fn emit_progress(&self, kind: ToolProgressKind, text: impl Into<String>) {
+        if let Some(emitter) = &self.progress_emitter {
+            emitter.emit(ToolProgressEvent {
+                kind,
+                text: text.into(),
+            });
+        }
+    }
+
+    /// Returns the optional progress emitter attached by the execution runtime.
+    pub fn progress_emitter(&self) -> Option<ToolProgressEmitter> {
+        self.progress_emitter.clone()
     }
 }
 

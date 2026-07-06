@@ -12,7 +12,6 @@ pub(crate) struct TranscriptState {
     pub(crate) open_final_answer_items: HashSet<String>,
     pub(crate) active_tool_items: HashMap<String, usize>,
     pub(crate) active_tool_calls: HashMap<String, usize>,
-    pub(crate) active_bash_sessions: HashMap<i64, usize>,
 }
 
 impl TranscriptState {
@@ -25,7 +24,6 @@ impl TranscriptState {
         self.open_final_answer_items.clear();
         self.active_tool_items.clear();
         self.active_tool_calls.clear();
-        self.active_bash_sessions.clear();
     }
 
     pub(crate) fn on_insert(&mut self, inserted_idx: usize) {
@@ -71,18 +69,6 @@ impl TranscriptState {
                     (item_id, block_idx + 1)
                 } else {
                     (item_id, block_idx)
-                }
-            })
-            .collect();
-
-        self.active_bash_sessions = self
-            .active_bash_sessions
-            .drain()
-            .map(|(session_id, block_idx)| {
-                if block_idx >= inserted_idx {
-                    (session_id, block_idx + 1)
-                } else {
-                    (session_id, block_idx)
                 }
             })
             .collect();
@@ -143,20 +129,6 @@ impl TranscriptState {
                     Some((item_id, block_idx - 1))
                 } else {
                     Some((item_id, block_idx))
-                }
-            })
-            .collect();
-
-        self.active_bash_sessions = self
-            .active_bash_sessions
-            .drain()
-            .filter_map(|(session_id, block_idx)| {
-                if block_idx == removed_idx {
-                    None
-                } else if block_idx > removed_idx {
-                    Some((session_id, block_idx - 1))
-                } else {
-                    Some((session_id, block_idx))
                 }
             })
             .collect();
@@ -263,6 +235,5 @@ impl TranscriptState {
         self.open_final_answer_items.clear();
         self.active_tool_items.clear();
         self.active_tool_calls.clear();
-        self.active_bash_sessions.clear();
     }
 }

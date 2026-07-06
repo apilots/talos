@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::Path;
 use talos_error::{TalosError, TalosResult};
 use tokio::fs;
 
@@ -73,7 +73,7 @@ pub async fn run(
 }
 
 pub fn ensure_read_state_is_fresh(
-    path: &PathBuf,
+    path: &Path,
     current_content: &str,
     context: &ToolContext,
 ) -> TalosResult<()> {

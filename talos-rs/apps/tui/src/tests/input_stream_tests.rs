@@ -996,6 +996,47 @@ async fn test_tool_updates_merge_by_timeline_item_id() {
 }
 
 #[tokio::test]
+async fn test_tool_progress_updates_existing_tool_block() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(tool_started_event(
+        "msg-tool-progress",
+        "sess-test",
+        1,
+        "call-bash",
+        "bash",
+        serde_json::json!({"cmd": "printf 'first\\nsecond\\n'"}),
+    ));
+    app.handle_stream_event(timeline_event(
+        "msg-tool-progress".to_string(),
+        "sess-test".to_string(),
+        2,
+        talos_sdk::AgentEventType::ItemDelta,
+        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "tool-call-bash".to_string(),
+            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
+                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
+                text_delta: "first\n".to_string(),
+            },
+        }),
+    ));
+
+    let tool_blocks = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::Tool)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_blocks.len(), 1);
+    assert_eq!(tool_blocks[0].tool_name.as_deref(), Some("bash"));
+    assert_eq!(tool_blocks[0].tool_progress, vec!["stdout: first\n"]);
+}
+
+#[tokio::test]
 async fn test_turn_completed_finishes_stream_without_output_delta() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
@@ -1293,118 +1334,6 @@ async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
         .any(|b| b.role == ChatRole::FinalAnswer
             && b.content.contains("I will inspect the workspace.")));
     assert!(!app.received_output_delta);
-}
-
-#[tokio::test]
-async fn test_task_output_updates_original_bash_block_by_session_id() {
-    let mut app = create_app_server_app();
-    app.initialize_session().await;
-    app.in_flight = true;
-    app.session_id = Some("sess-test".to_string());
-
-    app.handle_stream_event(tool_started_event(
-        "msg-bash-task",
-        "sess-test",
-        1,
-        "call-bash",
-        "bash",
-        serde_json::json!({"command": "curl -s -o /dev/null -w timing https://talos.love/"}),
-    ));
-    app.handle_stream_event(timeline_event(
-        "msg-bash-task".to_string(),
-        "sess-test".to_string(),
-        2,
-        talos_sdk::AgentEventType::ItemCompleted,
-        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "tool-call-bash".to_string(),
-            status: talos_sdk::TalosTimelineItemStatus::Completed,
-            completed_at_ms: 2,
-            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
-                call_id: "call-bash".to_string(),
-                name: "bash".to_string(),
-                arguments: "{}".to_string(),
-                progress: Vec::new(),
-                result: Some(talos_sdk::TalosToolResult {
-                    content: vec![talos_sdk::TalosContentItem::BashOutput {
-                        session_id: Some(19),
-                        status: talos_types::talos::TalosToolTaskStatus::Running,
-                        exit_code: None,
-                        stdout: "=== DNS & Connection Timing ===".to_string(),
-                        stderr: String::new(),
-                        truncated: false,
-                        elapsed_ms: Some(1200),
-                    }],
-                    is_error: false,
-                }),
-            }),
-        }),
-    ));
-    app.handle_stream_event(tool_started_event(
-        "msg-bash-task",
-        "sess-test",
-        3,
-        "call-task-output",
-        "TaskOutput",
-        serde_json::json!({"task_id": 19}),
-    ));
-    app.handle_stream_event(timeline_event(
-        "msg-bash-task".to_string(),
-        "sess-test".to_string(),
-        4,
-        talos_sdk::AgentEventType::ItemCompleted,
-        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
-            request_id: "req-test".to_string(),
-            turn_id: "turn-test".to_string(),
-            item_id: "tool-call-task-output".to_string(),
-            status: talos_sdk::TalosTimelineItemStatus::Completed,
-            completed_at_ms: 4,
-            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
-                call_id: "call-task-output".to_string(),
-                name: "TaskOutput".to_string(),
-                arguments: "{}".to_string(),
-                progress: Vec::new(),
-                result: Some(talos_sdk::TalosToolResult {
-                    content: vec![talos_sdk::TalosContentItem::BashOutput {
-                        session_id: Some(19),
-                        status: talos_types::talos::TalosToolTaskStatus::Completed,
-                        exit_code: Some(0),
-                        stdout: "DNS: 0.004047s | Total: 1.818914s".to_string(),
-                        stderr: String::new(),
-                        truncated: false,
-                        elapsed_ms: Some(1818),
-                    }],
-                    is_error: false,
-                }),
-            }),
-        }),
-    ));
-
-    app.handle_stream_event(output_completed_event(
-        "msg-bash-task",
-        "sess-test",
-        5,
-        "Final analysis",
-    ));
-
-    let tool_blocks = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::Tool)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_blocks.len(), 1);
-    assert_eq!(tool_blocks[0].tool_name.as_deref(), Some("bash"));
-    assert!(tool_blocks[0]
-        .content
-        .contains("=== DNS & Connection Timing ==="));
-    assert!(tool_blocks[0]
-        .content
-        .contains("DNS: 0.004047s | Total: 1.818914s"));
-    assert_eq!(
-        tool_blocks[0].tool_status,
-        Some(ToolCallStatus::Completed { exit_ok: true })
-    );
 }
 
 #[tokio::test]

@@ -4,11 +4,16 @@ use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{TalosContentItem, TalosToolTaskStatus};
 
-use crate::runtimes::bash::{run_bash_command, BashCommandRequest, SandboxPermissions, TaskStatus};
+use crate::runtimes::bash::{
+    run_bash_command, BashCommandRequest, BashRunStatus, SandboxPermissions,
+};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy, ToolVisibility};
 use crate::{Tool, ToolContext, ToolOutputPayload};
 
 pub struct BashTool;
+
+const DEFAULT_BASH_TIMEOUT_MS: u64 = 120_000;
+const BASH_TIMEOUT_RESULT_GRACE_MS: u64 = 250;
 
 #[derive(Debug, Deserialize)]
 struct BashInput {
@@ -17,8 +22,6 @@ struct BashInput {
     timeout: Option<u64>,
     #[serde(default)]
     description: Option<String>,
-    #[serde(default)]
-    run_in_background: bool,
     #[serde(default)]
     dangerously_disable_sandbox: bool,
     #[serde(default)]
@@ -36,7 +39,7 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &str {
-        "Run a shell command.\n\nUsage:\n- Use Bash for running tests, builds, git commands, scripts, and other shell-only tasks.\n- Use Read, Grep, Edit, Write, and Glob instead of cat/head/tail, grep/rg, sed/awk, shell heredoc writes, or find when dedicated tools can answer directly.\n- Use run_in_background when you do not need the result immediately and are okay checking it later with TaskOutput or stopping it with TaskStop.\n- If commands are independent and can run in parallel, issue multiple Bash tool calls in a single message."
+        "Run a shell command.\n\nUsage:\n- Use Bash for running tests, builds, git commands, scripts, and other shell-only tasks.\n- Use Read, Grep, Edit, Write, and Glob instead of cat/head/tail, grep/rg, sed/awk, shell heredoc writes, or find when dedicated tools can answer directly.\n- Set timeout to the maximum command runtime in milliseconds.\n- If commands are independent and can run in parallel, issue multiple Bash tool calls in a single message."
     }
 
     fn visibility(&self) -> ToolVisibility {
@@ -49,9 +52,8 @@ impl Tool for BashTool {
             "required": ["command"],
             "properties": {
                 "command": { "type": "string" },
-                "timeout": { "type": "integer", "minimum": 0 },
+                "timeout": { "type": "integer", "minimum": 1 },
                 "description": { "type": "string" },
-                "run_in_background": { "type": "boolean" },
                 "dangerously_disable_sandbox": { "type": "boolean" },
                 "workdir": { "type": "string" }
             }
@@ -94,13 +96,15 @@ impl Tool for BashTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let input = parse_bash_input(&input)?;
+        let timeout_ms = input.timeout.unwrap_or(DEFAULT_BASH_TIMEOUT_MS);
         let request = BashCommandRequest {
             cmd: input.command,
             workdir: input.workdir,
             shell: None,
             login: true,
-            tty: input.run_in_background,
-            yield_time_ms: input.timeout.unwrap_or(10_000),
+            tty: false,
+            yield_time_ms: timeout_ms.saturating_add(BASH_TIMEOUT_RESULT_GRACE_MS),
+            timeout_ms: Some(timeout_ms),
             max_output_tokens: Some(8_000),
             sandbox_permissions: if input.dangerously_disable_sandbox {
                 SandboxPermissions::RequireEscalated
@@ -114,9 +118,9 @@ impl Tool for BashTool {
         let structured = serde_json::to_value(&response)
             .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
         let status = match response.status {
-            TaskStatus::Running => TalosToolTaskStatus::Running,
-            TaskStatus::Stopped => TalosToolTaskStatus::Cancelled,
-            TaskStatus::Exited => {
+            BashRunStatus::Running => TalosToolTaskStatus::Running,
+            BashRunStatus::TimedOut => TalosToolTaskStatus::TimedOut,
+            BashRunStatus::Exited => {
                 if response.exit_code == Some(0) {
                     TalosToolTaskStatus::Completed
                 } else {
@@ -140,7 +144,7 @@ impl Tool for BashTool {
     }
 }
 
-fn bash_output_chunk(response: &crate::runtimes::bash::TaskSessionResponse) -> (String, String) {
+fn bash_output_chunk(response: &crate::runtimes::bash::BashSessionResponse) -> (String, String) {
     if response.output.is_empty() {
         return (String::new(), String::new());
     }

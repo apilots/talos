@@ -5,8 +5,9 @@ use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, PendingUserAction,
 };
 use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosItemDeltaEvent,
-    TalosTimelineDelta, TalosTurnCompletedEvent, TokenUsage,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosAssistantTextCommittedEvent,
+    TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelinePhase, TalosTurnCompletedEvent,
+    TalosTurnStartedEvent, TokenUsage,
 };
 
 async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
@@ -57,6 +58,18 @@ fn completed_event(sequence: u64) -> AgentEvent {
     )
 }
 
+fn started_event(sequence: u64) -> AgentEvent {
+    timeline_event(
+        sequence,
+        AgentEventType::TurnStarted,
+        AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
+            request_id: "req_1".to_string(),
+            turn_id: "turn_1".to_string(),
+            started_at_ms: 1000,
+        }),
+    )
+}
+
 fn dynamic_event(sequence: u64) -> AgentEvent {
     timeline_event(
         sequence,
@@ -74,6 +87,19 @@ fn dynamic_event(sequence: u64) -> AgentEvent {
     )
 }
 
+fn final_answer_committed_event(sequence: u64) -> AgentEvent {
+    timeline_event(
+        sequence,
+        AgentEventType::AssistantTextCommitted,
+        AgentEventPayload::AssistantTextCommitted(TalosAssistantTextCommittedEvent {
+            request_id: "req_1".to_string(),
+            turn_id: "turn_1".to_string(),
+            item_id: "assistant-1".to_string(),
+            phase: TalosTimelinePhase::FinalAnswer,
+        }),
+    )
+}
+
 #[tokio::test]
 async fn completed_event_updates_active_turn_terminal_status() {
     let (service, store) = service().await;
@@ -87,6 +113,23 @@ async fn completed_event_updates_active_turn_terminal_status() {
     assert_eq!(
         active.last_event_id,
         Some(TimelineEventId::from(record.event_id))
+    );
+}
+
+#[tokio::test]
+async fn final_answer_commit_does_not_update_active_turn_terminal_status() {
+    let (service, store) = service().await;
+    service.record_talos_event(started_event(1)).await.unwrap();
+    let committed = service
+        .record_talos_event(final_answer_committed_event(2))
+        .await
+        .unwrap();
+
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::Running);
+    assert_eq!(
+        active.last_event_id,
+        Some(TimelineEventId::from(committed.event_id))
     );
 }
 

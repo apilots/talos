@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::Path;
 use talos_error::{TalosError, TalosResult};
 use tokio::fs;
 
@@ -297,7 +297,7 @@ fn trim_trailing_empty_lines(mut lines: Vec<String>) -> Vec<String> {
     lines
 }
 
-fn apply_hunks(path: &PathBuf, original: &str, hunks: &[PatchHunk]) -> TalosResult<String> {
+fn apply_hunks(path: &Path, original: &str, hunks: &[PatchHunk]) -> TalosResult<String> {
     let mut updated = original.to_string();
     for (hunk_index, hunk) in hunks.iter().enumerate() {
         let old = hunk_old_text(hunk);

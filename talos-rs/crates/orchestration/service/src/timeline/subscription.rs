@@ -133,11 +133,21 @@ fn spawn_subscription_stream(
                 continue;
             }
             last_sent_seq = record.event_seq;
+            let is_terminal = is_terminal_event(&record);
             if tx
                 .send(TimelineSubscriptionMessage::Event(record))
                 .await
                 .is_err()
             {
+                return;
+            }
+            if close_on_terminal && is_terminal {
+                let _ = send_subscription_closed(
+                    &tx,
+                    TimelineSubscriptionCloseReason::Completed,
+                    "event subscription completed",
+                )
+                .await;
                 return;
             }
         }

@@ -43,9 +43,10 @@ fn assert_tool_failure(
 }
 
 fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> {
-    let mut config = AgentKernelConfig::default();
-    config.tool_result_max_bytes = limit;
-    Arc::new(config)
+    Arc::new(AgentKernelConfig {
+        tool_result_max_bytes: limit,
+        ..Default::default()
+    })
 }
 
 #[async_trait]
@@ -504,8 +505,10 @@ async fn test_default_registry_allows_memory_search() {
         .await
         .expect("root memory should write");
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     let context =
         ToolContext::new_with_kernel_config("session-ctx", "user-ctx", Some(Arc::new(config)));
     let invocation = registry

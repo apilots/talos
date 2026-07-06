@@ -196,17 +196,15 @@ impl TuiApp {
                 let timing_ms = item
                     .completed_at_ms
                     .map(|completed| completed.saturating_sub(item.started_at_ms));
-                if !is_internal_task_output(name) {
-                    self.push_tool_call_block(ToolCallBlockUpdate {
-                        item_id: Some(item.item_id.clone()),
-                        call_id: call_id.clone(),
-                        tool_name: name.clone(),
-                        tool_input: parse_tool_arguments(arguments),
-                        iteration: 0,
-                        item_index: item.started_at_ms,
-                        timing_ms,
-                    });
-                }
+                self.push_tool_call_block(ToolCallBlockUpdate {
+                    item_id: Some(item.item_id.clone()),
+                    call_id: call_id.clone(),
+                    tool_name: name.clone(),
+                    tool_input: parse_tool_arguments(arguments),
+                    iteration: 0,
+                    item_index: item.started_at_ms,
+                    timing_ms,
+                });
                 for entry in progress {
                     self.append_tool_call_progress(
                         call_id,
@@ -312,9 +310,6 @@ impl TuiApp {
                     ..
                 },
             ) => {
-                if is_internal_task_output(name) {
-                    return;
-                }
                 self.finish_live_text_blocks();
                 self.push_right_event(format!("tool started [{}]: {}", item.item_id, name));
                 self.push_tool_call_block(ToolCallBlockUpdate {
@@ -376,9 +371,6 @@ impl TuiApp {
                 else {
                     return;
                 };
-                if is_internal_task_output(&name) {
-                    return;
-                }
                 self.push_tool_call_block(ToolCallBlockUpdate {
                     item_id: Some(item_id.to_string()),
                     call_id,
@@ -688,10 +680,6 @@ fn parse_tool_arguments(arguments: &str) -> ToolArguments {
     serde_json::from_str::<serde_json::Value>(arguments)
         .map(ToolArguments::from)
         .unwrap_or_else(|_| ToolArguments::from(serde_json::Value::String(arguments.to_string())))
-}
-
-fn is_internal_task_output(tool_name: &str) -> bool {
-    tool_name.eq_ignore_ascii_case("TaskOutput")
 }
 
 fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {

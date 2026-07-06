@@ -4,9 +4,9 @@ pub async fn persist_general_turn_artifacts(
     prepared: &PreparedGeneralTurn,
     input: &str,
     executed: &ExecutedTurnArtifacts,
-    llm_provider: Arc<dyn LlmProvider>,
+    _llm_provider: Arc<dyn LlmProvider>,
     memory_store: Arc<MemoryStore>,
-    kernel_config: &AgentKernelConfig,
+    _kernel_config: &AgentKernelConfig,
 ) {
     let seq = match memory_store.next_turn_seq(&prepared.session_id).await {
         Ok(seq) => seq,
@@ -43,22 +43,6 @@ pub async fn persist_general_turn_artifacts(
             session_id = %prepared.session_id,
             error = %err,
             "failed to append memory store turn"
-        );
-    }
-
-    if let Err(err) = compact_workspace_context_if_needed(
-        &prepared.session_id,
-        &prepared.selected_model,
-        llm_provider.clone(),
-        memory_store.as_ref(),
-        kernel_config,
-    )
-    .await
-    {
-        warn!(
-            session_id = %prepared.session_id,
-            error = %err,
-            "failed to compact workspace memory context"
         );
     }
 }

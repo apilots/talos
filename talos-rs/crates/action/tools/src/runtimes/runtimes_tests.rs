@@ -4,8 +4,10 @@ use talos_config::AgentKernelConfig;
 
 #[test]
 fn resolve_base_dir_prefers_explicit_project_root() {
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = "/tmp/talos-workspace".to_string();
+    let config = AgentKernelConfig {
+        workspace_dir: "/tmp/talos-workspace".to_string(),
+        ..Default::default()
+    };
     let context =
         crate::ToolContext::new_with_kernel_config("session-1", "user-1", Some(Arc::new(config)))
             .with_project_root("/tmp/project-root");
@@ -17,8 +19,10 @@ fn resolve_base_dir_prefers_explicit_project_root() {
 
 #[test]
 fn resolve_base_dir_falls_back_to_workspace_dir_without_project_root() {
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = "/tmp/talos-workspace".to_string();
+    let config = AgentKernelConfig {
+        workspace_dir: "/tmp/talos-workspace".to_string(),
+        ..Default::default()
+    };
     let context =
         crate::ToolContext::new_with_kernel_config("session-1", "user-1", Some(Arc::new(config)));
 

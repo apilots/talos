@@ -53,7 +53,7 @@ impl DynamicToolHandler {
 #[async_trait]
 impl ToolHandler for DynamicToolHandler {
     fn kind(&self) -> ToolSource {
-        self.source.clone()
+        self.source
     }
 
     fn matches(&self, invocation: &ToolInvocation) -> bool {

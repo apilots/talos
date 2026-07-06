@@ -7,23 +7,20 @@ use std::time::{Duration, Instant};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, Notify};
 
 use crate::runtimes::{resolve_base_dir, resolve_path, truncate_prefix};
-use crate::ToolContext;
+use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 
 const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
-const DEFAULT_TASK_OUTPUT_YIELD_TIME_MS: u64 = 250;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024;
+const TERMINAL_OUTPUT_DRAIN_GRACE_MS: u64 = 100;
+const PROCESS_TERMINATE_GRACE_MS: u64 = 200;
 
 fn default_bash_yield_time_ms() -> u64 {
     DEFAULT_BASH_YIELD_TIME_MS
-}
-
-fn default_task_output_yield_time_ms() -> u64 {
-    DEFAULT_TASK_OUTPUT_YIELD_TIME_MS
 }
 
 fn default_login() -> bool {
@@ -56,6 +53,8 @@ pub struct BashCommandRequest {
     #[serde(default = "default_bash_yield_time_ms")]
     pub yield_time_ms: u64,
     #[serde(default)]
+    pub timeout_ms: Option<u64>,
+    #[serde(default)]
     pub max_output_tokens: Option<usize>,
     #[serde(default)]
     pub sandbox_permissions: SandboxPermissions,
@@ -65,25 +64,12 @@ pub struct BashCommandRequest {
     pub prefix_rule: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskOutputRequest {
-    pub session_id: i64,
-    #[serde(default)]
-    pub chars: String,
-    #[serde(default = "default_task_output_yield_time_ms")]
-    pub yield_time_ms: u64,
-    #[serde(default)]
-    pub offset: Option<usize>,
-    #[serde(default)]
-    pub max_output_tokens: Option<usize>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
+pub enum BashRunStatus {
     Running,
+    TimedOut,
     Exited,
-    Stopped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -107,9 +93,9 @@ pub enum BashCommandRisk {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TaskSessionResponse {
+pub struct BashSessionResponse {
     pub session_id: Option<i64>,
-    pub status: TaskStatus,
+    pub status: BashRunStatus,
     pub output: String,
     pub stdout: String,
     pub stderr: String,
@@ -128,15 +114,14 @@ pub struct TaskSessionResponse {
 
 struct BashSession {
     session_id: i64,
-    owner_session_id: String,
     max_output_bytes: usize,
     process_id: Option<u32>,
-    stdin: Mutex<Option<ChildStdin>>,
     state: Mutex<BashSessionState>,
     notify: Notify,
     started_at: Instant,
     command_kind: BashCommandKind,
     risk: BashCommandRisk,
+    progress_emitter: Option<ToolProgressEmitter>,
 }
 
 #[derive(Default)]
@@ -146,7 +131,7 @@ struct BashSessionState {
     output: String,
     delivered_bytes: usize,
     exit_code: Option<i32>,
-    stopped: bool,
+    timed_out: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -173,7 +158,7 @@ impl BashSessionManager {
         &self,
         request: &BashCommandRequest,
         context: &ToolContext,
-    ) -> TalosResult<TaskSessionResponse> {
+    ) -> TalosResult<BashSessionResponse> {
         if request.cmd.trim().is_empty() {
             return Err(TalosError::ToolError("cmd cannot be empty".to_string()));
         }
@@ -192,26 +177,25 @@ impl BashSessionManager {
 
         let session_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let process_id = child.id();
-        let stdin = child.stdin.take();
+        child.stdin.take();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         let (command_kind, risk) = classify_command(&request.cmd);
 
         let session = Arc::new(BashSession {
             session_id,
-            owner_session_id: context.session_id().to_string(),
             max_output_bytes: context
                 .kernel_config()
                 .map(|config| config.tools.local_exec.max_output_bytes)
                 .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
                 .max(DEFAULT_MAX_OUTPUT_BYTES),
             process_id,
-            stdin: Mutex::new(stdin),
             state: Mutex::new(BashSessionState::default()),
             notify: Notify::new(),
             started_at: Instant::now(),
             command_kind,
             risk,
+            progress_emitter: context.progress_emitter(),
         });
         self.sessions.insert(session_id, session.clone());
 
@@ -222,59 +206,14 @@ impl BashSessionManager {
             spawn_reader(stderr, session.clone(), OutputStreamKind::Stderr);
         }
         spawn_waiter(child, session.clone());
+        if let Some(timeout_ms) = request.timeout_ms {
+            spawn_timeout(session.clone(), timeout_ms);
+        }
 
         self.collect_output(
             session_id,
             request.yield_time_ms,
             None,
-            request.max_output_tokens,
-        )
-        .await
-    }
-
-    async fn read_task_output(
-        &self,
-        request: &TaskOutputRequest,
-        context: &ToolContext,
-    ) -> TalosResult<TaskSessionResponse> {
-        let session = self
-            .sessions
-            .get(&request.session_id)
-            .map(|entry| entry.value().clone())
-            .ok_or_else(|| {
-                TalosError::ToolError(format!("session {} not found", request.session_id))
-            })?;
-
-        if session.owner_session_id != context.session_id() {
-            return Err(TalosError::ToolError(format!(
-                "session {} does not belong to Talos session {}",
-                request.session_id,
-                context.session_id()
-            )));
-        }
-
-        if !request.chars.is_empty() {
-            let mut stdin_guard = session.stdin.lock().await;
-            let stdin = stdin_guard.as_mut().ok_or_else(|| {
-                TalosError::ToolError(format!(
-                    "session {} is no longer writable",
-                    request.session_id
-                ))
-            })?;
-            stdin
-                .write_all(request.chars.as_bytes())
-                .await
-                .map_err(|err| TalosError::ToolError(format!("failed to write stdin: {}", err)))?;
-            stdin
-                .flush()
-                .await
-                .map_err(|err| TalosError::ToolError(format!("failed to flush stdin: {}", err)))?;
-        }
-
-        self.collect_output(
-            request.session_id,
-            request.yield_time_ms,
-            request.offset,
             request.max_output_tokens,
         )
         .await
@@ -286,7 +225,7 @@ impl BashSessionManager {
         yield_time_ms: u64,
         offset: Option<usize>,
         max_output_tokens: Option<usize>,
-    ) -> TalosResult<TaskSessionResponse> {
+    ) -> TalosResult<BashSessionResponse> {
         let session = self
             .sessions
             .get(&session_id)
@@ -294,10 +233,26 @@ impl BashSessionManager {
             .ok_or_else(|| TalosError::ToolError(format!("session {} not found", session_id)))?;
 
         if yield_time_ms > 0 {
-            tokio::select! {
-                _ = tokio::time::sleep(Duration::from_millis(yield_time_ms)) => {}
-                _ = session.notify.notified() => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+            let deadline = Instant::now() + Duration::from_millis(yield_time_ms);
+            loop {
+                {
+                    let state = session.state.lock().await;
+                    if state.exit_code.is_some() || state.timed_out {
+                        drop(state);
+                        tokio::time::sleep(Duration::from_millis(TERMINAL_OUTPUT_DRAIN_GRACE_MS))
+                            .await;
+                        break;
+                    }
+                }
+
+                let now = Instant::now();
+                if now >= deadline {
+                    break;
+                }
+
+                tokio::select! {
+                    _ = tokio::time::sleep(deadline.saturating_duration_since(now)) => break,
+                    _ = session.notify.notified() => {}
                 }
             }
         }
@@ -311,18 +266,17 @@ impl BashSessionManager {
         let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
         state.delivered_bytes = state.delivered_bytes.max(start + consumed_bytes);
 
-        let status = if state.stopped {
-            TaskStatus::Stopped
+        let status = if state.timed_out {
+            BashRunStatus::TimedOut
         } else if state.exit_code.is_some() {
-            TaskStatus::Exited
+            BashRunStatus::Exited
         } else {
-            TaskStatus::Running
+            BashRunStatus::Running
         };
         let exit_code = state.exit_code;
         let stdout = state.stdout.clone();
         let stderr = state.stderr.clone();
-        let keep_session =
-            status == TaskStatus::Running || state.delivered_bytes < state.output.len();
+        let keep_session = status == BashRunStatus::Running;
         let next_offset = state.delivered_bytes;
         drop(state);
 
@@ -330,7 +284,7 @@ impl BashSessionManager {
             self.sessions.remove(&session_id);
         }
 
-        Ok(TaskSessionResponse {
+        Ok(BashSessionResponse {
             session_id: if keep_session {
                 Some(session.session_id)
             } else {
@@ -349,91 +303,14 @@ impl BashSessionManager {
             risk: Some(session.risk.clone()),
         })
     }
-
-    async fn stop_session(
-        &self,
-        session_id: i64,
-        context: &ToolContext,
-    ) -> TalosResult<TaskSessionResponse> {
-        let session = self
-            .sessions
-            .get(&session_id)
-            .map(|entry| entry.value().clone())
-            .ok_or_else(|| TalosError::ToolError(format!("session {} not found", session_id)))?;
-        if session.owner_session_id != context.session_id() {
-            return Err(TalosError::ToolError(format!(
-                "session {} does not belong to Talos session {}",
-                session_id,
-                context.session_id()
-            )));
-        }
-
-        let mut stdin_guard = session.stdin.lock().await;
-        stdin_guard.take();
-        drop(stdin_guard);
-        if let Some(process_id) = session.process_id {
-            let _ = Command::new("kill")
-                .arg("-TERM")
-                .arg(process_id.to_string())
-                .status()
-                .await;
-        }
-        let mut state = session.state.lock().await;
-        state.stopped = true;
-        if state.exit_code.is_none() {
-            state.exit_code = Some(130);
-        }
-        let response = TaskSessionResponse {
-            session_id: None,
-            status: TaskStatus::Stopped,
-            output: state.output.clone(),
-            stdout: state.stdout.clone(),
-            stderr: state.stderr.clone(),
-            exit_code: state.exit_code,
-            truncated: false,
-            elapsed_ms: elapsed_ms(&session),
-            output_offset: 0,
-            next_offset: state.output.len(),
-            command_kind: Some(session.command_kind.clone()),
-            risk: Some(session.risk.clone()),
-        };
-        drop(state);
-        self.sessions.remove(&session_id);
-        session.notify.notify_waiters();
-        Ok(response)
-    }
 }
 
 pub async fn run_bash_command(
     request: &BashCommandRequest,
     context: &ToolContext,
-) -> TalosResult<TaskSessionResponse> {
+) -> TalosResult<BashSessionResponse> {
     BashSessionManager::global()
         .open_session(request, context)
-        .await
-}
-
-pub async fn read_task_output(request: &TaskOutputRequest) -> TalosResult<TaskSessionResponse> {
-    BashSessionManager::global()
-        .read_task_output(request, &ToolContext::default())
-        .await
-}
-
-pub async fn read_task_output_with_context(
-    request: &TaskOutputRequest,
-    context: &ToolContext,
-) -> TalosResult<TaskSessionResponse> {
-    BashSessionManager::global()
-        .read_task_output(request, context)
-        .await
-}
-
-pub async fn stop_task_with_context(
-    session_id: i64,
-    context: &ToolContext,
-) -> TalosResult<TaskSessionResponse> {
-    BashSessionManager::global()
-        .stop_session(session_id, context)
         .await
 }
 
@@ -462,6 +339,10 @@ fn build_command(request: &BashCommandRequest, workdir: &PathBuf) -> TalosResult
     if request.tty {
         command.env("TERM", "xterm-256color");
     }
+    #[cfg(unix)]
+    {
+        command.process_group(0);
+    }
 
     Ok(command)
 }
@@ -485,6 +366,15 @@ where
                     }
                     state.output.push_str(&chunk);
                     drop(state);
+                    if let Some(emitter) = &session.progress_emitter {
+                        emitter.emit(crate::ToolProgressEvent {
+                            kind: match stream_kind {
+                                OutputStreamKind::Stdout => ToolProgressKind::Stdout,
+                                OutputStreamKind::Stderr => ToolProgressKind::Stderr,
+                            },
+                            text: chunk,
+                        });
+                    }
                     session.notify.notify_waiters();
                 }
                 Err(_) => {
@@ -550,12 +440,61 @@ fn spawn_waiter(mut child: Child, session: Arc<BashSession>) {
         let exit_code = child.wait().await.ok().and_then(|status| status.code());
         {
             let mut state = session.state.lock().await;
-            state.exit_code = exit_code;
+            if !state.timed_out {
+                state.exit_code = exit_code;
+            }
         }
-        let mut stdin_guard = session.stdin.lock().await;
-        stdin_guard.take();
         session.notify.notify_waiters();
     });
+}
+
+fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) {
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
+        {
+            let state = session.state.lock().await;
+            if state.exit_code.is_some() || state.timed_out {
+                return;
+            }
+        }
+        if let Some(process_id) = session.process_id {
+            terminate_process(process_id).await;
+        }
+        {
+            let mut state = session.state.lock().await;
+            if state.exit_code.is_none() && !state.timed_out {
+                state.timed_out = true;
+                state.exit_code = Some(124);
+            }
+        }
+        session.notify.notify_waiters();
+    });
+}
+
+#[cfg(unix)]
+async fn terminate_process(process_id: u32) {
+    let process_group = format!("-{process_id}");
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(&process_group)
+        .status()
+        .await;
+    tokio::time::sleep(Duration::from_millis(PROCESS_TERMINATE_GRACE_MS)).await;
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg(process_group)
+        .status()
+        .await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_process(process_id: u32) {
+    let _ = Command::new("kill")
+        .arg("-TERM")
+        .arg(process_id.to_string())
+        .status()
+        .await;
+    tokio::time::sleep(Duration::from_millis(PROCESS_TERMINATE_GRACE_MS)).await;
 }
 
 #[cfg(test)]
