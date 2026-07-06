@@ -458,7 +458,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
         cache_creation_input_tokens: Some(4),
         cache_read_input_tokens: Some(6),
     };
-    app.push_block(ChatRole::Assistant, "old answer".to_string());
+    app.push_block(ChatRole::FinalAnswer, "old answer".to_string());
     app.input_buffer = "/clear".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -538,7 +538,7 @@ async fn test_status_command_displays_cache_usage_metrics() {
 }
 
 #[tokio::test]
-async fn test_start_turn_stream_updates_assistant_block() {
+async fn test_start_turn_stream_updates_final_answer_block() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     assert!(app.send_user_message("hello".to_string()).await.unwrap());
@@ -551,14 +551,14 @@ async fn test_start_turn_stream_updates_assistant_block() {
         }
     }
 
-    let assistant = app
+    let final_answer = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .find(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .unwrap_or_default();
-    assert!(assistant.contains("# Title"));
-    assert!(assistant.contains("- item"));
+    assert!(final_answer.contains("# Title"));
+    assert!(final_answer.contains("- item"));
     let user_messages = app
         .chat_blocks
         .iter()
@@ -580,8 +580,8 @@ async fn test_thinking_block_is_not_created_before_first_delta() {
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant));
-    assert!(app.transcript.live_assistant_idx.is_none());
+        .any(|b| b.role == ChatRole::FinalAnswer));
+    assert!(app.transcript.live_final_answer_idx.is_none());
     assert!(app.is_agent_working());
 }
 
@@ -762,10 +762,11 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
         started_event("msg-recovered", 0),
         output_item_started_event("msg-recovered", "sess-test", 1),
         output_delta_event("msg-recovered", "sess-test", 2, "recovered reply"),
+        output_completed_event("msg-recovered", "sess-test", 3, "recovered reply"),
         completed_event(
             "msg-recovered",
             "sess-test",
-            3,
+            4,
             TokenUsage {
                 total_tokens: 25,
                 ..TokenUsage::default()
@@ -803,9 +804,11 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     app.on_tick().await;
 
     assert!(!app.in_flight);
-    assert!(app.chat_blocks.iter().any(
-        |block| block.role == ChatRole::Assistant && block.content.contains("recovered reply")
-    ));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::FinalAnswer
+            && block.content.contains("recovered reply")));
     assert!(!app
         .chat_blocks
         .iter()
@@ -819,7 +822,8 @@ async fn test_stale_timeline_events_are_ignored() {
     app.in_flight = true;
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
-    app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, String::new()));
+    app.transcript.live_final_answer_idx =
+        Some(app.push_block(ChatRole::FinalAnswer, String::new()));
 
     let stale_message_id = format!(
         "{}-stale",
@@ -834,13 +838,13 @@ async fn test_stale_timeline_events_are_ignored() {
         "stale",
     ));
 
-    let assistant = app
+    let final_answer = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .find(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .unwrap_or_default();
-    assert!(assistant.is_empty());
+    assert!(final_answer.is_empty());
     assert!(app
         .right_panel_events
         .iter()
@@ -856,7 +860,8 @@ async fn test_duplicate_stream_sequence_is_ignored() {
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
     app.last_stream_event_id = Some("ev_3".to_string());
-    app.transcript.live_assistant_idx = Some(app.push_block(ChatRole::Assistant, "hello".into()));
+    app.transcript.live_final_answer_idx =
+        Some(app.push_block(ChatRole::FinalAnswer, "hello".into()));
 
     app.handle_stream_event(output_delta_event(
         "msg-current",
@@ -865,13 +870,13 @@ async fn test_duplicate_stream_sequence_is_ignored() {
         " duplicate",
     ));
 
-    let assistant = app
+    let final_answer = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .find(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .unwrap_or_default();
-    assert_eq!(assistant, "hello");
+    assert_eq!(final_answer, "hello");
     assert_eq!(app.last_stream_sequence, Some(3));
     assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_3"));
 }
@@ -885,14 +890,15 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
 
-    app.push_tool_call_block(
-        "call-current".to_string(),
-        "bash".to_string(),
-        serde_json::json!({"cmd": "pwd"}),
-        1,
-        0,
-        None,
-    );
+    app.push_tool_call_block(ToolCallBlockUpdate {
+        item_id: None,
+        call_id: "call-current".to_string(),
+        tool_name: "bash".to_string(),
+        tool_input: talos_sdk::ToolArguments::from(serde_json::json!({"cmd": "pwd"})),
+        iteration: 1,
+        item_index: 0,
+        timing_ms: None,
+    });
 
     app.handle_stream_event(tool_completed_event(
         "msg-stale",
@@ -913,14 +919,80 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
         5,
         "final answer",
     ));
+    app.handle_stream_event(output_completed_event(
+        "msg-current",
+        "sess-test",
+        6,
+        "final answer",
+    ));
 
-    let assistant = app
+    let final_answer = app
         .chat_blocks
         .iter()
-        .filter(|b| b.role == ChatRole::Assistant)
+        .filter(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .collect::<String>();
-    assert!(assistant.contains("final answer"));
+    assert!(final_answer.contains("final answer"));
+}
+
+#[tokio::test]
+async fn test_tool_updates_merge_by_timeline_item_id() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(tool_started_event(
+        "msg-tool-merge",
+        "sess-test",
+        1,
+        "call-start",
+        "bash",
+        serde_json::json!({"cmd": "curl -sL https://talos.love/assets/index.css | wc -c"}),
+    ));
+
+    let started_item_id = "tool-call-start".to_string();
+    app.handle_stream_event(timeline_event(
+        "msg-tool-merge".to_string(),
+        "sess-test".to_string(),
+        2,
+        talos_sdk::AgentEventType::ItemCompleted,
+        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: started_item_id,
+            status: talos_sdk::TalosTimelineItemStatus::Completed,
+            completed_at_ms: 2,
+            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
+                call_id: "call-completed".to_string(),
+                name: "bash".to_string(),
+                arguments: "{}".to_string(),
+                progress: Vec::new(),
+                result: Some(talos_sdk::TalosToolResult {
+                    content: vec![talos_sdk::TalosContentItem::Text {
+                        text: "17576".to_string(),
+                    }],
+                    is_error: false,
+                }),
+            }),
+        }),
+    ));
+
+    let tool_blocks = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::Tool)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_blocks.len(), 1);
+    assert_eq!(tool_blocks[0].content, "17576");
+    assert_eq!(
+        tool_blocks[0]
+            .tool_input
+            .as_ref()
+            .and_then(|input| input.as_inner().get("cmd"))
+            .and_then(serde_json::Value::as_str),
+        Some("curl -sL https://talos.love/assets/index.css | wc -c")
+    );
 }
 
 #[tokio::test]
@@ -942,7 +1014,7 @@ async fn test_turn_completed_finishes_stream_without_output_delta() {
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant));
+        .any(|b| b.role == ChatRole::FinalAnswer));
 }
 
 #[tokio::test]
@@ -1007,7 +1079,7 @@ async fn test_context_compaction_stream_renders_right_panel_status() {
 }
 
 #[tokio::test]
-async fn test_commentary_stream_does_not_update_assistant_block() {
+async fn test_commentary_stream_does_not_update_final_answer_block() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
@@ -1028,16 +1100,18 @@ async fn test_commentary_stream_does_not_update_assistant_block() {
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant
+        .any(|b| b.role == ChatRole::FinalAnswer
             && b.content.contains("I will inspect the workspace.")));
-    assert!(app.chat_blocks.iter().any(
-        |b| b.role == ChatRole::Thinking && b.content.contains("I will inspect the workspace.")
-    ));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Commentary
+            && b.content.contains("I will inspect the workspace.")));
     assert!(!app.received_output_delta);
 }
 
 #[tokio::test]
-async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
+async fn test_unknown_stream_moves_to_final_answer_when_committed_final() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
@@ -1054,11 +1128,11 @@ async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
     assert!(app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Thinking && b.content.contains("Final answer text.")));
+        .any(|b| b.role == ChatRole::Commentary && b.content.contains("Final answer text.")));
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant && b.content.contains("Final answer text.")));
+        .any(|b| b.role == ChatRole::FinalAnswer && b.content.contains("Final answer text.")));
 
     app.handle_stream_event(assistant_text_committed_event(
         "msg-unknown",
@@ -1070,12 +1144,121 @@ async fn test_unknown_stream_moves_to_assistant_when_committed_final() {
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Thinking && b.content.contains("Final answer text.")));
+        .any(|b| b.role == ChatRole::Commentary && b.content.contains("Final answer text.")));
     assert!(app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant && b.content.contains("Final answer text.")));
+        .any(|b| b.role == ChatRole::FinalAnswer && b.content.contains("Final answer text.")));
     assert!(app.received_output_delta);
+}
+
+#[tokio::test]
+async fn test_interleaved_unknown_items_do_not_share_live_blocks() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(text_item_started_event(
+        "msg-unknown",
+        "sess-test",
+        1,
+        "unknown-a",
+        TalosTimelinePhase::Unknown,
+        "",
+    ));
+    app.handle_stream_event(text_delta_event(
+        "msg-unknown",
+        "sess-test",
+        2,
+        "unknown-a",
+        "First commentary. ",
+    ));
+    app.handle_stream_event(text_item_started_event(
+        "msg-unknown",
+        "sess-test",
+        3,
+        "unknown-b",
+        TalosTimelinePhase::Unknown,
+        "",
+    ));
+    app.handle_stream_event(text_delta_event(
+        "msg-unknown",
+        "sess-test",
+        4,
+        "unknown-b",
+        "Final candidate.",
+    ));
+    app.handle_stream_event(assistant_text_committed_event_for_item(
+        "msg-unknown",
+        "sess-test",
+        5,
+        "unknown-b",
+        TalosTimelinePhase::FinalAnswer,
+    ));
+
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::Commentary
+            && block.content.contains("First commentary.")));
+    assert!(!app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::FinalAnswer
+            && block.content.contains("First commentary.")));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|block| block.role == ChatRole::FinalAnswer
+            && block.content.contains("Final candidate.")));
+}
+
+#[tokio::test]
+async fn test_completed_final_content_updates_committed_unknown_final() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(text_item_started_event(
+        "msg-final",
+        "sess-test",
+        1,
+        "unknown-final",
+        TalosTimelinePhase::Unknown,
+        "",
+    ));
+    app.handle_stream_event(text_delta_event(
+        "msg-final",
+        "sess-test",
+        2,
+        "unknown-final",
+        "Partial final",
+    ));
+    app.handle_stream_event(assistant_text_committed_event_for_item(
+        "msg-final",
+        "sess-test",
+        3,
+        "unknown-final",
+        TalosTimelinePhase::FinalAnswer,
+    ));
+    app.handle_stream_event(output_completed_event_for_item(
+        "msg-final",
+        "sess-test",
+        4,
+        "unknown-final",
+        "Partial final with canonical suffix.",
+    ));
+
+    let final_answers = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::FinalAnswer)
+        .map(|block| block.content.as_str())
+        .collect::<Vec<_>>();
+
+    assert_eq!(final_answers, vec!["Partial final with canonical suffix."]);
 }
 
 #[tokio::test]
@@ -1099,19 +1282,133 @@ async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
         TalosTimelinePhase::Commentary,
     ));
 
-    assert!(app.chat_blocks.iter().any(
-        |b| b.role == ChatRole::Thinking && b.content.contains("I will inspect the workspace.")
-    ));
+    assert!(app
+        .chat_blocks
+        .iter()
+        .any(|b| b.role == ChatRole::Commentary
+            && b.content.contains("I will inspect the workspace.")));
     assert!(!app
         .chat_blocks
         .iter()
-        .any(|b| b.role == ChatRole::Assistant
+        .any(|b| b.role == ChatRole::FinalAnswer
             && b.content.contains("I will inspect the workspace.")));
     assert!(!app.received_output_delta);
 }
 
 #[tokio::test]
-async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
+async fn test_task_output_updates_original_bash_block_by_session_id() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(tool_started_event(
+        "msg-bash-task",
+        "sess-test",
+        1,
+        "call-bash",
+        "bash",
+        serde_json::json!({"command": "curl -s -o /dev/null -w timing https://talos.love/"}),
+    ));
+    app.handle_stream_event(timeline_event(
+        "msg-bash-task".to_string(),
+        "sess-test".to_string(),
+        2,
+        talos_sdk::AgentEventType::ItemCompleted,
+        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "tool-call-bash".to_string(),
+            status: talos_sdk::TalosTimelineItemStatus::Completed,
+            completed_at_ms: 2,
+            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
+                call_id: "call-bash".to_string(),
+                name: "bash".to_string(),
+                arguments: "{}".to_string(),
+                progress: Vec::new(),
+                result: Some(talos_sdk::TalosToolResult {
+                    content: vec![talos_sdk::TalosContentItem::BashOutput {
+                        session_id: Some(19),
+                        status: talos_types::talos::TalosToolTaskStatus::Running,
+                        exit_code: None,
+                        stdout: "=== DNS & Connection Timing ===".to_string(),
+                        stderr: String::new(),
+                        truncated: false,
+                        elapsed_ms: Some(1200),
+                    }],
+                    is_error: false,
+                }),
+            }),
+        }),
+    ));
+    app.handle_stream_event(tool_started_event(
+        "msg-bash-task",
+        "sess-test",
+        3,
+        "call-task-output",
+        "TaskOutput",
+        serde_json::json!({"task_id": 19}),
+    ));
+    app.handle_stream_event(timeline_event(
+        "msg-bash-task".to_string(),
+        "sess-test".to_string(),
+        4,
+        talos_sdk::AgentEventType::ItemCompleted,
+        talos_sdk::AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "tool-call-task-output".to_string(),
+            status: talos_sdk::TalosTimelineItemStatus::Completed,
+            completed_at_ms: 4,
+            final_content: Some(talos_sdk::TalosTimelineContent::ToolCall {
+                call_id: "call-task-output".to_string(),
+                name: "TaskOutput".to_string(),
+                arguments: "{}".to_string(),
+                progress: Vec::new(),
+                result: Some(talos_sdk::TalosToolResult {
+                    content: vec![talos_sdk::TalosContentItem::BashOutput {
+                        session_id: Some(19),
+                        status: talos_types::talos::TalosToolTaskStatus::Completed,
+                        exit_code: Some(0),
+                        stdout: "DNS: 0.004047s | Total: 1.818914s".to_string(),
+                        stderr: String::new(),
+                        truncated: false,
+                        elapsed_ms: Some(1818),
+                    }],
+                    is_error: false,
+                }),
+            }),
+        }),
+    ));
+
+    app.handle_stream_event(output_completed_event(
+        "msg-bash-task",
+        "sess-test",
+        5,
+        "Final analysis",
+    ));
+
+    let tool_blocks = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::Tool)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_blocks.len(), 1);
+    assert_eq!(tool_blocks[0].tool_name.as_deref(), Some("bash"));
+    assert!(tool_blocks[0]
+        .content
+        .contains("=== DNS & Connection Timing ==="));
+    assert!(tool_blocks[0]
+        .content
+        .contains("DNS: 0.004047s | Total: 1.818914s"));
+    assert_eq!(
+        tool_blocks[0].tool_status,
+        Some(ToolCallStatus::Completed { exit_ok: true })
+    );
+}
+
+#[tokio::test]
+async fn test_tool_using_stream_caches_final_answer_until_completed() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
@@ -1124,13 +1421,13 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
         2,
         "Draft summary",
     ));
-    let assistant_before_tool = app
+    let final_answer_before_tool = app
         .chat_blocks
         .iter()
-        .find(|b| b.role == ChatRole::Assistant)
+        .find(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .unwrap_or_default();
-    assert_eq!(assistant_before_tool, "Draft summary");
+    assert_eq!(final_answer_before_tool, "");
 
     app.handle_stream_event(tool_started_event(
         "msg-tools",
@@ -1147,34 +1444,64 @@ async fn test_tool_using_stream_keeps_assistant_output_interleaved() {
         "\nFinal answer",
     ));
 
-    let assistant_during_tool = app
+    let final_answer_during_tool = app
         .chat_blocks
         .iter()
-        .filter(|b| b.role == ChatRole::Assistant)
+        .filter(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .collect::<Vec<_>>();
-    assert_eq!(
-        assistant_during_tool,
-        vec!["Draft summary".to_string(), "\nFinal answer".to_string()]
-    );
+    assert!(final_answer_during_tool.is_empty());
+
+    app.handle_stream_event(output_completed_event(
+        "msg-tools",
+        "sess-test",
+        5,
+        "Draft summary\nFinal answer",
+    ));
 
     app.handle_stream_event(completed_event(
         "msg-tools",
         "sess-test",
-        5,
+        6,
         TokenUsage::default(),
     ));
 
-    let assistant_after_complete = app
+    let final_answer_after_complete = app
         .chat_blocks
         .iter()
-        .filter(|b| b.role == ChatRole::Assistant)
+        .filter(|b| b.role == ChatRole::FinalAnswer)
         .map(|b| b.content.clone())
         .collect::<Vec<_>>();
     assert_eq!(
-        assistant_after_complete,
-        vec!["Draft summary".to_string(), "\nFinal answer".to_string()]
+        final_answer_after_complete,
+        vec!["Draft summary\nFinal answer"]
     );
+}
+
+#[tokio::test]
+async fn test_completed_final_text_renders_when_no_delta_arrived() {
+    let mut app = create_app_server_app();
+    app.initialize_session().await;
+    app.in_flight = true;
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(output_item_started_event("msg-final", "sess-test", 1));
+    app.handle_stream_event(output_completed_event(
+        "msg-final",
+        "sess-test",
+        2,
+        "Final summary from completed content.",
+    ));
+
+    let final_answer = app
+        .chat_blocks
+        .iter()
+        .filter(|block| block.role == ChatRole::FinalAnswer)
+        .map(|block| block.content.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(final_answer, vec!["Final summary from completed content."]);
+    assert!(app.received_output_delta);
 }
 
 #[tokio::test]

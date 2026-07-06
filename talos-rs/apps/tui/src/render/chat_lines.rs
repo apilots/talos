@@ -4,7 +4,6 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::markdown::render_markdown_lines;
 use crate::render::helpers;
 use crate::status::render_status_card_lines;
 use crate::types::{ChatBlock, ChatRole, CopyProjection, RenderedChatLine, RoundFooterButton};
@@ -12,7 +11,7 @@ use crate::utils::{
     highlight_line_columns, line_display_width, line_plain_text, text_display_width,
     wrap_line_visual,
 };
-use crate::{TuiApp, CHAT_BLOCK_BODY_INDENT, COPY_ROUND_BUTTON_TEXT};
+use crate::{TuiApp, COPY_ROUND_BUTTON_TEXT};
 
 impl TuiApp {
     pub(crate) fn rebuild_chat_render_state_if_rect(&mut self) {
@@ -57,7 +56,6 @@ impl TuiApp {
             block_index = round_end_exclusive;
         }
 
-        // Append thinking spinner if agent is working
         if self.is_agent_working() {
             self.rendered_chat_lines
                 .push(self.thinking_spinner_line(self.spinner_index));
@@ -97,7 +95,7 @@ impl TuiApp {
         !self.in_flight
             && self.chat_blocks[round_start..round_end_exclusive]
                 .iter()
-                .any(|block| matches!(block.role, ChatRole::Assistant | ChatRole::System))
+                .any(|block| matches!(block.role, ChatRole::FinalAnswer | ChatRole::System))
     }
 
     pub(crate) fn round_footer_line(
@@ -198,8 +196,9 @@ impl TuiApp {
         match block.role {
             ChatRole::User => self.user_block_lines(block, content_width),
             ChatRole::Tool => self.tool_block_lines(block, content_width),
-            ChatRole::Assistant => self.assistant_block_lines(block, content_width),
+            ChatRole::Commentary => self.commentary_block_lines(block, content_width),
             ChatRole::Thinking => self.thinking_block_lines(block, content_width),
+            ChatRole::FinalAnswer => self.final_answer_block_lines(block, content_width),
             ChatRole::System => self.system_block_lines(block, content_width),
             ChatRole::Status => self.status_block_lines(block),
         }
@@ -210,110 +209,44 @@ impl TuiApp {
         block: &ChatBlock,
         content_width: usize,
     ) -> Vec<RenderedChatLine> {
-        let mut lines = vec![];
-        if block.content.trim_start().starts_with('/') {
-            let command = block.content.clone();
-            lines.push(RenderedChatLine {
-                display: Line::from(Span::styled(
-                    command.clone(),
-                    Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                copy_projection: Some(CopyProjection {
-                    text: command,
-                    display_start_col: 0,
-                }),
-            });
-            return lines;
-        }
-
-        let label_style = Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD);
-        let body_style = Style::default().fg(Color::White);
-
-        lines.push(RenderedChatLine {
-            display: Line::from(Span::styled("👤 User", label_style)),
-            copy_projection: Some(CopyProjection {
-                text: "User".to_string(),
-                display_start_col: 0,
-            }),
-        });
-
-        let content_lines = block
-            .content
-            .lines()
-            .map(|line| Line::from(line.to_string()))
-            .collect::<Vec<_>>();
-
-        if !content_lines.is_empty() {
-            helpers::push_block_header_gap(&mut lines);
-        }
-
-        for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(
-                line.clone(),
-                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
-            ) {
-                lines.push(self.decorate_chat_line(wrapped, body_style, CHAT_BLOCK_BODY_INDENT));
-            }
-        }
-
-        lines
+        let body_style = if block.content.trim_start().starts_with('/') {
+            Style::default()
+                .fg(Color::Blue)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        bullet_transcript_lines(
+            &block.content,
+            content_width,
+            Style::default().fg(Color::Gray),
+            body_style,
+            None,
+        )
     }
 
-    pub(crate) fn assistant_block_lines(
+    pub(crate) fn commentary_block_lines(
         &self,
         block: &ChatBlock,
         content_width: usize,
     ) -> Vec<RenderedChatLine> {
-        let mut lines = vec![];
-        let label_style = Style::default()
-            .fg(Color::Green)
-            .add_modifier(Modifier::BOLD);
-        lines.push(RenderedChatLine {
-            display: Line::from(Span::styled("🤖 Assistant", label_style)),
-            copy_projection: Some(CopyProjection {
-                text: "Assistant".to_string(),
-                display_start_col: 0,
-            }),
-        });
-        let content_lines = render_markdown_lines(&block.content);
+        let body_style = Style::default().fg(Color::White);
+        bullet_transcript_lines(
+            &block.content,
+            content_width,
+            Style::default().fg(Color::Gray),
+            body_style,
+            None,
+        )
+    }
 
-        if !content_lines.is_empty() {
-            helpers::push_block_header_gap(&mut lines);
-        }
-
-        for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(
-                line.clone(),
-                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
-            ) {
-                let mut colored_spans = vec![];
-                for span in &wrapped.spans {
-                    let final_style = if span.style.fg.is_some() {
-                        span.style
-                    } else {
-                        span.style.fg(Color::White)
-                    };
-                    colored_spans.push(Span::styled(span.content.to_string(), final_style));
-                }
-                lines.push(RenderedChatLine {
-                    display: Line::from(
-                        std::iter::once(Span::raw(" ".repeat(CHAT_BLOCK_BODY_INDENT)))
-                            .chain(colored_spans)
-                            .collect::<Vec<_>>(),
-                    ),
-                    copy_projection: Some(CopyProjection {
-                        text: line_plain_text(&wrapped),
-                        display_start_col: CHAT_BLOCK_BODY_INDENT,
-                    }),
-                });
-            }
-        }
-
-        lines
+    pub(crate) fn final_answer_block_lines(
+        &self,
+        block: &ChatBlock,
+        content_width: usize,
+    ) -> Vec<RenderedChatLine> {
+        let body_style = Style::default().fg(Color::White);
+        plain_transcript_lines(&block.content, content_width, body_style)
     }
 
     pub(crate) fn thinking_block_lines(
@@ -321,46 +254,54 @@ impl TuiApp {
         block: &ChatBlock,
         content_width: usize,
     ) -> Vec<RenderedChatLine> {
-        let mut lines = vec![];
-        let label_style = Style::default()
-            .fg(Color::Magenta)
-            .add_modifier(Modifier::BOLD | Modifier::ITALIC);
         let body_style = Style::default()
             .fg(Color::Gray)
             .add_modifier(Modifier::ITALIC | Modifier::DIM);
 
         if block.content.is_empty() {
-            return lines;
+            return Vec::new();
         }
 
-        lines.push(RenderedChatLine {
-            display: Line::from(Span::styled("💭 Thinking", label_style)),
-            copy_projection: Some(CopyProjection {
-                text: "Thinking".to_string(),
-                display_start_col: 0,
-            }),
-        });
-
-        let content_lines = block
-            .content
-            .lines()
-            .map(|line| Line::from(line.to_string()))
-            .collect::<Vec<_>>();
-
-        if !content_lines.is_empty() {
-            helpers::push_block_header_gap(&mut lines);
+        if block.expanded {
+            let mut lines = bullet_transcript_lines(
+                &block.content,
+                content_width,
+                Style::default().fg(Color::Gray),
+                body_style,
+                None,
+            );
+            lines.push(RenderedChatLine {
+                display: Line::from(Span::styled(
+                    "  (ctrl+o to collapse)",
+                    Style::default().fg(Color::DarkGray),
+                )),
+                copy_projection: Some(CopyProjection {
+                    text: "(ctrl+o to collapse)".to_string(),
+                    display_start_col: 2,
+                }),
+            });
+            lines
+        } else {
+            let preview = block
+                .content
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("")
+                .trim();
+            let text = if preview.is_empty() {
+                "Thinking (ctrl+o to expand)".to_string()
+            } else {
+                format!("Thinking: {preview} (ctrl+o to expand)")
+            };
+            prefix_transcript_lines(
+                &text,
+                content_width,
+                "∴ ",
+                Style::default().fg(Color::Gray),
+                body_style,
+                None,
+            )
         }
-
-        for line in content_lines.iter() {
-            for wrapped in wrap_line_visual(
-                line.clone(),
-                content_width.saturating_sub(CHAT_BLOCK_BODY_INDENT),
-            ) {
-                lines.push(self.decorate_chat_line(wrapped, body_style, CHAT_BLOCK_BODY_INDENT));
-            }
-        }
-
-        lines
     }
 
     pub(crate) fn system_block_lines(
@@ -428,13 +369,153 @@ impl TuiApp {
     pub(crate) fn status_block_lines(&self, block: &ChatBlock) -> Vec<RenderedChatLine> {
         render_status_card_lines(&block.content)
     }
+}
 
-    pub(crate) fn decorate_chat_line(
-        &self,
-        line: Line<'static>,
-        body_style: Style,
-        indent: usize,
-    ) -> RenderedChatLine {
-        helpers::decorate_chat_line(line, body_style, indent)
+fn bullet_transcript_lines(
+    content: &str,
+    content_width: usize,
+    bullet_style: Style,
+    body_style: Style,
+    empty_text: Option<&str>,
+) -> Vec<RenderedChatLine> {
+    let mut lines = Vec::new();
+    let source = if content.is_empty() {
+        empty_text.unwrap_or("")
+    } else {
+        content
+    };
+    let mut first_content_line = true;
+
+    for raw_line in source.lines() {
+        let prefix = if first_content_line { "● " } else { "  " };
+        let prefix_style = if first_content_line {
+            bullet_style
+        } else {
+            Style::default()
+        };
+        let prefix_width = text_display_width(prefix);
+        first_content_line = false;
+
+        let wrapped_lines = wrap_line_visual(
+            Line::from(Span::styled(raw_line.to_string(), body_style)),
+            content_width.saturating_sub(prefix_width),
+        );
+        for (index, wrapped) in wrapped_lines.into_iter().enumerate() {
+            let actual_prefix = if index == 0 { prefix } else { "  " };
+            let actual_prefix_width = text_display_width(actual_prefix);
+            let plain = line_plain_text(&wrapped);
+            let display = Line::from(
+                std::iter::once(Span::styled(actual_prefix.to_string(), prefix_style))
+                    .chain(wrapped.spans)
+                    .collect::<Vec<_>>(),
+            );
+            lines.push(RenderedChatLine {
+                display,
+                copy_projection: Some(CopyProjection {
+                    text: plain,
+                    display_start_col: actual_prefix_width,
+                }),
+            });
+        }
     }
+
+    if lines.is_empty() {
+        lines.push(RenderedChatLine {
+            display: Line::from(vec![
+                Span::styled("● ", bullet_style),
+                Span::styled(String::new(), body_style),
+            ]),
+            copy_projection: Some(CopyProjection {
+                text: String::new(),
+                display_start_col: 2,
+            }),
+        });
+    }
+
+    lines
+}
+
+fn prefix_transcript_lines(
+    content: &str,
+    content_width: usize,
+    prefix: &str,
+    prefix_style: Style,
+    body_style: Style,
+    empty_text: Option<&str>,
+) -> Vec<RenderedChatLine> {
+    let mut lines = Vec::new();
+    let source = if content.is_empty() {
+        empty_text.unwrap_or("")
+    } else {
+        content
+    };
+    let mut first_content_line = true;
+
+    for raw_line in source.lines() {
+        let actual_prefix = if first_content_line { prefix } else { "  " };
+        let actual_prefix_style = if first_content_line {
+            prefix_style
+        } else {
+            Style::default()
+        };
+        first_content_line = false;
+        let prefix_width = text_display_width(actual_prefix);
+        let wrapped_lines = wrap_line_visual(
+            Line::from(Span::styled(raw_line.to_string(), body_style)),
+            content_width.saturating_sub(prefix_width),
+        );
+        for (index, wrapped) in wrapped_lines.into_iter().enumerate() {
+            let line_prefix = if index == 0 { actual_prefix } else { "  " };
+            let line_prefix_width = text_display_width(line_prefix);
+            let plain = line_plain_text(&wrapped);
+            let display = Line::from(
+                std::iter::once(Span::styled(line_prefix.to_string(), actual_prefix_style))
+                    .chain(wrapped.spans)
+                    .collect::<Vec<_>>(),
+            );
+            lines.push(RenderedChatLine {
+                display,
+                copy_projection: Some(CopyProjection {
+                    text: plain,
+                    display_start_col: line_prefix_width,
+                }),
+            });
+        }
+    }
+
+    lines
+}
+
+fn plain_transcript_lines(
+    content: &str,
+    content_width: usize,
+    body_style: Style,
+) -> Vec<RenderedChatLine> {
+    let mut lines = Vec::new();
+    for raw_line in content.lines() {
+        let wrapped_lines = wrap_line_visual(
+            Line::from(Span::styled(raw_line.to_string(), body_style)),
+            content_width,
+        );
+        for wrapped in wrapped_lines {
+            let plain = line_plain_text(&wrapped);
+            lines.push(RenderedChatLine {
+                display: wrapped,
+                copy_projection: Some(CopyProjection {
+                    text: plain,
+                    display_start_col: 0,
+                }),
+            });
+        }
+    }
+    if lines.is_empty() {
+        lines.push(RenderedChatLine {
+            display: Line::from(String::new()),
+            copy_projection: Some(CopyProjection {
+                text: String::new(),
+                display_start_col: 0,
+            }),
+        });
+    }
+    lines
 }

@@ -80,7 +80,7 @@ impl TuiApp {
                     self.push_right_event("models load failed".to_string());
                 }
             },
-            CommandUpdate::StatusLoaded(result) => match result {
+            CommandUpdate::StatusLoaded(result) => match *result {
                 Ok(status) => {
                     let snapshot = TuiStatusSnapshot::from_app(
                         self,

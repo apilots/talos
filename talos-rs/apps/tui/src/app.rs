@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{ModelRef, SessionInfo, TalosContext, TalosProvider, TalosSourceType};
@@ -15,7 +15,7 @@ use crate::client::GatewayClient;
 use crate::render;
 use crate::types::{AppState, ChatRole, CopyProjection, RenderedChatLine};
 use crate::utils::{build_welcome_card, APP_VERSION};
-use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, WELCOME_MODEL_PLACEHOLDER};
+use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, SPINNER_FRAMES, WELCOME_MODEL_PLACEHOLDER};
 
 const SESSION_INIT_MAX_ATTEMPTS: usize = 5;
 const SESSION_INIT_RETRY_DELAY_MS: u64 = 250;
@@ -41,7 +41,6 @@ impl TuiApp {
             chat_blocks: vec![],
             chat_history: vec![],
             right_panel_events: vec![],
-            tool_events: vec![],
             rendered_chat_lines: vec![],
             rendered_round_footer_buttons: HashMap::new(),
             chat_content_rect: None,
@@ -74,7 +73,6 @@ impl TuiApp {
             timeline_items: HashMap::new(),
             status_hint: None,
             spinner_index: 0,
-            stripe_phase: 0,
             stream_started_at: None,
             last_stream_event_at: None,
             gateway_client,
@@ -211,14 +209,18 @@ impl TuiApp {
     }
 
     pub(crate) fn is_agent_working(&self) -> bool {
-        self.in_flight && !self.transcript.has_visible_activity
+        self.in_flight
     }
 
     pub(crate) fn thinking_spinner_line(&self, spinner_index: usize) -> RenderedChatLine {
         let color = render::helpers::spinning_color(spinner_index);
-        let text = "✢ Thinking…".to_string();
+        let marker = SPINNER_FRAMES[spinner_index % SPINNER_FRAMES.len()];
+        let text = format!("{marker} Brewing...");
 
-        let display = Line::from(vec![Span::styled(text.clone(), Style::default().fg(color))]);
+        let display = Line::from(vec![Span::styled(
+            text.clone(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )]);
 
         RenderedChatLine {
             display,
@@ -259,7 +261,6 @@ impl TuiApp {
         self.chat_blocks.clear();
         self.rendered_chat_lines.clear();
         self.chat_history.clear();
-        self.tool_events.clear();
         self.right_panel_events.clear();
         self.rendered_round_footer_buttons.clear();
         self.chat_selection = None;
@@ -289,20 +290,6 @@ impl TuiApp {
                 .to_string(),
         );
         self.rebuild_chat_render_state_if_rect();
-    }
-
-    pub(crate) fn stripe_line(&self, width: usize) -> String {
-        if width == 0 {
-            return String::new();
-        }
-        let pattern = [">>>", ">>>", "===", "===", "...", "..."];
-        let mut result = String::with_capacity(width);
-        for idx in 0..width {
-            let p = (idx + self.stripe_phase) % pattern.len();
-            let ch = pattern[p].chars().next().unwrap_or(' ');
-            result.push(ch);
-        }
-        result
     }
 
     pub(crate) fn chat_content_columns(&self, chat_inner: Rect) -> (Rect, Rect) {

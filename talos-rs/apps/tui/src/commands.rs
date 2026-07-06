@@ -392,7 +392,7 @@ impl TuiApp {
                 })
             }
             .await;
-            CommandUpdate::StatusLoaded(result)
+            CommandUpdate::StatusLoaded(Box::new(result))
         })
     }
 

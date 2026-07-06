@@ -152,7 +152,6 @@ impl TuiApp {
 
     pub async fn on_tick(&mut self) {
         self.spinner_index = (self.spinner_index + 1) % SPINNER_FRAMES.len();
-        self.stripe_phase = self.stripe_phase.wrapping_add(1);
 
         if let Some((_, expires_at)) = &self.status_hint {
             if Instant::now() >= *expires_at {

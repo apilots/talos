@@ -1,7 +1,7 @@
 use super::*;
 use crate::test_support::*;
 
+mod chat_render_tests;
 mod input_stream_tests;
-mod markdown_layout_tests;
-mod markdown_render_tests;
 mod scroll_render_tests;
+mod tool_render_tests;

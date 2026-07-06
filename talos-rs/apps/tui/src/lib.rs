@@ -7,7 +7,6 @@ mod chat;
 mod client;
 mod commands;
 mod input;
-mod markdown;
 mod render;
 pub mod run;
 mod selection;
@@ -49,9 +48,8 @@ pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
 pub(crate) const MAX_QUEUE_LEN: usize = 3;
 pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
-pub(crate) const SPINNER_FRAMES: &[char] = &['|', '/', '-', '\\'];
+pub(crate) const SPINNER_FRAMES: &[char] = &['✻', '✢', '✳', '✶'];
 pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
-pub(crate) const CHAT_BLOCK_BODY_INDENT: usize = 2;
 pub(crate) const TOOL_PREVIEW_CHAR_LIMIT: usize = 100;
 pub(crate) const COPY_ROUND_BUTTON_TEXT: &str = "  [ Copy Round ]";
 pub(crate) const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
@@ -103,7 +101,6 @@ pub struct TuiApp {
     pub(crate) chat_blocks: Vec<ChatBlock>,
     pub(crate) chat_history: Vec<String>,
     pub(crate) right_panel_events: Vec<String>,
-    pub(crate) tool_events: Vec<ToolPanelEvent>,
     pub(crate) rendered_chat_lines: Vec<RenderedChatLine>,
     pub(crate) rendered_round_footer_buttons: HashMap<usize, RoundFooterButton>,
     pub(crate) chat_content_rect: Option<Rect>,
@@ -137,7 +134,6 @@ pub struct TuiApp {
     pub(crate) timeline_items: HashMap<String, TalosTimelineItem>,
     pub(crate) status_hint: Option<(String, Instant)>,
     pub(crate) spinner_index: usize,
-    pub(crate) stripe_phase: usize,
     pub(crate) stream_started_at: Option<Instant>,
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,

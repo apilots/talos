@@ -57,8 +57,9 @@ impl TuiApp {
                 lines.join("\n")
             }
             ChatRole::User => format!("## User\n\n{}", block.content),
-            ChatRole::Assistant => format!("## Assistant\n\n{}", block.content),
+            ChatRole::Commentary => format!("## Commentary\n\n{}", block.content),
             ChatRole::Thinking => format!("## Thinking\n\n{}", block.content),
+            ChatRole::FinalAnswer => block.content.clone(),
             ChatRole::System => format!("## System\n\n{}", block.content),
             ChatRole::Status => block.content.clone(),
         }
@@ -84,10 +85,10 @@ impl TuiApp {
     #[cfg(test)]
     pub(crate) fn round_text_for_block(&self, block_index: usize) -> Option<String> {
         let (start, end_exclusive) = self.round_bounds_for_block(block_index)?;
-        self.round_markdown(start, end_exclusive)
+        self.round_copy_text(start, end_exclusive)
     }
 
-    pub(crate) fn round_markdown(&self, start: usize, end_exclusive: usize) -> Option<String> {
+    pub(crate) fn round_copy_text(&self, start: usize, end_exclusive: usize) -> Option<String> {
         let text = self.chat_blocks[start..end_exclusive]
             .iter()
             .map(Self::format_block_for_round_copy)
@@ -100,7 +101,7 @@ impl TuiApp {
         let end_exclusive = ((start_block_index + 1)..self.chat_blocks.len())
             .find(|&index| self.chat_blocks[index].role == ChatRole::User)
             .unwrap_or(self.chat_blocks.len());
-        let Some(text) = self.round_markdown(start_block_index, end_exclusive) else {
+        let Some(text) = self.round_copy_text(start_block_index, end_exclusive) else {
             self.show_status_hint("Nothing to copy.", Duration::from_secs(2));
             return;
         };

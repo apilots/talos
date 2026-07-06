@@ -1,11 +1,9 @@
 pub(crate) use super::*;
-pub(crate) use crate::markdown::render_markdown_lines;
 use crate::utils::char_display_width;
 use async_trait::async_trait;
 pub(crate) use crossterm::event::{
     KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
-pub(crate) use ratatui::style::{Color, Modifier};
 pub(crate) use serde_json::json;
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
@@ -154,6 +152,38 @@ pub(crate) fn output_delta_event(
     )
 }
 
+pub(crate) fn output_completed_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    text: impl Into<String>,
+) -> TimelineEventEnvelope {
+    output_completed_event_for_item(message_id, session_id, sequence, "final-answer", text)
+}
+
+pub(crate) fn output_completed_event_for_item(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    item_id: impl Into<String>,
+    text: impl Into<String>,
+) -> TimelineEventEnvelope {
+    timeline_event(
+        message_id.into(),
+        session_id.into(),
+        sequence,
+        AgentEventType::ItemCompleted,
+        AgentEventPayload::ItemCompleted(talos_sdk::TalosItemCompletedEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: item_id.into(),
+            status: TalosTimelineItemStatus::Completed,
+            completed_at_ms: sequence,
+            final_content: Some(TalosTimelineContent::Text { text: text.into() }),
+        }),
+    )
+}
+
 pub(crate) fn commentary_item_started_event(
     message_id: impl Into<String>,
     session_id: impl Into<String>,
@@ -209,6 +239,24 @@ pub(crate) fn unknown_item_started_event(
     session_id: impl Into<String>,
     sequence: u64,
 ) -> TimelineEventEnvelope {
+    text_item_started_event(
+        message_id,
+        session_id,
+        sequence,
+        "unknown-answer",
+        TalosTimelinePhase::Unknown,
+        String::new(),
+    )
+}
+
+pub(crate) fn text_item_started_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    item_id: impl Into<String>,
+    phase: TalosTimelinePhase,
+    text: impl Into<String>,
+) -> TimelineEventEnvelope {
     timeline_event(
         message_id.into(),
         session_id.into(),
@@ -218,17 +266,15 @@ pub(crate) fn unknown_item_started_event(
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
             item: TalosTimelineItem {
-                item_id: "unknown-answer".to_string(),
+                item_id: item_id.into(),
                 parent_item_id: None,
                 kind: TalosTimelineItemKind::AssistantText,
-                phase: TalosTimelinePhase::Unknown,
+                phase,
                 status: TalosTimelineItemStatus::Running,
                 title: None,
                 started_at_ms: sequence,
                 completed_at_ms: None,
-                content: TalosTimelineContent::Text {
-                    text: String::new(),
-                },
+                content: TalosTimelineContent::Text { text: text.into() },
             },
         }),
     )
@@ -240,6 +286,16 @@ pub(crate) fn unknown_delta_event(
     sequence: u64,
     delta: impl Into<String>,
 ) -> TimelineEventEnvelope {
+    text_delta_event(message_id, session_id, sequence, "unknown-answer", delta)
+}
+
+pub(crate) fn text_delta_event(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    item_id: impl Into<String>,
+    delta: impl Into<String>,
+) -> TimelineEventEnvelope {
     timeline_event(
         message_id.into(),
         session_id.into(),
@@ -248,7 +304,7 @@ pub(crate) fn unknown_delta_event(
         AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
-            item_id: "unknown-answer".to_string(),
+            item_id: item_id.into(),
             delta: TalosTimelineDelta::Text { text: delta.into() },
         }),
     )
@@ -260,6 +316,22 @@ pub(crate) fn assistant_text_committed_event(
     sequence: u64,
     phase: TalosTimelinePhase,
 ) -> TimelineEventEnvelope {
+    assistant_text_committed_event_for_item(
+        message_id,
+        session_id,
+        sequence,
+        "unknown-answer",
+        phase,
+    )
+}
+
+pub(crate) fn assistant_text_committed_event_for_item(
+    message_id: impl Into<String>,
+    session_id: impl Into<String>,
+    sequence: u64,
+    item_id: impl Into<String>,
+    phase: TalosTimelinePhase,
+) -> TimelineEventEnvelope {
     timeline_event(
         message_id.into(),
         session_id.into(),
@@ -268,7 +340,7 @@ pub(crate) fn assistant_text_committed_event(
         AgentEventPayload::AssistantTextCommitted(talos_sdk::TalosAssistantTextCommittedEvent {
             request_id: "req-test".to_string(),
             turn_id: "turn-test".to_string(),
-            item_id: "unknown-answer".to_string(),
+            item_id: item_id.into(),
             phase,
         }),
     )
@@ -543,7 +615,7 @@ pub(crate) fn tool_completed_event(
     )
 }
 
-fn timeline_event(
+pub(crate) fn timeline_event(
     message_id: String,
     session_id: String,
     sequence: u64,
@@ -668,6 +740,7 @@ impl GatewayClient for MockGatewayClient {
                     username: "talos-user".to_string(),
                     email: state.auth_email.clone(),
                     role: UserRole::User,
+                    r#type: Default::default(),
                 },
             }),
         })
@@ -837,10 +910,20 @@ impl GatewayClient for MockGatewayClient {
         .await
         .unwrap();
 
+        let final_text = format!("# Title\n- item\nreply({prompt})");
+        tx.send(output_completed_event(
+            message_id.clone(),
+            session_id.to_string(),
+            5,
+            final_text,
+        ))
+        .await
+        .unwrap();
+
         tx.send(completed_event(
             message_id,
             session_id.to_string(),
-            5,
+            6,
             TokenUsage::default(),
         ))
         .await

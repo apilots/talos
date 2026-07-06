@@ -40,7 +40,7 @@ impl TuiApp {
             .composer_line_count(left_inner.width as usize)
             .saturating_add(2)
             .clamp(3, 8) as u16;
-        let metrics_line_height = u16::from(self.turn_metrics.is_some());
+        let metrics_line_height = if self.turn_metrics.is_some() { 3 } else { 0 };
         let bottom_gap_height = 3;
         let left_chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -121,10 +121,15 @@ impl TuiApp {
             );
             if let Some(metrics_line) = self.turn_metrics_status_line(left_chunks[2].width as usize)
             {
+                let metrics_row_rect = Rect {
+                    y: left_chunks[2].y.saturating_add(2),
+                    height: 1,
+                    ..left_chunks[2]
+                };
                 let metrics_row = Paragraph::new(metrics_line)
                     .style(metrics_style)
                     .wrap(Wrap { trim: false });
-                f.render_widget(metrics_row, left_chunks[2]);
+                f.render_widget(metrics_row, metrics_row_rect);
             }
         }
 

@@ -145,17 +145,6 @@ impl TuiApp {
                 "closing {} · flushing memory · {}{}{}",
                 session_id, directory, history_indicator, pasted_indicator
             )
-        } else if self.in_flight {
-            let motion = self.stripe_line(6);
-            format!(
-                "{} {} · {} · {}{}{}",
-                motion,
-                self.current_model,
-                token_left,
-                directory,
-                history_indicator,
-                pasted_indicator
-            )
         } else {
             format!(
                 "{} · {} · {}{}{}",
@@ -181,7 +170,8 @@ impl TuiApp {
     }
 
     pub(crate) fn turn_metrics_status_line(&self, width: usize) -> Option<Line<'static>> {
-        let mut text = self.compact_turn_metrics_text(width)?;
+        let metrics_width = width.saturating_sub(CHAT_CONTENT_PADDING_LEFT as usize);
+        let mut text = self.compact_turn_metrics_text(metrics_width)?;
         text = format!("{}{}", " ".repeat(CHAT_CONTENT_PADDING_LEFT as usize), text);
         let max = width.saturating_sub(1);
         if text.chars().count() > max {

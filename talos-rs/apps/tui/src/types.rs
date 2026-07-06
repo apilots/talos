@@ -105,11 +105,12 @@ pub enum AppState {
 
 // ── Chat types ───────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ChatRole {
     User,
+    Commentary,
     Thinking,
-    Assistant,
+    FinalAnswer,
     System,
     Status,
     Tool,
@@ -119,8 +120,9 @@ impl ChatRole {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::User => "User",
+            Self::Commentary => "Commentary",
             Self::Thinking => "Thinking",
-            Self::Assistant => "Assistant",
+            Self::FinalAnswer => "FinalAnswer",
             Self::System => "System",
             Self::Status => "Status",
             Self::Tool => "Tool",
@@ -140,6 +142,7 @@ pub(crate) enum ToolCallStatus {
 pub(crate) struct ChatBlock {
     pub(crate) role: ChatRole,
     pub(crate) content: String,
+    pub(crate) tool_item_id: Option<String>,
     pub(crate) tool_call_id: Option<String>,
     pub(crate) tool_name: Option<String>,
     pub(crate) tool_input: Option<ToolArguments>,
@@ -153,11 +156,23 @@ pub(crate) struct ChatBlock {
     pub(crate) round_timing_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct ToolCallBlockUpdate {
+    pub(crate) item_id: Option<String>,
+    pub(crate) call_id: String,
+    pub(crate) tool_name: String,
+    pub(crate) tool_input: ToolArguments,
+    pub(crate) iteration: u64,
+    pub(crate) item_index: u64,
+    pub(crate) timing_ms: Option<u64>,
+}
+
 impl ChatBlock {
     pub(crate) fn new(role: ChatRole, content: String) -> Self {
         Self {
             role,
             content,
+            tool_item_id: None,
             tool_call_id: None,
             tool_name: None,
             tool_input: None,
@@ -172,7 +187,22 @@ impl ChatBlock {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn new_tool_call(
+        call_id: String,
+        tool_name: String,
+        tool_input: impl Into<ToolArguments>,
+        iteration: u64,
+        item_index: u64,
+        timing_ms: Option<u64>,
+    ) -> Self {
+        Self::new_tool_call_for_item(
+            None, call_id, tool_name, tool_input, iteration, item_index, timing_ms,
+        )
+    }
+
+    pub(crate) fn new_tool_call_for_item(
+        item_id: Option<String>,
         call_id: String,
         tool_name: String,
         tool_input: impl Into<ToolArguments>,
@@ -184,6 +214,7 @@ impl ChatBlock {
         Self {
             role: ChatRole::Tool,
             content: String::new(),
+            tool_item_id: item_id,
             tool_call_id: Some(call_id),
             tool_name: Some(tool_name),
             tool_input: Some(tool_input),
@@ -222,16 +253,12 @@ pub(crate) struct RoundFooterButton {
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct ToolRenderData {
+    pub(crate) title: String,
     pub(crate) summary: String,
     pub(crate) detail_lines: Vec<String>,
     pub(crate) preview_lines: Vec<String>,
     pub(crate) output_lines: Vec<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolPanelEvent {
-    pub(crate) call_id: String,
-    pub(crate) summary: String,
+    pub(crate) force_show_output: bool,
 }
 
 // ── Input types ──────────────────────────────────────────────────────────────
@@ -296,7 +323,7 @@ pub(crate) struct StatusLoad {
 
 pub(crate) enum CommandUpdate {
     ModelsLoaded(TalosResult<Vec<ModelInfo>>),
-    StatusLoaded(TalosResult<StatusLoad>),
+    StatusLoaded(Box<TalosResult<StatusLoad>>),
     SessionCompacted(TalosResult<SessionInfo>),
     SessionCleared(TalosResult<SessionInfo>),
     ModelSwitched {

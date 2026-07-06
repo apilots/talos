@@ -52,6 +52,7 @@ fn auth_session() -> AuthSessionReadResponse {
                 username: "status".to_string(),
                 email: Some("status@example.com".to_string()),
                 role: UserRole::User,
+                r#type: Default::default(),
             },
         }),
     }

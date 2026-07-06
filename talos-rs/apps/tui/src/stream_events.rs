@@ -5,7 +5,7 @@ use talos_sdk::{
     TimelineEventEnvelope, TimelineRecoveryResponse, ToolArguments,
 };
 
-use crate::types::{ChatRole, ToolCallStatus};
+use crate::types::{ChatRole, ToolCallBlockUpdate, ToolCallStatus};
 use crate::TuiApp;
 
 impl TuiApp {
@@ -156,8 +156,7 @@ impl TuiApp {
                 if text.trim().is_empty() {
                     return false;
                 }
-                self.transcript.note_visible_activity();
-                self.append_thinking(text);
+                self.append_thinking(None, text);
                 true
             }
             (
@@ -168,8 +167,7 @@ impl TuiApp {
                 if text.trim().is_empty() {
                     return false;
                 }
-                self.transcript.note_visible_activity();
-                self.append_assistant(text);
+                self.append_final_answer(None, text);
                 true
             }
             (
@@ -180,8 +178,7 @@ impl TuiApp {
                 if text.trim().is_empty() {
                     return false;
                 }
-                self.transcript.note_visible_activity();
-                self.append_thinking(text);
+                self.append_commentary(None, text);
                 true
             }
             (
@@ -195,19 +192,21 @@ impl TuiApp {
                     result,
                 },
             ) => {
-                self.transcript.note_visible_activity();
                 self.finish_live_text_blocks();
                 let timing_ms = item
                     .completed_at_ms
                     .map(|completed| completed.saturating_sub(item.started_at_ms));
-                self.push_tool_call_block(
-                    call_id.clone(),
-                    name.clone(),
-                    parse_tool_arguments(arguments),
-                    0,
-                    item.started_at_ms,
-                    timing_ms,
-                );
+                if !is_internal_task_output(name) {
+                    self.push_tool_call_block(ToolCallBlockUpdate {
+                        item_id: Some(item.item_id.clone()),
+                        call_id: call_id.clone(),
+                        tool_name: name.clone(),
+                        tool_input: parse_tool_arguments(arguments),
+                        iteration: 0,
+                        item_index: item.started_at_ms,
+                        timing_ms,
+                    });
+                }
                 for entry in progress {
                     self.append_tool_call_progress(
                         call_id,
@@ -217,6 +216,7 @@ impl TuiApp {
                 if let Some(result) = result {
                     let output = Self::tool_result_output_text(&result.content);
                     self.complete_tool_call_block(
+                        Some(&item.item_id),
                         call_id,
                         output,
                         result.content.clone(),
@@ -281,8 +281,7 @@ impl TuiApp {
                 TalosTimelineContent::Text { text },
             ) => {
                 if !text.is_empty() {
-                    self.transcript.note_visible_activity();
-                    self.append_thinking(text);
+                    self.append_thinking(Some(&item.item_id), text);
                 }
             }
             (
@@ -291,8 +290,16 @@ impl TuiApp {
                 TalosTimelineContent::Text { text },
             ) => {
                 if !text.is_empty() {
-                    self.transcript.note_visible_activity();
-                    self.append_thinking(text);
+                    self.append_commentary(Some(&item.item_id), text);
+                }
+            }
+            (
+                TalosTimelineItemKind::AssistantText,
+                TalosTimelinePhase::FinalAnswer,
+                TalosTimelineContent::Text { text },
+            ) => {
+                if !text.is_empty() {
+                    self.buffer_final_answer(&item.item_id, text);
                 }
             }
             (
@@ -305,20 +312,23 @@ impl TuiApp {
                     ..
                 },
             ) => {
-                self.transcript.note_visible_activity();
+                if is_internal_task_output(name) {
+                    return;
+                }
                 self.finish_live_text_blocks();
                 self.push_right_event(format!("tool started [{}]: {}", item.item_id, name));
-                self.upsert_tool_event(call_id.clone(), format!("queued: {}", name));
-                self.push_tool_call_block(
-                    call_id.clone(),
-                    name.clone(),
-                    parse_tool_arguments(arguments),
-                    0,
-                    item.started_at_ms,
-                    item.completed_at_ms
+                self.push_tool_call_block(ToolCallBlockUpdate {
+                    item_id: Some(item.item_id.clone()),
+                    call_id: call_id.clone(),
+                    tool_name: name.clone(),
+                    tool_input: parse_tool_arguments(arguments),
+                    iteration: 0,
+                    item_index: item.started_at_ms,
+                    timing_ms: item
+                        .completed_at_ms
                         .map(|completed| completed.saturating_sub(item.started_at_ms)),
-                );
-                self.update_tool_call_status(call_id, ToolCallStatus::Queued);
+                });
+                self.update_tool_call_status(call_id, ToolCallStatus::Running);
             }
             (
                 TalosTimelineItemKind::ExecutionSummary,
@@ -366,21 +376,24 @@ impl TuiApp {
                 else {
                     return;
                 };
-                self.push_tool_call_block(
+                if is_internal_task_output(&name) {
+                    return;
+                }
+                self.push_tool_call_block(ToolCallBlockUpdate {
+                    item_id: Some(item_id.to_string()),
                     call_id,
-                    name,
-                    parse_tool_arguments(&arguments),
-                    0,
-                    0,
-                    None,
-                );
+                    tool_name: name,
+                    tool_input: parse_tool_arguments(&arguments),
+                    iteration: 0,
+                    item_index: 0,
+                    timing_ms: None,
+                });
             }
             TalosTimelineDelta::ToolProgress {
                 progress_kind,
                 text_delta,
             } => {
                 if let Some(call_id) = self.tool_call_id(item_id) {
-                    self.transcript.note_visible_activity();
                     self.append_tool_call_progress(
                         &call_id,
                         Self::format_tool_progress_line(progress_kind, &text_delta),
@@ -391,13 +404,13 @@ impl TuiApp {
                 if let Some(call_id) = self.tool_call_id(item_id) {
                     let output = Self::tool_result_output_text(&content);
                     self.complete_tool_call_block(
+                        Some(item_id),
                         &call_id,
                         output,
                         content.clone(),
                         !is_error,
                         None,
                     );
-                    self.clear_live_tool_progress(&call_id);
                     self.update_stored_tool_result(item_id, content, is_error);
                 }
             }
@@ -406,25 +419,21 @@ impl TuiApp {
                 tool_name,
                 arguments,
             } => {
-                self.transcript.note_visible_activity();
                 self.push_right_event(format!(
                     "dynamic tool requested: {} ({})",
                     crate::utils::display_tool_name(&tool_name),
                     call_id
                 ));
-                self.upsert_tool_event(
-                    call_id.clone(),
-                    format!("running: {}", crate::utils::display_tool_name(&tool_name)),
-                );
-                self.push_tool_call_block(
-                    call_id.clone(),
+                self.push_tool_call_block(ToolCallBlockUpdate {
+                    item_id: Some(item_id.to_string()),
+                    call_id: call_id.clone(),
                     tool_name,
-                    ToolArguments::from(serde_json::Value::from(arguments)),
-                    0,
-                    0,
-                    None,
-                );
-                self.update_tool_call_status(&call_id, ToolCallStatus::PendingDynamicInput);
+                    tool_input: ToolArguments::from(serde_json::Value::from(arguments)),
+                    iteration: 0,
+                    item_index: 0,
+                    timing_ms: None,
+                });
+                self.update_tool_call_status(&call_id, ToolCallStatus::Running);
             }
             TalosTimelineDelta::ContextCompaction {
                 stage,
@@ -487,6 +496,9 @@ impl TuiApp {
             self.push_right_event(context_compaction_text(content));
             return;
         }
+        if let Some(TalosTimelineContent::Text { text }) = &final_content {
+            self.render_completed_final_text(item_id, text);
+        }
         let Some(TalosTimelineContent::ToolCall {
             call_id,
             name,
@@ -501,18 +513,14 @@ impl TuiApp {
             call_id,
             crate::utils::display_tool_name(&name)
         ));
-        self.upsert_tool_event(
-            call_id.clone(),
-            format!("done: {}", crate::utils::display_tool_name(&name)),
-        );
         self.complete_tool_call_block(
+            Some(item_id),
             &call_id,
             Self::tool_result_output_text(&result.content),
             result.content.clone(),
             !result.is_error,
             None,
         );
-        self.clear_live_tool_progress(&call_id);
     }
 
     fn handle_assistant_text_committed(&mut self, item_id: &str, phase: TalosTimelinePhase) {
@@ -524,7 +532,14 @@ impl TuiApp {
         if !matches!(
             (previous_phase, phase),
             (TalosTimelinePhase::Unknown, TalosTimelinePhase::FinalAnswer)
+                | (
+                    TalosTimelinePhase::FinalAnswer,
+                    TalosTimelinePhase::FinalAnswer
+                )
         ) {
+            if phase == TalosTimelinePhase::Commentary {
+                let _ = self.move_live_text_block(item_id, ChatRole::Commentary);
+            }
             return;
         }
         let TalosTimelineContent::Text { text } = &item.content else {
@@ -534,42 +549,62 @@ impl TuiApp {
         if text.trim().is_empty() {
             return;
         }
-        self.remove_text_from_live_thinking(&text);
-        self.transcript.note_visible_activity();
-        self.append_assistant(&text);
+        let _ = self.move_live_text_block(item_id, ChatRole::FinalAnswer);
+        self.open_final_answer(item_id);
         self.received_output_delta = true;
     }
 
-    fn remove_text_from_live_thinking(&mut self, text: &str) {
-        let Some(idx) = self.transcript.live_thinking_idx else {
+    fn render_completed_final_text(&mut self, item_id: &str, text: &str) {
+        if text.trim().is_empty() {
+            return;
+        }
+        if self
+            .transcript
+            .pending_final_answer_text
+            .contains_key(item_id)
+        {
+            self.open_final_answer(item_id);
+            self.complete_final_answer_text(item_id, text);
+            return;
+        }
+        if self.transcript.live_text_blocks.contains_key(item_id) {
+            self.open_final_answer(item_id);
+            self.complete_final_answer_text(item_id, text);
+            return;
+        }
+        if self.final_answer_text_already_rendered(text) {
+            return;
+        }
+        self.open_final_answer(item_id);
+        self.append_final_answer(Some(item_id), text);
+        self.received_output_delta = true;
+    }
+
+    fn complete_final_answer_text(&mut self, item_id: &str, text: &str) {
+        let Some(idx) = self.transcript.live_text_blocks.get(item_id).copied() else {
             return;
         };
-        let Some(block) = self.chat_blocks.get_mut(idx) else {
-            self.transcript.live_thinking_idx = None;
+        let Some(existing) = self.chat_blocks.get(idx).map(|block| block.content.clone()) else {
             return;
         };
-        if block.content == text {
-            self.remove_chat_block(idx);
-            self.rebuild_chat_history();
-            self.transcript.live_thinking_idx = None;
+        if existing == text {
             return;
         }
-        if let Some(start) = block.content.rfind(text) {
-            let end = start + text.len();
-            block.content.replace_range(start..end, "");
+        if let Some(suffix) = text.strip_prefix(&existing) {
+            self.append_final_answer(Some(item_id), suffix);
+            return;
         }
-        let should_remove = self
-            .chat_blocks
-            .get(idx)
-            .map(|block| block.content.trim().is_empty())
-            .unwrap_or(false);
-        if should_remove {
-            self.remove_chat_block(idx);
-            self.rebuild_chat_history();
-            self.transcript.live_thinking_idx = None;
-        } else {
-            self.sync_history_entry(idx);
+        if let Some(block) = self.chat_blocks.get_mut(idx) {
+            block.content = text.to_string();
         }
+        self.sync_history_entry(idx);
+        self.request_follow_bottom();
+    }
+
+    fn final_answer_text_already_rendered(&self, text: &str) -> bool {
+        self.chat_blocks
+            .iter()
+            .any(|block| block.role == ChatRole::FinalAnswer && block.content.contains(text))
     }
 
     fn handle_text_delta(&mut self, item: &TalosTimelineItem, text: &str) {
@@ -578,21 +613,21 @@ impl TuiApp {
         }
         match item.phase {
             TalosTimelinePhase::Thinking => {
-                self.transcript.note_visible_activity();
-                self.append_thinking(text);
+                self.append_thinking(Some(&item.item_id), text);
             }
             TalosTimelinePhase::Unknown => {
-                self.transcript.note_visible_activity();
-                self.append_thinking(text);
+                self.append_commentary(Some(&item.item_id), text);
             }
             TalosTimelinePhase::Commentary => {
-                self.transcript.note_visible_activity();
-                self.append_thinking(text);
+                self.append_commentary(Some(&item.item_id), text);
             }
             TalosTimelinePhase::FinalAnswer => {
-                self.transcript.note_visible_activity();
-                self.append_assistant(text);
-                self.received_output_delta = true;
+                if self.final_answer_is_open(&item.item_id) {
+                    self.append_final_answer(Some(&item.item_id), text);
+                    self.received_output_delta = true;
+                } else {
+                    self.buffer_final_answer(&item.item_id, text);
+                }
             }
             TalosTimelinePhase::System => {
                 self.push_right_event(text.trim().to_string());
@@ -653,6 +688,10 @@ fn parse_tool_arguments(arguments: &str) -> ToolArguments {
     serde_json::from_str::<serde_json::Value>(arguments)
         .map(ToolArguments::from)
         .unwrap_or_else(|_| ToolArguments::from(serde_json::Value::String(arguments.to_string())))
+}
+
+fn is_internal_task_output(tool_name: &str) -> bool {
+    tool_name.eq_ignore_ascii_case("TaskOutput")
 }
 
 fn timeline_tool_status(status: TalosTimelineItemStatus) -> ToolCallStatus {
