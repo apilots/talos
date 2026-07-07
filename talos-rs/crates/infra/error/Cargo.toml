@@ -1,7 +1,9 @@
 [package]
 name = "talos-error"
-version = "0.1.3"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 thiserror = "1.0"

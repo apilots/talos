@@ -2,6 +2,8 @@
 name = "talos-app-server-test-client"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "talos-app-server-test-client"

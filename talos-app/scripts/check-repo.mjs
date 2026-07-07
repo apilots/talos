@@ -3,7 +3,8 @@ import { dirname, extname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const webRoot = join(scriptDir, "..", "web");
+const appRoot = join(scriptDir, "..");
+const webRoot = join(appRoot, "web");
 const webSrcRoot = join(webRoot, "src");
 const featuresRoot = join(webSrcRoot, "features");
 const ignoredDirectories = new Set(["dist", "node_modules", ".git"]);
@@ -68,6 +69,58 @@ function collectFeatureDirectories() {
     .sort();
 }
 
+function readJsonFile(filePath) {
+  return JSON.parse(readFileSync(filePath, "utf8"));
+}
+
+function collectPackageJsonPaths() {
+  const packagePaths = [
+    join(appRoot, "package.json"),
+    join(appRoot, "desktop", "package.json"),
+    join(appRoot, "web", "package.json"),
+    join(appRoot, "ts-sdk", "package.json"),
+  ];
+  const sdkPackagesRoot = join(appRoot, "ts-sdk", "packages");
+  for (const entry of readdirSync(sdkPackagesRoot, { withFileTypes: true })) {
+    const packagePath = join(sdkPackagesRoot, entry.name, "package.json");
+    if (entry.isDirectory() && existsSync(packagePath)) {
+      packagePaths.push(packagePath);
+    }
+  }
+  return packagePaths.sort();
+}
+
+function validatePackageMetadata(errors) {
+  const rootPackagePath = join(appRoot, "package.json");
+  const rootPackage = readJsonFile(rootPackagePath);
+  const expectedVersion = rootPackage.version;
+  if (!expectedVersion) {
+    errors.push("Root package.json is missing version");
+    return;
+  }
+
+  for (const packagePath of collectPackageJsonPaths()) {
+    const label = toPosixPath(relative(appRoot, packagePath));
+    if (!existsSync(packagePath)) {
+      errors.push(`Missing package metadata file: ${label}`);
+      continue;
+    }
+
+    const packageJson = readJsonFile(packagePath);
+    if (!packageJson.name) {
+      errors.push(`Package metadata missing name: ${label}`);
+    }
+    if (packageJson.version !== expectedVersion) {
+      errors.push(
+        `Package version mismatch: ${label} has ${packageJson.version ?? "<missing>"}, expected ${expectedVersion}`,
+      );
+    }
+    if (packageJson.private !== true) {
+      errors.push(`Package must be private unless explicitly publishable: ${label}`);
+    }
+  }
+}
+
 function validateFeatureBarrels(errors) {
   for (const featureName of collectFeatureDirectories()) {
     const barrelPath = join(featuresRoot, featureName, "index.ts");
@@ -127,6 +180,7 @@ function validateLineRules(errors) {
 function main() {
   const errors = [];
 
+  validatePackageMetadata(errors);
   validateFeatureBarrels(errors);
   validateLineRules(errors);
 

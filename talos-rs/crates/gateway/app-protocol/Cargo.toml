@@ -2,6 +2,8 @@
 name = "talos-app-protocol"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [dependencies]
 talos-error = { workspace = true }
