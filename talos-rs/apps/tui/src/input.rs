@@ -1,11 +1,9 @@
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::types::{
-    AppState, ChatRole, ChatSelection, CommandSuggestion, PastedTextBlock, SelectionPoint,
-};
+use crate::types::{CommandSuggestion, PastedTextBlock};
 use crate::utils::byte_index_at_char;
 use crate::{TuiApp, PASTED_BLOCK_CHAR_THRESHOLD};
 
@@ -37,46 +35,15 @@ impl TuiApp {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),
                 KeyCode::Char('o') => {
-                    self.toggle_last_tool_block();
-                    self.rebuild_chat_render_state_if_rect();
+                    self.show_tool_details_hint();
                     return Ok(false);
                 }
                 KeyCode::Char('u') => {
                     self.reset_input();
                     return Ok(false);
                 }
-                KeyCode::Char('y') => {
-                    self.copy_chat_to_clipboard();
-                    return Ok(false);
-                }
                 _ => {}
             }
-        }
-
-        // History state navigation
-        if self.current_state == AppState::History {
-            match key_event.code {
-                KeyCode::Esc | KeyCode::Char('q') => {
-                    self.current_state = AppState::Chat;
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.history_selected = self.history_selected.saturating_sub(1);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let max = self.history_sessions.len().saturating_sub(1);
-                    if self.history_selected < max {
-                        self.history_selected += 1;
-                    }
-                }
-                KeyCode::Enter => {
-                    self.switch_to_history_session();
-                }
-                KeyCode::Char('d') => {
-                    self.delete_history_session();
-                }
-                _ => {}
-            }
-            return Ok(false);
         }
 
         // Model picker navigation
@@ -240,7 +207,6 @@ impl TuiApp {
                     self.cancel_active_turn().await;
                     return Ok(false);
                 }
-                self.chat_selection = None;
                 self.selected_pasted_block = None;
                 Ok(false)
             }
@@ -276,30 +242,24 @@ impl TuiApp {
                 }
                 Ok(false)
             }
-            KeyCode::PageUp => {
-                self.scroll_chat_up(8);
-                Ok(false)
-            }
-            KeyCode::PageDown => {
-                self.scroll_chat_down(8);
-                Ok(false)
-            }
+            KeyCode::PageUp => Ok(false),
+            KeyCode::PageDown => Ok(false),
             KeyCode::Home => {
-                self.scroll_chat_top();
+                self.cursor_index = 0;
+                self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::End => {
-                self.scroll_chat_bottom();
+                self.cursor_index = self.input_buffer.chars().count();
+                self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::Tab => {
-                self.toggle_last_tool_block();
-                self.rebuild_chat_render_state_if_rect();
+                self.show_tool_details_hint();
                 Ok(false)
             }
             KeyCode::BackTab => {
-                self.toggle_last_tool_block();
-                self.rebuild_chat_render_state_if_rect();
+                self.show_tool_details_hint();
                 Ok(false)
             }
             KeyCode::Char(c) => {
@@ -486,115 +446,10 @@ impl TuiApp {
                 self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));
             }
             Err(err) => {
-                self.push_block(ChatRole::System, format!("Failed to cancel turn: {}", err));
+                self.push_system_notice(format!("Failed to cancel turn: {}", err));
                 self.push_right_event("cancel request failed".to_string());
             }
         }
-    }
-
-    pub(crate) fn scroll_chat_up(&mut self, lines: u16) {
-        self.chat_manual_scroll = true;
-        self.chat_scroll = self.chat_scroll.saturating_sub(lines);
-    }
-
-    pub(crate) fn scroll_chat_down(&mut self, lines: u16) {
-        self.chat_manual_scroll = true;
-        self.chat_scroll = self.chat_scroll.saturating_add(lines);
-    }
-
-    pub(crate) fn scroll_chat_top(&mut self) {
-        self.chat_manual_scroll = true;
-        self.chat_scroll = 0;
-    }
-
-    pub(crate) fn scroll_chat_bottom(&mut self) {
-        self.chat_manual_scroll = false;
-    }
-
-    pub(crate) fn request_follow_bottom(&mut self) {
-        if !self.chat_manual_scroll {
-            self.chat_scroll = u16::MAX;
-        }
-    }
-
-    pub(crate) fn handle_mouse(&mut self, mouse_event: MouseEvent) {
-        match mouse_event.kind {
-            MouseEventKind::Down(MouseButton::Left) => {
-                if let Some(point) = self.selection_point_from_mouse(mouse_event) {
-                    if let Some(button) = self.rendered_round_footer_buttons.get(&point.line_index)
-                    {
-                        if point.column >= button.start_col && point.column < button.end_col {
-                            self.chat_selection = None;
-                            self.copy_round_for_start_block(button.round_start_block_index);
-                            return;
-                        }
-                    }
-                    if self
-                        .rendered_round_footer_buttons
-                        .contains_key(&point.line_index)
-                    {
-                        self.chat_selection = None;
-                        return;
-                    }
-                    self.chat_selection = Some(ChatSelection {
-                        anchor: point,
-                        focus: point,
-                    });
-                } else {
-                    self.chat_selection = None;
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if let (Some(point), Some(selection)) = (
-                    self.selection_point_from_mouse(mouse_event),
-                    self.chat_selection.as_mut(),
-                ) {
-                    selection.focus = point;
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                if let (Some(point), Some(selection)) = (
-                    self.selection_point_from_mouse(mouse_event),
-                    self.chat_selection.as_mut(),
-                ) {
-                    selection.focus = point;
-                }
-                if self.chat_selection.is_some() {
-                    self.copy_selection_to_clipboard();
-                }
-            }
-            MouseEventKind::ScrollUp => self.scroll_chat_up(3),
-            MouseEventKind::ScrollDown => self.scroll_chat_down(3),
-            _ => {}
-        }
-    }
-
-    pub(crate) fn selection_point_from_mouse(
-        &self,
-        mouse_event: MouseEvent,
-    ) -> Option<SelectionPoint> {
-        let rect = self.chat_content_rect?;
-        if rect.width == 0 || rect.height == 0 {
-            return None;
-        }
-        if mouse_event.column < rect.x
-            || mouse_event.column >= rect.x.saturating_add(rect.width)
-            || mouse_event.row < rect.y
-            || mouse_event.row >= rect.y.saturating_add(rect.height)
-        {
-            return None;
-        }
-
-        let row_offset = mouse_event.row.saturating_sub(rect.y) as usize;
-        let line_index = self.chat_scroll as usize + row_offset;
-        if line_index >= self.rendered_chat_lines.len() {
-            return None;
-        }
-
-        Some(SelectionPoint {
-            line_index,
-            column: mouse_event.column.saturating_sub(rect.x) as usize,
-        })
     }
 }
 

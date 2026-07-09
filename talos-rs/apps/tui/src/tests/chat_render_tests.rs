@@ -1,73 +1,11 @@
 use super::*;
 
 #[test]
-fn test_final_answer_block_preserves_raw_transcript_text() {
-    let app = create_embedded_app();
-    let block = ChatBlock::new(
-        ChatRole::FinalAnswer,
-        "## Summary\n\n---\n\n1. First\n2. Second\n\n┌──┐\n│ok│\n└──┘\n\n```rust\nlet x = 1;\n```"
-            .to_string(),
-    );
-
-    let texts = app
-        .final_answer_block_lines(&block, 80)
-        .into_iter()
-        .map(|line| line_plain_text(&line.display))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        texts,
-        vec![
-            "## Summary",
-            "",
-            "---",
-            "",
-            "1. First",
-            "2. Second",
-            "",
-            "┌──┐",
-            "│ok│",
-            "└──┘",
-            "",
-            "```rust",
-            "let x = 1;",
-            "```",
-        ]
-    );
-}
-
-#[test]
-fn test_user_and_thinking_blocks_use_bullet_transcript_style() {
-    let app = create_embedded_app();
-    let user = ChatBlock::new(ChatRole::User, "分析当前代码架构".to_string());
-    let thinking = ChatBlock::new(ChatRole::Thinking, "先看 TUI 渲染路径".to_string());
-
-    let user_texts = app
-        .user_block_lines(&user, 80)
-        .into_iter()
-        .map(|line| line_plain_text(&line.display))
-        .collect::<Vec<_>>();
-    let thinking_texts = app
-        .thinking_block_lines(&thinking, 80)
-        .into_iter()
-        .map(|line| line_plain_text(&line.display))
-        .collect::<Vec<_>>();
-
-    assert_eq!(user_texts, vec!["● 分析当前代码架构"]);
-    assert_eq!(
-        thinking_texts,
-        vec!["∴ Thinking: 先看 TUI 渲染路径 (ctrl+o to expand)"]
-    );
-}
-
-#[test]
 fn test_in_flight_activity_line_stays_visible_after_transcript_activity() {
     let mut app = create_embedded_app();
     app.in_flight = true;
-    app.push_block(
-        ChatRole::FinalAnswer,
-        "I will inspect the files.".to_string(),
-    );
+    app.render_runtime
+        .append_system_notice("I will inspect the files.");
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 100, 12));
     let texts = app
@@ -85,10 +23,8 @@ fn test_in_flight_activity_line_stays_visible_with_live_metrics() {
     app.in_flight = true;
     app.turn_metrics_live = true;
     app.turn_metrics = Some(TurnExecutionMetrics::default());
-    app.push_block(
-        ChatRole::FinalAnswer,
-        "I will inspect the files.".to_string(),
-    );
+    app.render_runtime
+        .append_system_notice("I will inspect the files.");
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 100, 12));
     let texts = app
@@ -101,10 +37,66 @@ fn test_in_flight_activity_line_stays_visible_with_live_metrics() {
 }
 
 #[test]
-fn test_chat_content_columns_keep_left_padding() {
+fn test_chat_content_rect_uses_full_width_without_left_padding() {
     let app = create_embedded_app();
-    let (chat_rect, scrollbar_rect) = app.chat_content_columns(Rect::new(1, 1, 20, 6));
+    let chat_rect = app.chat_content_rect(Rect::new(1, 1, 20, 6));
 
-    assert_eq!(chat_rect, Rect::new(3, 1, 17, 6));
-    assert_eq!(scrollbar_rect, Rect::new(20, 1, 1, 6));
+    assert_eq!(chat_rect, Rect::new(1, 1, 20, 6));
+}
+
+#[test]
+fn test_synced_history_uses_fixed_idle_inline_viewport() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("hello");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "done",
+            )],
+        ),
+    ]);
+    let synced_block_ids = app
+        .render_runtime
+        .pending_terminal_projection()
+        .into_iter()
+        .map(|block| block.block_id)
+        .collect::<Vec<_>>();
+    app.render_runtime
+        .mark_terminal_blocks_synced(synced_block_ids);
+
+    let height = app.inline_viewport_height(100, 30);
+
+    assert_eq!(height, 6);
+}
+
+#[test]
+fn test_live_feedback_uses_compact_inline_viewport_without_using_full_screen() {
+    let mut app = create_embedded_app();
+    app.render_runtime.start_live_text(
+        "live-answer",
+        crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
+        "streaming response",
+    );
+    app.in_flight = true;
+
+    let height = app.inline_viewport_height(100, 30);
+
+    assert_eq!(height, 7);
+    assert!(height < 30);
+}
+
+#[test]
+fn test_pending_execution_transcript_does_not_expand_live_viewport() {
+    let mut app = create_embedded_app();
+    app.in_flight = true;
+    app.render_runtime.append_user_input("analyze");
+    for index in 0..12 {
+        app.render_runtime
+            .append_system_notice(format!("tool summary {index}"));
+    }
+
+    let height = app.inline_viewport_height(100, 30);
+
+    assert_eq!(height, 6);
 }

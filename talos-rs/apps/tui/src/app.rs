@@ -13,9 +13,10 @@ use talos_types::talos::TokenUsage;
 
 use crate::client::GatewayClient;
 use crate::render;
-use crate::types::{AppState, ChatRole, CopyProjection, RenderedChatLine};
+use crate::render_runtime::common::style::StyledLine;
+use crate::types::RenderedChatLine;
 use crate::utils::{build_welcome_card, APP_VERSION};
-use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, SPINNER_FRAMES, WELCOME_MODEL_PLACEHOLDER};
+use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT, SPINNER_FRAMES, WELCOME_TIP_LINE};
 
 const SESSION_INIT_MAX_ATTEMPTS: usize = 5;
 const SESSION_INIT_RETRY_DELAY_MS: u64 = 250;
@@ -23,7 +24,6 @@ const SESSION_INIT_RETRY_DELAY_MS: u64 = 250;
 impl TuiApp {
     pub(crate) fn build(gateway_client: Option<Arc<dyn GatewayClient>>) -> Self {
         let mut app = Self {
-            current_state: AppState::Chat,
             input_buffer: String::new(),
             cursor_index: 0,
             pasted_blocks: Vec::new(),
@@ -38,17 +38,12 @@ impl TuiApp {
             available_models: vec![],
             session_id: None,
             connection_status: "disconnected".to_string(),
-            chat_blocks: vec![],
-            chat_history: vec![],
             right_panel_events: vec![],
             rendered_chat_lines: vec![],
-            rendered_round_footer_buttons: HashMap::new(),
+            rendered_chat_cache_key: None,
             chat_content_rect: None,
             chat_viewport_height: 0,
-            chat_selection: None,
             message_queue: VecDeque::new(),
-            chat_scroll: 0,
-            chat_manual_scroll: false,
             trace_event_count: 0,
             in_flight: false,
             received_output_delta: false,
@@ -56,8 +51,6 @@ impl TuiApp {
             active_message_raw: None,
             active_message_skills: Vec::new(),
             active_retry_count: 0,
-            active_user_idx: None,
-            transcript: Default::default(),
             pending_session_connect: None,
             pending_session_task: None,
             pending_stream_connect: None,
@@ -77,7 +70,6 @@ impl TuiApp {
             last_stream_event_at: None,
             gateway_client,
             history_sessions: vec![],
-            history_selected: 0,
             show_model_picker: false,
             model_picker_selected: 0,
             show_sessions_picker: false,
@@ -99,23 +91,14 @@ impl TuiApp {
             should_exit: false,
             left_panel_area: None,
             input_area: None,
+            render_runtime:
+                crate::render_runtime::runtime::engine::BufferedRenderRuntimeEngine::new_buffered(),
+            suppress_transcript_for_terminal_flush: false,
+            terminal_footer_synced_for: None,
         };
 
         app.current_project_root = Some(app.startup_directory.clone());
 
-        app.push_block(
-            ChatRole::System,
-            build_welcome_card(
-                APP_VERSION,
-                WELCOME_MODEL_PLACEHOLDER,
-                app.current_project_root.as_deref(),
-            ),
-        );
-        app.push_block(
-            ChatRole::System,
-            "Type a message or use /help /model /history /sessions /status /compact /clear /quit"
-                .to_string(),
-        );
         app.push_right_event("tui initialized".to_string());
         app
     }
@@ -154,16 +137,14 @@ impl TuiApp {
         self.push_right_event("connecting to embedded runtime".to_string());
 
         if let Err(err) = self.refresh_models_with_retry().await {
-            self.push_block(
-                ChatRole::System,
-                format!("Failed to load models from gateway: {}", err),
-            );
+            self.push_system_notice(format!("Failed to load models from gateway: {}", err));
             self.connection_status = "error".to_string();
             return;
         }
 
         self.connection_status = "connected".to_string();
         self.push_right_event("draft chat ready".to_string());
+        self.sync_session_header();
     }
 
     async fn refresh_models_with_retry(&mut self) -> talos_error::TalosResult<()> {
@@ -192,14 +173,6 @@ impl TuiApp {
         Duration::from_millis(SESSION_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
     }
 
-    pub fn get_current_state(&self) -> &AppState {
-        &self.current_state
-    }
-
-    pub fn get_chat_history(&self) -> &[String] {
-        &self.chat_history
-    }
-
     pub fn get_input_buffer(&self) -> &String {
         &self.input_buffer
     }
@@ -222,13 +195,7 @@ impl TuiApp {
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         )]);
 
-        RenderedChatLine {
-            display,
-            copy_projection: Some(CopyProjection {
-                text,
-                display_start_col: 0,
-            }),
-        }
+        RenderedChatLine { display }
     }
 
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
@@ -241,67 +208,51 @@ impl TuiApp {
             .current_directory
             .clone()
             .or_else(|| Some(self.startup_directory.clone()));
-        self.refresh_welcome_card();
+        self.sync_session_header();
         self.rebuild_chat_render_state_if_rect();
-    }
-
-    pub(crate) fn refresh_welcome_card(&mut self) {
-        if let Some(welcome_block) = self.chat_blocks.first_mut() {
-            if welcome_block.content.starts_with('╭') {
-                welcome_block.content = build_welcome_card(
-                    APP_VERSION,
-                    &self.current_model,
-                    self.current_project_root.as_deref(),
-                );
-            }
-        }
     }
 
     pub(crate) fn reset_chat_surface(&mut self) {
-        self.chat_blocks.clear();
+        self.render_runtime.reset_transcript();
+        self.sync_session_header();
         self.rendered_chat_lines.clear();
-        self.chat_history.clear();
         self.right_panel_events.clear();
-        self.rendered_round_footer_buttons.clear();
-        self.chat_selection = None;
+        self.rendered_chat_cache_key = None;
         self.active_message = None;
         self.active_message_raw = None;
         self.active_message_skills.clear();
-        self.active_user_idx = None;
         self.turn_metrics = None;
         self.turn_metrics_live = false;
+        self.terminal_footer_synced_for = None;
         self.received_output_delta = false;
-        self.chat_scroll = 0;
-        self.chat_manual_scroll = false;
         self.sent_messages_history.clear();
         self.message_history_index = None;
-        self.transcript = Default::default();
-        self.push_block(
-            ChatRole::System,
-            build_welcome_card(
-                APP_VERSION,
-                &self.current_model,
-                self.current_project_root.as_deref(),
-            ),
-        );
-        self.push_block(
-            ChatRole::System,
-            "Type a message or use /help /model /history /sessions /status /compact /clear /quit"
-                .to_string(),
-        );
         self.rebuild_chat_render_state_if_rect();
     }
 
-    pub(crate) fn chat_content_columns(&self, chat_inner: Rect) -> (Rect, Rect) {
+    pub(crate) fn sync_session_header(&mut self) {
+        let card = build_welcome_card(
+            APP_VERSION,
+            &self.current_model,
+            self.current_project_root.as_deref(),
+        );
+        self.render_runtime.set_session_header(
+            card.lines()
+                .map(|line| StyledLine::plain(line.to_string()))
+                .chain(std::iter::once(StyledLine::plain(WELCOME_TIP_LINE)))
+                .collect(),
+        );
+    }
+
+    pub(crate) fn chat_content_rect(&self, chat_inner: Rect) -> Rect {
         let chat_columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Length(CHAT_CONTENT_PADDING_LEFT),
                 Constraint::Min(1),
-                Constraint::Length(1),
             ])
             .split(chat_inner);
-        (chat_columns[1], chat_columns[2])
+        chat_columns[1]
     }
 }
 

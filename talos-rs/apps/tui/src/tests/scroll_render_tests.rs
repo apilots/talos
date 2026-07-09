@@ -1,19 +1,25 @@
 use super::*;
-use ratatui::{backend::TestBackend, Terminal};
+use ratatui::{backend::TestBackend, style::Color, Terminal};
 
-#[test]
-fn test_request_follow_bottom_updates_scroll_only_when_auto_following() {
-    let mut app = create_embedded_app();
-    app.chat_manual_scroll = false;
-    app.chat_scroll = 3;
+fn interactive_transcript_text(app: &TuiApp) -> String {
+    app.render_runtime
+        .interactive_projection_lines()
+        .into_iter()
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
-    app.request_follow_bottom();
-    assert_eq!(app.chat_scroll, u16::MAX);
-
-    app.chat_manual_scroll = true;
-    app.chat_scroll = 7;
-    app.request_follow_bottom();
-    assert_eq!(app.chat_scroll, 7);
+fn append_transcript_answer(app: &mut TuiApp, user: &str, answer: &str) {
+    app.render_runtime.append_user_input(user);
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                answer,
+            )],
+        ),
+    ]);
 }
 
 #[test]
@@ -41,8 +47,6 @@ async fn test_turn_completed_updates_session_usage() {
     app.current_model = "kimi-k2.5".to_string();
     app.in_flight = true;
     app.received_output_delta = false;
-    app.transcript.live_final_answer_idx =
-        Some(app.push_block(ChatRole::FinalAnswer, String::new()));
     app.session_id = Some("sess-test".to_string());
 
     app.handle_stream_event(completed_event(
@@ -232,24 +236,27 @@ fn test_metrics_line_renders_above_input_without_border() {
         .iter()
         .position(|line| line.contains("❯ Ask Talos"))
         .unwrap();
+    let status_index = lines
+        .iter()
+        .position(|line| line.contains("kimi-k2.5") && line.contains("left"))
+        .unwrap();
 
-    assert!(brewing_index + 3 <= metrics_index);
+    assert!(brewing_index < metrics_index);
     assert!(!lines[metrics_index].contains("Brewing"));
     assert!(metrics_index < input_index);
+    assert!(input_index < status_index);
     let inner_metrics = lines[metrics_index].trim_matches('│');
     assert!(inner_metrics.trim_end().ends_with("12.3s"));
+    assert_eq!(buffer[(0, metrics_index as u16)].bg, Color::Reset);
+    assert_eq!(buffer[(0, status_index as u16)].bg, Color::Reset);
 }
 
 #[test]
 fn test_status_block_renders_without_system_header_or_round_footer() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![
-        ChatBlock::new(ChatRole::User, "/status".to_string()),
-        ChatBlock::new(
-            ChatRole::Status,
-            "/status\n┌────┐\n│ Model:            qwen-plus │\n└────┘".to_string(),
-        ),
-    ];
+    app.render_runtime.append_command_input("/status");
+    app.render_runtime
+        .append_system_notice("┌────┐\n│ Model:            qwen-plus │\n└────┘");
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 100, 20));
 
@@ -259,10 +266,9 @@ fn test_status_block_renders_without_system_header_or_round_footer() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(rendered.contains("/status"));
+    assert_eq!(rendered.matches("/status").count(), 1);
     assert!(rendered.contains("Model:"));
     assert!(!rendered.contains("System"));
-    assert!(!rendered.contains(COPY_ROUND_BUTTON_TEXT));
 }
 
 fn buffer_lines(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
@@ -276,189 +282,115 @@ fn buffer_lines(buffer: &ratatui::buffer::Buffer) -> Vec<String> {
 }
 
 #[test]
-fn test_chat_card_wrapped_lines_keep_indent() {
-    let app = create_embedded_app();
-    let block = ChatBlock::new(
-        ChatRole::FinalAnswer,
-        "这是一个非常长的回答，用于测试换行后是否仍然带有缩进。".to_string(),
-    );
-    let lines = app.chat_card_lines(&block, 12);
-    assert!(!lines.is_empty());
-    assert!(line_plain_text(&lines[0].display).starts_with("这是"));
-    assert!(lines.len() > 1);
-}
-
-#[test]
-fn test_chat_card_wrapped_lines_never_exceed_visual_width() {
-    let app = create_embedded_app();
-    let body_width = 10usize;
-    let block = ChatBlock::new(
-        ChatRole::FinalAnswer,
-        "这是一段很长很长的内容，用于验证每一行都不会超过内容窗口宽度并触发终端二次换行。"
-            .to_string(),
-    );
-    let lines = app.chat_card_lines(&block, body_width);
-
-    let max_line_width = body_width + 2;
-    for line in lines.iter() {
-        let width = line_display_width(&line.display);
-        assert!(
-            width <= max_line_width,
-            "line width {} exceeds max {}",
-            width,
-            max_line_width
-        );
+fn test_synced_long_transcript_stays_out_of_inline_viewport() {
+    let mut app = create_embedded_app();
+    for index in 0..200 {
+        app.render_runtime
+            .append_system_notice(format!("notice {index:03}"));
     }
+    let synced_block_ids = app
+        .render_runtime
+        .pending_terminal_projection()
+        .into_iter()
+        .map(|block| block.block_id)
+        .collect::<Vec<_>>();
+    app.render_runtime
+        .mark_terminal_blocks_synced(synced_block_ids);
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
+    let rendered = buffer_lines(terminal.backend().buffer()).join("\n");
+
+    assert!(!rendered.contains("notice 000"));
+    assert_eq!(app.inline_viewport_height(100, 30), 6);
 }
 
 #[test]
-fn test_selected_chat_text_excludes_border_glyphs() {
+fn test_empty_inline_viewport_does_not_paint_full_background() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![ChatBlock::new(
-        ChatRole::FinalAnswer,
-        "Alpha Beta".to_string(),
-    )];
-    app.rebuild_chat_render_state(Rect::new(0, 0, 20, 8));
-    app.chat_selection = Some(ChatSelection {
-        anchor: SelectionPoint {
-            line_index: 0,
-            column: 0,
-        },
-        focus: SelectionPoint {
-            line_index: 0,
-            column: 11,
-        },
-    });
+    app.current_model = "qwen-test".to_string();
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
 
-    assert_eq!(app.selected_chat_text().as_deref(), Some("Alpha Beta"));
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let lines = buffer_lines(buffer);
+    let rendered = lines.join("\n");
+    assert!(rendered.contains("❯"));
+    assert!(!rendered.contains("Talos TUI"));
+    assert_eq!(buffer[(79, 0)].bg, Color::Reset);
 }
 
 #[test]
-fn test_selected_chat_text_across_wrapped_lines_preserves_newlines() {
+fn test_synced_history_without_live_content_keeps_input_below_idle_gap() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![ChatBlock::new(
-        ChatRole::FinalAnswer,
-        "abcdefghij".to_string(),
-    )];
-    app.rebuild_chat_render_state(Rect::new(0, 0, 6, 8));
-    // Final answer text is copied from raw projection and wraps to
-    // ["abcd", "efgh", "ij"].
-    app.chat_selection = Some(ChatSelection {
-        anchor: SelectionPoint {
-            line_index: 0,
-            column: 0,
-        },
-        focus: SelectionPoint {
-            line_index: 1,
-            column: 4,
-        },
-    });
+    app.sync_session_header();
+    let synced_block_ids = app
+        .render_runtime
+        .pending_terminal_projection()
+        .into_iter()
+        .map(|block| block.block_id)
+        .collect::<Vec<_>>();
+    app.render_runtime
+        .mark_terminal_blocks_synced(synced_block_ids);
 
-    assert_eq!(app.selected_chat_text().as_deref(), Some("abcd\nefgh"));
-}
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
 
-#[test]
-#[ignore = "mouse coordinate selection is layout-sensitive and covered separately"]
-fn test_mouse_drag_selection_stays_inside_chat_rect() {
-    let mut app = create_embedded_app();
-    app.chat_blocks = vec![ChatBlock::new(ChatRole::FinalAnswer, "Alpha".to_string())];
-    app.rebuild_chat_render_state(Rect::new(4, 3, 20, 8));
-    let alpha_line_index = app
-        .rendered_chat_lines
+    let lines = buffer_lines(terminal.backend().buffer());
+    let input_index = lines
         .iter()
-        .position(|line| line_plain_text(&line.display) == "Alpha")
-        .expect("final answer content line should exist");
-    let alpha_row = 3 + alpha_line_index as u16;
-    assert!(app
-        .selection_point_from_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 0,
-            row: 0,
-            modifiers: KeyModifiers::empty(),
-        })
-        .is_none());
+        .position(|line| line.contains("❯"))
+        .expect("input prompt should render");
 
-    assert_eq!(
-        app.selection_point_from_mouse(MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 6,
-            row: alpha_row,
-            modifiers: KeyModifiers::empty(),
-        }),
-        Some(SelectionPoint {
-            line_index: alpha_line_index,
-            column: 2,
-        })
-    );
+    assert_eq!(input_index, 3);
 }
 
 #[test]
-fn test_round_text_for_block_includes_user_final_answer_and_tool_blocks() {
+fn test_session_header_remains_top_after_first_round() {
     let mut app = create_embedded_app();
-    let mut tool_block = ChatBlock::new_tool_call(
-        "call-1".to_string(),
-        "read".to_string(),
-        json!({"file_path":"/tmp/demo.py"}),
-        1,
-        0,
-        None,
-    );
-    tool_block.content = "L1: print('hi')".to_string();
-    tool_block.tool_status = Some(ToolCallStatus::Completed { exit_ok: true });
-    app.chat_blocks = vec![
-        ChatBlock::new(ChatRole::User, "Analyze /tmp/demo".to_string()),
-        ChatBlock::new(
-            ChatRole::FinalAnswer,
-            "Planning to inspect the file.".to_string(),
-        ),
-        tool_block,
-        ChatBlock::new(ChatRole::FinalAnswer, "Here is the summary.".to_string()),
-    ];
+    app.current_model = "qwen-test".to_string();
+    app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
+    app.sync_session_header();
+    append_transcript_answer(&mut app, "你好", "你好！有什么需要帮忙的？");
 
-    let text = app
-        .round_text_for_block(2)
-        .expect("round text should exist for tool block");
+    app.rebuild_chat_render_state(Rect::new(0, 0, 100, 16));
 
-    assert!(text.contains("## User\n\nAnalyze /tmp/demo"));
-    assert!(text.contains("Planning to inspect the file."));
-    assert!(text.contains("### Tool `Read`"));
-    assert!(text.contains("\"file_path\": \"/tmp/demo.py\""));
-    assert!(text.contains("```json"));
-    assert!(text.contains("Output:\n```text\nL1: print('hi')\n```"));
-    assert!(text.contains("Here is the summary."));
-}
-
-#[test]
-fn test_rebuild_chat_render_state_tracks_round_footer_button() {
-    let mut app = create_embedded_app();
-    app.chat_blocks = vec![
-        ChatBlock::new(ChatRole::User, "First".to_string()),
-        ChatBlock::new(ChatRole::FinalAnswer, "Second".to_string()),
-    ];
-    app.chat_blocks[0].round_timing_ms = Some(1250);
-    app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
-
-    assert_eq!(app.rendered_round_footer_buttons.len(), 1);
-
-    let (line_index, button) = app
-        .rendered_round_footer_buttons
+    let rendered = app
+        .visible_chat_window()
+        .lines
         .iter()
-        .next()
-        .map(|(line_index, button)| (*line_index, *button))
-        .expect("footer button should exist");
-    let footer_text = line_plain_text(&app.rendered_chat_lines[line_index].display);
-    assert!(footer_text.contains("✻ Brewed for 1s"));
-    assert!(footer_text.contains(COPY_ROUND_BUTTON_TEXT));
-    assert_eq!(button.round_start_block_index, 0);
+        .map(line_plain_text)
+        .collect::<Vec<_>>();
+    assert!(rendered[0].contains("╭──────────────────────────────────────────────────╮"));
+    assert!(rendered.iter().any(|line| line.contains("Talos TUI")));
+    assert!(rendered.iter().any(|line| line.contains("● 你好")));
+    assert!(rendered
+        .iter()
+        .any(|line| line.contains("你好！有什么需要帮忙的？")));
 }
 
 #[test]
-fn test_rebuild_chat_render_state_inserts_spacing_between_blocks() {
+fn test_live_round_is_separated_from_synced_history() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![
-        ChatBlock::new(ChatRole::System, "Execution summary".to_string()),
-        ChatBlock::new(ChatRole::FinalAnswer, "Final answer".to_string()),
-    ];
+    append_transcript_answer(&mut app, "history user", "history answer");
+    let synced_block_ids = app
+        .render_runtime
+        .pending_terminal_projection()
+        .into_iter()
+        .map(|block| block.block_id)
+        .collect::<Vec<_>>();
+    app.render_runtime
+        .mark_terminal_blocks_synced(synced_block_ids);
+    app.render_runtime.start_live_text(
+        "item-live",
+        crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
+        "live answer",
+    );
+    app.in_flight = true;
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
 
@@ -468,46 +400,675 @@ fn test_rebuild_chat_render_state_inserts_spacing_between_blocks() {
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
 
-    assert_eq!(texts[0], "⚙  System");
-    assert_eq!(texts[1], "");
-    assert_eq!(texts[2], "Execution summary");
-    assert_eq!(texts[3], "");
-    assert_eq!(texts[4], "Final answer");
+    assert_eq!(texts.first().map(String::as_str), Some(""));
+    assert_eq!(texts.get(1).map(String::as_str), Some("● live answer"));
 }
 
 #[test]
-fn test_round_footer_button_hit_range_matches_button_text() {
+fn test_session_header_enters_terminal_projection() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![
-        ChatBlock::new(ChatRole::User, "First".to_string()),
-        ChatBlock::new(ChatRole::FinalAnswer, "Second".to_string()),
-    ];
-    app.chat_blocks[0].round_timing_ms = Some(1250);
+    app.current_model = "qwen-test".to_string();
+    app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
+
+    app.sync_session_header();
+
+    let pending = app.render_runtime.pending_terminal_projection();
+    let text = pending
+        .iter()
+        .flat_map(|block| block.lines.iter())
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("Talos TUI"));
+    assert!(text.contains("qwen-test"));
+    assert!(text.contains(" Tip: Type a message or use /help /model /sessions"));
+}
+
+#[test]
+fn test_exit_snapshot_renders_transcript_without_interaction_controls() {
+    let mut app = create_embedded_app();
+    app.current_model = "qwen-test".to_string();
+    app.turn_metrics = Some(TurnExecutionMetrics {
+        model_rounds: 1,
+        tool_calls: 1,
+        tool_successes: 1,
+        tool_errors: 0,
+        stop_reason: StopReason::EndTurn,
+        duration_ms: Some(1000),
+        usage: TokenUsage::default(),
+    });
+    app.input_buffer = "draft should not render".to_string();
+    app.should_exit = true;
+    append_transcript_answer(&mut app, "exit user", "exit answer");
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
+
+    let rendered = buffer_lines(terminal.backend().buffer()).join("\n");
+    assert!(rendered.contains("exit user"));
+    assert!(rendered.contains("exit answer"));
+    assert!(!rendered.contains("draft should not render"));
+    assert!(!rendered.contains("qwen-test"));
+    assert!(!rendered.contains("last ·"));
+}
+
+#[test]
+fn test_rebuild_chat_render_state_renders_round_footer() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "First", "Second");
     app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
 
-    let (_, button) = app
-        .rendered_round_footer_buttons
+    let footer_text = app
+        .rendered_chat_lines
         .iter()
-        .next()
-        .map(|(line_index, button)| (*line_index, *button))
-        .expect("footer button should exist");
+        .map(|line| line_plain_text(&line.display))
+        .find(|line| line.contains("✻ Brewed"))
+        .expect("footer should exist");
+    assert!(footer_text.contains("✻ Brewed for a moment"));
+}
 
+#[test]
+fn test_rebuild_chat_render_state_hides_round_footer_while_turn_is_in_flight() {
+    let mut app = create_embedded_app();
+    app.in_flight = true;
+    app.render_runtime.append_user_input("running user");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "still thinking",
+            )],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Tool,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "● Bash(running)",
+            )],
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("running user"));
+    assert!(joined.contains("Brewing"));
+    assert!(!joined.contains("Brewed"));
+}
+
+#[test]
+fn test_rebuild_chat_render_state_uses_completed_turn_duration_in_footer() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "Timed", "Done");
+    app.turn_metrics = Some(TurnExecutionMetrics {
+        model_rounds: 1,
+        tool_calls: 0,
+        tool_successes: 0,
+        tool_errors: 0,
+        stop_reason: StopReason::EndTurn,
+        usage: TokenUsage::default(),
+        duration_ms: Some(12_300),
+    });
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("✻ Brewed for 12s"));
+    assert!(!joined.contains("✻ Brewed for a moment"));
+}
+
+#[test]
+fn test_completed_footer_is_separated_from_next_round() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "First", "Second");
+    append_transcript_answer(&mut app, "Third", "Fourth");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 20));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    let footer_index = texts
+        .iter()
+        .position(|line| line.contains("✻ Brewed"))
+        .expect("completed footer should render");
+    let next_round_index = texts
+        .iter()
+        .position(|line| line == "● Third")
+        .expect("next round should render");
+
+    assert_eq!(texts[footer_index + 1], "");
+    assert_eq!(next_round_index, footer_index + 2);
+}
+
+#[test]
+fn test_completed_footer_does_not_leave_trailing_blank_line() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "First", "Second");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 12));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts.last().is_some_and(|line| line.contains("✻ Brewed")));
+}
+
+#[test]
+fn test_rebuild_chat_render_state_inserts_spacing_between_blocks() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "Execution summary", "Final answer");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert_eq!(texts[0], "● Execution summary");
+    assert_eq!(texts[1], "");
+    assert_eq!(texts[2], "● Final answer");
+}
+
+#[test]
+fn test_command_input_renders_without_message_bullet() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_command_input("/quit");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+
+    assert!(texts.iter().any(|line| line == "/quit"));
+    assert!(!texts.iter().any(|line| line == "● /quit"));
+}
+
+#[test]
+fn test_command_input_separates_model_rounds() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "First", "Second");
+    app.render_runtime.append_command_input("/status");
+    append_transcript_answer(&mut app, "Third", "Fourth");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 24));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    let first_footer_index = texts
+        .iter()
+        .position(|line| line.contains("✻ Brewed"))
+        .expect("first round footer should render before command");
+    let command_index = texts
+        .iter()
+        .position(|line| line == "/status")
+        .expect("command should render");
+    let next_round_index = texts
+        .iter()
+        .position(|line| line == "● Third")
+        .expect("next round should render after command");
+
+    assert!(first_footer_index < command_index);
+    assert_eq!(texts[first_footer_index + 1], "");
+    assert_eq!(command_index, first_footer_index + 2);
+    assert!(command_index < next_round_index);
+}
+
+#[test]
+fn test_rebuild_chat_render_state_cache_invalidates_on_content_change() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_system_notice("Before");
+    let rect = Rect::new(0, 0, 60, 12);
+
+    app.rebuild_chat_render_state(rect);
+    let first_key = app.rendered_chat_cache_key;
+    app.render_runtime.append_system_notice("After");
+    app.rebuild_chat_render_state(rect);
+
+    assert_ne!(app.rendered_chat_cache_key, first_key);
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("After"));
+}
+
+#[test]
+fn test_visible_chat_window_is_capped_by_viewport_and_overscan() {
+    let mut app = create_embedded_app();
+    for index in 0..200 {
+        app.render_runtime
+            .append_system_notice(format!("notice {index:03}"));
+    }
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 10));
+    assert!(app.rendered_chat_lines.len() > 300);
+
+    let window = app.visible_chat_window_with_overscan(120, 10, 2);
+
+    assert_eq!(window.lines.len(), 14);
+    assert_eq!(window.local_scroll, 2);
     assert_eq!(
-        button.end_col.saturating_sub(button.start_col),
-        COPY_ROUND_BUTTON_TEXT.len()
+        line_plain_text(&window.lines[0]),
+        line_plain_text(&app.rendered_chat_lines[118].display)
     );
+    assert_eq!(
+        line_plain_text(&window.lines[2]),
+        line_plain_text(&app.rendered_chat_lines[120].display)
+    );
+    assert_eq!(
+        line_plain_text(&window.lines[13]),
+        line_plain_text(&app.rendered_chat_lines[131].display)
+    );
+}
+
+#[test]
+fn test_rebuild_chat_render_state_uses_transcript_projection() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "transcript user", "transcript answer");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("transcript user"));
+    assert!(joined.contains("transcript answer"));
+    assert!(joined.contains("✻ Brewed for a moment"));
+}
+
+#[test]
+fn test_final_answer_preserves_newlines_with_message_bullet() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("summarize");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "# Title\n\n- first\n- second",
+            )],
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 20));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    assert!(texts.iter().any(|line| line == "● # Title"));
+    assert!(texts.iter().any(|line| line == "  - first"));
+    assert!(texts.iter().any(|line| line == "  - second"));
+}
+
+#[test]
+fn test_last_commentary_renders_as_final_answer_for_completed_round() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("summarize");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Commentary,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "I will inspect the workspace.",
+            )],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Commentary,
+            crate::render_runtime::common::style::StyledLine::plain_lines(
+                "# Summary\n\n- first\n- second",
+            ),
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 20));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    assert!(texts
+        .iter()
+        .any(|line| line == "● I will inspect the workspace."));
+    assert!(texts.iter().any(|line| line == "● # Summary"));
+    assert!(texts.iter().any(|line| line == "  - first"));
+    assert!(texts.iter().any(|line| line == "  - second"));
+}
+
+#[test]
+fn test_completed_round_renders_thinking_before_final_answer() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("analyze");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "final response",
+            )],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "reasoning preview",
+            )],
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 20));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    let thinking_index = texts
+        .iter()
+        .position(|line| line.contains("Thinking: reasoning preview"))
+        .expect("thinking should render");
+    let answer_index = texts
+        .iter()
+        .position(|line| line == "● final response")
+        .expect("final answer should render");
+
+    assert!(thinking_index < answer_index);
+}
+
+#[test]
+fn test_terminal_synced_transcript_is_not_duplicated_in_tui_viewport() {
+    let mut app = create_embedded_app();
+    append_transcript_answer(&mut app, "synced user", "synced answer");
+    let synced_block_ids = app
+        .render_runtime
+        .pending_terminal_projection()
+        .into_iter()
+        .map(|block| block.block_id)
+        .collect::<Vec<_>>();
+    app.render_runtime
+        .mark_terminal_blocks_synced(synced_block_ids);
+    append_transcript_answer(&mut app, "visible user", "visible answer");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let non_empty_lines = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        non_empty_lines,
+        vec![
+            "● visible user".to_string(),
+            "● visible answer".to_string(),
+            "✻ Brewed for a moment".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn test_rebuild_chat_render_state_uses_status_projection() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_system_notice("transcript status");
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("transcript status"));
+}
+
+#[test]
+fn test_rebuild_chat_render_state_uses_live_tail_when_available() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("transcript user");
+    app.render_runtime.start_live_text(
+        "item-live",
+        crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
+        "live answer",
+    );
+    app.in_flight = true;
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("transcript user"));
+    assert!(joined.contains("live answer"));
+    assert!(joined.contains("Brewing"));
+    assert!(!joined.contains("Brewed"));
+}
+
+#[test]
+fn test_live_activity_line_is_separated_from_live_tail() {
+    let mut app = create_embedded_app();
+    app.render_runtime.start_live_text(
+        "item-live",
+        crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
+        "live answer",
+    );
+    app.in_flight = true;
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let texts = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>();
+    let live_index = texts
+        .iter()
+        .position(|line| line == "● live answer")
+        .expect("live answer should render");
+    let brewing_index = texts
+        .iter()
+        .position(|line| line.contains("Brewing"))
+        .expect("brewing line should render");
+
+    assert_eq!(texts[live_index + 1], "");
+    assert_eq!(brewing_index, live_index + 2);
+}
+
+#[test]
+fn test_live_model_feedback_preserves_kind_specific_rendering() {
+    let mut app = create_embedded_app();
+    app.render_runtime.start_live_text(
+        "thinking-live",
+        crate::render_runtime::render::live::LiveTextKind::Thinking,
+        "inspect files",
+    );
+    app.render_runtime.start_live_text(
+        "commentary-live",
+        crate::render_runtime::render::live::LiveTextKind::Commentary,
+        "Reading project",
+    );
+    app.in_flight = true;
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 80, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("∴ Thinking: inspect files (ctrl+o to expand)"));
+    assert!(joined.contains("● Reading project"));
+    assert!(joined.contains("Brewing"));
+    assert!(!joined.contains("Brewed"));
+}
+
+#[test]
+fn test_rebuild_chat_render_state_uses_active_tool_snapshot_when_available() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("transcript user");
+    app.render_runtime.start_tool_with_arguments(
+        "tool-1",
+        "call-1",
+        "Read",
+        r#"{"file_path":"/tmp/demo.rs"}"#,
+    );
+    app.render_runtime
+        .append_stable_tool_progress("tool-1", "Read 12 lines");
+    app.in_flight = true;
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("transcript user"));
+    assert!(joined.contains("✻ Read(/tmp/demo.rs)"));
+    assert!(joined.contains("  ⎿ Read 12 lines"));
+    assert!(joined.contains("Brewing"));
+    assert!(!joined.contains("Brewed"));
+}
+
+#[test]
+fn test_completed_tool_rendering_is_collapsed_by_default() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("find prompts");
+    app.render_runtime.append_history([
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::Tool,
+            vec![
+                crate::render_runtime::common::style::StyledLine::plain(
+                    "● Glob(**/*.rs) completed",
+                ),
+                crate::render_runtime::common::style::StyledLine::plain("  ⎿ Found 28 matches"),
+                crate::render_runtime::common::style::StyledLine::plain(
+                    "    common/prompt/src/assembler.rs:1 common/prompt/src/assembler.rs",
+                ),
+                crate::render_runtime::common::style::StyledLine::plain(
+                    "    common/prompt/src/bootstrap.rs:1 common/prompt/src/bootstrap.rs",
+                ),
+            ],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "done",
+            )],
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 100, 16));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("● Glob(**/*.rs) completed"));
+    assert!(joined.contains("⎿ Found 28 matches (ctrl+o to expand)"));
+    assert!(!joined.contains("common/prompt/src/assembler.rs"));
+    assert!(!joined.contains("common/prompt/src/bootstrap.rs"));
+}
+
+#[test]
+fn test_completed_diff_tool_rendering_is_expanded_by_default() {
+    let mut app = create_embedded_app();
+    app.render_runtime.append_user_input("edit file");
+    app.render_runtime.append_history([
+        crate::render_runtime::render::tool_projection::tool_completed_block(
+            "Edit",
+            "call-edit",
+            r#"{"file_path":"/tmp/demo.rs"}"#,
+            false,
+            &[talos_sdk::TalosContentItem::Diff {
+                files: vec![talos_types::talos::TalosToolFileDiff {
+                    path: "/tmp/demo.rs".to_string(),
+                    old_path: None,
+                    hunks: vec![talos_types::talos::TalosToolDiffHunk {
+                        old_start: Some(1),
+                        old_lines: Some(2),
+                        new_start: Some(1),
+                        new_lines: Some(2),
+                        lines: vec![
+                            talos_types::talos::TalosToolDiffLine::Context {
+                                text: "fn main() {".to_string(),
+                            },
+                            talos_types::talos::TalosToolDiffLine::Removed {
+                                text: "    old();".to_string(),
+                            },
+                            talos_types::talos::TalosToolDiffLine::Added {
+                                text: "    new();".to_string(),
+                            },
+                        ],
+                    }],
+                    truncated: false,
+                }],
+            }],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "done",
+            )],
+        ),
+    ]);
+
+    app.rebuild_chat_render_state(Rect::new(0, 0, 100, 20));
+
+    let joined = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(joined.contains("● Edited 1 files (+1 -1)"));
+    assert!(joined.contains("/tmp/demo.rs (+1 -1)"));
+    assert!(joined.contains("@@ -1,2 +1,2 @@"));
+    assert!(joined.contains("-    old();"));
+    assert!(joined.contains("+    new();"));
+    assert!(!joined.contains("ctrl+o to expand"));
 }
 
 #[test]
 fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
     let mut app = create_embedded_app();
-    app.chat_blocks = vec![ChatBlock::new(
-        ChatRole::System,
-        "Talos TUI (v0.1.3)".to_string(),
-    )];
+    app.render_runtime
+        .append_system_notice("Talos TUI (v0.1.3)");
     app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
-
-    assert!(app.rendered_round_footer_buttons.is_empty());
 }
 
 #[tokio::test]
@@ -528,13 +1089,7 @@ async fn test_multiple_questions_keep_reply_order() {
         }
     }
 
-    let joined = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let joined = interactive_transcript_text(&app);
 
     let p1 = joined.find("reply(q1)").unwrap();
     let p2 = joined.find("reply(q2)").unwrap();
@@ -574,7 +1129,7 @@ async fn test_send_is_non_blocking_for_first_draft_turn() {
     assert!(elapsed < Duration::from_millis(150));
     assert_eq!(app.message_queue.len(), 0);
     assert!(app.pending_stream_connect.is_some());
-    assert!(app.chat_blocks.iter().any(|b| b.content == "slow-create"));
+    assert!(interactive_transcript_text(&app).contains("slow-create"));
 }
 
 #[tokio::test]
@@ -594,20 +1149,8 @@ async fn test_failed_queued_message_is_dropped_after_one_retry() {
     }
 
     assert!(app.message_queue.is_empty());
-    let user_messages = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::User)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(user_messages, vec!["next-one".to_string()]);
-    let final_answer_text = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let final_answer_text = interactive_transcript_text(&app);
+    assert!(final_answer_text.contains("drop-me"));
     assert!(final_answer_text.contains("reply(next-one)"));
     assert!(app
         .right_panel_events
@@ -629,6 +1172,20 @@ async fn test_quit_enters_closing_state_before_session_close_finishes() {
     assert!(app.pending_close_update.is_some());
     assert_eq!(app.connection_status, "closing");
     assert!(app.input_status_line(120).to_string().contains("closing"));
+    assert!(app.render_runtime.store().blocks().iter().any(|block| {
+        block.kind == crate::render_runtime::transcript::block::TranscriptBlockKind::CommandInput
+            && block
+                .lines
+                .iter()
+                .any(|line| line.content.plain_text() == "/quit")
+    }));
+    assert!(!app.render_runtime.store().blocks().iter().any(|block| {
+        block.kind == crate::render_runtime::transcript::block::TranscriptBlockKind::UserInput
+            && block
+                .lines
+                .iter()
+                .any(|line| line.content.plain_text() == "/quit")
+    }));
 }
 
 #[tokio::test]

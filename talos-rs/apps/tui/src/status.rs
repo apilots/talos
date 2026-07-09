@@ -1,14 +1,9 @@
 use std::path::PathBuf;
 
-use ratatui::{
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-};
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{AuthSessionReadResponse, LlmReasoningEffort, SessionInfo, WorkspaceInfoResponse};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
-use crate::types::{CopyProjection, RenderedChatLine};
 use crate::utils::{text_display_width, APP_VERSION};
 use crate::TuiApp;
 
@@ -164,8 +159,7 @@ pub(crate) fn render_status_card(snapshot: &TuiStatusSnapshot) -> String {
         .unwrap_or_default()
         .max(40);
     let border = "─".repeat(width + 2);
-    let mut out = Vec::with_capacity(rows.len() + 3);
-    out.push("/status".to_string());
+    let mut out = Vec::with_capacity(rows.len() + 2);
     out.push(format!("┌{border}┐"));
     for row in rows {
         out.push(format!(
@@ -176,20 +170,6 @@ pub(crate) fn render_status_card(snapshot: &TuiStatusSnapshot) -> String {
     }
     out.push(format!("└{border}┘"));
     out.join("\n")
-}
-
-/// Renders a status card with TUI colors while preserving plain copy text.
-pub(crate) fn render_status_card_lines(content: &str) -> Vec<RenderedChatLine> {
-    content
-        .lines()
-        .map(|line| RenderedChatLine {
-            display: style_status_line(line),
-            copy_projection: Some(CopyProjection {
-                text: line.to_string(),
-                display_start_col: 0,
-            }),
-        })
-        .collect()
 }
 
 fn status_row(label: &str, value: &str) -> String {
@@ -362,125 +342,6 @@ fn format_path(path: &std::path::Path) -> String {
     } else {
         format!("~/{}", stripped.display())
     }
-}
-
-fn style_status_line(line: &str) -> Line<'static> {
-    if line == "/status" {
-        return Line::from(Span::styled(
-            line.to_string(),
-            Style::default()
-                .fg(Color::Blue)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    if line.starts_with('┌') || line.starts_with('└') {
-        return Line::from(Span::styled(
-            line.to_string(),
-            Style::default().fg(Color::Gray),
-        ));
-    }
-    let Some(inner) = line
-        .strip_prefix("│ ")
-        .and_then(|value| value.strip_suffix(" │"))
-    else {
-        return Line::from(line.to_string());
-    };
-    if inner.trim().is_empty() {
-        return bordered_line(vec![Span::raw(inner.to_string())]);
-    }
-    if inner.trim_start().starts_with(">_") {
-        return bordered_line(vec![Span::styled(
-            inner.to_string(),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )]);
-    }
-    let Some((label, value)) = split_status_row(inner) else {
-        return bordered_line(vec![Span::styled(
-            inner.to_string(),
-            Style::default().fg(Color::White),
-        )]);
-    };
-    match label.trim() {
-        "Context:" => style_context_row(label, value),
-        "Runtime:" => style_runtime_row(label, value),
-        _ => bordered_line(vec![
-            Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-            Span::styled(value.to_string(), Style::default().fg(Color::White)),
-        ]),
-    }
-}
-
-fn split_status_row(inner: &str) -> Option<(&str, &str)> {
-    const LABEL_WIDTH: usize = 18;
-    if inner.len() <= LABEL_WIDTH {
-        return None;
-    }
-    let (label, value) = inner.split_at(LABEL_WIDTH);
-    label.contains(':').then_some((label, value))
-}
-
-fn bordered_line(spans: Vec<Span<'static>>) -> Line<'static> {
-    let mut out = vec![Span::styled(
-        "│ ".to_string(),
-        Style::default().fg(Color::Gray),
-    )];
-    out.extend(spans);
-    out.push(Span::styled(
-        " │".to_string(),
-        Style::default().fg(Color::Gray),
-    ));
-    Line::from(out)
-}
-
-fn style_runtime_row(label: &str, value: &str) -> Line<'static> {
-    if let Some(dot_index) = value.find('●') {
-        let before_dot = &value[..dot_index];
-        let after_dot = &value[dot_index + '●'.len_utf8()..];
-        return bordered_line(vec![
-            Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-            Span::styled(before_dot.to_string(), Style::default().fg(Color::White)),
-            Span::styled("●".to_string(), Style::default().fg(Color::Green)),
-            Span::styled(after_dot.to_string(), Style::default().fg(Color::White)),
-        ]);
-    }
-    bordered_line(vec![
-        Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-        Span::styled(value.to_string(), Style::default().fg(Color::White)),
-    ])
-}
-
-fn style_context_row(label: &str, value: &str) -> Line<'static> {
-    let Some(start) = value.find('[') else {
-        return bordered_line(vec![
-            Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-            Span::styled(value.to_string(), Style::default().fg(Color::White)),
-        ]);
-    };
-    let Some(end) = value.find(']') else {
-        return bordered_line(vec![
-            Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-            Span::styled(value.to_string(), Style::default().fg(Color::White)),
-        ]);
-    };
-    let before = &value[..start + 1];
-    let bar = &value[start + 1..end];
-    let after = &value[end..];
-    let filled = bar.chars().filter(|ch| *ch == '■').count();
-    let empty = bar.chars().filter(|ch| *ch == '□').count();
-    bordered_line(vec![
-        Span::styled(label.to_string(), Style::default().fg(Color::Gray)),
-        Span::styled(before.to_string(), Style::default().fg(Color::White)),
-        Span::styled("■".repeat(filled), Style::default().fg(Color::Cyan)),
-        Span::styled(
-            "□".repeat(empty),
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::styled(after.to_string(), Style::default().fg(Color::White)),
-    ])
 }
 
 #[cfg(test)]

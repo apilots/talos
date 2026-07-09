@@ -1,15 +1,7 @@
 //! Pure utility functions for TUI rendering and layout.
 
-use ratatui::{
-    style::{Color, Style},
-    text::{Line, Span},
-};
-use std::{
-    env,
-    io::Write,
-    path::Path,
-    process::{Command, Stdio},
-};
+use ratatui::text::{Line, Span};
+use std::{env, path::Path};
 use unicode_width::UnicodeWidthChar;
 
 pub(crate) const APP_VERSION: &str = "v0.1.3";
@@ -20,9 +12,11 @@ pub fn display_tool_name(tool_name: &str) -> &str {
     match tool_name {
         "bash" | "Bash" => "Bash",
         "read" | "Read" => "Read",
+        "glob" | "Glob" => "Glob",
         "grep" | "Grep" => "Grep",
         "write" | "write_file" | "Write" => "Write",
         "edit" | "Edit" => "Edit",
+        "apply_patch" | "ApplyPatch" => "ApplyPatch",
         "memory_search" | "MemorySearch" => "MemorySearch",
         "memory_get" | "MemoryGet" => "MemoryGet",
         _ => tool_name,
@@ -48,14 +42,6 @@ pub(crate) fn line_plain_text(line: &Line<'_>) -> String {
         .iter()
         .map(|span| span.content.as_ref())
         .collect::<String>()
-}
-
-pub(crate) fn line_display_width(line: &Line<'_>) -> usize {
-    line.spans
-        .iter()
-        .flat_map(|span| span.content.chars())
-        .map(char_display_width)
-        .sum()
 }
 
 pub(crate) fn byte_index_at_char(text: &str, char_index: usize) -> usize {
@@ -114,67 +100,6 @@ pub(crate) fn wrap_line_visual(line: Line<'static>, max_width: usize) -> Vec<Lin
     wrapped_lines
 }
 
-// ── Selection / highlight ────────────────────────────────────────────────────
-
-pub(crate) fn slice_text_by_display_columns(
-    text: &str,
-    start_col: usize,
-    end_col: usize,
-) -> String {
-    if start_col >= end_col {
-        return String::new();
-    }
-    let mut current_col = 0usize;
-    let mut selected = String::new();
-    for ch in text.chars() {
-        let ch_width = char_display_width(ch);
-        let next_col = current_col + ch_width;
-        if next_col > start_col && current_col < end_col {
-            selected.push(ch);
-        }
-        current_col = next_col;
-        if current_col >= end_col {
-            break;
-        }
-    }
-    selected
-}
-
-pub(crate) fn highlight_line_columns(line: &mut Line<'static>, start_col: usize, end_col: usize) {
-    let highlight_style = Style::default()
-        .bg(Color::Rgb(108, 117, 160))
-        .fg(Color::White);
-    let mut current_col = 0usize;
-    let mut spans = Vec::new();
-
-    for span in &line.spans {
-        for ch in span.content.chars() {
-            let ch_width = char_display_width(ch);
-            let next_col = current_col + ch_width;
-            let selected = next_col > start_col && current_col < end_col;
-            let style = if selected {
-                span.style.patch(highlight_style)
-            } else {
-                span.style
-            };
-            push_styled_char(&mut spans, ch, style);
-            current_col = next_col;
-        }
-    }
-
-    line.spans = spans;
-}
-
-fn push_styled_char(spans: &mut Vec<Span<'static>>, ch: char, style: Style) {
-    if let Some(last) = spans.last_mut() {
-        if last.style == style {
-            last.content.to_mut().push(ch);
-            return;
-        }
-    }
-    spans.push(Span::styled(ch.to_string(), style));
-}
-
 // ── Display helpers ──────────────────────────────────────────────────────────
 
 pub(crate) fn summarize_for_queue(input: &str) -> String {
@@ -197,44 +122,6 @@ pub(crate) fn compact_directory_path(path: &Path) -> String {
         }
     }
     raw
-}
-
-pub(crate) fn copy_to_system_clipboard(text: &str) -> Result<(), String> {
-    fn try_copy(command: &str, args: &[&str], text: &str) -> Result<(), String> {
-        let mut child = Command::new(command)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| e.to_string())?;
-
-        if let Some(stdin) = child.stdin.as_mut() {
-            stdin
-                .write_all(text.as_bytes())
-                .map_err(|e| e.to_string())?;
-        }
-
-        let status = child.wait().map_err(|e| e.to_string())?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err(format!("{} exited with {}", command, status))
-        }
-    }
-
-    let candidates: [(&str, &[&str]); 3] = [
-        ("pbcopy", &[]),
-        ("wl-copy", &[]),
-        ("xclip", &["-selection", "clipboard"]),
-    ];
-    for (cmd, args) in candidates {
-        if try_copy(cmd, args, text).is_ok() {
-            return Ok(());
-        }
-    }
-
-    Err("no clipboard command available (pbcopy/wl-copy/xclip)".to_string())
 }
 
 pub(crate) fn build_welcome_card(

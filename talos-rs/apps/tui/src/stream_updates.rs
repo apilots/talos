@@ -4,7 +4,7 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc::error::TryRecvError;
 
 use crate::status::{render_status_card, TuiStatusSnapshot};
-use crate::types::{AppState, ChatRole, CommandUpdate};
+use crate::types::CommandUpdate;
 use crate::TuiApp;
 
 impl TuiApp {
@@ -29,10 +29,7 @@ impl TuiApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    self.push_block(
-                        ChatRole::System,
-                        "Command channel dropped unexpectedly.".to_string(),
-                    );
+                    self.push_system_notice("Command channel dropped unexpectedly.");
                     should_clear = true;
                 }
             }
@@ -66,17 +63,17 @@ impl TuiApp {
                             self.current_model = first.clone();
                         }
                     }
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Available models: {}", self.available_models.join(", ")),
-                    );
+                    self.push_system_notice(format!(
+                        "Available models: {}",
+                        self.available_models.join(", ")
+                    ));
                     self.push_right_event(format!(
                         "models loaded: {}",
                         self.available_models.len()
                     ));
                 }
                 Err(err) => {
-                    self.push_block(ChatRole::System, format!("Failed to load models: {}", err));
+                    self.push_system_notice(format!("Failed to load models: {}", err));
                     self.push_right_event("models load failed".to_string());
                 }
             },
@@ -93,69 +90,57 @@ impl TuiApp {
                     }
                     match snapshot {
                         Ok(snapshot) => {
-                            self.push_block(ChatRole::Status, render_status_card(&snapshot));
+                            let status_card = render_status_card(&snapshot);
+                            self.render_runtime.append_system_notice(status_card);
+                            self.request_chat_activity();
                             self.push_right_event("status loaded".to_string());
                         }
                         Err(err) => {
-                            self.push_block(
-                                ChatRole::System,
-                                format!("Failed to render status: {}", err),
-                            );
+                            self.push_system_notice(format!("Failed to render status: {}", err));
                             self.push_right_event("status render failed".to_string());
                         }
                     }
                 }
                 Err(err) => {
-                    self.push_block(ChatRole::System, format!("Failed to fetch status: {}", err));
+                    self.push_system_notice(format!("Failed to fetch status: {}", err));
                     self.push_right_event("status load failed".to_string());
                 }
             },
             CommandUpdate::SessionCompacted(result) => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.push_block(
-                        ChatRole::System,
+                    self.push_system_notice(
                         "Session compaction completed for the current session.".to_string(),
                     );
                     self.push_right_event("session compacted".to_string());
                 }
                 Err(err) => {
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Failed to compact session: {}", err),
-                    );
+                    self.push_system_notice(format!("Failed to compact session: {}", err));
                     self.push_right_event("session compact failed".to_string());
                 }
             },
             CommandUpdate::SessionCleared(result) => match result {
                 Ok(info) => {
                     self.apply_cleared_session_snapshot(&info);
-                    self.push_block(
-                        ChatRole::System,
+                    self.push_system_notice(
                         "Session context cleared. History and token counters were reset."
                             .to_string(),
                     );
                     self.push_right_event("session cleared".to_string());
                 }
                 Err(err) => {
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Failed to clear session: {}", err),
-                    );
+                    self.push_system_notice(format!("Failed to clear session: {}", err));
                     self.push_right_event("session clear failed".to_string());
                 }
             },
             CommandUpdate::ModelSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Model switched to `{}`.", self.current_model),
-                    );
+                    self.push_system_notice(format!("Model switched to `{}`.", self.current_model));
                     self.push_right_event(format!("session model updated: {}", requested));
                 }
                 Err(err) => {
-                    self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
+                    self.push_system_notice(format!("Failed to switch model: {}", err));
                     self.push_right_event("model switch failed".to_string());
                 }
             },
@@ -169,7 +154,7 @@ impl TuiApp {
                             .then(right.created_at.cmp(&left.created_at))
                     });
                     self.history_sessions = sessions;
-                    self.history_selected = 0;
+                    self.sessions_picker_selected = 0;
                     self.push_right_event(format!(
                         "history loaded: {} sessions",
                         self.history_sessions.len()
@@ -177,22 +162,19 @@ impl TuiApp {
                 }
                 Err(err) => {
                     self.push_right_event(format!("history load failed: {err}"));
-                    self.current_state = AppState::Chat;
+                    self.show_sessions_picker = false;
                 }
             },
             CommandUpdate::ModelPickerSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
                     self.show_model_picker = false;
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Model switched to `{}`.", self.current_model),
-                    );
+                    self.push_system_notice(format!("Model switched to `{}`.", self.current_model));
                     self.push_right_event(format!("model picker switched: {}", requested));
                 }
                 Err(err) => {
                     self.show_model_picker = false;
-                    self.push_block(ChatRole::System, format!("Failed to switch model: {}", err));
+                    self.push_system_notice(format!("Failed to switch model: {}", err));
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
@@ -201,10 +183,10 @@ impl TuiApp {
                     let sid = &session.id;
                     let model = &session.model_ref.id;
                     let title = &session.title;
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Session: {}  ({})\nModel: {}", title, sid, model),
-                    );
+                    self.push_system_notice(format!(
+                        "Session: {}  ({})\nModel: {}",
+                        title, sid, model
+                    ));
                     let item_count = self.replay_history_snapshot(load.history);
                     self.message_history_index = None;
                     self.push_right_event(format!("history loaded: {} items", item_count));
@@ -218,10 +200,10 @@ impl TuiApp {
                                 ));
                             }
                             Err(err) => {
-                                self.push_block(
-                                    ChatRole::System,
-                                    format!("Failed to recover active turn: {}", err),
-                                );
+                                self.push_system_notice(format!(
+                                    "Failed to recover active turn: {}",
+                                    err
+                                ));
                                 self.push_right_event("live recovery failed".to_string());
                             }
                         }
@@ -229,13 +211,10 @@ impl TuiApp {
                 }
                 Err(err) => {
                     let sid = &session.id;
-                    self.push_block(
-                        ChatRole::System,
-                        format!(
-                            "Session: {}  ({})\nFailed to load session history: {}",
-                            session.title, sid, err
-                        ),
-                    );
+                    self.push_system_notice(format!(
+                        "Session: {}  ({})\nFailed to load session history: {}",
+                        session.title, sid, err
+                    ));
                     self.push_right_event("history load failed".to_string());
                 }
             },
@@ -275,10 +254,10 @@ impl TuiApp {
                 self.closing_session_id = None;
                 self.connection_status = "closed".to_string();
                 self.push_right_event(format!("session close completed: {}", session_id));
-                self.push_block(
-                    ChatRole::System,
-                    format!("Shutting down TUI. Closed session `{}`.", session_id),
-                );
+                self.push_system_notice(format!(
+                    "Shutting down TUI. Closed session `{}`.",
+                    session_id
+                ));
                 self.should_exit = true;
             }
             Some(Err(err)) => {
@@ -286,10 +265,7 @@ impl TuiApp {
                 self.close_started_at = None;
                 self.close_timeout_reported = false;
                 self.closing_session_id = None;
-                self.push_block(
-                    ChatRole::System,
-                    format!("Failed to close session: {}", err),
-                );
+                self.push_system_notice(format!("Failed to close session: {}", err));
                 self.push_right_event("session close failed".to_string());
             }
             None => {}

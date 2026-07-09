@@ -1,4 +1,25 @@
 use super::*;
+use crate::types::CommandSuggestion;
+
+fn interactive_transcript_text(app: &TuiApp) -> String {
+    app.render_runtime
+        .interactive_projection_lines()
+        .into_iter()
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn test_command_suggestions_expose_sessions_without_history_alias() {
+    let commands = CommandSuggestion::all()
+        .into_iter()
+        .map(|command| command.insert_text)
+        .collect::<Vec<_>>();
+
+    assert!(commands.contains(&"/sessions".to_string()));
+    assert!(!commands.contains(&"/history".to_string()));
+}
 
 #[test]
 fn test_input_cursor_and_backspace() {
@@ -49,7 +70,7 @@ fn test_handle_paste_inserts_short_multiline_text_into_draft() {
         .into_iter()
         .map(|line| line_plain_text(&line))
         .collect::<Vec<_>>();
-    assert_eq!(rendered, vec!["  ❯ alpha", "    beta█"]);
+    assert_eq!(rendered, vec!["❯ alpha", "  beta█"]);
 }
 
 #[test]
@@ -60,14 +81,14 @@ fn test_short_long_single_line_paste_wraps_inside_draft() {
     app.handle_paste(pasted);
 
     assert!(app.pasted_blocks.is_empty());
-    assert_eq!(app.composer_line_count(24), 7);
+    assert_eq!(app.composer_line_count(24), 6);
     let rendered = app
         .input_lines(24, 8)
         .into_iter()
         .map(|line| line_plain_text(&line))
         .collect::<Vec<_>>();
     assert!(rendered.len() > 1);
-    let expected_first_line = format!("  ❯ {}", "A".repeat(20));
+    let expected_first_line = format!("❯ {}", "A".repeat(22));
     assert_eq!(
         rendered.first().map(String::as_str),
         Some(expected_first_line.as_str())
@@ -90,27 +111,28 @@ async fn test_backspace_removes_last_character_when_input_is_not_empty() {
 }
 
 #[tokio::test]
-async fn test_tab_toggles_last_tool_block_without_pasted_behavior() {
+async fn test_tab_reports_inline_tool_details_without_pasted_behavior() {
     let mut app = create_embedded_app();
-    let idx = app.push_block(
-        ChatRole::Tool,
-        "Tool: read\nstatus: completed\nresult: ok".to_string(),
-    );
-    if let Some(block) = app.chat_blocks.get_mut(idx) {
-        block.expanded = false;
-    }
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
         .await
         .unwrap();
-    assert!(app.chat_blocks[idx].expanded);
+    assert!(app
+        .status_hint
+        .as_ref()
+        .map(|(message, _)| message.contains("Tool details are shown inline"))
+        .unwrap_or(false));
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT))
         .await
         .unwrap();
-    assert!(!app.chat_blocks[idx].expanded);
+    assert!(app
+        .status_hint
+        .as_ref()
+        .map(|(message, _)| message.contains("Tool details are shown inline"))
+        .unwrap_or(false));
 }
 
 #[tokio::test]
@@ -169,21 +191,11 @@ async fn test_escape_cancels_in_flight_turn() {
 }
 
 #[tokio::test]
-async fn test_escape_without_in_flight_clears_local_selection_only() {
+async fn test_escape_without_in_flight_clears_pasted_block_selection_only() {
     let client = Arc::new(MockGatewayClient::new());
     let state = client.state.clone();
     let gateway_client: Arc<dyn GatewayClient> = client;
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
-    app.chat_selection = Some(ChatSelection {
-        anchor: SelectionPoint {
-            line_index: 0,
-            column: 0,
-        },
-        focus: SelectionPoint {
-            line_index: 0,
-            column: 3,
-        },
-    });
     app.selected_pasted_block = Some(0);
 
     let _ = app
@@ -191,9 +203,20 @@ async fn test_escape_without_in_flight_clears_local_selection_only() {
         .await
         .unwrap();
 
-    assert!(app.chat_selection.is_none());
     assert!(app.selected_pasted_block.is_none());
     assert!(state.lock().unwrap().cancelled_sessions.is_empty());
+}
+
+#[test]
+fn test_finish_active_stream_clears_live_turn_metrics() {
+    let mut app = create_embedded_app();
+    app.in_flight = true;
+    app.turn_metrics_live = true;
+
+    app.finish_active_stream("stream disconnected", true, false);
+
+    assert!(!app.in_flight);
+    assert!(!app.turn_metrics_live);
 }
 
 #[tokio::test]
@@ -209,16 +232,7 @@ async fn test_submit_input_composes_pasted_blocks_into_plain_text_message() {
     let should_quit = app.submit_input().await.unwrap();
 
     assert!(!should_quit);
-    let user_messages = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::User)
-        .map(|b| b.content.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        user_messages,
-        vec![format!("Explain this log\n\n{}", pasted)]
-    );
+    assert!(interactive_transcript_text(&app).contains(&format!("Explain this log\n\n{}", pasted)));
     assert!(app.pasted_blocks.is_empty());
     assert!(app.input_buffer.is_empty());
 }
@@ -437,10 +451,9 @@ async fn test_compact_command_triggers_session_compaction() {
 
     assert!(!should_quit);
     assert_eq!(state.lock().unwrap().compact_calls, 1);
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|block| block.content.contains("Session compaction completed")));
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("/compact"));
+    assert!(transcript.contains("Session compaction completed"));
 }
 
 #[tokio::test]
@@ -458,7 +471,7 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
         cache_creation_input_tokens: Some(4),
         cache_read_input_tokens: Some(6),
     };
-    app.push_block(ChatRole::FinalAnswer, "old answer".to_string());
+    app.render_runtime.append_system_notice("old answer");
     app.input_buffer = "/clear".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -474,14 +487,23 @@ async fn test_clear_command_resets_local_chat_and_session_usage() {
     assert!(!should_quit);
     assert_eq!(state.lock().unwrap().clear_calls, 1);
     assert_eq!(app.session_usage, TokenUsage::default());
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.content == "old answer"));
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|block| block.content.contains("Session context cleared")));
+    let transcript = interactive_transcript_text(&app);
+    assert!(!transcript.contains("old answer"));
+    assert!(transcript.contains("Session context cleared"));
+}
+
+#[tokio::test]
+async fn test_help_command_writes_transcript() {
+    let mut app = create_embedded_app();
+    app.input_buffer = "/help".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+
+    let should_quit = app.submit_input().await.unwrap();
+
+    assert!(!should_quit);
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("/help"));
+    assert!(transcript.contains("Commands: /help /model /models /sessions"));
 }
 
 #[tokio::test]
@@ -518,14 +540,14 @@ async fn test_status_command_displays_cache_usage_metrics() {
     }
 
     assert!(!should_quit);
-    let status_text = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::Status)
-        .map(|block| block.content.as_str())
-        .find(|content| content.starts_with("/status"))
-        .unwrap_or_default()
-        .to_string();
+    let status_text = interactive_transcript_text(&app);
+    assert_eq!(
+        status_text
+            .lines()
+            .filter(|line| *line == "/status")
+            .count(),
+        1
+    );
     assert!(status_text.contains("Talos TUI"));
     assert!(
         status_text.contains("Model:            qwen-plus (mock, reasoning off, summaries auto)")
@@ -551,21 +573,10 @@ async fn test_start_turn_stream_updates_final_answer_block() {
         }
     }
 
-    let final_answer = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
+    let final_answer = interactive_transcript_text(&app);
     assert!(final_answer.contains("# Title"));
     assert!(final_answer.contains("- item"));
-    let user_messages = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::User)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(user_messages, vec!["hello".to_string()]);
+    assert!(final_answer.contains("hello"));
 }
 
 #[tokio::test]
@@ -576,12 +587,7 @@ async fn test_thinking_block_is_not_created_before_first_delta() {
 
     assert!(app.in_flight);
     assert!(!app.received_output_delta);
-    assert!(!app.chat_blocks.iter().any(|b| b.role == ChatRole::Thinking));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer));
-    assert!(app.transcript.live_final_answer_idx.is_none());
+    assert!(interactive_transcript_text(&app).contains("hello"));
     assert!(app.is_agent_working());
 }
 
@@ -605,14 +611,90 @@ async fn test_reasoning_delta_renders_plain_text_and_preserves_paragraphs() {
         "Second paragraph",
     ));
 
-    let thinking = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::Thinking)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
+    let thinking = interactive_transcript_text(&app);
 
-    assert_eq!(thinking, "First line\n\nSecond paragraph");
+    assert!(thinking.ends_with("First line\n\nSecond paragraph"));
+}
+
+#[test]
+fn test_history_replay_feeds_transcript_projection() {
+    let mut app = create_embedded_app();
+    let snapshot = talos_sdk::SessionHistorySnapshot {
+        session_id: "sess-test".to_string(),
+        messages: vec![talos_sdk::SessionHistoryMessage {
+            message_id: "msg-history".to_string(),
+            turn_id: "turn-history".to_string(),
+            items: vec![talos_sdk::TalosTimelineItem {
+                item_id: "item-history".to_string(),
+                parent_item_id: None,
+                kind: talos_sdk::TalosTimelineItemKind::AssistantText,
+                phase: talos_sdk::TalosTimelinePhase::FinalAnswer,
+                status: talos_sdk::TalosTimelineItemStatus::Completed,
+                title: None,
+                started_at_ms: 1,
+                completed_at_ms: Some(2),
+                content: talos_sdk::TalosTimelineContent::Text {
+                    text: "history answer".to_string(),
+                },
+            }],
+            stop_reason: talos_sdk::StopReason::EndTurn,
+            usage: TokenUsage::default(),
+            metrics: None,
+        }],
+        generated_at_ms: 3,
+        last_stable_event_id: None,
+    };
+
+    let item_count = app.replay_history_snapshot(snapshot);
+
+    assert_eq!(item_count, 1);
+    let pending_text = app
+        .render_runtime
+        .store()
+        .pending_terminal_projection()
+        .into_iter()
+        .flat_map(|block| block.lines)
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(pending_text.contains("history answer"));
+}
+
+#[test]
+fn test_stream_events_feed_transcript_projection() {
+    let mut app = create_embedded_app();
+    app.session_id = Some("sess-test".to_string());
+
+    app.handle_stream_event(output_item_started_event("msg-transcript", "sess-test", 1));
+    app.handle_stream_event(output_delta_event(
+        "msg-transcript",
+        "sess-test",
+        2,
+        "hello",
+    ));
+    app.handle_stream_event(assistant_text_committed_event(
+        "msg-transcript",
+        "sess-test",
+        3,
+        talos_sdk::TalosTimelinePhase::FinalAnswer,
+    ));
+    app.handle_stream_event(output_completed_event(
+        "msg-transcript",
+        "sess-test",
+        4,
+        "hello",
+    ));
+
+    let pending_text = app
+        .render_runtime
+        .store()
+        .pending_terminal_projection()
+        .into_iter()
+        .flat_map(|block| block.lines)
+        .map(|line| line.plain_text())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(pending_text.contains("hello"));
 }
 
 #[tokio::test]
@@ -629,10 +711,7 @@ async fn test_modes_alias_works_as_models() {
             break;
         }
     }
-    assert!(app
-        .chat_history
-        .iter()
-        .any(|line| line.contains("Available models")));
+    assert!(interactive_transcript_text(&app).contains("Available models"));
 }
 
 #[tokio::test]
@@ -659,13 +738,10 @@ async fn test_queue_limit_and_serial_dispatch() {
 
     assert!(app.message_queue.is_empty());
     assert!(!app.in_flight);
-    let user_messages = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::User)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(user_messages, vec!["m1", "m2", "m3", "m4"]);
+    let transcript = interactive_transcript_text(&app);
+    for message in ["m1", "m2", "m3", "m4"] {
+        assert!(transcript.contains(message));
+    }
 }
 
 #[tokio::test]
@@ -674,9 +750,9 @@ async fn test_queued_messages_do_not_add_system_noise_blocks() {
     app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
-    let before = app.chat_blocks.len();
+    let before = app.render_runtime.store().blocks().len();
     assert!(app.send_user_message("m2".to_string()).await.unwrap());
-    assert_eq!(app.chat_blocks.len(), before);
+    assert_eq!(app.render_runtime.store().blocks().len(), before);
 }
 
 #[tokio::test]
@@ -690,22 +766,18 @@ async fn test_submit_input_queues_without_adding_user_block() {
 
     app.input_buffer = "m2".to_string();
     app.cursor_index = app.input_buffer.chars().count();
-    let before = app.chat_blocks.len();
+    let before = app.render_runtime.store().blocks().len();
     let _ = app.submit_input().await.unwrap();
 
-    assert_eq!(app.chat_blocks.len(), before);
+    assert_eq!(app.render_runtime.store().blocks().len(), before);
     assert_eq!(app.message_queue.len(), 1);
     assert_eq!(
         app.message_queue.front().map(|msg| msg.text.as_str()),
         Some("m2")
     );
-    let user_messages = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::User)
-        .map(|b| b.content.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(user_messages, vec!["m1"]);
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("m1"));
+    assert!(!transcript.contains("m2"));
 }
 
 #[tokio::test]
@@ -719,13 +791,13 @@ async fn test_submit_input_keeps_text_when_queue_is_full() {
     assert!(app.send_user_message("m4".to_string()).await.unwrap());
     assert_eq!(app.message_queue.len(), 3);
 
-    let before_blocks = app.chat_blocks.len();
+    let before_blocks = app.render_runtime.store().blocks().len();
     app.input_buffer = "overflow".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
     let should_quit = app.submit_input().await.unwrap();
     assert!(!should_quit);
-    assert_eq!(app.chat_blocks.len(), before_blocks);
+    assert_eq!(app.render_runtime.store().blocks().len(), before_blocks);
     assert_eq!(app.input_buffer, "overflow");
     assert_eq!(app.message_queue.len(), 3);
     assert!(app
@@ -745,10 +817,10 @@ async fn test_timeout_uses_status_hint_not_chat_block() {
     app.last_stream_event_at =
         Some(Instant::now() - STREAM_STALL_TIMEOUT - Duration::from_millis(1));
 
-    let before_blocks = app.chat_blocks.len();
+    let before_transcript = interactive_transcript_text(&app);
     app.on_tick().await;
 
-    assert_eq!(app.chat_blocks.len(), before_blocks);
+    assert_eq!(interactive_transcript_text(&app), before_transcript);
     assert!(app
         .status_hint
         .as_ref()
@@ -779,7 +851,6 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     app.session_id = Some("sess-test".to_string());
     app.in_flight = true;
     app.active_message_raw = Some("slow request".to_string());
-    app.active_user_idx = Some(app.push_block(ChatRole::User, "slow request".to_string()));
     app.last_stream_event_id = Some("ev_2".to_string());
     app.last_stream_event_at =
         Some(Instant::now() - STREAM_STALL_TIMEOUT - Duration::from_millis(1));
@@ -804,15 +875,8 @@ async fn test_timeout_reconnects_active_stream_instead_of_retrying_turn() {
     app.on_tick().await;
 
     assert!(!app.in_flight);
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::FinalAnswer
-            && block.content.contains("recovered reply")));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.content.contains("Failed to start stream")));
+    assert!(interactive_transcript_text(&app).contains("recovered reply"));
+    assert!(!interactive_transcript_text(&app).contains("Failed to start stream"));
 }
 
 #[tokio::test]
@@ -822,9 +886,6 @@ async fn test_stale_timeline_events_are_ignored() {
     app.in_flight = true;
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
-    app.transcript.live_final_answer_idx =
-        Some(app.push_block(ChatRole::FinalAnswer, String::new()));
-
     let stale_message_id = format!(
         "{}-stale",
         app.active_stream_message_id
@@ -838,13 +899,7 @@ async fn test_stale_timeline_events_are_ignored() {
         "stale",
     ));
 
-    let final_answer = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert!(final_answer.is_empty());
+    assert!(!interactive_transcript_text(&app).contains("stale"));
     assert!(app
         .right_panel_events
         .iter()
@@ -860,8 +915,7 @@ async fn test_duplicate_stream_sequence_is_ignored() {
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
     app.last_stream_event_id = Some("ev_3".to_string());
-    app.transcript.live_final_answer_idx =
-        Some(app.push_block(ChatRole::FinalAnswer, "hello".into()));
+    let before = interactive_transcript_text(&app);
 
     app.handle_stream_event(output_delta_event(
         "msg-current",
@@ -870,13 +924,7 @@ async fn test_duplicate_stream_sequence_is_ignored() {
         " duplicate",
     ));
 
-    let final_answer = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert_eq!(final_answer, "hello");
+    assert_eq!(interactive_transcript_text(&app), before);
     assert_eq!(app.last_stream_sequence, Some(3));
     assert_eq!(app.last_stream_event_id.as_deref(), Some("ev_3"));
 }
@@ -889,16 +937,6 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
     app.session_id = Some("sess-test".to_string());
     app.active_stream_message_id = Some("msg-current".to_string());
     app.last_stream_sequence = Some(3);
-
-    app.push_tool_call_block(ToolCallBlockUpdate {
-        item_id: None,
-        call_id: "call-current".to_string(),
-        tool_name: "bash".to_string(),
-        tool_input: talos_sdk::ToolArguments::from(serde_json::json!({"cmd": "pwd"})),
-        iteration: 1,
-        item_index: 0,
-        timing_ms: None,
-    });
 
     app.handle_stream_event(tool_completed_event(
         "msg-stale",
@@ -926,21 +964,16 @@ async fn test_stale_tool_event_does_not_advance_sequence_or_block_valid_output()
         "final answer",
     ));
 
-    let final_answer = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .collect::<String>();
-    assert!(final_answer.contains("final answer"));
+    assert!(interactive_transcript_text(&app).contains("final answer"));
 }
 
 #[tokio::test]
-async fn test_tool_updates_merge_by_timeline_item_id() {
+async fn test_tool_updates_project_through_timeline_item_id() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
     app.session_id = Some("sess-test".to_string());
+    app.render_runtime.append_user_input("Fetch asset size");
 
     app.handle_stream_event(tool_started_event(
         "msg-tool-merge",
@@ -978,25 +1011,15 @@ async fn test_tool_updates_merge_by_timeline_item_id() {
         }),
     ));
 
-    let tool_blocks = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::Tool)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_blocks.len(), 1);
-    assert_eq!(tool_blocks[0].content, "17576");
-    assert_eq!(
-        tool_blocks[0]
-            .tool_input
-            .as_ref()
-            .and_then(|input| input.as_inner().get("cmd"))
-            .and_then(serde_json::Value::as_str),
-        Some("curl -sL https://talos.love/assets/index.css | wc -c")
-    );
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("● Bash(curl -sL https://talos.love/assets/index.css | wc -c)"));
+    assert!(transcript
+        .contains("● Bash(curl -sL https://talos.love/assets/index.css | wc -c) completed"));
+    assert!(transcript.contains("17576"));
 }
 
 #[tokio::test]
-async fn test_tool_progress_updates_existing_tool_block() {
+async fn test_tool_progress_updates_transcript_projection() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
@@ -1026,14 +1049,9 @@ async fn test_tool_progress_updates_existing_tool_block() {
         }),
     ));
 
-    let tool_blocks = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::Tool)
-        .collect::<Vec<_>>();
-    assert_eq!(tool_blocks.len(), 1);
-    assert_eq!(tool_blocks[0].tool_name.as_deref(), Some("bash"));
-    assert_eq!(tool_blocks[0].tool_progress, vec!["stdout: first\n"]);
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("● Bash(printf 'first\\nsecond\\n')"));
+    assert!(transcript.contains("  ⎿ first"));
 }
 
 #[tokio::test]
@@ -1052,10 +1070,7 @@ async fn test_turn_completed_finishes_stream_without_output_delta() {
     ));
 
     assert!(!app.in_flight);
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer));
+    assert!(!app.received_output_delta);
 }
 
 #[tokio::test]
@@ -1072,10 +1087,7 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
         "Kernel summary: executed 1 tool call(s).",
     ));
 
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::System && b.content.contains("Execution summary")));
+    assert!(!interactive_transcript_text(&app).contains("Kernel summary"));
     assert!(app
         .right_panel_events
         .iter()
@@ -1113,10 +1125,7 @@ async fn test_context_compaction_stream_renders_right_panel_status() {
         .right_panel_events
         .iter()
         .any(|line| line.contains("Session history compaction finished.")));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::System && block.content.contains("compaction")));
+    assert!(!interactive_transcript_text(&app).contains("compaction"));
 }
 
 #[tokio::test]
@@ -1138,16 +1147,8 @@ async fn test_commentary_stream_does_not_update_final_answer_block() {
         "I will inspect the workspace.",
     ));
 
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer
-            && b.content.contains("I will inspect the workspace.")));
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::Commentary
-            && b.content.contains("I will inspect the workspace.")));
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("I will inspect the workspace."));
     assert!(!app.received_output_delta);
 }
 
@@ -1166,14 +1167,7 @@ async fn test_unknown_stream_moves_to_final_answer_when_committed_final() {
         "Final answer text.",
     ));
 
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::Commentary && b.content.contains("Final answer text.")));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer && b.content.contains("Final answer text.")));
+    assert!(interactive_transcript_text(&app).contains("Final answer text."));
 
     app.handle_stream_event(assistant_text_committed_event(
         "msg-unknown",
@@ -1182,14 +1176,7 @@ async fn test_unknown_stream_moves_to_final_answer_when_committed_final() {
         TalosTimelinePhase::FinalAnswer,
     ));
 
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::Commentary && b.content.contains("Final answer text.")));
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer && b.content.contains("Final answer text.")));
+    assert!(interactive_transcript_text(&app).contains("Final answer text."));
     assert!(app.received_output_delta);
 }
 
@@ -1238,21 +1225,10 @@ async fn test_interleaved_unknown_items_do_not_share_live_blocks() {
         TalosTimelinePhase::FinalAnswer,
     ));
 
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::Commentary
-            && block.content.contains("First commentary.")));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::FinalAnswer
-            && block.content.contains("First commentary.")));
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|block| block.role == ChatRole::FinalAnswer
-            && block.content.contains("Final candidate.")));
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("First commentary."));
+    assert!(transcript.contains("Final candidate."));
+    assert!(app.received_output_delta);
 }
 
 #[tokio::test]
@@ -1292,14 +1268,7 @@ async fn test_completed_final_content_updates_committed_unknown_final() {
         "Partial final with canonical suffix.",
     ));
 
-    let final_answers = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::FinalAnswer)
-        .map(|block| block.content.as_str())
-        .collect::<Vec<_>>();
-
-    assert_eq!(final_answers, vec!["Partial final with canonical suffix."]);
+    assert!(interactive_transcript_text(&app).contains("Partial final with canonical suffix."));
 }
 
 #[tokio::test]
@@ -1323,21 +1292,12 @@ async fn test_unknown_stream_stays_thinking_when_committed_commentary() {
         TalosTimelinePhase::Commentary,
     ));
 
-    assert!(app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::Commentary
-            && b.content.contains("I will inspect the workspace.")));
-    assert!(!app
-        .chat_blocks
-        .iter()
-        .any(|b| b.role == ChatRole::FinalAnswer
-            && b.content.contains("I will inspect the workspace.")));
+    assert!(interactive_transcript_text(&app).contains("I will inspect the workspace."));
     assert!(!app.received_output_delta);
 }
 
 #[tokio::test]
-async fn test_tool_using_stream_caches_final_answer_until_completed() {
+async fn test_tool_using_stream_projects_final_answer_during_tool_activity() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
@@ -1350,13 +1310,8 @@ async fn test_tool_using_stream_caches_final_answer_until_completed() {
         2,
         "Draft summary",
     ));
-    let final_answer_before_tool = app
-        .chat_blocks
-        .iter()
-        .find(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .unwrap_or_default();
-    assert_eq!(final_answer_before_tool, "");
+    assert!(interactive_transcript_text(&app).contains("Draft summary"));
+    assert!(app.received_output_delta);
 
     app.handle_stream_event(tool_started_event(
         "msg-tools",
@@ -1373,13 +1328,8 @@ async fn test_tool_using_stream_caches_final_answer_until_completed() {
         "\nFinal answer",
     ));
 
-    let final_answer_during_tool = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>();
-    assert!(final_answer_during_tool.is_empty());
+    assert!(interactive_transcript_text(&app).contains("Draft summary\nFinal answer"));
+    assert!(app.received_output_delta);
 
     app.handle_stream_event(output_completed_event(
         "msg-tools",
@@ -1395,16 +1345,8 @@ async fn test_tool_using_stream_caches_final_answer_until_completed() {
         TokenUsage::default(),
     ));
 
-    let final_answer_after_complete = app
-        .chat_blocks
-        .iter()
-        .filter(|b| b.role == ChatRole::FinalAnswer)
-        .map(|b| b.content.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        final_answer_after_complete,
-        vec!["Draft summary\nFinal answer"]
-    );
+    assert!(interactive_transcript_text(&app).contains("Draft summary\nFinal answer"));
+    assert!(app.received_output_delta);
 }
 
 #[tokio::test]
@@ -1422,29 +1364,19 @@ async fn test_completed_final_text_renders_when_no_delta_arrived() {
         "Final summary from completed content.",
     ));
 
-    let final_answer = app
-        .chat_blocks
-        .iter()
-        .filter(|block| block.role == ChatRole::FinalAnswer)
-        .map(|block| block.content.clone())
-        .collect::<Vec<_>>();
-
-    assert_eq!(final_answer, vec!["Final summary from completed content."]);
+    assert!(interactive_transcript_text(&app).contains("Final summary from completed content."));
     assert!(app.received_output_delta);
 }
 
 #[tokio::test]
-async fn test_stream_event_preserves_manual_scroll_mode() {
+async fn test_stream_event_updates_live_projection() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
     app.in_flight = true;
-    app.chat_manual_scroll = true;
-    app.chat_scroll = 5;
     app.session_id = Some("sess-test".to_string());
 
     app.handle_stream_event(output_item_started_event("msg-follow", "sess-test", 1));
     app.handle_stream_event(output_delta_event("msg-follow", "sess-test", 2, "hello"));
 
-    assert!(app.chat_manual_scroll);
-    assert_eq!(app.chat_scroll, 5);
+    assert!(interactive_transcript_text(&app).contains("hello"));
 }

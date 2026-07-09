@@ -6,10 +6,8 @@ use talos_sdk::{
 };
 use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
 
-use ratatui::style::Color;
-
-use super::{render_status_card, render_status_card_lines, TuiStatusSnapshot};
-use crate::test_support::{line_plain_text, mock_model_info, set_test_model_info};
+use super::{render_status_card, TuiStatusSnapshot};
+use crate::test_support::{mock_model_info, set_test_model_info};
 use crate::TuiApp;
 
 fn session_info() -> SessionInfo {
@@ -94,7 +92,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
             .unwrap();
     let card = render_status_card(&snapshot);
 
-    assert!(card.contains("/status"));
+    assert!(!card.lines().any(|line| line == "/status"));
     assert!(card.contains("Talos TUI"));
     assert!(card.contains("Model:            qwen-plus (bailian, reasoning high, summaries auto)"));
     assert!(card.contains("Agent Workspace:  /tmp/talos-workspace"));
@@ -107,53 +105,6 @@ fn test_status_snapshot_renders_card_from_real_state() {
     assert!(card.contains("160.0K tokens · cache read 21.0K"));
     assert!(card.contains("last · 4 rounds · 7 tools · 6 ok · 1 err · 9.6s"));
     assert!(card.contains("Events:           128"));
-}
-
-#[test]
-fn test_status_card_lines_style_command_and_context_bar() {
-    let mut app = TuiApp::build(None);
-    set_test_model_info(&mut app, "qwen-plus", 200_000);
-    app.current_model = "qwen-plus".to_string();
-    app.connection_status = "connected".to_string();
-
-    let session = session_info();
-    let snapshot =
-        TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
-            .unwrap();
-    let lines = render_status_card_lines(&render_status_card(&snapshot));
-
-    assert_eq!(lines[0].display.spans[0].style.fg, Some(Color::Blue));
-    let context_line = lines
-        .iter()
-        .find(|line| {
-            line.display
-                .spans
-                .iter()
-                .any(|span| span.content.contains("Context:"))
-        })
-        .expect("context line should render");
-    assert!(context_line
-        .display
-        .spans
-        .iter()
-        .any(|span| span.content.contains('■') && span.style.fg == Some(Color::Cyan)));
-    let raw_card = render_status_card(&snapshot);
-    let raw_runtime = raw_card
-        .lines()
-        .find(|line| line.contains("Runtime:"))
-        .expect("raw runtime line should render");
-    let styled_runtime = lines
-        .iter()
-        .find(|line| {
-            line.display
-                .spans
-                .iter()
-                .any(|span| span.content.contains("Runtime:"))
-        })
-        .expect("styled runtime line should render");
-    let styled_runtime_text = line_plain_text(&styled_runtime.display);
-    assert_eq!(styled_runtime_text, raw_runtime);
-    assert!(styled_runtime_text.ends_with("│"));
 }
 
 #[test]

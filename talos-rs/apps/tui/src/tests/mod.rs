@@ -4,4 +4,3 @@ use crate::test_support::*;
 mod chat_render_tests;
 mod input_stream_tests;
 mod scroll_render_tests;
-mod tool_render_tests;

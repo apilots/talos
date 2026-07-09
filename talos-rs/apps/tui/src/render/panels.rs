@@ -2,53 +2,13 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState},
     Frame,
 };
 
 use crate::session_list_label;
 use crate::TuiApp;
 impl TuiApp {
-    pub(crate) fn render_history_panel(&self, f: &mut Frame, area: Rect) {
-        let block = Block::default()
-            .style(Style::default().bg(Color::Rgb(24, 28, 36)))
-            .title(" History  [Enter] switch  [d] delete  [Esc] back ");
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-
-        if self.history_sessions.is_empty() {
-            let msg = Paragraph::new("No sessions found.  (loading...)")
-                .style(Style::default().fg(Color::DarkGray));
-            f.render_widget(msg, inner);
-            return;
-        }
-
-        let items: Vec<ListItem> = self
-            .history_sessions
-            .iter()
-            .map(|s| ListItem::new(session_list_label(s)))
-            .collect();
-
-        let mut list_state = ListState::default();
-        list_state.select(Some(self.history_selected));
-
-        let list = List::new(items)
-            .style(
-                Style::default()
-                    .bg(Color::Rgb(24, 28, 36))
-                    .fg(Color::Rgb(212, 218, 228)),
-            )
-            .highlight_style(
-                Style::default()
-                    .bg(Color::Rgb(62, 96, 150))
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ ");
-
-        f.render_stateful_widget(list, inner, &mut list_state);
-    }
-
     pub(crate) fn render_model_picker(&self, f: &mut Frame, area: Rect) {
         let popup_area = self.left_panel_area.unwrap_or(area);
 

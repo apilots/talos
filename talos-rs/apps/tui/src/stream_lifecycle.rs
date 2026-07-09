@@ -5,7 +5,6 @@ use talos_sdk::SkillSuggestion;
 use tokio::sync::mpsc;
 use tracing::error;
 
-use crate::types::ChatRole;
 use crate::utils::summarize_for_queue;
 use crate::{TerminalTurnRequest, TuiApp};
 
@@ -26,7 +25,7 @@ impl TuiApp {
         reset_retry_state: bool,
     ) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            self.push_block(ChatRole::System, "Gateway client unavailable.".to_string());
+            self.push_system_notice("Gateway client unavailable.");
             return Ok(());
         };
 
@@ -53,7 +52,6 @@ impl TuiApp {
         self.abort_pending_stream_task();
         self.in_flight = true;
         self.received_output_delta = false;
-        self.transcript.reset_for_new_stream();
         self.active_message = Some(active_summary);
         if reset_retry_state {
             self.active_retry_count = 0;
@@ -70,8 +68,8 @@ impl TuiApp {
         self.timeline_items.clear();
 
         if reset_retry_state {
-            let user_idx = self.push_block(ChatRole::User, user_message.clone());
-            self.active_user_idx = Some(user_idx);
+            self.render_runtime.append_user_input(user_message.clone());
+            self.request_chat_activity();
         }
 
         let (tx, rx) = mpsc::channel(1);
@@ -104,22 +102,11 @@ impl TuiApp {
         is_error: bool,
         keep_active_payload: bool,
     ) {
-        let completed_round_timing_ms = if !is_error {
-            self.stream_started_at
-                .map(|started_at| started_at.elapsed().as_millis() as u64)
-        } else {
-            None
-        };
-        if let (Some(idx), Some(duration_ms)) = (self.active_user_idx, completed_round_timing_ms) {
-            if let Some(block) = self.chat_blocks.get_mut(idx) {
-                block.round_timing_ms = Some(duration_ms);
-            }
-        }
         self.in_flight = false;
+        self.turn_metrics_live = false;
         self.pending_stream_connect = None;
         self.pending_stream = None;
         self.abort_pending_stream_task();
-        self.active_user_idx = None;
         self.active_stream_message_id = None;
         self.last_stream_sequence = None;
         self.last_stream_event_id = None;
@@ -127,8 +114,6 @@ impl TuiApp {
         self.stream_started_at = None;
         self.last_stream_event_at = None;
         self.active_message = None;
-        self.transcript.finalize(&mut self.chat_blocks);
-        self.rebuild_chat_history();
         if !keep_active_payload {
             self.active_message_raw = None;
             self.active_message_skills.clear();

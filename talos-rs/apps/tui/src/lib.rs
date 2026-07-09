@@ -8,15 +8,14 @@ mod client;
 mod commands;
 mod input;
 mod render;
+mod render_runtime;
 pub mod run;
-mod selection;
 mod status;
 mod stream;
 mod stream_events;
 mod stream_lifecycle;
-mod stream_text;
 mod stream_updates;
-mod transcript;
+mod terminal_adapter;
 mod turn_request;
 mod types;
 mod utils;
@@ -29,6 +28,8 @@ pub use utils::display_tool_name;
 
 use chrono::{Datelike, Local, TimeZone};
 use ratatui::layout::Rect;
+use render_runtime::runtime::engine::BufferedRenderRuntimeEngine;
+use render_runtime::transcript::block::TranscriptBlockId;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -41,17 +42,15 @@ use talos_sdk::{
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
-use transcript::TranscriptState;
 
-pub(crate) const WELCOME_MODEL_PLACEHOLDER: &str = "(connecting...)";
 pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
 pub(crate) const MAX_QUEUE_LEN: usize = 3;
 pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
 pub(crate) const SPINNER_FRAMES: &[char] = &['✻', '✢', '✳', '✶'];
-pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 2;
-pub(crate) const TOOL_PREVIEW_CHAR_LIMIT: usize = 100;
-pub(crate) const COPY_ROUND_BUTTON_TEXT: &str = "  [ Copy Round ]";
+pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 0;
+pub(crate) const WELCOME_TIP_LINE: &str =
+    " Tip: Type a message or use /help /model /sessions /status /compact /clear /quit";
 pub(crate) const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
 
 fn format_session_timestamp(timestamp_ms: u64) -> String {
@@ -83,7 +82,6 @@ pub(crate) fn session_list_label(session: &SessionInfo) -> String {
 
 /// Main TUI app.
 pub struct TuiApp {
-    pub(crate) current_state: AppState,
     pub(crate) input_buffer: String,
     pub(crate) cursor_index: usize,
     pub(crate) pasted_blocks: Vec<PastedTextBlock>,
@@ -98,17 +96,12 @@ pub struct TuiApp {
     pub(crate) available_models: Vec<String>,
     pub(crate) session_id: Option<String>,
     pub(crate) connection_status: String,
-    pub(crate) chat_blocks: Vec<ChatBlock>,
-    pub(crate) chat_history: Vec<String>,
     pub(crate) right_panel_events: Vec<String>,
     pub(crate) rendered_chat_lines: Vec<RenderedChatLine>,
-    pub(crate) rendered_round_footer_buttons: HashMap<usize, RoundFooterButton>,
+    pub(crate) rendered_chat_cache_key: Option<ChatRenderCacheKey>,
     pub(crate) chat_content_rect: Option<Rect>,
     pub(crate) chat_viewport_height: usize,
-    pub(crate) chat_selection: Option<ChatSelection>,
     pub(crate) message_queue: VecDeque<QueuedMessage>,
-    pub(crate) chat_scroll: u16,
-    pub(crate) chat_manual_scroll: bool,
     pub(crate) trace_event_count: u64,
     pub(crate) in_flight: bool,
     pub(crate) received_output_delta: bool,
@@ -116,8 +109,6 @@ pub struct TuiApp {
     pub(crate) active_message_raw: Option<String>,
     pub(crate) active_message_skills: Vec<SkillSuggestion>,
     pub(crate) active_retry_count: u8,
-    pub(crate) active_user_idx: Option<usize>,
-    pub(crate) transcript: TranscriptState,
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_stream_connect:
@@ -138,7 +129,6 @@ pub struct TuiApp {
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
     pub(crate) history_sessions: Vec<SessionInfo>,
-    pub(crate) history_selected: usize,
     pub(crate) show_model_picker: bool,
     pub(crate) model_picker_selected: usize,
     pub(crate) show_sessions_picker: bool,
@@ -160,6 +150,9 @@ pub struct TuiApp {
     pub(crate) should_exit: bool,
     pub(crate) left_panel_area: Option<Rect>,
     pub(crate) input_area: Option<Rect>,
+    pub(crate) render_runtime: BufferedRenderRuntimeEngine,
+    pub(crate) suppress_transcript_for_terminal_flush: bool,
+    pub(crate) terminal_footer_synced_for: Option<TranscriptBlockId>,
 }
 
 impl TuiApp {

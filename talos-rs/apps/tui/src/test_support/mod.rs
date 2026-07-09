@@ -1,10 +1,6 @@
 pub(crate) use super::*;
-use crate::utils::char_display_width;
 use async_trait::async_trait;
-pub(crate) use crossterm::event::{
-    KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
-pub(crate) use serde_json::json;
+pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
@@ -791,14 +787,6 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
-    async fn delete_session(&self, _session_id: &str) -> TalosResult<()> {
-        let delay = self.state.lock().unwrap().close_session_delay_ms;
-        if delay > 0 {
-            tokio::time::sleep(Duration::from_millis(delay)).await;
-        }
-        Ok(())
-    }
-
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
         self.state
             .lock()
@@ -1053,12 +1041,4 @@ pub(crate) fn line_plain_text(line: &ratatui::text::Line<'_>) -> String {
         .iter()
         .map(|span| span.content.as_ref())
         .collect::<String>()
-}
-
-pub(crate) fn line_display_width(line: &ratatui::text::Line<'_>) -> usize {
-    line.spans
-        .iter()
-        .flat_map(|span| span.content.chars())
-        .map(char_display_width)
-        .sum()
 }

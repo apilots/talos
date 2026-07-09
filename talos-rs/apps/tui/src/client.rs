@@ -4,10 +4,10 @@ use talos_sdk::{
     AuthSessionReadRequest, AuthSessionReadResponse, GatewayClient as SdkGatewayClient,
     InterruptTurnRequest, ModelInfo, ModelListRequest, ModelRef, RecoverTimelineRequest,
     SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
-    SessionConf, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
-    SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
-    SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
-    TimelineEventEnvelope, TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SessionConf, SessionGetRequest, SessionHistoryRequest, SessionHistorySnapshot, SessionInfo,
+    SessionListRequest, SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest,
+    StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
+    TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -21,7 +21,6 @@ pub trait GatewayClient: Send + Sync {
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>>;
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
-    async fn delete_session(&self, session_id: &str) -> TalosResult<()>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
     async fn update_session_model(
         &self,
@@ -109,18 +108,6 @@ where
         SdkGatewayClient::close_session(
             &mut *client,
             SessionCloseRequest {
-                session_id: session_id.to_string(),
-            },
-        )
-        .await
-        .map(|_| ())
-    }
-
-    async fn delete_session(&self, session_id: &str) -> TalosResult<()> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::delete_session(
-            &mut *client,
-            SessionDeleteRequest {
                 session_id: session_id.to_string(),
             },
         )

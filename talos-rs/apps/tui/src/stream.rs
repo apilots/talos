@@ -5,7 +5,6 @@ use talos_sdk::TimelineEventEnvelope;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
 
-use crate::types::ChatRole;
 use crate::{TuiApp, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 fn is_active_turn_conflict(error: &TalosError) -> bool {
@@ -73,7 +72,6 @@ impl TuiApp {
                 let retry_message = self.active_message_raw.clone();
                 let retry_skills = self.active_message_skills.clone();
                 let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
-                self.discard_active_pending_blocks();
                 self.finish_active_stream("stream connect failed", true, true);
 
                 if can_retry_once {
@@ -89,17 +87,17 @@ impl TuiApp {
                         {
                             self.active_message_raw = None;
                             self.active_retry_count = 0;
-                            self.push_block(
-                                ChatRole::System,
-                                format!("Failed to start stream: {}", retry_err),
-                            );
+                            self.push_system_notice(format!(
+                                "Failed to start stream: {}",
+                                retry_err
+                            ));
                             self.push_right_event("stream connect retry failed".to_string());
                         }
                     }
                 } else {
                     self.active_message_raw = None;
                     self.active_retry_count = 0;
-                    self.push_block(ChatRole::System, format!("Failed to start stream: {}", err));
+                    self.push_system_notice(format!("Failed to start stream: {}", err));
                     self.push_right_event("queued dispatch dropped".to_string());
                 }
             }
@@ -140,10 +138,7 @@ impl TuiApp {
             }
             Some(Err(err)) => {
                 self.connection_status = "error".to_string();
-                self.push_block(
-                    ChatRole::System,
-                    format!("Failed to create session: {}", err),
-                );
+                self.push_system_notice(format!("Failed to create session: {}", err));
                 self.push_right_event("session create failed".to_string());
             }
             None => {}

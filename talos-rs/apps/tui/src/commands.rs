@@ -6,9 +6,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
-use crate::types::{
-    AppState, ChatRole, CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad,
-};
+use crate::types::{CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
 use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
@@ -27,7 +25,9 @@ impl TuiApp {
 
         let result = if self.is_command_input() {
             let command_line = self.input_buffer.trim().to_string();
-            self.push_block(ChatRole::User, command_line.clone());
+            self.render_runtime
+                .append_command_input(command_line.clone());
+            self.request_chat_activity();
             self.reset_input();
             self.execute_command(&command_line).await
         } else {
@@ -49,7 +49,7 @@ impl TuiApp {
         match result {
             Ok(should_quit) => Ok(should_quit),
             Err(err) => {
-                self.push_block(ChatRole::System, format!("Failed to handle input: {}", err));
+                self.push_system_notice(format!("Failed to handle input: {}", err));
                 self.push_right_event("input handling failed".to_string());
                 Ok(false)
             }
@@ -72,19 +72,14 @@ impl TuiApp {
 
         match cmd {
             "help" => {
-                self.push_block(
-                    ChatRole::System,
-                    "Commands: /help /model /models /history /sessions /status /compact /clear /quit\nKeys: ↑/↓/PgUp/PgDn scroll, Ctrl+O expand tool, Ctrl+Y copy, Ctrl+U clear input"
+                self.push_system_notice(
+                    "Commands: /help /model /models /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+O expand tool, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
             }
             "models" | "modes" => {
                 self.refresh_models_command()?;
-                Ok(false)
-            }
-            "history" => {
-                self.open_history();
                 Ok(false)
             }
             "model" => {
@@ -97,10 +92,10 @@ impl TuiApp {
                 if !self.available_models.is_empty()
                     && !self.available_models.iter().any(|m| m == requested)
                 {
-                    self.push_block(
-                        ChatRole::System,
-                        format!("Unknown model `{}`. Run /models first.", requested),
-                    );
+                    self.push_system_notice(format!(
+                        "Unknown model `{}`. Run /models first.",
+                        requested
+                    ));
                     return Ok(false);
                 }
 
@@ -117,10 +112,7 @@ impl TuiApp {
                     self.show_sessions_picker = true;
                     Ok(false)
                 } else {
-                    self.push_block(
-                        ChatRole::System,
-                        "Sessions picker requires gateway mode.".to_string(),
-                    );
+                    self.push_system_notice("Sessions picker requires gateway mode.".to_string());
                     Ok(false)
                 }
             }
@@ -140,8 +132,7 @@ impl TuiApp {
                 if self.close_in_progress {
                     if self.is_close_timed_out() {
                         self.push_right_event("session force exit".to_string());
-                        self.push_block(
-                            ChatRole::System,
+                        self.push_system_notice(
                             "Forcing local exit while session closes in background.".to_string(),
                         );
                         self.should_exit = true;
@@ -158,10 +149,7 @@ impl TuiApp {
                 Ok(false)
             }
             unknown => {
-                self.push_block(
-                    ChatRole::System,
-                    format!("Unknown command `{}`. Run /help.", unknown),
-                );
+                self.push_system_notice(format!("Unknown command `{}`. Run /help.", unknown));
                 Ok(false)
             }
         }
@@ -303,10 +291,7 @@ impl TuiApp {
             }
 
             let failed = self.message_queue.pop_front();
-            self.push_block(
-                ChatRole::System,
-                format!("Failed to dispatch queued message: {}", err),
-            );
+            self.push_system_notice(format!("Failed to dispatch queued message: {}", err));
             if let Some(failed) = failed {
                 self.push_right_event(format!(
                     "queued dispatch dropped: {}",
@@ -351,7 +336,6 @@ impl TuiApp {
         {
             self.current_model = self.available_models[0].clone();
         }
-        self.refresh_welcome_card();
         self.push_right_event(format!("models loaded: {}", self.available_models.len()));
         Ok(())
     }
@@ -476,27 +460,13 @@ impl TuiApp {
             })
     }
 
-    pub(crate) fn open_history(&mut self) {
-        let Some(client) = self.gateway_client.clone() else {
-            self.push_block(ChatRole::System, "No gateway client connected.".to_string());
-            return;
-        };
-        self.current_state = AppState::History;
-        let _ = self.spawn_command_task("loading history", async move {
-            CommandUpdate::HistoryLoaded(client.list_sessions().await)
-        });
-    }
-
     pub(crate) fn toggle_model_picker(&mut self) {
         if self.show_model_picker {
             self.show_model_picker = false;
             return;
         }
         if self.available_models.is_empty() {
-            self.push_block(
-                ChatRole::System,
-                "No models loaded. Run /models first.".to_string(),
-            );
+            self.push_system_notice("No models loaded. Run /models first.");
             return;
         }
         // Pre-select current model
@@ -506,14 +476,6 @@ impl TuiApp {
             .position(|m| m == &self.current_model)
             .unwrap_or(0);
         self.show_model_picker = true;
-    }
-
-    pub(crate) fn switch_to_history_session(&mut self) {
-        let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
-            return;
-        };
-        self.current_state = AppState::Chat;
-        self.load_session_history(session);
     }
 
     pub(crate) fn switch_to_sessions_picker(&mut self) {
@@ -537,8 +499,9 @@ impl TuiApp {
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         // Reset chat and input history for the new session
-        self.chat_blocks.clear();
+        self.render_runtime.reset_transcript();
         self.rendered_chat_lines.clear();
+        self.rendered_chat_cache_key = None;
         self.sent_messages_history.clear();
         self.message_history_index = None;
         self.push_right_event(format!("switched to session: {}", session_id));
@@ -551,7 +514,7 @@ impl TuiApp {
         self.pending_command_update = None;
 
         let Some(client) = self.gateway_client.clone() else {
-            self.push_block(ChatRole::System, format!("Session: {}", session_id));
+            self.push_system_notice(format!("Session: {}", session_id));
             return;
         };
         let _ = self.spawn_command_task("loading session history", async move {
@@ -592,25 +555,6 @@ impl TuiApp {
         });
     }
 
-    pub(crate) fn delete_history_session(&mut self) {
-        let Some(session) = self.history_sessions.get(self.history_selected).cloned() else {
-            return;
-        };
-        let session_id = session.id.clone();
-        let Some(client) = self.gateway_client.clone() else {
-            return;
-        };
-        self.history_sessions.remove(self.history_selected);
-        if self.history_selected > 0 && self.history_selected >= self.history_sessions.len() {
-            self.history_selected = self.history_sessions.len().saturating_sub(1);
-        }
-        let sid_log = session_id.clone();
-        tokio::spawn(async move {
-            let _ = client.delete_session(&session_id).await;
-        });
-        self.push_right_event(format!("deleted session: {}", sid_log));
-    }
-
     pub(crate) fn confirm_model_picker(&mut self) {
         let Some(model) = self
             .available_models
@@ -633,13 +577,10 @@ impl TuiApp {
         let requested = model.clone();
         let Some(model_ref) = self.model_ref_for_id(&requested) else {
             self.show_model_picker = false;
-            self.push_block(
-                ChatRole::System,
-                format!(
-                    "Model `{}` is not available in the current catalog.",
-                    requested
-                ),
-            );
+            self.push_system_notice(format!(
+                "Model `{}` is not available in the current catalog.",
+                requested
+            ));
             return;
         };
         let _ = self.spawn_command_task(
