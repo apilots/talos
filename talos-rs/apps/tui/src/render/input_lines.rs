@@ -148,7 +148,11 @@ impl TuiApp {
         } else {
             format!(
                 "{} · {} · {}{}{}",
-                self.current_model, token_left, directory, history_indicator, pasted_indicator
+                self.current_model_status_label(),
+                token_left,
+                directory,
+                history_indicator,
+                pasted_indicator
             )
         };
         let mut text = if let Some((hint, expires_at)) = &self.status_hint {

@@ -101,7 +101,10 @@ impl TuiStatusSnapshot {
                 provider: model_info.provider.clone(),
                 context_window: model_info.context_window,
                 reasoning: model_info.reasoning,
-                reasoning_effort: model_info.reasoning_effort,
+                reasoning_effort: app
+                    .current_reasoning_effort
+                    .filter(|_| model_info.reasoning && model_info.id == app.current_model)
+                    .unwrap_or(model_info.reasoning_effort),
             },
             agent_workspace,
             directory,

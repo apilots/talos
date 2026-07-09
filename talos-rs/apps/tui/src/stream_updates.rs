@@ -63,6 +63,7 @@ impl TuiApp {
                             self.current_model = first.clone();
                         }
                     }
+                    self.sync_current_reasoning_effort_from_model();
                     self.push_system_notice(format!(
                         "Available models: {}",
                         self.available_models.join(", ")
@@ -133,10 +134,18 @@ impl TuiApp {
                     self.push_right_event("session clear failed".to_string());
                 }
             },
-            CommandUpdate::ModelSwitched { requested, result } => match result {
+            CommandUpdate::ModelSwitched {
+                requested,
+                reasoning_effort,
+                result,
+            } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.push_system_notice(format!("Model switched to `{}`.", self.current_model));
+                    self.set_current_reasoning_effort(reasoning_effort);
+                    self.push_command_result(format!(
+                        "Model changed to {}",
+                        self.current_model_status_label()
+                    ));
                     self.push_right_event(format!("session model updated: {}", requested));
                 }
                 Err(err) => {
@@ -165,15 +174,23 @@ impl TuiApp {
                     self.show_sessions_picker = false;
                 }
             },
-            CommandUpdate::ModelPickerSwitched { requested, result } => match result {
+            CommandUpdate::ModelPickerSwitched {
+                requested,
+                reasoning_effort,
+                result,
+            } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.show_model_picker = false;
-                    self.push_system_notice(format!("Model switched to `{}`.", self.current_model));
+                    self.set_current_reasoning_effort(reasoning_effort);
+                    self.close_model_picker();
+                    self.push_command_result(format!(
+                        "Model changed to {}",
+                        self.current_model_status_label()
+                    ));
                     self.push_right_event(format!("model picker switched: {}", requested));
                 }
                 Err(err) => {
-                    self.show_model_picker = false;
+                    self.close_model_picker();
                     self.push_system_notice(format!("Failed to switch model: {}", err));
                     self.push_right_event("model picker switch failed".to_string());
                 }

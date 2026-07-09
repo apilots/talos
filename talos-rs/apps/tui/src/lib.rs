@@ -38,7 +38,8 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
+    LlmReasoningEffort, ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem,
+    TimelineEventEnvelope,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -89,6 +90,7 @@ pub struct TuiApp {
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_model: String,
+    pub(crate) current_reasoning_effort: Option<LlmReasoningEffort>,
     pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,
@@ -130,7 +132,9 @@ pub struct TuiApp {
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
     pub(crate) history_sessions: Vec<SessionInfo>,
     pub(crate) show_model_picker: bool,
+    pub(crate) model_picker_step: ModelPickerStep,
     pub(crate) model_picker_selected: usize,
+    pub(crate) reasoning_picker_selected: usize,
     pub(crate) show_sessions_picker: bool,
     pub(crate) sessions_picker_selected: usize,
     pub(crate) sent_messages_history: VecDeque<String>,

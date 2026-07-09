@@ -50,16 +50,13 @@ impl TuiApp {
         if self.show_model_picker {
             match key_event.code {
                 KeyCode::Esc => {
-                    self.show_model_picker = false;
+                    self.back_model_picker();
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    self.model_picker_selected = self.model_picker_selected.saturating_sub(1);
+                    self.navigate_model_picker(-1);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let max = self.available_models.len().saturating_sub(1);
-                    if self.model_picker_selected < max {
-                        self.model_picker_selected += 1;
-                    }
+                    self.navigate_model_picker(1);
                 }
                 KeyCode::Enter => {
                     self.confirm_model_picker();

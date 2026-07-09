@@ -21,6 +21,63 @@ fn test_command_suggestions_expose_sessions_without_history_alias() {
     assert!(!commands.contains(&"/history".to_string()));
 }
 
+#[tokio::test]
+async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step() {
+    let mut app = create_embedded_app();
+    set_test_model_info(&mut app, "gpt-5.5", 128_000);
+    app.available_model_info[0].reasoning = true;
+    app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::High;
+    app.current_model = "gpt-5.5".to_string();
+    app.current_reasoning_effort = Some(talos_sdk::LlmReasoningEffort::High);
+
+    app.toggle_model_picker();
+    app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert!(app.show_model_picker);
+    assert_eq!(
+        app.model_picker_step,
+        crate::types::ModelPickerStep::Reasoning
+    );
+
+    app.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert!(app.show_model_picker);
+    assert_eq!(app.model_picker_step, crate::types::ModelPickerStep::Model);
+}
+
+#[tokio::test]
+async fn test_model_picker_confirm_writes_command_result_block() {
+    let mut app = create_embedded_app();
+    set_test_model_info(&mut app, "gpt-5.5", 128_000);
+    app.available_model_info[0].reasoning = true;
+    app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+    app.current_model = "gpt-5.5".to_string();
+    app.current_reasoning_effort = Some(talos_sdk::LlmReasoningEffort::Medium);
+
+    app.toggle_model_picker();
+    app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+    app.handle_input(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+        .await
+        .unwrap();
+    app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    let transcript = interactive_transcript_text(&app);
+    assert!(!app.show_model_picker);
+    assert_eq!(
+        app.current_reasoning_effort,
+        Some(talos_sdk::LlmReasoningEffort::High)
+    );
+    assert!(transcript.contains("Model changed to gpt-5.5 high"));
+}
+
 #[test]
 fn test_input_cursor_and_backspace() {
     let mut app = create_embedded_app();
@@ -427,6 +484,9 @@ async fn test_model_command_updates_app_server_session_model() {
     }
     assert!(!should_quit);
     assert_eq!(app.current_model, "gpt-5.3 medium");
+    let transcript = interactive_transcript_text(&app);
+    assert!(transcript.contains("/model gpt-5.3 medium"));
+    assert!(transcript.contains("Model changed to gpt-5.3 medium"));
 }
 
 #[tokio::test]

@@ -534,6 +534,7 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     hash_debug(&app.pasted_blocks, &mut hasher);
     app.selected_pasted_block.hash(&mut hasher);
     app.current_model.hash(&mut hasher);
+    hash_debug(&app.current_reasoning_effort, &mut hasher);
     app.connection_status.hash(&mut hasher);
     hash_debug(&app.rendered_chat_cache_key, &mut hasher);
     app.suppress_transcript_for_terminal_flush.hash(&mut hasher);
@@ -554,7 +555,9 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     }
     app.history_sessions.len().hash(&mut hasher);
     app.show_model_picker.hash(&mut hasher);
+    app.model_picker_step.hash(&mut hasher);
     app.model_picker_selected.hash(&mut hasher);
+    app.reasoning_picker_selected.hash(&mut hasher);
     app.show_sessions_picker.hash(&mut hasher);
     app.sessions_picker_selected.hash(&mut hasher);
     app.show_command_autocomplete.hash(&mut hasher);

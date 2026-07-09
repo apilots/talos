@@ -8,7 +8,10 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
-use talos_sdk::{ModelRef, SessionInfo, TalosContext, TalosProvider, TalosSourceType};
+use talos_sdk::{
+    LlmReasoningEffort, ModelInfo, ModelRef, SessionInfo, TalosContext, TalosProvider,
+    TalosSourceType,
+};
 use talos_types::talos::TokenUsage;
 
 use crate::client::GatewayClient;
@@ -31,6 +34,7 @@ impl TuiApp {
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
             current_model: String::new(),
+            current_reasoning_effort: None,
             session_usage: TokenUsage::default(),
             turn_metrics: None,
             turn_metrics_live: false,
@@ -71,7 +75,9 @@ impl TuiApp {
             gateway_client,
             history_sessions: vec![],
             show_model_picker: false,
+            model_picker_step: crate::types::ModelPickerStep::Model,
             model_picker_selected: 0,
+            reasoning_picker_selected: 0,
             show_sessions_picker: false,
             sessions_picker_selected: 0,
             sent_messages_history: VecDeque::new(),
@@ -130,6 +136,85 @@ impl TuiApp {
                 provider: model.provider.clone(),
                 id: model.id.clone(),
             })
+    }
+
+    pub(crate) fn current_model_info(&self) -> Option<&ModelInfo> {
+        self.available_model_info
+            .iter()
+            .find(|model| model.id == self.current_model)
+    }
+
+    pub(crate) fn model_info_for_id(&self, model_id: &str) -> Option<&ModelInfo> {
+        self.available_model_info
+            .iter()
+            .find(|model| model.id == model_id)
+    }
+
+    pub(crate) fn selected_reasoning_effort(&self) -> LlmReasoningEffort {
+        crate::types::ReasoningOption::ALL
+            .get(self.reasoning_picker_selected)
+            .map(|option| option.effort)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn sync_current_reasoning_effort_from_model(&mut self) {
+        self.current_reasoning_effort = self.current_model_info().and_then(|model| {
+            if model.reasoning {
+                Some(model.reasoning_effort)
+            } else {
+                None
+            }
+        });
+    }
+
+    pub(crate) fn selected_model_id(&self) -> Option<&str> {
+        self.available_models
+            .get(self.model_picker_selected)
+            .map(String::as_str)
+    }
+
+    pub(crate) fn selected_model_info(&self) -> Option<&ModelInfo> {
+        self.selected_model_id()
+            .and_then(|model_id| self.model_info_for_id(model_id))
+    }
+
+    pub(crate) fn select_reasoning_effort(&mut self, effort: LlmReasoningEffort) {
+        self.reasoning_picker_selected = crate::types::ReasoningOption::ALL
+            .iter()
+            .position(|option| option.effort == effort)
+            .unwrap_or(1);
+    }
+
+    pub(crate) fn set_current_reasoning_effort(&mut self, effort: Option<LlmReasoningEffort>) {
+        self.current_reasoning_effort = self.current_model_info().and_then(|model| {
+            model
+                .reasoning
+                .then_some(effort.unwrap_or(model.reasoning_effort))
+        });
+    }
+
+    pub(crate) fn model_status_label(&self, model_id: &str) -> String {
+        let Some(model) = self.model_info_for_id(model_id) else {
+            return model_id.to_string();
+        };
+        if !model.reasoning {
+            return model_id.to_string();
+        }
+        let effort = if model.id == self.current_model {
+            self.current_reasoning_effort
+                .unwrap_or(model.reasoning_effort)
+        } else {
+            model.reasoning_effort
+        };
+        format!(
+            "{} {}",
+            model_id,
+            crate::types::ReasoningOption::status_label_for(effort)
+        )
+    }
+
+    pub(crate) fn current_model_status_label(&self) -> String {
+        self.model_status_label(&self.current_model)
     }
 
     pub async fn initialize_session(&mut self) {
@@ -201,6 +286,7 @@ impl TuiApp {
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
         self.current_model = session.model_ref.id.clone();
+        self.sync_current_reasoning_effort_from_model();
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

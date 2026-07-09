@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::render_runtime::common::style::StyledLine;
+use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
 use crate::{TuiApp, MAX_RIGHT_EVENTS};
 
 impl TuiApp {
@@ -10,6 +12,15 @@ impl TuiApp {
     pub(crate) fn push_system_notice(&mut self, content: impl Into<String>) {
         let content = content.into();
         self.render_runtime.append_system_notice(content);
+        self.request_chat_activity();
+    }
+
+    pub(crate) fn push_command_result(&mut self, content: impl Into<String>) {
+        self.render_runtime
+            .append_history([FinalizedTranscriptBlock::new(
+                TranscriptBlockKind::FinalAnswer,
+                vec![StyledLine::plain(content.into())],
+            )]);
         self.request_chat_activity();
     }
 
