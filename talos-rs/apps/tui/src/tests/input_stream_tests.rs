@@ -1,4 +1,5 @@
 use super::*;
+use crate::model_picker::ModelPickerStep;
 use crate::types::CommandSuggestion;
 
 fn interactive_transcript_text(app: &TuiApp) -> String {
@@ -35,18 +36,18 @@ async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step()
         .await
         .unwrap();
 
-    assert!(app.show_model_picker);
-    assert_eq!(
-        app.model_picker_step,
-        crate::types::ModelPickerStep::Reasoning
-    );
+    let picker = app.model_picker.as_ref().expect("model picker should open");
+    assert_eq!(picker.step(), ModelPickerStep::Reasoning);
 
     app.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .await
         .unwrap();
 
-    assert!(app.show_model_picker);
-    assert_eq!(app.model_picker_step, crate::types::ModelPickerStep::Model);
+    let picker = app
+        .model_picker
+        .as_ref()
+        .expect("model picker should stay open");
+    assert_eq!(picker.step(), ModelPickerStep::Model);
 }
 
 #[tokio::test]
@@ -70,7 +71,7 @@ async fn test_model_picker_confirm_writes_command_result_block() {
         .unwrap();
 
     let transcript = interactive_transcript_text(&app);
-    assert!(!app.show_model_picker);
+    assert!(app.model_picker.is_none());
     assert_eq!(
         app.current_reasoning_effort,
         Some(talos_sdk::LlmReasoningEffort::High)

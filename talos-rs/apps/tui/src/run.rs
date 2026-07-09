@@ -553,13 +553,8 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     if app.is_agent_working() {
         app.spinner_index.hash(&mut hasher);
     }
-    app.history_sessions.len().hash(&mut hasher);
-    app.show_model_picker.hash(&mut hasher);
-    app.model_picker_step.hash(&mut hasher);
-    app.model_picker_selected.hash(&mut hasher);
-    app.reasoning_picker_selected.hash(&mut hasher);
-    app.show_sessions_picker.hash(&mut hasher);
-    app.sessions_picker_selected.hash(&mut hasher);
+    hash_debug(&app.model_picker, &mut hasher);
+    hash_debug(&app.session_picker, &mut hasher);
     app.show_command_autocomplete.hash(&mut hasher);
     app.command_autocomplete_selected.hash(&mut hasher);
     app.command_input_buffer.hash(&mut hasher);

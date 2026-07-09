@@ -3,7 +3,7 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc::error::TryRecvError;
 
-use crate::status::{render_status_card, TuiStatusSnapshot};
+use crate::status_picker::{render_status_card, TuiStatusSnapshot};
 use crate::types::CommandUpdate;
 use crate::TuiApp;
 
@@ -155,23 +155,17 @@ impl TuiApp {
             },
             CommandUpdate::HistoryLoaded(result) => match result {
                 Ok(sessions) => {
-                    let mut sessions = sessions;
-                    sessions.sort_by(|left, right| {
-                        right
-                            .last_activity
-                            .cmp(&left.last_activity)
-                            .then(right.created_at.cmp(&left.created_at))
-                    });
-                    self.history_sessions = sessions;
-                    self.sessions_picker_selected = 0;
-                    self.push_right_event(format!(
-                        "history loaded: {} sessions",
-                        self.history_sessions.len()
-                    ));
+                    let count = sessions.len();
+                    if let Some(picker) = self.session_picker.as_mut() {
+                        picker.set_sessions(sessions);
+                    }
+                    self.push_right_event(format!("history loaded: {} sessions", count));
                 }
                 Err(err) => {
                     self.push_right_event(format!("history load failed: {err}"));
-                    self.show_sessions_picker = false;
+                    if let Some(picker) = self.session_picker.as_mut() {
+                        picker.set_error(err.to_string());
+                    }
                 }
             },
             CommandUpdate::ModelPickerSwitched {

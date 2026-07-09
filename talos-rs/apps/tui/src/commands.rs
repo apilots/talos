@@ -6,10 +6,12 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
+use crate::model_picker::{ModelPickerSelection, ModelPickerState};
+use crate::session_picker::SessionPickerState;
 use crate::types::{CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad};
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
-use talos_sdk::{LlmReasoningEffort, SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
+use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -104,12 +106,11 @@ impl TuiApp {
                 Ok(false)
             }
             "sessions" | "s" => {
-                // Load sessions for quick switch
                 if let Some(client) = self.gateway_client.clone() {
+                    self.session_picker = Some(SessionPickerState::loading());
                     let _ = self.spawn_command_task("loading sessions", async move {
                         CommandUpdate::HistoryLoaded(client.list_sessions().await)
                     });
-                    self.show_sessions_picker = true;
                     Ok(false)
                 } else {
                     self.push_system_notice("Sessions picker requires gateway mode.".to_string());
@@ -471,7 +472,7 @@ impl TuiApp {
     }
 
     pub(crate) fn toggle_model_picker(&mut self) {
-        if self.show_model_picker {
+        if self.model_picker.is_some() {
             self.close_model_picker();
             return;
         }
@@ -479,82 +480,32 @@ impl TuiApp {
             self.push_system_notice("No models loaded. Run /models first.");
             return;
         }
-        // Pre-select current model
-        self.model_picker_selected = self
-            .available_models
-            .iter()
-            .position(|m| m == &self.current_model)
-            .unwrap_or(0);
-        self.model_picker_step = crate::types::ModelPickerStep::Model;
-        self.sync_selected_reasoning_effort_for_picker();
-        self.show_model_picker = true;
+        self.model_picker = Some(ModelPickerState::new(
+            &self.available_model_info,
+            &self.current_model,
+            self.current_reasoning_effort,
+        ));
     }
 
     pub(crate) fn close_model_picker(&mut self) {
-        self.show_model_picker = false;
-        self.model_picker_step = crate::types::ModelPickerStep::Model;
+        self.model_picker = None;
     }
 
     pub(crate) fn navigate_model_picker(&mut self, direction: i32) {
-        match self.model_picker_step {
-            crate::types::ModelPickerStep::Model => {
-                let max = self.available_models.len().saturating_sub(1);
-                self.model_picker_selected =
-                    Self::move_selection(self.model_picker_selected, max, direction);
-                self.sync_selected_reasoning_effort_for_picker();
-            }
-            crate::types::ModelPickerStep::Reasoning => {
-                let max = crate::types::ReasoningOption::ALL.len().saturating_sub(1);
-                self.reasoning_picker_selected =
-                    Self::move_selection(self.reasoning_picker_selected, max, direction);
-            }
-        }
-    }
-
-    fn move_selection(current: usize, max: usize, direction: i32) -> usize {
-        if direction < 0 {
-            current.saturating_sub(1)
-        } else if current < max {
-            current + 1
-        } else {
-            current
+        if let Some(picker) = self.model_picker.as_mut() {
+            picker.move_selection(direction);
         }
     }
 
     pub(crate) fn back_model_picker(&mut self) {
-        match self.model_picker_step {
-            crate::types::ModelPickerStep::Model => self.close_model_picker(),
-            crate::types::ModelPickerStep::Reasoning => {
-                self.model_picker_step = crate::types::ModelPickerStep::Model;
-            }
+        let should_close = self
+            .model_picker
+            .as_mut()
+            .map(ModelPickerState::back)
+            .unwrap_or(false);
+        if should_close {
+            self.close_model_picker();
         }
-    }
-
-    fn sync_selected_reasoning_effort_for_picker(&mut self) {
-        let effort = self
-            .selected_model_info()
-            .map(|model| {
-                if model.id == self.current_model {
-                    self.current_reasoning_effort
-                        .unwrap_or(model.reasoning_effort)
-                } else {
-                    model.reasoning_effort
-                }
-            })
-            .unwrap_or_default();
-        self.select_reasoning_effort(effort);
-    }
-
-    pub(crate) fn switch_to_sessions_picker(&mut self) {
-        let Some(session) = self
-            .history_sessions
-            .get(self.sessions_picker_selected)
-            .cloned()
-        else {
-            return;
-        };
-        self.show_sessions_picker = false;
-        self.load_session_history(session);
     }
 
     pub(crate) fn load_session_history(&mut self, session: SessionInfo) {
@@ -624,25 +575,19 @@ impl TuiApp {
     }
 
     pub(crate) fn confirm_model_picker(&mut self) {
-        let Some(model_info) = self.selected_model_info().cloned() else {
+        let Some(selection) = self
+            .model_picker
+            .as_mut()
+            .and_then(ModelPickerState::confirm)
+        else {
             return;
         };
-        if model_info.reasoning && self.model_picker_step == crate::types::ModelPickerStep::Model {
-            self.model_picker_step = crate::types::ModelPickerStep::Reasoning;
-            self.sync_selected_reasoning_effort_for_picker();
-            return;
-        }
-        let reasoning_effort = model_info
-            .reasoning
-            .then_some(self.selected_reasoning_effort());
-        self.apply_model_picker_selection(model_info.id, reasoning_effort);
+        self.apply_model_picker_selection(selection);
     }
 
-    fn apply_model_picker_selection(
-        &mut self,
-        model: String,
-        reasoning_effort: Option<LlmReasoningEffort>,
-    ) {
+    fn apply_model_picker_selection(&mut self, selection: ModelPickerSelection) {
+        let model = selection.model;
+        let reasoning_effort = selection.reasoning_effort;
         if self.session_id.is_none() {
             self.current_model = model.clone();
             self.set_current_reasoning_effort(reasoning_effort);

@@ -15,6 +15,7 @@ use talos_sdk::{
 use talos_types::talos::TokenUsage;
 
 use crate::client::GatewayClient;
+use crate::model_picker::ReasoningOption;
 use crate::render;
 use crate::render_runtime::common::style::StyledLine;
 use crate::types::RenderedChatLine;
@@ -73,13 +74,8 @@ impl TuiApp {
             stream_started_at: None,
             last_stream_event_at: None,
             gateway_client,
-            history_sessions: vec![],
-            show_model_picker: false,
-            model_picker_step: crate::types::ModelPickerStep::Model,
-            model_picker_selected: 0,
-            reasoning_picker_selected: 0,
-            show_sessions_picker: false,
-            sessions_picker_selected: 0,
+            model_picker: None,
+            session_picker: None,
             sent_messages_history: VecDeque::new(),
             message_history_index: None,
             show_command_autocomplete: false,
@@ -150,13 +146,6 @@ impl TuiApp {
             .find(|model| model.id == model_id)
     }
 
-    pub(crate) fn selected_reasoning_effort(&self) -> LlmReasoningEffort {
-        crate::types::ReasoningOption::ALL
-            .get(self.reasoning_picker_selected)
-            .map(|option| option.effort)
-            .unwrap_or_default()
-    }
-
     pub(crate) fn sync_current_reasoning_effort_from_model(&mut self) {
         self.current_reasoning_effort = self.current_model_info().and_then(|model| {
             if model.reasoning {
@@ -165,24 +154,6 @@ impl TuiApp {
                 None
             }
         });
-    }
-
-    pub(crate) fn selected_model_id(&self) -> Option<&str> {
-        self.available_models
-            .get(self.model_picker_selected)
-            .map(String::as_str)
-    }
-
-    pub(crate) fn selected_model_info(&self) -> Option<&ModelInfo> {
-        self.selected_model_id()
-            .and_then(|model_id| self.model_info_for_id(model_id))
-    }
-
-    pub(crate) fn select_reasoning_effort(&mut self, effort: LlmReasoningEffort) {
-        self.reasoning_picker_selected = crate::types::ReasoningOption::ALL
-            .iter()
-            .position(|option| option.effort == effort)
-            .unwrap_or(1);
     }
 
     pub(crate) fn set_current_reasoning_effort(&mut self, effort: Option<LlmReasoningEffort>) {
@@ -206,11 +177,7 @@ impl TuiApp {
         } else {
             model.reasoning_effort
         };
-        format!(
-            "{} {}",
-            model_id,
-            crate::types::ReasoningOption::status_label_for(effort)
-        )
+        format!("{} {}", model_id, ReasoningOption::status_label_for(effort))
     }
 
     pub(crate) fn current_model_status_label(&self) -> String {

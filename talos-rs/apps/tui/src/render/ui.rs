@@ -21,10 +21,11 @@ impl TuiApp {
             self.render_skill_autocomplete(f, f.area());
         } else if self.show_command_autocomplete {
             self.render_command_autocomplete(f, f.area());
-        } else if self.show_model_picker {
-            self.render_model_picker(f, f.area());
-        } else if self.show_sessions_picker {
-            self.render_sessions_picker(f, f.area());
+        } else if let Some(picker) = self.model_picker.as_ref() {
+            let area = self.left_panel_area.unwrap_or(f.area());
+            picker.render(f, area, self.input_area);
+        } else if let Some(picker) = self.session_picker.as_mut() {
+            picker.render(f, f.area());
         }
     }
 
@@ -223,8 +224,8 @@ impl TuiApp {
     fn has_interaction_overlay(&self) -> bool {
         self.show_skill_autocomplete
             || self.show_command_autocomplete
-            || self.show_model_picker
-            || self.show_sessions_picker
+            || self.model_picker.is_some()
+            || self.session_picker.is_some()
     }
 
     fn clear_inline_chat_viewport_state(&mut self) {

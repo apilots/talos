@@ -7,10 +7,10 @@ use talos_error::TalosError;
 pub(crate) use talos_sdk::{
     AgentEvent, AgentEventPayload, AgentEventType, AuthSessionReadResponse, AuthSessionSnapshot,
     AuthSessionUserSnapshot, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger, SessionHistorySnapshot, SkillSuggestion, StartTurnRequest,
-    StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
-    TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    ContextCompactionTrigger, SessionHistorySnapshot, SessionInfo, SkillSuggestion,
+    StartTurnRequest, StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
     TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
     UserRole, WorkspaceInfoResponse,
 };

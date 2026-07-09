@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::session_picker::SessionPickerEvent;
 use crate::types::{CommandSuggestion, PastedTextBlock};
 use crate::utils::byte_index_at_char;
 use crate::{TuiApp, PASTED_BLOCK_CHAR_THRESHOLD};
@@ -46,8 +47,7 @@ impl TuiApp {
             }
         }
 
-        // Model picker navigation
-        if self.show_model_picker {
+        if self.model_picker.is_some() {
             match key_event.code {
                 KeyCode::Esc => {
                     self.back_model_picker();
@@ -66,32 +66,16 @@ impl TuiApp {
             return Ok(false);
         }
 
-        // Sessions picker navigation
-        if self.show_sessions_picker {
-            match key_event.code {
-                KeyCode::Esc => {
-                    self.show_sessions_picker = false;
+        if let Some(picker) = self.session_picker.as_mut() {
+            match picker.handle_key(key_event) {
+                SessionPickerEvent::None => {}
+                SessionPickerEvent::Cancel => {
+                    self.session_picker = None;
                 }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.sessions_picker_selected = self.sessions_picker_selected.saturating_sub(1);
+                SessionPickerEvent::Selected(session) => {
+                    self.session_picker = None;
+                    self.load_session_history(*session);
                 }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let max = self.history_sessions.len().saturating_sub(1);
-                    if self.sessions_picker_selected < max {
-                        self.sessions_picker_selected += 1;
-                    }
-                }
-                KeyCode::Enter => {
-                    self.switch_to_sessions_picker();
-                }
-                KeyCode::Char(c) if c.is_numeric() => {
-                    let index = (c.to_digit(10).unwrap_or(0) as usize).saturating_sub(1);
-                    if index < self.history_sessions.len() {
-                        self.sessions_picker_selected = index;
-                        self.switch_to_sessions_picker();
-                    }
-                }
-                _ => {}
             }
             return Ok(false);
         }

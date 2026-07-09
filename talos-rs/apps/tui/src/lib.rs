@@ -7,10 +7,12 @@ mod chat;
 mod client;
 mod commands;
 mod input;
+mod model_picker;
 mod render;
 mod render_runtime;
 pub mod run;
-mod status;
+mod session_picker;
+mod status_picker;
 mod stream;
 mod stream_events;
 mod stream_lifecycle;
@@ -27,9 +29,11 @@ use types::*;
 pub use utils::display_tool_name;
 
 use chrono::{Datelike, Local, TimeZone};
+use model_picker::ModelPickerState;
 use ratatui::layout::Rect;
 use render_runtime::runtime::engine::BufferedRenderRuntimeEngine;
 use render_runtime::transcript::block::TranscriptBlockId;
+use session_picker::SessionPickerState;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
@@ -38,8 +42,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    LlmReasoningEffort, ModelInfo, SessionInfo, SkillSuggestion, TalosTimelineItem,
-    TimelineEventEnvelope,
+    LlmReasoningEffort, ModelInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -73,12 +76,6 @@ fn format_session_timestamp(timestamp_ms: u64) -> String {
     }
 
     local_dt.format("%Y-%m-%d %H:%M").to_string()
-}
-
-pub(crate) fn session_list_label(session: &SessionInfo) -> String {
-    let title = session.title.trim();
-    let time_text = format_session_timestamp(session.last_activity);
-    format!(" {}  {}", title, time_text)
 }
 
 /// Main TUI app.
@@ -130,13 +127,8 @@ pub struct TuiApp {
     pub(crate) stream_started_at: Option<Instant>,
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
-    pub(crate) history_sessions: Vec<SessionInfo>,
-    pub(crate) show_model_picker: bool,
-    pub(crate) model_picker_step: ModelPickerStep,
-    pub(crate) model_picker_selected: usize,
-    pub(crate) reasoning_picker_selected: usize,
-    pub(crate) show_sessions_picker: bool,
-    pub(crate) sessions_picker_selected: usize,
+    pub(crate) model_picker: Option<ModelPickerState>,
+    pub(crate) session_picker: Option<SessionPickerState>,
     pub(crate) sent_messages_history: VecDeque<String>,
     pub(crate) message_history_index: Option<usize>,
     pub(crate) show_command_autocomplete: bool,

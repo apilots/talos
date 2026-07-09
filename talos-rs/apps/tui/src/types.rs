@@ -107,55 +107,6 @@ pub(crate) struct ChatRenderCacheKey {
     pub(crate) spinner_index: Option<usize>,
 }
 
-// ── Model picker types ───────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum ModelPickerStep {
-    Model,
-    Reasoning,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ReasoningOption {
-    pub(crate) effort: LlmReasoningEffort,
-    pub(crate) label: &'static str,
-    pub(crate) description: &'static str,
-}
-
-impl ReasoningOption {
-    pub(crate) const ALL: [Self; 4] = [
-        Self {
-            effort: LlmReasoningEffort::Low,
-            label: "Low",
-            description: "Fast responses with lighter reasoning",
-        },
-        Self {
-            effort: LlmReasoningEffort::Medium,
-            label: "Medium",
-            description: "Balances speed and reasoning depth for everyday tasks",
-        },
-        Self {
-            effort: LlmReasoningEffort::High,
-            label: "High",
-            description: "Greater reasoning depth for complex problems",
-        },
-        Self {
-            effort: LlmReasoningEffort::XHigh,
-            label: "Extra high",
-            description: "Extra high reasoning depth for complex problems",
-        },
-    ];
-
-    pub(crate) fn status_label_for(effort: LlmReasoningEffort) -> &'static str {
-        match effort {
-            LlmReasoningEffort::Low => "low",
-            LlmReasoningEffort::Medium => "medium",
-            LlmReasoningEffort::High => "high",
-            LlmReasoningEffort::XHigh => "xhigh",
-        }
-    }
-}
-
 // ── Input types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq, Eq)]
