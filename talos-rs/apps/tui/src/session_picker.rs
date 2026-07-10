@@ -1,15 +1,19 @@
+use chrono::{Local, TimeZone};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 use talos_sdk::SessionInfo;
 
-use crate::format_session_timestamp;
-use crate::utils::{compact_directory_path, text_display_width};
+use crate::{render::frame::RenderFrame, utils::text_display_width};
+
+const PICKER_CHROME_HEIGHT: u16 = 8;
+const LIST_HORIZONTAL_INSET: u16 = 4;
+const SESSION_AGE_WIDTH: usize = 9;
+const SESSION_COLUMN_GAP: usize = 2;
 
 /// Owns the transient `/sessions` switcher state.
 ///
@@ -109,17 +113,12 @@ impl SessionPickerState {
         }
     }
 
-    pub(crate) fn render(&mut self, f: &mut Frame, area: Rect) {
+    pub(crate) fn render(&mut self, f: &mut impl RenderFrame, area: Rect) {
         f.render_widget(Clear, area);
         let bg_style = Style::default().bg(Color::Rgb(33, 38, 49));
         f.render_widget(Block::default().style(bg_style), area);
 
-        let inner = Rect::new(
-            area.x.saturating_add(2),
-            area.y.saturating_add(1),
-            area.width.saturating_sub(4),
-            area.height.saturating_sub(2),
-        );
+        let inner = Rect::new(area.x, area.y, area.width, area.height);
         if inner.width == 0 || inner.height == 0 {
             return;
         }
@@ -127,66 +126,86 @@ impl SessionPickerState {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),
-                Constraint::Length(2),
-                Constraint::Min(1),
-                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(inner.height.saturating_sub(PICKER_CHROME_HEIGHT)),
+                Constraint::Length(4),
             ])
             .split(inner);
 
         self.render_header(f, chunks[0], bg_style);
-        self.render_search(f, chunks[1], bg_style);
-        self.render_list(f, chunks[2], bg_style);
-        self.render_footer(f, chunks[3], bg_style);
+        self.render_search(f, chunks[2], bg_style);
+        self.render_list(f, chunks[4], bg_style);
+        self.render_footer(f, chunks[5], bg_style);
     }
 
-    fn render_header(&self, f: &mut Frame, area: Rect, bg_style: Style) {
-        let lines = vec![
-            Line::from(Span::styled(
-                "Switch Session",
+    fn render_header(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
+        let title_area = inset(area, 1);
+        let line = Line::from(Span::styled(
+            "Resume a previous session",
+            bg_style
+                .fg(Color::Rgb(134, 233, 255))
+                .add_modifier(Modifier::BOLD),
+        ));
+        f.render_widget(Paragraph::new(line).style(bg_style), title_area);
+    }
+
+    fn render_search(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
+        let area = inset(area, 1);
+        let search = if self.query.is_empty() {
+            Span::styled("Type to search", bg_style.fg(Color::Rgb(168, 172, 184)))
+        } else {
+            Span::styled(
+                format!("Search: {}", self.query),
+                bg_style.fg(Color::Rgb(242, 243, 245)),
+            )
+        };
+        let toolbar = Line::from(vec![
+            Span::styled("Filter: ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(
+                "[Cwd]",
+                bg_style
+                    .fg(Color::Rgb(255, 128, 210))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" All    Sort: ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(
+                "[Updated]",
                 bg_style
                     .fg(Color::Rgb(242, 243, 245))
                     .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                "Type to filter recent sessions",
-                bg_style.fg(Color::Rgb(168, 172, 184)),
-            )),
-        ];
-        f.render_widget(Paragraph::new(lines).style(bg_style), area);
+            ),
+            Span::styled(" Created", bg_style.fg(Color::Rgb(168, 172, 184))),
+        ]);
+        let search_width = text_display_width(search.content.as_ref());
+        let toolbar_width = toolbar.width();
+        let spacer = area
+            .width
+            .saturating_sub((search_width + toolbar_width) as u16)
+            .max(1) as usize;
+        let mut spans = vec![search, Span::raw(" ".repeat(spacer))];
+        spans.extend(toolbar.spans);
+        f.render_widget(Paragraph::new(Line::from(spans)).style(bg_style), area);
     }
 
-    fn render_search(&self, f: &mut Frame, area: Rect, bg_style: Style) {
-        let value = if self.query.is_empty() {
-            "Search sessions"
-        } else {
-            self.query.as_str()
-        };
-        let style = if self.query.is_empty() {
-            bg_style.fg(Color::Rgb(145, 149, 160))
-        } else {
-            bg_style.fg(Color::Rgb(242, 243, 245))
-        };
-        f.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled("› ", bg_style.fg(Color::Rgb(134, 233, 255))),
-                Span::styled(value.to_string(), style),
-            ]))
-            .style(bg_style),
-            area,
-        );
-    }
-
-    fn render_list(&mut self, f: &mut Frame, area: Rect, bg_style: Style) {
+    fn render_list(&mut self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
         if area.height == 0 {
             return;
         }
-        self.clamp_scroll(area.height as usize);
+        let list_area = Rect::new(
+            area.x.saturating_add(2),
+            area.y,
+            area.width.saturating_sub(LIST_HORIZONTAL_INSET),
+            area.height,
+        );
+        self.clamp_scroll(list_area.height as usize);
         let visible_indices = self
             .filtered_indices
             .iter()
             .skip(self.scroll_top)
-            .take(area.height as usize)
+            .take(list_area.height as usize)
             .copied()
             .collect::<Vec<_>>();
 
@@ -211,7 +230,7 @@ impl SessionPickerState {
                 .map(|session_index| {
                     session_item(
                         &self.sessions[*session_index],
-                        area.width as usize,
+                        list_area.width as usize,
                         bg_style,
                     )
                 })
@@ -233,45 +252,98 @@ impl SessionPickerState {
             )
             .highlight_symbol("› ")
             .highlight_spacing(ratatui::widgets::HighlightSpacing::Always);
-        f.render_stateful_widget(list, area, &mut list_state);
+        f.render_stateful_widget(list, list_area, &mut list_state);
     }
 
-    fn render_footer(&self, f: &mut Frame, area: Rect, bg_style: Style) {
-        let count = self.filtered_indices.len();
-        let total = self.sessions.len();
-        let progress = if self.loading {
-            "loading".to_string()
-        } else {
-            format!("{count}/{total}")
-        };
-        let line = Line::from(vec![
+    fn render_footer(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
+        if area.height == 0 {
+            return;
+        }
+        let separator_area = Rect::new(area.x, area.y, area.width, 1);
+        let progress = self.footer_progress(area.height.saturating_sub(1) as usize);
+        let separator = "─".repeat(area.width as usize);
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                separator,
+                bg_style.fg(Color::Rgb(168, 172, 184)),
+            )))
+            .style(bg_style),
+            separator_area,
+        );
+        let progress_width = text_display_width(&progress) as u16;
+        if progress_width < area.width {
+            let progress_area = Rect::new(
+                area.x + area.width - progress_width - 1,
+                area.y,
+                progress_width,
+                1,
+            );
+            f.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    progress,
+                    bg_style.fg(Color::Rgb(168, 172, 184)),
+                )))
+                .style(bg_style),
+                progress_area,
+            );
+        }
+
+        let first_line = Line::from(vec![
             Span::styled(
-                "Enter",
+                "enter",
                 bg_style
                     .fg(Color::Rgb(242, 243, 245))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" switch  ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(" resume    ", bg_style.fg(Color::Rgb(168, 172, 184))),
             Span::styled(
-                "Esc",
+                "esc",
                 bg_style
                     .fg(Color::Rgb(242, 243, 245))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" cancel  ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(" exit    ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(
+                "ctrl+c",
+                bg_style
+                    .fg(Color::Rgb(242, 243, 245))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" exit    ", bg_style.fg(Color::Rgb(168, 172, 184))),
             Span::styled(
                 "↑/↓",
                 bg_style
                     .fg(Color::Rgb(242, 243, 245))
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(" navigate", bg_style.fg(Color::Rgb(168, 172, 184))),
-            Span::styled(
-                format!("  {progress}"),
-                bg_style.fg(Color::Rgb(134, 233, 255)),
-            ),
+            Span::styled(" browse", bg_style.fg(Color::Rgb(168, 172, 184))),
         ]);
-        f.render_widget(Paragraph::new(line).style(bg_style), area);
+        let second_line = Line::from(vec![
+            Span::styled(
+                "type",
+                bg_style
+                    .fg(Color::Rgb(242, 243, 245))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" search    ", bg_style.fg(Color::Rgb(168, 172, 184))),
+            Span::styled(
+                "backspace",
+                bg_style
+                    .fg(Color::Rgb(242, 243, 245))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" edit search", bg_style.fg(Color::Rgb(168, 172, 184))),
+        ]);
+        let hint_area = Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(1),
+            area.width,
+            2,
+        );
+        f.render_widget(
+            Paragraph::new(vec![first_line, second_line]).style(bg_style),
+            hint_area,
+        );
     }
 
     fn selected_session(&self) -> Option<SessionInfo> {
@@ -334,6 +406,22 @@ impl SessionPickerState {
             self.scroll_top = self.selected.saturating_sub(height.saturating_sub(1));
         }
     }
+
+    fn footer_progress(&self, list_height: usize) -> String {
+        if self.loading {
+            return " loading ".to_string();
+        }
+        let total = self.filtered_indices.len();
+        let position = if total == 0 { 0 } else { self.selected + 1 };
+        let percent = if total <= list_height || total <= 1 {
+            100
+        } else {
+            ((self.scroll_top as f32 / (total.saturating_sub(list_height).max(1)) as f32) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8
+        };
+        format!(" {position} / {total} · {percent}% ")
+    }
 }
 
 fn session_matches(session: &SessionInfo, query: &str) -> bool {
@@ -358,28 +446,54 @@ fn session_item(session: &SessionInfo, width: usize, bg_style: Style) -> ListIte
     } else {
         session.title.trim()
     };
-    let time_text = format_session_timestamp(session.last_activity);
-    let meta = session
-        .current_directory
-        .as_ref()
-        .map(|path| compact_directory_path(path))
-        .unwrap_or_else(|| session.model_ref.id.clone());
-    let available = width.saturating_sub(14).max(16);
+    let age = format_session_age(session.last_activity);
+    let available = width
+        .saturating_sub(SESSION_AGE_WIDTH)
+        .saturating_sub(SESSION_COLUMN_GAP)
+        .max(16);
     let title = truncate_to_width(title, available);
-    let meta = truncate_to_width(&meta, available);
-    ListItem::new(vec![
-        Line::from(vec![
-            Span::styled(title, bg_style.fg(Color::Rgb(242, 243, 245))),
-            Span::styled(
-                format!("  {time_text}"),
-                bg_style.fg(Color::Rgb(168, 172, 184)),
-            ),
-        ]),
-        Line::from(Span::styled(
-            format!("  {meta}"),
-            bg_style.fg(Color::Rgb(145, 149, 160)),
-        )),
-    ])
+    ListItem::new(Line::from(vec![
+        Span::styled(
+            format!("{age:>SESSION_AGE_WIDTH$}"),
+            bg_style.fg(Color::Rgb(168, 172, 184)),
+        ),
+        Span::raw("  "),
+        Span::styled(title, bg_style.fg(Color::Rgb(242, 243, 245))),
+    ]))
+}
+
+fn format_session_age(timestamp_ms: u64) -> String {
+    let Some(local_dt) = timestamp_ms
+        .try_into()
+        .ok()
+        .and_then(|millis| Local.timestamp_millis_opt(millis).single())
+    else {
+        return "unknown".to_string();
+    };
+    let duration = Local::now().signed_duration_since(local_dt);
+    let minutes = duration.num_minutes().max(0);
+    if minutes < 1 {
+        "now".to_string()
+    } else if minutes < 60 {
+        format!("{minutes}m ago")
+    } else {
+        let hours = duration.num_hours();
+        if hours < 24 {
+            format!("{hours}h ago")
+        } else {
+            let days = duration.num_days();
+            format!("{days}d ago")
+        }
+    }
+}
+
+fn inset(area: Rect, horizontal: u16) -> Rect {
+    Rect::new(
+        area.x.saturating_add(horizontal),
+        area.y,
+        area.width.saturating_sub(horizontal.saturating_mul(2)),
+        area.height,
+    )
 }
 
 fn truncate_to_width(text: &str, max_width: usize) -> String {

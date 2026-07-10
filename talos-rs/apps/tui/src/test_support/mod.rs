@@ -1,6 +1,12 @@
 pub(crate) use super::*;
+mod render_runtime;
+
 use async_trait::async_trait;
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+pub(crate) use render_runtime::{
+    append_live_text, append_live_tool_progress, finalize_live_text, start_live_text,
+    start_live_tool,
+};
 pub(crate) use std::path::PathBuf;
 use std::sync::Mutex;
 use talos_error::TalosError;
@@ -15,6 +21,21 @@ pub(crate) use talos_sdk::{
     UserRole, WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
+
+/// Adds test-only convenience operations without expanding the production TUI API.
+pub(crate) trait TestTuiAppExt {
+    fn send_user_message(
+        &mut self,
+        user_message: String,
+    ) -> impl std::future::Future<Output = TalosResult<bool>> + Send;
+}
+
+impl TestTuiAppExt for TuiApp {
+    async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
+        self.send_user_message_with_skills(user_message, Vec::new())
+            .await
+    }
+}
 
 #[derive(Default)]
 pub(crate) struct MockGatewayState {

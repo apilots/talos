@@ -199,7 +199,6 @@ impl TuiApp {
                         title, sid, model
                     ));
                     let item_count = self.replay_history_snapshot(load.history);
-                    self.message_history_index = None;
                     self.push_right_event(format!("history loaded: {} items", item_count));
                     if let Some(live_recovery) = load.live_recovery {
                         match live_recovery {

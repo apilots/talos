@@ -3,23 +3,9 @@
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::tool_projection;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
-use crate::render_runtime::transcript::store::TranscriptStore;
 use talos_sdk::{
     TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind, TalosTimelinePhase,
 };
-
-/// Appends finalized history blocks to the transcript store.
-pub(crate) fn append_history_blocks(
-    store: &mut TranscriptStore,
-    blocks: impl IntoIterator<Item = FinalizedTranscriptBlock>,
-) -> usize {
-    let mut count = 0usize;
-    for block in blocks {
-        store.push_finalized(block);
-        count += 1;
-    }
-    count
-}
 
 /// Converts a completed timeline history item into finalized transcript blocks.
 pub(crate) fn timeline_item_to_blocks(item: &TalosTimelineItem) -> Vec<FinalizedTranscriptBlock> {
@@ -90,10 +76,8 @@ fn text_block(kind: TranscriptBlockKind, text: &str) -> Vec<FinalizedTranscriptB
 
 #[cfg(test)]
 mod tests {
-    use super::{append_history_blocks, timeline_item_to_blocks};
-    use crate::render_runtime::common::style::StyledLine;
-    use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
-    use crate::render_runtime::transcript::store::TranscriptStore;
+    use super::timeline_item_to_blocks;
+    use crate::render_runtime::transcript::block::TranscriptBlockKind;
     use talos_sdk::{
         TalosContentItem, TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind,
         TalosTimelineItemStatus, TalosTimelinePhase, TalosToolResult,
@@ -113,22 +97,6 @@ mod tests {
                 text: text.to_string(),
             },
         }
-    }
-
-    #[test]
-    fn appends_finalized_history_blocks_to_store() {
-        let mut store = TranscriptStore::default();
-
-        let count = append_history_blocks(
-            &mut store,
-            [FinalizedTranscriptBlock::new(
-                TranscriptBlockKind::UserInput,
-                vec![StyledLine::plain("hello")],
-            )],
-        );
-
-        assert_eq!(count, 1);
-        assert_eq!(store.blocks()[0].kind, TranscriptBlockKind::UserInput);
     }
 
     #[test]

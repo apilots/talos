@@ -5,12 +5,11 @@
 pub(crate) struct DirtyFlags {
     pub(crate) interaction: bool,
     pub(crate) transcript_viewport: bool,
-    pub(crate) terminal_transcript: bool,
 }
 
 impl DirtyFlags {
     pub(crate) fn any(self) -> bool {
-        self.interaction || self.transcript_viewport || self.terminal_transcript
+        self.interaction || self.transcript_viewport
     }
 
     pub(crate) fn mark_interaction(&mut self) {
@@ -19,10 +18,6 @@ impl DirtyFlags {
 
     pub(crate) fn mark_transcript_viewport(&mut self) {
         self.transcript_viewport = true;
-    }
-
-    pub(crate) fn mark_terminal_transcript(&mut self) {
-        self.terminal_transcript = true;
     }
 
     pub(crate) fn clear(&mut self) {

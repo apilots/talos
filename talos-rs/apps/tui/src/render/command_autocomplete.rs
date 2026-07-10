@@ -3,10 +3,9 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState},
-    Frame,
 };
 
-use crate::TuiApp;
+use crate::{render::frame::RenderFrame, TuiApp};
 
 impl TuiApp {
     pub(crate) fn command_autocomplete_panel_height(&self) -> u16 {
@@ -16,7 +15,7 @@ impl TuiApp {
         self.command_suggestions.len().clamp(1, 7) as u16
     }
 
-    pub(crate) fn render_command_autocomplete(&self, f: &mut Frame, area: Rect) {
+    pub(crate) fn render_command_autocomplete(&self, f: &mut impl RenderFrame, area: Rect) {
         let Some(input_area) = self.input_area else {
             return;
         };

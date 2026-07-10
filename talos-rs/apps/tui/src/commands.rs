@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tracing::error;
 
 use crate::client::GatewayClient;
+use crate::input_history::InputHistoryNavigation;
 use crate::model_picker::{ModelPickerSelection, ModelPickerState};
 use crate::session_picker::SessionPickerState;
 use crate::types::{CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad};
@@ -27,8 +28,10 @@ impl TuiApp {
 
         let result = if self.is_command_input() {
             let command_line = self.input_buffer.trim().to_string();
-            self.render_runtime
-                .append_command_input(command_line.clone());
+            if command_should_enter_transcript(&command_line) {
+                self.render_runtime
+                    .append_command_input(command_line.clone());
+            }
             self.request_chat_activity();
             self.reset_input();
             self.execute_command(&command_line).await
@@ -157,59 +160,30 @@ impl TuiApp {
     }
 
     pub(crate) fn navigate_message_history(&mut self, direction: i32) {
-        if self.sent_messages_history.is_empty() {
-            return;
-        }
-
         match direction {
             -1 => {
-                // Up: go to previous (older) message, clamp at oldest
-                let new_index = match self.message_history_index {
-                    Some(0) => return, // already at oldest, do nothing
-                    Some(idx) => idx - 1,
-                    None => self.sent_messages_history.len() - 1,
-                };
-                self.message_history_index = Some(new_index);
-                if let Some(msg) = self.sent_messages_history.get(new_index) {
-                    self.input_buffer = msg.clone();
+                if let Some(message) = self.input_history.previous() {
+                    self.input_buffer = message.to_string();
                     self.cursor_index = self.input_buffer.chars().count();
                 }
             }
-            1 => {
-                // Down: go to next message in history or back to empty input
-                if let Some(idx) = self.message_history_index {
-                    if idx + 1 >= self.sent_messages_history.len() {
-                        // At the newest item — return to empty input
-                        self.input_buffer.clear();
-                        self.cursor_index = 0;
-                        self.message_history_index = None;
-                    } else {
-                        let new_index = idx + 1;
-                        self.message_history_index = Some(new_index);
-                        if let Some(msg) = self.sent_messages_history.get(new_index) {
-                            self.input_buffer = msg.clone();
-                            self.cursor_index = self.input_buffer.chars().count();
-                        }
-                    }
+            1 => match self.input_history.next() {
+                InputHistoryNavigation::Selected(message) => {
+                    self.input_buffer = message.to_string();
+                    self.cursor_index = self.input_buffer.chars().count();
                 }
-            }
+                InputHistoryNavigation::Cleared => {
+                    self.input_buffer.clear();
+                    self.cursor_index = 0;
+                }
+                InputHistoryNavigation::Unchanged => {}
+            },
             _ => {}
         }
     }
 
     pub(crate) fn add_message_to_history(&mut self, message: String) {
-        const MAX_HISTORY: usize = 100;
-        self.sent_messages_history.push_back(message);
-        if self.sent_messages_history.len() > MAX_HISTORY {
-            self.sent_messages_history.pop_front();
-        }
-        self.message_history_index = None;
-    }
-
-    #[cfg(test)]
-    pub(crate) async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
-        self.send_user_message_with_skills(user_message, Vec::new())
-            .await
+        self.input_history.push(message);
     }
 
     pub(crate) async fn send_user_message_with_skills(
@@ -521,8 +495,7 @@ impl TuiApp {
         self.render_runtime.reset_transcript();
         self.rendered_chat_lines.clear();
         self.rendered_chat_cache_key = None;
-        self.sent_messages_history.clear();
-        self.message_history_index = None;
+        self.input_history.clear();
         self.push_right_event(format!("switched to session: {}", session_id));
 
         // Abort any in-flight command — session switch takes priority and the
@@ -696,6 +669,16 @@ impl TuiApp {
             .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_TIMEOUT)
             .unwrap_or(false)
     }
+}
+
+fn command_should_enter_transcript(command_line: &str) -> bool {
+    let command = command_line
+        .trim_start()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or_default();
+    !matches!(command, "sessions" | "s")
 }
 
 async fn close_session_and_shutdown(

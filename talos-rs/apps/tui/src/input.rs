@@ -218,9 +218,7 @@ impl TuiApp {
                 Ok(false)
             }
             KeyCode::Down => {
-                if self.message_history_index.is_some() {
-                    self.navigate_message_history(1);
-                }
+                self.navigate_message_history(1);
                 Ok(false)
             }
             KeyCode::PageUp => Ok(false),

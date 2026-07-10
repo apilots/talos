@@ -36,10 +36,6 @@ impl TuiApp {
         draft_lines
     }
 
-    pub(crate) fn composer_line_count(&self, width: usize) -> usize {
-        self.draft_input_lines(width).len()
-    }
-
     pub(crate) fn draft_input_lines(&self, width: usize) -> Vec<Line<'static>> {
         let chars: Vec<char> = self.input_buffer.chars().collect();
         let mut display_text = String::new();
@@ -125,9 +121,9 @@ impl TuiApp {
             .map(|percent| format!("{}% left", percent))
             .unwrap_or_else(|| "n/a left".to_string());
 
-        let history_indicator = if let Some(idx) = self.message_history_index {
-            let total = self.sent_messages_history.len();
-            format!("  [History {}/{}]", idx + 1, total)
+        let history_indicator = if let Some((index, total)) = self.input_history.selected_position()
+        {
+            format!("  [History {index}/{total}]")
         } else {
             String::new()
         };

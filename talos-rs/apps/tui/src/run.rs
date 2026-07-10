@@ -10,10 +10,10 @@ use std::{
 };
 
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
+    cursor::{Hide, Show},
     event::{DisableBracketedPaste, EnableBracketedPaste},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
+    terminal::{disable_raw_mode, enable_raw_mode},
 };
 #[cfg(test)]
 use ratatui::{
@@ -40,28 +40,34 @@ use super::{GatewayClient, TuiApp};
 pub async fn run_tui_app_with_gateway_client(
     client: Arc<dyn GatewayClient>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut stdout = io::stdout();
-    reset_primary_screen_viewport(&mut stdout)?;
     let shutdown_client = client.clone();
     let mut app = TuiApp::new_with_gateway_client(client);
     app.initialize_session().await;
 
     let (terminal_width, terminal_height) = crossterm::terminal::size()?;
-    let inline_viewport_height = app.inline_viewport_height(terminal_width, terminal_height.max(1));
-    let mut terminal = PrimaryTerminal::new(
-        terminal_width,
-        inline_viewport_height,
-        terminal_height.max(1),
-    )?;
+    let inline_viewport_height =
+        app.inline_viewport_height(terminal_width.max(1), terminal_height.max(1));
     enable_raw_mode()?;
+    let mut terminal = match PrimaryTerminal::new(inline_viewport_height) {
+        Ok(terminal) => terminal,
+        Err(err) => {
+            disable_raw_mode()?;
+            return Err(Box::new(err));
+        }
+    };
     if let Err(err) = enter_primary_screen_interaction(terminal.backend_mut()) {
-        disable_raw_mode()?;
+        let _ = leave_primary_screen_interaction(terminal.backend_mut());
+        let _ = disable_raw_mode();
         return Err(Box::new(err));
     }
 
     let run_result = run_event_loop(&mut terminal, &mut app).await;
     let shutdown_result = shutdown_client.shutdown().await;
 
+    if app.uses_transient_fullscreen_surface() {
+        app.session_picker = None;
+    }
+    let transient_surface_result = terminal.leave_transient_fullscreen();
     let flush_result = flush_terminal_transcript(&mut terminal, &mut app);
     let final_clear_result = if app.should_exit {
         terminal.clear_viewport()
@@ -72,6 +78,7 @@ pub async fn run_tui_app_with_gateway_client(
     let raw_mode_result = disable_raw_mode();
 
     run_result?;
+    transient_surface_result?;
     flush_result?;
     final_clear_result?;
     leave_result?;
@@ -91,7 +98,11 @@ async fn run_event_loop(
             return Ok(());
         }
         sync_terminal_viewport(terminal, app)?;
-        let flushed_transcript = flush_terminal_transcript(terminal, app)?;
+        let flushed_transcript = if terminal.is_transient_fullscreen_active() {
+            false
+        } else {
+            flush_terminal_transcript(terminal, app)?
+        };
         let frame_fingerprint = tui_frame_fingerprint(app);
         if flushed_transcript || app.render_runtime.should_draw_frame(frame_fingerprint) {
             terminal.draw(|frame| app.render_ui(frame))?;
@@ -116,16 +127,6 @@ async fn run_event_loop(
     }
 }
 
-fn reset_primary_screen_viewport(output: &mut impl io::Write) -> io::Result<()> {
-    execute!(
-        output,
-        MoveTo(0, 0),
-        Clear(ClearType::All),
-        Clear(ClearType::Purge),
-        MoveTo(0, 0)
-    )
-}
-
 fn enter_primary_screen_interaction(output: &mut impl io::Write) -> io::Result<()> {
     execute!(output, EnableBracketedPaste, Hide)
 }
@@ -136,8 +137,12 @@ fn leave_primary_screen_interaction(output: &mut impl io::Write) -> io::Result<(
 
 fn sync_terminal_viewport(terminal: &mut PrimaryTerminal, app: &TuiApp) -> io::Result<()> {
     let (width, height) = crossterm::terminal::size()?;
-    let viewport_height = app.inline_viewport_height(width, height.max(1));
-    terminal.resize_viewport(width, viewport_height, height.max(1))
+    if app.uses_transient_fullscreen_surface() {
+        return terminal.enter_transient_fullscreen();
+    }
+
+    let viewport_height = app.inline_viewport_height(width.max(1), height.max(1));
+    terminal.exit_transient_fullscreen(viewport_height)
 }
 
 fn flush_terminal_transcript<T: TerminalTranscriptTarget>(
@@ -278,7 +283,7 @@ impl<B: Backend> TerminalTranscriptTarget for Terminal<B> {
         let height = lines.len().min(u16::MAX as usize) as u16;
         self.insert_before(height, |buf| {
             Paragraph::new(lines.to_vec()).render(buf.area, buf);
-            suppress_wide_symbol_placeholder_cells(buf);
+            crate::terminal_surface::suppress_wide_symbol_placeholder_cells(buf);
         })
     }
 }
@@ -329,6 +334,7 @@ fn render_terminal_transcript_lines(
             rendered.push(terminal_round_footer_line(terminal_segment_duration_ms(
                 app,
                 blocks,
+                segment_start,
                 segment_end,
             )));
         }
@@ -342,21 +348,7 @@ fn render_terminal_transcript_lines(
 }
 
 fn terminal_projection_needs_leading_gap(app: &TuiApp, blocks: &[PendingTerminalBlock]) -> bool {
-    let Some(first_pending) = blocks.first() else {
-        return false;
-    };
-    let Some(first_pending_index) = app
-        .render_runtime
-        .store()
-        .blocks()
-        .iter()
-        .position(|block| block.id == first_pending.block_id)
-    else {
-        return false;
-    };
-    app.render_runtime.store().blocks()[..first_pending_index]
-        .iter()
-        .any(|block| block.terminal_synced)
+    !blocks.is_empty() && app.render_runtime.store().has_terminal_history()
 }
 
 fn is_terminal_segment_start(kind: TranscriptBlockKind) -> bool {
@@ -458,8 +450,12 @@ fn completed_round_footer_target(
 fn terminal_segment_duration_ms(
     app: &TuiApp,
     blocks: &[PendingTerminalBlock],
+    segment_start: usize,
     segment_end: usize,
 ) -> Option<u64> {
+    if let Some(duration_ms) = blocks[segment_start].round_duration_ms {
+        return Some(duration_ms);
+    }
     if segment_end == blocks.len() && !app.in_flight && !app.turn_metrics_live {
         return app
             .turn_metrics
@@ -509,22 +505,6 @@ fn terminal_round_footer_line(duration_ms: Option<u64>) -> Line<'static> {
         duration_text,
         Style::default().fg(Color::White),
     ))
-}
-
-#[cfg(test)]
-fn suppress_wide_symbol_placeholder_cells(buffer: &mut ratatui::buffer::Buffer) {
-    for y in buffer.area.top()..buffer.area.bottom() {
-        let mut cells_to_skip = 0usize;
-        for x in buffer.area.left()..buffer.area.right() {
-            let cell = &mut buffer[(x, y)];
-            if cells_to_skip > 0 {
-                cell.set_symbol("");
-                cells_to_skip -= 1;
-                continue;
-            }
-            cells_to_skip = crate::utils::text_display_width(cell.symbol()).saturating_sub(1);
-        }
-    }
 }
 
 fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
@@ -623,20 +603,6 @@ mod tests {
     }
 
     #[test]
-    fn reset_primary_screen_viewport_clears_current_screen_without_alt_screen() {
-        let mut output = Vec::new();
-
-        super::reset_primary_screen_viewport(&mut output).unwrap();
-        let output = String::from_utf8(output).unwrap();
-
-        assert!(output.contains("\u{1b}[2J"));
-        assert!(output.contains("\u{1b}[3J"));
-        assert!(output.contains("\u{1b}[1;1H"));
-        assert!(!output.contains("\u{1b}[?1049h"));
-        assert!(!output.contains("\u{1b}[?1049l"));
-    }
-
-    #[test]
     fn primary_screen_interaction_never_emits_alternate_screen_sequences() {
         let mut output = Vec::new();
 
@@ -685,8 +651,21 @@ mod tests {
     #[test]
     fn terminal_transcript_projection_preserves_spacing_and_noninteractive_footer() {
         let mut app = crate::TuiApp::build(None);
-        app.render_runtime.append_user_input("persisted");
-        append_test_final_answer(&mut app, "done");
+        app.render_runtime.append_history([
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::UserInput,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "persisted",
+                )],
+            )
+            .with_round_duration_ms(12_300),
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "done",
+                )],
+            ),
+        ]);
 
         let pending = app.render_runtime.pending_terminal_projection();
         let lines = super::render_terminal_transcript_lines(&app, &pending, 80)
@@ -701,7 +680,7 @@ mod tests {
                 String::new(),
                 "● done".to_string(),
                 String::new(),
-                "✻ Brewed for a moment".to_string(),
+                "✻ Brewed for 12s".to_string(),
             ]
         );
     }
@@ -729,6 +708,38 @@ mod tests {
 
         assert_eq!(lines.first().map(String::as_str), Some(""));
         assert_eq!(lines.get(1).map(String::as_str), Some("● next question"));
+    }
+
+    #[test]
+    fn terminal_transcript_projection_preserves_spacing_after_session_reset() {
+        let mut app = crate::TuiApp::build(None);
+        app.render_runtime.append_system_notice("previous session");
+        let block_ids = app
+            .render_runtime
+            .pending_terminal_projection()
+            .into_iter()
+            .map(|block| block.block_id)
+            .collect::<Vec<_>>();
+        app.render_runtime.mark_terminal_blocks_synced(block_ids);
+
+        app.render_runtime.reset_transcript();
+        app.render_runtime
+            .append_system_notice("Session: selected\nModel: qwen3.6-flash");
+
+        let pending = app.render_runtime.pending_terminal_projection();
+        let lines = super::render_terminal_transcript_lines(&app, &pending, 80)
+            .iter()
+            .map(crate::utils::line_plain_text)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            lines,
+            vec![
+                String::new(),
+                "Session: selected".to_string(),
+                "Model: qwen3.6-flash".to_string(),
+            ]
+        );
     }
 
     #[test]
@@ -1028,7 +1039,8 @@ mod tests {
         let mut app = crate::TuiApp::build(None);
         let first_fingerprint = super::tui_frame_fingerprint(&app);
 
-        app.render_runtime.start_live_text(
+        crate::test_support::start_live_text(
+            &mut app.render_runtime,
             "item-1",
             crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
             "streaming",

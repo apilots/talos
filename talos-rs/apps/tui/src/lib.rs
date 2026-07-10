@@ -7,6 +7,7 @@ mod chat;
 mod client;
 mod commands;
 mod input;
+mod input_history;
 mod model_picker;
 mod render;
 mod render_runtime;
@@ -18,6 +19,7 @@ mod stream_events;
 mod stream_lifecycle;
 mod stream_updates;
 mod terminal_adapter;
+mod terminal_surface;
 mod turn_request;
 mod types;
 mod utils;
@@ -28,10 +30,10 @@ pub use turn_request::TerminalTurnRequest;
 use types::*;
 pub use utils::display_tool_name;
 
-use chrono::{Datelike, Local, TimeZone};
+use input_history::InputHistoryState;
 use model_picker::ModelPickerState;
 use ratatui::layout::Rect;
-use render_runtime::runtime::engine::BufferedRenderRuntimeEngine;
+use render_runtime::runtime::engine::RenderRuntimeEngine;
 use render_runtime::transcript::block::TranscriptBlockId;
 use session_picker::SessionPickerState;
 use std::{
@@ -56,27 +58,6 @@ pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 0;
 pub(crate) const WELCOME_TIP_LINE: &str =
     " Tip: Type a message or use /help /model /sessions /status /compact /clear /quit";
 pub(crate) const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
-
-fn format_session_timestamp(timestamp_ms: u64) -> String {
-    let Some(local_dt) = timestamp_ms
-        .try_into()
-        .ok()
-        .and_then(|millis| Local.timestamp_millis_opt(millis).single())
-    else {
-        return "unknown time".to_string();
-    };
-
-    let now = Local::now();
-    if now.date_naive() == local_dt.date_naive() {
-        return local_dt.format("%H:%M").to_string();
-    }
-
-    if now.year() == local_dt.year() {
-        return local_dt.format("%m-%d %H:%M").to_string();
-    }
-
-    local_dt.format("%Y-%m-%d %H:%M").to_string()
-}
 
 /// Main TUI app.
 pub struct TuiApp {
@@ -129,8 +110,7 @@ pub struct TuiApp {
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
     pub(crate) model_picker: Option<ModelPickerState>,
     pub(crate) session_picker: Option<SessionPickerState>,
-    pub(crate) sent_messages_history: VecDeque<String>,
-    pub(crate) message_history_index: Option<usize>,
+    pub(crate) input_history: InputHistoryState,
     pub(crate) show_command_autocomplete: bool,
     pub(crate) command_suggestions: Vec<CommandSuggestion>,
     pub(crate) command_autocomplete_selected: usize,
@@ -146,7 +126,7 @@ pub struct TuiApp {
     pub(crate) should_exit: bool,
     pub(crate) left_panel_area: Option<Rect>,
     pub(crate) input_area: Option<Rect>,
-    pub(crate) render_runtime: BufferedRenderRuntimeEngine,
+    pub(crate) render_runtime: RenderRuntimeEngine,
     pub(crate) suppress_transcript_for_terminal_flush: bool,
     pub(crate) terminal_footer_synced_for: Option<TranscriptBlockId>,
 }
@@ -192,22 +172,6 @@ impl TuiApp {
                 format_metric_number(metrics.usage.total_tokens),
             ))
         }
-    }
-
-    #[cfg(test)]
-    fn input_line_plain(&self) -> String {
-        let chars: Vec<char> = self.input_buffer.chars().collect();
-        let mut out = String::from("❯ ");
-        for (idx, ch) in chars.iter().enumerate() {
-            if idx == self.cursor_index {
-                out.push('█');
-            }
-            out.push(*ch);
-        }
-        if self.cursor_index >= chars.len() {
-            out.push('█');
-        }
-        out
     }
 }
 

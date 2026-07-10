@@ -25,6 +25,7 @@ pub(crate) struct TranscriptBlock {
     pub(crate) id: TranscriptBlockId,
     pub(crate) kind: TranscriptBlockKind,
     pub(crate) lines: Vec<TranscriptLine>,
+    pub(crate) round_duration_ms: Option<u64>,
     pub(crate) copy_markdown: Option<String>,
     pub(crate) terminal_synced: bool,
 }
@@ -34,6 +35,7 @@ pub(crate) struct TranscriptBlock {
 pub(crate) struct FinalizedTranscriptBlock {
     pub(crate) kind: TranscriptBlockKind,
     pub(crate) lines: Vec<crate::render_runtime::common::style::StyledLine>,
+    pub(crate) round_duration_ms: Option<u64>,
     pub(crate) copy_markdown: Option<String>,
 }
 
@@ -45,8 +47,14 @@ impl FinalizedTranscriptBlock {
         Self {
             kind,
             lines,
+            round_duration_ms: None,
             copy_markdown: None,
         }
+    }
+
+    pub(crate) fn with_round_duration_ms(mut self, round_duration_ms: u64) -> Self {
+        self.round_duration_ms = Some(round_duration_ms);
+        self
     }
 
     pub(crate) fn with_copy_markdown(mut self, copy_markdown: impl Into<String>) -> Self {
@@ -68,9 +76,15 @@ impl TranscriptBlock {
             id,
             kind,
             lines,
+            round_duration_ms: None,
             copy_markdown: None,
             terminal_synced: false,
         }
+    }
+
+    pub(crate) fn with_round_duration_ms(mut self, round_duration_ms: u64) -> Self {
+        self.round_duration_ms = Some(round_duration_ms);
+        self
     }
 
     pub(crate) fn with_copy_markdown(mut self, copy_markdown: Option<String>) -> Self {

@@ -13,6 +13,7 @@ pub(crate) struct PendingTerminalBlock {
     pub(crate) block_id: TranscriptBlockId,
     pub(crate) kind: TranscriptBlockKind,
     pub(crate) lines: Vec<StyledLine>,
+    pub(crate) round_duration_ms: Option<u64>,
 }
 
 /// Owns finalized transcript blocks and stable line identities.
@@ -21,30 +22,10 @@ pub(crate) struct TranscriptStore {
     blocks: Vec<TranscriptBlock>,
     next_block_id: u64,
     next_line_id: u64,
+    terminal_history_present: bool,
 }
 
 impl TranscriptStore {
-    #[cfg(test)]
-    pub(crate) fn push_block(
-        &mut self,
-        kind: TranscriptBlockKind,
-        lines: Vec<StyledLine>,
-    ) -> TranscriptBlockId {
-        let id = TranscriptBlockId(self.next_block_id);
-        self.next_block_id += 1;
-        let transcript_lines = lines
-            .into_iter()
-            .map(|line| {
-                let line_id = TranscriptLineId(self.next_line_id);
-                self.next_line_id += 1;
-                TranscriptLine::new(line_id, line)
-            })
-            .collect();
-        self.blocks
-            .push(TranscriptBlock::new(id, kind, transcript_lines));
-        id
-    }
-
     pub(crate) fn push_finalized(&mut self, block: FinalizedTranscriptBlock) -> TranscriptBlockId {
         let id = TranscriptBlockId(self.next_block_id);
         self.next_block_id += 1;
@@ -58,11 +39,12 @@ impl TranscriptStore {
             })
             .collect();
         let insert_index = self.insert_index_for(block.kind);
-        self.blocks.insert(
-            insert_index,
-            TranscriptBlock::new(id, block.kind, transcript_lines)
-                .with_copy_markdown(block.copy_markdown),
-        );
+        let mut transcript_block = TranscriptBlock::new(id, block.kind, transcript_lines)
+            .with_copy_markdown(block.copy_markdown);
+        if let Some(round_duration_ms) = block.round_duration_ms {
+            transcript_block = transcript_block.with_round_duration_ms(round_duration_ms);
+        }
+        self.blocks.insert(insert_index, transcript_block);
         id
     }
 
@@ -118,16 +100,15 @@ impl TranscriptStore {
         self.next_line_id = 0;
     }
 
-    pub(crate) fn pending_terminal_blocks(&self) -> impl Iterator<Item = &TranscriptBlock> {
-        self.blocks.iter().filter(|block| !block.terminal_synced)
-    }
-
     pub(crate) fn pending_terminal_projection(&self) -> Vec<PendingTerminalBlock> {
-        self.pending_terminal_blocks()
+        self.blocks
+            .iter()
+            .filter(|block| !block.terminal_synced)
             .map(|block| PendingTerminalBlock {
                 block_id: block.id,
                 kind: block.kind,
                 lines: terminal_projection(block),
+                round_duration_ms: block.round_duration_ms,
             })
             .collect()
     }
@@ -146,7 +127,12 @@ impl TranscriptStore {
     pub(crate) fn mark_terminal_synced(&mut self, block_id: TranscriptBlockId) {
         if let Some(block) = self.blocks.iter_mut().find(|block| block.id == block_id) {
             block.terminal_synced = true;
+            self.terminal_history_present = true;
         }
+    }
+
+    pub(crate) fn has_terminal_history(&self) -> bool {
+        self.terminal_history_present
     }
 
     pub(crate) fn mark_many_terminal_synced(
@@ -190,7 +176,27 @@ impl TranscriptStore {
 mod tests {
     use super::TranscriptStore;
     use crate::render_runtime::common::style::StyledLine;
-    use crate::render_runtime::transcript::block::TranscriptBlockKind;
+    use crate::render_runtime::transcript::block::{
+        FinalizedTranscriptBlock, TranscriptBlockId, TranscriptBlockKind,
+    };
+
+    trait TestTranscriptStoreExt {
+        fn push_block(
+            &mut self,
+            kind: TranscriptBlockKind,
+            lines: Vec<StyledLine>,
+        ) -> TranscriptBlockId;
+    }
+
+    impl TestTranscriptStoreExt for TranscriptStore {
+        fn push_block(
+            &mut self,
+            kind: TranscriptBlockKind,
+            lines: Vec<StyledLine>,
+        ) -> TranscriptBlockId {
+            self.push_finalized(FinalizedTranscriptBlock::new(kind, lines))
+        }
+    }
 
     #[test]
     fn assigns_stable_block_and_line_ids() {
@@ -266,5 +272,19 @@ mod tests {
 
         assert_eq!(id.0, 0);
         assert_eq!(store.blocks()[0].lines[0].id.0, 0);
+    }
+
+    #[test]
+    fn clear_preserves_the_existing_terminal_history_boundary() {
+        let mut store = TranscriptStore::default();
+        let id = store.push_block(
+            TranscriptBlockKind::SystemNotice,
+            vec![StyledLine::plain("previous session")],
+        );
+        store.mark_terminal_synced(id);
+
+        store.clear();
+
+        assert!(store.has_terminal_history());
     }
 }

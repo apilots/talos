@@ -20,10 +20,11 @@ use crate::{TuiApp, SPINNER_FRAMES, WELCOME_TIP_LINE};
 
 const CHAT_VISIBLE_OVERSCAN: usize = 2;
 
-type TranscriptRenderBlock = (
-    TranscriptBlockKind,
-    Vec<(Option<TranscriptLineId>, StyledLine)>,
-);
+struct TranscriptRenderBlock {
+    kind: TranscriptBlockKind,
+    lines: Vec<(Option<TranscriptLineId>, StyledLine)>,
+    round_duration_ms: Option<u64>,
+}
 
 #[derive(Debug, Clone, Copy)]
 struct TranscriptRoundBlock {
@@ -66,15 +67,14 @@ impl TuiApp {
                 .blocks()
                 .iter()
                 .filter(|block| !block.terminal_synced)
-                .map(|block| {
-                    (
-                        block.kind,
-                        block
-                            .lines
-                            .iter()
-                            .map(|line| (Some(line.id), line.content.clone()))
-                            .collect::<Vec<_>>(),
-                    )
+                .map(|block| TranscriptRenderBlock {
+                    kind: block.kind,
+                    lines: block
+                        .lines
+                        .iter()
+                        .map(|line| (Some(line.id), line.content.clone()))
+                        .collect::<Vec<_>>(),
+                    round_duration_ms: block.round_duration_ms,
                 })
                 .collect::<Vec<_>>()
         };
@@ -85,13 +85,13 @@ impl TuiApp {
         while block_index < finalized_blocks.len() {
             let round_start = block_index;
             let round_end_exclusive = ((round_start + 1)..finalized_blocks.len())
-                .find(|&index| is_transcript_segment_start(finalized_blocks[index].0))
+                .find(|&index| is_transcript_segment_start(finalized_blocks[index].kind))
                 .unwrap_or(finalized_blocks.len());
 
             let round_blocks =
                 self.transcript_round_blocks(&finalized_blocks, round_start, round_end_exclusive);
             for (index, block) in round_blocks.iter().enumerate() {
-                let (_, lines) = &finalized_blocks[block.index];
+                let lines = &finalized_blocks[block.index].lines;
                 self.rendered_chat_lines
                     .extend(render_transcript_block_lines(
                         block.render_kind,
@@ -204,7 +204,8 @@ impl TuiApp {
         round_start: usize,
         round_end_exclusive: usize,
     ) -> bool {
-        if round_start >= blocks.len() || blocks[round_start].0 != TranscriptBlockKind::UserInput {
+        if round_start >= blocks.len() || blocks[round_start].kind != TranscriptBlockKind::UserInput
+        {
             return false;
         }
         if round_end_exclusive < blocks.len() {
@@ -215,9 +216,9 @@ impl TuiApp {
         }
         blocks[round_start..round_end_exclusive]
             .iter()
-            .any(|(kind, _)| {
+            .any(|block| {
                 matches!(
-                    kind,
+                    block.kind,
                     TranscriptBlockKind::Commentary | TranscriptBlockKind::FinalAnswer
                 )
             })
@@ -226,9 +227,12 @@ impl TuiApp {
     fn transcript_round_duration_ms(
         &self,
         blocks: &[TranscriptRenderBlock],
-        _round_start: usize,
+        round_start: usize,
         round_end_exclusive: usize,
     ) -> Option<u64> {
+        if let Some(duration_ms) = blocks[round_start].round_duration_ms {
+            return Some(duration_ms);
+        }
         if round_end_exclusive == blocks.len() && !self.in_flight && !self.turn_metrics_live {
             return self
                 .turn_metrics
@@ -264,27 +268,27 @@ impl TuiApp {
         round_end_exclusive: usize,
         block_index: usize,
     ) -> TranscriptBlockKind {
-        if blocks[block_index].0 != TranscriptBlockKind::Commentary
+        if blocks[block_index].kind != TranscriptBlockKind::Commentary
             || self.in_flight
             || self.turn_metrics_live
             || blocks[round_start..round_end_exclusive]
                 .iter()
-                .any(|(kind, _)| *kind == TranscriptBlockKind::FinalAnswer)
+                .any(|block| block.kind == TranscriptBlockKind::FinalAnswer)
         {
-            return blocks[block_index].0;
+            return blocks[block_index].kind;
         }
 
         let last_commentary = blocks[round_start..round_end_exclusive]
             .iter()
             .enumerate()
-            .filter(|(_, (kind, _))| *kind == TranscriptBlockKind::Commentary)
+            .filter(|(_, block)| block.kind == TranscriptBlockKind::Commentary)
             .map(|(offset, _)| round_start + offset)
             .next_back();
 
         if last_commentary == Some(block_index) {
             TranscriptBlockKind::FinalAnswer
         } else {
-            blocks[block_index].0
+            blocks[block_index].kind
         }
     }
 

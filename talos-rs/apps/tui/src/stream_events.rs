@@ -5,6 +5,7 @@ use talos_sdk::{
 };
 
 use crate::render_runtime::render::history::timeline_item_to_blocks;
+use crate::render_runtime::transcript::block::TranscriptBlockKind;
 use crate::TuiApp;
 
 impl TuiApp {
@@ -123,8 +124,12 @@ impl TuiApp {
         self.timeline_items.clear();
 
         for message in snapshot.messages {
+            let round_duration_ms = message
+                .metrics
+                .as_ref()
+                .and_then(|metrics| metrics.duration_ms);
             for item in message.items {
-                if self.render_history_item(item) {
+                if self.render_history_item(item, round_duration_ms) {
                     item_count += 1;
                 }
             }
@@ -134,11 +139,34 @@ impl TuiApp {
         item_count
     }
 
-    fn render_history_item(&mut self, item: TalosTimelineItem) -> bool {
-        let transcript_blocks = timeline_item_to_blocks(&item);
+    fn render_history_item(
+        &mut self,
+        item: TalosTimelineItem,
+        round_duration_ms: Option<u64>,
+    ) -> bool {
+        let transcript_blocks = timeline_item_to_blocks(&item)
+            .into_iter()
+            .map(|block| {
+                if block.kind == TranscriptBlockKind::UserInput {
+                    return match round_duration_ms {
+                        Some(round_duration_ms) => block.with_round_duration_ms(round_duration_ms),
+                        None => block,
+                    };
+                }
+                block
+            })
+            .collect::<Vec<_>>();
         let rendered_to_transcript = self.render_runtime.append_history(transcript_blocks) > 0;
 
         match (&item.kind, &item.phase, &item.content) {
+            (
+                TalosTimelineItemKind::UserInput,
+                TalosTimelinePhase::Input,
+                TalosTimelineContent::Text { text },
+            ) => {
+                self.add_message_to_history(text.clone());
+                rendered_to_transcript
+            }
             (
                 TalosTimelineItemKind::ExecutionSummary,
                 TalosTimelinePhase::System,

@@ -1,346 +1,127 @@
-//! Primary terminal adapter for fixed viewport and scrollback writes.
-//!
-//! This module owns the terminal boundary for the TUI runtime. It keeps the
-//! mutable live viewport separate from finalized transcript rows, which are
-//! inserted into the primary terminal scrollback above the viewport.
+//! Product terminal adapter built on the single-owner inline surface.
 
 use std::io;
-use std::io::Write;
 
-use crossterm::{
-    cursor::MoveTo,
-    queue,
-    style::{
-        Attribute as CrosstermAttribute, Color as CrosstermColor, Colors, Print, SetAttribute,
-        SetColors,
-    },
-    terminal::{Clear, ClearType},
-};
+use crossterm::{execute, terminal::EnterAlternateScreen, terminal::LeaveAlternateScreen};
 use ratatui::{
-    backend::CrosstermBackend,
+    backend::{Backend, CrosstermBackend},
     layout::Rect,
-    style::{Color, Modifier},
-    text::{Line, Span},
-    Terminal, TerminalOptions, Viewport,
+    text::Line,
+    widgets::{Paragraph, Widget},
 };
 
-use crate::utils::wrap_line_visual;
+use crate::{
+    render::frame::BufferFrame,
+    terminal_surface::{suppress_wide_symbol_placeholder_cells, InlineTerminal},
+    utils::wrap_line_visual,
+};
 
-/// Owns the fixed TUI viewport and all writes into primary terminal scrollback.
-///
-/// Callers draw transient live/input UI through [`draw`](Self::draw). Finalized
-/// transcript rows must go through [`insert_history_lines`](Self::insert_history_lines)
-/// so the viewport is moved by terminal scroll-region operations instead of
-/// being copied into the terminal history.
-pub(crate) struct PrimaryTerminal {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-    viewport: Rect,
-    screen_height: u16,
-    history_bottom: u16,
+/// Coordinates inline and alternate-screen geometry without changing backend ownership.
+pub(crate) struct TerminalAdapter<B>
+where
+    B: Backend,
+{
+    surface: InlineTerminal<B>,
+    saved_inline_viewport: Option<Rect>,
 }
 
+pub(crate) type PrimaryTerminal = TerminalAdapter<CrosstermBackend<io::Stdout>>;
+
 impl PrimaryTerminal {
-    pub(crate) fn new(width: u16, height: u16, screen_height: u16) -> io::Result<Self> {
-        let viewport_height = height.clamp(1, screen_height.max(1));
-        let viewport = Rect::new(/*x*/ 0, /*y*/ 0, width, viewport_height);
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = create_fixed_terminal(backend, viewport)?;
+    pub(crate) fn new(height: u16) -> io::Result<Self> {
+        Self::from_backend(CrosstermBackend::new(io::stdout()), height)
+    }
+
+    pub(crate) fn enter_transient_fullscreen(&mut self) -> io::Result<()> {
+        if self.saved_inline_viewport.is_some() {
+            if self.surface.sync_fullscreen_area()? {
+                self.surface.clear_screen()?;
+            }
+            return Ok(());
+        }
+        execute!(self.surface.backend_mut(), EnterAlternateScreen)?;
+        self.enter_fullscreen_geometry()?;
+        self.surface.clear_screen()
+    }
+
+    pub(crate) fn exit_transient_fullscreen(&mut self, inline_height: u16) -> io::Result<()> {
+        self.leave_transient_fullscreen()?;
+        self.surface.sync_inline_height(inline_height)
+    }
+
+    pub(crate) fn leave_transient_fullscreen(&mut self) -> io::Result<()> {
+        if self.saved_inline_viewport.is_none() {
+            return Ok(());
+        }
+        execute!(self.surface.backend_mut(), LeaveAlternateScreen)?;
+        self.restore_inline_surface()
+    }
+}
+
+impl<B> TerminalAdapter<B>
+where
+    B: Backend,
+{
+    pub(crate) fn from_backend(backend: B, height: u16) -> io::Result<Self> {
         Ok(Self {
-            terminal,
-            viewport,
-            screen_height,
-            history_bottom: 0,
+            surface: InlineTerminal::new(backend, height)?,
+            saved_inline_viewport: None,
         })
     }
 
-    pub(crate) fn backend_mut(&mut self) -> &mut CrosstermBackend<io::Stdout> {
-        self.terminal.backend_mut()
+    pub(crate) fn backend_mut(&mut self) -> &mut B {
+        self.surface.backend_mut()
     }
 
     pub(crate) fn size(&self) -> io::Result<ratatui::layout::Size> {
-        self.terminal.size()
+        self.surface.size()
     }
 
-    pub(crate) fn resize_viewport(
-        &mut self,
-        width: u16,
-        height: u16,
-        screen_height: u16,
-    ) -> io::Result<()> {
-        let next_height = height.clamp(1, screen_height.max(1));
-        if self.viewport.width == width
-            && self.viewport.height == next_height
-            && self.screen_height == screen_height
-        {
-            return Ok(());
-        }
-
-        self.clear_current_viewport()?;
-        self.screen_height = screen_height.max(1);
-        self.viewport.width = width.max(1);
-        self.viewport.height = next_height;
-        self.fit_history_above_viewport()?;
-        self.viewport.y = self.viewport_top_after_history();
-        self.recreate_fixed_terminal()
+    pub(crate) fn is_transient_fullscreen_active(&self) -> bool {
+        self.saved_inline_viewport.is_some()
     }
 
-    pub(crate) fn draw<F>(&mut self, render_callback: F) -> io::Result<()>
+    pub(crate) fn draw<F>(&mut self, render: F) -> io::Result<()>
     where
-        F: FnOnce(&mut ratatui::Frame),
+        F: FnOnce(&mut BufferFrame<'_>),
     {
-        self.terminal.draw(render_callback).map(|_| ())
+        self.surface.draw(render)
     }
 
     pub(crate) fn clear_viewport(&mut self) -> io::Result<()> {
-        self.clear_current_viewport()?;
-        queue!(
-            self.terminal.backend_mut(),
-            MoveTo(/*x*/ 0, self.history_bottom),
-            Clear(ClearType::FromCursorDown)
-        )?;
-        self.terminal.backend_mut().flush()
+        self.surface.clear_viewport()
     }
 
     pub(crate) fn insert_history_lines(&mut self, lines: &[Line<'static>]) -> io::Result<()> {
         if lines.is_empty() {
             return Ok(());
         }
-
-        let rows = wrap_history_lines(lines, self.viewport.width as usize);
-        self.clear_current_viewport()?;
-        for row in &rows {
-            self.append_history_row(row)?;
-        }
-        self.viewport.y = self.viewport_top_after_history();
-        self.recreate_fixed_terminal()
+        let width = self.surface.viewport_area().width.max(1) as usize;
+        let rows = lines
+            .iter()
+            .cloned()
+            .flat_map(|line| wrap_line_visual(line, width))
+            .collect::<Vec<_>>();
+        let height = rows.len().min(u16::MAX as usize) as u16;
+        self.surface.insert_before(height, |buffer| {
+            Paragraph::new(rows).render(buffer.area, buffer);
+            suppress_wide_symbol_placeholder_cells(buffer);
+        })
     }
 
-    fn fit_history_above_viewport(&mut self) -> io::Result<()> {
-        let history_limit = self.history_bottom_limit();
-        while self.history_bottom > history_limit {
-            self.scroll_history_region_up(history_limit)?;
-            self.history_bottom = self.history_bottom.saturating_sub(1);
-        }
-        Ok(())
-    }
-
-    fn append_history_row(&mut self, row: &Line<'static>) -> io::Result<()> {
-        let history_limit = self.history_bottom_limit();
-        if self.history_bottom >= history_limit {
-            self.scroll_history_region_up(history_limit)?;
-            self.history_bottom = history_limit.saturating_sub(1);
-        }
-        let writer = self.terminal.backend_mut();
-        queue!(
-            writer,
-            MoveTo(/*x*/ 0, self.history_bottom),
-            Clear(ClearType::CurrentLine)
-        )?;
-        write_history_line(writer, row)?;
-        self.history_bottom = self.history_bottom.saturating_add(1).min(history_limit);
-        writer.flush()
-    }
-
-    fn scroll_history_region_up(&mut self, history_limit: u16) -> io::Result<()> {
-        if history_limit <= 1 || self.screen_height == 0 {
+    fn enter_fullscreen_geometry(&mut self) -> io::Result<()> {
+        if self.saved_inline_viewport.is_some() {
             return Ok(());
         }
-        let writer = self.terminal.backend_mut();
-        queue!(
-            writer,
-            MoveTo(/*x*/ 0, self.screen_height.saturating_sub(1)),
-            Print("\r\n"),
-        )?;
-        writer.flush()
-    }
-
-    fn clear_current_viewport(&mut self) -> io::Result<()> {
-        let bottom = self.viewport.bottom().min(self.screen_height);
-        let writer = self.terminal.backend_mut();
-        for row in self.viewport.top()..bottom {
-            queue!(writer, MoveTo(/*x*/ 0, row), Clear(ClearType::CurrentLine))?;
-        }
-        writer.flush()
-    }
-
-    fn history_bottom_limit(&self) -> u16 {
-        self.screen_height
-            .saturating_sub(self.viewport.height)
-            .max(1)
-    }
-
-    fn viewport_top_after_history(&self) -> u16 {
-        viewport_top_after_history(
-            self.history_bottom,
-            self.viewport.height,
-            self.screen_height,
-        )
-    }
-
-    fn recreate_fixed_terminal(&mut self) -> io::Result<()> {
-        let backend = CrosstermBackend::new(io::stdout());
-        self.terminal = create_fixed_terminal(backend, self.viewport)?;
+        self.saved_inline_viewport = Some(self.surface.viewport_area());
+        self.surface.sync_fullscreen_area()?;
         Ok(())
     }
-}
 
-fn viewport_top_after_history(
-    history_bottom: u16,
-    viewport_height: u16,
-    screen_height: u16,
-) -> u16 {
-    history_bottom.min(screen_height.saturating_sub(viewport_height))
-}
-
-fn wrap_history_lines(lines: &[Line<'static>], terminal_width: usize) -> Vec<Line<'static>> {
-    let width = terminal_width.max(1);
-    lines
-        .iter()
-        .cloned()
-        .flat_map(|line| wrap_line_visual(line, width))
-        .collect()
-}
-
-fn create_fixed_terminal(
-    backend: CrosstermBackend<io::Stdout>,
-    viewport: Rect,
-) -> io::Result<Terminal<CrosstermBackend<io::Stdout>>> {
-    Terminal::with_options(
-        backend,
-        TerminalOptions {
-            viewport: Viewport::Fixed(viewport),
-        },
-    )
-}
-
-fn write_history_line<W: Write>(writer: &mut W, line: &Line<'_>) -> io::Result<()> {
-    queue!(writer, Clear(ClearType::UntilNewLine))?;
-    let spans = line
-        .spans
-        .iter()
-        .map(|span| Span {
-            style: span.style.patch(line.style),
-            content: span.content.clone(),
-        })
-        .collect::<Vec<_>>();
-    write_spans(writer, spans.iter())
-}
-
-fn write_spans<'a, I, W>(writer: &mut W, spans: I) -> io::Result<()>
-where
-    I: IntoIterator<Item = &'a Span<'a>>,
-    W: Write,
-{
-    let mut fg = Color::Reset;
-    let mut bg = Color::Reset;
-    let mut last_modifier = Modifier::empty();
-    for span in spans {
-        let mut modifier = Modifier::empty();
-        modifier.insert(span.style.add_modifier);
-        modifier.remove(span.style.sub_modifier);
-        if modifier != last_modifier {
-            ModifierDiff {
-                from: last_modifier,
-                to: modifier,
-            }
-            .queue(writer)?;
-            last_modifier = modifier;
-        }
-
-        let next_fg = span.style.fg.unwrap_or(Color::Reset);
-        let next_bg = span.style.bg.unwrap_or(Color::Reset);
-        if next_fg != fg || next_bg != bg {
-            queue!(
-                writer,
-                SetColors(Colors::new(
-                    ratatui_color_to_crossterm(next_fg),
-                    ratatui_color_to_crossterm(next_bg)
-                ))
-            )?;
-            fg = next_fg;
-            bg = next_bg;
-        }
-        queue!(writer, Print(span.content.as_ref()))?;
-    }
-    queue!(
-        writer,
-        SetColors(Colors::new(CrosstermColor::Reset, CrosstermColor::Reset)),
-        SetAttribute(CrosstermAttribute::Reset)
-    )
-}
-
-fn ratatui_color_to_crossterm(color: Color) -> CrosstermColor {
-    match color {
-        Color::Reset => CrosstermColor::Reset,
-        Color::Black => CrosstermColor::Black,
-        Color::Red => CrosstermColor::DarkRed,
-        Color::Green => CrosstermColor::DarkGreen,
-        Color::Yellow => CrosstermColor::DarkYellow,
-        Color::Blue => CrosstermColor::DarkBlue,
-        Color::Magenta => CrosstermColor::DarkMagenta,
-        Color::Cyan => CrosstermColor::DarkCyan,
-        Color::Gray => CrosstermColor::Grey,
-        Color::DarkGray => CrosstermColor::DarkGrey,
-        Color::LightRed => CrosstermColor::Red,
-        Color::LightGreen => CrosstermColor::Green,
-        Color::LightYellow => CrosstermColor::Yellow,
-        Color::LightBlue => CrosstermColor::Blue,
-        Color::LightMagenta => CrosstermColor::Magenta,
-        Color::LightCyan => CrosstermColor::Cyan,
-        Color::White => CrosstermColor::White,
-        Color::Rgb(r, g, b) => CrosstermColor::Rgb { r, g, b },
-        Color::Indexed(index) => CrosstermColor::AnsiValue(index),
-    }
-}
-
-struct ModifierDiff {
-    from: Modifier,
-    to: Modifier,
-}
-
-impl ModifierDiff {
-    fn queue<W: Write>(self, writer: &mut W) -> io::Result<()> {
-        let removed = self.from - self.to;
-        if removed.contains(Modifier::REVERSED) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NoReverse))?;
-        }
-        if removed.contains(Modifier::BOLD) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NormalIntensity))?;
-            if self.to.contains(Modifier::DIM) {
-                queue!(writer, SetAttribute(CrosstermAttribute::Dim))?;
-            }
-        }
-        if removed.contains(Modifier::ITALIC) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NoItalic))?;
-        }
-        if removed.contains(Modifier::UNDERLINED) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NoUnderline))?;
-        }
-        if removed.contains(Modifier::DIM) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NormalIntensity))?;
-        }
-        if removed.contains(Modifier::CROSSED_OUT) {
-            queue!(writer, SetAttribute(CrosstermAttribute::NotCrossedOut))?;
-        }
-
-        let added = self.to - self.from;
-        if added.contains(Modifier::REVERSED) {
-            queue!(writer, SetAttribute(CrosstermAttribute::Reverse))?;
-        }
-        if added.contains(Modifier::BOLD) {
-            queue!(writer, SetAttribute(CrosstermAttribute::Bold))?;
-        }
-        if added.contains(Modifier::ITALIC) {
-            queue!(writer, SetAttribute(CrosstermAttribute::Italic))?;
-        }
-        if added.contains(Modifier::UNDERLINED) {
-            queue!(writer, SetAttribute(CrosstermAttribute::Underlined))?;
-        }
-        if added.contains(Modifier::DIM) {
-            queue!(writer, SetAttribute(CrosstermAttribute::Dim))?;
-        }
-        if added.contains(Modifier::CROSSED_OUT) {
-            queue!(writer, SetAttribute(CrosstermAttribute::CrossedOut))?;
+    fn restore_inline_surface(&mut self) -> io::Result<()> {
+        if let Some(viewport) = self.saved_inline_viewport.take() {
+            self.surface.set_viewport_area(viewport);
+            self.surface.clear_viewport()?;
         }
         Ok(())
     }
@@ -348,47 +129,101 @@ impl ModifierDiff {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use ratatui::{backend::TestBackend, widgets::Paragraph};
+
+    use super::TerminalAdapter;
+    use crate::render::frame::RenderFrame;
 
     #[test]
-    fn history_line_writer_preserves_plain_text() {
-        let mut output = Vec::new();
-        let line = Line::from(vec![Span::raw("hello "), Span::raw("world")]);
+    fn fullscreen_geometry_restores_the_exact_inline_viewport() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = TerminalAdapter::from_backend(backend, 5).expect("terminal adapter");
+        let inline = terminal.surface.viewport_area();
 
-        write_history_line(&mut output, &line).unwrap();
-        let output = String::from_utf8(output).unwrap();
+        terminal
+            .enter_fullscreen_geometry()
+            .expect("enter fullscreen geometry");
+        assert_eq!(
+            terminal.surface.viewport_area(),
+            ratatui::layout::Rect::new(0, 0, 80, 24)
+        );
 
-        assert!(output.contains("hello world"));
+        terminal
+            .restore_inline_surface()
+            .expect("restore inline surface");
+        assert_eq!(terminal.surface.viewport_area(), inline);
+        assert!(!terminal.is_transient_fullscreen_active());
     }
 
     #[test]
-    fn history_lines_wrap_to_terminal_width_before_insert() {
-        let lines = vec![Line::from("abcdefghij")];
+    fn repeated_fullscreen_cancel_cycles_do_not_change_inline_geometry() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = TerminalAdapter::from_backend(backend, 5).expect("terminal adapter");
+        let inline = terminal.surface.viewport_area();
 
-        let wrapped = wrap_history_lines(&lines, 4)
-            .into_iter()
-            .map(|line| crate::utils::line_plain_text(&line))
-            .collect::<Vec<_>>();
+        for _ in 0..3 {
+            terminal
+                .enter_fullscreen_geometry()
+                .expect("enter fullscreen geometry");
+            terminal
+                .restore_inline_surface()
+                .expect("restore inline surface");
+        }
 
-        assert_eq!(
-            wrapped,
-            vec!["abcd".to_string(), "efgh".to_string(), "ij".to_string()]
-        );
+        assert_eq!(terminal.surface.viewport_area(), inline);
     }
 
     #[test]
-    fn viewport_top_follows_short_history_and_clamps_to_bottom() {
+    fn fullscreen_geometry_tracks_terminal_resize_and_restores_inline_mode() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = TerminalAdapter::from_backend(backend, 5).expect("terminal adapter");
+
+        terminal
+            .enter_fullscreen_geometry()
+            .expect("enter fullscreen geometry");
+        terminal.surface.backend_mut().resize(100, 30);
+        terminal
+            .surface
+            .sync_fullscreen_area()
+            .expect("resize fullscreen geometry");
         assert_eq!(
-            viewport_top_after_history(
-                /*history_bottom*/ 8, /*viewport_height*/ 6, /*screen_height*/ 30
-            ),
-            8
+            terminal.surface.viewport_area(),
+            ratatui::layout::Rect::new(0, 0, 100, 30)
         );
-        assert_eq!(
-            viewport_top_after_history(
-                /*history_bottom*/ 28, /*viewport_height*/ 6, /*screen_height*/ 30,
-            ),
-            24
-        );
+
+        terminal
+            .restore_inline_surface()
+            .expect("restore inline surface");
+        terminal
+            .surface
+            .sync_inline_height(5)
+            .expect("restore resized inline geometry");
+        assert_eq!(terminal.surface.viewport_area().width, 100);
+        assert_eq!(terminal.surface.viewport_area().height, 5);
+    }
+
+    #[test]
+    fn restored_inline_surface_clears_stale_cells_before_redraw() {
+        let height = 5;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal =
+            TerminalAdapter::from_backend(backend, height).expect("terminal adapter");
+
+        terminal
+            .draw(|frame| frame.render_widget(Paragraph::new("short-stale-tail"), frame.area()))
+            .expect("initial draw");
+        terminal
+            .enter_fullscreen_geometry()
+            .expect("enter fullscreen geometry");
+        terminal
+            .restore_inline_surface()
+            .expect("restore inline surface");
+        terminal
+            .draw(|frame| frame.render_widget(Paragraph::new("short"), frame.area()))
+            .expect("restored draw");
+
+        let output = format!("{}", terminal.surface.backend_mut());
+        assert!(!output.contains("stale-tail"));
+        assert_eq!(output.matches("short").count(), 1);
     }
 }

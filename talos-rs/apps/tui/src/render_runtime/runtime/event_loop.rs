@@ -15,8 +15,6 @@ pub(crate) enum TuiRuntimeEvent {
     Stream,
     HistoryLoaded,
     LiveCommitTick,
-    #[cfg(test)]
-    FrameRequested,
 }
 
 /// Terminal event consumed by the top-level TUI runtime loop.

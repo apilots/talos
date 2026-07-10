@@ -1,5 +1,4 @@
 use super::*;
-use crate::model_picker::ModelPickerStep;
 use crate::types::CommandSuggestion;
 
 fn interactive_transcript_text(app: &TuiApp) -> String {
@@ -36,18 +35,18 @@ async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step()
         .await
         .unwrap();
 
-    let picker = app.model_picker.as_ref().expect("model picker should open");
-    assert_eq!(picker.step(), ModelPickerStep::Reasoning);
+    let mut picker = app.model_picker.clone().expect("model picker should open");
+    assert!(!picker.back());
 
     app.handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
         .await
         .unwrap();
 
-    let picker = app
+    let mut picker = app
         .model_picker
-        .as_ref()
+        .clone()
         .expect("model picker should stay open");
-    assert_eq!(picker.step(), ModelPickerStep::Model);
+    assert!(picker.back());
 }
 
 #[tokio::test]
@@ -86,8 +85,8 @@ fn test_input_cursor_and_backspace() {
     app.insert_char('b');
     app.cursor_index = 1;
     app.handle_backspace();
-    assert_eq!(app.get_input_buffer(), "b");
-    assert_eq!(app.input_line_plain(), "❯ █b");
+    assert_eq!(app.input_buffer, "b");
+    assert_eq!(app.cursor_index, 0);
 }
 
 #[test]
@@ -139,7 +138,7 @@ fn test_short_long_single_line_paste_wraps_inside_draft() {
     app.handle_paste(pasted);
 
     assert!(app.pasted_blocks.is_empty());
-    assert_eq!(app.composer_line_count(24), 6);
+    assert_eq!(app.draft_input_lines(24).len(), 6);
     let rendered = app
         .input_lines(24, 8)
         .into_iter()
@@ -685,22 +684,40 @@ fn test_history_replay_feeds_transcript_projection() {
         messages: vec![talos_sdk::SessionHistoryMessage {
             message_id: "msg-history".to_string(),
             turn_id: "turn-history".to_string(),
-            items: vec![talos_sdk::TalosTimelineItem {
-                item_id: "item-history".to_string(),
-                parent_item_id: None,
-                kind: talos_sdk::TalosTimelineItemKind::AssistantText,
-                phase: talos_sdk::TalosTimelinePhase::FinalAnswer,
-                status: talos_sdk::TalosTimelineItemStatus::Completed,
-                title: None,
-                started_at_ms: 1,
-                completed_at_ms: Some(2),
-                content: talos_sdk::TalosTimelineContent::Text {
-                    text: "history answer".to_string(),
+            items: vec![
+                talos_sdk::TalosTimelineItem {
+                    item_id: "item-user".to_string(),
+                    parent_item_id: None,
+                    kind: talos_sdk::TalosTimelineItemKind::UserInput,
+                    phase: talos_sdk::TalosTimelinePhase::Input,
+                    status: talos_sdk::TalosTimelineItemStatus::Completed,
+                    title: None,
+                    started_at_ms: 1,
+                    completed_at_ms: Some(1),
+                    content: talos_sdk::TalosTimelineContent::Text {
+                        text: "history question".to_string(),
+                    },
                 },
-            }],
+                talos_sdk::TalosTimelineItem {
+                    item_id: "item-history".to_string(),
+                    parent_item_id: None,
+                    kind: talos_sdk::TalosTimelineItemKind::AssistantText,
+                    phase: talos_sdk::TalosTimelinePhase::FinalAnswer,
+                    status: talos_sdk::TalosTimelineItemStatus::Completed,
+                    title: None,
+                    started_at_ms: 1,
+                    completed_at_ms: Some(2),
+                    content: talos_sdk::TalosTimelineContent::Text {
+                        text: "history answer".to_string(),
+                    },
+                },
+            ],
             stop_reason: talos_sdk::StopReason::EndTurn,
             usage: TokenUsage::default(),
-            metrics: None,
+            metrics: Some(talos_sdk::TurnExecutionMetrics {
+                duration_ms: Some(12_300),
+                ..talos_sdk::TurnExecutionMetrics::default()
+            }),
         }],
         generated_at_ms: 3,
         last_stable_event_id: None,
@@ -708,7 +725,7 @@ fn test_history_replay_feeds_transcript_projection() {
 
     let item_count = app.replay_history_snapshot(snapshot);
 
-    assert_eq!(item_count, 1);
+    assert_eq!(item_count, 2);
     let pending_text = app
         .render_runtime
         .store()
@@ -719,6 +736,49 @@ fn test_history_replay_feeds_transcript_projection() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(pending_text.contains("history answer"));
+    app.rebuild_chat_render_state(ratatui::layout::Rect::new(0, 0, 80, 20));
+    let rendered_text = app
+        .rendered_chat_lines
+        .iter()
+        .map(|line| line_plain_text(&line.display))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(rendered_text.contains("✻ Brewed for 12s"));
+}
+
+#[test]
+fn test_history_replay_feeds_input_history() {
+    let mut app = create_embedded_app();
+    let snapshot = talos_sdk::SessionHistorySnapshot {
+        session_id: "sess-test".to_string(),
+        messages: vec![talos_sdk::SessionHistoryMessage {
+            message_id: "msg-history".to_string(),
+            turn_id: "turn-history".to_string(),
+            items: vec![talos_sdk::TalosTimelineItem {
+                item_id: "item-user-input".to_string(),
+                parent_item_id: None,
+                kind: talos_sdk::TalosTimelineItemKind::UserInput,
+                phase: talos_sdk::TalosTimelinePhase::Input,
+                status: talos_sdk::TalosTimelineItemStatus::Completed,
+                title: None,
+                started_at_ms: 1,
+                completed_at_ms: Some(2),
+                content: talos_sdk::TalosTimelineContent::Text {
+                    text: "previous question".to_string(),
+                },
+            }],
+            stop_reason: talos_sdk::StopReason::EndTurn,
+            usage: TokenUsage::default(),
+            metrics: None,
+        }],
+        generated_at_ms: 3,
+        last_stable_event_id: None,
+    };
+
+    app.replay_history_snapshot(snapshot);
+    app.navigate_message_history(-1);
+
+    assert_eq!(app.input_buffer, "previous question");
 }
 
 #[test]

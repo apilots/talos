@@ -3,9 +3,10 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
-    Frame,
 };
 use talos_sdk::{LlmReasoningEffort, ModelInfo};
+
+use crate::render::frame::RenderFrame;
 
 /// Owns the transient `/model` picker state and rendering contract.
 ///
@@ -96,11 +97,6 @@ impl ModelPickerState {
         state
     }
 
-    #[cfg(test)]
-    pub(crate) fn step(&self) -> ModelPickerStep {
-        self.step
-    }
-
     pub(crate) fn selected_model_id(&self) -> Option<&str> {
         self.models
             .get(self.selected_model)
@@ -151,7 +147,7 @@ impl ModelPickerState {
         })
     }
 
-    pub(crate) fn render(&self, f: &mut Frame, area: Rect, input_area: Option<Rect>) {
+    pub(crate) fn render(&self, f: &mut impl RenderFrame, area: Rect, input_area: Option<Rect>) {
         let content_len = match self.step {
             ModelPickerStep::Model => self.models.len(),
             ModelPickerStep::Reasoning => ReasoningOption::ALL.len(),
@@ -173,7 +169,7 @@ impl ModelPickerState {
         }
     }
 
-    fn render_models(&self, f: &mut Frame, area: Rect, bg_style: Style) {
+    fn render_models(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
         let header_lines = vec![
             Line::from(Span::styled(
                 "Select Model and Effort",
@@ -250,7 +246,7 @@ impl ModelPickerState {
         ]))
     }
 
-    fn render_reasoning(&self, f: &mut Frame, area: Rect, bg_style: Style) {
+    fn render_reasoning(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
         let model = self
             .selected_model_id()
             .unwrap_or(self.current_model.as_str());
@@ -360,7 +356,7 @@ impl ModelPickerState {
     }
 }
 
-fn render_footer(f: &mut Frame, area: Rect, bg_style: Style) {
+fn render_footer(f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
     let footer_area = Rect::new(
         area.x,
         area.y.saturating_add(area.height.saturating_sub(1)),

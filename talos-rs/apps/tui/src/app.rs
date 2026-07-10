@@ -76,8 +76,7 @@ impl TuiApp {
             gateway_client,
             model_picker: None,
             session_picker: None,
-            sent_messages_history: VecDeque::new(),
-            message_history_index: None,
+            input_history: crate::input_history::InputHistoryState::default(),
             show_command_autocomplete: false,
             command_suggestions: Vec::new(),
             command_autocomplete_selected: 0,
@@ -93,8 +92,7 @@ impl TuiApp {
             should_exit: false,
             left_panel_area: None,
             input_area: None,
-            render_runtime:
-                crate::render_runtime::runtime::engine::BufferedRenderRuntimeEngine::new_buffered(),
+            render_runtime: crate::render_runtime::runtime::engine::RenderRuntimeEngine::default(),
             suppress_transcript_for_terminal_flush: false,
             terminal_footer_synced_for: None,
         };
@@ -225,14 +223,6 @@ impl TuiApp {
         Duration::from_millis(SESSION_INIT_RETRY_DELAY_MS.saturating_mul(attempt as u64))
     }
 
-    pub fn get_input_buffer(&self) -> &String {
-        &self.input_buffer
-    }
-
-    pub fn get_tool_status(&self) -> &[String] {
-        &self.right_panel_events
-    }
-
     pub(crate) fn is_agent_working(&self) -> bool {
         self.in_flight
     }
@@ -278,8 +268,7 @@ impl TuiApp {
         self.turn_metrics_live = false;
         self.terminal_footer_synced_for = None;
         self.received_output_delta = false;
-        self.sent_messages_history.clear();
-        self.message_history_index = None;
+        self.input_history.clear();
         self.rebuild_chat_render_state_if_rect();
     }
 

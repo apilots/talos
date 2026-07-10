@@ -1,6 +1,11 @@
 pub(crate) mod chat_lines;
 pub(crate) mod command_autocomplete;
+pub(crate) mod composer;
+pub(crate) mod frame;
 pub(crate) mod helpers;
 pub(crate) mod input_lines;
+pub(crate) mod input_panel;
+pub(crate) mod metrics_bar;
 pub(crate) mod skill_autocomplete;
+pub(crate) mod status_bar;
 pub(crate) mod ui;

@@ -306,7 +306,7 @@ fn test_synced_long_transcript_stays_out_of_inline_viewport() {
     let rendered = buffer_lines(terminal.backend().buffer()).join("\n");
 
     assert!(!rendered.contains("notice 000"));
-    assert_eq!(app.inline_viewport_height(100, 30), 6);
+    assert_eq!(app.inline_viewport_height(100, 30), 7);
 }
 
 #[test]
@@ -348,8 +348,10 @@ fn test_synced_history_without_live_content_keeps_input_below_idle_gap() {
         .iter()
         .position(|line| line.contains("❯"))
         .expect("input prompt should render");
+    let input_area = app.input_area.expect("composer should record input area");
+    let centered_prompt_row = input_area.y + (input_area.height.saturating_sub(1) / 2);
 
-    assert_eq!(input_index, 3);
+    assert_eq!(input_index, centered_prompt_row as usize);
 }
 
 #[test]
@@ -388,7 +390,8 @@ fn test_live_round_is_separated_from_synced_history() {
         .collect::<Vec<_>>();
     app.render_runtime
         .mark_terminal_blocks_synced(synced_block_ids);
-    app.render_runtime.start_live_text(
+    start_live_text(
+        &mut app.render_runtime,
         "item-live",
         crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
         "live answer",
@@ -856,7 +859,8 @@ fn test_rebuild_chat_render_state_uses_status_projection() {
 fn test_rebuild_chat_render_state_uses_live_tail_when_available() {
     let mut app = create_embedded_app();
     app.render_runtime.append_user_input("transcript user");
-    app.render_runtime.start_live_text(
+    start_live_text(
+        &mut app.render_runtime,
         "item-live",
         crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
         "live answer",
@@ -880,7 +884,8 @@ fn test_rebuild_chat_render_state_uses_live_tail_when_available() {
 #[test]
 fn test_live_activity_line_is_separated_from_live_tail() {
     let mut app = create_embedded_app();
-    app.render_runtime.start_live_text(
+    start_live_text(
+        &mut app.render_runtime,
         "item-live",
         crate::render_runtime::render::live::LiveTextKind::FinalAnswer,
         "live answer",
@@ -910,12 +915,14 @@ fn test_live_activity_line_is_separated_from_live_tail() {
 #[test]
 fn test_live_model_feedback_preserves_kind_specific_rendering() {
     let mut app = create_embedded_app();
-    app.render_runtime.start_live_text(
+    start_live_text(
+        &mut app.render_runtime,
         "thinking-live",
         crate::render_runtime::render::live::LiveTextKind::Thinking,
         "inspect files",
     );
-    app.render_runtime.start_live_text(
+    start_live_text(
+        &mut app.render_runtime,
         "commentary-live",
         crate::render_runtime::render::live::LiveTextKind::Commentary,
         "Reading project",
@@ -940,14 +947,14 @@ fn test_live_model_feedback_preserves_kind_specific_rendering() {
 fn test_rebuild_chat_render_state_uses_active_tool_snapshot_when_available() {
     let mut app = create_embedded_app();
     app.render_runtime.append_user_input("transcript user");
-    app.render_runtime.start_tool_with_arguments(
+    start_live_tool(
+        &mut app.render_runtime,
         "tool-1",
         "call-1",
         "Read",
         r#"{"file_path":"/tmp/demo.rs"}"#,
     );
-    app.render_runtime
-        .append_stable_tool_progress("tool-1", "Read 12 lines");
+    append_live_tool_progress(&mut app.render_runtime, "tool-1", "Read 12 lines");
     app.in_flight = true;
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));

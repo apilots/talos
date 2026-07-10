@@ -1,30 +1,18 @@
-//! Composes the render runtime, live reducer, transcript store, and terminal writer.
+//! Composes the render runtime, live reducer, and transcript store.
 
 use std::collections::HashMap;
-#[cfg(test)]
-use std::io::{self, Write};
-use std::marker::PhantomData;
 
 use crate::render_runtime::common::style::StyledLine;
-use crate::render_runtime::render::history::append_history_blocks;
-#[cfg(test)]
-use crate::render_runtime::render::live::LiveTextKind;
 use crate::render_runtime::render::live::{LiveProjectionBlock, LiveReducer};
 use crate::render_runtime::render::timeline::{
     apply_assistant_text_committed, apply_item_completed, apply_item_delta, apply_item_started,
 };
 use crate::render_runtime::runtime::controller::RuntimeController;
-#[cfg(test)]
-use crate::render_runtime::runtime::controller::RuntimeCycle;
 use crate::render_runtime::runtime::event_loop::TuiRuntimeEvent;
 use crate::render_runtime::transcript::block::TranscriptBlockId;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
 use crate::render_runtime::transcript::store::PendingTerminalBlock;
 use crate::render_runtime::transcript::store::TranscriptStore;
-#[cfg(test)]
-use crate::render_runtime::transcript::sync::flush_pending_terminal_blocks;
-#[cfg(test)]
-use crate::render_runtime::transcript::writer::{InteractionLayer, TerminalTranscriptWriter};
 use talos_sdk::{
     AgentEventPayload, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
     TalosTimelineItemKind, TalosTimelinePhase,
@@ -33,58 +21,15 @@ use talos_sdk::{
 /// Runtime engine for the render runtime.
 ///
 /// This owns the transcript data flow for interactive and terminal projections.
-pub(crate) struct RenderRuntimeEngine<W, I> {
+#[derive(Default)]
+pub(crate) struct RenderRuntimeEngine {
     runtime: RuntimeController,
     live: LiveReducer,
     store: TranscriptStore,
-    #[cfg(test)]
-    writer: TerminalTranscriptWriter<W>,
-    #[cfg(test)]
-    interaction_layer: I,
     timeline_items: HashMap<String, TalosTimelineItem>,
-    _marker: PhantomData<(W, I)>,
 }
 
-/// In-memory interaction layer used by tests and buffered runtime checks.
-#[derive(Debug, Default)]
-pub(crate) struct BufferedInteractionLayer;
-
-#[cfg(test)]
-impl InteractionLayer for BufferedInteractionLayer {
-    fn suspend(&mut self, _output: &mut dyn Write) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn repaint(&mut self, _output: &mut dyn Write) -> io::Result<()> {
-        Ok(())
-    }
-
-    fn restore(&mut self, _output: &mut dyn Write) -> io::Result<()> {
-        Ok(())
-    }
-}
-
-pub(crate) type BufferedRenderRuntimeEngine =
-    RenderRuntimeEngine<Vec<u8>, BufferedInteractionLayer>;
-
-impl<W, I> RenderRuntimeEngine<W, I> {
-    #[cfg(test)]
-    pub(crate) fn new(output: W, interaction_layer: I) -> Self
-    where
-        W: Write,
-        I: InteractionLayer,
-    {
-        Self {
-            runtime: RuntimeController::default(),
-            live: LiveReducer::default(),
-            store: TranscriptStore::default(),
-            writer: TerminalTranscriptWriter::new(output),
-            interaction_layer,
-            timeline_items: HashMap::new(),
-            _marker: PhantomData,
-        }
-    }
-
+impl RenderRuntimeEngine {
     pub(crate) fn append_user_input(&mut self, text: impl Into<String>) {
         let text = text.into();
         if text.trim().is_empty() {
@@ -131,55 +76,15 @@ impl<W, I> RenderRuntimeEngine<W, I> {
         &mut self,
         blocks: impl IntoIterator<Item = FinalizedTranscriptBlock>,
     ) -> usize {
-        let count = append_history_blocks(&mut self.store, blocks);
+        let mut count = 0usize;
+        for block in blocks {
+            self.store.push_finalized(block);
+            count += 1;
+        }
         if count > 0 {
             self.runtime.handle_event(TuiRuntimeEvent::HistoryLoaded);
         }
         count
-    }
-
-    #[cfg(test)]
-    pub(crate) fn start_live_text(
-        &mut self,
-        item_id: impl Into<String>,
-        kind: LiveTextKind,
-        text: impl AsRef<str>,
-    ) {
-        self.live.start_text(item_id, kind, text);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn append_live_text(&mut self, item_id: &str, text: &str) {
-        self.live.append_text(item_id, text);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn finalize_live_text(&mut self, item_id: &str) {
-        if let Some(block) = self.live.finalize_text(item_id) {
-            self.push_finalized(block);
-            self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn start_tool_with_arguments(
-        &mut self,
-        item_id: impl Into<String>,
-        call_id: impl Into<String>,
-        name: impl Into<String>,
-        arguments: impl Into<String>,
-    ) {
-        self.live
-            .start_tool_with_arguments(item_id, call_id, name, arguments);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
-    }
-
-    #[cfg(test)]
-    pub(crate) fn append_stable_tool_progress(&mut self, item_id: &str, text: impl Into<String>) {
-        self.live.append_stable_tool_progress(item_id, text);
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
     }
 
     pub(crate) fn apply_timeline_item_started(&mut self, item: &TalosTimelineItem) {
@@ -275,34 +180,8 @@ impl<W, I> RenderRuntimeEngine<W, I> {
         self.runtime.handle_event(event);
     }
 
-    #[cfg(test)]
-    pub(crate) fn run_cycle(&mut self) -> io::Result<RuntimeCycle>
-    where
-        W: Write,
-        I: InteractionLayer,
-    {
-        let cycle = self.runtime.take_cycle();
-        if cycle.flush_terminal_transcript {
-            flush_pending_terminal_blocks(
-                &mut self.store,
-                &mut self.writer,
-                &mut self.interaction_layer,
-            )?;
-        }
-        Ok(cycle)
-    }
-
     pub(crate) fn should_draw_frame(&mut self, fingerprint: u64) -> bool {
         self.runtime.should_draw_frame(fingerprint)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn flush_pending_terminal_to<W2: Write>(
-        &mut self,
-        writer: &mut TerminalTranscriptWriter<W2>,
-        interaction_layer: &mut impl InteractionLayer,
-    ) -> io::Result<bool> {
-        flush_pending_terminal_blocks(&mut self.store, writer, interaction_layer)
     }
 
     pub(crate) fn pending_terminal_projection(&self) -> Vec<PendingTerminalBlock> {
@@ -346,11 +225,6 @@ impl<W, I> RenderRuntimeEngine<W, I> {
         self.store.clear();
         self.live = LiveReducer::default();
         self.timeline_items.clear();
-    }
-
-    #[cfg(test)]
-    pub(crate) fn into_parts(self) -> (TranscriptStore, TerminalTranscriptWriter<W>, I) {
-        (self.store, self.writer, self.interaction_layer)
     }
 
     fn push_finalized(&mut self, block: FinalizedTranscriptBlock) {
@@ -416,32 +290,13 @@ impl<W, I> RenderRuntimeEngine<W, I> {
     }
 }
 
-impl BufferedRenderRuntimeEngine {
-    pub(crate) fn new_buffered() -> Self {
-        Self {
-            runtime: RuntimeController::default(),
-            live: LiveReducer::default(),
-            store: TranscriptStore::default(),
-            #[cfg(test)]
-            writer: TerminalTranscriptWriter::new(Vec::new()),
-            #[cfg(test)]
-            interaction_layer: BufferedInteractionLayer,
-            timeline_items: HashMap::new(),
-            _marker: PhantomData,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::io::{self, Write};
-
     use super::RenderRuntimeEngine;
     use crate::render_runtime::common::style::StyledLine;
     use crate::render_runtime::render::live::LiveTextKind;
-    use crate::render_runtime::runtime::controller::RuntimeCycle;
     use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
-    use crate::render_runtime::transcript::writer::InteractionLayer;
+    use crate::test_support::{append_live_text, finalize_live_text, start_live_text};
     use talos_sdk::{
         AgentEventPayload, TalosAssistantTextCommittedEvent, TalosItemCompletedEvent,
         TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta,
@@ -449,74 +304,39 @@ mod tests {
         TalosTurnErrorEvent,
     };
 
-    struct TestInteractionLayer;
-
-    impl InteractionLayer for TestInteractionLayer {
-        fn suspend(&mut self, output: &mut dyn Write) -> io::Result<()> {
-            output.write_all(b"[suspend]")
-        }
-
-        fn repaint(&mut self, output: &mut dyn Write) -> io::Result<()> {
-            output.write_all(b"[repaint]")
-        }
-
-        fn restore(&mut self, output: &mut dyn Write) -> io::Result<()> {
-            output.write_all(b"[restore]")
-        }
+    fn pending_plain_text(engine: &RenderRuntimeEngine) -> Vec<String> {
+        engine
+            .pending_terminal_projection()
+            .into_iter()
+            .flat_map(|block| block.lines)
+            .map(|line| line.plain_text())
+            .collect()
     }
 
     #[test]
-    fn finalized_user_input_flushes_to_terminal_projection() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+    fn finalized_user_input_enters_terminal_projection() {
+        let mut engine = RenderRuntimeEngine::default();
         engine.append_user_input("hello");
 
-        let cycle = engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
-
-        assert_eq!(
-            cycle,
-            RuntimeCycle {
-                flush_terminal_transcript: true,
-                commit_live_stream: false,
-                draw_frame: true,
-            }
-        );
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]hello\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
     }
 
     #[test]
     fn live_text_flushes_only_after_finalize() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
-        engine.start_live_text("item-1", LiveTextKind::Commentary, "hello");
-        engine.append_live_text("item-1", " world");
+        let mut engine = RenderRuntimeEngine::default();
+        start_live_text(&mut engine, "item-1", LiveTextKind::Commentary, "hello");
+        append_live_text(&mut engine, "item-1", LiveTextKind::Commentary, " world");
 
-        let live_cycle = engine.run_cycle().unwrap();
-        assert_eq!(
-            live_cycle,
-            RuntimeCycle {
-                flush_terminal_transcript: false,
-                commit_live_stream: true,
-                draw_frame: true,
-            }
-        );
+        assert!(engine.pending_terminal_projection().is_empty());
 
-        engine.finalize_live_text("item-1");
-        let finalized_cycle = engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
+        finalize_live_text(&mut engine, "item-1", LiveTextKind::Commentary);
 
-        assert!(finalized_cycle.flush_terminal_transcript);
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]hello world\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["hello world"]);
     }
 
     #[test]
     fn history_blocks_enter_store_and_terminal_pending_path() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
         let count = engine.append_history([FinalizedTranscriptBlock::new(
             TranscriptBlockKind::FinalAnswer,
             vec![StyledLine::plain("done")],
@@ -524,14 +344,7 @@ mod tests {
 
         assert_eq!(count, 1);
         assert_eq!(engine.store().blocks().len(), 1);
-
-        engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
-
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]done\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["done"]);
     }
 
     fn timeline_text_item(phase: TalosTimelinePhase) -> TalosTimelineItem {
@@ -568,7 +381,7 @@ mod tests {
 
     #[test]
     fn agent_event_user_input_started_does_not_duplicate_local_pending_user_block() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
         engine.append_user_input("hello");
         let item = timeline_user_input_item("hello");
 
@@ -589,7 +402,7 @@ mod tests {
 
     #[test]
     fn agent_event_user_input_started_does_not_duplicate_local_synced_user_block() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
         engine.append_user_input("hello");
         let synced_ids = engine
             .pending_terminal_projection()
@@ -616,7 +429,7 @@ mod tests {
 
     #[test]
     fn engine_consumes_timeline_text_lifecycle_without_early_flush() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
         let item = timeline_text_item(TalosTimelinePhase::Unknown);
 
         engine.apply_timeline_item_started(&item);
@@ -627,23 +440,16 @@ mod tests {
             },
         );
         engine.apply_assistant_text_committed(&item.item_id, TalosTimelinePhase::FinalAnswer);
-        let live_cycle = engine.run_cycle().unwrap();
-        assert!(!live_cycle.flush_terminal_transcript);
+        assert!(engine.pending_terminal_projection().is_empty());
 
         engine.apply_timeline_item_completed(&item, None);
-        let finalized_cycle = engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
 
-        assert!(finalized_cycle.flush_terminal_transcript);
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]hello\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
     }
 
     #[test]
     fn engine_consumes_agent_event_payload_lifecycle() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
         let item = timeline_text_item(TalosTimelinePhase::Unknown);
 
         engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
@@ -677,18 +483,13 @@ mod tests {
                 final_content: None,
             },
         ));
-        engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
 
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]hello\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
     }
 
     #[test]
     fn engine_converts_turn_error_to_system_notice_projection() {
-        let mut engine = RenderRuntimeEngine::new(Vec::new(), TestInteractionLayer);
+        let mut engine = RenderRuntimeEngine::default();
 
         engine.apply_agent_event_payload(AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: "request-1".to_string(),
@@ -697,53 +498,34 @@ mod tests {
             error_info: None,
             failed_at_ms: 2,
         }));
-        engine.run_cycle().unwrap();
-        let (_, writer, _) = engine.into_parts();
 
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]Stream error: boom\u{1b}[0m\n[repaint][restore]"
-        );
-    }
-
-    #[test]
-    fn engine_flushes_pending_transcript_to_external_writer() {
-        let mut engine = super::BufferedRenderRuntimeEngine::new_buffered();
-        let mut writer =
-            crate::render_runtime::transcript::writer::TerminalTranscriptWriter::new(Vec::new());
-
-        engine.append_user_input("external writer");
-        let flushed = engine
-            .flush_pending_terminal_to(&mut writer, &mut TestInteractionLayer)
-            .unwrap();
-
-        assert!(flushed);
-        assert!(engine.store().pending_terminal_projection().is_empty());
-        assert_eq!(
-            String::from_utf8(writer.into_inner()).unwrap(),
-            "[suspend]external writer\u{1b}[0m\n[repaint][restore]"
-        );
+        assert_eq!(pending_plain_text(&engine), vec!["Stream error: boom"]);
     }
 
     #[test]
     fn reset_transcript_clears_store_and_live_state() {
-        let mut engine = super::BufferedRenderRuntimeEngine::new_buffered();
+        let mut engine = RenderRuntimeEngine::default();
 
         engine.append_user_input("hello");
-        engine.start_live_text("item-1", LiveTextKind::FinalAnswer, "pending");
+        start_live_text(&mut engine, "item-1", LiveTextKind::FinalAnswer, "pending");
         engine.reset_transcript();
 
         assert!(engine.store().blocks().is_empty());
-        engine.finalize_live_text("item-1");
+        finalize_live_text(&mut engine, "item-1", LiveTextKind::FinalAnswer);
         assert!(engine.store().blocks().is_empty());
     }
 
     #[test]
     fn interactive_projection_includes_finalized_and_live_text() {
-        let mut engine = super::BufferedRenderRuntimeEngine::new_buffered();
+        let mut engine = RenderRuntimeEngine::default();
 
         engine.append_user_input("hello");
-        engine.start_live_text("item-1", LiveTextKind::FinalAnswer, "live answer");
+        start_live_text(
+            &mut engine,
+            "item-1",
+            LiveTextKind::FinalAnswer,
+            "live answer",
+        );
 
         let lines = engine.interactive_projection_lines();
 
