@@ -28,16 +28,16 @@ export function buildToolResultModel({
     return buildTaskModel(items, progress, status);
   }
   if (items.some((item) => item.type === "diff")) {
-    return buildDiffModel(items);
+    return buildDiffModel(items, status);
   }
   if (items.some((item) => item.type === "file_read")) {
-    return buildFileModel(items);
+    return buildFileModel(items, status);
   }
   if (items.some((item) => item.type === "search_results")) {
-    return buildExploredModel(items);
+    return buildExploredModel(items, status);
   }
   if (items.some((item) => item.type === "web_reference")) {
-    return buildReferenceModel(items);
+    return buildReferenceModel(items, status);
   }
   if (items.length > 0) {
     return buildTextJsonModel(items, status);
@@ -52,7 +52,12 @@ export function ToolResultRenderer(props: {
   status: ChatToolStatus;
 }) {
   const model = buildToolResultModel(props);
-  return <div className="space-y-3">{model.body}</div>;
+  return (
+    <div className="space-y-3">
+      <ToolResultSummaryLine summary={model.summary} />
+      {model.body}
+    </div>
+  );
 }
 
 export function ToolResultPreview(props: {
@@ -66,7 +71,8 @@ export function ToolResultPreview(props: {
     return null;
   }
   return (
-    <div className="border-t border-border/55 px-4 pb-3 text-[12px] leading-5 text-muted">
+    <div className="space-y-1 border-t border-border/55 px-4 py-3 text-[12px] leading-5 text-muted">
+      <ToolResultSummaryLine summary={model.summary} />
       {model.preview.slice(0, 2).map((line, index) => (
         <div className="truncate" key={`${line}-${index}`}>
           {line}
@@ -76,13 +82,8 @@ export function ToolResultPreview(props: {
   );
 }
 
-export function ToolResultSummary(props: {
-  contentItems?: TalosContentItem[];
-  fallbackOutput?: string;
-  progress: ToolProgress;
-  status: ChatToolStatus;
-}) {
-  return buildToolResultModel(props).summary;
+function ToolResultSummaryLine({ summary }: { summary: string }) {
+  return <div className="font-medium text-ink/75">{summary}</div>;
 }
 
 function buildTaskModel(
@@ -98,31 +99,22 @@ function buildTaskModel(
     .map((entry) => entry.message)
     .join("");
   const exitCode = lastDefined(taskItems.map((item) => item.exit_code));
-  const elapsedMs = lastDefined(taskItems.map((item) => item.elapsed_ms));
   const output = [stdout, stderr].filter(Boolean).join(stderr && stdout ? "\n\n" : "") || liveOutput;
   const firstLine = firstNonEmptyLine(output);
-  const summary =
-    status === "running"
-      ? "Running"
-      : status === "error"
-        ? exitCode !== undefined && exitCode !== null
-          ? `Error · exit ${exitCode}${formatDurationSuffix(elapsedMs)}`
-          : `Error${formatDurationSuffix(elapsedMs)}`
-        : exitCode !== undefined && exitCode !== null
-          ? `Done · exit ${exitCode}${formatDurationSuffix(elapsedMs)}`
-          : `Done${formatDurationSuffix(elapsedMs)}`;
+  const exitSuffix = exitCode !== undefined && exitCode !== null ? ` · exit ${exitCode}` : "";
+  const summary = `${toolResultStateLabel(status)}${exitSuffix}`;
   return {
     summary,
     preview: firstLine ? [firstLine] : [],
-    body: (
+    body: output ? (
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
-        {output || summary}
+        {output}
       </pre>
-    ),
+    ) : null,
   };
 }
 
-function buildDiffModel(items: TalosContentItem[]): ToolResultRenderModel {
+function buildDiffModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
   const diffItems = items.filter((item) => item.type === "diff");
   let files = 0;
   let added = 0;
@@ -155,7 +147,7 @@ function buildDiffModel(items: TalosContentItem[]): ToolResultRenderModel {
       lines.push("");
     }
   }
-  const summary = `Done · ${files} file(s) · +${added} -${removed}`;
+  const summary = `${toolResultStateLabel(status)} · ${files} file(s) · +${added} -${removed}`;
   return {
     summary,
     preview: [`${files} file(s) changed · +${added} -${removed}`],
@@ -167,7 +159,7 @@ function buildDiffModel(items: TalosContentItem[]): ToolResultRenderModel {
   };
 }
 
-function buildFileModel(items: TalosContentItem[]): ToolResultRenderModel {
+function buildFileModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
   const fileItems = items.filter((item) => item.type === "file_read");
   const lines: string[] = [];
   let count = 0;
@@ -179,7 +171,7 @@ function buildFileModel(items: TalosContentItem[]): ToolResultRenderModel {
       lines.push(`${String(start + index).padStart(4, " ")} ${line}`);
     }
   }
-  const summary = `Done · ${count} lines`;
+  const summary = `${toolResultStateLabel(status)} · ${count} lines`;
   return {
     summary,
     preview: [firstNonEmptyLine(lines.join("\n")) ?? summary],
@@ -191,7 +183,7 @@ function buildFileModel(items: TalosContentItem[]): ToolResultRenderModel {
   };
 }
 
-function buildExploredModel(items: TalosContentItem[]): ToolResultRenderModel {
+function buildExploredModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
   const lines: string[] = [];
   let count = 0;
   for (const item of items) {
@@ -215,7 +207,7 @@ function buildExploredModel(items: TalosContentItem[]): ToolResultRenderModel {
       }
     }
   }
-  const summary = `Done · ${count} result(s)`;
+  const summary = `${toolResultStateLabel(status)} · ${count} result(s)`;
   return {
     summary,
     preview: lines.filter(Boolean).slice(0, 2),
@@ -223,7 +215,7 @@ function buildExploredModel(items: TalosContentItem[]): ToolResultRenderModel {
   };
 }
 
-function buildReferenceModel(items: TalosContentItem[]): ToolResultRenderModel {
+function buildReferenceModel(items: TalosContentItem[], status: ChatToolStatus): ToolResultRenderModel {
   const lines = items.flatMap((item) => {
     if (item.type === "web_reference") {
       return [item.title ?? item.url, item.source_domain ?? item.url, item.snippet ?? ""].filter(Boolean);
@@ -236,7 +228,7 @@ function buildReferenceModel(items: TalosContentItem[]): ToolResultRenderModel {
     }
     return [];
   });
-  const summary = `Done · ${lines.length || 1} reference(s)`;
+  const summary = `${toolResultStateLabel(status)} · ${lines.length || 1} reference(s)`;
   return {
     summary,
     preview: lines.slice(0, 2),
@@ -258,15 +250,15 @@ function buildTextJsonModel(items: TalosContentItem[], status: ChatToolStatus): 
     return [];
   });
   const text = lines.join("\n");
-  const summary = status === "running" ? "Running" : status === "error" ? "Error" : "Done";
+  const summary = toolResultStateLabel(status);
   return {
     summary,
     preview: [firstNonEmptyLine(text) ?? summary],
-    body: (
+    body: text ? (
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
         {text}
       </pre>
-    ),
+    ) : null,
   };
 }
 
@@ -281,7 +273,7 @@ function buildProgressFallbackModel(
       .filter((entry) => entry.kind === "stdout" || entry.kind === "stderr")
       .map((entry) => entry.message)
       .join("");
-  const summary = status === "running" ? "Running" : status === "error" ? "Error" : "Done";
+  const summary = toolResultStateLabel(status);
   return {
     summary,
     preview: output ? [firstNonEmptyLine(output) ?? output] : [],
@@ -289,10 +281,23 @@ function buildProgressFallbackModel(
       <pre className="max-h-80 overflow-auto rounded-lg border border-border/70 bg-surface/85 p-3 font-mono text-[12px] leading-5 text-ink">
         {output}
       </pre>
-    ) : (
-      <div className="text-[12px] text-muted">{summary}</div>
-    ),
+    ) : null,
   };
+}
+
+function toolResultStateLabel(status: ChatToolStatus) {
+  switch (status) {
+    case "queued":
+      return "Queued";
+    case "running":
+      return "Running";
+    case "waiting_dynamic_input":
+      return "Waiting for input";
+    case "done":
+      return "Completed";
+    case "error":
+      return "Failed";
+  }
 }
 
 function ResultList({ lines }: { lines: string[] }) {
@@ -319,11 +324,4 @@ function lastDefined<T>(values: Array<T | null | undefined>) {
     }
   }
   return undefined;
-}
-
-function formatDurationSuffix(value: number | null | undefined) {
-  if (value === undefined || value === null) {
-    return "";
-  }
-  return ` · ${(value / 1000).toFixed(1)}s`;
 }

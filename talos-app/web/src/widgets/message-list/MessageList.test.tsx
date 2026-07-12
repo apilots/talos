@@ -151,8 +151,8 @@ describe("MessageList", () => {
     });
   });
 
-  it("renders timeline blocks with product labels, tool progress, and duration", async () => {
-    const { getAllByText, getByText, queryByText } = render(
+  it("renders timeline blocks with distinct labels, one tool card, and duration", async () => {
+    const { container, getAllByText, getByText } = render(
       <MessageList
         blocks={[
           {
@@ -206,6 +206,15 @@ describe("MessageList", () => {
                 startedAtMs: 25,
                 completedAtMs: 325,
               },
+              {
+                itemId: "summary-1",
+                kind: "execution_summary",
+                phase: "system",
+                status: "completed",
+                text: "Validation completed.",
+                startedAtMs: 326,
+                completedAtMs: 330,
+              },
             ],
           },
         ]}
@@ -215,24 +224,24 @@ describe("MessageList", () => {
     );
 
     expect(getByText("Thinking / Acting")).not.toBeNull();
-    expect(getByText("Completed")).not.toBeNull();
-    expect(getByText("46 tokens")).not.toBeNull();
-    expect(getByText((content) => content === "315ms")).not.toBeNull();
+    expect(getByText("46 tokens").parentElement?.textContent).toContain("Completed");
+    expect(getByText((content) => content === "320ms")).not.toBeNull();
     fireEvent.click(getByText("Thinking / Acting"));
 
     await waitFor(() => {
       expect(getByText("Checking context")).not.toBeNull();
       expect(getByText("I will inspect the workspace.")).not.toBeNull();
-      expect(getAllByText("Thinking").length).toBeGreaterThanOrEqual(2);
-      expect(getAllByText("Bash").length).toBeGreaterThan(0);
-      expect(getByText("300ms")).not.toBeNull();
-      expect(queryByText("completed · 300ms")).toBeNull();
-      expect(queryByText("assistant text")).toBeNull();
-      expect(queryByText("commentary")).toBeNull();
+      expect(getAllByText("Thinking")).toHaveLength(1);
+      expect(getByText("Commentary")).not.toBeNull();
+      expect(getByText("Execution summary")).not.toBeNull();
+      expect(getByText("Validation completed.")).not.toBeNull();
+      expect(getAllByText(/Bash/)).toHaveLength(1);
+      expect(getByText(/300ms/)).not.toBeNull();
+      expect(container.querySelectorAll('[data-tool-call-card="true"]')).toHaveLength(1);
     });
   });
 
-  it("renders thinking text as ordered timeline thought lines", async () => {
+  it("preserves complete thinking sentences and model-provided line breaks", async () => {
     const { container, getAllByText, getByLabelText, getByText } = render(
       <MessageList
         blocks={[
@@ -245,7 +254,7 @@ describe("MessageList", () => {
                 kind: "reasoning",
                 phase: "thinking",
                 status: "running",
-                text: "First thought. Second thought.",
+                text: "First thought. Second thought.\nThird thought.",
                 startedAtMs: 10,
               },
               {
@@ -267,30 +276,47 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(getByText("First thought.")).not.toBeNull();
-    expect(getByText("Second thought.")).not.toBeNull();
-    expect(getAllByText("Glob").length).toBeGreaterThan(0);
+    const thinkingText = getByText((_, element) =>
+      element?.getAttribute("data-timeline-text") === "true",
+    );
+    expect(thinkingText.textContent).toBe("First thought. Second thought.\nThird thought.");
+    expect(getAllByText(/Glob/).length).toBeGreaterThan(0);
     expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
     expect(container.querySelectorAll("ol > li")).toHaveLength(3);
   });
 
-  it("does not show a running status label on thinking items", async () => {
-    const { getByLabelText, queryByText } = render(
+  it("keeps the same timeline item element when working text becomes a final answer", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const processItem = {
+      itemId: "thinking-1",
+      kind: "reasoning" as const,
+      phase: "thinking" as const,
+      status: "completed" as const,
+      text: "Checked the workspace.",
+      startedAtMs: 1,
+      completedAtMs: 9,
+    };
+    const workingItem = {
+      itemId: "answer-1",
+      sourceItemId: "answer-1",
+      kind: "assistant_text" as const,
+      phase: "unknown" as const,
+      status: "running" as const,
+      text: "Streaming **answer**.",
+      startedAtMs: 10,
+    };
+    const { container, getByText, rerender } = render(
       <MessageList
         blocks={[
           {
-            id: "timeline-running-thinking",
+            id: "timeline-session-1-message-1",
             kind: "timeline",
-            items: [
-              {
-                itemId: "thinking-1",
-                kind: "reasoning",
-                phase: "thinking",
-                status: "running",
-                text: "Checking the current context.",
-                startedAtMs: Date.now() - 1200,
-              },
-            ],
+            live: true,
+            items: [processItem, workingItem],
           },
         ]}
         emptyDetail=""
@@ -298,27 +324,19 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(queryByText("running")).toBeNull();
-    expect(getByLabelText("Waiting for timeline update")).not.toBeNull();
-  });
+    const initialItem = container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]');
+    expect(initialItem).toBeInstanceOf(HTMLElement);
+    expect(initialItem?.getAttribute("data-timeline-response")).toBe("true");
+    expect(getByText("Working")).not.toBeNull();
 
-  it("hides the timeline waiting indicator after the final answer phase starts", async () => {
-    const { queryByLabelText } = render(
+    rerender(
       <MessageList
         blocks={[
           {
-            id: "timeline-final-answer",
+            id: "timeline-session-1-message-1",
             kind: "timeline",
-            items: [
-              {
-                itemId: "answer-1",
-                kind: "assistant_text",
-                phase: "final_answer",
-                status: "running",
-                text: "Streaming final answer.",
-                startedAtMs: Date.now() - 1200,
-              },
-            ],
+            live: false,
+            items: [processItem, { ...workingItem, phase: "final_answer", status: "completed" }],
           },
         ]}
         emptyDetail=""
@@ -326,7 +344,22 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(queryByLabelText("Waiting for timeline update")).toBeNull();
+    expect(container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]')).toBe(initialItem);
+    expect(getByText("Final answer")).not.toBeNull();
+    await waitFor(() => {
+      expect(container.querySelector(".markdown-body strong")?.textContent).toBe("answer");
+    });
+
+    const responseItem = container.querySelector('[data-timeline-response="true"]');
+    const responseCopyButton = responseItem?.parentElement?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy block"]',
+    );
+    expect(responseCopyButton).toBeInstanceOf(HTMLButtonElement);
+    fireEvent.click(responseCopyButton as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("Streaming **answer**.");
+    });
   });
 
   it("shows the timeline waiting indicator while a live turn is between completed tool work and the next server item", async () => {

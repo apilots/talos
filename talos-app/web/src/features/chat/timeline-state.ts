@@ -1,6 +1,5 @@
 import type {
   ChatTurnMetrics,
-  ChatRenderBlock,
   ChatTimelineItem,
   StreamSessionState,
 } from "@/shared/types/ui";
@@ -149,51 +148,19 @@ export function commitTimelineAssistantTextInStream(
   itemId: string,
   phase: TalosTimelinePhase,
 ) {
-  let movedText = "";
-  const blocks: ChatRenderBlock[] = [];
-  for (const block of stream.blocks) {
+  const blocks = stream.blocks.map((block) => {
     if (block.kind !== "timeline" || block.id !== timelineBlockId(sessionId, messageId)) {
-      blocks.push(block);
-      continue;
+      return block;
     }
-    const items: ChatTimelineItem[] = [];
-    for (const item of block.items) {
-      const sameSource = item.itemId === itemId || item.sourceItemId === itemId;
-      if (!sameSource) {
-        items.push(item);
-        continue;
-      }
-      if (item.kind !== "tool_call") {
-        movedText += item.text;
-      }
-      if (phase !== "final_answer") {
-        items.push({ ...item, phase });
-      }
-    }
-    if (items.length === 0 && phase === "final_answer" && !block.metrics) {
-      continue;
-    }
-    blocks.push({ ...block, items, live: phase !== "final_answer" });
-  }
-  const nextBlocks = [...blocks];
-  if (phase === "final_answer" && movedText.trim()) {
-    const lastBlock = nextBlocks.at(-1);
-    if (lastBlock?.kind === "assistant") {
-      nextBlocks[nextBlocks.length - 1] = {
-        ...lastBlock,
-        text: lastBlock.text + movedText,
-        live: true,
-      };
-    } else {
-      nextBlocks.push({
-        id: `assistant-${Date.now()}-${nextBlocks.length}`,
-        kind: "assistant",
-        text: movedText,
-        live: true,
-      });
-    }
-  }
-  return { ...stream, isStreaming: true, blocks: nextBlocks };
+    return {
+      ...block,
+      items: block.items.map((item) => {
+        const sameSource = item.itemId === itemId || item.sourceItemId === itemId;
+        return sameSource && item.kind !== "tool_call" ? { ...item, phase } : item;
+      }),
+    };
+  });
+  return { ...stream, isStreaming: true, blocks };
 }
 
 export function updateTimelineToolInStream(

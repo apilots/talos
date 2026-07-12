@@ -23,7 +23,10 @@ function Section({
 export const ToolCallCard = {
   Root({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
     return (
-      <div className={cn("w-full", !compact && "md:ml-11 md:max-w-[39rem]")}>
+      <div
+        className={cn("w-full", !compact && "md:ml-11 md:max-w-[39rem]")}
+        data-tool-call-card="true"
+      >
         <Panel
           className={cn(
             "overflow-hidden border-border/65 bg-card/76",
@@ -38,12 +41,14 @@ export const ToolCallCard = {
     );
   },
   Header({
+    durationLabel,
     open,
     onToggle,
     statusLabel,
     title,
     tone,
   }: {
+    durationLabel?: string;
     open: boolean;
     onToggle: () => void;
     statusLabel: string;
@@ -52,20 +57,24 @@ export const ToolCallCard = {
   }) {
     return (
       <button
+        aria-expanded={open}
         className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
         onClick={onToggle}
         type="button"
       >
-        <div className="flex items-center gap-3">
-          <span className="rounded-[0.85rem] border border-brand/14 bg-brand/5 p-2 text-brand/85">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
+          <span className="shrink-0 rounded-[0.85rem] border border-brand/14 bg-brand/5 p-2 text-brand/85">
             <Wrench size={13} />
           </span>
-          <div className="min-w-0">
-            <div className="text-[13.5px] font-medium text-ink">{title}</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13.5px] font-medium text-ink" title={title}>
+              {title}
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge className="text-[10px]" tone={tone}>
+        <div className="flex shrink-0 items-center gap-2">
+          {durationLabel ? <span className="text-[11px] text-muted">{durationLabel}</span> : null}
+          <Badge className="whitespace-nowrap text-[10px]" tone={tone}>
             {statusLabel}
           </Badge>
           {open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -115,21 +124,6 @@ export const ToolCallCard = {
       </Section>
     );
   },
-  Output({
-    content,
-    title,
-  }: {
-    content: string;
-    title: string;
-  }) {
-    return (
-      <Section title={title}>
-        <pre className="overflow-x-auto rounded-[0.95rem] border border-border/75 bg-surface/88 p-3 font-mono text-[12px] leading-5 text-ink">
-          {content}
-        </pre>
-      </Section>
-    );
-  },
   Details({ children, title }: { children: ReactNode; title: string }) {
     return (
       <details className="rounded-lg border border-border/65 bg-background/40">
@@ -149,24 +143,18 @@ export const ToolCallCard = {
     );
   },
   Prompt({
-    children,
     prompt,
     title,
   }: {
-    children?: ReactNode;
     prompt: string;
     title: string;
   }) {
     return (
       <Section title={title}>
         <div
-          className={cn(
-            "rounded-[0.95rem] border border-border/70 bg-background/45 p-3 text-[13px] leading-6 text-ink",
-            children ? "space-y-3" : "",
-          )}
+          className="rounded-[0.95rem] border border-border/70 bg-background/45 p-3 text-[13px] leading-6 text-ink"
         >
           <p>{prompt}</p>
-          {children}
         </div>
       </Section>
     );

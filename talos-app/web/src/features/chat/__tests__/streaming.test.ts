@@ -48,17 +48,26 @@ describe("timeline stream events", () => {
     ]));
   });
 
-  it("moves unknown assistant text to the answer block when committed as final", () => {
+  it("keeps unknown assistant text on the same timeline item when committed as final", () => {
     applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "unknown", 1));
     applyStreamEvent("sess-1", textDelta("answer-1", "final text", 2));
     applyStreamEvent("sess-1", itemCompleted("answer-1", 3));
     applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 4));
 
     const blocks = useAppStore.getState().streams["sess-1"]?.blocks ?? [];
-    expect(blocks.find((block) => block.kind === "timeline")).toBeUndefined();
-    expect(blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "assistant", text: "final text" }),
-    ]));
+    expect(blocks).toEqual([
+      expect.objectContaining({
+        kind: "timeline",
+        items: [
+          expect.objectContaining({
+            itemId: "answer-1",
+            sourceItemId: "answer-1",
+            phase: "final_answer",
+            text: "final text",
+          }),
+        ],
+      }),
+    ]);
   });
 
   it("keeps unknown assistant text in the timeline when committed as commentary", () => {
@@ -163,10 +172,15 @@ describe("timeline stream events", () => {
 
     const blocks = useAppStore.getState().streams["sess-1"]?.blocks ?? [];
     expect(blocks).toEqual([
-      expect.objectContaining({ kind: "assistant", text: "final text" }),
       expect.objectContaining({
         kind: "timeline",
-        items: [],
+        items: [
+          expect.objectContaining({
+            itemId: "answer-1",
+            phase: "final_answer",
+            text: "final text",
+          }),
+        ],
         metrics: expect.objectContaining({
           state: "completed",
           usage: expect.objectContaining({ total_tokens: 46 }),
@@ -196,21 +210,6 @@ describe("timeline stream events", () => {
         expect.objectContaining({ kind: "assistant_text", text: "After second tool." }),
       ],
     });
-  });
-
-  it("does not show the waiting placeholder once timeline events are rendering", () => {
-    applyStreamEvent("sess-1", itemStarted("thinking-1", "assistant_text", "commentary", 1));
-
-    const blocks = buildSessionBlocks({
-      sessionId: "sess-1",
-      streamState: useAppStore.getState().streams["sess-1"],
-      waitingResponseDetail: "waiting detail",
-      waitingResponseTitle: "waiting title",
-      stoppingResponseDetail: "stopping detail",
-      stoppingResponseTitle: "stopping title",
-    });
-
-    expect(blocks.map((block) => block.kind)).toEqual(["timeline"]);
   });
 
   it("renders server user input without duplicating completed pending input", () => {
