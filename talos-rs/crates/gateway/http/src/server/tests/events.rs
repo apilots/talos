@@ -159,3 +159,51 @@ async fn test_subscribe_timeline_events_replay_continues_after_historical_termin
     assert!(body_text.contains(&second.event_id));
     assert!(body_text.contains("second turn output"));
 }
+
+#[tokio::test]
+async fn test_subscribe_timeline_events_filters_replay_by_turn() {
+    let state = test_state(false);
+    let first_terminal = state
+        .event_service
+        .record_talos_event(turn_completed("turn-1", "msg-1", 0))
+        .await
+        .expect("first terminal event should record");
+    let second = state
+        .event_service
+        .record_talos_event(text_delta("turn-2", "msg-2", 0, "target turn output"))
+        .await
+        .expect("target turn event should record");
+    let second_terminal = state
+        .event_service
+        .record_talos_event(turn_completed("turn-2", "msg-2", 1))
+        .await
+        .expect("target terminal event should record");
+
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/events",
+            get(subscribe_timeline_events_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/events?turn_id=turn-2")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("event body should be readable");
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(body_text.contains(&second.event_id));
+    assert!(body_text.contains(&second_terminal.event_id));
+    assert!(body_text.contains("target turn output"));
+    assert!(!body_text.contains(&first_terminal.event_id));
+}

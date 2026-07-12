@@ -269,7 +269,10 @@ describe("createDesktopTalosClient", () => {
         project_root: null,
         environment: null,
       },
-      model_ref: { provider: "bailian", id: "kimi-k2.5" },
+      modelSelection: {
+        modelRef: { provider: "bailian", id: "kimi-k2.5" },
+        reasoning: { type: "modelDefault" },
+      },
     });
 
     expect(calls).toEqual([

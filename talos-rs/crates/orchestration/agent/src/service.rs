@@ -10,7 +10,7 @@ use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     RunItem, StopReason, TalosInputItem, TalosReasoning, TalosSessionEnvironment, TokenUsage,
 };
-use talos_types::{ModelRef, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{ModelRef, ModelSelection, TalosSession, DEFAULT_SESSION_TITLE};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -75,23 +75,40 @@ pub struct AgentRunConfig {
     pub agent: AgentConfig,
     /// LLM configuration selected for this run.
     pub llm: LlmConfig,
+    /// Model and reasoning policy selected for this run.
+    pub model_selection: ModelSelection,
 }
 
 impl AgentRunConfig {
     /// Build runtime config from the prepared product session.
     pub fn from_session(session: &TalosSession) -> Self {
+        let model_selection = session.conf.model_selection.clone().unwrap_or_else(|| {
+            ModelSelection::model_default(ModelRef {
+                provider: session.config.llm.provider.clone(),
+                id: session.config.llm.model.clone(),
+            })
+        });
         Self {
             agent: session.config.agent.clone(),
             llm: session.config.llm.clone(),
+            model_selection,
         }
     }
 
     /// Return the provider config for the selected LLM provider.
     pub fn current_provider_config(&self) -> Option<&ProviderConfig> {
-        match self.llm.provider.trim().to_ascii_lowercase().as_str() {
+        match self
+            .model_selection
+            .model_ref
+            .provider
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "anthropic" => Some(&self.llm.anthropic),
             "openai" => Some(&self.llm.openai),
             "bailian" => Some(&self.llm.bailian),
+            "deepseek" => Some(&self.llm.deepseek),
             "ollama" => Some(&self.llm.ollama),
             "openrouter" => Some(&self.llm.openrouter),
             _ => None,
@@ -136,7 +153,7 @@ impl AgentRunSessionState {
 pub struct AgentRunOptions {
     /// Selected model snapshot for cross-runtime checks and diagnostics.
     ///
-    /// AgentRunConfig.llm remains the execution source of truth. This snapshot
+    /// AgentRunConfig.model_selection remains the execution source of truth. This snapshot
     /// must not override runtime configuration or create a second model source.
     #[serde(default)]
     pub current_model: Option<String>,
@@ -145,11 +162,11 @@ pub struct AgentRunOptions {
 impl AgentRunOptions {
     /// Derive cross-runtime run options from the selected Agent run config.
     pub fn from_config(config: &AgentRunConfig) -> Self {
-        let current_model = config.llm.model.trim();
+        let current_model = config.model_selection.model_ref.id.trim();
         let current_model = if current_model.is_empty() {
             None
         } else {
-            Some(config.llm.model.clone())
+            Some(config.model_selection.model_ref.id.clone())
         };
         Self { current_model }
     }
@@ -366,11 +383,11 @@ pub fn empty_skill_roots_resolver() -> Arc<dyn SkillRootsResolver> {
 pub trait AgentHarness: Send + Sync {
     /// Stable Agent identity registered in Coordinator.
     fn id(&self) -> &str;
-    /// Concrete default model selected for this Agent, when the Harness owns one.
+    /// Default model and reasoning policy selected for this Agent, when owned by the Harness.
     ///
     /// Coordinators use this only to initialize new product sessions. Runtime
     /// execution must still read the resolved model from AgentRunConfig.
-    fn default_model_ref(&self) -> Option<ModelRef> {
+    fn default_model_selection(&self) -> Option<ModelSelection> {
         None
     }
     /// Descriptor used for routing, validation, and management surfaces.

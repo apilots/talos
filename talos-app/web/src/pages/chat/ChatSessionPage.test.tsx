@@ -15,71 +15,92 @@ const mocks = vi.hoisted(() => ({
   session: undefined as unknown,
   sessionHistoryError: undefined as Error | undefined,
   sessionHistoryIsSuccess: true,
+  sessionQueryEnabled: undefined as boolean | undefined,
   composerProps: undefined as unknown,
 }));
 
-vi.mock("@/features/chat", () => ({
-  ChatComposer: (props: {
-    disabled?: boolean;
-    onModelChange?: (model: string) => void;
-    onProjectChange: (projectId: string) => void;
-    onSend: () => Promise<void>;
-    showRuntimeModeSelector?: boolean;
-  }) => {
-    mocks.composerProps = props;
-    return (
-      <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
-        <button onClick={() => props.onModelChange?.("model-2")} type="button">
-          Model
-        </button>
-        <button onClick={() => props.onProjectChange("project-1")} type="button">
-          Project
-        </button>
-        <button onClick={() => void props.onSend()} type="button">
-          Send
-        </button>
-      </div>
-    );
-  },
-  useChatSession: () => ({
-    blocks: [],
-    draft: "",
-    setDraft: vi.fn(),
-    sendTurn: mocks.sendTurn,
-    sendText: mocks.sendText,
-    isStreaming: true,
-    isCancelling: false,
-    canRetryResponse: false,
-    retryResponse: vi.fn(),
-    retryStream: vi.fn(),
-    showReconnectControls: false,
-    stopResponse: vi.fn(),
-    streamError: undefined,
-    sessionHistoryQuery: {
-      error: mocks.sessionHistoryError,
-      isError: Boolean(mocks.sessionHistoryError),
-      isLoading: false,
-      isSuccess: mocks.sessionHistoryIsSuccess,
+vi.mock("@/features/chat", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/chat")>();
+
+  return {
+    ...actual,
+    ChatComposer: (props: {
+      disabled?: boolean;
+      onModelChange?: (model: string) => void;
+      onProjectChange: (projectId: string) => void;
+      onReasoningLevelChange?: (level: "low" | "medium" | "high" | "extra_high") => void;
+      onSend: () => Promise<void>;
+      showRuntimeModeSelector?: boolean;
+    }) => {
+      mocks.composerProps = props;
+      return (
+        <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
+          <button onClick={() => props.onModelChange?.("model-2")} type="button">
+            Model
+          </button>
+          <button onClick={() => props.onProjectChange("project-1")} type="button">
+            Project
+          </button>
+          <button onClick={() => props.onReasoningLevelChange?.("high")} type="button">
+            Reasoning
+          </button>
+          <button onClick={() => void props.onSend()} type="button">
+            Send
+          </button>
+        </div>
+      );
     },
-  }),
-  useModelsQuery: () => ({ data: [{ id: "model-1", name: "Model 1", provider: "mock" }] }),
-  useProjectsView: () => ({
-    activeProjectId: "__unbound_project__",
-    projects: [
-      {
-        id: "project-1",
-        name: "Project 1",
-        directory: "/tmp/project-1",
+    useChatSession: () => ({
+      blocks: [],
+      draft: "",
+      setDraft: vi.fn(),
+      sendTurn: mocks.sendTurn,
+      sendText: mocks.sendText,
+      isStreaming: true,
+      isCancelling: false,
+      canRetryResponse: false,
+      retryResponse: vi.fn(),
+      retryStream: vi.fn(),
+      showReconnectControls: false,
+      stopResponse: vi.fn(),
+      streamError: undefined,
+      sessionHistoryQuery: {
+        error: mocks.sessionHistoryError,
+        isError: Boolean(mocks.sessionHistoryError),
+        isLoading: false,
+        isSuccess: mocks.sessionHistoryIsSuccess,
       },
-    ],
-    setActiveProjectId: vi.fn(),
-  }),
-  useSessionQuery: () => ({
-    data: mocks.session,
-  }),
-  useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
-  useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
-}));
+    }),
+    useModelsQuery: () => ({
+      data: [
+        {
+          id: "model-1",
+          name: "Model 1",
+          provider: "mock",
+          reasoning: true,
+          reasoning_effort: "medium",
+        },
+      ],
+    }),
+    useProjectsView: () => ({
+      activeProjectId: "__unbound_project__",
+      projects: [
+        {
+          id: "project-1",
+          name: "Project 1",
+          directory: "/tmp/project-1",
+        },
+      ],
+      setActiveProjectId: vi.fn(),
+    }),
+    useSessionQuery: (_sessionId: string, enabled?: boolean) => {
+      mocks.sessionQueryEnabled = enabled;
+      return { data: mocks.session };
+    },
+    useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
+    useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
+  };
+});
 
 vi.mock("@/shared/store/app-store", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -112,10 +133,15 @@ describe("ChatSessionPage", () => {
       project_id: null,
       config: { llm: { model: "model-1" } },
       state: { message_count: 0 },
+      modelSelection: {
+        modelRef: { provider: "mock", id: "model-1" },
+        reasoning: { type: "modelDefault" },
+      },
     };
     mocks.sessionHistoryError = undefined;
     mocks.sessionHistoryIsSuccess = true;
     mocks.composerProps = undefined;
+    mocks.sessionQueryEnabled = undefined;
     mocks.sendText.mockImplementation(
       () =>
         new Promise<void>((resolve, reject) => {
@@ -161,8 +187,27 @@ describe("ChatSessionPage", () => {
     expect((mocks.composerProps as { showRuntimeModeSelector?: boolean }).showRuntimeModeSelector).toBe(false);
   });
 
+  it("submits an explicit reasoning effort through model selection", () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Reasoning" }));
+
+    expect(mocks.mutateModel).toHaveBeenCalledWith({
+      modelRef: { provider: "mock", id: "model-1" },
+      reasoning: { type: "effort", level: "high" },
+    });
+  });
+
   it("keeps draft sessions sendable after the initial prompt fails", async () => {
     mocks.session = undefined;
+    mocks.sessionHistoryError = new Error("session not found");
+    mocks.sessionHistoryIsSuccess = false;
     mocks.sendTurn.mockResolvedValue(undefined);
 
     render(
@@ -175,10 +220,12 @@ describe("ChatSessionPage", () => {
 
     await waitFor(() => {
       expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        modelRef: undefined,
+        modelSelection: undefined,
         project: undefined,
       });
     });
+    expect(mocks.sessionQueryEnabled).toBe(false);
+    expect(screen.queryByText("Session history failed to load.")).toBeNull();
 
     await act(async () => {
       rejectSend(new Error("first turn failed"));
@@ -191,7 +238,10 @@ describe("ChatSessionPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(mocks.sendTurn).toHaveBeenCalledWith({
-      modelRef: { provider: "mock", id: "model-1" },
+      modelSelection: {
+        modelRef: { provider: "mock", id: "model-1" },
+        reasoning: { type: "modelDefault" },
+      },
       project: undefined,
     });
   });
@@ -216,7 +266,7 @@ describe("ChatSessionPage", () => {
 
     await waitFor(() => {
       expect(mocks.sendText).toHaveBeenCalledWith("hello", {
-        modelRef: undefined,
+        modelSelection: undefined,
         project: undefined,
       });
     });

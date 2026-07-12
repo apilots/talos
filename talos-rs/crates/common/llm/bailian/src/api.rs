@@ -5,9 +5,8 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::chat as chat_protocol, reasoning_budget_tokens, ChatRequest, ChatResponse,
-    ChatStream, LlmProvider, ModelBlockStream, PromptCacheSupport, ReasoningEffort,
-    ReasoningSupport,
+    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, EffectiveReasoning,
+    LlmProvider, ModelBlockStream, PromptCacheSupport, ReasoningEffort, ReasoningSupport,
 };
 use tracing::{error, info};
 
@@ -99,18 +98,28 @@ impl BailianProvider {
     }
 
     pub(crate) fn thinking_config(request: &ChatRequest) -> Option<BailianThinkingConfig> {
-        request
-            .reasoning_effort
-            .map(|effort: ReasoningEffort| BailianThinkingConfig {
+        match request.reasoning {
+            EffectiveReasoning::Unsupported => None,
+            EffectiveReasoning::Effort(effort) => Some(BailianThinkingConfig {
                 mode: BailianThinkingMode::Enabled,
-                budget_tokens: Some(reasoning_budget_tokens(effort)),
-            })
+                budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
+            }),
+        }
+    }
+
+    fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
+        match effort {
+            ReasoningEffort::Low => 1024,
+            ReasoningEffort::Medium => 2048,
+            ReasoningEffort::High => 4096,
+            ReasoningEffort::XHigh => 8192,
+        }
     }
 
     pub(crate) fn build_request(
         request: ChatRequest,
         stream: bool,
-    ) -> chat_protocol::ChatCompletionRequest {
+    ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
         let thinking = Self::thinking_config(&request);
         let options = chat_protocol::ChatCompletionRequestOptions {
             cache_control: true,
@@ -118,13 +127,15 @@ impl BailianProvider {
                 .as_ref()
                 .map(|config| matches!(config.mode, BailianThinkingMode::Enabled)),
             thinking_budget: thinking.as_ref().and_then(|config| config.budget_tokens),
+            reasoning_continuation:
+                chat_protocol::ChatReasoningContinuationFormat::ReasoningContent,
             ..Default::default()
         };
         chat_protocol::request(request, stream, options)
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let bailian_req = Self::build_request(request, false);
+        let bailian_req = Self::build_request(request, false)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
 
@@ -159,7 +170,7 @@ impl BailianProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
-        let bailian_req = Self::build_request(request, true);
+        let bailian_req = Self::build_request(request, true)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
 

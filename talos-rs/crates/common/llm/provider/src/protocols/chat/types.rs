@@ -1,4 +1,4 @@
-use crate::CacheControl;
+use crate::{CacheControl, ReasoningBlock};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -12,6 +12,117 @@ pub struct ChatCompletionMessage {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ChatCompletionToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_details: Option<Vec<ChatCompletionReasoningDetail>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type")]
+pub enum ChatCompletionReasoningDetail {
+    #[serde(rename = "reasoning.text")]
+    Text {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signature: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<u32>,
+    },
+    #[serde(rename = "reasoning.summary")]
+    Summary {
+        summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<u32>,
+    },
+    #[serde(rename = "reasoning.encrypted")]
+    Encrypted {
+        data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<u32>,
+    },
+}
+
+impl From<ReasoningBlock> for ChatCompletionReasoningDetail {
+    fn from(block: ReasoningBlock) -> Self {
+        match block {
+            ReasoningBlock::Text(block) => Self::Text {
+                text: block.text,
+                signature: block.signature,
+                id: block.provider_item_id,
+                format: block.format,
+                index: block.provider_index,
+            },
+            ReasoningBlock::Summary(block) => Self::Summary {
+                summary: block.text,
+                id: block.provider_item_id,
+                format: block.format,
+                index: block.provider_index,
+            },
+            ReasoningBlock::Encrypted(block) => Self::Encrypted {
+                data: block.data,
+                id: block.provider_item_id,
+                format: block.format,
+                index: block.provider_index,
+            },
+        }
+    }
+}
+
+impl ChatCompletionReasoningDetail {
+    pub fn into_reasoning_block(self) -> ReasoningBlock {
+        match self {
+            Self::Text {
+                text,
+                signature,
+                id,
+                format,
+                index,
+            } => ReasoningBlock::Text(crate::ReasoningTextBlock {
+                provider_item_id: id,
+                provider_index: index,
+                text,
+                signature,
+                format,
+            }),
+            Self::Summary {
+                summary,
+                id,
+                format,
+                index,
+            } => ReasoningBlock::Summary(crate::ReasoningSummaryBlock {
+                provider_item_id: id,
+                provider_index: index,
+                text: summary,
+                format,
+            }),
+            Self::Encrypted {
+                data,
+                id,
+                format,
+                index,
+            } => ReasoningBlock::Encrypted(crate::ReasoningEncryptedBlock {
+                provider_item_id: id,
+                provider_index: index,
+                data,
+                format,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -91,7 +202,11 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel_tool_calls: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<ChatCompletionReasoningConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub thinking: Option<ChatCompletionThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_thinking: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,6 +217,16 @@ pub struct ChatCompletionRequest {
     pub stream_options: Option<ChatCompletionStreamOptions>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ChatCompletionReasoningConfig {
+    pub effort: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ChatCompletionThinkingConfig {
+    pub r#type: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatCompletionStreamOptions {
     pub include_usage: bool,
@@ -110,9 +235,22 @@ pub struct ChatCompletionStreamOptions {
 #[derive(Debug, Clone, Default)]
 pub struct ChatCompletionRequestOptions {
     pub cache_control: bool,
+    pub reasoning: Option<ChatCompletionReasoningConfig>,
     pub reasoning_effort: Option<String>,
+    pub thinking: Option<ChatCompletionThinkingConfig>,
     pub enable_thinking: Option<bool>,
     pub thinking_budget: Option<u32>,
+    pub reasoning_continuation: ChatReasoningContinuationFormat,
+}
+
+/// Selects the provider-specific assistant field used for reasoning replay.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ChatReasoningContinuationFormat {
+    #[default]
+    None,
+    Reasoning,
+    ReasoningContent,
+    ReasoningDetails,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -143,6 +281,14 @@ pub struct ChatCompletionResponseMessage {
     pub content: Option<ChatCompletionMessageContent>,
     #[serde(default)]
     pub tool_calls: Option<Vec<ChatCompletionToolCall>>,
+    #[serde(default)]
+    pub reasoning: Option<String>,
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
+    #[serde(default)]
+    pub thinking: Option<String>,
+    #[serde(default)]
+    pub reasoning_details: Option<Vec<ChatCompletionReasoningDetail>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

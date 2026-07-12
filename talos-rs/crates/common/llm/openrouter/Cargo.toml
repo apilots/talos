@@ -1,0 +1,21 @@
+[package]
+name = "talos-llm-openrouter"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - OpenRouter LLM Provider"
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+talos-error = { workspace = true }
+talos-llm-provider = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

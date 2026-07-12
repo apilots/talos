@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use talos_sdk::{
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, LlmReasoningEffort,
-    ModelRef, SessionInfo, UserRole, WorkspaceInfoResponse,
+    ModelRef, ModelSelection, ReasoningSelection, SessionInfo, UserRole, WorkspaceInfoResponse,
 };
 use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
 
@@ -17,9 +17,12 @@ fn session_info() -> SessionInfo {
         user_id: "status-user".to_string(),
         source_type: talos_types::talos::TalosSourceType::Cli,
         provider: talos_types::talos::TalosProvider::Cli,
-        model_ref: ModelRef {
-            provider: "mock".to_string(),
-            id: "qwen-plus".to_string(),
+        model_selection: ModelSelection {
+            model_ref: ModelRef {
+                provider: "mock".to_string(),
+                id: "qwen-plus".to_string(),
+            },
+            reasoning: ReasoningSelection::ModelDefault,
         },
         created_at: 1,
         last_activity: 2,
@@ -73,6 +76,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     app.available_model_info[0].reasoning = true;
     app.available_model_info[0].reasoning_effort = LlmReasoningEffort::High;
     app.current_model = "qwen-plus".to_string();
+    app.reasoning_effort_override = Some(LlmReasoningEffort::High);
     app.connection_status = "connected".to_string();
     app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
     app.trace_event_count = 128;
@@ -86,7 +90,10 @@ fn test_status_snapshot_renders_card_from_real_state() {
         duration_ms: Some(9_600),
     });
 
-    let session = session_info();
+    let mut session = session_info();
+    session.model_selection.reasoning = ReasoningSelection::Effort {
+        level: LlmReasoningEffort::Low,
+    };
     let snapshot =
         TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
             .unwrap();
@@ -94,7 +101,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
 
     assert!(!card.lines().any(|line| line == "/status"));
     assert!(card.contains("Talos TUI"));
-    assert!(card.contains("Model:            qwen-plus (bailian, reasoning high, summaries auto)"));
+    assert!(card.contains("Model:            qwen-plus (bailian, reasoning low, summaries auto)"));
     assert!(card.contains("Agent Workspace:  /tmp/talos-workspace"));
     assert!(card.contains("Directory:        /tmp/talos-project"));
     assert!(card.contains("Account:          status@example.com"));

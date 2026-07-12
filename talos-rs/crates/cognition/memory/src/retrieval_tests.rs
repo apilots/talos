@@ -33,7 +33,7 @@ impl LlmProvider for MockLlmProvider {
         let content = responses.remove(0);
         Ok(ChatResponse {
             content,
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: "mock".to_string(),
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),

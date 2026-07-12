@@ -23,6 +23,7 @@ use super::state::HttpApiState;
 pub(super) struct TimelineEventsQuery {
     after_event_id: Option<String>,
     limit: Option<usize>,
+    turn_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +40,7 @@ pub(super) async fn subscribe_timeline_events_handler(
     Query(query): Query<TimelineEventsQuery>,
 ) -> Result<Response, ApiError> {
     let after_event_id = parse_cursor(query.after_event_id, &headers)?;
+    let close_on_terminal = query.turn_id.is_some();
     let limit = query
         .limit
         .unwrap_or(
@@ -57,11 +59,11 @@ pub(super) async fn subscribe_timeline_events_handler(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),
-                turn_id: None,
+                turn_id: query.turn_id,
                 since_event_id: after_event_id,
                 replay_limit: Some(limit),
                 close_when_idle: Some(true),
-                close_on_terminal: Some(true),
+                close_on_terminal: Some(close_on_terminal),
             },
         )
         .await

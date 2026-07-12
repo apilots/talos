@@ -1,0 +1,20 @@
+[package]
+name = "talos-llm-ollama"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Ollama LLM Provider"
+repository.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tokio = { workspace = true }
+
+talos-error = { workspace = true }
+talos-llm-provider = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }

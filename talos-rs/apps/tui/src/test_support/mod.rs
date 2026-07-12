@@ -42,6 +42,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) models: Vec<ModelInfo>,
     pub(crate) session_id: String,
     pub(crate) current_model: String,
+    pub(crate) current_reasoning: talos_sdk::ReasoningSelection,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) auth_email: Option<String>,
     pub(crate) workspace_root: PathBuf,
@@ -78,7 +79,6 @@ pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
         speed: Default::default(),
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
-        compat: talos_types::ModelCompatConfig::default(),
     }
 }
 
@@ -90,9 +90,12 @@ impl MockGatewayState {
             user_id: "test-user".to_string(),
             source_type: talos_types::talos::TalosSourceType::Http,
             provider: talos_types::talos::TalosProvider::Sdk,
-            model_ref: talos_sdk::ModelRef {
-                provider: "mock".to_string(),
-                id: self.current_model.clone(),
+            model_selection: talos_sdk::ModelSelection {
+                model_ref: talos_sdk::ModelRef {
+                    provider: "mock".to_string(),
+                    id: self.current_model.clone(),
+                },
+                reasoning: self.current_reasoning,
             },
             created_at: 1,
             last_activity: 2,
@@ -674,6 +677,7 @@ impl MockGatewayClient {
                 ],
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
+                current_reasoning: talos_sdk::ReasoningSelection::ModelDefault,
                 current_project_root: None,
                 auth_email: Some("talos@example.com".to_string()),
                 workspace_root: PathBuf::from("/tmp/talos-workspace"),
@@ -817,14 +821,15 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
-    async fn update_session_model(
+    async fn update_session_model_selection(
         &self,
         _session_id: &str,
-        model_ref: &talos_sdk::ModelRef,
+        model_selection: &talos_sdk::ModelSelection,
     ) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
-        state.current_model = model_ref.id.clone();
-        state.updated_model = Some(model_ref.id.clone());
+        state.current_model = model_selection.model_ref.id.clone();
+        state.current_reasoning = model_selection.reasoning;
+        state.updated_model = Some(model_selection.model_ref.id.clone());
         Ok(state.session_info(3))
     }
 

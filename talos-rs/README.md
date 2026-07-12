@@ -14,7 +14,7 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 ### Cognitive Layer
 - **Memory System**: Short-term and long-term memory with unified interface
 - **Prompt Builder**: Shared prompt composition with configurable planner modes
-- **LLM Providers**: Support for Anthropic, OpenAI, Bailian, and Ollama-compatible endpoints
+- **LLM Providers**: Support for Anthropic, OpenAI, Bailian, DeepSeek, OpenRouter, and Ollama
 
 ### Action Layer
 - **Tool System**: Built-in tools plus deferred discovery through `tool_search`
@@ -172,7 +172,6 @@ curl -X POST "http://localhost:8080/v1/turns/start" \
       "message_id": "msg-start-1",
       "trace_id": "trace-start-1"
     },
-    "model": "gpt-4o-mini",
     "project_id": null,
     "current_directory": null,
     "client_request_id": null
@@ -197,7 +196,6 @@ curl -X POST http://localhost:8080/v1/turns/start \
     ],
     "workspace_id": null,
     "context": null,
-    "model": null,
     "project_id": null,
     "current_directory": null,
     "client_request_id": null

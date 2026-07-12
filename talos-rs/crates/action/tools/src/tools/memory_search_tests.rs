@@ -31,7 +31,7 @@ impl LlmProvider for MockLlmProvider {
         let mut responses = self.responses.lock().await;
         Ok(ChatResponse {
             content: responses.remove(0),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: "mock-model".to_string(),
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),

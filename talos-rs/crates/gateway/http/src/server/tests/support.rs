@@ -57,7 +57,7 @@ impl LlmProvider for MockLlmProvider {
         };
         Ok(ChatResponse {
             content,
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: "mock-model".to_string(),
             usage: Usage::default(),
             finish_reason: None,

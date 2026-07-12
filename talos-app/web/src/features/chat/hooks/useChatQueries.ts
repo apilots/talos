@@ -91,21 +91,21 @@ export function useProjectsView() {
   };
 }
 
-export function useSessionQuery(sessionId: string) {
+export function useSessionQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
   return useQuery({
     queryKey: chatKeys.session(connectionKey, sessionId),
     queryFn: () => getSession(sessionId),
-    enabled: Boolean(sessionId),
+    enabled: Boolean(sessionId) && enabled,
   });
 }
 
-export function useActiveTurnQuery(sessionId: string) {
+export function useActiveTurnQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
   return useQuery({
     queryKey: chatKeys.activeTurn(connectionKey, sessionId),
     queryFn: () => getActiveTurn(sessionId),
-    enabled: Boolean(sessionId),
+    enabled: Boolean(sessionId) && enabled,
     refetchInterval: (query) =>
       query.state.data?.status === "running" ||
       query.state.data?.status === "waiting_user_action"
@@ -127,12 +127,12 @@ export function useLiveRecoveryQuery(
   });
 }
 
-export function useSessionHistoryQuery(sessionId: string) {
+export function useSessionHistoryQuery(sessionId: string, enabled = true) {
   const connectionKey = useConnectionKey();
   return useQuery({
     queryKey: chatKeys.sessionHistory(connectionKey, sessionId),
     queryFn: () => getSessionHistory(sessionId),
-    enabled: Boolean(sessionId),
+    enabled: Boolean(sessionId) && enabled,
     retry: false,
   });
 }

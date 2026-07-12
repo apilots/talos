@@ -8,12 +8,14 @@ interface SidebarChatsSectionProps {
   currentPath: string;
   sessions: SidebarSessionItem[];
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (session: SidebarSessionItem) => void;
 }
 
 export function SidebarChatsSection({
   currentPath,
   sessions,
   onSelectSession,
+  onDeleteSession,
 }: SidebarChatsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [open, setOpen] = useState(true);
@@ -29,6 +31,7 @@ export function SidebarChatsSection({
             <SidebarSessionRow
               currentPath={currentPath}
               key={session.id}
+              onDeleteSession={onDeleteSession}
               onSelectSession={onSelectSession}
               session={session}
             />

@@ -54,7 +54,7 @@ export type SessionClearRequest = { session_id: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, model_ref: ModelRef, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
+export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, modelSelection: ModelSelection, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
 
 export type SessionActiveTurnRequest = { session_id: string, };
 
@@ -132,7 +132,7 @@ export type StartTurnRequest = { session_id: string, input: Array<TalosInputItem
 /**
  * Explicit model selection for this turn; absent means use the session or configured default.
  */
-model_ref?: ModelRef, project_id?: string, current_directory?: string, client_request_id?: string, };
+modelSelection?: ModelSelection, project_id?: string, current_directory?: string, client_request_id?: string, };
 
 export type StartTurnResponse = { request_id: string, message_id: string | null, session_id: string, turn_id: string, status: TurnCommandStatus, };
 
@@ -180,15 +180,19 @@ export type ModelListRequest = Record<string, never>;
 
 export type ModelListResponse = { models: Array<ModelInfo>, };
 
-export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
+export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, };
 
 export type ModelRef = { provider: string, id: string, };
 
-export type LlmConfig = { provider: string, model: string, anthropic: LlmProviderConfig, openai: LlmProviderConfig, bailian: LlmProviderConfig, ollama: LlmProviderConfig, openrouter: LlmProviderConfig, };
+export type ModelSelection = { modelRef: ModelRef, reasoning: ReasoningSelection, };
+
+export type ReasoningSelection = { "type": "modelDefault" } | { "type": "effort", level: LlmReasoningEffort, };
+
+export type LlmConfig = { provider: string, model: string, anthropic: LlmProviderConfig, openai: LlmProviderConfig, bailian: LlmProviderConfig, deepseek: LlmProviderConfig, ollama: LlmProviderConfig, openrouter: LlmProviderConfig, };
 
 export type LlmProviderConfig = { api_key?: string, base_url?: string, protocol?: LlmProtocol, models: Array<LlmModelConfig>, };
 
-export type LlmModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, compat: LlmModelCompat, };
+export type LlmModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 
@@ -200,17 +204,13 @@ export type LlmModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
 export type LlmModelCost = { input: number, output: number, cache_read: number, cache_write: number, };
 
-export type LlmModelCompat = { thinking_format?: LlmThinkingFormat, };
-
-export type LlmThinkingFormat = "open_ai" | "anthropic" | "qwen";
-
 export type ConfigGetRequest = { path?: string, };
 
-export type ConfigGetResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, };
+export type ConfigGetResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
 
 export type ConfigUpdateRequest = { path: string, value: ConfigValue, };
 
-export type ConfigUpdateResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, };
+export type ConfigUpdateResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
 
 export type ConfigDeleteRequest = { path: string, };
 
@@ -225,6 +225,8 @@ export type ConfigValue = { "type": "llm", "value": LlmConfig };
 export type ModelReadiness = { ready: boolean, provider: string, model: string, issues: Array<string>, };
 
 export type ProviderKeyStatus = { api_key_configured: boolean, };
+
+export type ProviderProtocolCapabilities = { default_protocol: LlmProtocol, protocols: Array<LlmProtocol>, };
 
 export type ExpectedFileVersion = { "mode": "must_not_exist" } | { "mode": "match", version_token: string, };
 
@@ -512,7 +514,7 @@ export type OptionalProjectIdPatch = { "type": "set", project_id: string, } | { 
 
 export type OptionalCurrentDirectoryPatch = { "type": "set", path: string, } | { "type": "clear" };
 
-export type SessionConf = { model_ref: ModelRef | null, };
+export type SessionConf = { modelSelection: ModelSelection | null, };
 
 export type AgentEvent = { event_seq: number | null, event_id: string | null, created_at_ms: number | null, event_type: AgentEventType, turn_id: string, message_id: string, session_id: string, sequence: number, payload: AgentEventPayload, };
 

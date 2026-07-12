@@ -134,6 +134,39 @@ fn canonical(path: PathBuf) -> PathBuf {
     path.canonicalize().unwrap_or(path)
 }
 
+async fn spawn_json_server(body: impl Into<String>) -> (String, oneshot::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test server should bind");
+    let addr = listener
+        .local_addr()
+        .expect("test server address should exist");
+    let body = body.into();
+    let (path_tx, path_rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.expect("request should arrive");
+        let mut buffer = vec![0; 4096];
+        let read = socket.read(&mut buffer).await.expect("request should read");
+        let request = String::from_utf8_lossy(&buffer[..read]);
+        let path = request
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .unwrap_or_default()
+            .to_string();
+        path_tx.send(path).expect("path should send");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("response should write");
+    });
+    (format!("http://{addr}"), path_rx)
+}
+
 #[tokio::test]
 async fn application_runtime_builds_when_model_key_is_missing() {
     let mut config = Config::default();
@@ -161,7 +194,7 @@ async fn application_runtime_registers_configured_default_agent() {
         enabled: true,
         description: Some("Review agent".to_string()),
         default_workspace_id: Some("default".to_string()),
-        model_ref: None,
+        model_selection: None,
         runtime_config: Some(AgentRuntimeConfig::Kernel {
             kernel: config.agent.kernel.clone(),
         }),
@@ -195,7 +228,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: false,
             description: None,
             default_workspace_id: None,
-            model_ref: None,
+            model_selection: None,
             runtime_config: None,
         },
         AgentDefinitionConfig {
@@ -205,7 +238,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_ref: None,
+            model_selection: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel {
                 kernel: config.agent.kernel.clone(),
             }),
@@ -245,43 +278,15 @@ async fn setup_required_provider_reports_configuration_error_for_model_blocks() 
 }
 
 #[tokio::test]
-async fn openrouter_provider_uses_chat_completions_path_and_identity() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test server should bind");
-    let addr = listener
-        .local_addr()
-        .expect("test server addr should exist");
-    let (path_tx, path_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.expect("request should arrive");
-        let mut buf = vec![0; 4096];
-        let n = socket.read(&mut buf).await.expect("request should read");
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let path = request
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or("")
-            .to_string();
-        let _ = path_tx.send(path);
-        let body = r#"{"model":"test-model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
-        let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-        socket
-            .write_all(response.as_bytes())
-            .await
-            .expect("response should write");
-    });
+async fn openrouter_provider_uses_chat_completions_path_and_concrete_provider() {
+    let body = r#"{"model":"test-model","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+    let (base_url, path_rx) = spawn_json_server(body).await;
 
     let mut config = Config::default();
     config.llm.provider = "openrouter".to_string();
     config.llm.model = "test-model".to_string();
     config.llm.openrouter.api_key = Some("test-key".to_string());
-    config.llm.openrouter.base_url = Some(format!("http://{addr}"));
+    config.llm.openrouter.base_url = Some(base_url);
 
     let provider = create_llm_provider(&config).expect("provider should be created");
     assert_eq!(provider.name(), "openrouter");
@@ -299,42 +304,14 @@ async fn openrouter_provider_uses_chat_completions_path_and_identity() {
 
 #[tokio::test]
 async fn openai_provider_uses_responses_path_when_protocol_selected() {
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("test server should bind");
-    let addr = listener
-        .local_addr()
-        .expect("test server addr should exist");
-    let (path_tx, path_rx) = oneshot::channel();
-    tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.expect("request should arrive");
-        let mut buf = vec![0; 4096];
-        let n = socket.read(&mut buf).await.expect("request should read");
-        let request = String::from_utf8_lossy(&buf[..n]);
-        let path = request
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .unwrap_or("")
-            .to_string();
-        let _ = path_tx.send(path);
-        let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
-        let response = format!(
-                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-                body.len(),
-                body
-            );
-        socket
-            .write_all(response.as_bytes())
-            .await
-            .expect("response should write");
-    });
+    let body = r#"{"id":"resp_1","model":"gpt-test","status":"completed","output_text":"ok","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
+    let (base_url, path_rx) = spawn_json_server(body).await;
 
     let mut config = Config::default();
     config.llm.provider = "openai".to_string();
     config.llm.model = "gpt-test".to_string();
     config.llm.openai.api_key = Some("test-key".to_string());
-    config.llm.openai.base_url = Some(format!("http://{addr}"));
+    config.llm.openai.base_url = Some(base_url);
     config.llm.openai.protocol = Some(LlmProtocol::Responses);
 
     let provider = create_llm_provider(&config).expect("provider should be created");
@@ -347,6 +324,31 @@ async fn openai_provider_uses_responses_path_when_protocol_selected() {
     let path = path_rx.await.expect("path should be captured");
 
     assert_eq!(path, "/responses");
+    assert_eq!(response.content, "ok");
+}
+
+#[tokio::test]
+async fn deepseek_provider_uses_chat_completions_path_and_concrete_provider() {
+    let body = r#"{"model":"deepseek-v4-pro","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+    let (base_url, path_rx) = spawn_json_server(body).await;
+    let mut config = Config::default();
+    config.llm.provider = "deepseek".to_string();
+    config.llm.model = "deepseek-v4-pro".to_string();
+    config.llm.deepseek.api_key = Some("test-key".to_string());
+    config.llm.deepseek.base_url = Some(base_url);
+
+    let provider = create_llm_provider(&config).expect("provider should be created");
+    let response = provider
+        .chat(ChatRequest::new_user("hello", "deepseek-v4-pro"))
+        .await
+        .expect("chat should succeed");
+
+    assert_eq!(provider.name(), "deepseek");
+    assert_eq!(provider.default_model(), "deepseek-v4-pro");
+    assert_eq!(
+        path_rx.await.expect("path should be captured"),
+        "/chat/completions"
+    );
     assert_eq!(response.content, "ok");
 }
 
@@ -389,7 +391,7 @@ impl LlmProvider for TestLlmProvider {
     async fn chat(&self, request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: self.text.clone(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),

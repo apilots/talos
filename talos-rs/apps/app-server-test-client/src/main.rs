@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AgentEventPayload, AgentEventType, AppServerClient, AppServerClientConfig,
     ConfigGetRequest, ExpectedFileVersion, GatewayClient, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ModelRef,
+    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ModelRef, ModelSelection,
     ProjectDeleteRequest, ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest,
     SessionGetRequest, StartTurnRequest, SubmitDynamicToolResultRequest, SubscribeTimelineRequest,
     TalosContext, TalosError, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
@@ -591,7 +591,7 @@ fn start_turn_request(
         }],
         workspace_id: None,
         context: Some(test_talos_context()),
-        model_ref: test_model_ref(),
+        model_selection: test_model_ref().map(ModelSelection::model_default),
         project_id: None,
         current_directory: None,
         client_request_id,

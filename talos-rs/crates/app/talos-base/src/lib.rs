@@ -10,7 +10,7 @@ use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
     effective_llm_protocol, AgentKernelConfig, Config, LlmConfigManager, LlmConfigService,
-    LlmProtocol, McpTransportConfig, ProviderConfig, TalosPaths, YamlLlmConfigStore,
+    LlmProtocol, McpTransportConfig, ProviderConfig, YamlLlmConfigStore,
 };
 use talos_coordinator::{Coordinator, CoordinatorImpl, SessionRuntime};
 use talos_error::{TalosError, TalosResult};
@@ -18,7 +18,10 @@ use talos_gateway::{Gateway, ServiceGateway};
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
 use talos_llm_anthropic::AnthropicProvider;
 use talos_llm_bailian::BailianProvider;
+use talos_llm_deepseek::{DeepSeekConfig, DeepSeekProtocol, DeepSeekProvider};
+use talos_llm_ollama::{OllamaConfig, OllamaProvider};
 use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
+use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvider};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelRef,
     PromptCacheSupport, ReasoningSupport, ReloadableLlmProviderRouter,
@@ -45,8 +48,8 @@ use talos_types::talos::{
 };
 use talos_types::{
     resolve_model_catalog, AgentDispatchResult, AgentDispatchRuntime, McpServerDefinition,
-    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, StartTurnRequest,
-    TalosContext, TalosSession,
+    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, ModelSelection,
+    StartTurnRequest, TalosContext, TalosSession,
 };
 use tokio::signal;
 use tokio::task::JoinSet;
@@ -202,7 +205,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                 CreateSessionRequest {
                     session_id,
                     context,
-                    model_ref: None,
+                    model_selection: None,
                     workspace_id: None,
                     project_id: None,
                     current_directory: None,
@@ -271,7 +274,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                 project_root: session.context.project_root.clone(),
                 environment: session.context.environment.clone(),
             }),
-            model_ref: None,
+            model_selection: None,
             project_id: None,
             current_directory: None,
             client_request_id: None,
@@ -319,7 +322,7 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
                         usage: completed.usage,
                         model,
                         output_items: Vec::new(),
-                        reasoning: Vec::new(),
+                        reasoning: Default::default(),
                     });
                 }
                 AgentEventPayload::TurnError(error) => {
@@ -340,7 +343,7 @@ const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub async fn run_app_server() -> TalosResult<()> {
     let config = load_runtime_config()?;
-    let config_source = resolve_config_source_path();
+    let config_source = resolve_config_source_path(&config);
     let logging_options = TalosServerOptions {
         logging_stdout: Some(false),
         ..TalosServerOptions::default()
@@ -356,7 +359,7 @@ pub async fn run_app_server() -> TalosResult<()> {
 
 pub async fn run_server() -> TalosResult<()> {
     let config = load_runtime_config()?;
-    let config_source = resolve_config_source_path();
+    let config_source = resolve_config_source_path(&config);
     let mut server_options = TalosServerOptions::default();
     let _log_guard = init_logging(&config, Some(&server_options))?;
     log_config_source(config_source);
@@ -387,8 +390,8 @@ fn load_runtime_config() -> TalosResult<Config> {
     Ok(config)
 }
 
-fn resolve_config_source_path() -> Option<PathBuf> {
-    let config_path = Config::source_path();
+fn resolve_config_source_path(config: &Config) -> Option<PathBuf> {
+    let config_path = config.source_path();
     config_path
         .exists()
         .then(|| canonical_or_original(config_path))
@@ -761,11 +764,11 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
-    let default_model_ref = ModelRef {
+    let default_model_selection = ModelSelection::model_default(ModelRef {
         provider: config.llm.provider.clone(),
         id: config.llm.model.clone(),
-    };
-    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &default_model_ref)?;
+    });
+    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &default_model_selection)?;
     let default_agent_id = agent_definitions
         .iter()
         .find(|definition| definition.enabled)
@@ -849,8 +852,10 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         Arc::new(OpenModeUserService)
     };
 
-    let config_path = TalosPaths::resolve().config_file;
-    let llm_store = Arc::new(YamlLlmConfigStore::new(config_path));
+    let llm_store = Arc::new(YamlLlmConfigStore::with_env_path(
+        config.source_path(),
+        config.talos_paths().env_file,
+    ));
     let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(llm_store));
 
     let model_catalog = resolve_model_catalog(&config.llm);
@@ -983,8 +988,12 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
             let api_key = config.llm.openai.api_key.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.openai.api_key is required".to_string())
             })?;
-            let openai_config = openai_config(&api_key, config.llm.openai.base_url.as_deref())
+            let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key)
+                .with_default_model(&config.llm.model)
                 .with_protocol(openai_protocol("openai", &config.llm.openai)?);
+            if let Some(base_url) = config.llm.openai.base_url.as_deref() {
+                openai_config = openai_config.with_base_url(base_url);
+            }
             Ok(Arc::new(OpenAIProvider::new(openai_config)))
         }
         "bailian" => {
@@ -998,19 +1007,31 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
             Ok(Arc::new(BailianProvider::new(bailian_config)))
         }
+        "deepseek" => {
+            let api_key = config.llm.deepseek.api_key.clone().ok_or_else(|| {
+                TalosError::InvalidConfiguration("llm.deepseek.api_key is required".to_string())
+            })?;
+            let base_url = config
+                .llm
+                .deepseek
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.deepseek.com".to_string());
+            let deepseek_config = DeepSeekConfig::new(&api_key)
+                .with_base_url(&base_url)
+                .with_default_model(&config.llm.model)
+                .with_protocol(deepseek_protocol(&config.llm.deepseek)?);
+            Ok(Arc::new(DeepSeekProvider::new(deepseek_config)))
+        }
         "ollama" => {
             let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
                 TalosError::InvalidConfiguration("llm.ollama.base_url is required".to_string())
             })?;
-            let openai_config = openai_compatible_config(
-                "ollama",
-                "Ollama",
-                "ollama",
-                &base_url,
-                &config.llm.model,
-                &config.llm.ollama,
-            )?;
-            Ok(Arc::new(OpenAIProvider::new(openai_config)))
+            let mut ollama_config = OllamaConfig::new(&base_url, &config.llm.model);
+            if let Some(api_key) = config.llm.ollama.api_key.as_deref() {
+                ollama_config = ollama_config.with_api_key(api_key);
+            }
+            Ok(Arc::new(OllamaProvider::new(ollama_config)))
         }
         "openrouter" => {
             let api_key = config.llm.openrouter.api_key.clone().ok_or_else(|| {
@@ -1022,15 +1043,11 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .base_url
                 .clone()
                 .unwrap_or_else(|| "https://openrouter.ai/api/v1".to_string());
-            let openai_config = openai_compatible_config(
-                "openrouter",
-                "OpenRouter",
-                &api_key,
-                &base_url,
-                &config.llm.model,
-                &config.llm.openrouter,
-            )?;
-            Ok(Arc::new(OpenAIProvider::new(openai_config)))
+            let openrouter_config = OpenRouterConfig::new(&api_key)
+                .with_base_url(&base_url)
+                .with_default_model(&config.llm.model)
+                .with_protocol(openrouter_protocol(&config.llm.openrouter)?);
+            Ok(Arc::new(OpenRouterProvider::new(openrouter_config)))
         }
         _ => Err(TalosError::InvalidConfiguration(format!(
             "unsupported provider '{}'",
@@ -1039,38 +1056,40 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
     }
 }
 
-fn openai_config(api_key: &str, base_url: Option<&str>) -> talos_llm_openai::OpenAIConfig {
-    let mut config = talos_llm_openai::OpenAIConfig::new(api_key);
-    if let Some(base_url) = base_url {
-        config = config.with_base_url(base_url);
-    }
-    config
-}
-
-fn openai_compatible_config(
-    provider: &str,
-    display_name: &str,
-    api_key: &str,
-    base_url: &str,
-    default_model: &str,
-    provider_config: &ProviderConfig,
-) -> TalosResult<talos_llm_openai::OpenAIConfig> {
-    Ok(talos_llm_openai::OpenAIConfig::new(api_key)
-        .with_base_url(base_url)
-        .with_identity(provider, display_name, default_model)
-        .with_protocol(openai_protocol(provider, provider_config)?))
-}
-
 fn openai_protocol(
     provider: &str,
     provider_config: &ProviderConfig,
 ) -> TalosResult<OpenAIProtocol> {
-    match effective_llm_protocol(provider, provider_config).unwrap_or(LlmProtocol::Chat) {
+    match effective_llm_protocol(provider, provider_config).ok_or_else(|| {
+        TalosError::InvalidConfiguration(format!("llm.{provider}.protocol is required"))
+    })? {
         LlmProtocol::Chat => Ok(OpenAIProtocol::Chat),
-        LlmProtocol::Responses if provider == "openai" => Ok(OpenAIProtocol::Responses),
+        LlmProtocol::Responses => Ok(OpenAIProtocol::Responses),
         protocol => Err(TalosError::InvalidConfiguration(format!(
             "llm.{provider}.protocol does not support {protocol}"
         ))),
+    }
+}
+
+fn openrouter_protocol(provider_config: &ProviderConfig) -> TalosResult<OpenRouterProtocol> {
+    match effective_llm_protocol("openrouter", provider_config).ok_or_else(|| {
+        TalosError::InvalidConfiguration("llm.openrouter.protocol is required".to_string())
+    })? {
+        LlmProtocol::Chat => Ok(OpenRouterProtocol::Chat),
+        LlmProtocol::Responses => Ok(OpenRouterProtocol::Responses),
+        LlmProtocol::Messages => Ok(OpenRouterProtocol::Messages),
+    }
+}
+
+fn deepseek_protocol(provider_config: &ProviderConfig) -> TalosResult<DeepSeekProtocol> {
+    match effective_llm_protocol("deepseek", provider_config).ok_or_else(|| {
+        TalosError::InvalidConfiguration("llm.deepseek.protocol is required".to_string())
+    })? {
+        LlmProtocol::Chat => Ok(DeepSeekProtocol::Chat),
+        LlmProtocol::Messages => Ok(DeepSeekProtocol::Messages),
+        LlmProtocol::Responses => Err(TalosError::InvalidConfiguration(
+            "llm.deepseek.protocol does not support responses".to_string(),
+        )),
     }
 }
 

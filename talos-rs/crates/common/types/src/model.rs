@@ -19,6 +19,68 @@ pub struct ModelRef {
     pub id: String,
 }
 
+/// Selects a model and the reasoning policy applied to requests using it.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelSelection {
+    pub model_ref: ModelRef,
+    pub reasoning: ReasoningSelection,
+}
+
+impl ModelSelection {
+    /// Creates a selection that follows the selected model's configured reasoning default.
+    pub fn model_default(model_ref: ModelRef) -> Self {
+        Self {
+            model_ref,
+            reasoning: ReasoningSelection::ModelDefault,
+        }
+    }
+
+    /// Resolves the product-level selection against the selected model's capabilities.
+    pub fn resolve_reasoning(&self, model: &ModelInfo) -> crate::TalosResult<EffectiveReasoning> {
+        if self.model_ref.provider != model.provider || self.model_ref.id != model.id {
+            return Err(crate::TalosError::ValidationError(format!(
+                "model selection '{}:{}' does not match model metadata '{}:{}'",
+                self.model_ref.provider, self.model_ref.id, model.provider, model.id
+            )));
+        }
+
+        match (model.reasoning, self.reasoning) {
+            (false, ReasoningSelection::ModelDefault) => Ok(EffectiveReasoning::Unsupported),
+            (false, ReasoningSelection::Effort { .. }) => {
+                Err(crate::TalosError::ValidationError(format!(
+                    "model '{}:{}' does not support reasoning effort selection",
+                    model.provider, model.id
+                )))
+            }
+            (true, ReasoningSelection::ModelDefault) => {
+                Ok(EffectiveReasoning::Effort(model.reasoning_effort))
+            }
+            (true, ReasoningSelection::Effort { level }) => Ok(EffectiveReasoning::Effort(level)),
+        }
+    }
+}
+
+/// Describes whether a selection follows model defaults or explicitly overrides effort.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ReasoningSelection {
+    #[default]
+    ModelDefault,
+    Effort {
+        level: LlmReasoningEffort,
+    },
+}
+
+/// Reasoning policy resolved from a model's capabilities and a request selection.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", content = "level", rename_all = "camelCase")]
+pub enum EffectiveReasoning {
+    #[default]
+    Unsupported,
+    Effort(LlmReasoningEffort),
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct LlmConfig {
     pub provider: String,
@@ -26,6 +88,7 @@ pub struct LlmConfig {
     pub anthropic: LlmProviderConfig,
     pub openai: LlmProviderConfig,
     pub bailian: LlmProviderConfig,
+    pub deepseek: LlmProviderConfig,
     pub ollama: LlmProviderConfig,
     pub openrouter: LlmProviderConfig,
 }
@@ -55,7 +118,6 @@ pub struct LlmModelConfig {
     pub speed: LlmModelSpeed,
     pub input: Vec<LlmModelInputKind>,
     pub cost: LlmModelCost,
-    pub compat: LlmModelCompat,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
@@ -104,27 +166,10 @@ pub struct LlmModelCost {
     pub cache_write: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct LlmModelCompat {
-    #[serde(default)]
-    #[ts(optional)]
-    pub thinking_format: Option<LlmThinkingFormat>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum LlmThinkingFormat {
-    OpenAi,
-    Anthropic,
-    Qwen,
-}
-
 pub type ReasoningEffort = LlmReasoningEffort;
 pub type ModelSpeed = LlmModelSpeed;
 pub type ModelInputKind = LlmModelInputKind;
 pub type ModelCostConfig = LlmModelCost;
-pub type ModelCompatConfig = LlmModelCompat;
-pub type ThinkingFormat = LlmThinkingFormat;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ModelInfo {
@@ -137,7 +182,6 @@ pub struct ModelInfo {
     pub speed: LlmModelSpeed,
     pub input: Vec<LlmModelInputKind>,
     pub cost: LlmModelCost,
-    pub compat: LlmModelCompat,
 }
 
 impl ModelInfo {
@@ -155,7 +199,6 @@ impl ModelInfo {
             speed: model.speed.into(),
             input: model.input.into_iter().map(Into::into).collect(),
             cost: model.cost.into(),
-            compat: model.compat.into(),
         }
     }
 }
@@ -174,6 +217,7 @@ impl From<talos_config::LlmConfig> for LlmConfig {
             anthropic: value.anthropic.into(),
             openai: value.openai.into(),
             bailian: value.bailian.into(),
+            deepseek: value.deepseek.into(),
             ollama: value.ollama.into(),
             openrouter: value.openrouter.into(),
         }
@@ -188,6 +232,7 @@ impl From<LlmConfig> for talos_config::LlmConfig {
             anthropic: value.anthropic.into(),
             openai: value.openai.into(),
             bailian: value.bailian.into(),
+            deepseek: value.deepseek.into(),
             ollama: value.ollama.into(),
             openrouter: value.openrouter.into(),
         }
@@ -227,7 +272,6 @@ impl From<talos_config::ProviderModelConfig> for LlmModelConfig {
             speed: value.speed.into(),
             input: value.input.into_iter().map(Into::into).collect(),
             cost: value.cost.into(),
-            compat: value.compat.into(),
         }
     }
 }
@@ -243,7 +287,6 @@ impl From<LlmModelConfig> for talos_config::ProviderModelConfig {
             speed: value.speed.into(),
             input: value.input.into_iter().map(Into::into).collect(),
             cost: value.cost.into(),
-            compat: value.compat.into(),
         }
     }
 }
@@ -354,48 +397,13 @@ impl From<LlmModelCost> for talos_config::ModelCostConfig {
     }
 }
 
-impl From<talos_config::ModelCompatConfig> for LlmModelCompat {
-    fn from(value: talos_config::ModelCompatConfig) -> Self {
-        Self {
-            thinking_format: value.thinking_format.map(Into::into),
-        }
-    }
-}
-
-impl From<LlmModelCompat> for talos_config::ModelCompatConfig {
-    fn from(value: LlmModelCompat) -> Self {
-        Self {
-            thinking_format: value.thinking_format.map(Into::into),
-        }
-    }
-}
-
-impl From<talos_config::ThinkingFormat> for LlmThinkingFormat {
-    fn from(value: talos_config::ThinkingFormat) -> Self {
-        match value {
-            talos_config::ThinkingFormat::OpenAi => Self::OpenAi,
-            talos_config::ThinkingFormat::Anthropic => Self::Anthropic,
-            talos_config::ThinkingFormat::Qwen => Self::Qwen,
-        }
-    }
-}
-
-impl From<LlmThinkingFormat> for talos_config::ThinkingFormat {
-    fn from(value: LlmThinkingFormat) -> Self {
-        match value {
-            LlmThinkingFormat::OpenAi => Self::OpenAi,
-            LlmThinkingFormat::Anthropic => Self::Anthropic,
-            LlmThinkingFormat::Qwen => Self::Qwen,
-        }
-    }
-}
-
 pub fn resolve_model_catalog(llm: &talos_config::LlmConfig) -> Vec<ModelInfo> {
     let provider = llm.provider.clone();
     let provider_models = match llm.provider.as_str() {
         "anthropic" => llm.anthropic.models.clone(),
         "openai" => llm.openai.models.clone(),
         "bailian" => llm.bailian.models.clone(),
+        "deepseek" => llm.deepseek.models.clone(),
         "ollama" => llm.ollama.models.clone(),
         "openrouter" => llm.openrouter.models.clone(),
         _ => Vec::new(),
@@ -418,7 +426,6 @@ pub fn resolve_model_catalog(llm: &talos_config::LlmConfig) -> Vec<ModelInfo> {
             speed: LlmModelSpeed::default(),
             input: Vec::new(),
             cost: talos_config::ModelCostConfig::default().into(),
-            compat: talos_config::ModelCompatConfig::default().into(),
         });
     }
 

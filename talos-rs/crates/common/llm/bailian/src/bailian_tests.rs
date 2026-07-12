@@ -2,8 +2,9 @@ use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
     protocols::chat as chat_protocol, CacheControl, CacheControlKind, ChatMessage, ChatRequest,
-    LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent,
-    PromptCacheSupport, ReasoningEffort, ReasoningSupport,
+    EffectiveReasoning, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
+    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
+    ReasoningSupport,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -116,6 +117,12 @@ async fn test_stream_model_blocks_maps_chat_completion_chunks() {
         event,
         ModelBlockStreamEvent::BlockCompleted(completed)
             if completed.model_item_id == "bailian-tool-0"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::ReasoningCompleted { output }
+            if output.display_text == vec!["think".to_string()]
+                && output.continuation == Some(ReasoningContinuation::Text("think".to_string()))
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -423,10 +430,10 @@ fn test_build_request_maps_reasoning_to_bailian_fields() {
     let request = ChatRequest::builder()
         .model("qwen3.7-plus")
         .messages(vec![ChatMessage::user("hello")])
-        .reasoning_effort(ReasoningEffort::Low)
+        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Low))
         .build();
 
-    let built = BailianProvider::build_request(request, true);
+    let built = BailianProvider::build_request(request, true).expect("request should build");
     let json = serde_json::to_value(&built).expect("request should serialize");
     assert_eq!(json["enable_thinking"], true);
     assert_eq!(json["thinking_budget"], 1024);
@@ -466,7 +473,8 @@ fn test_bailian_request_serializes_cache_control_for_request_level_provider() {
             .messages(vec![message])
             .build(),
         false,
-    );
+    )
+    .expect("request should build");
 
     let json = serde_json::to_string(&request).expect("request should serialize");
     assert!(json.contains("cache_control"));
@@ -484,7 +492,8 @@ fn test_bailian_request_serializes_cache_control_as_content_block() {
             .messages(vec![message])
             .build(),
         false,
-    );
+    )
+    .expect("request should build");
 
     let json = serde_json::to_value(&request).expect("request should serialize");
     assert_eq!(json["messages"][0]["content"][0]["text"], "stable context");

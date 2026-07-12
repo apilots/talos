@@ -16,20 +16,47 @@ const setActiveProjectIdMock = vi.fn((projectId: string) => {
 });
 
 vi.mock("@/features/chat", () => ({
-  ChatComposer: ({ activeProjectId }: { activeProjectId: string }) => (
-    <div data-testid="composer-project">{activeProjectId}</div>
+  ChatComposer: ({
+    activeProjectId,
+    reasoningLevel,
+    selectedModel,
+  }: {
+    activeProjectId: string;
+    reasoningLevel: string;
+    selectedModel?: string;
+  }) => (
+    <div>
+      <span data-testid="composer-project">{activeProjectId}</span>
+      <span data-testid="composer-model">{selectedModel}</span>
+      <span data-testid="composer-reasoning">{reasoningLevel}</span>
+    </div>
   ),
   useCreateProjectMutation: () => ({
     mutateAsync: createProjectMutateAsync,
   }),
   generateSessionId: () => "session-1",
+  reasoningLevelForModel: () => "high",
   useModelsQuery: () => ({
-    data: [{ id: "glm-5", name: "GLM-5" }],
+    data: [
+      { id: "llama-3.3", name: "Llama 3.3" },
+      { id: "tencent/hy3:free", name: "Tencent HY3 Free" },
+    ],
   }),
   useProjectsView: () => ({
     activeProjectId: useAppStore.getState().activeProjectId,
     projects: useAppStore.getState().projects,
     setActiveProjectId: setActiveProjectIdMock,
+  }),
+}));
+
+vi.mock("@/features/settings", () => ({
+  useLlmConfigQuery: () => ({
+    data: {
+      config: {
+        provider: "openrouter",
+        model: "tencent/hy3:free",
+      },
+    },
   }),
 }));
 
@@ -81,5 +108,7 @@ describe("ChatHomePage", () => {
     });
 
     expect(screen.getByTestId("composer-project").textContent).toBe(createDefaultProjects()[0]?.id);
+    expect(screen.getByTestId("composer-model").textContent).toBe("tencent/hy3:free");
+    expect(screen.getByTestId("composer-reasoning").textContent).toBe("high");
   });
 });

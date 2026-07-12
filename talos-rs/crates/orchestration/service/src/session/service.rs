@@ -8,8 +8,9 @@ use talos_store::session::{SessionPatchAck, SessionQuery, SessionRecord, Session
 use talos_types::talos::{TalosConnectionMode, TalosContext};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
-    ModelRef, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConfigOverridePolicy,
-    SessionContext, SessionPatch, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    ModelRef, ModelSelection, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
+    SessionConfigOverridePolicy, SessionContext, SessionPatch, SessionState, TalosConfig,
+    TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
@@ -43,12 +44,12 @@ impl SessionService {
         self
     }
 
-    fn base_model_ref(&self) -> ModelRef {
+    fn base_model_selection(&self) -> ModelSelection {
         let base_config = self.base_config_snapshot();
-        ModelRef {
+        ModelSelection::model_default(ModelRef {
             provider: base_config.llm.provider,
             id: base_config.llm.model,
-        }
+        })
     }
 
     fn base_config_snapshot(&self) -> TalosConfig {
@@ -308,14 +309,14 @@ impl SessionService {
         let session_id = params
             .session_id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
-        let requested_model_ref = params.model_ref;
-        let agent_model_ref = params.agent_model_ref;
-        let effective_model_ref = requested_model_ref
+        let requested_selection = params.model_selection;
+        let agent_selection = params.agent_model_selection;
+        let effective_selection = requested_selection
             .clone()
-            .or_else(|| agent_model_ref.clone())
-            .unwrap_or_else(|| self.base_model_ref());
-        let base_conf = if requested_model_ref.is_some() || agent_model_ref.is_some() {
-            SessionConfigOverridePolicy::single_model_ref_conf(&effective_model_ref)
+            .or_else(|| agent_selection.clone())
+            .unwrap_or_else(|| self.base_model_selection());
+        let base_conf = if requested_selection.is_some() || agent_selection.is_some() {
+            SessionConfigOverridePolicy::single_model_selection_conf(&effective_selection)
         } else {
             Default::default()
         };
@@ -325,8 +326,9 @@ impl SessionService {
             .map(|patch_conf| SessionConfigOverridePolicy::merge_conf(&base_conf, patch_conf))
             .unwrap_or(base_conf);
         SessionConfigOverridePolicy::validate_conf(&conf)?;
-        let stored_model = SessionConfigOverridePolicy::extract_model_ref(&conf)?
-            .unwrap_or(effective_model_ref)
+        let stored_model = SessionConfigOverridePolicy::extract_model_selection(&conf)?
+            .unwrap_or(effective_selection)
+            .model_ref
             .id;
         let now = chrono::Utc::now().timestamp_millis();
         let record = SessionRecord {
@@ -360,8 +362,9 @@ impl SessionService {
         }
         let patch_conf = patch.conf.as_ref().cloned().unwrap_or_default();
         record.conf = SessionConfigOverridePolicy::merge_conf(&record.conf, &patch_conf);
-        if let Some(model_ref) = SessionConfigOverridePolicy::extract_model_ref(&record.conf)? {
-            record.model = model_ref.id;
+        if let Some(selection) = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?
+        {
+            record.model = selection.model_ref.id;
         }
         if let Some(project_id_patch) = &patch.project_id {
             match project_id_patch {

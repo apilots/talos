@@ -88,7 +88,7 @@ pub struct PreparedGeneralTurn {
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub max_output_tokens: Option<u32>,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning: EffectiveReasoning,
     pub speed: ModelSpeed,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
@@ -161,6 +161,7 @@ pub struct ResumeToolCall {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: DynamicToolArguments,
+    pub reasoning_continuation: Option<ReasoningContinuation>,
 }
 
 #[derive(Debug, Clone)]
@@ -307,7 +308,7 @@ pub struct GeneralTurnStepRequest {
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning: EffectiveReasoning,
     pub speed: ModelSpeed,
     pub pre_final_execution_summary: Option<String>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
@@ -337,9 +338,7 @@ impl GeneralTurnStepRequest {
                 .parallel_tool_calls(self.parallel_tool_calls);
         }
 
-        if let Some(reasoning_effort) = self.reasoning_effort {
-            builder = builder.reasoning_effort(reasoning_effort);
-        }
+        builder = builder.reasoning(self.reasoning);
 
         builder = builder.speed(self.speed);
 
@@ -350,7 +349,7 @@ impl GeneralTurnStepRequest {
 #[derive(Debug, Clone)]
 pub struct GeneralTurnStepResult {
     pub text: String,
-    pub reasoning: Vec<String>,
+    pub reasoning: ReasoningOutput,
     pub tool_calls: Vec<FunctionCall>,
     pub streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub model_finish_reason: ModelFinishReason,
@@ -393,6 +392,7 @@ pub struct PendingDynamicToolRequest {
     pub tool_name: String,
     pub call_id: String,
     pub arguments: Value,
+    pub reasoning_continuation: Option<ReasoningContinuation>,
 }
 
 #[allow(dead_code)]

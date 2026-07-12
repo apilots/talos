@@ -11,6 +11,10 @@ fn test_invocation_context_state_write_scopes() {
         workspace_id: "w1".to_string(),
         project_root: None,
         input: "hello".to_string(),
+        model_selection: talos_types::ModelSelection::model_default(talos_types::ModelRef {
+            provider: "p1".to_string(),
+            id: "m1".to_string(),
+        }),
         selected_model_info: ModelInfo {
             id: "m1".to_string(),
             name: "m1".to_string(),
@@ -21,7 +25,6 @@ fn test_invocation_context_state_write_scopes() {
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         },
         phase: TurnPhase::Execution,
         planning_instruction: None,

@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 load_env
 require_command curl
 
-if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
+if ! has_real_llm_key; then
   echo "CASE real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi
@@ -45,7 +45,7 @@ payload = {
         "message_id": "msg-bilingual-tools",
         "trace_id": "trace-bilingual-tools",
     },
-    "model_ref": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]},
+    "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoning": {"type": "modelDefault"}},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

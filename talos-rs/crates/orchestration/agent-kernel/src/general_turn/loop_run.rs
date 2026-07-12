@@ -122,7 +122,6 @@ pub async fn execute_general_turn_loop_with_policy(
                 llm_provider.clone(),
                 prepared.stream_tx.clone(),
                 None,
-                None,
                 cause.clone(),
             )
             .await?;
@@ -143,7 +142,6 @@ pub async fn execute_general_turn_loop_with_policy(
                 prepared.selected_model.clone(),
                 llm_provider.clone(),
                 prepared.stream_tx.clone(),
-                None,
                 None,
                 ForcedFinalizationCause::EmptyFinalResponseAfterTools,
             )
@@ -185,6 +183,9 @@ pub async fn execute_general_turn_loop_with_policy(
             )
             .await?
         };
+        for pending in &mut tool_batch.pending_dynamic_requests {
+            pending.reasoning_continuation = step.reasoning.continuation.clone();
+        }
         let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
         emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
@@ -243,6 +244,7 @@ async fn apply_general_turn_resume(
         call_id: resume.call_id.clone(),
         tool_name: resume.tool_name.clone(),
         arguments: Value::Null.into(),
+        reasoning_continuation: None,
     });
     let mut replay_dynamic_tool_results = resume.replay_dynamic_tool_results;
     replay_dynamic_tool_results.insert(
@@ -257,10 +259,12 @@ async fn apply_general_turn_resume(
         original_call.tool_name,
         Value::from(original_call.arguments),
     )];
-    state.messages.push(ChatMessage::assistant_with_tool_calls(
-        "",
-        tool_calls.clone(),
-    ));
+    let reasoning_continuation = original_call.reasoning_continuation;
+    let mut assistant_message = ChatMessage::assistant_with_tool_calls("", tool_calls.clone());
+    if let Some(continuation) = reasoning_continuation {
+        assistant_message = assistant_message.with_reasoning_continuation(continuation);
+    }
+    state.messages.push(assistant_message);
     let replay_batch = execute_general_turn_tool_batch(
         prepared,
         tool_executor,

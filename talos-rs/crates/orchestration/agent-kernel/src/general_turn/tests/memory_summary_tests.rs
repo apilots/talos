@@ -44,7 +44,7 @@ impl LlmProvider for ModelRecordingProvider {
             .expect("provider should have queued responses");
         Ok(ChatResponse {
             content: response,
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage {
                 prompt_tokens: 5,

@@ -13,6 +13,7 @@ use crate::{
 const ANTHROPIC_API_KEY_ENV: &str = "TALOS_LLM_ANTHROPIC_API_KEY";
 const OPENAI_API_KEY_ENV: &str = "TALOS_LLM_OPENAI_API_KEY";
 const BAILIAN_API_KEY_ENV: &str = "TALOS_LLM_BAILIAN_API_KEY";
+const DEEPSEEK_API_KEY_ENV: &str = "TALOS_LLM_DEEPSEEK_API_KEY";
 const OLLAMA_API_KEY_ENV: &str = "TALOS_LLM_OLLAMA_API_KEY";
 const OPENROUTER_API_KEY_ENV: &str = "TALOS_LLM_OPENROUTER_API_KEY";
 const REDACTED_API_KEY: &str = "********";
@@ -119,6 +120,13 @@ impl LlmConfigStore for YamlLlmConfigStore {
             true,
             &mut safe_llm.bailian,
             Some(&existing_llm.bailian),
+        )?;
+        persist_provider_secret(
+            &self.env_path,
+            DEEPSEEK_API_KEY_ENV,
+            true,
+            &mut safe_llm.deepseek,
+            Some(&existing_llm.deepseek),
         )?;
         persist_provider_secret(
             &self.env_path,
@@ -251,6 +259,7 @@ fn sanitize_llm_for_read(llm: &mut LlmConfig) {
     sanitize_provider_for_read(&mut llm.anthropic);
     sanitize_provider_for_read(&mut llm.openai);
     sanitize_provider_for_read(&mut llm.bailian);
+    sanitize_provider_for_read(&mut llm.deepseek);
     sanitize_provider_for_read(&mut llm.ollama);
     sanitize_provider_for_read(&mut llm.openrouter);
 }
@@ -266,6 +275,7 @@ fn build_llm_config_read(mut raw: LlmConfig, runtime_env: &RuntimeEnv) -> LlmCon
     resolve_provider_api_key(&mut resolved.anthropic, ANTHROPIC_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(&mut resolved.openai, OPENAI_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(&mut resolved.bailian, BAILIAN_API_KEY_ENV, runtime_env);
+    resolve_provider_api_key(&mut resolved.deepseek, DEEPSEEK_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(&mut resolved.ollama, OLLAMA_API_KEY_ENV, runtime_env);
     resolve_provider_api_key(
         &mut resolved.openrouter,
@@ -290,6 +300,7 @@ fn apply_provider_api_key_displays(
     apply_provider_api_key_display(&mut llm.anthropic, provider_keys.get("anthropic"));
     apply_provider_api_key_display(&mut llm.openai, provider_keys.get("openai"));
     apply_provider_api_key_display(&mut llm.bailian, provider_keys.get("bailian"));
+    apply_provider_api_key_display(&mut llm.deepseek, provider_keys.get("deepseek"));
     apply_provider_api_key_display(&mut llm.ollama, provider_keys.get("ollama"));
     apply_provider_api_key_display(&mut llm.openrouter, provider_keys.get("openrouter"));
 }
@@ -311,6 +322,7 @@ fn provider_key_statuses(
         ("anthropic", ANTHROPIC_API_KEY_ENV, &llm.anthropic),
         ("openai", OPENAI_API_KEY_ENV, &llm.openai),
         ("bailian", BAILIAN_API_KEY_ENV, &llm.bailian),
+        ("deepseek", DEEPSEEK_API_KEY_ENV, &llm.deepseek),
         ("ollama", OLLAMA_API_KEY_ENV, &llm.ollama),
         ("openrouter", OPENROUTER_API_KEY_ENV, &llm.openrouter),
     ]

@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKernelConfig, AgentKind as ConfigAgentKind,
-    AgentRuntimeConfig, ModelRefConfig,
+    AgentRuntimeConfig, ModelRefConfig, ModelSelectionConfig, ReasoningEffort,
+    ReasoningSelectionConfig,
 };
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, Usage,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ReasoningOutput, Usage,
 };
 use talos_tools::ToolRegistry;
-use talos_types::ModelRef;
+use talos_types::{LlmReasoningEffort, ModelRef, ModelSelection, ReasoningSelection};
 
 use super::*;
 use crate::{empty_skill_roots_resolver, AgentHarness};
@@ -24,7 +25,7 @@ impl LlmProvider for TestLlmProvider {
     async fn chat(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: String::new(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "test-model".to_string(),
             usage: Usage::default(),
             finish_reason: None,
@@ -53,20 +54,25 @@ impl LlmProviderRouter for TestLlmProviderRouter {
     }
 }
 
-fn default_model_ref() -> ModelRef {
-    ModelRef {
+fn default_model_selection() -> ModelSelection {
+    ModelSelection::model_default(ModelRef {
         provider: "test".to_string(),
         id: "global-model".to_string(),
-    }
+    })
 }
 
 #[test]
 fn loader_builds_synthesized_default_definition() {
     let config = AgentConfig {
         name: "Talos".to_string(),
-        model_ref: Some(ModelRefConfig {
-            provider: "test".to_string(),
-            id: "agent-model".to_string(),
+        model_selection: Some(ModelSelectionConfig {
+            model_ref: ModelRefConfig {
+                provider: "test".to_string(),
+                id: "agent-model".to_string(),
+            },
+            reasoning: ReasoningSelectionConfig::Effort {
+                level: ReasoningEffort::High,
+            },
         }),
         kernel: AgentKernelConfig {
             default_workspace_id: "workspace-default".to_string(),
@@ -75,7 +81,7 @@ fn loader_builds_synthesized_default_definition() {
         ..Default::default()
     };
 
-    let definitions = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let definitions = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load");
 
     assert_eq!(definitions.len(), 1);
@@ -88,15 +94,20 @@ fn loader_builds_synthesized_default_definition() {
         Some("workspace-default")
     );
     assert_eq!(
-        definition.model_ref,
-        ModelRef {
-            provider: "test".to_string(),
-            id: "agent-model".to_string(),
+        definition.model_selection,
+        ModelSelection {
+            model_ref: ModelRef {
+                provider: "test".to_string(),
+                id: "agent-model".to_string(),
+            },
+            reasoning: ReasoningSelection::Effort {
+                level: LlmReasoningEffort::High,
+            },
         }
     );
     assert_eq!(
-        definition.model_ref_override,
-        Some(definition.model_ref.clone())
+        definition.model_selection_override,
+        Some(definition.model_selection.clone())
     );
 }
 
@@ -115,13 +126,13 @@ fn loader_resolves_explicit_agent_definition() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_ref: None,
+            model_selection: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel { kernel }),
         }],
         ..Default::default()
     };
 
-    let definitions = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let definitions = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load");
 
     assert_eq!(definitions.len(), 1);
@@ -133,8 +144,8 @@ fn loader_resolves_explicit_agent_definition() {
         definition.default_workspace_id.as_deref(),
         Some("base-workspace")
     );
-    assert_eq!(definition.model_ref, default_model_ref());
-    assert_eq!(definition.model_ref_override, None);
+    assert_eq!(definition.model_selection, default_model_selection());
+    assert_eq!(definition.model_selection_override, None);
 }
 
 #[test]
@@ -148,7 +159,7 @@ fn loader_rejects_duplicate_agent_ids() {
                 enabled: true,
                 description: None,
                 default_workspace_id: None,
-                model_ref: None,
+                model_selection: None,
                 runtime_config: None,
             },
             AgentDefinitionConfig {
@@ -158,14 +169,14 @@ fn loader_rejects_duplicate_agent_ids() {
                 enabled: true,
                 description: None,
                 default_workspace_id: None,
-                model_ref: None,
+                model_selection: None,
                 runtime_config: None,
             },
         ],
         ..Default::default()
     };
 
-    let error = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let error = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect_err("duplicate id should fail");
 
     assert!(error.to_string().contains("duplicate"));
@@ -181,13 +192,13 @@ fn loader_rejects_kind_runtime_mismatch() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_ref: None,
+            model_selection: None,
             runtime_config: None,
         }],
         ..Default::default()
     };
 
-    let error = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let error = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect_err("kind/runtime mismatch should fail");
 
     assert!(error.to_string().contains("does not match"));
@@ -203,12 +214,12 @@ fn factory_rejects_disabled_definition() {
             enabled: false,
             description: None,
             default_workspace_id: None,
-            model_ref: None,
+            model_selection: None,
             runtime_config: None,
         }],
         ..Default::default()
     };
-    let definition = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let definition = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load")
         .remove(0);
     let factory = AgentHarnessFactory::new(
@@ -228,7 +239,7 @@ fn factory_rejects_disabled_definition() {
 #[test]
 fn factory_builds_kernel_agent_with_descriptor() {
     let config = AgentConfig::default();
-    let definition = AgentDefinitionLoader::load(&config, &default_model_ref())
+    let definition = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load")
         .remove(0);
     let factory = AgentHarnessFactory::new(

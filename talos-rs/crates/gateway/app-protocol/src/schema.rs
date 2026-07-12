@@ -147,6 +147,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ModelListResponse>());
     output.push_str(&export::<talos_types::ModelInfo>());
     output.push_str(&export::<talos_types::ModelRef>());
+    output.push_str(&export::<talos_types::ModelSelection>());
+    output.push_str(&export::<talos_types::ReasoningSelection>());
     output.push_str(&export::<talos_types::LlmConfig>());
     output.push_str(&export::<talos_types::LlmProviderConfig>());
     output.push_str(&export::<talos_types::LlmModelConfig>());
@@ -155,8 +157,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::LlmModelSpeed>());
     output.push_str(&export::<talos_types::LlmModelInputKind>());
     output.push_str(&export::<talos_types::LlmModelCost>());
-    output.push_str(&export::<talos_types::LlmModelCompat>());
-    output.push_str(&export::<talos_types::LlmThinkingFormat>());
     output.push_str(&export::<talos_types::ConfigGetRequest>());
     output.push_str(&export::<talos_types::ConfigGetResponse>());
     output.push_str(&export::<talos_types::ConfigUpdateRequest>());
@@ -168,6 +168,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ConfigValue>());
     output.push_str(&export::<talos_types::ModelReadiness>());
     output.push_str(&export::<talos_types::ProviderKeyStatus>());
+    output.push_str(&export::<talos_types::ProviderProtocolCapabilities>());
     output.push_str(&export::<talos_types::ExpectedFileVersion>());
     output.push_str(&export::<talos_types::DocUpdateRequest>());
     output.push_str(&export::<talos_types::MemoryFileListRequest>());

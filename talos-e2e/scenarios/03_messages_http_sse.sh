@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/../scripts/common.sh"
 load_env
 require_command curl
 
-if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
+if ! has_real_llm_key; then
   echo "CASE real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi

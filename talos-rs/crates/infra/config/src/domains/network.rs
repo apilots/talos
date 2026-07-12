@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 /// Gateway configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,6 +274,10 @@ pub struct LlmConfig {
     #[serde(default)]
     pub bailian: ProviderConfig,
 
+    /// DeepSeek config
+    #[serde(default)]
+    pub deepseek: ProviderConfig,
+
     /// Ollama config
     #[serde(default)]
     pub ollama: ProviderConfig,
@@ -298,6 +303,7 @@ impl Default for LlmConfig {
             anthropic: ProviderConfig::default(),
             openai: ProviderConfig::default(),
             bailian: ProviderConfig::default(),
+            deepseek: ProviderConfig::default(),
             ollama: ProviderConfig::default(),
             openrouter: ProviderConfig::default(),
         }
@@ -331,23 +337,60 @@ impl std::fmt::Display for LlmProtocol {
 const CHAT_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat];
 const OPENAI_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat, LlmProtocol::Responses];
 const MESSAGES_ONLY_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Messages];
+const DEEPSEEK_PROTOCOLS: &[LlmProtocol] = &[LlmProtocol::Chat, LlmProtocol::Messages];
+const OPENROUTER_PROTOCOLS: &[LlmProtocol] = &[
+    LlmProtocol::Chat,
+    LlmProtocol::Responses,
+    LlmProtocol::Messages,
+];
+
+const PROVIDER_PROTOCOLS: &[(&str, LlmProtocol, &[LlmProtocol])] = &[
+    ("anthropic", LlmProtocol::Messages, MESSAGES_ONLY_PROTOCOLS),
+    ("openai", LlmProtocol::Chat, OPENAI_PROTOCOLS),
+    ("bailian", LlmProtocol::Chat, CHAT_ONLY_PROTOCOLS),
+    ("deepseek", LlmProtocol::Chat, DEEPSEEK_PROTOCOLS),
+    ("ollama", LlmProtocol::Chat, CHAT_ONLY_PROTOCOLS),
+    ("openrouter", LlmProtocol::Chat, OPENROUTER_PROTOCOLS),
+];
+
+/// Protocol capabilities exposed to configuration clients for one provider.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderProtocolCapabilities {
+    pub default_protocol: LlmProtocol,
+    pub protocols: Vec<LlmProtocol>,
+}
+
+fn provider_protocols(
+    provider: &str,
+) -> Option<&'static (&'static str, LlmProtocol, &'static [LlmProtocol])> {
+    let provider = provider.trim();
+    PROVIDER_PROTOCOLS
+        .iter()
+        .find(|(name, _, _)| name.eq_ignore_ascii_case(provider))
+}
 
 pub fn default_llm_protocol(provider: &str) -> Option<LlmProtocol> {
-    match provider.trim().to_ascii_lowercase().as_str() {
-        "anthropic" => Some(LlmProtocol::Messages),
-        "openai" => Some(LlmProtocol::Chat),
-        "bailian" | "ollama" | "openrouter" => Some(LlmProtocol::Chat),
-        _ => None,
-    }
+    provider_protocols(provider).map(|(_, default_protocol, _)| *default_protocol)
 }
 
 pub fn allowed_llm_protocols(provider: &str) -> Option<&'static [LlmProtocol]> {
-    match provider.trim().to_ascii_lowercase().as_str() {
-        "anthropic" => Some(MESSAGES_ONLY_PROTOCOLS),
-        "openai" => Some(OPENAI_PROTOCOLS),
-        "bailian" | "ollama" | "openrouter" => Some(CHAT_ONLY_PROTOCOLS),
-        _ => None,
-    }
+    provider_protocols(provider).map(|(_, _, protocols)| *protocols)
+}
+
+/// Returns the complete provider protocol matrix from the validation source of truth.
+pub fn provider_protocol_capabilities() -> BTreeMap<String, ProviderProtocolCapabilities> {
+    PROVIDER_PROTOCOLS
+        .iter()
+        .map(|(provider, default_protocol, protocols)| {
+            (
+                (*provider).to_string(),
+                ProviderProtocolCapabilities {
+                    default_protocol: *default_protocol,
+                    protocols: protocols.to_vec(),
+                },
+            )
+        })
+        .collect()
 }
 
 pub fn effective_llm_protocol(provider: &str, config: &ProviderConfig) -> Option<LlmProtocol> {
@@ -396,8 +439,6 @@ pub struct ProviderModelConfig {
     pub input: Vec<ModelInputKind>,
     #[serde(default)]
     pub cost: ModelCostConfig,
-    #[serde(default)]
-    pub compat: ModelCompatConfig,
 }
 
 impl ProviderModelConfig {
@@ -460,18 +501,4 @@ impl Default for ModelCostConfig {
             cache_write: 0.0,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub struct ModelCompatConfig {
-    #[serde(default)]
-    pub thinking_format: Option<ThinkingFormat>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ThinkingFormat {
-    OpenAi,
-    Anthropic,
-    Qwen,
 }

@@ -185,10 +185,7 @@ impl KernelAgent {
 
     fn llm_provider_for_run(&self, config: &AgentRunConfig) -> TalosResult<Arc<dyn LlmProvider>> {
         self.llm_provider_router
-            .provider_for(&talos_types::ModelRef {
-                provider: config.llm.provider.clone(),
-                id: config.llm.model.clone(),
-            })
+            .provider_for(&config.model_selection.model_ref)
     }
 
     async fn memory_store_for_run(
@@ -205,8 +202,8 @@ impl KernelAgent {
     }
 
     fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> ModelInfo {
-        let selected_model = config.llm.model.clone();
-        let provider_name = config.llm.provider.clone();
+        let selected_model = config.model_selection.model_ref.id.clone();
+        let provider_name = config.model_selection.model_ref.provider.clone();
 
         if let Some(provider_config) = config.current_provider_config() {
             if let Some(model) = provider_config
@@ -228,7 +225,6 @@ impl KernelAgent {
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         }
     }
 
@@ -274,6 +270,7 @@ impl KernelAgent {
             workspace_id,
             project_root: agent_request.context.project_root.clone(),
             input,
+            model_selection: agent_request.config.model_selection.clone(),
             selected_model_info: self.resolve_selected_model_info(&agent_request.config),
             phase: agent_request.phase.clone(),
             planning_instruction: agent_request.planning_instruction.clone(),
@@ -372,6 +369,7 @@ impl KernelAgent {
                     call_id: tool_call.call_id,
                     tool_name: tool_call.tool_name,
                     arguments: original_arguments,
+                    reasoning_continuation: request.reasoning_continuation,
                 }),
                 replay_dynamic_tool_results: HashMap::new(),
             },
@@ -666,7 +664,7 @@ impl KernelAgent {
                     Ok(AgentRunResult {
                         output_text: String::new(),
                         output_items: Vec::new(),
-                        reasoning: Vec::new(),
+                        reasoning: Default::default(),
                         stop_reason: TalosStopReason::Cancelled,
                         usage: TokenUsage::default(),
                         task_count: 0,

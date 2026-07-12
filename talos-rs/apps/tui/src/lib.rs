@@ -68,7 +68,7 @@ pub struct TuiApp {
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_model: String,
-    pub(crate) current_reasoning_effort: Option<LlmReasoningEffort>,
+    pub(crate) reasoning_effort_override: Option<LlmReasoningEffort>,
     pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,

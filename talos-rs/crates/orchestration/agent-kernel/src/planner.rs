@@ -14,6 +14,12 @@ when no tool is needed."
 
 pub struct BuiltInPlanner;
 
+impl Default for BuiltInPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BuiltInPlanner {
     pub fn new() -> Self {
         Self
@@ -30,24 +36,10 @@ impl Planner for BuiltInPlanner {
         _ctx: &InvocationContext,
         request: &LlmRequestEnvelope,
     ) -> PlanningRequestEffect {
-        let reasoning_effort = if request
-            .selected_model_info
-            .as_ref()
-            .map(|model| model.reasoning)
-            .unwrap_or(false)
-        {
-            request
-                .selected_model_info
-                .as_ref()
-                .map(|model| model.reasoning_effort)
-        } else {
-            None
-        };
         let planning_instruction =
             (!request.tool_definitions.is_empty()).then(built_in_tool_guidance);
         PlanningRequestEffect {
             planning_instruction,
-            reasoning_effort,
             clear_request_thoughts: false,
         }
     }

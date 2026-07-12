@@ -44,7 +44,12 @@ describe("AppServerClient", () => {
     await client.listModels();
     await client.patchSession({
       session_id: "session-1",
-      conf: { model_ref: { provider: "bailian", id: "MiniMax-M2.5" } },
+      conf: {
+        modelSelection: {
+          modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
+          reasoning: { type: "modelDefault" },
+        },
+      },
       project_id: null,
       current_directory: null,
     });
@@ -83,7 +88,12 @@ describe("AppServerClient", () => {
         method: "session.patch",
         params: {
           session_id: "session-1",
-          conf: { model_ref: { provider: "bailian", id: "MiniMax-M2.5" } },
+          conf: {
+            modelSelection: {
+              modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
+              reasoning: { type: "modelDefault" },
+            },
+          },
           project_id: null,
           current_directory: null,
         },
@@ -166,6 +176,7 @@ const testLlmConfig = {
   anthropic: emptyProvider,
   openai: emptyProvider,
   bailian: emptyProvider,
+  deepseek: emptyProvider,
   ollama: emptyProvider,
   openrouter: emptyProvider,
 };
@@ -179,4 +190,15 @@ const testLlmConfigRead = {
     issues: [],
   },
   provider_keys: {},
+  provider_capabilities: {
+    anthropic: { default_protocol: "messages", protocols: ["messages"] },
+    openai: { default_protocol: "chat", protocols: ["chat", "responses"] },
+    bailian: { default_protocol: "chat", protocols: ["chat"] },
+    deepseek: { default_protocol: "chat", protocols: ["chat", "messages"] },
+    ollama: { default_protocol: "chat", protocols: ["chat"] },
+    openrouter: {
+      default_protocol: "chat",
+      protocols: ["chat", "responses", "messages"],
+    },
+  },
 };

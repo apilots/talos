@@ -348,7 +348,7 @@ fn build_start_turn_request(
         workspace_id: None,
         input,
         context: Some(context),
-        model_ref: None,
+        model_selection: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,

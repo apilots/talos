@@ -2,8 +2,9 @@ use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
     protocols::messages as messages_protocol, CacheControl, CacheControlKind, ChatMessage,
-    ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
-    ModelBlockStreamEvent, PromptCacheSupport, ReasoningEffort, ReasoningSupport, ToolDefinition,
+    ChatRequest, EffectiveReasoning, LlmProvider, ModelBlockDelta, ModelBlockKind,
+    ModelBlockStream, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
+    ReasoningEffort, ReasoningSupport, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -80,6 +81,7 @@ async fn test_stream_model_blocks_maps_content_block_lifecycle() {
     let body = concat!(
         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"think\"}}\n\n",
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\n",
         "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
         "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n",
@@ -122,6 +124,12 @@ async fn test_stream_model_blocks_maps_content_block_lifecycle() {
         event,
         ModelBlockStreamEvent::BlockCompleted(completed)
             if completed.model_item_id == "anthropic-block-2-tool"
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::ReasoningCompleted { output }
+            if output.display_text == vec!["think".to_string()]
+                && matches!(output.continuation, Some(ReasoningContinuation::Blocks(ref blocks)) if blocks.len() == 1)
     )));
     assert!(events.iter().any(|event| matches!(
         event,
@@ -180,7 +188,8 @@ fn test_convert_messages() {
         ChatMessage::assistant("Hi there!"),
     ];
 
-    let (system, anthropic_msgs) = messages_protocol::messages(messages);
+    let (system, anthropic_msgs) =
+        messages_protocol::messages(messages).expect("messages should map");
     let first = serde_json::to_value(&anthropic_msgs[0]).expect("message should serialize");
     let second = serde_json::to_value(&anthropic_msgs[1]).expect("message should serialize");
 
@@ -195,7 +204,8 @@ fn test_convert_messages() {
 #[test]
 fn test_convert_messages_with_tool_result() {
     let messages = vec![ChatMessage::tool("call_1", "read", "done")];
-    let (_system, anthropic_msgs) = messages_protocol::messages(messages);
+    let (_system, anthropic_msgs) =
+        messages_protocol::messages(messages).expect("messages should map");
     let first = serde_json::to_value(&anthropic_msgs[0]).expect("message should serialize");
     assert_eq!(anthropic_msgs.len(), 1);
     assert_eq!(first["role"], "user");
@@ -304,10 +314,10 @@ fn test_build_request_maps_reasoning_budget() {
     let request = ChatRequest::builder()
         .model("claude-3-5-sonnet-20241022")
         .messages(vec![ChatMessage::user("hello")])
-        .reasoning_effort(ReasoningEffort::High)
+        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
         .build();
 
-    let built = AnthropicProvider::build_request(request, None);
+    let built = AnthropicProvider::build_request(request, None).expect("request should build");
     let json = serde_json::to_value(&built).expect("request should serialize");
 
     assert_eq!(json["thinking"]["budget_tokens"], 4096);
@@ -321,8 +331,9 @@ fn test_convert_messages_preserves_multiple_system_blocks_and_cache_control() {
     });
     let messages = vec![first, ChatMessage::system("Workspace context")];
 
-    let (system_blocks, anthropic_msgs) = messages_protocol::messages(messages);
-    let serialized = serde_json::to_value(&system_blocks.expect("system blocks should exist"))
+    let (system_blocks, anthropic_msgs) =
+        messages_protocol::messages(messages).expect("messages should map");
+    let serialized = serde_json::to_value(system_blocks.expect("system blocks should exist"))
         .expect("system blocks should serialize");
 
     assert!(anthropic_msgs.is_empty());

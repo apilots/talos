@@ -1,3 +1,5 @@
+import { Trash2 } from "lucide-react";
+
 import { cn } from "@/shared/lib/cn";
 import { formatRelativeTime } from "@/shared/lib/time";
 import type { SessionUiStatus } from "@/shared/types/ui";
@@ -17,6 +19,7 @@ interface SidebarSessionRowProps {
   indent?: boolean;
   session: SidebarSessionItem;
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (session: SidebarSessionItem) => void;
 }
 
 export function SidebarSessionRow({
@@ -24,6 +27,7 @@ export function SidebarSessionRow({
   indent = false,
   session,
   onSelectSession,
+  onDeleteSession,
 }: SidebarSessionRowProps) {
   const active = currentPath === `/sessions/${session.id}`;
 
@@ -38,7 +42,29 @@ export function SidebarSessionRow({
         type="button"
       >
         <span className="truncate font-medium leading-5 text-ink">{session.label}</span>
-        <span className="whitespace-nowrap text-right text-xs tabular-nums text-muted">{formatRelativeTime(session.lastActivityAt)}</span>
+        <span
+          className={cn(
+            "whitespace-nowrap text-right text-xs tabular-nums text-muted transition-opacity",
+            active ? "opacity-0" : "group-hover:opacity-0 group-focus-within:opacity-0",
+          )}
+        >
+          {formatRelativeTime(session.lastActivityAt)}
+        </span>
+      </button>
+      <button
+        aria-label={`Delete ${session.label}`}
+        className={cn(
+          "absolute right-2 top-1/2 size-6 -translate-y-1/2 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-danger/10 hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/30",
+          active ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+        )}
+        onClick={(event) => {
+          event.stopPropagation();
+          onDeleteSession(session);
+        }}
+        title={`Delete ${session.label}`}
+        type="button"
+      >
+        <Trash2 aria-hidden="true" size={14} />
       </button>
     </div>
   );

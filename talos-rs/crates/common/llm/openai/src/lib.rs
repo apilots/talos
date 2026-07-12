@@ -6,8 +6,8 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, responses as responses_protocol},
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
-    ReasoningSupport,
+    ChatRequest, ChatResponse, ChatStream, EffectiveReasoning, LlmProvider, ModelBlockStream,
+    ReasoningEffort, ReasoningSupport,
 };
 use tracing::{debug, error, info};
 
@@ -24,9 +24,6 @@ pub struct OpenAIConfig {
     pub api_key: String,
     pub base_url: String,
     pub timeout_secs: u64,
-    pub provider_name: String,
-    pub display_name: String,
-    pub item_prefix: String,
     pub default_model: String,
     pub protocol: OpenAIProtocol,
 }
@@ -37,9 +34,6 @@ impl OpenAIConfig {
             api_key: api_key.into(),
             base_url: "https://api.openai.com/v1".to_string(),
             timeout_secs: 60,
-            provider_name: "openai".to_string(),
-            display_name: "OpenAI".to_string(),
-            item_prefix: "openai".to_string(),
             default_model: "gpt-5.5".to_string(),
             protocol: OpenAIProtocol::Chat,
         }
@@ -55,16 +49,8 @@ impl OpenAIConfig {
         self
     }
 
-    pub fn with_identity(
-        mut self,
-        provider_name: impl Into<String>,
-        display_name: impl Into<String>,
-        default_model: impl Into<String>,
-    ) -> Self {
-        self.provider_name = provider_name.into();
-        self.display_name = display_name.into();
-        self.item_prefix = self.provider_name.clone();
-        self.default_model = default_model.into();
+    pub fn with_default_model(mut self, model: impl Into<String>) -> Self {
+        self.default_model = model.into();
         self
     }
 
@@ -131,12 +117,16 @@ impl OpenAIProvider {
 
     fn request_options(request: &ChatRequest) -> chat_protocol::ChatCompletionRequestOptions {
         chat_protocol::ChatCompletionRequestOptions {
-            reasoning_effort: request.reasoning_effort.map(Self::convert_reasoning_effort),
+            reasoning_effort: Self::effective_reasoning_effort(request.reasoning),
+            reasoning_continuation: chat_protocol::ChatReasoningContinuationFormat::Reasoning,
             ..Default::default()
         }
     }
 
-    fn build_request(request: ChatRequest, stream: bool) -> chat_protocol::ChatCompletionRequest {
+    fn build_request(
+        request: ChatRequest,
+        stream: bool,
+    ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
         let options = Self::request_options(&request);
         chat_protocol::request(request, stream, options)
     }
@@ -144,8 +134,17 @@ impl OpenAIProvider {
     fn responses_request(
         request: ChatRequest,
         stream: Option<bool>,
-    ) -> responses_protocol::ResponsesRequest {
-        responses_protocol::request(request, stream)
+    ) -> TalosResult<responses_protocol::ResponsesRequest> {
+        let reasoning = Self::effective_reasoning_effort(request.reasoning)
+            .map(|effort| responses_protocol::ResponsesReasoning { effort });
+        let include = reasoning
+            .as_ref()
+            .map(|_| vec!["reasoning.encrypted_content".to_string()]);
+        responses_protocol::request(
+            request,
+            stream,
+            responses_protocol::ResponsesRequestOptions { reasoning, include },
+        )
     }
 
     fn endpoint_url(&self, endpoint: &str) -> String {
@@ -155,7 +154,20 @@ impl OpenAIProvider {
     }
 
     fn convert_reasoning_effort(effort: ReasoningEffort) -> String {
-        chat_protocol::reasoning_effort(effort)
+        match effort {
+            ReasoningEffort::Low => "low",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+            ReasoningEffort::XHigh => "xhigh",
+        }
+        .to_string()
+    }
+
+    fn effective_reasoning_effort(reasoning: EffectiveReasoning) -> Option<String> {
+        match reasoning {
+            EffectiveReasoning::Unsupported => None,
+            EffectiveReasoning::Effort(effort) => Some(Self::convert_reasoning_effort(effort)),
+        }
     }
 
     fn supports_reasoning_model(model: &str) -> bool {
@@ -174,7 +186,7 @@ impl OpenAIProvider {
     }
 
     async fn send_chat_completion(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let openai_req = Self::build_request(request, false);
+        let openai_req = Self::build_request(request, false)?;
 
         let url = self.endpoint_url("chat/completions");
         let headers = self.build_headers();
@@ -197,13 +209,9 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            error!(
-                "{} API error: {} - {}",
-                self.config.display_name, status, error_text
-            );
+            error!("OpenAI API error: {status} - {error_text}");
             return Err(TalosError::InternalError(format!(
-                "{} API error: {} - {}",
-                self.config.display_name, status, error_text
+                "OpenAI API error: {status} - {error_text}"
             )));
         }
 
@@ -212,11 +220,11 @@ impl OpenAIProvider {
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        chat_protocol::chat_response(openai_resp, &self.config.display_name)
+        chat_protocol::chat_response(openai_resp, "OpenAI")
     }
 
     async fn send_responses(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let openai_req = Self::responses_request(request, None);
+        let openai_req = Self::responses_request(request, None)?;
 
         let url = self.endpoint_url("responses");
         let headers = self.build_headers();
@@ -239,13 +247,9 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            error!(
-                "{} API error: {} - {}",
-                self.config.display_name, status, error_text
-            );
+            error!("OpenAI API error: {status} - {error_text}");
             return Err(TalosError::InternalError(format!(
-                "{} API error: {} - {}",
-                self.config.display_name, status, error_text
+                "OpenAI API error: {status} - {error_text}"
             )));
         }
 
@@ -261,13 +265,13 @@ impl OpenAIProvider {
         let (url, body) = match self.config.protocol {
             OpenAIProtocol::Chat => (
                 self.endpoint_url("chat/completions"),
-                serde_json::to_value(Self::build_request(request, true)).map_err(|e| {
+                serde_json::to_value(Self::build_request(request, true)?).map_err(|e| {
                     TalosError::InternalError(format!("Failed to serialize request: {}", e))
                 })?,
             ),
             OpenAIProtocol::Responses => (
                 self.endpoint_url("responses"),
-                serde_json::to_value(Self::responses_request(request, Some(true))).map_err(
+                serde_json::to_value(Self::responses_request(request, Some(true))?).map_err(
                     |e| TalosError::InternalError(format!("Failed to serialize request: {}", e)),
                 )?,
             ),
@@ -290,8 +294,7 @@ impl OpenAIProvider {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(TalosError::InternalError(format!(
-                "{} API error: {} - {}",
-                self.config.display_name, status, error_text
+                "OpenAI API error: {status} - {error_text}"
             )));
         }
 
@@ -302,7 +305,7 @@ impl OpenAIProvider {
 #[async_trait]
 impl LlmProvider for OpenAIProvider {
     fn name(&self) -> &str {
-        &self.config.provider_name
+        "openai"
     }
 
     fn default_model(&self) -> String {
@@ -318,29 +321,20 @@ impl LlmProvider for OpenAIProvider {
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        info!("Sending chat request to {} API", self.config.display_name);
+        info!("Sending chat request to OpenAI API");
         self.send_chat(request).await
     }
 
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        info!(
-            "Sending tool-aware chat request to {} API",
-            self.config.display_name
-        );
+        info!("Sending tool-aware chat request to OpenAI API");
         self.send_chat(request).await
     }
 
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream> {
         let response = self.send_stream(request).await?;
         match self.config.protocol {
-            OpenAIProtocol::Chat => Ok(chat_protocol::stream(
-                response,
-                self.config.display_name.clone(),
-            )),
-            OpenAIProtocol::Responses => Ok(responses_protocol::stream(
-                response,
-                self.config.display_name.clone(),
-            )),
+            OpenAIProtocol::Chat => Ok(chat_protocol::stream(response, "OpenAI")),
+            OpenAIProtocol::Responses => Ok(responses_protocol::stream(response, "OpenAI")),
         }
     }
 
@@ -349,17 +343,11 @@ impl LlmProvider for OpenAIProvider {
         match self.config.protocol {
             OpenAIProtocol::Chat => Ok(chat_protocol::model_blocks(
                 response,
-                chat_protocol::ChatCompletionModelBlocks::openai().with_identity(
-                    self.config.display_name.clone(),
-                    self.config.item_prefix.clone(),
-                ),
+                chat_protocol::ChatCompletionModelBlocks::openai(),
             )),
             OpenAIProtocol::Responses => Ok(responses_protocol::model_blocks(
                 response,
-                responses_protocol::ResponsesModelBlocks::openai().with_identity(
-                    self.config.display_name.clone(),
-                    self.config.item_prefix.clone(),
-                ),
+                responses_protocol::ResponsesModelBlocks::openai(),
             )),
         }
     }

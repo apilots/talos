@@ -18,14 +18,20 @@ describe("chat api initial turn request", () => {
       "sess-1",
       "user-1",
       "hello",
-      { provider: "bailian", id: "qwen-max" },
+      {
+        modelRef: { provider: "bailian", id: "qwen-max" },
+        reasoning: { type: "modelDefault" },
+      },
       undefined,
     );
 
     expect(request).toMatchObject({
       session_id: "sess-1",
       input: [{ type: "text", text: "hello" }],
-      model_ref: { provider: "bailian", id: "qwen-max" },
+      modelSelection: {
+        modelRef: { provider: "bailian", id: "qwen-max" },
+        reasoning: { type: "modelDefault" },
+      },
       context: expect.objectContaining({
         user_id: "user-1",
         source_type: "http",

@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   LlmConfig,
   LlmProtocol,
   ProviderConfig,
+  ProviderProtocolCapabilities,
   ConfigUpdateResponse,
 } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, Pencil, Plus, Trash2 } from "lucide-react";
 
-import { getLlmConfig, updateLlmConfig } from "@/features/settings/api";
+import { updateLlmConfig } from "@/features/settings/api";
+import { llmConfigKey, useLlmConfigQuery } from "@/features/settings/hooks/useLlmConfigQuery";
 import { useConnectionKey } from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -24,31 +26,21 @@ import {
   type ModelFormState,
 } from "./modelForm";
 
-type ProviderKey = "anthropic" | "openai" | "bailian" | "ollama" | "openrouter";
+type ProviderKey = Exclude<keyof LlmConfig, "provider" | "model">;
 
-const PROVIDERS: { key: ProviderKey; label: string }[] = [
-  { key: "anthropic", label: "Anthropic" },
-  { key: "openai", label: "OpenAI" },
-  { key: "bailian", label: "Bailian" },
-  { key: "ollama", label: "Ollama" },
-  { key: "openrouter", label: "OpenRouter" },
-];
+const PROVIDER_LABELS = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  bailian: "Bailian",
+  deepseek: "DeepSeek",
+  ollama: "Ollama",
+  openrouter: "OpenRouter",
+} satisfies Record<ProviderKey, string>;
 
-const PROVIDER_PROTOCOLS: Record<ProviderKey, LlmProtocol[]> = {
-  anthropic: ["messages"],
-  openai: ["chat", "responses"],
-  bailian: ["chat"],
-  ollama: ["chat"],
-  openrouter: ["chat"],
-};
-
-const DEFAULT_PROTOCOLS: Record<ProviderKey, LlmProtocol> = {
-  anthropic: "messages",
-  openai: "chat",
-  bailian: "chat",
-  ollama: "chat",
-  openrouter: "chat",
-};
+const PROVIDERS = Object.entries(PROVIDER_LABELS).map(([key, label]) => ({
+  key: key as ProviderKey,
+  label,
+}));
 
 function fmtContext(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}K`;
@@ -74,20 +66,20 @@ function protocolLabel(protocol: LlmProtocol, t: (key: string) => string): strin
 // ─── Provider tab content ─────────────────────────────────────────────────────
 
 interface ProviderTabProps {
-  providerKey: ProviderKey;
   config: ProviderConfig;
+  capabilities: ProviderProtocolCapabilities;
   keyConfigured: boolean;
   onChange: (patch: Partial<ProviderConfig>) => void;
 }
 
-function ProviderTab({ providerKey, config, keyConfigured, onChange }: ProviderTabProps) {
+function ProviderTab({ config, capabilities, keyConfigured, onChange }: ProviderTabProps) {
   const { t } = useTranslation("settings");
   const [modalMode, setModalMode] = useState<"add" | "edit" | null>(null);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [modelForm, setModelForm] = useState<ModelFormState>(emptyModelForm);
   const [modelFormError, setModelFormError] = useState("");
-  const protocols = PROVIDER_PROTOCOLS[providerKey];
-  const protocol = config.protocol ?? DEFAULT_PROTOCOLS[providerKey];
+  const protocols = capabilities.protocols;
+  const protocol = config.protocol ?? capabilities.default_protocol;
 
   function openAddModal() { setModalMode("add"); setEditingIdx(null); setModelForm(emptyModelForm); setModelFormError(""); }
   function openEditModal(idx: number) { setModalMode("edit"); setEditingIdx(idx); setModelForm(modelToForm(config.models[idx])); setModelFormError(""); }
@@ -231,10 +223,7 @@ export function SettingsModelsEditor() {
   const [activeProvider, setActiveProvider] = useState<ProviderKey>("anthropic");
   const [draft, setDraft] = useState<LlmConfig | null>(null);
 
-  const { data: serverRead, isLoading, error } = useQuery({
-    queryKey: ["llm-config", connectionKey],
-    queryFn: getLlmConfig,
-  });
+  const { data: serverRead, isLoading, error } = useLlmConfigQuery();
   const serverConfig = serverRead?.config;
 
   // Keep draft in sync with server on initial load (but not on mutation success)
@@ -245,7 +234,7 @@ export function SettingsModelsEditor() {
   const mutation = useMutation({
     mutationFn: updateLlmConfig,
     onSuccess: (updated: ConfigUpdateResponse) => {
-      queryClient.setQueryData(["llm-config", connectionKey], updated);
+      queryClient.setQueryData(llmConfigKey(connectionKey), updated);
       setDraft(updated.config);
     },
   });
@@ -275,10 +264,21 @@ export function SettingsModelsEditor() {
     );
   }
 
-  if (isLoading || !draft) {
+  if (isLoading || !draft || !serverRead) {
     return (
       <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
         <div className="text-sm text-muted">{t("modelsPanel.loading")}</div>
+      </Panel>
+    );
+  }
+
+  const activeProviderCapabilities = serverRead.provider_capabilities[activeProvider];
+  if (!activeProviderCapabilities) {
+    return (
+      <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
+        <div className="text-sm text-danger">
+          {`Provider capabilities are missing for ${activeProvider}.`}
+        </div>
       </Panel>
     );
   }
@@ -345,8 +345,8 @@ export function SettingsModelsEditor() {
       {/* Active provider panel — key resets local modal/edit state on tab switch */}
       <ProviderTab
         key={activeProvider}
-        providerKey={activeProvider}
         config={draft[activeProvider]}
+        capabilities={activeProviderCapabilities}
         keyConfigured={serverRead?.provider_keys[activeProvider]?.api_key_configured ?? false}
         onChange={(patch) => updateProvider(activeProvider, patch)}
       />

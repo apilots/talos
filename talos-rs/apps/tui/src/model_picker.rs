@@ -19,7 +19,7 @@ pub(crate) struct ModelPickerState {
     selected_model: usize,
     selected_reasoning: usize,
     current_model: String,
-    current_reasoning_effort: Option<LlmReasoningEffort>,
+    reasoning_effort_override: Option<LlmReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -36,30 +36,35 @@ pub(crate) struct ModelPickerSelection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReasoningOption {
-    pub(crate) effort: LlmReasoningEffort,
+    pub(crate) effort: Option<LlmReasoningEffort>,
     label: &'static str,
     description: &'static str,
 }
 
 impl ReasoningOption {
-    pub(crate) const ALL: [Self; 4] = [
+    pub(crate) const ALL: [Self; 5] = [
         Self {
-            effort: LlmReasoningEffort::Low,
+            effort: None,
+            label: "Default",
+            description: "Use the model's configured reasoning level",
+        },
+        Self {
+            effort: Some(LlmReasoningEffort::Low),
             label: "Low",
             description: "Fast responses with lighter reasoning",
         },
         Self {
-            effort: LlmReasoningEffort::Medium,
+            effort: Some(LlmReasoningEffort::Medium),
             label: "Medium",
             description: "Balances speed and reasoning depth for everyday tasks",
         },
         Self {
-            effort: LlmReasoningEffort::High,
+            effort: Some(LlmReasoningEffort::High),
             label: "High",
             description: "Greater reasoning depth for complex problems",
         },
         Self {
-            effort: LlmReasoningEffort::XHigh,
+            effort: Some(LlmReasoningEffort::XHigh),
             label: "Extra high",
             description: "Extra high reasoning depth for complex problems",
         },
@@ -79,7 +84,7 @@ impl ModelPickerState {
     pub(crate) fn new(
         models: &[ModelInfo],
         current_model: &str,
-        current_reasoning_effort: Option<LlmReasoningEffort>,
+        reasoning_effort_override: Option<LlmReasoningEffort>,
     ) -> Self {
         let selected_model = models
             .iter()
@@ -91,9 +96,9 @@ impl ModelPickerState {
             selected_model,
             selected_reasoning: 0,
             current_model: current_model.to_string(),
-            current_reasoning_effort,
+            reasoning_effort_override,
         };
-        state.sync_selected_reasoning_effort();
+        state.sync_selected_reasoning();
         state
     }
 
@@ -111,7 +116,7 @@ impl ModelPickerState {
                     self.models.len().saturating_sub(1),
                     direction,
                 );
-                self.sync_selected_reasoning_effort();
+                self.sync_selected_reasoning();
             }
             ModelPickerStep::Reasoning => {
                 self.selected_reasoning = move_selection(
@@ -137,13 +142,20 @@ impl ModelPickerState {
         let model = self.models.get(self.selected_model)?.clone();
         if model.reasoning && self.step == ModelPickerStep::Model {
             self.step = ModelPickerStep::Reasoning;
-            self.sync_selected_reasoning_effort();
+            self.sync_selected_reasoning();
             return None;
         }
 
+        let reasoning_effort = if model.reasoning {
+            ReasoningOption::ALL
+                .get(self.selected_reasoning)
+                .and_then(|option| option.effort)
+        } else {
+            None
+        };
         Some(ModelPickerSelection {
             model: model.id,
-            reasoning_effort: model.reasoning.then_some(self.selected_reasoning_effort()),
+            reasoning_effort,
         })
     }
 
@@ -265,15 +277,14 @@ impl ModelPickerState {
             area.height.saturating_sub(3),
         );
         if list_area.height > 0 {
-            let current_effort = if model == self.current_model {
-                self.current_reasoning_effort
-            } else {
-                None
-            };
             let items = ReasoningOption::ALL
                 .iter()
                 .enumerate()
-                .map(|(index, option)| self.reasoning_item(index, option, current_effort, bg_style))
+                .map(|(index, option)| {
+                    let is_current = model == self.current_model
+                        && option.effort == self.reasoning_effort_override;
+                    self.reasoning_item(index, option, is_current, bg_style)
+                })
                 .collect::<Vec<_>>();
             let mut list_state = ListState::default();
             list_state.select(Some(self.selected_reasoning));
@@ -292,19 +303,11 @@ impl ModelPickerState {
         &self,
         index: usize,
         option: &ReasoningOption,
-        current_effort: Option<LlmReasoningEffort>,
+        is_current: bool,
         bg_style: Style,
     ) -> ListItem<'static> {
         let selected = index == self.selected_reasoning;
-        let is_default = option.effort == Default::default();
-        let is_current = current_effort == Some(option.effort);
-        let suffix = if is_current {
-            " (current)"
-        } else if is_default {
-            " (default)"
-        } else {
-            ""
-        };
+        let suffix = if is_current { " (current)" } else { "" };
         let label = format!("{}. {}{}", index + 1, option.label, suffix);
         let selected_style = bg_style
             .fg(Color::Rgb(134, 233, 255))
@@ -329,30 +332,18 @@ impl ModelPickerState {
         ]))
     }
 
-    fn selected_reasoning_effort(&self) -> LlmReasoningEffort {
-        ReasoningOption::ALL
-            .get(self.selected_reasoning)
-            .map(|option| option.effort)
-            .unwrap_or_default()
-    }
-
-    fn sync_selected_reasoning_effort(&mut self) {
-        let effort = self
-            .models
-            .get(self.selected_model)
-            .map(|model| {
-                if model.id == self.current_model {
-                    self.current_reasoning_effort
-                        .unwrap_or(model.reasoning_effort)
-                } else {
-                    model.reasoning_effort
-                }
-            })
-            .unwrap_or_default();
+    fn sync_selected_reasoning(&mut self) {
+        let effort = self.models.get(self.selected_model).and_then(|model| {
+            if model.id == self.current_model {
+                self.reasoning_effort_override
+            } else {
+                None
+            }
+        });
         self.selected_reasoning = ReasoningOption::ALL
             .iter()
             .position(|option| option.effort == effort)
-            .unwrap_or(1);
+            .unwrap_or_default();
     }
 }
 

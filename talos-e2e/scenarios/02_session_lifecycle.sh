@@ -34,7 +34,10 @@ create_payload='{
     "message_id": "msg-session-lifecycle",
     "trace_id": "trace-session-lifecycle"
   },
-  "model_ref": {"provider": "__PRIMARY_PROVIDER__", "id": "__PRIMARY_MODEL__"}
+  "modelSelection": {
+    "modelRef": {"provider": "__PRIMARY_PROVIDER__", "id": "__PRIMARY_MODEL__"},
+    "reasoning": {"type": "modelDefault"}
+  }
 }'
 create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
 create_payload="${create_payload/__PRIMARY_PROVIDER__/${primary_provider}}"
@@ -74,8 +77,8 @@ echo "CASE get_session PASS id=${detail_id}"
 
 patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
-  -d "{\"conf\":{\"model_ref\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"}}}")"
-log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"model_ref\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"}}}" "${patch_json}"
+  -d "{\"conf\":{\"modelSelection\":{\"modelRef\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"},\"reasoning\":{\"type\":\"modelDefault\"}}}}")"
+log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"modelSelection\":{\"modelRef\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"},\"reasoning\":{\"type\":\"modelDefault\"}}}}" "${patch_json}"
 patch_session_id="$(json_get "${patch_json}" "session.id")"
 if [[ "${patch_session_id}" != "${session_id}" ]]; then
   echo "CASE patch_session_model FAIL response=${patch_json}"

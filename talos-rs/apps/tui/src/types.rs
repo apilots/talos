@@ -1,8 +1,7 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
 use talos_sdk::{
-    LlmReasoningEffort, ModelInfo, SessionHistorySnapshot, SessionInfo, SkillSuggestion,
-    TimelineRecoveryResponse,
+    ModelInfo, SessionHistorySnapshot, SessionInfo, SkillSuggestion, TimelineRecoveryResponse,
 };
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
@@ -160,13 +159,11 @@ pub(crate) enum CommandUpdate {
     SessionCleared(TalosResult<SessionInfo>),
     ModelSwitched {
         requested: String,
-        reasoning_effort: Option<LlmReasoningEffort>,
         result: TalosResult<SessionInfo>,
     },
     HistoryLoaded(TalosResult<Vec<SessionInfo>>),
     ModelPickerSwitched {
         requested: String,
-        reasoning_effort: Option<LlmReasoningEffort>,
         result: TalosResult<SessionInfo>,
     },
     SessionHistoryLoaded {

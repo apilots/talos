@@ -9,8 +9,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{
-    LlmReasoningEffort, ModelInfo, ModelRef, SessionInfo, TalosContext, TalosProvider,
-    TalosSourceType,
+    LlmReasoningEffort, ModelInfo, ModelRef, ModelSelection, ReasoningSelection, SessionInfo,
+    TalosContext, TalosProvider, TalosSourceType,
 };
 use talos_types::talos::TokenUsage;
 
@@ -35,7 +35,7 @@ impl TuiApp {
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
             current_model: String::new(),
-            current_reasoning_effort: None,
+            reasoning_effort_override: None,
             session_usage: TokenUsage::default(),
             turn_metrics: None,
             turn_metrics_live: false,
@@ -122,14 +122,20 @@ impl TuiApp {
         }
     }
 
-    pub(crate) fn current_model_ref(&self) -> Option<ModelRef> {
-        self.available_model_info
-            .iter()
-            .find(|model| model.id == self.current_model)
-            .map(|model| ModelRef {
-                provider: model.provider.clone(),
-                id: model.id.clone(),
-            })
+    pub(crate) fn current_model_selection(&self) -> Option<ModelSelection> {
+        let model = self.current_model_info()?;
+        let model_ref = ModelRef {
+            provider: model.provider.clone(),
+            id: model.id.clone(),
+        };
+        let reasoning = match self.reasoning_effort_override {
+            Some(level) if model.reasoning => ReasoningSelection::Effort { level },
+            _ => ReasoningSelection::ModelDefault,
+        };
+        Some(ModelSelection {
+            model_ref,
+            reasoning,
+        })
     }
 
     pub(crate) fn current_model_info(&self) -> Option<&ModelInfo> {
@@ -144,22 +150,19 @@ impl TuiApp {
             .find(|model| model.id == model_id)
     }
 
-    pub(crate) fn sync_current_reasoning_effort_from_model(&mut self) {
-        self.current_reasoning_effort = self.current_model_info().and_then(|model| {
-            if model.reasoning {
-                Some(model.reasoning_effort)
-            } else {
-                None
-            }
-        });
+    pub(crate) fn use_model_default_reasoning(&mut self) {
+        self.reasoning_effort_override = None;
     }
 
-    pub(crate) fn set_current_reasoning_effort(&mut self, effort: Option<LlmReasoningEffort>) {
-        self.current_reasoning_effort = self.current_model_info().and_then(|model| {
-            model
-                .reasoning
-                .then_some(effort.unwrap_or(model.reasoning_effort))
-        });
+    pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<LlmReasoningEffort>) {
+        self.reasoning_effort_override = if self
+            .current_model_info()
+            .is_some_and(|model| model.reasoning)
+        {
+            effort
+        } else {
+            None
+        };
     }
 
     pub(crate) fn model_status_label(&self, model_id: &str) -> String {
@@ -170,7 +173,7 @@ impl TuiApp {
             return model_id.to_string();
         }
         let effort = if model.id == self.current_model {
-            self.current_reasoning_effort
+            self.reasoning_effort_override
                 .unwrap_or(model.reasoning_effort)
         } else {
             model.reasoning_effort
@@ -242,8 +245,13 @@ impl TuiApp {
 
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
-        self.current_model = session.model_ref.id.clone();
-        self.sync_current_reasoning_effort_from_model();
+        self.current_model = session.model_selection.model_ref.id.clone();
+        match session.model_selection.reasoning {
+            ReasoningSelection::ModelDefault => self.use_model_default_reasoning(),
+            ReasoningSelection::Effort { level } => {
+                self.set_reasoning_effort_override(Some(level));
+            }
+        }
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

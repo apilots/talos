@@ -1,8 +1,9 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, ReasoningEffort, Role, SseLineDecoder, ToolChoice,
-    ToolDefinition, Usage,
+    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
+    ReasoningEncryptedBlock, ReasoningOutput, ReasoningSummaryBlock, ReasoningTextBlock, Role,
+    SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,8 @@ pub struct ResponsesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ResponsesReasoning>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 }
 
@@ -53,6 +56,13 @@ pub enum ResponsesToolChoice {
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsesReasoning {
     pub effort: String,
+}
+
+/// Provider-owned options applied by the shared Responses protocol encoder.
+#[derive(Debug, Clone, Default)]
+pub struct ResponsesRequestOptions {
+    pub reasoning: Option<ResponsesReasoning>,
+    pub include: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -103,14 +113,11 @@ impl ResponsesModelBlocks {
         }
     }
 
-    pub fn with_identity(
-        mut self,
-        provider_name: impl Into<String>,
-        item_prefix: impl Into<String>,
-    ) -> Self {
-        self.provider_name = provider_name.into();
-        self.item_prefix = item_prefix.into();
-        self
+    pub fn openrouter() -> Self {
+        Self {
+            provider_name: "OpenRouter".to_string(),
+            item_prefix: "openrouter".to_string(),
+        }
     }
 }
 
@@ -121,22 +128,27 @@ enum ActiveResponsesBlock {
     ToolCall { model_item_id: String },
 }
 
-pub fn request(request: ChatRequest, stream: Option<bool>) -> ResponsesRequest {
-    ResponsesRequest {
+pub fn request(
+    request: ChatRequest,
+    stream: Option<bool>,
+    options: ResponsesRequestOptions,
+) -> TalosResult<ResponsesRequest> {
+    Ok(ResponsesRequest {
         model: request.model,
-        input: input(request.messages),
+        input: input(request.messages)?,
         temperature: request.temperature,
         max_output_tokens: request.max_tokens,
         top_p: request.top_p,
         tools: tools(request.tools),
         tool_choice: tool_choice(request.tool_choice),
         parallel_tool_calls: request.parallel_tool_calls,
-        reasoning: request.reasoning_effort.map(reasoning),
+        reasoning: options.reasoning,
+        include: options.include,
         stream,
-    }
+    })
 }
 
-pub fn input(messages: Vec<ChatMessage>) -> Vec<Value> {
+pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
     let mut items = Vec::new();
 
     for message in messages {
@@ -151,6 +163,7 @@ pub fn input(messages: Vec<ChatMessage>) -> Vec<Value> {
                 }));
             }
             Role::Assistant => {
+                items.extend(reasoning_items(message.reasoning_continuation)?);
                 if !message.content.is_empty() {
                     items.push(serde_json::json!({
                         "role": "assistant",
@@ -181,7 +194,105 @@ pub fn input(messages: Vec<ChatMessage>) -> Vec<Value> {
         }
     }
 
-    items
+    Ok(items)
+}
+
+#[derive(Debug)]
+struct ResponsesReasoningItem {
+    id: String,
+    summary: Vec<Value>,
+    content: Vec<Value>,
+    encrypted_content: Option<String>,
+}
+
+impl ResponsesReasoningItem {
+    fn new(id: String) -> Self {
+        Self {
+            id,
+            summary: Vec::new(),
+            content: Vec::new(),
+            encrypted_content: None,
+        }
+    }
+
+    fn into_value(self) -> Value {
+        let mut value = serde_json::json!({
+            "type": "reasoning",
+            "id": self.id,
+        });
+        let object = value
+            .as_object_mut()
+            .expect("reasoning item should serialize as object");
+        if !self.summary.is_empty() {
+            object.insert("summary".to_string(), Value::Array(self.summary));
+        }
+        if !self.content.is_empty() {
+            object.insert("content".to_string(), Value::Array(self.content));
+        }
+        if let Some(encrypted_content) = self.encrypted_content {
+            object.insert(
+                "encrypted_content".to_string(),
+                Value::String(encrypted_content),
+            );
+        }
+        value
+    }
+}
+
+fn reasoning_items(continuation: Option<ReasoningContinuation>) -> TalosResult<Vec<Value>> {
+    let Some(continuation) = continuation else {
+        return Ok(Vec::new());
+    };
+    let ReasoningContinuation::Blocks(blocks) = continuation else {
+        return Err(TalosError::ValidationError(
+            "Responses protocol requires structured reasoning continuation".to_string(),
+        ));
+    };
+
+    let mut items: Vec<ResponsesReasoningItem> = Vec::new();
+    for block in blocks {
+        let provider_item_id = match &block {
+            ReasoningBlock::Text(block) => block.provider_item_id.as_ref(),
+            ReasoningBlock::Summary(block) => block.provider_item_id.as_ref(),
+            ReasoningBlock::Encrypted(block) => block.provider_item_id.as_ref(),
+        }
+        .cloned()
+        .ok_or_else(|| {
+            TalosError::ValidationError(
+                "Responses reasoning continuation requires a provider item id".to_string(),
+            )
+        })?;
+
+        if items.last().is_none_or(|item| item.id != provider_item_id) {
+            items.push(ResponsesReasoningItem::new(provider_item_id));
+        }
+        let item = items
+            .last_mut()
+            .expect("reasoning item should exist after insertion");
+        match block {
+            ReasoningBlock::Text(block) => item.content.push(serde_json::json!({
+                "type": "reasoning_text",
+                "text": block.text,
+            })),
+            ReasoningBlock::Summary(block) => item.summary.push(serde_json::json!({
+                "type": "summary_text",
+                "text": block.text,
+            })),
+            ReasoningBlock::Encrypted(block) => {
+                if item.encrypted_content.replace(block.data).is_some() {
+                    return Err(TalosError::ValidationError(format!(
+                        "Responses reasoning item '{}' contains multiple encrypted blocks",
+                        item.id
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(items
+        .into_iter()
+        .map(ResponsesReasoningItem::into_value)
+        .collect())
 }
 
 pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ResponsesTool>> {
@@ -208,18 +319,6 @@ pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ResponsesToolChoice> {
             name,
         }),
         None => None,
-    }
-}
-
-pub fn reasoning(effort: ReasoningEffort) -> ResponsesReasoning {
-    let effort = match effort {
-        ReasoningEffort::Low => "low",
-        ReasoningEffort::Medium => "medium",
-        ReasoningEffort::High => "high",
-        ReasoningEffort::XHigh => "xhigh",
-    };
-    ResponsesReasoning {
-        effort: effort.to_string(),
     }
 }
 
@@ -252,9 +351,10 @@ pub fn chat_response(response: ResponsesResponse) -> ChatResponse {
 
 pub fn response_content(
     response: &ResponsesResponse,
-) -> (String, Vec<String>, Option<Vec<FunctionCall>>) {
+) -> (String, ReasoningOutput, Option<Vec<FunctionCall>>) {
     let mut text = Vec::new();
-    let mut reasoning = Vec::new();
+    let mut display_text = Vec::new();
+    let mut continuation = Vec::new();
     let mut calls = Vec::new();
 
     let has_output_text = response
@@ -270,14 +370,27 @@ pub fn response_content(
     for item in &response.output {
         match item_type(item) {
             "message" if !has_output_text => text.extend(text_from_message_item(item)),
-            "reasoning" => reasoning.extend(reasoning_from_item(item)),
+            "reasoning" => {
+                let (display, blocks) = reasoning_from_item(item);
+                display_text.extend(display);
+                continuation.extend(blocks);
+            }
             "function_call" => calls.push(function_call(item)),
             _ => {}
         }
     }
 
     let tool_calls = if calls.is_empty() { None } else { Some(calls) };
-    (text.join(""), reasoning, tool_calls)
+    let continuation =
+        (!continuation.is_empty()).then_some(ReasoningContinuation::Blocks(continuation));
+    (
+        text.join(""),
+        ReasoningOutput {
+            display_text,
+            continuation,
+        },
+        tool_calls,
+    )
 }
 
 pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> ChatStream {
@@ -392,6 +505,7 @@ pub fn model_blocks(
         let mut stream = response.bytes_stream();
         let mut decoder = SseLineDecoder::new();
         let mut active_blocks: HashMap<String, ActiveResponsesBlock> = HashMap::new();
+        let mut reasoning_output = ReasoningOutput::default();
         let mut final_usage: Option<Usage> = None;
         let mut final_finish_reason: Option<String> = None;
 
@@ -415,6 +529,9 @@ pub fn model_blocks(
                         }
                         if data == "[DONE]" {
                             if !complete_open_blocks(&tx, &mut active_blocks).await {
+                                return;
+                            }
+                            if !send_reasoning_output(&tx, &mut reasoning_output).await {
                                 return;
                             }
                             let _ = tx
@@ -502,6 +619,7 @@ pub fn model_blocks(
                                 }
                             }
                             "response.output_item.done" => {
+                                append_reasoning_output(&mut reasoning_output, &event);
                                 if !complete_output_item(&tx, &mut active_blocks, &event).await {
                                     return;
                                 }
@@ -520,6 +638,9 @@ pub fn model_blocks(
                                     .and_then(|v| v.as_str())
                                     .and_then(|status| finish_reason(Some(status)));
                                 if !complete_open_blocks(&tx, &mut active_blocks).await {
+                                    return;
+                                }
+                                if !send_reasoning_output(&tx, &mut reasoning_output).await {
                                     return;
                                 }
                                 let _ = tx
@@ -596,22 +717,48 @@ fn text_from_message_item(item: &Value) -> Vec<String> {
         .collect()
 }
 
-fn reasoning_from_item(item: &Value) -> Vec<String> {
-    let mut fragments = Vec::new();
-    for key in ["summary", "content"] {
-        if let Some(items) = item.get(key).and_then(|v| v.as_array()) {
-            for block in items {
-                if let Some(text) = block
-                    .get("text")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| block.get("summary_text").and_then(|v| v.as_str()))
-                {
-                    fragments.push(text.to_string());
-                }
+fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
+    let provider_item_id = item.get("id").and_then(|v| v.as_str()).map(str::to_string);
+    let mut display_text = Vec::new();
+    let mut blocks = Vec::new();
+
+    if let Some(items) = item.get("summary").and_then(|v| v.as_array()) {
+        for block in items {
+            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                display_text.push(text.to_string());
+                blocks.push(ReasoningBlock::Summary(ReasoningSummaryBlock {
+                    provider_item_id: provider_item_id.clone(),
+                    provider_index: None,
+                    text: text.to_string(),
+                    format: Some("openai-responses-v1".to_string()),
+                }));
             }
         }
     }
-    fragments
+    if let Some(items) = item.get("content").and_then(|v| v.as_array()) {
+        for block in items {
+            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+                display_text.push(text.to_string());
+                blocks.push(ReasoningBlock::Text(ReasoningTextBlock {
+                    provider_item_id: provider_item_id.clone(),
+                    provider_index: None,
+                    text: text.to_string(),
+                    signature: None,
+                    format: Some("openai-responses-v1".to_string()),
+                }));
+            }
+        }
+    }
+    if let Some(data) = item.get("encrypted_content").and_then(|v| v.as_str()) {
+        blocks.push(ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
+            provider_item_id,
+            provider_index: None,
+            data: data.to_string(),
+            format: Some("openai-responses-v1".to_string()),
+        }));
+    }
+
+    (display_text, blocks)
 }
 
 fn function_call(item: &Value) -> FunctionCall {
@@ -958,6 +1105,43 @@ fn provider_item_id(item: &Value, index: usize) -> Option<String> {
         .and_then(|v| v.as_str())
         .map(str::to_string)
         .or_else(|| Some(format!("output:{index}")))
+}
+
+fn append_reasoning_output(output: &mut ReasoningOutput, event: &Value) {
+    let item = event.get("item").unwrap_or(&Value::Null);
+    if item_type(item) != "reasoning" {
+        return;
+    }
+    let (display_text, blocks) = reasoning_from_item(item);
+    output.display_text.extend(display_text);
+    if blocks.is_empty() {
+        return;
+    }
+    match output
+        .continuation
+        .get_or_insert_with(|| ReasoningContinuation::Blocks(Vec::new()))
+    {
+        ReasoningContinuation::Blocks(existing) => existing.extend(blocks),
+        ReasoningContinuation::Text(_) => {
+            unreachable!("Responses protocol only builds structured reasoning continuation")
+        }
+    }
+}
+
+async fn send_reasoning_output(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    output: &mut ReasoningOutput,
+) -> bool {
+    if output.continuation.is_none() {
+        return true;
+    }
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::ReasoningCompleted {
+            output: std::mem::take(output),
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

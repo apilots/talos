@@ -88,11 +88,15 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.name is empty or unresolved placeholder".to_string(),
         ));
     }
-    validate_agent_model_ref(config.agent.model_ref.as_ref(), "agent.model_ref", config)?;
+    validate_agent_model_selection(
+        config.agent.model_selection.as_ref(),
+        "agent.model_selection",
+        config,
+    )?;
     for definition in &config.agent.agents {
-        validate_agent_model_ref(
-            definition.model_ref.as_ref(),
-            &format!("agent.agents.{}.model_ref", definition.id),
+        validate_agent_model_selection(
+            definition.model_selection.as_ref(),
+            &format!("agent.agents.{}.model_selection", definition.id),
             config,
         )?;
     }
@@ -475,16 +479,17 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     Ok(())
 }
 
-fn validate_agent_model_ref(
-    model_ref: Option<&crate::ModelRefConfig>,
+fn validate_agent_model_selection(
+    selection: Option<&crate::ModelSelectionConfig>,
     path: &str,
     config: &Config,
 ) -> TalosResult<()> {
     use talos_error::TalosError;
 
-    let Some(model_ref) = model_ref else {
+    let Some(selection) = selection else {
         return Ok(());
     };
+    let model_ref = &selection.model_ref;
     let provider = model_ref.provider.trim();
     let model = model_ref.id.trim();
     if provider.is_empty()
@@ -503,16 +508,27 @@ fn validate_agent_model_ref(
             model_ref.provider
         )));
     };
-    if !provider_config.models.is_empty()
-        && !provider_config
+    if !provider_config.models.is_empty() {
+        let model = provider_config
             .models
             .iter()
-            .any(|entry| entry.id == model_ref.id)
-    {
-        return Err(TalosError::InvalidConfiguration(format!(
-            "{path} id '{}' is not configured under llm.{}.models",
-            model_ref.id, provider_key
-        )));
+            .find(|entry| entry.id == model_ref.id)
+            .ok_or_else(|| {
+                TalosError::InvalidConfiguration(format!(
+                    "{path} id '{}' is not configured under llm.{}.models",
+                    model_ref.id, provider_key
+                ))
+            })?;
+        if matches!(
+            selection.reasoning,
+            crate::ReasoningSelectionConfig::Effort { .. }
+        ) && !model.reasoning
+        {
+            return Err(TalosError::InvalidConfiguration(format!(
+                "{path} cannot select reasoning effort for model '{}:{}' because reasoning is disabled",
+                model_ref.provider, model_ref.id
+            )));
+        }
     }
     Ok(())
 }

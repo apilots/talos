@@ -114,7 +114,7 @@ impl LlmProvider for TestLlmProvider {
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: String::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: "default".to_string(),
             usage: Usage::default(),
             finish_reason: None,
@@ -245,7 +245,7 @@ fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
         }],
         workspace_id: None,
         context: Some(request_context()),
-        model_ref: None,
+        model_selection: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,
@@ -260,7 +260,7 @@ fn create_session_params(
     CreateSessionRequest {
         session_id: session_id.to_string(),
         context,
-        model_ref: None,
+        model_selection: None,
         workspace_id: None,
         project_id: None,
         current_directory,
@@ -268,7 +268,7 @@ fn create_session_params(
 }
 
 #[tokio::test]
-async fn existing_session_start_turn_applies_model_ref_before_dispatch() {
+async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
     let (service, _store) = test_application(
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
@@ -286,10 +286,12 @@ async fn existing_session_start_turn_applies_model_ref_before_dispatch() {
         .expect("session should be created");
 
     let mut request = start_turn_request("session-model-ref", "hello");
-    request.model_ref = Some(talos_types::ModelRef {
-        provider: "anthropic".to_string(),
-        id: "turn-model".to_string(),
-    });
+    request.model_selection = Some(talos_types::ModelSelection::model_default(
+        talos_types::ModelRef {
+            provider: "anthropic".to_string(),
+            id: "turn-model".to_string(),
+        },
+    ));
     let _ = service.start_turn(&actor, request, None).await;
 
     let session = service

@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::model::LlmConfig;
+use crate::model::{LlmConfig, LlmProtocol};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ConfigGetRequest {
@@ -18,6 +18,7 @@ pub struct ConfigGetResponse {
     pub config: LlmConfig,
     pub model_readiness: ModelReadiness,
     pub provider_keys: BTreeMap<String, ProviderKeyStatus>,
+    pub provider_capabilities: BTreeMap<String, ProviderProtocolCapabilities>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -31,6 +32,7 @@ pub struct ConfigUpdateResponse {
     pub config: LlmConfig,
     pub model_readiness: ModelReadiness,
     pub provider_keys: BTreeMap<String, ProviderKeyStatus>,
+    pub provider_capabilities: BTreeMap<String, ProviderProtocolCapabilities>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
@@ -70,6 +72,13 @@ pub struct ProviderKeyStatus {
     pub api_key_configured: bool,
 }
 
+/// Provider protocol choices returned to configuration clients.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ProviderProtocolCapabilities {
+    pub default_protocol: LlmProtocol,
+    pub protocols: Vec<LlmProtocol>,
+}
+
 impl From<talos_config::LlmConfigRead> for ConfigGetResponse {
     fn from(value: talos_config::LlmConfigRead) -> Self {
         Self {
@@ -77,6 +86,10 @@ impl From<talos_config::LlmConfigRead> for ConfigGetResponse {
             model_readiness: value.model_readiness.into(),
             provider_keys: value
                 .provider_keys
+                .into_iter()
+                .map(|(key, value)| (key, value.into()))
+                .collect(),
+            provider_capabilities: talos_config::provider_protocol_capabilities()
                 .into_iter()
                 .map(|(key, value)| (key, value.into()))
                 .collect(),
@@ -91,6 +104,7 @@ impl From<talos_config::LlmConfigRead> for ConfigUpdateResponse {
             config: response.config,
             model_readiness: response.model_readiness,
             provider_keys: response.provider_keys,
+            provider_capabilities: response.provider_capabilities,
         }
     }
 }
@@ -110,6 +124,15 @@ impl From<talos_config::ProviderKeyStatus> for ProviderKeyStatus {
     fn from(value: talos_config::ProviderKeyStatus) -> Self {
         Self {
             api_key_configured: value.api_key_configured,
+        }
+    }
+}
+
+impl From<talos_config::ProviderProtocolCapabilities> for ProviderProtocolCapabilities {
+    fn from(value: talos_config::ProviderProtocolCapabilities) -> Self {
+        Self {
+            default_protocol: value.default_protocol.into(),
+            protocols: value.protocols.into_iter().map(Into::into).collect(),
         }
     }
 }

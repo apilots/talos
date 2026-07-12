@@ -126,7 +126,7 @@ impl<'a> AgentCapabilityValidator<'a> {
         if selected_model.is_empty() {
             return Ok(());
         }
-        let session_model = request.config.llm.model.trim();
+        let session_model = request.config.model_selection.model_ref.id.trim();
         if session_model == selected_model {
             return Ok(());
         }

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{CancelActiveTurnParams, ModelRef, TalosSession};
+use talos_types::{CancelActiveTurnParams, ModelSelection, TalosSession};
 
 /// Coordinator-owned session lifecycle facade.
 ///
@@ -15,10 +15,10 @@ pub trait SessionRuntime: Send + Sync {
     }
 
     /// Resolve the selected Agent default model for initializing a new session.
-    async fn resolve_target_agent_model_ref(
+    async fn resolve_target_agent_model_selection(
         &self,
         _context: &TalosContext,
-    ) -> TalosResult<Option<ModelRef>> {
+    ) -> TalosResult<Option<ModelSelection>> {
         Ok(None)
     }
 

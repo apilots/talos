@@ -10,7 +10,7 @@ require_command curl
 require_command python3
 require_command mktemp
 
-if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
+if ! has_real_llm_key; then
   echo "CASE grep_glob_real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi
@@ -72,7 +72,7 @@ payload = {
         "message_id": "msg-tool-grep-glob",
         "trace_id": "trace-tool-grep-glob",
     },
-    "model_ref": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]},
+    "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoning": {"type": "modelDefault"}},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

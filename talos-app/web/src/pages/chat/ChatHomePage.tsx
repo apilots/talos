@@ -5,13 +5,16 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatComposer,
   generateSessionId,
+  reasoningLevelForModel,
   useCreateProjectMutation,
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
+import { useLlmConfigQuery } from "@/features/settings";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type { SkillSuggestion } from "@talos/sdk-browser";
+import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface HomeLocationState {
   initialDraft?: string;
@@ -28,6 +31,8 @@ export function ChatHomePage() {
   const location = useLocation();
   const locationState = location.state as HomeLocationState | null;
   const { data: models } = useModelsQuery();
+  const { data: llmConfigRead } = useLlmConfigQuery();
+  const configuredModel = llmConfigRead?.config.model;
   const projectsView = useProjectsView();
   const createProject = useCreateProjectMutation();
   const projects = projectsView.projects;
@@ -37,7 +42,8 @@ export function ChatHomePage() {
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
   const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(models?.[0]?.id);
+  const [selectedModel, setSelectedModel] = useState<string>();
+  const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("medium");
 
   const activeProject = useMemo(
     () => resolveProjectView(projects, activeProjectId),
@@ -45,10 +51,11 @@ export function ChatHomePage() {
   );
 
   useEffect(() => {
-    if (!selectedModel && models?.[0]?.id) {
-      setSelectedModel(models[0].id);
+    if (!selectedModel && configuredModel) {
+      setSelectedModel(configuredModel);
+      setSelectedReasoningLevel(reasoningLevelForModel(models, configuredModel));
     }
-  }, [models, selectedModel]);
+  }, [configuredModel, models, selectedModel]);
 
   useEffect(() => {
     if (activeProject && activeProject.id !== activeProjectId) {
@@ -70,7 +77,8 @@ export function ChatHomePage() {
       state: trimmed
         ? {
             initialPrompt: trimmed,
-            initialModel: selectedModel ?? models?.[0]?.id,
+            initialModel: selectedModel,
+            initialReasoningLevel: selectedReasoningLevel,
             initialProjectId: activeProject?.id,
             initialProject: activeProject,
             initialSkills: initialSkillsState(skills),
@@ -99,17 +107,22 @@ export function ChatHomePage() {
           onCreateProject={handleCreateProject}
           onDraftChange={setDraft}
           initialSelectedSkills={initialSkills}
-          onModelChange={setSelectedModel}
+          onModelChange={(model) => {
+            setSelectedModel(model);
+            setSelectedReasoningLevel(reasoningLevelForModel(models, model));
+          }}
           onProjectChange={setActiveProjectId}
           onRuntimeModeChange={(mode) => {
             if (mode === "local") {
               setConnection({ runtimeMode: mode });
             }
           }}
+          onReasoningLevelChange={setSelectedReasoningLevel}
           onSend={(skills) => handleStartDraft(draft, skills)}
           projects={projects}
           runtimeMode={connection.runtimeMode}
           selectedModel={selectedModel}
+          reasoningLevel={selectedReasoningLevel}
           showProjectSelector
         />
       </div>

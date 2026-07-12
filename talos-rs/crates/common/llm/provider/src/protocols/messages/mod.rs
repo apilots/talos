@@ -1,8 +1,9 @@
 use crate::{
-    reasoning_budget_tokens, CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse,
-    ChatStream, FunctionCall, ModelBlockCompleted, ModelBlockDelta, ModelBlockKind,
-    ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelToolCallStart,
-    ReasoningEffort, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
+    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
+    ReasoningEncryptedBlock, ReasoningOutput, ReasoningTextBlock, Role, SseLineDecoder, ToolChoice,
+    ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -53,13 +54,28 @@ pub struct MessagesRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking: Option<MessagesThinkingConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_config: Option<MessagesOutputConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct MessagesThinkingConfig {
     pub r#type: String,
-    pub budget_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct MessagesOutputConfig {
+    pub effort: String,
+}
+
+/// Provider-owned options applied by the shared Messages protocol encoder.
+#[derive(Debug, Clone, Default)]
+pub struct MessagesRequestOptions {
+    pub thinking: Option<MessagesThinkingConfig>,
+    pub output_config: Option<MessagesOutputConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -84,6 +100,10 @@ pub struct MessagesContent {
     pub text: Option<String>,
     #[serde(default)]
     pub thinking: Option<String>,
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub data: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -145,7 +165,7 @@ pub fn tools(tools: Option<Vec<ToolDefinition>>) -> Option<Vec<MessagesTool>> {
 
 pub fn messages(
     messages: Vec<ChatMessage>,
-) -> (Option<Vec<MessagesTextBlock>>, Vec<MessagesMessage>) {
+) -> TalosResult<(Option<Vec<MessagesTextBlock>>, Vec<MessagesMessage>)> {
     let mut system_blocks: Option<Vec<MessagesTextBlock>> = None;
     let mut protocol_messages = Vec::new();
 
@@ -167,11 +187,11 @@ pub fn messages(
                 });
             }
             Role::Assistant => {
+                let mut blocks = reasoning_blocks(msg.reasoning_continuation)?;
+                if !msg.content.is_empty() {
+                    blocks.push(text_block(msg.content, msg.cache_control));
+                }
                 if let Some(tool_calls) = msg.tool_calls {
-                    let mut blocks = Vec::new();
-                    if !msg.content.is_empty() {
-                        blocks.push(text_block(msg.content, msg.cache_control));
-                    }
                     for call in tool_calls {
                         blocks.push(serde_json::json!({
                             "type": "tool_use",
@@ -187,7 +207,7 @@ pub fn messages(
                 } else {
                     protocol_messages.push(MessagesMessage {
                         role: "assistant".to_string(),
-                        content: Value::Array(vec![text_block(msg.content, msg.cache_control)]),
+                        content: Value::Array(blocks),
                     });
                 }
             }
@@ -206,14 +226,46 @@ pub fn messages(
         }
     }
 
-    (system_blocks, protocol_messages)
+    Ok((system_blocks, protocol_messages))
+}
+
+fn reasoning_blocks(continuation: Option<ReasoningContinuation>) -> TalosResult<Vec<Value>> {
+    let Some(continuation) = continuation else {
+        return Ok(Vec::new());
+    };
+
+    let blocks = match continuation {
+        ReasoningContinuation::Text(text) => vec![serde_json::json!({
+            "type": "thinking",
+            "thinking": text,
+        })],
+        ReasoningContinuation::Blocks(blocks) => blocks
+            .into_iter()
+            .map(|block| match block {
+                ReasoningBlock::Text(block) => Ok(serde_json::json!({
+                    "type": "thinking",
+                    "thinking": block.text,
+                    "signature": block.signature,
+                })),
+                ReasoningBlock::Encrypted(block) => Ok(serde_json::json!({
+                    "type": "redacted_thinking",
+                    "data": block.data,
+                })),
+                ReasoningBlock::Summary(_) => Err(TalosError::ValidationError(
+                    "Messages protocol cannot replay a reasoning summary block".to_string(),
+                )),
+            })
+            .collect::<TalosResult<Vec<_>>>()?,
+    };
+    Ok(blocks)
 }
 
 pub fn response_content(
     content: &[MessagesContent],
-) -> (String, Vec<String>, Option<Vec<FunctionCall>>) {
+) -> (String, ReasoningOutput, Option<Vec<FunctionCall>>) {
     let mut text = Vec::new();
-    let mut reasoning = Vec::new();
+    let mut display_text = Vec::new();
+    let mut continuation = Vec::new();
     let mut calls = Vec::new();
 
     for block in content {
@@ -225,7 +277,24 @@ pub fn response_content(
             }
             "thinking" => {
                 if let Some(fragment) = block.thinking.as_ref() {
-                    reasoning.push(fragment.clone());
+                    display_text.push(fragment.clone());
+                    continuation.push(ReasoningBlock::Text(ReasoningTextBlock {
+                        provider_item_id: block.id.clone(),
+                        provider_index: None,
+                        text: fragment.clone(),
+                        signature: block.signature.clone(),
+                        format: Some("anthropic-claude-v1".to_string()),
+                    }));
+                }
+            }
+            "redacted_thinking" => {
+                if let Some(data) = block.data.as_ref() {
+                    continuation.push(ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
+                        provider_item_id: block.id.clone(),
+                        provider_index: None,
+                        data: data.clone(),
+                        format: Some("anthropic-claude-v1".to_string()),
+                    }));
                 }
             }
             "tool_use" => {
@@ -240,12 +309,25 @@ pub fn response_content(
     }
 
     let tool_calls = if calls.is_empty() { None } else { Some(calls) };
-    (text.join(""), reasoning, tool_calls)
+    let continuation =
+        (!continuation.is_empty()).then_some(ReasoningContinuation::Blocks(continuation));
+    (
+        text.join(""),
+        ReasoningOutput {
+            display_text,
+            continuation,
+        },
+        tool_calls,
+    )
 }
 
-pub fn request(request: ChatRequest, stream: Option<bool>) -> MessagesRequest {
-    let (system, messages) = messages(request.messages);
-    MessagesRequest {
+pub fn request(
+    request: ChatRequest,
+    stream: Option<bool>,
+    options: MessagesRequestOptions,
+) -> TalosResult<MessagesRequest> {
+    let (system, messages) = messages(request.messages)?;
+    Ok(MessagesRequest {
         model: request.model,
         messages,
         system,
@@ -255,16 +337,10 @@ pub fn request(request: ChatRequest, stream: Option<bool>) -> MessagesRequest {
         stop_sequences: request.stop,
         tools: tools(request.tools),
         tool_choice: tool_choice(request.tool_choice),
-        thinking: request.reasoning_effort.map(thinking),
+        thinking: options.thinking,
+        output_config: options.output_config,
         stream,
-    }
-}
-
-pub fn thinking(effort: ReasoningEffort) -> MessagesThinkingConfig {
-    MessagesThinkingConfig {
-        r#type: "enabled".to_string(),
-        budget_tokens: reasoning_budget_tokens(effort),
-    }
+    })
 }
 
 pub fn chat_response(response: MessagesResponse) -> ChatResponse {
@@ -284,6 +360,10 @@ pub fn chat_response(response: MessagesResponse) -> ChatResponse {
         tool_calls,
     }
 }
+
+#[cfg(test)]
+#[path = "messages_tests.rs"]
+mod tests;
 
 pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> ChatStream {
     let (tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(100);
@@ -401,6 +481,7 @@ pub fn model_blocks(
     tokio::spawn(async move {
         let mut stream = response.bytes_stream();
         let mut active_blocks: HashMap<usize, ActiveMessagesBlock> = HashMap::new();
+        let mut reasoning_blocks: Vec<(usize, ReasoningBlock)> = Vec::new();
         let mut stop_reason: Option<String> = None;
         let mut output_tokens: Option<u32> = None;
         let mut decoder = SseLineDecoder::new();
@@ -459,12 +540,20 @@ pub fn model_blocks(
                                 }
                             }
                             "content_block_delta" => {
-                                if !send_content_block_delta(&tx, &active_blocks, &event).await {
+                                if !send_content_block_delta(&tx, &mut active_blocks, &event).await
+                                {
                                     return;
                                 }
                             }
                             "content_block_stop" => {
-                                if !stop_content_block(&tx, &mut active_blocks, &event).await {
+                                if !stop_content_block(
+                                    &tx,
+                                    &mut active_blocks,
+                                    &mut reasoning_blocks,
+                                    &event,
+                                )
+                                .await
+                                {
                                     return;
                                 }
                             }
@@ -500,6 +589,38 @@ pub fn model_blocks(
                                     cache_creation_input_tokens: None,
                                     cache_read_input_tokens: None,
                                 });
+                                if !reasoning_blocks.is_empty() {
+                                    reasoning_blocks.sort_by_key(|(index, _)| *index);
+                                    let blocks: Vec<_> = reasoning_blocks
+                                        .drain(..)
+                                        .map(|(_, block)| block)
+                                        .collect();
+                                    let display_text = blocks
+                                        .iter()
+                                        .filter_map(|block| match block {
+                                            ReasoningBlock::Text(block) => Some(block.text.clone()),
+                                            ReasoningBlock::Summary(block) => {
+                                                Some(block.text.clone())
+                                            }
+                                            ReasoningBlock::Encrypted(_) => None,
+                                        })
+                                        .collect();
+                                    if !send_model_block_event(
+                                        &tx,
+                                        ModelBlockStreamEvent::ReasoningCompleted {
+                                            output: ReasoningOutput {
+                                                display_text,
+                                                continuation: Some(ReasoningContinuation::Blocks(
+                                                    blocks,
+                                                )),
+                                            },
+                                        },
+                                    )
+                                    .await
+                                    {
+                                        return;
+                                    }
+                                }
                                 let _ = tx
                                     .send(Ok(ModelBlockStreamEvent::Done {
                                         finish_reason: stop_reason
@@ -531,9 +652,22 @@ pub fn model_blocks(
 
 #[derive(Debug, Clone)]
 enum ActiveMessagesBlock {
-    Reasoning { model_item_id: String },
-    AssistantText { model_item_id: String },
-    ToolCall { model_item_id: String },
+    Reasoning {
+        model_item_id: String,
+        provider_item_id: Option<String>,
+        text: String,
+        signature: String,
+    },
+    EncryptedReasoning {
+        provider_item_id: Option<String>,
+        data: String,
+    },
+    AssistantText {
+        model_item_id: String,
+    },
+    ToolCall {
+        model_item_id: String,
+    },
 }
 
 fn block_model_item_id(item_prefix: &str, index: usize, kind: &str) -> String {
@@ -579,6 +713,17 @@ async fn start_content_block(
             (
                 ActiveMessagesBlock::Reasoning {
                     model_item_id: model_item_id.clone(),
+                    provider_item_id: provider_item_id.clone(),
+                    text: block
+                        .and_then(|b| b.get("thinking"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    signature: block
+                        .and_then(|b| b.get("signature"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                 },
                 ModelBlockStarted {
                     model_item_id,
@@ -589,6 +734,20 @@ async fn start_content_block(
                     tool_call: None,
                 },
             )
+        }
+        "redacted_thinking" => {
+            active_blocks.insert(
+                index,
+                ActiveMessagesBlock::EncryptedReasoning {
+                    provider_item_id,
+                    data: block
+                        .and_then(|b| b.get("data"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                },
+            );
+            return true;
         }
         "text" => {
             let model_item_id = block_model_item_id(item_prefix, index, "text");
@@ -642,7 +801,7 @@ async fn start_content_block(
 
 async fn send_content_block_delta(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
-    active_blocks: &HashMap<usize, ActiveMessagesBlock>,
+    active_blocks: &mut HashMap<usize, ActiveMessagesBlock>,
     event: &Value,
 ) -> bool {
     let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -651,21 +810,38 @@ async fn send_content_block_delta(
         .and_then(|d| d.get("type"))
         .and_then(|v| v.as_str())
         .unwrap_or("");
-    let Some(active_block) = active_blocks.get(&index) else {
+    let Some(active_block) = active_blocks.get_mut(&index) else {
         return true;
     };
     let mapped_delta = match (delta_type, active_block) {
-        ("thinking_delta", ActiveMessagesBlock::Reasoning { model_item_id }) => delta
+        (
+            "thinking_delta",
+            ActiveMessagesBlock::Reasoning {
+                model_item_id,
+                text,
+                ..
+            },
+        ) => delta
             .and_then(|d| d.get("thinking"))
             .and_then(|v| v.as_str())
-            .map(|text| {
+            .map(|fragment| {
+                text.push_str(fragment);
                 (
                     model_item_id.clone(),
                     ModelBlockDelta::ReasoningText {
-                        delta: text.to_string(),
+                        delta: fragment.to_string(),
                     },
                 )
             }),
+        ("signature_delta", ActiveMessagesBlock::Reasoning { signature, .. }) => {
+            if let Some(fragment) = delta
+                .and_then(|d| d.get("signature"))
+                .and_then(|v| v.as_str())
+            {
+                signature.push_str(fragment);
+            }
+            None
+        }
         ("text_delta", ActiveMessagesBlock::AssistantText { model_item_id }) => delta
             .and_then(|d| d.get("text"))
             .and_then(|v| v.as_str())
@@ -708,6 +884,7 @@ async fn send_content_block_delta(
 async fn stop_content_block(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     active_blocks: &mut HashMap<usize, ActiveMessagesBlock>,
+    reasoning_blocks: &mut Vec<(usize, ReasoningBlock)>,
     event: &Value,
 ) -> bool {
     let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
@@ -715,8 +892,40 @@ async fn stop_content_block(
         return true;
     };
     let model_item_id = match active_block {
-        ActiveMessagesBlock::Reasoning { model_item_id }
-        | ActiveMessagesBlock::AssistantText { model_item_id }
+        ActiveMessagesBlock::Reasoning {
+            model_item_id,
+            provider_item_id,
+            text,
+            signature,
+        } => {
+            reasoning_blocks.push((
+                index,
+                ReasoningBlock::Text(ReasoningTextBlock {
+                    provider_item_id,
+                    provider_index: Some(index as u32),
+                    text,
+                    signature: (!signature.is_empty()).then_some(signature),
+                    format: Some("anthropic-claude-v1".to_string()),
+                }),
+            ));
+            model_item_id
+        }
+        ActiveMessagesBlock::EncryptedReasoning {
+            provider_item_id,
+            data,
+        } => {
+            reasoning_blocks.push((
+                index,
+                ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
+                    provider_item_id,
+                    provider_index: Some(index as u32),
+                    data,
+                    format: Some("anthropic-claude-v1".to_string()),
+                }),
+            ));
+            return true;
+        }
+        ActiveMessagesBlock::AssistantText { model_item_id }
         | ActiveMessagesBlock::ToolCall { model_item_id } => model_item_id,
     };
     send_model_block_event(

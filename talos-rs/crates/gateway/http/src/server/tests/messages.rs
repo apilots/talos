@@ -13,7 +13,6 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
         "input": [{ "type": "text", "text": "hello" }],
         "workspace_id": null,
         "context": null,
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": "idem-1"
@@ -81,7 +80,6 @@ async fn test_start_turn_handler_accepts_shared_request() {
         "input": [{ "type": "text", "text": "hello" }],
         "workspace_id": null,
         "context": null,
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": "idem-start-1"
@@ -135,7 +133,6 @@ async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
             "message_id": "msg-empty-input",
             "trace_id": "trace-empty-input"
         },
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": null
@@ -178,7 +175,6 @@ async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
         "input": [{ "type": "text", "text": "hello" }],
         "workspace_id": null,
         "context": null,
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": "idem-conflict"
@@ -189,7 +185,6 @@ async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
         "input": [{ "type": "text", "text": "different" }],
         "workspace_id": null,
         "context": null,
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": "idem-conflict"
@@ -247,7 +242,6 @@ async fn test_start_turn_handler_timeout_stores_failed_idempotency() {
         "input": [{ "type": "text", "text": "hello" }],
         "workspace_id": null,
         "context": null,
-        "model": null,
         "project_id": null,
         "current_directory": null,
         "client_request_id": "timeout-key"

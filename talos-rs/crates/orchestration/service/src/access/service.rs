@@ -6,8 +6,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    CancelActiveTurnParams, ModelRef, OptionalProjectIdPatch, ProjectPatch, SessionListRequest,
-    SessionPatch, TalosSession,
+    CancelActiveTurnParams, ModelSelection, OptionalProjectIdPatch, ProjectPatch,
+    SessionListRequest, SessionPatch, TalosSession,
 };
 
 use super::types::Actor;
@@ -25,7 +25,7 @@ pub(crate) struct ResourceAccessService {
 pub struct CreateSessionRequest {
     pub session_id: String,
     pub context: talos_types::talos::TalosContext,
-    pub model_ref: Option<ModelRef>,
+    pub model_selection: Option<ModelSelection>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub current_directory: Option<PathBuf>,
@@ -66,8 +66,8 @@ impl ResourceAccessService {
             self.ensure_project_access(actor, project_id_ref).await?;
         }
         let target_agent = self.resolve_target_agent(&context).await?;
-        let agent_model_ref = if params.model_ref.is_none() {
-            self.resolve_target_agent_model_ref(&context).await?
+        let agent_model_selection = if params.model_selection.is_none() {
+            self.resolve_target_agent_model_selection(&context).await?
         } else {
             None
         };
@@ -76,8 +76,8 @@ impl ResourceAccessService {
                 session_id: Some(params.session_id),
                 context,
                 target_agent,
-                model_ref: params.model_ref,
-                agent_model_ref,
+                model_selection: params.model_selection,
+                agent_model_selection,
                 conf: None,
                 workspace_id: params.workspace_id,
                 project_id: params.project_id,
@@ -343,12 +343,12 @@ impl ResourceAccessService {
         self.session_runtime.resolve_target_agent(context).await
     }
 
-    async fn resolve_target_agent_model_ref(
+    async fn resolve_target_agent_model_selection(
         &self,
         context: &talos_types::talos::TalosContext,
-    ) -> TalosResult<Option<ModelRef>> {
+    ) -> TalosResult<Option<ModelSelection>> {
         self.session_runtime
-            .resolve_target_agent_model_ref(context)
+            .resolve_target_agent_model_selection(context)
             .await
     }
 

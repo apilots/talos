@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
-pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
+pub use talos_types::{EffectiveReasoning, ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -191,7 +191,7 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolDefinition>>,
     pub tool_choice: Option<ToolChoice>,
     pub parallel_tool_calls: Option<bool>,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning: EffectiveReasoning,
     pub speed: Option<ModelSpeed>,
 }
 
@@ -211,18 +211,9 @@ impl ChatRequest {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: None,
         }
-    }
-}
-
-pub fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
-    match effort {
-        ReasoningEffort::Low => 1024,
-        ReasoningEffort::Medium => 2048,
-        ReasoningEffort::High => 4096,
-        ReasoningEffort::XHigh => 8192,
     }
 }
 
@@ -251,6 +242,8 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<FunctionCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_continuation: Option<ReasoningContinuation>,
     // Only RequestLevel providers should consume this field. Unsupported providers must drop it
     // during request conversion rather than serializing it into outbound payloads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -277,6 +270,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            reasoning_continuation: None,
             cache_control: None,
         }
     }
@@ -288,6 +282,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            reasoning_continuation: None,
             cache_control: None,
         }
     }
@@ -299,6 +294,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: None,
+            reasoning_continuation: None,
             cache_control: None,
         }
     }
@@ -313,6 +309,7 @@ impl ChatMessage {
             name: None,
             tool_call_id: None,
             tool_calls: Some(tool_calls),
+            reasoning_continuation: None,
             cache_control: None,
         }
     }
@@ -328,8 +325,15 @@ impl ChatMessage {
             name: Some(name.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
+            reasoning_continuation: None,
             cache_control: None,
         }
+    }
+
+    /// Attaches provider continuation required to replay this assistant message.
+    pub fn with_reasoning_continuation(mut self, continuation: ReasoningContinuation) -> Self {
+        self.reasoning_continuation = Some(continuation);
+        self
     }
 }
 
@@ -343,12 +347,72 @@ pub enum Role {
     Tool,
 }
 
+/// Provider-neutral reasoning output split into display and replay projections.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReasoningOutput {
+    #[serde(default)]
+    pub display_text: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<ReasoningContinuation>,
+}
+
+impl ReasoningOutput {
+    pub fn display_text(&self) -> String {
+        self.display_text.join("")
+    }
+}
+
+/// Provider continuation replayed only inside the model conversation state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum ReasoningContinuation {
+    Text(String),
+    Blocks(Vec<ReasoningBlock>),
+}
+
+/// Ordered provider reasoning block retained for tool-loop replay.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum ReasoningBlock {
+    Text(ReasoningTextBlock),
+    Summary(ReasoningSummaryBlock),
+    Encrypted(ReasoningEncryptedBlock),
+}
+
+/// Provider reasoning text retained with its replay identity and signature.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReasoningTextBlock {
+    pub provider_item_id: Option<String>,
+    pub provider_index: Option<u32>,
+    pub text: String,
+    pub signature: Option<String>,
+    pub format: Option<String>,
+}
+
+/// Provider reasoning summary retained in its original block position.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReasoningSummaryBlock {
+    pub provider_item_id: Option<String>,
+    pub provider_index: Option<u32>,
+    pub text: String,
+    pub format: Option<String>,
+}
+
+/// Opaque provider reasoning payload retained only for continuation replay.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReasoningEncryptedBlock {
+    pub provider_item_id: Option<String>,
+    pub provider_index: Option<u32>,
+    pub data: String,
+    pub format: Option<String>,
+}
+
 /// Chat response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatResponse {
     pub content: String,
     #[serde(default)]
-    pub reasoning: Vec<String>,
+    pub reasoning: ReasoningOutput,
     pub model: String,
     pub usage: Usage,
     pub finish_reason: Option<String>,
@@ -513,6 +577,9 @@ pub enum ModelBlockStreamEvent {
         delta: ModelBlockDelta,
     },
     BlockCompleted(ModelBlockCompleted),
+    ReasoningCompleted {
+        output: ReasoningOutput,
+    },
     Done {
         finish_reason: Option<String>,
         #[serde(default)]
@@ -663,7 +730,7 @@ pub struct ChatRequestBuilder {
     tools: Option<Vec<ToolDefinition>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
-    reasoning_effort: Option<ReasoningEffort>,
+    reasoning: Option<EffectiveReasoning>,
     speed: Option<ModelSpeed>,
 }
 
@@ -719,8 +786,8 @@ impl ChatRequestBuilder {
         self
     }
 
-    pub fn reasoning_effort(mut self, effort: ReasoningEffort) -> Self {
-        self.reasoning_effort = Some(effort);
+    pub fn reasoning(mut self, reasoning: EffectiveReasoning) -> Self {
+        self.reasoning = Some(reasoning);
         self
     }
 
@@ -740,7 +807,7 @@ impl ChatRequestBuilder {
             tools: self.tools,
             tool_choice: self.tool_choice,
             parallel_tool_calls: self.parallel_tool_calls,
-            reasoning_effort: self.reasoning_effort,
+            reasoning: self.reasoning.unwrap_or(EffectiveReasoning::Unsupported),
             speed: self.speed,
         }
     }

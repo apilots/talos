@@ -10,7 +10,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, Role, Usage,
+    ModelBlockStreamEvent, ReasoningContinuation, ReasoningOutput, Role, Usage,
 };
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
@@ -18,7 +18,7 @@ use talos_types::talos::{
     AgentEventPayload, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta,
     TalosTimelineItemKind,
 };
-use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, ModelSelection, SessionContext, SessionState, TalosSession};
 use tokio::sync::mpsc;
 
 static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
@@ -135,7 +135,7 @@ impl LlmProvider for IntegrationMockProvider {
                 .is_some_and(|items| !items.is_empty()));
             return Ok(ChatResponse {
                 content: "I should call a tool first.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: talos_llm_provider::ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -178,7 +178,7 @@ impl LlmProvider for IntegrationMockProvider {
 
         Ok(ChatResponse {
             content: format!("Final answer after tool execution: {tool_result}"),
-            reasoning: Vec::new(),
+            reasoning: talos_llm_provider::ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -195,6 +195,23 @@ impl LlmProvider for IntegrationMockProvider {
     async fn stream_model_blocks(&self, request: ChatRequest) -> TalosResult<ModelBlockStream> {
         let round = self.state.chat_round.fetch_add(1, Ordering::SeqCst);
         if round > 0 {
+            let assistant_message = request
+                .messages
+                .iter()
+                .find(|message| {
+                    message.role == Role::Assistant
+                        && message
+                            .tool_calls
+                            .as_ref()
+                            .is_some_and(|calls| calls.iter().any(|call| call.id == "call_1"))
+                })
+                .expect("tool loop should replay the assistant tool-call message");
+            assert_eq!(
+                assistant_message.reasoning_continuation,
+                Some(ReasoningContinuation::Text(
+                    "Need tool context first.".to_string()
+                ))
+            );
             if let Some(message) = request.messages.iter().find(|msg| {
                 msg.role == Role::Tool
                     && msg.name.as_deref() == Some("echo_test")
@@ -247,6 +264,16 @@ impl LlmProvider for IntegrationMockProvider {
                             model_item_id: "reasoning".to_string(),
                         },
                     )))
+                    .await;
+                let _ = tx
+                    .send(Ok(ModelBlockStreamEvent::ReasoningCompleted {
+                        output: ReasoningOutput {
+                            display_text: vec!["Need tool context first.".to_string()],
+                            continuation: Some(ReasoningContinuation::Text(
+                                "Need tool context first.".to_string(),
+                            )),
+                        },
+                    }))
                     .await;
                 let _ = tx
                     .send(Ok(ModelBlockStreamEvent::BlockStarted(
@@ -322,6 +349,16 @@ impl LlmProvider for IntegrationMockProvider {
                 )))
                 .await;
             let _ = tx
+                .send(Ok(ModelBlockStreamEvent::ReasoningCompleted {
+                    output: ReasoningOutput {
+                        display_text: vec!["Tool result received.".to_string()],
+                        continuation: Some(ReasoningContinuation::Text(
+                            "Tool result received.".to_string(),
+                        )),
+                    },
+                }))
+                .await;
+            let _ = tx
                 .send(Ok(ModelBlockStreamEvent::BlockStarted(
                     ModelBlockStarted::assistant_text(None, None),
                 )))
@@ -367,10 +404,10 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
         "Integration Agent".to_string(),
         "Agent for integration tests".to_string(),
         Arc::new(StaticLlmProviderRouter { provider }),
-        ModelRef {
+        ModelSelection::model_default(ModelRef {
             provider: "mock".to_string(),
             id: "mock-model".to_string(),
-        },
+        }),
         registry,
         Default::default(),
     )

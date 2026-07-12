@@ -1,10 +1,12 @@
 # Provider Protocol 抽象重构设计
 
-Status: draft
+Status: archived
 Owner: agent
 Created: 2026-06-15
-Updated: 2026-06-15
+Updated: 2026-07-10
 Related: `refactor-022-provider-neutral-agent-stream`, `feat-001-admin-model-management`
+
+归档说明：Chat/Responses/Messages 共享协议抽取保留为历史背景；Concrete Provider 构造、`ModelSelection`、Reasoning 映射、continuation 回放和当前 protocol matrix 统一由 `refactor-036-provider-reasoning-selection` 定义。
 
 ## 背景
 

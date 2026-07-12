@@ -5,8 +5,9 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
-    ModelBlockStream, PromptCacheSupport, ReasoningSupport,
+    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream,
+    EffectiveReasoning, LlmProvider, ModelBlockStream, PromptCacheSupport, ReasoningEffort,
+    ReasoningSupport,
 };
 use tracing::{debug, error, info};
 
@@ -139,8 +140,31 @@ impl AnthropicProvider {
     pub(crate) fn build_request(
         request: ChatRequest,
         stream: Option<bool>,
-    ) -> messages_protocol::MessagesRequest {
-        messages_protocol::request(request, stream)
+    ) -> TalosResult<messages_protocol::MessagesRequest> {
+        let thinking = match request.reasoning {
+            EffectiveReasoning::Unsupported => None,
+            EffectiveReasoning::Effort(effort) => Some(messages_protocol::MessagesThinkingConfig {
+                r#type: "enabled".to_string(),
+                budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
+            }),
+        };
+        messages_protocol::request(
+            request,
+            stream,
+            messages_protocol::MessagesRequestOptions {
+                thinking,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
+        match effort {
+            ReasoningEffort::Low => 1024,
+            ReasoningEffort::Medium => 2048,
+            ReasoningEffort::High => 4096,
+            ReasoningEffort::XHigh => 8192,
+        }
     }
 
     pub(crate) fn supports_reasoning_model(model: &str) -> bool {
@@ -153,7 +177,7 @@ impl AnthropicProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        let anthropic_req = Self::build_request(request, None);
+        let anthropic_req = Self::build_request(request, None)?;
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();
 
@@ -191,7 +215,7 @@ impl AnthropicProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
-        let anthropic_req = Self::build_request(request, Some(true));
+        let anthropic_req = Self::build_request(request, Some(true))?;
 
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();

@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use talos_llm_provider::ChatMessage;
+use talos_llm_provider::{ChatMessage, ReasoningContinuation};
 use talos_types::talos::{
     DynamicToolArguments, JsonContentValue, RunItem, StopReason, TokenUsage, ToolArguments,
     ToolExecutionResult,
@@ -203,6 +203,7 @@ pub struct SessionTranscriptDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: DynamicToolArguments,
+    pub reasoning_continuation: Option<ReasoningContinuation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

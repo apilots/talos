@@ -183,8 +183,8 @@ channels:
     enabled: false
 
 llm:
-  provider: "bailian"
-  model: "qwen3.6-flash"
+  provider: "deepseek"
+  model: "deepseek-v4-flash"
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: "https://api.anthropic.com/v1"
@@ -202,7 +202,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
       - id: "claude-sonnet-4-6"
         name: "Claude Sonnet 4.6"
         context_window: 1000000
@@ -215,7 +214,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
       - id: "claude-haiku-4-5-20251001"
         name: "Claude Haiku 4.5"
         context_window: 200000
@@ -228,7 +226,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
   openai:
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
     base_url: "https://api.openai.com/v1"
@@ -246,7 +243,6 @@ llm:
           output: 30
           cache_read: 0
           cache_write: 0
-        compat: {}
       - id: "gpt-5.4"
         name: "GPT-5.4"
         context_window: 1000000
@@ -259,7 +255,6 @@ llm:
           output: 15
           cache_read: 0
           cache_write: 0
-        compat: {}
       - id: "gpt-5.4-mini"
         name: "GPT-5.4 mini"
         context_window: 400000
@@ -272,7 +267,6 @@ llm:
           output: 4.5
           cache_read: 0
           cache_write: 0
-        compat: {}
   bailian:
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
     base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -290,8 +284,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat:
-          thinking_format: "qwen"
       - id: "qwen3.7-plus"
         name: "Qwen 3.7 Plus"
         context_window: 991000
@@ -304,8 +296,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat:
-          thinking_format: "qwen"
       - id: "qwen3.6-flash"
         name: "Qwen 3.6 Flash"
         context_window: 1000000
@@ -318,8 +308,35 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat:
-          thinking_format: "qwen"
+  deepseek:
+    api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
+    base_url: "https://api.deepseek.com"
+    protocol: "chat"
+    models:
+      - id: "deepseek-v4-pro"
+        name: "DeepSeek V4 Pro"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+      - id: "deepseek-v4-flash"
+        name: "DeepSeek V4 Flash"
+        context_window: 1000000
+        reasoning: true
+        reasoning_effort: "high"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
   openrouter:
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
     base_url: "https://openrouter.ai/api/v1"
@@ -337,7 +354,6 @@ llm:
           output: 0
           cache_read: 0
           cache_write: 0
-        compat: {}
       - id: "openai/gpt-oss-20b"
         name: "GPT OSS 20B"
         context_window: 131072
@@ -350,7 +366,42 @@ llm:
           output: 0.14
           cache_read: 0
           cache_write: 0
-        compat: {}
+      - id: "tencent/hy3:free"
+        name: "Tencent HY3 Free"
+        context_window: 262144
+        reasoning: false
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+      - id: "meta-llama/llama-3.3-70b-instruct"
+        name: "Llama 3.3 70B Instruct"
+        context_window: 131072
+        reasoning: false
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+      - id: "meta-llama/llama-3.3-70b-instruct:free"
+        name: "Llama 3.3 70B Instruct Free"
+        context_window: 131072
+        reasoning: false
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
   ollama:
     base_url: "http://localhost:11434"
     protocol: "chat"

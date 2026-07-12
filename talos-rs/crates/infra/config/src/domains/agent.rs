@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use talos_error::TalosResult;
 
 use crate::AgentKernelConfig;
+use crate::ReasoningEffort;
 
 fn default_agent_id() -> String {
     "default".to_string()
@@ -47,6 +48,28 @@ pub struct ModelRefConfig {
     pub id: String,
 }
 
+/// Config-file model and reasoning selection used as an Agent default.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ModelSelectionConfig {
+    /// Concrete provider and model identity.
+    pub model_ref: ModelRefConfig,
+    /// Reasoning policy applied when the Agent initializes a product session.
+    #[serde(default)]
+    pub reasoning: ReasoningSelectionConfig,
+}
+
+/// Config-file reasoning policy for an Agent model selection.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReasoningSelectionConfig {
+    /// Follow the selected model's configured default effort.
+    #[default]
+    ModelDefault,
+    /// Override the selected model's configured effort.
+    Effort { level: ReasoningEffort },
+}
+
 impl Default for AgentRuntimeConfig {
     fn default() -> Self {
         Self::Kernel {
@@ -86,9 +109,9 @@ pub struct AgentDefinitionConfig {
     #[serde(default)]
     pub default_workspace_id: Option<String>,
 
-    /// Optional model override for this Agent.
+    /// Optional model and reasoning override for this Agent.
     #[serde(default)]
-    pub model_ref: Option<ModelRefConfig>,
+    pub model_selection: Option<ModelSelectionConfig>,
 
     /// Optional runtime-specific configuration matched with kind.
     #[serde(default)]
@@ -107,9 +130,9 @@ pub struct AgentConfig {
     #[serde(default)]
     pub workspace: Option<String>,
 
-    /// Default model override for the synthesized Agent.
+    /// Default model and reasoning override for the synthesized Agent.
     #[serde(default)]
-    pub model_ref: Option<ModelRefConfig>,
+    pub model_selection: Option<ModelSelectionConfig>,
 
     /// Persona file
     #[serde(default)]
@@ -133,7 +156,7 @@ impl Default for AgentConfig {
         Self {
             name: default_agent_name(),
             workspace: None,
-            model_ref: None,
+            model_selection: None,
             identity: None,
             kernel: AgentKernelConfig::default(),
             agents: Vec::new(),

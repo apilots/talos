@@ -11,6 +11,10 @@ fn mock_ctx(input: &str) -> InvocationContext {
         workspace_id: "w1".to_string(),
         project_root: None,
         input: input.to_string(),
+        model_selection: talos_types::ModelSelection::model_default(talos_types::ModelRef {
+            provider: "p1".to_string(),
+            id: "m1".to_string(),
+        }),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),
             name: "m1".to_string(),
@@ -21,7 +25,6 @@ fn mock_ctx(input: &str) -> InvocationContext {
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         },
         phase: TurnPhase::Execution,
         planning_instruction: None,
@@ -45,37 +48,6 @@ fn mock_ctx(input: &str) -> InvocationContext {
 fn test_built_in_planner_mode() {
     let planner = BuiltInPlanner::new();
     assert_eq!(planner.mode(), PlannerKind::BuiltIn);
-}
-
-#[test]
-fn test_built_in_planner_gates_reasoning_effort_by_request_support() {
-    let planner = BuiltInPlanner::new();
-    let ctx = mock_ctx("hello");
-
-    let mut supported_request = crate::LlmRequestEnvelope::default();
-    supported_request.selected_model_info = Some(talos_types::ModelInfo {
-        id: "m1".to_string(),
-        name: "m1".to_string(),
-        provider: "p1".to_string(),
-        context_window: 0,
-        reasoning: true,
-        reasoning_effort: talos_types::ReasoningEffort::High,
-        speed: Default::default(),
-        input: Vec::new(),
-        cost: Default::default(),
-        compat: Default::default(),
-    });
-    let effect = planner
-        .build_request_effect(&ctx, &supported_request)
-        .reasoning_effort
-        .expect("reasoning effort should be enabled");
-    assert_eq!(effect, talos_types::ReasoningEffort::High);
-
-    let unsupported_request = crate::LlmRequestEnvelope::default();
-    assert!(planner
-        .build_request_effect(&ctx, &unsupported_request)
-        .reasoning_effort
-        .is_none());
 }
 
 #[test]

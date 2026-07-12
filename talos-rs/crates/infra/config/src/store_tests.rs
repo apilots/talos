@@ -24,6 +24,9 @@ llm:
     models: []
   bailian:
     models: []
+  deepseek:
+    api_key: ${{TALOS_LLM_DEEPSEEK_API_KEY}}
+    models: []
   ollama:
     models: []
   openrouter:
@@ -74,6 +77,22 @@ fn test_load_read_reports_configured_placeholder_secret() {
 }
 
 #[test]
+fn test_load_read_reports_configured_deepseek_secret() {
+    let file = write_yaml(&minimal_yaml_with_llm("${TALOS_LLM_ANTHROPIC_API_KEY}"));
+    let env_path = file.path().with_extension("env");
+    std::fs::write(&env_path, "TALOS_LLM_DEEPSEEK_API_KEY=deepseek-secret\n").unwrap();
+    let store = YamlLlmConfigStore::with_env_path(file.path().to_path_buf(), env_path);
+
+    let read = store.load_read().unwrap();
+
+    assert_eq!(
+        read.config.deepseek.api_key.as_deref(),
+        Some(REDACTED_API_KEY)
+    );
+    assert!(read.provider_keys["deepseek"].api_key_configured);
+}
+
+#[test]
 fn test_save_only_replaces_llm_section() {
     let file = write_yaml(&minimal_yaml_with_llm("${TALOS_LLM_ANTHROPIC_API_KEY}"));
     let store = store_for(&file);
@@ -114,7 +133,6 @@ fn test_save_then_load_raw_roundtrip() {
         speed: Default::default(),
         input: vec![],
         cost: Default::default(),
-        compat: Default::default(),
     });
     store.save(&llm).unwrap();
 

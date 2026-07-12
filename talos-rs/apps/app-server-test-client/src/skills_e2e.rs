@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, GatewayClient, MarketplaceSourceInput, PluginDocumentMediaType,
-    PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
-    PluginKind, PluginReadRequest, PluginSearchRefreshPolicy, PluginSearchRequest,
-    PluginSearchStatusFilter, PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope,
-    SkillSelector, SkillSummary, SkillsListRequest, SkillsReadRequest, SkillsResolveRequest,
-    SkillsSuggestRequest, StartTurnRequest, TalosInputItem,
+    AppServerClient, GatewayClient, MarketplaceSourceInput, ModelSelection,
+    PluginDocumentMediaType, PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest,
+    PluginInstallTarget, PluginKind, PluginReadRequest, PluginSearchRefreshPolicy,
+    PluginSearchRequest, PluginSearchStatusFilter, PluginSourceAddRequest,
+    PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary, SkillsListRequest,
+    SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
+    TalosInputItem,
 };
 
 pub(super) async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
@@ -268,7 +269,7 @@ async fn run_selected_skill_turn(
             ],
             workspace_id: None,
             context: Some(super::test_talos_context()),
-            model_ref: super::test_model_ref(),
+            model_selection: super::test_model_ref().map(ModelSelection::model_default),
             project_id: None,
             current_directory: None,
             client_request_id: Some(format!(

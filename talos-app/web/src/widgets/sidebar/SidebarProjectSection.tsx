@@ -19,6 +19,7 @@ interface SidebarProjectSectionProps {
   currentPath: string;
   groups: SidebarProjectGroup[];
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (session: SidebarSessionItem) => void;
   onCreateProjectThread: (projectId: string) => void;
   onRemoveProject: (projectId: string) => Promise<void> | void;
   onRenameProject: (projectId: string, name: string) => Promise<void> | void;
@@ -29,6 +30,7 @@ export function SidebarProjectSection({
   currentPath,
   groups,
   onSelectSession,
+  onDeleteSession,
   onCreateProjectThread,
   onRemoveProject,
   onRenameProject,
@@ -105,6 +107,7 @@ export function SidebarProjectSection({
                 onShowMoreSessions={() => {
                   setExpandedSessionProjectIds((current) => new Set(current).add(group.project.id));
                 }}
+                onDeleteSession={onDeleteSession}
                 onSelectSession={onSelectSession}
                 onToggleProject={() => toggleProject(group.project.id)}
                 open={projectOpen}
@@ -151,6 +154,7 @@ function ProjectGroup({
   onCreateProjectThread,
   onRenameProject,
   onShowMoreSessions,
+  onDeleteSession,
   onSelectSession,
   onToggleProject,
   open,
@@ -166,6 +170,7 @@ function ProjectGroup({
   onCreateProjectThread: () => void;
   onRenameProject: () => void;
   onShowMoreSessions: () => void;
+  onDeleteSession: (session: SidebarSessionItem) => void;
   onSelectSession: (sessionId: string) => void;
   onToggleProject: () => void;
   open: boolean;
@@ -245,6 +250,7 @@ function ProjectGroup({
               currentPath={currentPath}
               indent
               key={session.id}
+              onDeleteSession={onDeleteSession}
               onSelectSession={onSelectSession}
               session={session}
             />

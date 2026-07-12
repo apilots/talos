@@ -8,7 +8,6 @@ import type {
   ConfigUpdateResponse as ProtocolConfigUpdateResponse,
   ConfigValue as ProtocolConfigValue,
   LlmConfig as ProtocolLlmConfig,
-  LlmModelCompat as ProtocolLlmModelCompat,
   LlmModelConfig as ProtocolLlmModelConfig,
   LlmModelCost as ProtocolLlmModelCost,
   LlmModelInputKind as ProtocolLlmModelInputKind,
@@ -16,12 +15,14 @@ import type {
   LlmProtocol as ProtocolLlmProtocol,
   LlmProviderConfig as ProtocolLlmProviderConfig,
   LlmReasoningEffort as ProtocolLlmReasoningEffort,
-  LlmThinkingFormat as ProtocolLlmThinkingFormat,
   ModelInfo as ProtocolModelInfo,
   ModelListResponse as ProtocolModelListResponse,
   ModelReadiness as ProtocolModelReadiness,
   ModelRef as ProtocolModelRef,
+  ModelSelection as ProtocolModelSelection,
   ProviderKeyStatus as ProtocolProviderKeyStatus,
+  ProviderProtocolCapabilities as ProtocolProviderProtocolCapabilities,
+  ReasoningSelection as ProtocolReasoningSelection,
   SessionClearResponse as ProtocolSessionClearResponse,
   SessionCloseResponse as ProtocolSessionCloseResponse,
   SessionCompactResponse as ProtocolSessionCompactResponse,
@@ -307,6 +308,8 @@ export type TalosActiveTurn = ProtocolTimelineActiveTurnSnapshot;
 
 export type ModelInfo = ProtocolModelInfo;
 export type ModelRef = ProtocolModelRef;
+export type ModelSelection = ProtocolModelSelection;
+export type ReasoningSelection = ProtocolReasoningSelection;
 export type ModelListResponse = ProtocolModelListResponse;
 export type SessionInfo = ProtocolSessionInfo;
 export type SessionListRequest = ProtocolSessionListRequest;
@@ -349,8 +352,6 @@ export type WorkspaceDocKind = ProtocolWorkspaceDocKind;
 export type WorkspaceDocSummary = ProtocolWorkspaceDocSummary;
 export type WorkspaceDocInfo = ProtocolWorkspaceDocInfo;
 export type ModelInputKind = ProtocolLlmModelInputKind;
-export type ThinkingFormat = ProtocolLlmThinkingFormat;
-export type ModelCompatConfig = ProtocolLlmModelCompat;
 export type ModelCostConfig = ProtocolLlmModelCost;
 export type ReasoningEffort = ProtocolLlmReasoningEffort;
 export type ModelSpeed = ProtocolLlmModelSpeed;
@@ -360,6 +361,7 @@ export type ProviderConfig = ProtocolLlmProviderConfig;
 export type LlmConfig = ProtocolLlmConfig;
 export type ModelReadiness = ProtocolModelReadiness;
 export type ProviderKeyStatus = ProtocolProviderKeyStatus;
+export type ProviderProtocolCapabilities = ProtocolProviderProtocolCapabilities;
 export type ConfigValue = ProtocolConfigValue;
 export type ConfigGetResponse = ProtocolConfigGetResponse;
 export type ConfigUpdateResponse = ProtocolConfigUpdateResponse;

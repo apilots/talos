@@ -64,7 +64,6 @@ export function formToModel(
     speed: "standard",
     input: ["text"],
     cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    compat: {},
   };
 
   return {

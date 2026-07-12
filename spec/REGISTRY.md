@@ -8,7 +8,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 031 |
 | `fix` | 005 |
-| `refactor` | 036 |
+| `refactor` | 037 |
 | `docs` | 001 |
 
 ## Active Specs
@@ -29,7 +29,6 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
 | refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
 | refactor-025 | `refactor-025-talos-tool-capability-alignment` | draft |
-| refactor-026 | `refactor-026-provider-protocol-abstraction` | draft |
 | refactor-027 | `refactor-027-core-api-object-boundary` | implemented |
 | refactor-028 | `refactor-028-orchestration-store-service-layout` | implemented |
 | refactor-029 | `refactor-029-plugin-install-state-layout` | draft |
@@ -39,6 +38,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | refactor-033 | `refactor-033-agent-framework-api-standardization` | draft |
 | refactor-034 | `refactor-034-model-driven-agent-loop` | draft |
 | refactor-035 | `refactor-035-tui-render-runtime` | completed |
+| refactor-036 | `refactor-036-provider-reasoning-selection` | implemented |
 
 ## Archived Specs
 
@@ -90,3 +90,4 @@ Historical root specs were reorganized on 2026-05-08.
 | refactor-020 | `archive/2026/refactor-020-application-timeline-recovery-stream` | archived |
 | refactor-021 | `archive/2026/refactor-021-kernel-stream-phase-ownership` | archived |
 | refactor-022 | `archive/2026/refactor-022-provider-neutral-agent-stream` | archived |
+| refactor-026 | `archive/2026/refactor-026-provider-protocol-abstraction` | archived |

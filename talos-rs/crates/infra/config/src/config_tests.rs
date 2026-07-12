@@ -26,9 +26,13 @@ agent:
       enabled: true
       description: Review-focused agent
       default_workspace_id: default
-      model_ref:
-        provider: ollama
-        id: qwen-plus
+      model_selection:
+        model_ref:
+          provider: ollama
+          id: qwen-plus
+        reasoning:
+          type: effort
+          level: high
       runtime_config:
         type: kernel
         kernel:
@@ -55,10 +59,15 @@ llm:
     assert_eq!(definition.kind, AgentKind::Kernel);
     assert_eq!(definition.default_workspace_id.as_deref(), Some("default"));
     assert_eq!(
-        definition.model_ref,
-        Some(ModelRefConfig {
-            provider: "ollama".to_string(),
-            id: "qwen-plus".to_string(),
+        definition.model_selection,
+        Some(ModelSelectionConfig {
+            model_ref: ModelRefConfig {
+                provider: "ollama".to_string(),
+                id: "qwen-plus".to_string(),
+            },
+            reasoning: ReasoningSelectionConfig::Effort {
+                level: ReasoningEffort::High,
+            },
         })
     );
     match definition
@@ -331,6 +340,7 @@ fn test_provider_protocol_defaults_by_provider() {
     assert_eq!(default_llm_protocol("bailian"), Some(LlmProtocol::Chat));
     assert_eq!(default_llm_protocol("ollama"), Some(LlmProtocol::Chat));
     assert_eq!(default_llm_protocol("openrouter"), Some(LlmProtocol::Chat));
+    assert_eq!(default_llm_protocol("deepseek"), Some(LlmProtocol::Chat));
     assert_eq!(default_llm_protocol("unknown"), None);
 }
 
@@ -353,10 +363,42 @@ fn test_provider_protocol_support_is_provider_scoped() {
         "openrouter",
         LlmProtocol::Chat
     ));
-    assert!(!llm_provider_supports_protocol(
+    assert!(llm_provider_supports_protocol(
         "openrouter",
         LlmProtocol::Responses
     ));
+    assert!(llm_provider_supports_protocol(
+        "openrouter",
+        LlmProtocol::Messages
+    ));
+    assert!(llm_provider_supports_protocol(
+        "deepseek",
+        LlmProtocol::Chat
+    ));
+    assert!(llm_provider_supports_protocol(
+        "deepseek",
+        LlmProtocol::Messages
+    ));
+
+    let capabilities = provider_protocol_capabilities();
+    assert_eq!(
+        capabilities["deepseek"],
+        ProviderProtocolCapabilities {
+            default_protocol: LlmProtocol::Chat,
+            protocols: vec![LlmProtocol::Chat, LlmProtocol::Messages],
+        }
+    );
+    assert_eq!(
+        capabilities["openrouter"],
+        ProviderProtocolCapabilities {
+            default_protocol: LlmProtocol::Chat,
+            protocols: vec![
+                LlmProtocol::Chat,
+                LlmProtocol::Responses,
+                LlmProtocol::Messages,
+            ],
+        }
+    );
 }
 
 #[test]
@@ -410,8 +452,6 @@ models:
       output: 0.2
       cache_read: 0.01
       cache_write: 0.02
-    compat:
-      thinking_format: qwen
 "#;
 
     let provider: ProviderConfig =
@@ -424,7 +464,45 @@ models:
         model.input,
         vec![ModelInputKind::Text, ModelInputKind::Image]
     );
-    assert_eq!(model.compat.thinking_format, Some(ThinkingFormat::Qwen));
+}
+
+#[test]
+fn test_product_configs_include_deepseek_and_openrouter_models() {
+    let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
+    let config_paths = [
+        repo_root.join("conf/talos.yaml"),
+        repo_root.join("conf/talos-dev.yaml"),
+        repo_root.join("conf/talos-prod.yaml"),
+    ];
+    for config_path in config_paths {
+        let content =
+            std::fs::read_to_string(config_path).expect("product config should be readable");
+        let config: Config =
+            serde_yaml::from_str(&content).expect("product config should deserialize");
+        assert_eq!(
+            config
+                .llm
+                .deepseek
+                .models
+                .iter()
+                .map(|model| (model.id.as_str(), model.context_window))
+                .collect::<Vec<_>>(),
+            vec![
+                ("deepseek-v4-pro", 1_000_000),
+                ("deepseek-v4-flash", 1_000_000),
+            ]
+        );
+        let openrouter_models = config
+            .llm
+            .openrouter
+            .models
+            .iter()
+            .map(|model| (model.id.as_str(), model.context_window))
+            .collect::<Vec<_>>();
+        assert!(openrouter_models.contains(&("tencent/hy3:free", 262_144)));
+        assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct", 131_072)));
+        assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct:free", 131_072)));
+    }
 }
 
 #[test]
@@ -444,8 +522,6 @@ models:
       output: 0.2
       cache_read: 0.01
       cache_write: 0.02
-    compat:
-      thinking_format: qwen
 "#;
 
     assert!(serde_yaml::from_str::<ProviderConfig>(yaml).is_err());
@@ -464,23 +540,6 @@ fn test_load_from_path_fails_when_required_keys_missing() {
     ));
     let _ = std::fs::remove_file(&temp_file);
     assert!(result.is_err());
-}
-
-#[test]
-fn test_source_path_uses_talos_config_env() {
-    let temp_file = std::env::temp_dir().join(format!(
-        "talos-config-source-env-{}.yaml",
-        std::process::id()
-    ));
-    let previous = std::env::var_os("TALOS_CONFIG");
-    std::env::set_var("TALOS_CONFIG", &temp_file);
-
-    assert_eq!(Config::source_path(), temp_file);
-
-    match previous {
-        Some(value) => std::env::set_var("TALOS_CONFIG", value),
-        None => std::env::remove_var("TALOS_CONFIG"),
-    }
 }
 
 #[test]
@@ -519,6 +578,7 @@ llm:
             .expect("temp path should be valid unicode"),
     ))
     .expect("config without prompt block should load");
+    assert_eq!(config.source_path(), temp_file);
     let _ = std::fs::remove_file(&temp_file);
 
     assert_eq!(config.agent.kernel.compaction.recent_messages_keep, 24);

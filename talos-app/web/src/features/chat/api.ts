@@ -1,7 +1,7 @@
 import { TalosHttpError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
-  ModelRef,
+  ModelSelection,
   ProjectInfo as ApiProjectInfo,
   RetryTurnRequest,
   SkillSuggestion,
@@ -87,7 +87,7 @@ export function createInitialTurnRequest(
   sessionId: string,
   userId: string,
   text: string,
-  modelRef: ModelRef | undefined,
+  modelSelection: ModelSelection | undefined,
   project: ProjectView | undefined,
   skills: SkillSuggestion[] = [],
 ): StartTurnRequest {
@@ -103,7 +103,7 @@ export function createInitialTurnRequest(
     session_id: sessionId,
     input,
     context: createContext(userId),
-    model_ref: modelRef,
+    modelSelection,
     project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
   };
 }
@@ -173,11 +173,11 @@ export async function updateSessionProject(sessionId: string, project?: ProjectV
   await getTalosClient().sessions.patch(request);
 }
 
-export async function updateSessionModel(sessionId: string, modelRef: ModelRef) {
+export async function updateSessionModel(sessionId: string, modelSelection: ModelSelection) {
   const request: SessionPatchRequest = {
     session_id: sessionId,
     conf: {
-      model_ref: modelRef,
+      modelSelection,
     },
     project_id: null,
     current_directory: null,

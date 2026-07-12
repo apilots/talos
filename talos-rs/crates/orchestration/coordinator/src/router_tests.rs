@@ -84,7 +84,7 @@ impl AgentHarness for DescriptorAgent {
         Ok(AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 0,

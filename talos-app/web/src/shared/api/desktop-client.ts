@@ -454,7 +454,7 @@ function toProtocolSessionConf(
     return null;
   }
   return {
-    model_ref: conf.model_ref ?? null,
+    modelSelection: conf.modelSelection,
   };
 }
 

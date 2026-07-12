@@ -1,4 +1,4 @@
-use crate::model::ModelRef;
+use crate::model::ModelSelection;
 use crate::talos::{TalosContext, TalosInputItem, TimelineEventEnvelope};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -7,6 +7,7 @@ use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 /// Request payload used by clients to start a turn in a session.
+#[serde(deny_unknown_fields)]
 pub struct StartTurnRequest {
     pub session_id: String,
     pub input: Vec<TalosInputItem>,
@@ -19,7 +20,8 @@ pub struct StartTurnRequest {
     #[serde(default)]
     #[ts(optional)]
     /// Explicit model selection for this turn; absent means use the session or configured default.
-    pub model_ref: Option<ModelRef>,
+    #[serde(rename = "modelSelection")]
+    pub model_selection: Option<ModelSelection>,
     #[serde(default)]
     #[ts(optional)]
     pub project_id: Option<String>,

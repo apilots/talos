@@ -13,10 +13,10 @@ import { createInitialTurnRequest } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import type { PendingInput, ProjectView, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
-import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelSelection, SkillSuggestion } from "@talos/sdk-browser";
 
 interface SendTextOptions {
-  modelRef?: ModelRef;
+  modelSelection?: ModelSelection;
   project?: ProjectView;
   skills?: SkillSuggestion[];
 }
@@ -27,8 +27,9 @@ export function useChatSession(
   sessionTitle?: string,
 ) {
   const [draft, setDraft] = useState("");
-  const activeTurnQuery = useActiveTurnQuery(sessionId);
-  const sessionHistoryQuery = useSessionHistoryQuery(sessionId);
+  const sessionAvailable = serverMessageCount !== undefined;
+  const activeTurnQuery = useActiveTurnQuery(sessionId, sessionAvailable);
+  const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
   const shouldRecoverLiveTail = isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
   const liveRecoveryQuery = useLiveRecoveryQuery(
     sessionId,
@@ -155,7 +156,7 @@ export function useChatSession(
           sessionId,
           useAppStore.getState().connection.userId,
           content,
-          options.modelRef,
+          options.modelSelection,
           options.project,
           options.skills,
         )
@@ -180,7 +181,7 @@ export function useChatSession(
             sessionId,
             useAppStore.getState().connection.userId,
             text,
-            options.modelRef,
+            options.modelSelection,
             options.project,
             options.skills,
           )

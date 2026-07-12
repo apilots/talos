@@ -5,7 +5,7 @@ use talos_error::TalosResult;
 use talos_store::project::MockProjectStore;
 use talos_store::session::{MockSessionStore, SessionQuery, SessionRecord, SessionStore};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
-use talos_types::{ModelRef, SessionConf};
+use talos_types::{ModelRef, ModelSelection, SessionConf};
 
 use super::{CreateSessionParams, SessionService};
 
@@ -71,7 +71,6 @@ fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
         speed: Default::default(),
         input: Vec::new(),
         cost: Default::default(),
-        compat: Default::default(),
     }
 }
 
@@ -92,14 +91,14 @@ fn context() -> TalosContext {
 fn create_session_params(
     context: TalosContext,
     target_agent: &str,
-    model_ref: Option<ModelRef>,
+    model_selection: Option<ModelSelection>,
 ) -> CreateSessionParams {
     CreateSessionParams {
         session_id: None,
         context,
         target_agent: target_agent.to_string(),
-        model_ref,
-        agent_model_ref: None,
+        model_selection,
+        agent_model_selection: None,
         conf: None,
         workspace_id: None,
         project_id: None,
@@ -108,7 +107,7 @@ fn create_session_params(
 }
 
 #[tokio::test]
-async fn create_session_uses_agent_model_ref_before_global_default() {
+async fn create_session_uses_agent_model_selection_before_global_default() {
     let mut base_config = talos_types::TalosConfig::default();
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "global-model".to_string();
@@ -118,10 +117,10 @@ async fn create_session_uses_agent_model_ref_before_global_default() {
         base_config,
     );
     let mut params = create_session_params(context(), "default", None);
-    params.agent_model_ref = Some(ModelRef {
+    params.agent_model_selection = Some(ModelSelection::model_default(ModelRef {
         provider: "openai".to_string(),
         id: "agent-model".to_string(),
-    });
+    }));
 
     let session = service
         .create_session(params)
@@ -131,11 +130,11 @@ async fn create_session_uses_agent_model_ref_before_global_default() {
     assert_eq!(session.config.llm.provider, "openai");
     assert_eq!(session.config.llm.model, "agent-model");
     assert_eq!(
-        session.conf.model_ref,
-        Some(ModelRef {
+        session.conf.model_selection,
+        Some(ModelSelection::model_default(ModelRef {
             provider: "openai".to_string(),
             id: "agent-model".to_string(),
-        })
+        }))
     );
 }
 
@@ -191,10 +190,10 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
         .create_session(create_session_params(
             context(),
             "default",
-            Some(ModelRef {
+            Some(ModelSelection::model_default(ModelRef {
                 provider: "anthropic".to_string(),
                 id: "session-model".to_string(),
-            }),
+            })),
         ))
         .await
         .expect("session should be created");
@@ -204,7 +203,7 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
 }
 
 #[tokio::test]
-async fn create_session_conf_model_ref_matches_stored_model() {
+async fn create_session_conf_model_selection_matches_stored_model() {
     let mut base_config = talos_types::TalosConfig::default();
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "default-model".to_string();
@@ -216,10 +215,10 @@ async fn create_session_conf_model_ref_matches_stored_model() {
     );
     let mut params = create_session_params(context(), "default", None);
     params.conf = Some(SessionConf {
-        model_ref: Some(ModelRef {
+        model_selection: Some(ModelSelection::model_default(ModelRef {
             provider: "openai".to_string(),
             id: "conf-model".to_string(),
-        }),
+        })),
     });
 
     let session = service
@@ -234,7 +233,7 @@ async fn create_session_conf_model_ref_matches_stored_model() {
 }
 
 #[tokio::test]
-async fn existing_session_without_model_ref_tracks_new_default() {
+async fn existing_session_without_model_selection_tracks_new_default() {
     let mut base_config = talos_types::TalosConfig::default();
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "old-default".to_string();

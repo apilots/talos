@@ -1,5 +1,5 @@
 use super::*;
-use talos_llm_provider::{ChatMessage, ModelSpeed, ReasoningEffort};
+use talos_llm_provider::{ChatMessage, EffectiveReasoning, ModelSpeed, ReasoningEffort};
 use talos_prompt::{PromptMode, PromptWindowUsage};
 
 #[test]
@@ -12,7 +12,7 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         project_root: None,
         selected_model: "model".to_string(),
         max_output_tokens: Some(2_048),
-        reasoning_effort: Some(ReasoningEffort::Medium),
+        reasoning: EffectiveReasoning::Effort(ReasoningEffort::Medium),
         speed: ModelSpeed::Fast,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current user input")],
@@ -43,8 +43,8 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
     let sequential_chat_request = sequential_request.into_chat_request();
     assert_eq!(sequential_chat_request.max_tokens, Some(2_048));
     assert_eq!(
-        sequential_chat_request.reasoning_effort,
-        Some(ReasoningEffort::Medium)
+        sequential_chat_request.reasoning,
+        EffectiveReasoning::Effort(ReasoningEffort::Medium)
     );
     assert_eq!(sequential_chat_request.speed, Some(ModelSpeed::Fast));
 

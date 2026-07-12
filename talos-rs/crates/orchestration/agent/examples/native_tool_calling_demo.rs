@@ -12,7 +12,7 @@ use talos_llm_provider::{
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
-use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, ModelSelection, SessionContext, SessionState, TalosSession};
 
 struct NativeToolMockProvider;
 
@@ -61,7 +61,7 @@ impl LlmProvider for NativeToolMockProvider {
         if has_tool_result {
             return Ok(ChatResponse {
                 content: "I used the tool result and produced the final answer.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: talos_llm_provider::ReasoningOutput::default(),
                 model: "mock-model".to_string(),
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -71,7 +71,7 @@ impl LlmProvider for NativeToolMockProvider {
 
         Ok(ChatResponse {
             content: "Let me call WebSearch first.".to_string(),
-            reasoning: Vec::new(),
+            reasoning: talos_llm_provider::ReasoningOutput::default(),
             model: "mock-model".to_string(),
             usage: Usage::default(),
             finish_reason: Some("tool_calls".to_string()),
@@ -102,10 +102,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "NativeToolAgent".to_string(),
         "Demonstrates native tool calling flow".to_string(),
         Arc::new(StaticLlmProviderRouter { provider }),
-        ModelRef {
+        ModelSelection::model_default(ModelRef {
             provider: "mock".to_string(),
             id: "mock-model".to_string(),
-        },
+        }),
         registry,
         Default::default(),
     )?;

@@ -61,7 +61,7 @@ impl AgentHarness for MockAgent {
             output_items: vec![RunItem::OutputText {
                 text: "Mock response".to_string(),
             }],
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             stop_reason: talos_types::talos::StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 1,

@@ -1,4 +1,9 @@
 use super::*;
+use crate::{
+    EventAuthor, ExecutionBranch, InvocationSession, KernelTranscriptEvent,
+    KernelTranscriptEventKind, KernelTranscriptPayload, KernelTranscriptService,
+    MemoryBackedKernelTranscriptService,
+};
 
 pub async fn persist_general_turn_artifacts(
     prepared: &PreparedGeneralTurn,
@@ -44,5 +49,36 @@ pub async fn persist_general_turn_artifacts(
             error = %err,
             "failed to append memory store turn"
         );
+    }
+
+    let transcript_service = MemoryBackedKernelTranscriptService::new(memory_store);
+    let mut session = InvocationSession {
+        session_id: prepared.session_id.clone(),
+        ..InvocationSession::default()
+    };
+    for pending in &executed.pending_dynamic_requests {
+        let event = KernelTranscriptEvent::new(
+            prepared.session_id.clone(),
+            prepared.invocation_id.clone(),
+            ExecutionBranch::ReactiveLoop,
+            EventAuthor::System,
+            KernelTranscriptEventKind::SystemMessage,
+            KernelTranscriptPayload::DynamicToolRequest {
+                payload: crate::session::KernelTranscriptDynamicToolRequestPayload {
+                    call_id: pending.call_id.clone(),
+                    tool_name: pending.tool_name.clone(),
+                    arguments: pending.arguments.clone().into(),
+                    reasoning_continuation: pending.reasoning_continuation.clone(),
+                },
+            },
+        );
+        if let Err(err) = transcript_service.append_event(&mut session, event).await {
+            warn!(
+                session_id = %prepared.session_id,
+                call_id = %pending.call_id,
+                error = %err,
+                "failed to append pending dynamic tool transcript"
+            );
+        }
     }
 }

@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
-use talos_sdk::{AuthSessionReadResponse, LlmReasoningEffort, SessionInfo, WorkspaceInfoResponse};
+use talos_sdk::{
+    AuthSessionReadResponse, LlmReasoningEffort, ReasoningSelection, SessionInfo,
+    WorkspaceInfoResponse,
+};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
 use crate::utils::{text_display_width, APP_VERSION};
@@ -55,7 +58,7 @@ impl TuiStatusSnapshot {
         workspace: &WorkspaceInfoResponse,
     ) -> TalosResult<TuiStatusSnapshot> {
         let model_id = session
-            .map(|session| session.model_ref.id.as_str())
+            .map(|session| session.model_selection.model_ref.id.as_str())
             .unwrap_or(app.current_model.as_str());
         if model_id.trim().is_empty() {
             return Err(TalosError::ClientError(
@@ -101,10 +104,16 @@ impl TuiStatusSnapshot {
                 provider: model_info.provider.clone(),
                 context_window: model_info.context_window,
                 reasoning: model_info.reasoning,
-                reasoning_effort: app
-                    .current_reasoning_effort
-                    .filter(|_| model_info.reasoning && model_info.id == app.current_model)
-                    .unwrap_or(model_info.reasoning_effort),
+                reasoning_effort: session
+                    .map(|session| match session.model_selection.reasoning {
+                        ReasoningSelection::ModelDefault => model_info.reasoning_effort,
+                        ReasoningSelection::Effort { level } => level,
+                    })
+                    .unwrap_or_else(|| {
+                        app.reasoning_effort_override
+                            .filter(|_| model_info.reasoning && model_info.id == app.current_model)
+                            .unwrap_or(model_info.reasoning_effort)
+                    }),
             },
             agent_workspace,
             directory,

@@ -42,6 +42,8 @@ export const resources = {
       settings: "Settings",
       signedIn: "Signed in",
       logout: "Sign out",
+      deleteSessionTitle: "Delete “{{title}}”?",
+      deleteSessionDescription: "This permanently deletes the chat and its saved history.",
     },
     chat: {
       newThread: "New chat",
@@ -561,6 +563,8 @@ export const resources = {
       settings: "设置",
       signedIn: "已登录",
       logout: "退出",
+      deleteSessionTitle: "删除“{{title}}”？",
+      deleteSessionDescription: "此操作会永久删除该会话及其已保存的历史记录。",
     },
     chat: {
       newThread: "新会话",

@@ -14,7 +14,7 @@ use talos_config::{resolve_runtime_path, AgentKernelConfig, PluginRootConfig, Pl
 use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, Usage,
+    ModelBlockStreamEvent, ReasoningContinuation, ReasoningOutput, Usage,
 };
 use talos_skills::{SkillRoot, SkillRoots, SkillSelector};
 use talos_tools::{register_core_local_tools, ToolRegistry};
@@ -145,7 +145,7 @@ impl LlmProvider for NoopLlmProvider {
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: "ok".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "noop".to_string(),
             usage: Usage {
                 prompt_tokens: 1,
@@ -229,7 +229,7 @@ impl LlmProvider for ExecLoopProvider {
         match round {
             0 => Ok(ChatResponse {
                 content: "Run bash and use its final output.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -269,7 +269,7 @@ impl LlmProvider for ExecLoopProvider {
                     .to_string();
                 Ok(ChatResponse {
                     content: format!("Final answer after bash output: {}", output.trim()),
-                    reasoning: Vec::new(),
+                    reasoning: ReasoningOutput::default(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("stop".to_string()),
@@ -299,7 +299,7 @@ impl LlmProvider for LengthFinishProvider {
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: "partial answer".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "length-finish".to_string(),
             usage: Usage {
                 prompt_tokens: 1,
@@ -472,7 +472,7 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
         match self.round.fetch_add(1, Ordering::SeqCst) {
             0 => Ok(ChatResponse {
                 content: "Inspect the project root first.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -488,7 +488,7 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
             }),
             1 => Ok(ChatResponse {
                 content: String::new(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -508,7 +508,7 @@ impl LlmProvider for EmptyFinalAfterToolsProvider {
                 Ok(ChatResponse {
                     content: "Final architecture summary based on verified tool results."
                         .to_string(),
-                    reasoning: Vec::new(),
+                    reasoning: ReasoningOutput::default(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("stop".to_string()),
@@ -542,7 +542,7 @@ impl LlmProvider for SalvageAfterEmptyFinalProvider {
         match self.round.fetch_add(1, Ordering::SeqCst) {
             0 => Ok(ChatResponse {
                 content: "Inspect the project root first.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -558,7 +558,7 @@ impl LlmProvider for SalvageAfterEmptyFinalProvider {
             }),
             1 | 2 => Ok(ChatResponse {
                 content: String::new(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -566,7 +566,7 @@ impl LlmProvider for SalvageAfterEmptyFinalProvider {
             }),
             _ => Ok(ChatResponse {
                 content: "Salvaged final answer from verified tool results.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("stop".to_string()),
@@ -600,7 +600,7 @@ impl LlmProvider for SummaryProvider {
             .expect("summary provider should have a queued response");
         Ok(ChatResponse {
             content: response,
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "summary-model".to_string(),
             usage: Usage {
                 prompt_tokens: 13,
@@ -652,7 +652,7 @@ impl LlmProvider for RecordingSummaryProvider {
             .expect("recording summary provider should have a queued response");
         Ok(ChatResponse {
             content: response,
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "summary-model".to_string(),
             usage: Usage {
                 prompt_tokens: 13,
@@ -695,6 +695,10 @@ fn build_ctx_with_stream_for_session(
         workspace_id: "w1".to_string(),
         project_root: None,
         input: "hello".to_string(),
+        model_selection: talos_types::ModelSelection::model_default(talos_types::ModelRef {
+            provider: "p1".to_string(),
+            id: "m1".to_string(),
+        }),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),
             name: "m1".to_string(),
@@ -705,7 +709,6 @@ fn build_ctx_with_stream_for_session(
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         },
         phase: TurnPhase::Execution,
         planning_instruction: None,

@@ -192,7 +192,7 @@ impl AgentHarness for RecordingStreamAgent {
         Ok(AgentRunResult {
             output_text: "ok".to_string(),
             output_items: Vec::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 1,
@@ -216,7 +216,7 @@ impl AgentHarness for RecordingStreamAgent {
         Ok(AgentRunResult {
             output_text: "ok".to_string(),
             output_items: Vec::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 1,
@@ -287,7 +287,7 @@ impl AgentHarness for TrackingFlushAgent {
         Ok(AgentRunResult {
             output_text: String::new(),
             output_items: Vec::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             task_count: 0,

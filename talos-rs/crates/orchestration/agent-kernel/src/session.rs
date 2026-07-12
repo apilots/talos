@@ -9,7 +9,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use talos_error::TalosResult;
-use talos_llm_provider::{ChatMessage, FunctionCall};
+use talos_llm_provider::{ChatMessage, FunctionCall, ReasoningContinuation};
 use talos_memory::SessionTranscriptPayload;
 use talos_memory::{
     Memory, MemoryStore, SessionTranscriptActions, SessionTranscriptAuthPayload,
@@ -88,6 +88,7 @@ pub struct KernelTranscriptDynamicToolRequestPayload {
     pub call_id: String,
     pub tool_name: String,
     pub arguments: DynamicToolArguments,
+    pub reasoning_continuation: Option<ReasoningContinuation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -173,7 +174,7 @@ impl KernelTranscriptEvent {
                     vec![FunctionCall::new(
                         call_id.clone(),
                         name.clone(),
-                        arguments.clone().into(),
+                        arguments.clone(),
                     )],
                 ),
             },
@@ -197,6 +198,7 @@ impl KernelTranscriptEvent {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
                         arguments: payload.arguments.clone().into(),
+                        reasoning_continuation: None,
                     },
                 }
             }
@@ -509,7 +511,8 @@ impl KernelSessionTranscriptMapper {
                     payload: SessionTranscriptDynamicToolRequestPayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
-                        arguments: payload.arguments.clone().into(),
+                        arguments: payload.arguments.clone(),
+                        reasoning_continuation: payload.reasoning_continuation.clone(),
                     },
                 }
             }
@@ -556,6 +559,7 @@ impl KernelSessionTranscriptMapper {
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
                         arguments: payload.arguments,
+                        reasoning_continuation: payload.reasoning_continuation,
                     },
                 }
             }

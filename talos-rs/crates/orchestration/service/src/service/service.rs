@@ -188,8 +188,8 @@ impl TalosService {
         session_id: &str,
         patch: SessionPatch,
     ) -> ServiceResult<SessionPatchAck> {
-        if let Some(model_ref) = patch.model_ref()? {
-            self.config.validate_model_ref_supported(&model_ref)?;
+        if let Some(selection) = patch.model_selection()? {
+            self.config.validate_model_selection_supported(&selection)?;
         }
         self.access.patch_session(actor, session_id, patch).await
     }
@@ -215,8 +215,8 @@ impl TalosService {
         actor: &Actor,
         params: CreateSessionRequest,
     ) -> ServiceResult<TalosSession> {
-        if let Some(model_ref) = params.model_ref.as_ref() {
-            self.config.validate_model_ref_supported(model_ref)?;
+        if let Some(selection) = params.model_selection.as_ref() {
+            self.config.validate_model_selection_supported(selection)?;
         }
         self.access.get_or_create_session(actor, params).await
     }
@@ -246,8 +246,8 @@ impl TalosService {
         idempotency_key: Option<String>,
     ) -> ServiceResult<MessageCommandResult> {
         TurnService::validate_start_turn_request(&request)?;
-        if let Some(model_ref) = request.model_ref.as_ref() {
-            self.config.validate_model_ref_supported(model_ref)?;
+        if let Some(selection) = request.model_selection.as_ref() {
+            self.config.validate_model_selection_supported(selection)?;
         }
         let session_id = request.session_id.clone();
         let (session, created_session) = match self.access.get_session(actor, &session_id).await {
@@ -270,7 +270,7 @@ impl TalosService {
                         CreateSessionRequest {
                             session_id: session_id.clone(),
                             context,
-                            model_ref: request.model_ref.clone(),
+                            model_selection: request.model_selection.clone(),
                             workspace_id: request.workspace_id.clone(),
                             project_id: request.project_id.clone(),
                             current_directory: request.current_directory.clone(),
@@ -306,9 +306,9 @@ impl TalosService {
         request: &StartTurnRequest,
     ) -> ServiceResult<TalosSession> {
         let mut patch = SessionPatch::default();
-        if let Some(model_ref) = request.model_ref.as_ref() {
-            patch.conf = Some(SessionConfigOverridePolicy::single_model_ref_conf(
-                model_ref,
+        if let Some(selection) = request.model_selection.as_ref() {
+            patch.conf = Some(SessionConfigOverridePolicy::single_model_selection_conf(
+                selection,
             ));
         }
         if let Some(current_directory) = request.current_directory.clone() {

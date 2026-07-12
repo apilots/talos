@@ -44,7 +44,7 @@ impl DatabaseSessionStore {
         Ok(rows.into_iter().next())
     }
 
-    fn parse_session_record(row: &Row) -> SessionRecord {
+    fn parse_session_record(row: &Row) -> TalosResult<SessionRecord> {
         let context = row
             .get_string("context_json")
             .and_then(|m| serde_json::from_str::<TalosContext>(&m).ok())
@@ -73,8 +73,11 @@ impl DatabaseSessionStore {
             .and_then(|raw| serde_json::from_str::<TokenUsage>(&raw).ok())
             .unwrap_or_default();
 
-        SessionRecord {
-            id: row.get_string("session_key").unwrap_or_default(),
+        let id = row.get_string("session_key").unwrap_or_default();
+        let conf = Self::parse_conf_json(row.get_string("conf_json"), &id)?;
+
+        Ok(SessionRecord {
+            id,
             workspace_id: Self::normalized_optional_string(row.get_string("workspace_id")),
             title: row
                 .get_string("title")
@@ -95,19 +98,24 @@ impl DatabaseSessionStore {
                 .unwrap_or_default(),
             message_count,
             usage,
-            conf: Self::parse_conf_json(row.get_string("conf_json")),
+            conf,
             project_id: Self::normalized_optional_string(row.get_string("project_id")),
             current_directory: Self::normalized_optional_string(
                 row.get_string("current_directory"),
             )
             .map(std::path::PathBuf::from),
-        }
+        })
     }
 
-    fn parse_conf_json(conf_json: Option<String>) -> SessionConf {
-        conf_json
-            .and_then(|v| serde_json::from_str::<SessionConf>(&v).ok())
-            .unwrap_or_default()
+    fn parse_conf_json(conf_json: Option<String>, session_id: &str) -> TalosResult<SessionConf> {
+        let Some(conf_json) = conf_json else {
+            return Ok(SessionConf::default());
+        };
+        serde_json::from_str(&conf_json).map_err(|error| {
+            talos_error::TalosError::SerializationError(format!(
+                "parse session '{session_id}' conf_json: {error}"
+            ))
+        })
     }
 
     pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {
@@ -258,7 +266,7 @@ impl SessionStore for DatabaseSessionStore {
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         let row = self.fetch_session_row(session_id).await?;
-        Ok(row.as_ref().map(Self::parse_session_record))
+        row.as_ref().map(Self::parse_session_record).transpose()
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
@@ -297,7 +305,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self.storage.query(&sql, &params_ref).await?;
         let mut records = Vec::new();
         for row in rows {
-            let record = Self::parse_session_record(&row);
+            let record = Self::parse_session_record(&row)?;
             if query
                 .provider
                 .as_ref()

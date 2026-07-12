@@ -6,7 +6,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::session::{IdempotencyRecord, MessageCommandResult};
 use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem};
 use tokio::sync::mpsc;
-use tracing::error;
+use tracing::{error, warn};
 
 use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
@@ -120,11 +120,17 @@ async fn record_session_title(
     title: &str,
 ) {
     if let Err(err) = sessions.update_session_title(session_id, title).await {
-        error!(
-            session_id = %session_id,
-            error = %err,
-            "failed to persist session title"
-        );
+        match err {
+            TalosError::ResourceNotFound(_) => warn!(
+                session_id = %session_id,
+                "session was deleted before its generated title could be persisted"
+            ),
+            err => error!(
+                session_id = %session_id,
+                error = %err,
+                "failed to persist session title"
+            ),
+        }
         return;
     }
     if let Err(err) = session_runtime.invalidate_cached_session(session_id).await {

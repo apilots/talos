@@ -38,7 +38,7 @@ enum ActiveModelBlock {
 #[derive(Debug, Default)]
 pub(crate) struct StreamRound {
     pub(crate) content: String,
-    pub(crate) reasoning: String,
+    pub(crate) reasoning: ReasoningOutput,
     pub(crate) tool_calls: Vec<FunctionCall>,
     pub(crate) streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub(crate) finish_reason: Option<String>,
@@ -66,7 +66,7 @@ fn finalize_tool_calls(
             serde_json::json!({})
         } else {
             serde_json::from_str::<Value>(&call.arguments_buffer)
-                .unwrap_or_else(|_| Value::String(call.arguments_buffer))
+                .unwrap_or(Value::String(call.arguments_buffer))
         };
 
         calls.push(FunctionCall::new(id, name, arguments));
@@ -166,7 +166,8 @@ pub(crate) async fn stream_round(
 ) -> TalosResult<StreamRound> {
     let mut stream = llm_provider.stream_model_blocks(request).await?;
     let mut content = String::new();
-    let mut reasoning = String::new();
+    let mut streamed_reasoning = String::new();
+    let mut completed_reasoning: Option<ReasoningOutput> = None;
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
     let mut active_blocks = BTreeMap::<String, ActiveModelBlock>::new();
@@ -344,7 +345,7 @@ pub(crate) async fn stream_round(
                             "reasoning delta received without active reasoning block {model_item_id}"
                         )));
                     }
-                    reasoning.push_str(&delta);
+                    streamed_reasoning.push_str(&delta);
                     emit_stream_event(
                         stream_tx,
                         KernelStreamEventType::ThinkingDelta,
@@ -475,6 +476,13 @@ pub(crate) async fn stream_round(
                     }
                 }
             }
+            ModelBlockStreamEvent::ReasoningCompleted { output } => {
+                if completed_reasoning.replace(output).is_some() {
+                    return Err(provider_protocol_violation(
+                        "provider emitted multiple completed reasoning outputs",
+                    ));
+                }
+            }
             ModelBlockStreamEvent::Done {
                 finish_reason: final_reason,
                 usage: final_usage,
@@ -516,6 +524,22 @@ pub(crate) async fn stream_round(
     }
 
     let tool_calls = finalize_tool_calls(round, pending_calls);
+    let reasoning = match completed_reasoning {
+        Some(output) => {
+            if output.display_text() != streamed_reasoning {
+                return Err(provider_protocol_violation(
+                    "completed reasoning output does not match streamed reasoning text",
+                ));
+            }
+            output
+        }
+        None if streamed_reasoning.is_empty() => ReasoningOutput::default(),
+        None => {
+            return Err(provider_protocol_violation(
+                "reasoning deltas completed without provider continuation output",
+            ));
+        }
+    };
     if !unknown_assistant_text_items.is_empty() {
         let phase = if tool_calls.is_empty() {
             KernelAssistantTextPhase::FinalAnswer
@@ -579,7 +603,7 @@ async fn chat_round(
     let tool_calls = response.get_tool_calls().to_vec();
     Ok(StreamRound {
         content: response.content,
-        reasoning: response.reasoning.join(""),
+        reasoning: response.reasoning,
         tool_calls,
         streamed_tool_outputs: Vec::new(),
         finish_reason: response.finish_reason,
@@ -679,13 +703,12 @@ pub async fn execute_general_turn_step(
     };
 
     let mut output_items = Vec::new();
-    let mut reasoning = Vec::new();
-    if !round_response.reasoning.trim().is_empty() {
-        let reasoning_text = round_response.reasoning.trim().to_string();
+    let reasoning_text = round_response.reasoning.display_text();
+    if !reasoning_text.trim().is_empty() {
+        let reasoning_text = reasoning_text.trim().to_string();
         output_items.push(RunItem::Reasoning {
-            text: reasoning_text.clone(),
+            text: reasoning_text,
         });
-        reasoning.push(reasoning_text);
     }
 
     for call in &round_response.tool_calls {
@@ -720,7 +743,7 @@ pub async fn execute_general_turn_step(
 
     Ok(GeneralTurnStepResult {
         text: round_response.content,
-        reasoning,
+        reasoning: round_response.reasoning,
         tool_calls: round_response.tool_calls,
         streamed_tool_outputs: round_response.streamed_tool_outputs,
         model_finish_reason,
@@ -738,12 +761,16 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
         state.execution_summary_streamed || step.execution_summary_streamed;
     state.usage.accumulate(&step.usage);
     state.output_items.extend(step.output_items.clone());
-    state.reasoning_log.extend(step.reasoning.clone());
+    state
+        .reasoning_log
+        .extend(step.reasoning.display_text.clone());
     if !step.tool_calls.is_empty() {
-        state.messages.push(ChatMessage::assistant_with_tool_calls(
-            step.text.clone(),
-            step.tool_calls.clone(),
-        ));
+        let mut message =
+            ChatMessage::assistant_with_tool_calls(step.text.clone(), step.tool_calls.clone());
+        if let Some(continuation) = step.reasoning.continuation.clone() {
+            message = message.with_reasoning_continuation(continuation);
+        }
+        state.messages.push(message);
     }
     for call in &step.tool_calls {
         state.tool_call_count += 1;

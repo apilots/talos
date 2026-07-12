@@ -3,12 +3,12 @@ use std::sync::Arc;
 
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
-    ModelRefConfig,
+    ModelSelectionConfig, ReasoningSelectionConfig,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
 use talos_tools::ToolRegistry;
-use talos_types::ModelRef;
+use talos_types::{ModelSelection, ReasoningSelection};
 
 use crate::{agent::AgentHarnessParams, AgentHarnessImpl, SkillRootsResolver};
 
@@ -95,12 +95,12 @@ pub struct AgentDefinition {
     pub description: String,
     /// Default execution workspace key, not a filesystem path and not an Agent selector.
     pub default_workspace_id: Option<String>,
-    /// Concrete model used to initialize this Agent runtime.
-    pub model_ref: ModelRef,
-    /// Agent-specific model override applied when creating new product sessions.
+    /// Concrete model and reasoning policy used to initialize this Agent runtime.
+    pub model_selection: ModelSelection,
+    /// Agent-specific selection override applied when creating new product sessions.
     ///
     /// None means sessions inherit the current service-level LLM default.
-    pub model_ref_override: Option<ModelRef>,
+    pub model_selection_override: Option<ModelSelection>,
     /// Typed runtime configuration matched with kind.
     pub runtime_config: AgentRuntimeConfig,
 }
@@ -135,12 +135,12 @@ impl AgentDefinitionLoader {
     /// Load explicit definitions or synthesize the default Kernel Agent.
     pub fn load(
         config: &AgentConfig,
-        default_model_ref: &ModelRef,
+        default_model_selection: &ModelSelection,
     ) -> TalosResult<Vec<AgentDefinition>> {
         if config.agents.is_empty() {
             return Ok(vec![synthesized_default_definition(
                 config,
-                default_model_ref,
+                default_model_selection,
             )]);
         }
 
@@ -149,7 +149,8 @@ impl AgentDefinitionLoader {
             .agents
             .iter()
             .map(|definition| {
-                let definition = definition_from_config(config, default_model_ref, definition)?;
+                let definition =
+                    definition_from_config(config, default_model_selection, definition)?;
                 if !seen_ids.insert(definition.id.clone()) {
                     return Err(TalosError::ValidationError(format!(
                         "duplicate agent definition id: {}",
@@ -205,8 +206,8 @@ impl AgentHarnessFactory {
                     name: definition.name.clone(),
                     description: definition.description.clone(),
                     llm_provider_router: self.llm_provider_router.clone(),
-                    model_ref: definition.model_ref.clone(),
-                    model_ref_override: definition.model_ref_override.clone(),
+                    model_selection: definition.model_selection.clone(),
+                    model_selection_override: definition.model_selection_override.clone(),
                     tool_registry: self.tool_registry.clone(),
                     kernel_config: kernel.clone(),
                     skill_roots_resolver: self.skill_roots_resolver.clone(),
@@ -247,7 +248,7 @@ impl AgentDefinition {
 
 fn synthesized_default_definition(
     config: &AgentConfig,
-    default_model_ref: &ModelRef,
+    default_model_selection: &ModelSelection,
 ) -> AgentDefinition {
     AgentDefinition {
         id: "default".to_string(),
@@ -256,8 +257,11 @@ fn synthesized_default_definition(
         enabled: true,
         description: "Default AI assistant".to_string(),
         default_workspace_id: Some(config.kernel.default_workspace_id.clone()),
-        model_ref: model_ref_or_default(config.model_ref.as_ref(), default_model_ref),
-        model_ref_override: model_ref_from_config(config.model_ref.as_ref()),
+        model_selection: model_selection_or_default(
+            config.model_selection.as_ref(),
+            default_model_selection,
+        ),
+        model_selection_override: model_selection_from_config(config.model_selection.as_ref()),
         runtime_config: AgentRuntimeConfig::Kernel {
             kernel: config.kernel.clone(),
         },
@@ -266,7 +270,7 @@ fn synthesized_default_definition(
 
 fn definition_from_config(
     config: &AgentConfig,
-    default_model_ref: &ModelRef,
+    default_model_selection: &ModelSelection,
     definition: &AgentDefinitionConfig,
 ) -> TalosResult<AgentDefinition> {
     let id = definition.id.trim();
@@ -304,23 +308,34 @@ fn definition_from_config(
             .default_workspace_id
             .clone()
             .or_else(|| Some(config.kernel.default_workspace_id.clone())),
-        model_ref: model_ref_or_default(definition.model_ref.as_ref(), default_model_ref),
-        model_ref_override: model_ref_from_config(definition.model_ref.as_ref()),
+        model_selection: model_selection_or_default(
+            definition.model_selection.as_ref(),
+            default_model_selection,
+        ),
+        model_selection_override: model_selection_from_config(definition.model_selection.as_ref()),
         runtime_config,
     })
 }
 
-fn model_ref_or_default(
-    model_ref: Option<&ModelRefConfig>,
-    default_model_ref: &ModelRef,
-) -> ModelRef {
-    model_ref_from_config(model_ref).unwrap_or_else(|| default_model_ref.clone())
+fn model_selection_or_default(
+    selection: Option<&ModelSelectionConfig>,
+    default_selection: &ModelSelection,
+) -> ModelSelection {
+    model_selection_from_config(selection).unwrap_or_else(|| default_selection.clone())
 }
 
-fn model_ref_from_config(model_ref: Option<&ModelRefConfig>) -> Option<ModelRef> {
-    model_ref.map(|model_ref| ModelRef {
-        provider: model_ref.provider.trim().to_string(),
-        id: model_ref.id.trim().to_string(),
+fn model_selection_from_config(selection: Option<&ModelSelectionConfig>) -> Option<ModelSelection> {
+    selection.map(|selection| ModelSelection {
+        model_ref: talos_types::ModelRef {
+            provider: selection.model_ref.provider.trim().to_string(),
+            id: selection.model_ref.id.trim().to_string(),
+        },
+        reasoning: match selection.reasoning {
+            ReasoningSelectionConfig::ModelDefault => ReasoningSelection::ModelDefault,
+            ReasoningSelectionConfig::Effort { level } => ReasoningSelection::Effort {
+                level: level.into(),
+            },
+        },
     })
 }
 

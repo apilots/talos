@@ -43,7 +43,7 @@ impl TuiApp {
             message: user_message.clone(),
             skills: skills.clone(),
             context: Some(self.build_talos_context()),
-            model_ref: self.current_model_ref(),
+            model_selection: self.current_model_selection(),
             current_directory: Some(self.startup_directory.clone()),
             client_request_id: None,
         }

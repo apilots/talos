@@ -134,11 +134,14 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
 }
 
 #[test]
-fn test_session_override_policy_rejects_unknown_keys() {
+fn test_session_override_policy_accepts_model_selection() {
     let conf = SessionConf {
-        model_ref: Some(ModelRef {
-            provider: "openai".to_string(),
-            id: "gpt-4o".to_string(),
+        model_selection: Some(ModelSelection {
+            model_ref: ModelRef {
+                provider: "openai".to_string(),
+                id: "gpt-4o".to_string(),
+            },
+            reasoning: ReasoningSelection::ModelDefault,
         }),
     };
     SessionConfigOverridePolicy::validate_conf(&conf)
@@ -146,19 +149,155 @@ fn test_session_override_policy_rejects_unknown_keys() {
 }
 
 #[test]
-fn test_session_override_policy_builds_model_ref_conf() {
-    let conf = SessionConfigOverridePolicy::single_model_ref_conf(&ModelRef {
-        provider: "openai".to_string(),
-        id: "gpt-4o".to_string(),
-    });
-    let model_ref = SessionConfigOverridePolicy::extract_model_ref(&conf)
-        .expect("conf extraction should succeed");
-
-    assert_eq!(
-        model_ref,
-        Some(ModelRef {
+fn test_session_override_policy_builds_model_selection_conf() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
             provider: "openai".to_string(),
             id: "gpt-4o".to_string(),
+        },
+        reasoning: ReasoningSelection::Effort {
+            level: ReasoningEffort::High,
+        },
+    };
+    let conf = SessionConfigOverridePolicy::single_model_selection_conf(&selection);
+    let extracted = SessionConfigOverridePolicy::extract_model_selection(&conf)
+        .expect("conf extraction should succeed");
+
+    assert_eq!(extracted, Some(selection));
+}
+
+#[test]
+fn test_model_selection_resolves_model_default_effort() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-5.5".to_string(),
+        },
+        reasoning: ReasoningSelection::ModelDefault,
+    };
+    let model = ModelInfo {
+        id: "gpt-5.5".to_string(),
+        name: "GPT-5.5".to_string(),
+        provider: "openai".to_string(),
+        context_window: 1_000_000,
+        reasoning: true,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    };
+
+    assert_eq!(
+        selection.resolve_reasoning(&model).unwrap(),
+        EffectiveReasoning::Effort(ReasoningEffort::Medium)
+    );
+}
+
+#[test]
+fn test_model_selection_resolves_explicit_effort() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-5.5".to_string(),
+        },
+        reasoning: ReasoningSelection::Effort {
+            level: ReasoningEffort::XHigh,
+        },
+    };
+    let model = ModelInfo {
+        id: "gpt-5.5".to_string(),
+        name: "GPT-5.5".to_string(),
+        provider: "openai".to_string(),
+        context_window: 1_000_000,
+        reasoning: true,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    };
+
+    assert_eq!(
+        selection.resolve_reasoning(&model).unwrap(),
+        EffectiveReasoning::Effort(ReasoningEffort::XHigh)
+    );
+}
+
+#[test]
+fn test_model_selection_resolves_unsupported_model_default() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
+            provider: "ollama".to_string(),
+            id: "qwen".to_string(),
+        },
+        reasoning: ReasoningSelection::ModelDefault,
+    };
+    let model = ModelInfo {
+        id: "qwen".to_string(),
+        name: "Qwen".to_string(),
+        provider: "ollama".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    };
+
+    assert_eq!(
+        selection.resolve_reasoning(&model).unwrap(),
+        EffectiveReasoning::Unsupported
+    );
+}
+
+#[test]
+fn test_model_selection_rejects_explicit_effort_for_unsupported_model() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
+            provider: "ollama".to_string(),
+            id: "qwen".to_string(),
+        },
+        reasoning: ReasoningSelection::Effort {
+            level: ReasoningEffort::High,
+        },
+    };
+    let model = ModelInfo {
+        id: "qwen".to_string(),
+        name: "Qwen".to_string(),
+        provider: "ollama".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    };
+
+    let error = selection
+        .resolve_reasoning(&model)
+        .expect_err("explicit effort should be rejected");
+
+    assert!(matches!(error, TalosError::ValidationError(_)));
+}
+
+#[test]
+fn test_model_selection_serializes_as_single_wire_object() {
+    let selection = ModelSelection {
+        model_ref: ModelRef {
+            provider: "openai".to_string(),
+            id: "gpt-5.5".to_string(),
+        },
+        reasoning: ReasoningSelection::Effort {
+            level: ReasoningEffort::High,
+        },
+    };
+
+    let encoded = serde_json::to_value(&selection).unwrap();
+
+    assert_eq!(
+        encoded,
+        serde_json::json!({
+            "modelRef": {"provider": "openai", "id": "gpt-5.5"},
+            "reasoning": {"type": "effort", "level": "high"}
         })
     );
 }

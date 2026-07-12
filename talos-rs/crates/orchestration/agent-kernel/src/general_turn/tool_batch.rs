@@ -299,6 +299,7 @@ pub(crate) fn collect_general_turn_tool_batch(
                 tool_name: output.tool_name.clone(),
                 call_id: output.call_id.clone(),
                 arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+                reasoning_continuation: None,
             });
             continue;
         }
@@ -403,7 +404,7 @@ pub async fn execute_general_turn_tool_batch(
         .map(|call| ToolExecutionInput {
             call_id: call.id.clone(),
             tool_name: call.name.clone(),
-            arguments: call.arguments.clone().into(),
+            arguments: call.arguments.clone(),
         })
         .collect::<Vec<_>>();
     let outputs = tool_executor

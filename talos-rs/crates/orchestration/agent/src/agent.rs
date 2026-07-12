@@ -35,7 +35,7 @@ use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
 use talos_memory::MemoryStore;
 use talos_tools::ToolRegistry;
 use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
-use talos_types::{normalize_session_title, ModelRef};
+use talos_types::{normalize_session_title, ModelSelection};
 use tracing::warn;
 
 const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the conversation.
@@ -63,10 +63,10 @@ pub struct AgentHarnessImpl {
     pub description: String,
     /// LLM provider router shared with the built-in runtime.
     pub llm_provider_router: Arc<dyn LlmProviderRouter>,
-    /// Default model for this Harness.
-    pub model_ref: ModelRef,
-    /// Agent-specific model override applied to new product sessions.
-    pub model_ref_override: Option<ModelRef>,
+    /// Default model and reasoning policy for this Harness.
+    pub model_selection: ModelSelection,
+    /// Agent-specific selection override applied to new product sessions.
+    pub model_selection_override: Option<ModelSelection>,
     /// Memory store used by current Kernel-backed behavior.
     pub memory_store: Arc<MemoryStore>,
     /// Tool registry shared by Harness and runtime execution.
@@ -89,8 +89,8 @@ pub(crate) struct AgentHarnessParams {
     pub(crate) name: String,
     pub(crate) description: String,
     pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
-    pub(crate) model_ref: ModelRef,
-    pub(crate) model_ref_override: Option<ModelRef>,
+    pub(crate) model_selection: ModelSelection,
+    pub(crate) model_selection_override: Option<ModelSelection>,
     pub(crate) tool_registry: Arc<ToolRegistry>,
     pub(crate) kernel_config: AgentKernelConfig,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
@@ -103,7 +103,7 @@ impl AgentHarnessImpl {
         name: String,
         description: String,
         llm_provider_router: Arc<dyn LlmProviderRouter>,
-        model_ref: ModelRef,
+        model_selection: ModelSelection,
         tool_registry: Arc<ToolRegistry>,
         kernel_config: AgentKernelConfig,
     ) -> TalosResult<Self> {
@@ -112,8 +112,8 @@ impl AgentHarnessImpl {
             name,
             description,
             llm_provider_router,
-            model_ref: model_ref.clone(),
-            model_ref_override: Some(model_ref),
+            model_selection: model_selection.clone(),
+            model_selection_override: Some(model_selection),
             tool_registry,
             kernel_config,
             skill_roots_resolver: empty_skill_roots_resolver(),
@@ -127,14 +127,14 @@ impl AgentHarnessImpl {
             name,
             description,
             llm_provider_router,
-            model_ref,
-            model_ref_override,
+            model_selection,
+            model_selection_override,
             tool_registry,
             kernel_config,
             skill_roots_resolver,
         } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
-        let llm_provider = llm_provider_router.provider_for(&model_ref)?;
+        let llm_provider = llm_provider_router.provider_for(&model_selection.model_ref)?;
         let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &kernel_config,
             llm_provider.clone(),
@@ -145,8 +145,8 @@ impl AgentHarnessImpl {
             name: name.clone(),
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
-            model_ref: model_ref.clone(),
-            model_ref_override,
+            model_selection: model_selection.clone(),
+            model_selection_override,
             memory_store,
             tool_registry: tool_registry.clone(),
             kernel_config: kernel_config.clone(),
@@ -188,7 +188,9 @@ impl AgentHarnessImpl {
     /// Replace Kernel runtime configuration and rebuild dependent Harness state.
     pub fn update_kernel_config(&mut self, config: AgentKernelConfig) -> TalosResult<()> {
         let kernel_config = Self::normalized_kernel_config(config);
-        let llm_provider = self.llm_provider_router.provider_for(&self.model_ref)?;
+        let llm_provider = self
+            .llm_provider_router
+            .provider_for(&self.model_selection.model_ref)?;
         let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
             &kernel_config,
             llm_provider,
@@ -232,7 +234,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         }
 
         let request = ChatRequest::builder()
-            .model(run_config.llm.model.clone())
+            .model(run_config.model_selection.model_ref.id.clone())
             .messages(vec![
                 ChatMessage::system(SESSION_TITLE_PROMPT),
                 ChatMessage::user(format!(
@@ -245,10 +247,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
         let llm_provider = match self
             .llm_provider_router
-            .provider_for(&talos_types::ModelRef {
-                provider: run_config.llm.provider.clone(),
-                id: run_config.llm.model.clone(),
-            }) {
+            .provider_for(&run_config.model_selection.model_ref)
+        {
             Ok(llm_provider) => llm_provider,
             Err(error) => {
                 warn!(
@@ -331,7 +331,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
             Err(err) if err.is_cancelled() => Ok(AgentRunResult {
                 output_text: String::new(),
                 output_items: Vec::new(),
-                reasoning: Vec::new(),
+                reasoning: Default::default(),
                 stop_reason: TalosStopReason::Cancelled,
                 usage: TokenUsage::default(),
                 task_count: 0,
@@ -447,8 +447,8 @@ impl AgentHarness for AgentHarnessImpl {
         &self.id
     }
 
-    fn default_model_ref(&self) -> Option<ModelRef> {
-        self.model_ref_override.clone()
+    fn default_model_selection(&self) -> Option<ModelSelection> {
+        self.model_selection_override.clone()
     }
 
     fn descriptor(&self) -> AgentDescriptor {

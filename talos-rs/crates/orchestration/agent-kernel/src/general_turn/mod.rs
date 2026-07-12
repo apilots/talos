@@ -16,8 +16,9 @@ use std::time::Instant;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    AssistantTextPhaseHint, ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningEffort, ToolChoice, ToolDefinition,
+    AssistantTextPhaseHint, ChatMessage, ChatRequest, EffectiveReasoning, FunctionCall,
+    LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStreamEvent, ModelSpeed,
+    ReasoningContinuation, ReasoningOutput, ToolChoice, ToolDefinition,
 };
 use talos_memory::{
     memory_search_response_into_retrieved_items, strip_json_fences, Memory, MemoryGetResult,

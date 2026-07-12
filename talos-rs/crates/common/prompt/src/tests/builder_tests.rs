@@ -167,7 +167,6 @@ async fn test_prompt_builder_keeps_active_skill_instructions_when_trimming_dynam
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         })
         .skill_prompt_context(SkillPromptContext {
             available_summary: "available skill summary\n".repeat(500),
@@ -326,7 +325,6 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         })
         .planning_instruction(Some("keep planning".to_string()))
         .user_input("hello")
@@ -364,7 +362,6 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         })
         .user_input("hello")
         .assemble()

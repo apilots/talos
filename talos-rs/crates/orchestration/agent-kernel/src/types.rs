@@ -10,7 +10,7 @@ use talos_types::talos::{
     ContextCompactionTrigger, TalosSessionEnvironment,
 };
 use talos_types::talos::{RunItem, TalosContentItem, TokenUsage, TurnExecutionMetrics};
-use talos_types::ModelInfo;
+use talos_types::{ModelInfo, ModelSelection};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -416,6 +416,7 @@ pub struct InvocationContext {
     #[serde(default)]
     pub project_root: Option<PathBuf>,
     pub input: String,
+    pub model_selection: ModelSelection,
     pub selected_model_info: ModelInfo,
     #[serde(default)]
     pub phase: TurnPhase,

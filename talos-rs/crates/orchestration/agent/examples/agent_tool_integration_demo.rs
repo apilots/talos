@@ -12,7 +12,7 @@ use talos_llm_provider::{
 use talos_tools::{ToolRegistry, WebSearchTool};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{TalosInputItem, TalosProvider, TalosSourceType};
-use talos_types::{ModelRef, SessionContext, SessionState, TalosSession};
+use talos_types::{ModelRef, ModelSelection, SessionContext, SessionState, TalosSession};
 
 /// Simple mock LLM provider for demo purposes
 struct DemoLlmProvider;
@@ -60,7 +60,7 @@ impl LlmProvider for DemoLlmProvider {
                 total_tokens: 30,
                 ..Usage::default()
             },
-            reasoning: Vec::new(),
+            reasoning: talos_llm_provider::ReasoningOutput::default(),
             finish_reason: Some("stop".to_string()),
             tool_calls: None,
         })
@@ -93,10 +93,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(StaticLlmProviderRouter {
             provider: llm_provider,
         }),
-        ModelRef {
+        ModelSelection::model_default(ModelRef {
             provider: "demo".to_string(),
             id: "demo-model".to_string(),
-        },
+        }),
         tool_registry,
         Default::default(),
     )?;

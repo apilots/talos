@@ -9,7 +9,7 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
         project_root: None,
         selected_model: "test-model".to_string(),
         max_output_tokens: None,
-        reasoning_effort: None,
+        reasoning: EffectiveReasoning::Unsupported,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current task")],

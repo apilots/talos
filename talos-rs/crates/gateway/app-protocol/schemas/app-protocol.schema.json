@@ -2373,6 +2373,9 @@
         "bailian": {
           "$ref": "#/definitions/LlmProviderConfig"
         },
+        "deepseek": {
+          "$ref": "#/definitions/LlmProviderConfig"
+        },
         "model": {
           "type": "string"
         },
@@ -2392,6 +2395,7 @@
       "required": [
         "anthropic",
         "bailian",
+        "deepseek",
         "model",
         "ollama",
         "openai",
@@ -2400,27 +2404,8 @@
       ],
       "type": "object"
     },
-    "LlmModelCompat": {
-      "properties": {
-        "thinking_format": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/LlmThinkingFormat"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
     "LlmModelConfig": {
       "properties": {
-        "compat": {
-          "$ref": "#/definitions/LlmModelCompat"
-        },
         "context_window": {
           "format": "uint32",
           "minimum": 0.0,
@@ -2452,7 +2437,6 @@
         }
       },
       "required": [
-        "compat",
         "context_window",
         "cost",
         "id",
@@ -2559,14 +2543,6 @@
         "medium",
         "high",
         "xhigh"
-      ],
-      "type": "string"
-    },
-    "LlmThinkingFormat": {
-      "enum": [
-        "open_ai",
-        "anthropic",
-        "qwen"
       ],
       "type": "string"
     },
@@ -2749,6 +2725,23 @@
       "required": [
         "id",
         "provider"
+      ],
+      "type": "object"
+    },
+    "ModelSelection": {
+      "additionalProperties": false,
+      "description": "Selects a model and the reasoning policy applied to requests using it.",
+      "properties": {
+        "modelRef": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "reasoning": {
+          "$ref": "#/definitions/ReasoningSelection"
+        }
+      },
+      "required": [
+        "modelRef",
+        "reasoning"
       ],
       "type": "object"
     },
@@ -3206,6 +3199,43 @@
       ],
       "type": "object"
     },
+    "ReasoningSelection": {
+      "description": "Describes whether a selection follows model defaults or explicitly overrides effort.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "modelDefault"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/LlmReasoningEffort"
+            },
+            "type": {
+              "enum": [
+                "effort"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "RecoverTimelineRequest": {
       "properties": {
         "after_event_id": {
@@ -3594,12 +3624,13 @@
       "type": "object"
     },
     "SessionConf": {
+      "additionalProperties": false,
       "description": "Configuration override stored with a session.",
       "properties": {
-        "model_ref": {
+        "modelSelection": {
           "anyOf": [
             {
-              "$ref": "#/definitions/ModelRef"
+              "$ref": "#/definitions/ModelSelection"
             },
             {
               "type": "null"
@@ -3876,6 +3907,7 @@
       "type": "object"
     },
     "StartTurnRequest": {
+      "additionalProperties": false,
       "description": "Request payload used by clients to start a turn in a session.",
       "properties": {
         "client_request_id": {
@@ -3909,10 +3941,10 @@
           },
           "type": "array"
         },
-        "model_ref": {
+        "modelSelection": {
           "anyOf": [
             {
-              "$ref": "#/definitions/ModelRef"
+              "$ref": "#/definitions/ModelSelection"
             },
             {
               "type": "null"

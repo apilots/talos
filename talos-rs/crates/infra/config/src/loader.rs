@@ -57,16 +57,13 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     let config: Config =
         serde_json::from_value(raw_value).map_err(|e| TalosError::ConfigError(e.to_string()))?;
     let mut config = resolve_env_placeholders(config, &runtime_env)?;
+    config.source_path = Some(config_path);
     config.apply_derived_paths();
     config
         .talos_paths()
         .ensure_agent_workspace(&config.agent.name)?;
 
     Ok(config)
-}
-
-pub(crate) fn config_source_path(path: Option<&str>) -> PathBuf {
-    explicit_config_path(path).unwrap_or_else(default_config_path)
 }
 
 fn explicit_config_path(path: Option<&str>) -> Option<PathBuf> {

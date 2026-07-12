@@ -135,7 +135,6 @@ pub(crate) async fn run_forced_finalization_step(
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
     stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
-    _reasoning_effort: Option<ReasoningEffort>,
     pre_final_execution_summary: Option<String>,
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
@@ -161,7 +160,7 @@ pub(crate) async fn run_forced_finalization_step(
             messages: messages.clone(),
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: Default::default(),
             pre_final_execution_summary: pre_final_execution_summary.clone(),
             stream_tx: stream_tx.clone(),
@@ -208,7 +207,7 @@ async fn run_salvage_finalization_step(
             messages,
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: Default::default(),
             pre_final_execution_summary: if prior_step.execution_summary_streamed {
                 None

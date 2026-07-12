@@ -72,7 +72,6 @@ fn test_model_info() -> ModelInfo {
         speed: Default::default(),
         input: vec![talos_types::ModelInputKind::Text],
         cost: talos_types::ModelCostConfig::default(),
-        compat: talos_types::ModelCompatConfig::default(),
     }
 }
 
@@ -93,88 +92,59 @@ fn test_state_with_lifecycle(
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
-    let (auth_service, user_service) = test_auth_services();
     let event_store = Arc::new(RecordingEventStore::default());
-    build_test_state_with_lifecycle(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService::default()),
-        event_service_from_store(event_store.clone()),
+    build_test_state(TestStateConfig {
+        turn_executor: Arc::new(MockGateway),
+        session_service: Arc::new(MockSessionService::default()),
         event_store,
-        test_config(),
-        Arc::new(MockLlmProvider),
-        auth_service,
-        user_service,
+        base_config: test_config(),
         auth_disabled,
         lifecycle,
-    )
+        llm_config_service: None,
+    })
 }
 
-fn build_test_state_with_lifecycle(
+struct TestStateConfig {
     turn_executor: Arc<dyn TurnExecutor>,
     session_service: Arc<dyn SessionService>,
-    event_service: Arc<TimelineEventService>,
-    idempotency_store: Arc<dyn MessageIdempotencyStore>,
+    event_store: Arc<RecordingEventStore>,
     base_config: talos_types::TalosConfig,
-    llm_provider: Arc<dyn LlmProvider>,
-    auth_service: Arc<dyn AuthService>,
-    user_service: Arc<dyn UserService>,
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
-) -> Arc<HttpApiState> {
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(base_config.llm.clone()),
-    )));
-    build_test_state_with_lifecycle_and_config(
-        turn_executor,
-        session_service,
-        event_service,
-        idempotency_store,
-        base_config,
-        llm_provider,
-        auth_service,
-        user_service,
-        auth_disabled,
-        vec![test_model_info()],
-        llm_config_service,
-        lifecycle,
-    )
+    llm_config_service: Option<Arc<dyn LlmConfigService>>,
 }
 
-fn build_test_state_with_lifecycle_and_config(
-    turn_executor: Arc<dyn TurnExecutor>,
-    session_service: Arc<dyn SessionService>,
-    event_service: Arc<TimelineEventService>,
-    idempotency_store: Arc<dyn MessageIdempotencyStore>,
-    base_config: talos_types::TalosConfig,
-    llm_provider: Arc<dyn LlmProvider>,
-    auth_service: Arc<dyn AuthService>,
-    user_service: Arc<dyn UserService>,
-    auth_disabled: bool,
-    models: Vec<ModelInfo>,
-    llm_config_service: Arc<dyn LlmConfigService>,
-    lifecycle: Arc<ServerLifecycle>,
-) -> Arc<HttpApiState> {
+fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
+    let (auth_service, user_service) = test_auth_services();
+    let event_service = event_service_from_store(config.event_store.clone());
+    let llm_config_service = config.llm_config_service.unwrap_or_else(|| {
+        Arc::new(LlmConfigManager::new(Arc::new(
+            InMemoryLlmConfigStore::new(config.base_config.llm.clone()),
+        )))
+    });
     let app = Arc::new(TalosService::new_with_session_store(
-        turn_executor,
-        Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
-        Arc::new(SessionStoreAdapter::new(session_service)),
+        config.turn_executor,
+        Arc::new(SessionServiceRuntimeAdapter::new(
+            config.session_service.clone(),
+        )),
+        Arc::new(SessionStoreAdapter::new(config.session_service)),
         Arc::new(MockProjectStore::new()),
         event_service.clone(),
-        idempotency_store,
-        base_config.clone(),
-        llm_provider,
+        config.event_store,
+        config.base_config.clone(),
+        Arc::new(MockLlmProvider),
         llm_config_service,
-        models,
+        vec![test_model_info()],
         auth_service.clone(),
         user_service,
     ));
     Arc::new(HttpApiState::from_service(
         app,
         event_service,
-        base_config,
+        config.base_config,
         auth_service,
-        auth_disabled,
-        lifecycle,
+        config.auth_disabled,
+        config.lifecycle,
     ))
 }
 
@@ -186,20 +156,16 @@ fn test_state_with_config(
     config: talos_types::TalosConfig,
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
-    let (auth_service, user_service) = test_auth_services();
     let event_store = Arc::new(RecordingEventStore::default());
-    build_test_state_with_lifecycle(
-        Arc::new(MockGateway),
-        Arc::new(MockSessionService::default()),
-        event_service_from_store(event_store.clone()),
+    build_test_state(TestStateConfig {
+        turn_executor: Arc::new(MockGateway),
+        session_service: Arc::new(MockSessionService::default()),
         event_store,
-        config,
-        Arc::new(MockLlmProvider),
-        auth_service,
-        user_service,
+        base_config: config,
         auth_disabled,
-        Arc::new(ServerLifecycle::new()),
-    )
+        lifecycle: Arc::new(ServerLifecycle::new()),
+        llm_config_service: None,
+    })
 }
 
 fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEventService> {
@@ -380,21 +346,15 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
     lifecycle: Arc<ServerLifecycle>,
     llm_config_service: Arc<dyn LlmConfigService>,
 ) -> Arc<HttpApiState> {
-    let (auth_service, user_service) = test_auth_services();
-    build_test_state_with_lifecycle_and_config(
+    build_test_state(TestStateConfig {
         turn_executor,
-        Arc::new(MockSessionService::default()),
-        event_service_from_store(store.clone()),
-        store,
-        config,
-        Arc::new(MockLlmProvider),
-        auth_service,
-        user_service,
+        session_service: Arc::new(MockSessionService::default()),
+        event_store: store,
+        base_config: config,
         auth_disabled,
-        vec![test_model_info()],
-        llm_config_service,
         lifecycle,
-    )
+        llm_config_service: Some(llm_config_service),
+    })
 }
 
 #[derive(Default)]

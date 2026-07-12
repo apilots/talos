@@ -17,6 +17,11 @@ export {
   updateSessionProject,
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
+export {
+  modelSelectionForId,
+  reasoningLevelForModel,
+  reasoningLevelForSession,
+} from "./model-selection";
 export { SidebarContainer } from "./components/SidebarContainer";
 export { useChatSession } from "./hooks/useChatSession";
 export {

@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
     AuthSessionReadRequest, AuthSessionReadResponse, GatewayClient as SdkGatewayClient,
-    InterruptTurnRequest, ModelInfo, ModelListRequest, ModelRef, RecoverTimelineRequest,
+    InterruptTurnRequest, ModelInfo, ModelListRequest, ModelSelection, RecoverTimelineRequest,
     SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
     SessionConf, SessionGetRequest, SessionHistoryRequest, SessionHistorySnapshot, SessionInfo,
     SessionListRequest, SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest,
@@ -22,10 +22,10 @@ pub trait GatewayClient: Send + Sync {
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
     async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-    async fn update_session_model(
+    async fn update_session_model_selection(
         &self,
         session_id: &str,
-        model_ref: &ModelRef,
+        model_selection: &ModelSelection,
     ) -> TalosResult<SessionInfo>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
@@ -127,10 +127,10 @@ where
         .map(|_| ())
     }
 
-    async fn update_session_model(
+    async fn update_session_model_selection(
         &self,
         session_id: &str,
-        model_ref: &ModelRef,
+        model_selection: &ModelSelection,
     ) -> TalosResult<SessionInfo> {
         let mut client = self.lock().await;
         SdkGatewayClient::patch_session(
@@ -138,7 +138,7 @@ where
             SessionPatchRequest {
                 session_id: session_id.to_string(),
                 conf: Some(SessionConf {
-                    model_ref: Some(model_ref.clone()),
+                    model_selection: Some(model_selection.clone()),
                 }),
                 project_id: None,
                 current_directory: None,

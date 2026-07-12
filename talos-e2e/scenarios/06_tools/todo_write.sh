@@ -9,7 +9,7 @@ load_env
 require_command curl
 require_command python3
 
-if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
+if ! has_real_llm_key; then
   echo "CASE todo_write_real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi
@@ -47,7 +47,7 @@ payload = {
         "message_id": "msg-tool-todo-write",
         "trace_id": "trace-tool-todo-write",
     },
-    "model_ref": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]},
+    "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoning": {"type": "modelDefault"}},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

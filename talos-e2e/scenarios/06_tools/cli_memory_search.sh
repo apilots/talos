@@ -8,7 +8,7 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 load_env
 require_command "${TALOS_RS_DIR}/target/debug/talos"
 
-if [[ -z "${TALOS_LLM_BAILIAN_API_KEY:-}" && -z "${TALOS_LLM_ANTHROPIC_API_KEY:-}" && -z "${TALOS_LLM_OPENAI_API_KEY:-}" ]]; then
+if ! has_real_llm_key; then
   echo "CASE cli_stream_real_llm_precheck FAIL missing provider key in .env"
   exit 1
 fi

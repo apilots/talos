@@ -1,8 +1,8 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, ReasoningEffort, Role, SseLineDecoder, ToolChoice,
-    ToolDefinition, Usage,
+    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
+    ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -11,6 +11,10 @@ use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 
 mod types;
+
+#[cfg(test)]
+#[path = "chat/chat_tests.rs"]
+mod tests;
 
 pub use types::*;
 
@@ -22,6 +26,7 @@ pub struct ChatCompletionModelBlocks {
     pub segment_after_boundary: bool,
     pub ignore_empty_text: bool,
     pub ignore_reasoning_after_assistant: bool,
+    pub reasoning_details: bool,
 }
 
 impl ChatCompletionModelBlocks {
@@ -33,6 +38,7 @@ impl ChatCompletionModelBlocks {
             segment_after_boundary: false,
             ignore_empty_text: false,
             ignore_reasoning_after_assistant: false,
+            reasoning_details: false,
         }
     }
 
@@ -44,17 +50,44 @@ impl ChatCompletionModelBlocks {
             segment_after_boundary: true,
             ignore_empty_text: true,
             ignore_reasoning_after_assistant: true,
+            reasoning_details: false,
         }
     }
 
-    pub fn with_identity(
-        mut self,
-        provider_name: impl Into<String>,
-        item_prefix: impl Into<String>,
-    ) -> Self {
-        self.provider_name = provider_name.into();
-        self.item_prefix = item_prefix.into();
-        self
+    pub fn deepseek() -> Self {
+        Self {
+            provider_name: "DeepSeek".to_string(),
+            item_prefix: "deepseek".to_string(),
+            reasoning_keys: &["reasoning_content"],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_details: false,
+        }
+    }
+
+    pub fn openrouter() -> Self {
+        Self {
+            provider_name: "OpenRouter".to_string(),
+            item_prefix: "openrouter".to_string(),
+            reasoning_keys: &[],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_details: true,
+        }
+    }
+
+    pub fn ollama() -> Self {
+        Self {
+            provider_name: "Ollama".to_string(),
+            item_prefix: "ollama".to_string(),
+            reasoning_keys: &["thinking", "reasoning"],
+            segment_after_boundary: false,
+            ignore_empty_text: true,
+            ignore_reasoning_after_assistant: false,
+            reasoning_details: false,
+        }
     }
 }
 
@@ -65,6 +98,9 @@ struct ModelBlockState {
     assistant_started: HashMap<usize, bool>,
     assistant_segment: HashMap<usize, usize>,
     tool_started: HashMap<usize, bool>,
+    reasoning_text: String,
+    reasoning_details: Vec<ChatCompletionReasoningDetail>,
+    reasoning_completed: bool,
 }
 
 #[derive(Debug, Default)]
@@ -79,10 +115,14 @@ pub fn request(
     chat_request: ChatRequest,
     stream: bool,
     options: ChatCompletionRequestOptions,
-) -> ChatCompletionRequest {
-    ChatCompletionRequest {
+) -> TalosResult<ChatCompletionRequest> {
+    Ok(ChatCompletionRequest {
         model: chat_request.model,
-        messages: messages(chat_request.messages, options.cache_control),
+        messages: messages(
+            chat_request.messages,
+            options.cache_control,
+            options.reasoning_continuation,
+        )?,
         temperature: chat_request.temperature,
         max_tokens: chat_request.max_tokens,
         top_p: chat_request.top_p,
@@ -90,7 +130,9 @@ pub fn request(
         tools: tools(chat_request.tools),
         tool_choice: tool_choice(chat_request.tool_choice),
         parallel_tool_calls: chat_request.parallel_tool_calls,
+        reasoning: options.reasoning,
         reasoning_effort: options.reasoning_effort,
+        thinking: options.thinking,
         enable_thinking: options.enable_thinking,
         thinking_budget: options.thinking_budget,
         stream: Some(stream),
@@ -101,7 +143,7 @@ pub fn request(
         } else {
             None
         },
-    }
+    })
 }
 
 pub fn reasoning_effort(effort: ReasoningEffort) -> String {
@@ -117,7 +159,8 @@ pub fn reasoning_effort(effort: ReasoningEffort) -> String {
 pub fn messages(
     chat_messages: Vec<ChatMessage>,
     cache_control: bool,
-) -> Vec<ChatCompletionMessage> {
+    reasoning_continuation: ChatReasoningContinuationFormat,
+) -> TalosResult<Vec<ChatCompletionMessage>> {
     chat_messages
         .into_iter()
         .map(|message| {
@@ -158,15 +201,97 @@ pub fn messages(
                 Some(ChatCompletionMessageContent::Text(message.content))
             };
 
-            ChatCompletionMessage {
+            let (reasoning, reasoning_content, reasoning_details) =
+                reasoning_fields(message.reasoning_continuation, reasoning_continuation)?;
+
+            Ok(ChatCompletionMessage {
                 role,
                 content,
                 name: message.name,
                 tool_call_id: message.tool_call_id,
                 tool_calls,
-            }
+                reasoning,
+                reasoning_content,
+                reasoning_details,
+            })
         })
         .collect()
+}
+
+type ChatReasoningFields = (
+    Option<String>,
+    Option<String>,
+    Option<Vec<ChatCompletionReasoningDetail>>,
+);
+
+fn reasoning_fields(
+    continuation: Option<ReasoningContinuation>,
+    format: ChatReasoningContinuationFormat,
+) -> TalosResult<ChatReasoningFields> {
+    let Some(continuation) = continuation else {
+        return Ok((None, None, None));
+    };
+
+    match (format, continuation) {
+        (ChatReasoningContinuationFormat::None, _) => Err(TalosError::ValidationError(
+            "Chat protocol received reasoning continuation without a replay format".to_string(),
+        )),
+        (ChatReasoningContinuationFormat::Reasoning, continuation) => {
+            let text = text_reasoning_continuation(continuation)?;
+            Ok((Some(text), None, None))
+        }
+        (ChatReasoningContinuationFormat::ReasoningContent, continuation) => {
+            let text = text_reasoning_continuation(continuation)?;
+            Ok((None, Some(text), None))
+        }
+        (ChatReasoningContinuationFormat::ReasoningDetails, ReasoningContinuation::Text(text)) => {
+            Ok((
+                None,
+                None,
+                Some(vec![ChatCompletionReasoningDetail::Text {
+                    text,
+                    signature: None,
+                    id: None,
+                    format: None,
+                    index: None,
+                }]),
+            ))
+        }
+        (
+            ChatReasoningContinuationFormat::ReasoningDetails,
+            ReasoningContinuation::Blocks(blocks),
+        ) => Ok((
+            None,
+            None,
+            Some(
+                blocks
+                    .into_iter()
+                    .map(ChatCompletionReasoningDetail::from)
+                    .collect(),
+            ),
+        )),
+    }
+}
+
+fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResult<String> {
+    match continuation {
+        ReasoningContinuation::Text(text) => Ok(text),
+        ReasoningContinuation::Blocks(blocks) => {
+            let mut text = String::new();
+            for block in blocks {
+                match block {
+                    ReasoningBlock::Text(block) => text.push_str(&block.text),
+                    ReasoningBlock::Summary(_) | ReasoningBlock::Encrypted(_) => {
+                        return Err(TalosError::ValidationError(
+                            "Chat text reasoning field cannot replay structured reasoning blocks"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            Ok(text)
+        }
+    }
 }
 
 pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ChatCompletionTool>> {
@@ -268,14 +393,55 @@ pub fn chat_response(
         cache_creation: None,
     });
 
+    let reasoning = response_reasoning(&choice.message);
     Ok(ChatResponse {
         content: content_text(choice.message.content, provider_name)?,
-        reasoning: Vec::new(),
+        reasoning,
         model: response.model,
         usage: usage(usage_value)?,
         finish_reason: choice.finish_reason,
         tool_calls: tool_calls(choice.message.tool_calls),
     })
+}
+
+fn response_reasoning(message: &ChatCompletionResponseMessage) -> ReasoningOutput {
+    if let Some(details) = message
+        .reasoning_details
+        .as_ref()
+        .filter(|details| !details.is_empty())
+    {
+        let blocks: Vec<_> = details
+            .iter()
+            .cloned()
+            .map(ChatCompletionReasoningDetail::into_reasoning_block)
+            .collect();
+        let display_text = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ReasoningBlock::Text(block) => Some(block.text.clone()),
+                ReasoningBlock::Summary(block) => Some(block.text.clone()),
+                ReasoningBlock::Encrypted(_) => None,
+            })
+            .collect();
+        return ReasoningOutput {
+            display_text,
+            continuation: Some(ReasoningContinuation::Blocks(blocks)),
+        };
+    }
+
+    let text = message
+        .reasoning_content
+        .clone()
+        .or_else(|| message.thinking.clone())
+        .or_else(|| message.reasoning.clone())
+        .filter(|text| !text.is_empty());
+    match text {
+        Some(text) => ReasoningOutput {
+            display_text: vec![text.clone()],
+            continuation: Some(ReasoningContinuation::Text(text)),
+        },
+        None => ReasoningOutput::default(),
+    }
 }
 
 pub fn reasoning_delta(delta: &Value, keys: &[&str]) -> Option<String> {
@@ -315,6 +481,123 @@ pub fn reasoning_delta(delta: &Value, keys: &[&str]) -> Option<String> {
         }
     }
     None
+}
+
+fn reasoning_detail_display(detail: &ChatCompletionReasoningDetail) -> Option<String> {
+    match detail {
+        ChatCompletionReasoningDetail::Text { text, .. } => {
+            (!text.is_empty()).then(|| text.clone())
+        }
+        ChatCompletionReasoningDetail::Summary { summary, .. } => {
+            (!summary.is_empty()).then(|| summary.clone())
+        }
+        ChatCompletionReasoningDetail::Encrypted { .. } => None,
+    }
+}
+
+fn reasoning_detail_index(detail: &ChatCompletionReasoningDetail) -> Option<u32> {
+    match detail {
+        ChatCompletionReasoningDetail::Text { index, .. }
+        | ChatCompletionReasoningDetail::Summary { index, .. }
+        | ChatCompletionReasoningDetail::Encrypted { index, .. } => *index,
+    }
+}
+
+fn accumulate_reasoning_detail(
+    details: &mut Vec<ChatCompletionReasoningDetail>,
+    incoming: ChatCompletionReasoningDetail,
+) -> TalosResult<()> {
+    let Some(index) = reasoning_detail_index(&incoming) else {
+        details.push(incoming);
+        return Ok(());
+    };
+    let Some(existing) = details
+        .iter_mut()
+        .find(|detail| reasoning_detail_index(detail) == Some(index))
+    else {
+        details.push(incoming);
+        return Ok(());
+    };
+
+    match (existing, incoming) {
+        (
+            ChatCompletionReasoningDetail::Text {
+                text,
+                signature,
+                id,
+                format,
+                ..
+            },
+            ChatCompletionReasoningDetail::Text {
+                text: incoming_text,
+                signature: incoming_signature,
+                id: incoming_id,
+                format: incoming_format,
+                ..
+            },
+        ) => {
+            text.push_str(&incoming_text);
+            merge_reasoning_metadata(signature, incoming_signature, "signature", index)?;
+            merge_reasoning_metadata(id, incoming_id, "id", index)?;
+            merge_reasoning_metadata(format, incoming_format, "format", index)
+        }
+        (
+            ChatCompletionReasoningDetail::Summary {
+                summary,
+                id,
+                format,
+                ..
+            },
+            ChatCompletionReasoningDetail::Summary {
+                summary: incoming_summary,
+                id: incoming_id,
+                format: incoming_format,
+                ..
+            },
+        ) => {
+            summary.push_str(&incoming_summary);
+            merge_reasoning_metadata(id, incoming_id, "id", index)?;
+            merge_reasoning_metadata(format, incoming_format, "format", index)
+        }
+        (
+            ChatCompletionReasoningDetail::Encrypted {
+                data, id, format, ..
+            },
+            ChatCompletionReasoningDetail::Encrypted {
+                data: incoming_data,
+                id: incoming_id,
+                format: incoming_format,
+                ..
+            },
+        ) => {
+            data.push_str(&incoming_data);
+            merge_reasoning_metadata(id, incoming_id, "id", index)?;
+            merge_reasoning_metadata(format, incoming_format, "format", index)
+        }
+        _ => Err(TalosError::ValidationError(format!(
+            "reasoning detail index {index} changed type across stream chunks"
+        ))),
+    }
+}
+
+fn merge_reasoning_metadata(
+    current: &mut Option<String>,
+    incoming: Option<String>,
+    field: &str,
+    index: u32,
+) -> TalosResult<()> {
+    match (current.as_ref(), incoming) {
+        (Some(current), Some(incoming)) if current != &incoming => {
+            Err(TalosError::ValidationError(format!(
+                "reasoning detail index {index} changed {field} across stream chunks"
+            )))
+        }
+        (None, Some(incoming)) => {
+            *current = Some(incoming);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
 }
 
 pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> ChatStream {
@@ -440,6 +723,9 @@ pub fn model_blocks(
                             if !complete_open_model_blocks(&tx, &mut state, &options).await {
                                 return;
                             }
+                            if !complete_reasoning_output(&tx, &mut state).await {
+                                return;
+                            }
                             let _ = tx
                                 .send(Ok(ModelBlockStreamEvent::Done {
                                     finish_reason: final_finish_reason
@@ -480,37 +766,102 @@ pub fn model_blocks(
                         let choice_index = choice_index(choice);
                         let delta_object = choice.and_then(|c| c.get("delta"));
 
-                        if let Some(reasoning_delta) = delta_object
-                            .and_then(|delta| reasoning_delta(delta, options.reasoning_keys))
-                        {
-                            let should_emit = (!options.ignore_empty_text
-                                || !reasoning_delta.trim().is_empty())
-                                && (!options.ignore_reasoning_after_assistant
-                                    || !has_seen_assistant_text(&state, choice_index));
-                            if should_emit
-                                && (!ensure_reasoning_model_block(
-                                    &tx,
-                                    &mut state,
-                                    choice_index,
-                                    &options,
-                                )
-                                .await
-                                    || !send_model_block_event(
-                                        &tx,
-                                        ModelBlockStreamEvent::BlockDelta {
-                                            model_item_id: current_reasoning_model_item_id(
-                                                &state,
-                                                choice_index,
-                                                &options,
-                                            ),
-                                            delta: ModelBlockDelta::ReasoningText {
-                                                delta: reasoning_delta,
-                                            },
-                                        },
-                                    )
-                                    .await)
+                        if options.reasoning_details {
+                            if let Some(details) = delta_object
+                                .and_then(|delta| delta.get("reasoning_details"))
+                                .and_then(Value::as_array)
                             {
-                                return;
+                                for raw_detail in details {
+                                    let detail = match serde_json::from_value::<
+                                        ChatCompletionReasoningDetail,
+                                    >(
+                                        raw_detail.clone()
+                                    ) {
+                                        Ok(detail) => detail,
+                                        Err(error) => {
+                                            let _ = tx
+                                                .send(Err(TalosError::ValidationError(format!(
+                                                    "{} reasoning detail is invalid: {error}",
+                                                    options.provider_name
+                                                ))))
+                                                .await;
+                                            return;
+                                        }
+                                    };
+                                    let display_delta = reasoning_detail_display(&detail);
+                                    if let Err(error) = accumulate_reasoning_detail(
+                                        &mut state.reasoning_details,
+                                        detail,
+                                    ) {
+                                        let _ = tx.send(Err(error)).await;
+                                        return;
+                                    }
+                                    if let Some(display_delta) = display_delta {
+                                        state.reasoning_text.push_str(&display_delta);
+                                        if !ensure_reasoning_model_block(
+                                            &tx,
+                                            &mut state,
+                                            choice_index,
+                                            &options,
+                                        )
+                                        .await
+                                            || !send_model_block_event(
+                                                &tx,
+                                                ModelBlockStreamEvent::BlockDelta {
+                                                    model_item_id: current_reasoning_model_item_id(
+                                                        &state,
+                                                        choice_index,
+                                                        &options,
+                                                    ),
+                                                    delta: ModelBlockDelta::ReasoningText {
+                                                        delta: display_delta,
+                                                    },
+                                                },
+                                            )
+                                            .await
+                                        {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if !options.reasoning_details {
+                            if let Some(reasoning_delta) = delta_object
+                                .and_then(|delta| reasoning_delta(delta, options.reasoning_keys))
+                            {
+                                let should_emit = (!options.ignore_empty_text
+                                    || !reasoning_delta.trim().is_empty())
+                                    && (!options.ignore_reasoning_after_assistant
+                                        || !has_seen_assistant_text(&state, choice_index));
+                                if should_emit {
+                                    state.reasoning_text.push_str(&reasoning_delta);
+                                    if !ensure_reasoning_model_block(
+                                        &tx,
+                                        &mut state,
+                                        choice_index,
+                                        &options,
+                                    )
+                                    .await
+                                        || !send_model_block_event(
+                                            &tx,
+                                            ModelBlockStreamEvent::BlockDelta {
+                                                model_item_id: current_reasoning_model_item_id(
+                                                    &state,
+                                                    choice_index,
+                                                    &options,
+                                                ),
+                                                delta: ModelBlockDelta::ReasoningText {
+                                                    delta: reasoning_delta,
+                                                },
+                                            },
+                                        )
+                                        .await
+                                    {
+                                        return;
+                                    }
+                                }
                             }
                         }
 
@@ -632,6 +983,9 @@ pub fn model_blocks(
                         if let Some(finish_reason) = finish_reason(choice) {
                             final_finish_reason = Some(finish_reason.to_string());
                             if !complete_open_model_blocks(&tx, &mut state, &options).await {
+                                return;
+                            }
+                            if !complete_reasoning_output(&tx, &mut state).await {
                                 return;
                             }
                         }
@@ -915,4 +1269,38 @@ async fn complete_open_model_blocks(
         }
     }
     true
+}
+
+async fn complete_reasoning_output(
+    tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
+    state: &mut ModelBlockState,
+) -> bool {
+    if state.reasoning_completed
+        || (state.reasoning_text.is_empty() && state.reasoning_details.is_empty())
+    {
+        return true;
+    }
+    state.reasoning_completed = true;
+    let reasoning_text = state.reasoning_text.clone();
+    let display_text = (!reasoning_text.is_empty()).then_some(reasoning_text.clone());
+    let continuation = if state.reasoning_details.is_empty() {
+        ReasoningContinuation::Text(reasoning_text)
+    } else {
+        ReasoningContinuation::Blocks(
+            std::mem::take(&mut state.reasoning_details)
+                .into_iter()
+                .map(ChatCompletionReasoningDetail::into_reasoning_block)
+                .collect(),
+        )
+    };
+    send_model_block_event(
+        tx,
+        ModelBlockStreamEvent::ReasoningCompleted {
+            output: ReasoningOutput {
+                display_text: display_text.into_iter().collect(),
+                continuation: Some(continuation),
+            },
+        },
+    )
+    .await
 }

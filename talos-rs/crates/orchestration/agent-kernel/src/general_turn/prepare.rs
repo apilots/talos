@@ -985,10 +985,9 @@ pub async fn prepare_general_turn(
     }
     emit_prompt_warning_events(ctx, &warnings).await;
     let max_output_tokens = Some(kernel_config.output.effective_max_tokens());
-    let reasoning_effort = ctx
-        .selected_model_info
-        .reasoning
-        .then_some(ctx.selected_model_info.reasoning_effort);
+    let reasoning = ctx
+        .model_selection
+        .resolve_reasoning(&ctx.selected_model_info)?;
     let speed = ctx.selected_model_info.speed;
 
     let tool_selection_request =
@@ -1007,7 +1006,7 @@ pub async fn prepare_general_turn(
         project_root: ctx.project_root.clone(),
         selected_model,
         max_output_tokens,
-        reasoning_effort,
+        reasoning,
         speed,
         prompt_prefix_messages: split_prompt_prefix_messages(
             &render_prompt_assembly(&prompt_assembly),

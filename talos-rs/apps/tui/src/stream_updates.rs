@@ -46,33 +46,22 @@ impl TuiApp {
 
         match update {
             CommandUpdate::ModelsLoaded(result) => match result {
-                Ok(models) => {
-                    self.available_model_info = models;
-                    self.available_models = self
-                        .available_model_info
-                        .iter()
-                        .map(|model| model.id.clone())
-                        .filter(|id| !id.trim().is_empty())
-                        .collect();
-                    if !self
-                        .available_models
-                        .iter()
-                        .any(|model| model == &self.current_model)
-                    {
-                        if let Some(first) = self.available_models.first() {
-                            self.current_model = first.clone();
-                        }
+                Ok(models) => match self.apply_model_catalog(models) {
+                    Ok(()) => {
+                        self.push_system_notice(format!(
+                            "Available models: {}",
+                            self.available_models.join(", ")
+                        ));
+                        self.push_right_event(format!(
+                            "models loaded: {}",
+                            self.available_models.len()
+                        ));
                     }
-                    self.sync_current_reasoning_effort_from_model();
-                    self.push_system_notice(format!(
-                        "Available models: {}",
-                        self.available_models.join(", ")
-                    ));
-                    self.push_right_event(format!(
-                        "models loaded: {}",
-                        self.available_models.len()
-                    ));
-                }
+                    Err(err) => {
+                        self.push_system_notice(format!("Failed to load models: {}", err));
+                        self.push_right_event("models load failed".to_string());
+                    }
+                },
                 Err(err) => {
                     self.push_system_notice(format!("Failed to load models: {}", err));
                     self.push_right_event("models load failed".to_string());
@@ -80,15 +69,15 @@ impl TuiApp {
             },
             CommandUpdate::StatusLoaded(result) => match *result {
                 Ok(status) => {
+                    if let Some(info) = status.session.as_ref() {
+                        self.apply_session_snapshot(info);
+                    }
                     let snapshot = TuiStatusSnapshot::from_app(
                         self,
                         status.session.as_ref(),
                         &status.auth,
                         &status.workspace,
                     );
-                    if let Some(info) = status.session {
-                        self.apply_session_snapshot(&info);
-                    }
                     match snapshot {
                         Ok(snapshot) => {
                             let status_card = render_status_card(&snapshot);
@@ -134,14 +123,9 @@ impl TuiApp {
                     self.push_right_event("session clear failed".to_string());
                 }
             },
-            CommandUpdate::ModelSwitched {
-                requested,
-                reasoning_effort,
-                result,
-            } => match result {
+            CommandUpdate::ModelSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.set_current_reasoning_effort(reasoning_effort);
                     self.push_command_result(format!(
                         "Model changed to {}",
                         self.current_model_status_label()
@@ -168,14 +152,9 @@ impl TuiApp {
                     }
                 }
             },
-            CommandUpdate::ModelPickerSwitched {
-                requested,
-                reasoning_effort,
-                result,
-            } => match result {
+            CommandUpdate::ModelPickerSwitched { requested, result } => match result {
                 Ok(info) => {
                     self.apply_session_snapshot(&info);
-                    self.set_current_reasoning_effort(reasoning_effort);
                     self.close_model_picker();
                     self.push_command_result(format!(
                         "Model changed to {}",
@@ -192,7 +171,7 @@ impl TuiApp {
             CommandUpdate::SessionHistoryLoaded { session, result } => match *result {
                 Ok(load) => {
                     let sid = &session.id;
-                    let model = &session.model_ref.id;
+                    let model = &session.model_selection.model_ref.id;
                     let title = &session.title;
                     self.push_system_notice(format!(
                         "Session: {}  ({})\nModel: {}",

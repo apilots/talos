@@ -19,6 +19,7 @@ fn test_chat_request_builder() {
     assert_eq!(req.messages.len(), 1);
     assert_eq!(req.model, "claude-3-5-sonnet");
     assert_eq!(req.temperature, Some(0.7));
+    assert_eq!(req.reasoning, EffectiveReasoning::Unsupported);
 }
 
 #[test]
@@ -66,7 +67,7 @@ fn test_tool_definition_validation() {
 fn test_chat_response_tool_calls_helper() {
     let response = ChatResponse {
         content: String::new(),
-        reasoning: Vec::new(),
+        reasoning: ReasoningOutput::default(),
         model: "mock".to_string(),
         usage: Usage::default(),
         finish_reason: Some("tool_calls".to_string()),
@@ -75,6 +76,65 @@ fn test_chat_response_tool_calls_helper() {
 
     assert!(response.has_tool_calls());
     assert_eq!(response.get_tool_calls().len(), 1);
+}
+
+#[test]
+fn assistant_tool_call_message_preserves_reasoning_continuation_order() {
+    let continuation = ReasoningContinuation::Blocks(vec![
+        ReasoningBlock::Summary(ReasoningSummaryBlock {
+            provider_item_id: Some("summary-1".to_string()),
+            provider_index: Some(0),
+            text: "summary".to_string(),
+            format: Some("openrouter-v1".to_string()),
+        }),
+        ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
+            provider_item_id: Some("encrypted-1".to_string()),
+            provider_index: Some(1),
+            data: "ciphertext".to_string(),
+            format: Some("openrouter-v1".to_string()),
+        }),
+    ]);
+    let message = ChatMessage::assistant_with_tool_calls(
+        "working",
+        vec![FunctionCall::new("call-1", "read", serde_json::json!({}))],
+    )
+    .with_reasoning_continuation(continuation.clone());
+
+    assert_eq!(message.reasoning_continuation, Some(continuation));
+}
+
+#[test]
+fn reasoning_output_separates_display_text_from_provider_continuation() {
+    let output = ReasoningOutput {
+        display_text: vec!["visible reasoning".to_string()],
+        continuation: Some(ReasoningContinuation::Text(
+            "provider replay text".to_string(),
+        )),
+    };
+
+    assert_eq!(output.display_text, vec!["visible reasoning".to_string()]);
+    assert_eq!(
+        output.continuation,
+        Some(ReasoningContinuation::Text(
+            "provider replay text".to_string()
+        ))
+    );
+}
+
+#[test]
+fn model_block_stream_can_emit_completed_reasoning_output() {
+    let output = ReasoningOutput {
+        display_text: vec!["visible".to_string()],
+        continuation: Some(ReasoningContinuation::Text("replay".to_string())),
+    };
+    let event = ModelBlockStreamEvent::ReasoningCompleted {
+        output: output.clone(),
+    };
+
+    assert!(matches!(
+        event,
+        ModelBlockStreamEvent::ReasoningCompleted { output: actual } if actual == output
+    ));
 }
 
 #[tokio::test]

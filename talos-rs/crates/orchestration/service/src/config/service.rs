@@ -5,7 +5,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::{
     resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
     ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest,
-    ConfigUpdateResponse, ConfigValue, ModelInfo,
+    ConfigUpdateResponse, ConfigValue, ModelInfo, ModelSelection, ReasoningSelection,
 };
 use tokio::sync::RwLock;
 
@@ -39,10 +39,11 @@ impl ConfigService {
         self.models.read().await.clone()
     }
 
-    pub fn validate_model_ref_supported(
+    pub fn validate_model_selection_supported(
         &self,
-        model_ref: &talos_types::ModelRef,
+        selection: &ModelSelection,
     ) -> TalosResult<()> {
+        let model_ref = &selection.model_ref;
         if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
             return Err(TalosError::UnsupportedModel(format!(
                 "{}:{}",
@@ -57,16 +58,34 @@ impl ConfigService {
                 model_ref.provider, model_ref.id
             )));
         };
+        if let Some(model) = provider
+            .models
+            .iter()
+            .find(|entry| entry.id == model_ref.id)
+        {
+            selection.resolve_reasoning(&ModelInfo::from_provider_model(
+                provider_name,
+                model.clone(),
+            ))?;
+            return Ok(());
+        }
         if provider.models.is_empty()
-            || provider.models.iter().any(|entry| entry.id == model_ref.id)
+            && matches!(selection.reasoning, ReasoningSelection::ModelDefault)
         {
             return Ok(());
         }
 
-        Err(TalosError::UnsupportedModel(format!(
-            "{}:{}",
-            model_ref.provider, model_ref.id
-        )))
+        if provider.models.is_empty() {
+            Err(TalosError::ValidationError(format!(
+                "model '{}:{}' has no configured reasoning capability metadata",
+                model_ref.provider, model_ref.id
+            )))
+        } else {
+            Err(TalosError::UnsupportedModel(format!(
+                "{}:{}",
+                model_ref.provider, model_ref.id
+            )))
+        }
     }
 
     pub fn get_llm(&self) -> TalosResult<LlmConfig> {

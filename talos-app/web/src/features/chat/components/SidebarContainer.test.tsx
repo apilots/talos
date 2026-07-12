@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   sidebarProps: undefined as ComponentProps<typeof Sidebar> | undefined,
   deleteProject: vi.fn(),
   updateProjectName: vi.fn(),
+  deleteSession: vi.fn(),
+  deleteSessionAlias: vi.fn(),
+  resetStream: vi.fn(),
+  setSessionStatus: vi.fn(),
 }));
 
 vi.mock("@/widgets/sidebar/Sidebar", () => ({
@@ -23,6 +27,10 @@ vi.mock("@/widgets/sidebar/Sidebar", () => ({
 }));
 
 vi.mock("../hooks/useChatQueries", () => ({
+  useDeleteSessionMutation: () => ({
+    isPending: false,
+    mutateAsync: mocks.deleteSession,
+  }),
   useDeleteProjectMutation: () => ({
     isPending: false,
     mutateAsync: mocks.deleteProject,
@@ -47,7 +55,10 @@ vi.mock("../hooks/useChatQueries", () => ({
         id: "session-known-project",
         title: "Known project session",
         project_id: "project-known",
-        model_ref: { id: "model-1" },
+        modelSelection: {
+          modelRef: { provider: "mock", id: "model-1" },
+          reasoning: { type: "modelDefault" },
+        },
         created_at: 1,
         last_activity: 3,
       },
@@ -55,7 +66,10 @@ vi.mock("../hooks/useChatQueries", () => ({
         id: "session-missing-project",
         title: "Missing project session",
         project_id: "project-missing",
-        model_ref: { id: "model-1" },
+        modelSelection: {
+          modelRef: { provider: "mock", id: "model-1" },
+          reasoning: { type: "modelDefault" },
+        },
         created_at: 1,
         last_activity: 2,
       },
@@ -63,7 +77,10 @@ vi.mock("../hooks/useChatQueries", () => ({
         id: "session-chat",
         title: "Chat session",
         project_id: null,
-        model_ref: { id: "model-1" },
+        modelSelection: {
+          modelRef: { provider: "mock", id: "model-1" },
+          reasoning: { type: "modelDefault" },
+        },
         created_at: 1,
         last_activity: 1,
       },
@@ -93,6 +110,9 @@ vi.mock("@/shared/store/app-store", () => ({
         runtimeMode: "local",
       },
       sessionAliases: {},
+      deleteSessionAlias: mocks.deleteSessionAlias,
+      resetStream: mocks.resetStream,
+      setSessionStatus: mocks.setSessionStatus,
       setConnection: vi.fn(),
       setSidebarOpen: vi.fn(),
       streams: {},
@@ -121,5 +141,22 @@ describe("SidebarContainer", () => {
       "session-missing-project",
       "session-chat",
     ]);
+  });
+
+  it("deletes the active session and clears its local state", async () => {
+    render(
+      <MemoryRouter initialEntries={["/sessions/session-chat"]}>
+        <SidebarContainer />
+      </MemoryRouter>,
+    );
+
+    await mocks.sidebarProps?.onDeleteSession("session-chat");
+
+    await waitFor(() => {
+      expect(mocks.deleteSession).toHaveBeenCalledWith("session-chat");
+      expect(mocks.deleteSessionAlias).toHaveBeenCalledWith("session-chat");
+      expect(mocks.resetStream).toHaveBeenCalledWith("session-chat");
+      expect(mocks.setSessionStatus).toHaveBeenCalledWith("session-chat", undefined);
+    });
   });
 });

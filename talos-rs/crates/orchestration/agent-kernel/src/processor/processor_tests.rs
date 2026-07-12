@@ -42,6 +42,10 @@ fn mock_ctx() -> InvocationContext {
         workspace_id: "w1".to_string(),
         project_root: None,
         input: "hello".to_string(),
+        model_selection: talos_types::ModelSelection::model_default(talos_types::ModelRef {
+            provider: "p1".to_string(),
+            id: "m1".to_string(),
+        }),
         selected_model_info: talos_types::ModelInfo {
             id: "m1".to_string(),
             name: "m1".to_string(),
@@ -52,7 +56,6 @@ fn mock_ctx() -> InvocationContext {
             speed: Default::default(),
             input: Vec::new(),
             cost: Default::default(),
-            compat: Default::default(),
         },
         phase: TurnPhase::Execution,
         planning_instruction: None,
@@ -105,32 +108,21 @@ async fn test_planning_response_processor_emits_typed_branch_override_event() {
 }
 
 #[tokio::test]
-async fn test_planning_request_processor_applies_built_in_reasoning_effort() {
+async fn test_planning_request_processor_preserves_resolved_reasoning() {
     let planner: Arc<dyn Planner> = Arc::new(BuiltInPlanner::new());
     let processor = PlanningRequestProcessor::new(planner);
     let mut ctx = mock_ctx();
     let mut request = LlmRequestEnvelope {
         branch: ExecutionBranch::ModelThinking,
-        selected_model_info: Some(talos_types::ModelInfo {
-            id: "m1".to_string(),
-            name: "m1".to_string(),
-            provider: "p1".to_string(),
-            context_window: 0,
-            reasoning: true,
-            reasoning_effort: talos_types::ReasoningEffort::XHigh,
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-            compat: Default::default(),
-        }),
+        reasoning: talos_types::EffectiveReasoning::Effort(talos_types::ReasoningEffort::XHigh),
         ..LlmRequestEnvelope::default()
     };
 
     processor.run(&mut ctx, &mut request).await.unwrap();
 
     assert_eq!(
-        request.reasoning_effort,
-        Some(talos_types::ReasoningEffort::XHigh)
+        request.reasoning,
+        talos_types::EffectiveReasoning::Effort(talos_types::ReasoningEffort::XHigh)
     );
     assert!(request.planning_instruction.is_none());
 }

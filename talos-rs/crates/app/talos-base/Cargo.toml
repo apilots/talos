@@ -22,7 +22,10 @@ talos-gateway = { path = "../../gateway/core" }
 talos-gateway-http = { path = "../../gateway/http" }
 talos-llm-anthropic = { workspace = true }
 talos-llm-bailian = { workspace = true }
+talos-llm-deepseek = { workspace = true }
+talos-llm-ollama = { workspace = true }
 talos-llm-openai = { workspace = true }
+talos-llm-openrouter = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-logging = { workspace = true }
 talos-router = { path = "../../orchestration/router" }

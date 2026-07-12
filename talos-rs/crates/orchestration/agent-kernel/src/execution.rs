@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::TalosResult;
-use talos_llm_provider::{ChatMessage, ReasoningEffort, ToolDefinition};
+use talos_llm_provider::{ChatMessage, EffectiveReasoning, ToolDefinition};
 use talos_types::talos::RunItem;
 use talos_types::ModelInfo;
 use uuid::Uuid;
@@ -53,7 +53,6 @@ pub struct StateDelta {
 #[derive(Debug, Clone, Default)]
 pub struct PlanningRequestEffect {
     pub planning_instruction: Option<String>,
-    pub reasoning_effort: Option<ReasoningEffort>,
     pub clear_request_thoughts: bool,
 }
 
@@ -312,7 +311,7 @@ pub struct LlmRequestEnvelope {
     #[allow(dead_code)]
     pub replay_dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
     pub branch: ExecutionBranch,
-    pub reasoning_effort: Option<ReasoningEffort>,
+    pub reasoning: EffectiveReasoning,
     pub cache_context: Option<RequestCacheContext>,
     pub interaction_context: Option<RequestInteractionContext>,
     pub output_contract: RequestOutputContract,

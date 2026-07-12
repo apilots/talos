@@ -1,7 +1,8 @@
 use super::*;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta, ModelBlockKind,
-    ModelBlockStreamEvent, PromptCacheSupport, ReasoningEffort, ToolDefinition,
+    CacheControl, CacheControlKind, ChatMessage, EffectiveReasoning, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
+    ReasoningEffort, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -82,6 +83,13 @@ fn test_openai_config_can_select_responses_protocol() {
 }
 
 #[test]
+fn test_openai_config_can_set_default_model() {
+    let config = OpenAIConfig::new("test-api-key").with_default_model("gpt-5.5-mini");
+
+    assert_eq!(config.default_model, "gpt-5.5-mini");
+}
+
+#[test]
 fn test_endpoint_url_appends_protocol_endpoint_to_base_url() {
     let provider = OpenAIProvider::new(
         OpenAIConfig::new("test-api-key")
@@ -142,6 +150,12 @@ async fn test_stream_model_blocks_maps_chat_completion_chunks() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
+        ModelBlockStreamEvent::ReasoningCompleted { output }
+            if output.display_text == vec!["think".to_string()]
+                && output.continuation == Some(ReasoningContinuation::Text("think".to_string()))
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
         ModelBlockStreamEvent::Done { usage: Some(usage), .. }
             if usage.total_tokens == 3
     )));
@@ -175,7 +189,7 @@ async fn test_stream_model_blocks_maps_responses_events() {
     let body = concat!(
             "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\"}}\n\n",
             "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"delta\":\"think\"}\n\n",
-            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\"}}\n\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"think\"}],\"encrypted_content\":\"encrypted\"}}\n\n",
             "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"hello\"}\n\n",
             "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"path\\\"\"}\n\n",
@@ -234,6 +248,12 @@ async fn test_stream_model_blocks_maps_responses_events() {
     )));
     assert!(events.iter().any(|event| matches!(
         event,
+        ModelBlockStreamEvent::ReasoningCompleted { output }
+            if output.display_text == vec!["think".to_string()]
+                && matches!(output.continuation, Some(ReasoningContinuation::Blocks(ref blocks)) if blocks.len() == 2)
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
         ModelBlockStreamEvent::Done { usage: Some(usage), finish_reason: Some(reason) }
             if usage.total_tokens == 3 && reason == "stop"
     )));
@@ -261,7 +281,12 @@ fn test_convert_messages() {
         ChatMessage::assistant("Hi there!"),
     ];
 
-    let openai_msgs = chat_protocol::messages(messages, false);
+    let openai_msgs = chat_protocol::messages(
+        messages,
+        false,
+        chat_protocol::ChatReasoningContinuationFormat::Reasoning,
+    )
+    .expect("messages should map");
 
     assert_eq!(openai_msgs.len(), 3);
     assert_eq!(openai_msgs[0].role, "system");
@@ -300,7 +325,8 @@ fn test_openai_request_serialization_with_tools() {
             .build(),
         false,
         chat_protocol::ChatCompletionRequestOptions::default(),
-    );
+    )
+    .expect("request should build");
 
     let json = serde_json::to_string(&req).unwrap();
     assert!(json.contains("\"model\":\"gpt-4o\""));
@@ -313,10 +339,10 @@ fn test_build_request_maps_reasoning_effort() {
     let request = ChatRequest::builder()
         .model("gpt-4o")
         .messages(vec![ChatMessage::user("hello")])
-        .reasoning_effort(ReasoningEffort::High)
+        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
         .build();
 
-    let built = OpenAIProvider::build_request(request, false);
+    let built = OpenAIProvider::build_request(request, false).expect("request should build");
 
     assert_eq!(built.reasoning_effort.as_deref(), Some("high"));
 }
@@ -351,19 +377,6 @@ fn test_provider_name() {
 }
 
 #[test]
-fn test_provider_identity_can_be_overridden() {
-    let config = OpenAIConfig::new("test-key").with_identity(
-        "openrouter",
-        "OpenRouter",
-        "anthropic/claude-sonnet-4.5",
-    );
-    let provider = OpenAIProvider::new(config);
-
-    assert_eq!(provider.name(), "openrouter");
-    assert_eq!(provider.default_model(), "anthropic/claude-sonnet-4.5");
-}
-
-#[test]
 fn test_openai_request_does_not_serialize_cache_control_for_unsupported_provider() {
     let mut msg = ChatMessage::user("Hello");
     msg.cache_control = Some(CacheControl {
@@ -375,7 +388,8 @@ fn test_openai_request_does_not_serialize_cache_control_for_unsupported_provider
             .messages(vec![msg])
             .build(),
         false,
-    );
+    )
+    .expect("request should build");
 
     let json = serde_json::to_string(&request).expect("request should serialize");
     assert!(!json.contains("cache_control"));

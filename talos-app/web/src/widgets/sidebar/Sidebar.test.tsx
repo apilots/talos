@@ -67,6 +67,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof Sidebar>> = {}) 
     onCreateProjectThread: vi.fn(),
     onCreateThread: vi.fn(),
     onLogout: vi.fn(),
+    onDeleteSession: vi.fn(),
     onRemoveProject: vi.fn(),
     onRenameProject: vi.fn(),
     onSelectThread: vi.fn(),
@@ -118,6 +119,21 @@ describe("Sidebar", () => {
 
     fireEvent.click(screen.getByText("Compare JSON-GRPC and WebSocket"));
     expect(props.onSelectThread).toHaveBeenCalledWith("chat-1");
+  });
+
+  it("deletes the selected session after confirmation without selecting it again", async () => {
+    const { props } = renderSidebar({
+      currentPath: "/sessions/chat-1",
+      projectGroups: [],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete Compare JSON-GRPC and WebSocket" }));
+    expect(props.onSelectThread).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /^Delete$/ }));
+
+    await waitFor(() => {
+      expect(props.onDeleteSession).toHaveBeenCalledWith("chat-1");
+    });
   });
 
   it("allows multiple projects to expand independently from the project row", () => {

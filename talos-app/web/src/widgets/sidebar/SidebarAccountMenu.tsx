@@ -96,7 +96,7 @@ function AccountPopover({
       </AccountMenuSection>
       <AccountMenuSection>
         <MenuLink icon={<UserCircle aria-hidden="true" size={16} />} label="Profile" onClose={onClose} to="/settings" />
-        <MenuLink icon={<Settings2 aria-hidden="true" size={16} />} label="Settings" onClose={onClose} shortcut="⌘," to="/settings/general" />
+        <MenuLink icon={<Settings2 aria-hidden="true" size={16} />} label="Settings" onClose={onClose} to="/settings/general" />
       </AccountMenuSection>
       <div className="py-1.5">
         {authStatus !== "open" ? (
@@ -142,13 +142,11 @@ function MenuLink({
   icon,
   label,
   onClose,
-  shortcut,
   to,
 }: {
   icon: ReactNode;
   label: string;
   onClose: () => void;
-  shortcut?: string;
   to: string;
 }) {
   return (
@@ -159,7 +157,6 @@ function MenuLink({
     >
       <span className="text-muted">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {shortcut ? <span className="text-xs text-muted">{shortcut}</span> : null}
     </NavLink>
   );
 }

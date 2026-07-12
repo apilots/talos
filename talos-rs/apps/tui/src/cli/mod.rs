@@ -9,8 +9,8 @@ use std::io::Write;
 use std::sync::Arc;
 
 use talos_sdk::{
-    AgentEventPayload, ModelInfo, ModelRef, TalosContext, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
+    AgentEventPayload, ModelRef, ModelSelection, TalosContext, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItemKind, TalosTimelinePhase, TimelineEventEnvelope,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::{display_tool_name, GatewayClient as TerminalGatewayClient, TerminalTurnRequest};
@@ -60,8 +60,10 @@ async fn execute_exec_command(
     let session_id = cmd
         .session
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let model_ref = if let Some(model) = cmd.model.as_deref() {
-        Some(resolve_cli_model_ref(client.as_ref(), model).await?)
+    let model_selection = if let Some(model) = cmd.model.as_deref() {
+        Some(ModelSelection::model_default(
+            resolve_cli_model_ref(client.as_ref(), model).await?,
+        ))
     } else {
         None
     };
@@ -72,7 +74,7 @@ async fn execute_exec_command(
         context: Some(default_terminal_context(
             cmd.user.as_deref().unwrap_or("cli-user"),
         )),
-        model_ref,
+        model_selection,
         current_directory: current_terminal_directory(),
         client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
     }
@@ -87,22 +89,19 @@ async fn resolve_cli_model_ref(
     model_id: &str,
 ) -> Result<ModelRef, Box<dyn std::error::Error>> {
     let models = client.list_models().await?;
-    model_ref_for_id(&models, model_id).ok_or_else(|| {
-        format!(
-            "model '{}' is not available in the current model catalog",
-            model_id
-        )
-        .into()
-    })
-}
-
-fn model_ref_for_id(models: &[ModelInfo], model_id: &str) -> Option<ModelRef> {
     models
         .iter()
         .find(|model| model.id == model_id)
         .map(|model| ModelRef {
             provider: model.provider.clone(),
             id: model.id.clone(),
+        })
+        .ok_or_else(|| {
+            format!(
+                "model '{}' is not available in the current model catalog",
+                model_id
+            )
+            .into()
         })
 }
 
@@ -133,7 +132,7 @@ async fn execute_session_command(
             for (i, session) in sessions.iter().take(limit).enumerate() {
                 println!(
                     "{}. ID: {} | Model: {} | Messages: {}",
-                    i, session.id, session.model_ref.id, session.message_count
+                    i, session.id, session.model_selection.model_ref.id, session.message_count
                 );
             }
         }
@@ -141,15 +140,19 @@ async fn execute_session_command(
             let session = client.get_session(&session_id).await?;
             println!("Session Info:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model_ref.id);
+            println!("  Model: {}", session.model_selection.model_ref.id);
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let model_ref = resolve_cli_model_ref(client.as_ref(), &model).await?;
-            let session = client.update_session_model(&session_id, &model_ref).await?;
+            let model_selection = ModelSelection::model_default(
+                resolve_cli_model_ref(client.as_ref(), &model).await?,
+            );
+            let session = client
+                .update_session_model_selection(&session_id, &model_selection)
+                .await?;
             println!("Session model updated:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model_ref.id);
+            println!("  Model: {}", session.model_selection.model_ref.id);
         }
     }
     Ok(())
@@ -318,7 +321,7 @@ fn render_event(
         }
         AgentEventPayload::TurnError(payload) => {
             error!("TURN_ERROR {}", payload.error);
-            return Ok(true);
+            return Err(payload.error.clone().into());
         }
         AgentEventPayload::TurnCompleted(_) => {
             return Ok(true);

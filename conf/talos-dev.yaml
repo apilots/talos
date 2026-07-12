@@ -1,93 +1,88 @@
-timezone: "Asia/Shanghai"
-
-# Development profile for local Talos + local Talos Cloud.
+timezone: Asia/Shanghai
 gateway:
   port: 8080
-  host: "0.0.0.0"
+  host: 0.0.0.0
   auth: false
-
 cloud:
-  api_base_url: "http://127.0.0.1:8787"
-  web_base_url: "http://127.0.0.1:3000"
+  api_base_url: http://127.0.0.1:8787
+  web_base_url: http://127.0.0.1:3000
   auth:
     introspection_cache_ttl_seconds: 300
-
 fs:
   directory_picker:
     enabled: true
-    root: "home"
+    root: home
     show_hidden: true
-
 agent:
-  name: "talos"
+  name: talos
   kernel:
     tool_parallelism: 1
     tool_result_max_bytes: 65536
     context_compaction_max_bytes: 262144
-    default_workspace_id: "default"
+    default_workspace_id: default
     tools:
       enable_collaboration_tools: true
       web_search:
-        provider: "duckduckgo"
+        provider: duckduckgo
         duckduckgo:
-          base_url: "https://api.duckduckgo.com/"
+          base_url: https://api.duckduckgo.com/
           timeout_ms: 15000
         brave:
-          api_key_env: "TALOS_WEB_SEARCH_BRAVE_API_KEY"
-          base_url: "https://api.search.brave.com/res/v1/web/search"
+          api_key_env: TALOS_WEB_SEARCH_BRAVE_API_KEY
+          base_url: https://api.search.brave.com/res/v1/web/search
           timeout_ms: 15000
         tavily:
-          api_key_env: "TALOS_WEB_SEARCH_TAVILY_API_KEY"
-          base_url: "https://api.tavily.com/search"
+          api_key_env: TALOS_WEB_SEARCH_TAVILY_API_KEY
+          base_url: https://api.tavily.com/search
           timeout_ms: 15000
     skills:
       max_skill_md_bytes: 65536
       max_available_summary_bytes: 8192
     plugins:
       sources:
-        - source_type: "official"
-          display_name: "Apilots Skills"
-          kind: "git"
-          url: "https://github.com/apilots/skills"
-          reference: "main"
-          sparse_paths:
-            - "skills"
+      - source_type: official
+        display_name: Apilots Skills
+        kind: git
+        url: https://github.com/apilots/skills
+        reference: main
+        sparse_paths:
+        - skills
       roots:
-        - kind: "skill"
-          path: "~/.agents/skills"
-          read_only: true
-        - kind: "skill"
-          path: "~/.codex/skills"
-          read_only: true
-    planner_mode: "built_in"
+      - kind: skill
+        path: ~/.agents/skills
+        read_only: true
+      - kind: skill
+        path: ~/.codex/skills
+        read_only: true
+    planner_mode: built_in
     mcp:
       servers:
-        - name: "playwright"
-          transport:
-            type: "stdio"
-            command: "npx"
-            args:
-              - "-y"
-              - "@playwright/mcp@latest"
-              - "--headless"
-              - "--isolated"
-              - "--viewport-size"
-              - "1280x900"
-              - "--executable-path"
-              - "${TALOS_PLAYWRIGHT_MCP_BROWSER}"
-              - "--output-dir"
-              - "${TALOS_PLAYWRIGHT_MCP_E2E_OUTPUT}"
+      - name: playwright
+        transport:
+          type: stdio
+          command: npx
+          args:
+          - -y
+          - '@playwright/mcp@latest'
+          - --headless
+          - --isolated
+          - --viewport-size
+          - 1280x900
+          - --executable-path
+          - ${TALOS_PLAYWRIGHT_MCP_BROWSER}
+          - --output-dir
+          - ${TALOS_PLAYWRIGHT_MCP_E2E_OUTPUT}
     prompt:
       window:
         reserved_output_tokens:
-          kind: "fixed"
+          kind: fixed
           tokens: 8192
         compaction_buffer_tokens: 4096
       bootstrap:
         enabled: true
         auto_create_missing_files: true
         max_chars_per_file: 8000
-        warning_mode: "once"
+        warning_mode: once
         include_agents: true
         include_soul: true
         include_identity: true
@@ -122,11 +117,11 @@ agent:
     memory:
       hot_recent_messages: 64
       compaction_threshold_bytes: 262144
-      root_memory_filename: "MEMORY.md"
-      memory_dirname: "memory"
+      root_memory_filename: MEMORY.md
+      memory_dirname: memory
       workspace_memory_flush_enabled: true
       workspace_memory_flush_on_compaction: true
-      flush_file_pattern: "YYYY-MM-DD.md"
+      flush_file_pattern: YYYY-MM-DD.md
       tool_search_enabled: true
       tool_get_enabled: true
       search_max_results: 6
@@ -135,7 +130,6 @@ agent:
       search_include_root_memory: true
       search_include_daily_memory: true
       search_include_sessions: false
-
 channels:
   whatsapp:
     enabled: false
@@ -143,223 +137,285 @@ channels:
     enabled: false
     token: ${TALOS_TELEGRAM_BOT_TOKEN}
     allow_from: []
-    dm_policy: "open"
-    group_policy: "mention"
+    dm_policy: open
+    group_policy: mention
     group_allow_from: []
-    dm_scope: "per_channel_peer_topic"
-    mode: "polling"
+    dm_scope: per_channel_peer_topic
+    mode: polling
     webhook_url: null
     accounts:
-      - id: "telegram-default"
-        enabled: false
-        token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
-        dm_policy: "open"
-        group_policy: "mention"
+    - id: telegram-default
+      enabled: false
+      token: ${TALOS_TELEGRAM_ACCOUNT_1_TOKEN}
+      dm_policy: open
+      group_policy: mention
+      allow_from: []
+      group_allow_from: []
+      mode: polling
+      webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
+      groups:
+      - id: ${TALOS_TELEGRAM_GROUP_ID}
+        require_mention: true
         allow_from: []
-        group_allow_from: []
-        mode: "polling"
-        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_1_WEBHOOK_URL}
-        groups:
-          - id: ${TALOS_TELEGRAM_GROUP_ID}
-            require_mention: true
-            allow_from: []
-            topics:
-              - id: ${TALOS_TELEGRAM_TOPIC_ID}
-                require_mention: false
-                allow_from: []
-      - id: "telegram-webhook"
-        enabled: false
-        token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
-        dm_policy: "open"
-        group_policy: "mention"
-        allow_from: []
-        group_allow_from: []
-        mode: "webhook"
-        webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
-        groups: []
+        topics:
+        - id: ${TALOS_TELEGRAM_TOPIC_ID}
+          require_mention: false
+          allow_from: []
+    - id: telegram-webhook
+      enabled: false
+      token: ${TALOS_TELEGRAM_ACCOUNT_2_TOKEN}
+      dm_policy: open
+      group_policy: mention
+      allow_from: []
+      group_allow_from: []
+      mode: webhook
+      webhook_url: ${TALOS_TELEGRAM_ACCOUNT_2_WEBHOOK_URL}
+      groups: []
   discord:
     enabled: false
   feishu:
     enabled: false
-
 llm:
-  provider: "bailian"
-  model: "qwen3.6-flash"
+  provider: openrouter
+  model: tencent/hy3:free
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
-    base_url: "https://api.anthropic.com/v1"
-    protocol: "messages"
+    base_url: https://api.anthropic.com/v1
+    protocol: messages
     models:
-      - id: "claude-opus-4-8"
-        name: "Claude Opus 4.8"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "claude-sonnet-4-6"
-        name: "Claude Sonnet 4.6"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "claude-haiku-4-5-20251001"
-        name: "Claude Haiku 4.5"
-        context_window: 200000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
+    - id: claude-opus-4-8
+      name: Claude Opus 4.8
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: claude-sonnet-4-6
+      name: Claude Sonnet 4.6
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: claude-haiku-4-5-20251001
+      name: Claude Haiku 4.5
+      context_window: 200000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
   openai:
     api_key: ${TALOS_LLM_OPENAI_API_KEY}
-    base_url: "https://api.openai.com/v1"
-    protocol: "chat"
+    base_url: https://api.openai.com/v1
+    protocol: chat
     models:
-      - id: "gpt-5.5"
-        name: "GPT-5.5"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 5
-          output: 30
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "gpt-5.4"
-        name: "GPT-5.4"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 2.5
-          output: 15
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "gpt-5.4-mini"
-        name: "GPT-5.4 mini"
-        context_window: 400000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0.75
-          output: 4.5
-          cache_read: 0
-          cache_write: 0
-        compat: {}
+    - id: gpt-5.5
+      name: GPT-5.5
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 5.0
+        output: 30.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: gpt-5.4
+      name: GPT-5.4
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 2.5
+        output: 15.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: gpt-5.4-mini
+      name: GPT-5.4 mini
+      context_window: 400000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.75
+        output: 4.5
+        cache_read: 0.0
+        cache_write: 0.0
   bailian:
     api_key: ${TALOS_LLM_BAILIAN_API_KEY}
-    base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    protocol: "chat"
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    protocol: chat
     models:
-      - id: "qwen3.7-max"
-        name: "Qwen 3.7 Max"
-        context_window: 991000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat:
-          thinking_format: "qwen"
-      - id: "qwen3.7-plus"
-        name: "Qwen 3.7 Plus"
-        context_window: 991000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat:
-          thinking_format: "qwen"
-      - id: "qwen3.6-flash"
-        name: "Qwen 3.6 Flash"
-        context_window: 1000000
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text", "image"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat:
-          thinking_format: "qwen"
+    - id: qwen3.7-max
+      name: Qwen 3.7 Max
+      context_window: 991000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: qwen3.7-plus
+      name: Qwen 3.7 Plus
+      context_window: 991000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: qwen3.6-flash
+      name: Qwen 3.6 Flash
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      - image
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+  deepseek:
+    api_key: ${TALOS_LLM_DEEPSEEK_API_KEY}
+    base_url: https://api.deepseek.com
+    protocol: chat
+    models:
+    - id: deepseek-v4-pro
+      name: DeepSeek V4 Pro
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: high
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: deepseek-v4-flash
+      name: DeepSeek V4 Flash
+      context_window: 1000000
+      reasoning: true
+      reasoning_effort: high
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+  ollama:
+    api_key: null
+    base_url: http://localhost:11434
+    protocol: chat
+    models: []
   openrouter:
     api_key: ${TALOS_LLM_OPENROUTER_API_KEY}
-    base_url: "https://openrouter.ai/api/v1"
-    protocol: "chat"
+    base_url: https://openrouter.ai/api/v1
+    protocol: chat
     models:
-      - id: "openai/gpt-oss-120b:free"
-        name: "GPT OSS 120B Free"
-        context_window: 131072
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text"]
-        cost:
-          input: 0
-          output: 0
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-      - id: "openai/gpt-oss-20b"
-        name: "GPT OSS 20B"
-        context_window: 131072
-        reasoning: true
-        reasoning_effort: "medium"
-        speed: "standard"
-        input: ["text"]
-        cost:
-          input: 0.029
-          output: 0.14
-          cache_read: 0
-          cache_write: 0
-        compat: {}
-  ollama:
-    base_url: "http://localhost:11434"
-    protocol: "chat"
-
+    - id: openai/gpt-oss-120b:free
+      name: GPT OSS 120B Free
+      context_window: 131072
+      reasoning: true
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: tencent/hy3:free
+      name: Tencent HY3 Free
+      context_window: 262144
+      reasoning: false
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: meta-llama/llama-3.3-70b-instruct
+      name: Llama 3.3 70B Instruct
+      context_window: 131072
+      reasoning: false
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
+    - id: meta-llama/llama-3.3-70b-instruct:free
+      name: Llama 3.3 70B Instruct Free
+      context_window: 131072
+      reasoning: false
+      reasoning_effort: medium
+      speed: standard
+      input:
+      - text
+      cost:
+        input: 0.0
+        output: 0.0
+        cache_read: 0.0
+        cache_write: 0.0
 logging:
-  level: "info"
-  format: "text"
+  level: info
+  format: text
   stdout: true
-
 storage:
-  database_type: "sqlite"
+  database_type: sqlite
   max_connections: 5

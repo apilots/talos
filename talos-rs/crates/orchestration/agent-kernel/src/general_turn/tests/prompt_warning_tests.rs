@@ -17,7 +17,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         project_root: None,
         selected_model: "length-finish".to_string(),
         max_output_tokens: Some(16),
-        reasoning_effort: None,
+        reasoning: EffectiveReasoning::Unsupported,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),

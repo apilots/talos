@@ -86,6 +86,15 @@ fn block_completed(model_item_id: &str) -> ModelBlockStreamEvent {
     })
 }
 
+fn reasoning_completed(text: &str) -> ModelBlockStreamEvent {
+    ModelBlockStreamEvent::ReasoningCompleted {
+        output: ReasoningOutput {
+            display_text: vec![text.to_string()],
+            continuation: Some(ReasoningContinuation::Text(text.to_string())),
+        },
+    }
+}
+
 fn done() -> ModelBlockStreamEvent {
     ModelBlockStreamEvent::Done {
         finish_reason: Some("stop".to_string()),
@@ -585,6 +594,7 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
                 },
             },
             block_completed("final"),
+            reasoning_completed("thinking"),
             done(),
         ],
     ));
@@ -661,6 +671,7 @@ async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
                 },
             },
             block_completed("final"),
+            reasoning_completed("thinking live"),
             done(),
         ],
     ));
@@ -687,10 +698,8 @@ async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
                     saw_thinking_delta = true;
                 }
             }
-            KernelStreamEventData::AssistantTextDelta(data) => {
-                if data.delta == "Final answer." {
-                    saw_final_delta = true;
-                }
+            KernelStreamEventData::AssistantTextDelta(data) if data.delta == "Final answer." => {
+                saw_final_delta = true;
             }
             _ => {}
         }
@@ -926,7 +935,7 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
             messages: vec![ChatMessage::user("Read the sample file")],
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: Default::default(),
             pre_final_execution_summary: None,
             stream_tx: Some(tx),
@@ -979,7 +988,7 @@ async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_don
             messages: vec![ChatMessage::user("Answer directly")],
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: Default::default(),
             pre_final_execution_summary: None,
             stream_tx: Some(tx),
@@ -1035,7 +1044,7 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
             messages: vec![ChatMessage::user("Answer directly")],
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning_effort: None,
+            reasoning: EffectiveReasoning::Unsupported,
             speed: Default::default(),
             pre_final_execution_summary: None,
             stream_tx: Some(tx),

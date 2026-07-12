@@ -10,7 +10,7 @@ pub trait Planner: Send + Sync {
         PlannerKind::BuiltIn
     }
 
-    /// Produce the request-phase effect: planning instruction and optional reasoning effort.
+    /// Produce the request-phase effect without changing model selection.
     fn build_request_effect(
         &self,
         _ctx: &InvocationContext,

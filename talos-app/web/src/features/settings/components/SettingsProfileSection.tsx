@@ -21,7 +21,7 @@ export function SettingsProfileSection({
   const cacheReadTokens = sessions.reduce((sum, session) => sum + (session.usage.cache_read_input_tokens ?? 0), 0);
   const modelsById = new Map<string, number>();
   sessions.forEach((session) => {
-    const modelId = session.model_ref.id;
+    const modelId = session.modelSelection.modelRef.id;
     modelsById.set(modelId, (modelsById.get(modelId) ?? 0) + 1);
   });
   const mostUsedModels = [...modelsById.entries()]

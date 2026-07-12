@@ -2,6 +2,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 
 import {
   useDeleteProjectMutation,
+  useDeleteSessionMutation,
   useProjectsView,
   useSessionsQuery,
   useUpdateProjectNameMutation,
@@ -22,7 +23,11 @@ export function SidebarContainer() {
   const aliases = useAppStore((state) => state.sessionAliases);
   const statuses = useAppStore((state) => state.transientStatuses);
   const streams = useAppStore((state) => state.streams);
+  const deleteSessionAlias = useAppStore((state) => state.deleteSessionAlias);
+  const resetStream = useAppStore((state) => state.resetStream);
+  const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const sessionsQuery = useSessionsQuery();
+  const deleteSession = useDeleteSessionMutation();
   const deleteProject = useDeleteProjectMutation();
   const updateProjectName = useUpdateProjectNameMutation();
   const projectsView = useProjectsView();
@@ -35,7 +40,7 @@ export function SidebarContainer() {
       id: sessionId,
       label: aliases[sessionId] ?? session.title,
       status: getEffectiveSessionStatus(statuses[sessionId], streams[sessionId]),
-      model: session.model_ref?.id || "unknown",
+      model: session.modelSelection.modelRef.id,
       projectId: session.project_id ?? null,
       lastActivityAt: session.last_activity,
       createdAt: session.created_at,
@@ -86,12 +91,20 @@ export function SidebarContainer() {
       onRemoveProject={async (projectId) => {
         await deleteProject.mutateAsync(projectId);
       }}
+      onDeleteSession={async (sessionId) => {
+        await deleteSession.mutateAsync(sessionId);
+        deleteSessionAlias(sessionId);
+        resetStream(sessionId);
+        setSessionStatus(sessionId, undefined);
+        if (location.pathname === `/sessions/${sessionId}`) navigate("/");
+      }}
       onRenameProject={async (projectId, name) => {
         await updateProjectName.mutateAsync({ projectId, name });
       }}
       onSelectThread={(sessionId) => navigate(`/sessions/${sessionId}`)}
       onLogout={handleLogout}
       projectActionPending={deleteProject.isPending || updateProjectName.isPending}
+      sessionActionPending={deleteSession.isPending}
       projectGroups={projectGroups}
     />
   );

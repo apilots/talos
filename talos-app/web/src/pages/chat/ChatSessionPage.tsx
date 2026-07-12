@@ -4,6 +4,9 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
+  modelSelectionForId,
+  reasoningLevelForModel,
+  reasoningLevelForSession,
   useChatSession,
   useModelsQuery,
   useProjectsView,
@@ -13,17 +16,18 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import type { ProjectView } from "@/shared/types/ui";
+import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
 import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
-import type { ModelInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
+import type { SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
   initialModel?: string;
+  initialReasoningLevel?: ReasoningLevel;
   initialProjectId?: string;
   initialProject?: ProjectView;
   initialSkills?: SkillSuggestion[];
@@ -31,14 +35,6 @@ interface SessionLocationState {
 
 function selectedSkillsOption(skills?: SkillSuggestion[]) {
   return skills && skills.length > 0 ? skills : undefined;
-}
-
-function modelRefForId(models: ModelInfo[] | undefined, modelId: string | undefined): ModelRef | undefined {
-  if (!modelId) {
-    return undefined;
-  }
-  const model = models?.find((entry) => entry.id === modelId);
-  return model ? { provider: model.provider, id: model.id } : undefined;
 }
 
 export function ChatSessionPage() {
@@ -52,10 +48,13 @@ export function ChatSessionPage() {
   const activeSessionIdRef = useRef(sessionId);
   const locationState = location.state as SessionLocationState | null;
   const [draftModel, setDraftModel] = useState<string | undefined>(locationState?.initialModel);
+  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
+    locationState?.initialReasoningLevel,
+  );
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
     locationState?.initialProjectId,
   );
-  const { data: session } = useSessionQuery(sessionId);
+  const { data: session } = useSessionQuery(sessionId, !locationState?.initialPrompt);
   const { data: models } = useModelsQuery();
   const projectsView = useProjectsView();
   const {
@@ -84,6 +83,9 @@ export function ChatSessionPage() {
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
   const currentModel = session ? getSessionModel(session) : draftModel ?? models?.[0]?.id;
+  const currentReasoningLevel = session
+    ? reasoningLevelForSession(session, models, draftModel)
+    : draftReasoningLevel ?? reasoningLevelForModel(models, currentModel);
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
@@ -124,7 +126,11 @@ export function ChatSessionPage() {
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
     void sendText(initialPrompt, {
-      modelRef: modelRefForId(models, locationState?.initialModel),
+      modelSelection: modelSelectionForId(
+        models,
+        locationState?.initialModel,
+        locationState?.initialReasoningLevel,
+      ),
       project: initialProject,
       skills: selectedSkillsOption(locationState?.initialSkills),
     })
@@ -142,6 +148,7 @@ export function ChatSessionPage() {
     locationState?.initialProject,
     locationState?.initialProjectId,
     locationState?.initialPrompt,
+    locationState?.initialReasoningLevel,
     locationState?.initialSkills,
     models,
     navigate,
@@ -189,7 +196,7 @@ export function ChatSessionPage() {
           {streamError ? (
             <ChatSessionErrorPanel title={streamError} />
           ) : null}
-          {sessionHistoryError ? (
+          {session && sessionHistoryError ? (
             <ChatSessionErrorPanel
               detail={sessionHistoryError instanceof Error
                 ? sessionHistoryError.message
@@ -224,11 +231,12 @@ export function ChatSessionPage() {
             onModelChange={(model) => {
               if (!session) {
                 setDraftModel(model);
+                setDraftReasoningLevel(reasoningLevelForModel(models, model));
                 return;
               }
-              const modelRef = modelRefForId(models, model);
-              if (modelRef) {
-                updateModel.mutate(modelRef);
+              const modelSelection = modelSelectionForId(models, model);
+              if (modelSelection) {
+                updateModel.mutate(modelSelection);
               }
             }}
             onProjectChange={(projectId) => {
@@ -247,13 +255,27 @@ export function ChatSessionPage() {
                 setConnection({ runtimeMode: mode });
               }
             }}
+            onReasoningLevelChange={(level) => {
+              if (!session) {
+                setDraftReasoningLevel(level);
+                return;
+              }
+              const modelSelection = modelSelectionForId(models, currentModel, level);
+              if (modelSelection) {
+                updateModel.mutate(modelSelection);
+              }
+            }}
             onSend={(skills) => {
               autoScroll.stickToBottomRef.current = true;
               window.requestAnimationFrame(autoScroll.scrollToBottom);
               if (!session) {
                 const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
                 return sendTurn({
-                  modelRef: modelRefForId(models, currentModel),
+                  modelSelection: modelSelectionForId(
+                    models,
+                    currentModel,
+                    currentReasoningLevel,
+                  ),
                   project: selectedProject,
                   skills: selectedSkillsOption(skills),
                 });
@@ -262,6 +284,7 @@ export function ChatSessionPage() {
             }}
             projects={projects}
             runtimeMode={connection.runtimeMode}
+            reasoningLevel={currentReasoningLevel}
             selectedModel={currentModel}
             showProjectSelector={false}
             showRuntimeModeSelector={false}

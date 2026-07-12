@@ -110,7 +110,7 @@ impl LlmProvider for TestLlmProvider {
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
         Ok(ChatResponse {
             content: String::new(),
-            reasoning: Vec::new(),
+            reasoning: Default::default(),
             model: "default".to_string(),
             usage: Usage::default(),
             finish_reason: None,
@@ -234,7 +234,7 @@ async fn gateway_start_turn_delegates_to_service() {
                 }],
                 workspace_id: None,
                 context: Some(request_context()),
-                model_ref: None,
+                model_selection: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: Some("client-1".to_string()),
@@ -259,7 +259,7 @@ async fn gateway_start_turn_rejects_invalid_request() {
                 input: Vec::new(),
                 workspace_id: None,
                 context: Some(request_context()),
-                model_ref: None,
+                model_selection: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: None,

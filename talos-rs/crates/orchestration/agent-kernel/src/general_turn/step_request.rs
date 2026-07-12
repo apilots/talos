@@ -17,7 +17,7 @@ pub fn build_general_turn_step_request(
         messages,
         tool_definitions,
         parallel_tool_calls,
-        reasoning_effort: prepared.reasoning_effort,
+        reasoning: prepared.reasoning,
         speed: prepared.speed,
         pre_final_execution_summary: None,
         stream_tx: prepared.stream_tx.clone(),

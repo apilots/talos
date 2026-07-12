@@ -411,7 +411,7 @@ async fn creating_session_uses_actor_user_id() {
             CreateSessionRequest {
                 session_id: "session-created".to_string(),
                 context,
-                model_ref: None,
+                model_selection: None,
                 workspace_id: None,
                 project_id: None,
                 current_directory: None,

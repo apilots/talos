@@ -22,7 +22,6 @@ impl RequestProcessor for PlanningRequestProcessor {
         request: &mut LlmRequestEnvelope,
     ) -> TalosResult<RequestProcessorOutput> {
         let effect = self.planner.build_request_effect(ctx, request);
-        request.reasoning_effort = effect.reasoning_effort;
         ctx.planning_instruction = effect.planning_instruction.clone();
         request.planning_instruction = effect.planning_instruction;
         Ok(RequestProcessorOutput::default())

@@ -63,7 +63,7 @@ payload = {
         "message_id": "msg-session-close-flush",
         "trace_id": "trace-session-close-flush",
     },
-    "model_ref": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]},
+    "modelSelection": {"modelRef": {"provider": os.environ["PRIMARY_PROVIDER"], "id": os.environ["PRIMARY_MODEL"]}, "reasoning": {"type": "modelDefault"}},
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

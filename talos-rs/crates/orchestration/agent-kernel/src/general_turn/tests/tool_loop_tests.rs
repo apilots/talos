@@ -53,7 +53,12 @@ impl LlmProvider for DynamicLoopProvider {
         match round {
             0 => Ok(ChatResponse {
                 content: "Request dynamic tool result.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput {
+                    display_text: vec!["prepare dynamic tool call".to_string()],
+                    continuation: Some(ReasoningContinuation::Text(
+                        "dynamic provider continuation".to_string(),
+                    )),
+                },
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -100,9 +105,26 @@ impl LlmProvider for DynamicResumeProvider {
             })
             .expect("dynamic resume should replay tool result before model step");
         assert!(tool_message.content.contains("dynamic pong"));
+        let assistant_message = request
+            .messages
+            .iter()
+            .find(|message| {
+                message.role == talos_llm_provider::Role::Assistant
+                    && message
+                        .tool_calls
+                        .as_ref()
+                        .is_some_and(|calls| calls.iter().any(|call| call.id == "call_dynamic"))
+            })
+            .expect("dynamic resume should replay assistant tool call before its result");
+        assert_eq!(
+            assistant_message.reasoning_continuation,
+            Some(ReasoningContinuation::Text(
+                "dynamic provider continuation".to_string()
+            ))
+        );
         Ok(ChatResponse {
             content: "Final answer after dynamic pong.".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -148,7 +170,12 @@ impl LlmProvider for ToolSearchActivationProvider {
                 assert!(!tool_names.contains(&"echo_test".to_string()));
                 Ok(ChatResponse {
                     content: String::new(),
-                    reasoning: Vec::new(),
+                    reasoning: ReasoningOutput {
+                        display_text: vec!["find the requested tool".to_string()],
+                        continuation: Some(ReasoningContinuation::Text(
+                            "provider continuation".to_string(),
+                        )),
+                    },
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -160,10 +187,26 @@ impl LlmProvider for ToolSearchActivationProvider {
                 })
             }
             1 => {
+                let tool_call_message = request
+                    .messages
+                    .iter()
+                    .find(|message| {
+                        message.role == talos_llm_provider::Role::Assistant
+                            && message.tool_calls.as_ref().is_some_and(|calls| {
+                                calls.iter().any(|call| call.id == "call_search")
+                            })
+                    })
+                    .expect("assistant tool-call message should be replayed");
+                assert_eq!(
+                    tool_call_message.reasoning_continuation,
+                    Some(ReasoningContinuation::Text(
+                        "provider continuation".to_string()
+                    ))
+                );
                 assert!(tool_names.contains(&"echo_test".to_string()));
                 Ok(ChatResponse {
                     content: String::new(),
-                    reasoning: Vec::new(),
+                    reasoning: ReasoningOutput::default(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("tool_calls".to_string()),
@@ -187,7 +230,7 @@ impl LlmProvider for ToolSearchActivationProvider {
                 assert!(tool_message.content.contains("dynamic pong"));
                 Ok(ChatResponse {
                     content: "activated done".to_string(),
-                    reasoning: Vec::new(),
+                    reasoning: ReasoningOutput::default(),
                     model: request.model,
                     usage: Usage::default(),
                     finish_reason: Some("stop".to_string()),
@@ -228,7 +271,7 @@ impl LlmProvider for PolicyStepProvider {
         );
         Ok(ChatResponse {
             content: "provider text".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -302,7 +345,7 @@ impl LlmProvider for WorkingContextBudgetProvider {
         match round {
             0 => Ok(ChatResponse {
                 content: "Call the large output tool.".to_string(),
-                reasoning: Vec::new(),
+                reasoning: ReasoningOutput::default(),
                 model: request.model,
                 usage: Usage::default(),
                 finish_reason: Some("tool_calls".to_string()),
@@ -349,7 +392,7 @@ async fn test_run_general_turn_bash_completes_directly() {
         provider.clone(),
         tool_registry.clone(),
         tool_registry,
-        memory_store,
+        memory_store.clone(),
         &config,
         skill_options_from_config(&workspace_dir, &config),
     )
@@ -392,7 +435,7 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
         provider.clone(),
         tool_registry.clone(),
         tool_registry,
-        memory_store,
+        memory_store.clone(),
         &config,
         skill_options_from_config(&workspace_dir, &config),
     )
@@ -452,7 +495,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
         provider.clone(),
         tool_registry.clone(),
         tool_registry,
-        memory_store,
+        memory_store.clone(),
         &config,
         skill_options_from_config(&workspace_dir, &config),
     )
@@ -461,14 +504,37 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
 
     assert!(result.output_text.is_empty());
     assert_eq!(result.stop_reason, StopReason::WaitingDynamicInput);
-    assert!(matches!(
-        result.outcome,
-        GeneralTurnOutcome::Waiting {
-            pending_action: PendingGeneralTurnAction::DynamicToolResult(_),
-            stop_reason: StopReason::WaitingDynamicInput,
-            ..
-        }
-    ));
+    let GeneralTurnOutcome::Waiting {
+        pending_action: PendingGeneralTurnAction::DynamicToolResult(pending),
+        stop_reason: StopReason::WaitingDynamicInput,
+        ..
+    } = result.outcome
+    else {
+        panic!("dynamic tool result should remain pending");
+    };
+    assert_eq!(
+        pending.reasoning_continuation,
+        Some(ReasoningContinuation::Text(
+            "dynamic provider continuation".to_string()
+        ))
+    );
+    let transcript = memory_store
+        .load_transcript_records(
+            "tool-loop-pending-dynamic",
+            Some("i1"),
+            talos_memory::SessionTranscriptBranch::ReactiveLoop,
+        )
+        .await
+        .expect("dynamic request transcript should load");
+    assert!(transcript.iter().any(|record| {
+        matches!(
+            &record.payload,
+            talos_memory::SessionTranscriptPayload::DynamicToolRequest { payload }
+                if payload.reasoning_continuation == Some(ReasoningContinuation::Text(
+                    "dynamic provider continuation".to_string()
+                ))
+        )
+    }));
     assert!(
         result.output_items.iter().all(|item| !matches!(
             item,
@@ -555,7 +621,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
-        reasoning_effort: None,
+        reasoning: EffectiveReasoning::Unsupported,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
@@ -637,7 +703,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
-        reasoning_effort: None,
+        reasoning: EffectiveReasoning::Unsupported,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user(
@@ -672,6 +738,9 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
             call_id: "call_dynamic".to_string(),
             tool_name: "echo_test".to_string(),
             arguments: json!({ "message": "ping" }).into(),
+            reasoning_continuation: Some(ReasoningContinuation::Text(
+                "dynamic provider continuation".to_string(),
+            )),
         }),
         replay_dynamic_tool_results: HashMap::new(),
     });

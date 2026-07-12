@@ -17,8 +17,8 @@ use talos_agent_kernel::{
 use talos_config::AgentKernelConfig;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
-    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, Role,
-    ToolDefinition, Usage,
+    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
+    ReasoningContinuation, ReasoningOutput, Role, ToolDefinition, Usage,
 };
 use talos_memory::{Memory, TalosTurn};
 use talos_tools::{
@@ -34,7 +34,8 @@ use talos_types::talos::{
     TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
 };
 use talos_types::{
-    ModelRef, SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE,
+    ModelRef, ModelSelection, SessionConf, SessionContext, SessionState, TalosSession,
+    DEFAULT_SESSION_TITLE,
 };
 use tempfile::TempDir;
 use tokio::sync::Notify;
@@ -46,7 +47,7 @@ fn build_test_agent() -> AgentHarnessImpl {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(Arc::new(MockLlmProvider {})),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -70,11 +71,11 @@ fn static_router(provider: Arc<dyn LlmProvider>) -> Arc<dyn LlmProviderRouter> {
     Arc::new(StaticLlmProviderRouter { provider })
 }
 
-fn model_ref(id: &str) -> ModelRef {
-    ModelRef {
+fn model_selection(id: &str) -> ModelSelection {
+    ModelSelection::model_default(ModelRef {
         provider: "test".to_string(),
         id: id.to_string(),
-    }
+    })
 }
 
 async fn submit_dynamic_tool_result(
@@ -151,7 +152,7 @@ impl LlmProvider for NamedRecordingProvider {
         *self.seen_model.lock().expect("model lock poisoned") = Some(request.model.clone());
         Ok(ChatResponse {
             content: "provider selected".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -246,7 +247,7 @@ impl LlmProvider for SequencedProvider {
 
         Ok(ChatResponse {
             content: "provider ok".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -330,7 +331,7 @@ impl LlmProvider for CapturingMaxTokensProvider {
         }
         Ok(ChatResponse {
             content: "captured".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -365,7 +366,7 @@ impl LlmProvider for DynamicResumeAgentProvider {
         self.assert_replayed_tool_message(&request);
         Ok(ChatResponse {
             content: "Final answer after dynamic pong.".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -413,6 +414,23 @@ impl DynamicResumeAgentProvider {
             .find(|tool_call| tool_call.id == "call-dynamic" && tool_call.name == "echo_dynamic")
             .expect("dynamic resume should replay original dynamic request");
         assert_eq!(tool_call.arguments, json!({ "message": "ping" }));
+        let assistant_message = request
+            .messages
+            .iter()
+            .find(|message| {
+                message.role == Role::Assistant
+                    && message
+                        .tool_calls
+                        .as_ref()
+                        .is_some_and(|calls| calls.iter().any(|call| call.id == "call-dynamic"))
+            })
+            .expect("dynamic resume should replay the assistant tool-call message");
+        assert_eq!(
+            assistant_message.reasoning_continuation,
+            Some(ReasoningContinuation::Text(
+                "dynamic provider continuation".to_string()
+            ))
+        );
     }
 }
 
@@ -463,7 +481,7 @@ fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(Arc::new(MockLlmProvider {})),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
     )
@@ -513,6 +531,27 @@ fn agent_run_params(
     let session_state = AgentRunSessionState::from_session(&session);
     let options = AgentRunOptions::from_config(&config);
     AgentRunParams::new(context, config, session_state, options, input)
+}
+
+#[test]
+fn agent_run_config_resolves_deepseek_provider_config() {
+    let mut llm = talos_config::LlmConfig::default();
+    llm.deepseek.base_url = Some("https://api.deepseek.example".to_string());
+    let config = AgentRunConfig {
+        agent: talos_config::AgentConfig::default(),
+        llm,
+        model_selection: ModelSelection::model_default(ModelRef {
+            provider: "deepseek".to_string(),
+            id: "deepseek-v4-pro".to_string(),
+        }),
+    };
+
+    assert_eq!(
+        config
+            .current_provider_config()
+            .and_then(|provider| provider.base_url.as_deref()),
+        Some("https://api.deepseek.example")
+    );
 }
 
 #[test]
@@ -1150,7 +1189,7 @@ async fn test_generate_system_prompt() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(Arc::new(mock_provider)),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -1175,7 +1214,7 @@ async fn test_add_tool() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(Arc::new(mock_provider)),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -1204,7 +1243,7 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(provider),
-        model_ref("agent-model"),
+        model_selection("agent-model"),
         Arc::new(ToolRegistry::new()),
         agent_kernel_config,
     )
@@ -1258,10 +1297,10 @@ async fn test_run_uses_session_provider_for_llm_routing() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         Arc::new(RecordingLlmProviderRouter { primary, secondary }),
-        ModelRef {
+        ModelSelection::model_default(ModelRef {
             provider: "primary".to_string(),
             id: "primary-model".to_string(),
-        },
+        }),
         Arc::new(ToolRegistry::new()),
         AgentKernelConfig::default(),
     )
@@ -1354,7 +1393,7 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(provider.clone()),
-        model_ref("mock-model"),
+        model_selection("mock-model"),
         registry,
         kernel_config,
     )
@@ -1383,6 +1422,9 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_dynamic".to_string(),
                 arguments: json!({ "message": "ping" }).into(),
+                reasoning_continuation: Some(ReasoningContinuation::Text(
+                    "dynamic provider continuation".to_string(),
+                )),
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),
@@ -1623,6 +1665,7 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
                 call_id: "call-1".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({ "name": "Talos" }).into(),
+                reasoning_continuation: None,
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),
@@ -1691,6 +1734,7 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
                 call_id: "call-timeout".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
+                reasoning_continuation: None,
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),
@@ -1734,6 +1778,7 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
                 call_id: "call-wrong-turn".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
+                reasoning_continuation: None,
             },
         },
         actions: talos_memory::SessionTranscriptActions::default(),
@@ -1791,7 +1836,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(provider.clone()),
-        model_ref("mock-model"),
+        model_selection("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
     )
@@ -1821,6 +1866,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
                     arguments: json!({ "message": "ping" }).into(),
+                    reasoning_continuation: None,
                 },
             },
             actions: talos_memory::SessionTranscriptActions::default(),
@@ -1894,7 +1940,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(provider.clone()),
-        model_ref("mock-model"),
+        model_selection("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
     )
@@ -1998,7 +2044,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         static_router(provider.clone()),
-        model_ref("mock-model"),
+        model_selection("mock-model"),
         Arc::new(ToolRegistry::new()),
         kernel_config,
     )
@@ -2074,7 +2120,7 @@ async fn test_interrupt_aborts_only_current_session_turn() {
             started: started.clone(),
             calls: AtomicUsize::new(0),
         })),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -2173,7 +2219,7 @@ async fn test_run_streamed_queues_second_active_turn_for_same_session() {
             started: started.clone(),
             calls: AtomicUsize::new(0),
         })),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -2335,7 +2381,7 @@ async fn test_run_streamed_completes_before_post_turn_memory_flush() {
         static_router(Arc::new(BlockingPostTurnFlushProvider {
             chat_calls: chat_calls.clone(),
         })),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         AgentKernelConfig {
             workspace_dir: temp_dir.path().display().to_string(),
@@ -2388,7 +2434,7 @@ async fn test_run_queues_second_active_turn_for_same_session() {
             started: started.clone(),
             calls: AtomicUsize::new(0),
         })),
-        model_ref("gpt-4o"),
+        model_selection("gpt-4o"),
         Arc::new(ToolRegistry::new()),
         Default::default(),
     )
@@ -2474,7 +2520,7 @@ impl LlmProvider for MockLlmProvider {
         };
         Ok(ChatResponse {
             content,
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: "mock-model".to_string(),
             usage: Usage { ..Usage::default() },
             finish_reason: None,

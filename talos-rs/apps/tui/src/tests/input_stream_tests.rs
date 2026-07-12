@@ -28,7 +28,7 @@ async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step()
     app.available_model_info[0].reasoning = true;
     app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::High;
     app.current_model = "gpt-5.5".to_string();
-    app.current_reasoning_effort = Some(talos_sdk::LlmReasoningEffort::High);
+    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::High);
 
     app.toggle_model_picker();
     app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -56,7 +56,7 @@ async fn test_model_picker_confirm_writes_command_result_block() {
     app.available_model_info[0].reasoning = true;
     app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
     app.current_model = "gpt-5.5".to_string();
-    app.current_reasoning_effort = Some(talos_sdk::LlmReasoningEffort::Medium);
+    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::Medium);
 
     app.toggle_model_picker();
     app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -72,10 +72,29 @@ async fn test_model_picker_confirm_writes_command_result_block() {
     let transcript = interactive_transcript_text(&app);
     assert!(app.model_picker.is_none());
     assert_eq!(
-        app.current_reasoning_effort,
+        app.reasoning_effort_override,
         Some(talos_sdk::LlmReasoningEffort::High)
     );
     assert!(transcript.contains("Model changed to gpt-5.5 high"));
+
+    app.toggle_model_picker();
+    app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        app.handle_input(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))
+            .await
+            .unwrap();
+    }
+    app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+        .await
+        .unwrap();
+
+    assert_eq!(app.reasoning_effort_override, None);
+    assert_eq!(
+        app.current_model_selection().unwrap().reasoning,
+        talos_sdk::ReasoningSelection::ModelDefault
+    );
 }
 
 #[test]
@@ -380,10 +399,12 @@ async fn test_submit_input_sends_turn_metadata_after_first_turn() {
         Some(Some("terminal"))
     );
     assert_eq!(
-        request
-            .model_ref
-            .as_ref()
-            .map(|model_ref| (model_ref.provider.as_str(), model_ref.id.as_str())),
+        request.model_selection.as_ref().map(|selection| {
+            (
+                selection.model_ref.provider.as_str(),
+                selection.model_ref.id.as_str(),
+            )
+        }),
         Some(("mock", "qwen-plus"))
     );
     assert_eq!(
@@ -433,11 +454,29 @@ async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
 
 #[tokio::test]
 async fn test_app_server_initialize_loads_models_without_session() {
-    let mut app = create_app_server_app();
+    let client = Arc::new(MockGatewayClient::new());
+    {
+        let mut state = client.state.lock().unwrap();
+        state.models[0].reasoning = true;
+        state.models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+    }
+    let gateway_client: Arc<dyn GatewayClient> = client.clone();
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     assert_eq!(app.session_id.as_deref(), None);
     assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
     assert_eq!(app.connection_status, "connected");
+    assert_eq!(app.reasoning_effort_override, None);
+
+    client.state.lock().unwrap().models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::High;
+    app.refresh_models_from_gateway().await.unwrap();
+
+    assert_eq!(app.reasoning_effort_override, None);
+    assert_eq!(
+        app.current_model_selection().unwrap().reasoning,
+        talos_sdk::ReasoningSelection::ModelDefault
+    );
+    assert_eq!(app.current_model_status_label(), "qwen-plus high");
 }
 
 #[tokio::test]
@@ -820,8 +859,17 @@ fn test_stream_events_feed_transcript_projection() {
 
 #[tokio::test]
 async fn test_modes_alias_works_as_models() {
-    let mut app = create_app_server_app();
+    let client = Arc::new(MockGatewayClient::new());
+    {
+        let mut state = client.state.lock().unwrap();
+        state.models[0].reasoning = true;
+        state.models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+    }
+    let gateway_client: Arc<dyn GatewayClient> = client.clone();
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
+    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::High);
+    client.state.lock().unwrap().models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Low;
     app.input_buffer = "/modes".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let _ = app.submit_input().await.unwrap();
@@ -833,6 +881,16 @@ async fn test_modes_alias_works_as_models() {
         }
     }
     assert!(interactive_transcript_text(&app).contains("Available models"));
+    assert_eq!(
+        app.reasoning_effort_override,
+        Some(talos_sdk::LlmReasoningEffort::High)
+    );
+    assert_eq!(
+        app.current_model_selection().unwrap().reasoning,
+        talos_sdk::ReasoningSelection::Effort {
+            level: talos_sdk::LlmReasoningEffort::High,
+        }
+    );
 }
 
 #[tokio::test]

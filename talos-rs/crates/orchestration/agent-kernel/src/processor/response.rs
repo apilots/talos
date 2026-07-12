@@ -13,15 +13,9 @@ pub trait ResponseProcessor: Send + Sync {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ResponseProcessorOutput {
     pub events: Vec<ExecutionEvent>,
-}
-
-impl Default for ResponseProcessorOutput {
-    fn default() -> Self {
-        Self { events: Vec::new() }
-    }
 }
 
 #[derive(Default)]

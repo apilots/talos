@@ -7,6 +7,7 @@ import { SidebarHomeEntry } from "./SidebarHomeEntry";
 import { SidebarPrimaryNav } from "./SidebarPrimaryNav";
 import { SidebarProjectSection, type SidebarProjectGroup } from "./SidebarProjectSection";
 import type { SidebarSessionItem } from "./SidebarSessionRow";
+import { SidebarSessionDeleteDialog } from "./SidebarSessionDeleteDialog";
 
 type AuthConnectionState = {
   authStatus:
@@ -34,6 +35,8 @@ interface SidebarProps {
   onRemoveProject: (projectId: ProjectView["id"]) => Promise<void> | void;
   onRenameProject: (projectId: ProjectView["id"], name: string) => Promise<void> | void;
   onSelectThread: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => Promise<void> | void;
+  sessionActionPending?: boolean;
   projectActionPending?: boolean;
 }
 
@@ -49,8 +52,12 @@ export function Sidebar({
   onRemoveProject,
   onRenameProject,
   onSelectThread,
+  onDeleteSession,
   projectActionPending,
+  sessionActionPending = false,
 }: SidebarProps) {
+  const [sessionPendingDelete, setSessionPendingDelete] = useState<SidebarSessionItem | null>(null);
+
   return (
     <aside className="sticky top-0 flex h-screen w-full shrink-0 flex-col border-r border-border/80 bg-card px-4 py-4">
       <div className="absolute right-4 top-4 z-20">
@@ -63,6 +70,7 @@ export function Sidebar({
         <SidebarProjectSection
           currentPath={currentPath}
           groups={projectGroups}
+          onDeleteSession={setSessionPendingDelete}
           onCreateProjectThread={onCreateProjectThread}
           onRemoveProject={onRemoveProject}
           onRenameProject={onRenameProject}
@@ -71,6 +79,7 @@ export function Sidebar({
         />
         <SidebarChatsSection
           currentPath={currentPath}
+          onDeleteSession={setSessionPendingDelete}
           onSelectSession={onSelectThread}
           sessions={chats}
         />
@@ -82,6 +91,18 @@ export function Sidebar({
         authUsername={connection.authUsername}
         onLogout={onLogout}
       />
+      {sessionPendingDelete ? (
+        <SidebarSessionDeleteDialog
+          deleting={sessionActionPending}
+          onClose={() => setSessionPendingDelete(null)}
+          onDelete={async () => {
+            await onDeleteSession(sessionPendingDelete.id);
+            setSessionPendingDelete(null);
+          }}
+          sessionTitle={sessionPendingDelete.label}
+        />
+      ) : null}
     </aside>
   );
 }
+import { useState } from "react";

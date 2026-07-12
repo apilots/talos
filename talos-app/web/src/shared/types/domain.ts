@@ -185,5 +185,5 @@ function assertNeverToolContentItem(item: never): string {
 }
 
 export function getSessionModel(session: SessionInfo) {
-  return session.model_ref?.id || "unknown";
+  return session.modelSelection.modelRef.id;
 }

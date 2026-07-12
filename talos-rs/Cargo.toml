@@ -5,6 +5,9 @@ members = [
     "crates/common/llm/provider",
     "crates/common/llm/anthropic",
     "crates/common/llm/bailian",
+    "crates/common/llm/deepseek",
+    "crates/common/llm/openrouter",
+    "crates/common/llm/ollama",
     "crates/common/llm/openai",
     "crates/common/fs",
     "crates/common/prompt",
@@ -127,6 +130,9 @@ talos-llm-provider = { path = "crates/common/llm/provider" }
 talos-prompt = { path = "crates/common/prompt" }
 talos-llm-anthropic = { path = "crates/common/llm/anthropic" }
 talos-llm-bailian = { path = "crates/common/llm/bailian" }
+talos-llm-deepseek = { path = "crates/common/llm/deepseek" }
+talos-llm-openrouter = { path = "crates/common/llm/openrouter" }
+talos-llm-ollama = { path = "crates/common/llm/ollama" }
 talos-llm-openai = { path = "crates/common/llm/openai" }
 talos-config = { path = "crates/infra/config" }
 talos-logging = { path = "crates/infra/logging" }

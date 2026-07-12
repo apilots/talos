@@ -38,7 +38,8 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
-    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, ModelRefConfig, PlannerMode,
+    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, ModelRefConfig,
+    ModelSelectionConfig, PlannerMode, ReasoningSelectionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
@@ -49,11 +50,11 @@ pub use domains::kernel::{
 pub use domains::memory::AgentKernelMemoryConfig;
 pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
-    llm_provider_supports_protocol, ChannelConfig, ChannelsConfig, DmPolicy, DmScope,
-    GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCompatConfig, ModelCostConfig,
-    ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig, ReasoningEffort,
-    TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig, TelegramMode,
-    TelegramTopicConfig, ThinkingFormat,
+    llm_provider_supports_protocol, provider_protocol_capabilities, ChannelConfig, ChannelsConfig,
+    DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCostConfig,
+    ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig, ProviderProtocolCapabilities,
+    ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
+    TelegramMode, TelegramTopicConfig,
 };
 pub use domains::plugins::{
     PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,
@@ -86,6 +87,9 @@ pub use workspace::{
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(skip)]
+    source_path: Option<PathBuf>,
+
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
     pub timezone: String,
@@ -146,6 +150,7 @@ pub struct LlmConfigRead {
 impl Default for Config {
     fn default() -> Self {
         let mut config = Self {
+            source_path: None,
             timezone: default_timezone(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
@@ -196,6 +201,7 @@ impl Config {
             "anthropic" => Some(&self.llm.anthropic),
             "openai" => Some(&self.llm.openai),
             "bailian" => Some(&self.llm.bailian),
+            "deepseek" => Some(&self.llm.deepseek),
             "ollama" => Some(&self.llm.ollama),
             "openrouter" => Some(&self.llm.openrouter),
             _ => None,
@@ -207,6 +213,7 @@ impl Config {
             "anthropic" => Some(&self.llm.anthropic),
             "openai" => Some(&self.llm.openai),
             "bailian" => Some(&self.llm.bailian),
+            "deepseek" => Some(&self.llm.deepseek),
             "ollama" => Some(&self.llm.ollama),
             "openrouter" => Some(&self.llm.openrouter),
             _ => None,
@@ -238,9 +245,11 @@ impl Config {
         loader::default_config_path()
     }
 
-    /// Return the config path that the loader will use for the current process.
-    pub fn source_path() -> PathBuf {
-        loader::config_source_path(None)
+    /// Return the file that produced this configuration instance.
+    pub fn source_path(&self) -> PathBuf {
+        self.source_path
+            .clone()
+            .unwrap_or_else(loader::default_config_path)
     }
 
     #[cfg(test)]
@@ -335,6 +344,7 @@ pub fn provider_config_for_llm<'a>(
         "anthropic" => Some(&llm.anthropic),
         "openai" => Some(&llm.openai),
         "bailian" => Some(&llm.bailian),
+        "deepseek" => Some(&llm.deepseek),
         "ollama" => Some(&llm.ollama),
         "openrouter" => Some(&llm.openrouter),
         _ => None,

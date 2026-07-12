@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use super::*;
 use crate::project::{ProjectStore, StorageProjectStore};
-use talos_storage::SqliteStorage;
+use serde_json::Value;
+use talos_storage::{Row, SqliteStorage, Storage};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
+use talos_types::{
+    ModelRef, ModelSelection, ReasoningSelection, SessionConf, DEFAULT_SESSION_TITLE,
+};
 
 fn sample_context() -> TalosContext {
     TalosContext {
@@ -73,12 +76,21 @@ fn test_normalized_optional_string_treats_blank_as_none() {
 #[tokio::test]
 async fn test_insert_and_get_session_record_roundtrip() {
     let store = store().await;
-    let record = record(
+    let mut record = record(
         "session-1",
         "user-1",
         Some("project-1".to_string()),
         Some(PathBuf::from("/repo")),
     );
+    record.conf = SessionConf {
+        model_selection: Some(ModelSelection {
+            model_ref: ModelRef {
+                provider: "deepseek".to_string(),
+                id: "deepseek-v4-flash".to_string(),
+            },
+            reasoning: ReasoningSelection::ModelDefault,
+        }),
+    };
 
     store
         .insert_session_record(&record, "agent-a", "api")
@@ -95,6 +107,39 @@ async fn test_insert_and_get_session_record_roundtrip() {
     assert_eq!(loaded.project_id, record.project_id);
     assert_eq!(loaded.current_directory, record.current_directory);
     assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
+    assert_eq!(loaded.conf, record.conf);
+}
+
+#[tokio::test]
+async fn test_get_session_record_reports_invalid_conf_json() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let record = record("session-1", "user-1", None, None);
+    store
+        .insert_session_record(&record, "agent-a", "api")
+        .await
+        .unwrap();
+    storage
+        .update(
+            "sessions",
+            &Row::new(
+                vec!["conf_json".to_string()],
+                vec![Value::String("{invalid".to_string())],
+            ),
+            "session_key = ?",
+            &["session-1"],
+        )
+        .await
+        .unwrap();
+
+    let error = store
+        .get_session_record("session-1")
+        .await
+        .expect_err("invalid session conf should fail");
+
+    assert!(error
+        .to_string()
+        .contains("parse session 'session-1' conf_json"));
 }
 
 #[tokio::test]

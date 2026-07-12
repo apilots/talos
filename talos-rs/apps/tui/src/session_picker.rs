@@ -427,7 +427,12 @@ impl SessionPickerState {
 fn session_matches(session: &SessionInfo, query: &str) -> bool {
     session.title.to_ascii_lowercase().contains(query)
         || session.id.to_ascii_lowercase().contains(query)
-        || session.model_ref.id.to_ascii_lowercase().contains(query)
+        || session
+            .model_selection
+            .model_ref
+            .id
+            .to_ascii_lowercase()
+            .contains(query)
         || session
             .current_directory
             .as_ref()

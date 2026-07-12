@@ -1,7 +1,7 @@
 use super::*;
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use talos_llm_provider::{ChatResponse, ChatStream, ReasoningEffort, Role, Usage};
+use talos_llm_provider::{ChatResponse, ChatStream, Role, Usage};
 
 #[test]
 fn forced_finalization_prompt_requires_visible_answer_without_tools() {
@@ -73,12 +73,13 @@ impl LlmProvider for FinalizationReasoningProvider {
 
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        assert!(
-            request.reasoning_effort.is_none(),
+        assert_eq!(
+            request.reasoning,
+            EffectiveReasoning::Unsupported,
             "final-answer phase must use the visible response channel"
         );
         assert!(
-            request.tools.as_ref().map_or(true, Vec::is_empty),
+            request.tools.as_ref().is_none_or(Vec::is_empty),
             "final-answer phase must not include tool definitions"
         );
         assert!(
@@ -90,7 +91,7 @@ impl LlmProvider for FinalizationReasoningProvider {
         );
         Ok(ChatResponse {
             content: "Visible final answer from existing evidence.".to_string(),
-            reasoning: Vec::new(),
+            reasoning: ReasoningOutput::default(),
             model: request.model,
             usage: Usage::default(),
             finish_reason: Some("stop".to_string()),
@@ -119,7 +120,6 @@ async fn forced_finalization_disables_reasoning_effort_for_visible_answer_phase(
         "mock-model".to_string(),
         provider.clone(),
         None,
-        Some(ReasoningEffort::High),
         None,
         ForcedFinalizationCause::RepeatedReadOnlyInvestigation,
     )

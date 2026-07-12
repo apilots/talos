@@ -157,7 +157,15 @@ async fn test_patch_session_handler_returns_success_ack() {
         Path("mock-session".to_string()),
         Json(
             serde_json::from_value(serde_json::json!({
-                "conf": {"agent": {"model": "qwen-plus"}}
+                "conf": {
+                    "modelSelection": {
+                        "modelRef": {
+                            "provider": "bailian",
+                            "id": "qwen-plus"
+                        },
+                        "reasoning": {"type": "modelDefault"}
+                    }
+                }
             }))
             .expect("patch request should deserialize"),
         ),

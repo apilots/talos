@@ -316,6 +316,14 @@ require_command() {
   fi
 }
 
+has_real_llm_key() {
+  [[ -n "${TALOS_LLM_ANTHROPIC_API_KEY:-}" \
+    || -n "${TALOS_LLM_BAILIAN_API_KEY:-}" \
+    || -n "${TALOS_LLM_DEEPSEEK_API_KEY:-}" \
+    || -n "${TALOS_LLM_OPENAI_API_KEY:-}" \
+    || -n "${TALOS_LLM_OPENROUTER_API_KEY:-}" ]]
+}
+
 wait_for_health() {
   local max_retry="${1:-60}"
   local retry=0
@@ -507,7 +515,7 @@ message_payload = json.loads(os.environ["MESSAGE_PAYLOAD"])
 session_payload = json.loads(Path(os.environ["SESSION_PAYLOAD_PATH"]).read_text())
 message_payload["session_id"] = os.environ["SESSION_ID"]
 
-for key in ("context", "model_ref", "project_id", "current_directory"):
+for key in ("context", "modelSelection", "project_id", "current_directory"):
     if key in session_payload and message_payload.get(key) is None:
         message_payload[key] = session_payload[key]
 
@@ -550,12 +558,12 @@ send_message_ack() {
 
 collect_timeline_events() {
   local session_id="$1"
-  local message_id="$2"
+  local turn_id="$2"
   local output_path="$3"
   local after_event_id="${4:-}"
 
   SESSION_ID="${session_id}" \
-  MESSAGE_ID="${message_id}" \
+  TURN_ID="${turn_id}" \
   OUTPUT_PATH="${output_path}" \
   AFTER_EVENT_ID="${after_event_id}" \
   GATEWAY_URL="${GATEWAY_URL}" \
@@ -567,12 +575,12 @@ import urllib.parse
 import urllib.request
 
 session_id = os.environ["SESSION_ID"]
-message_id = os.environ["MESSAGE_ID"]
+turn_id = os.environ["TURN_ID"]
 output_path = os.environ["OUTPUT_PATH"]
 after_event_id = os.environ.get("AFTER_EVENT_ID", "")
 gateway_url = os.environ["GATEWAY_URL"].rstrip("/")
 
-query = {"limit": "10000"}
+query = {"limit": "10000", "turn_id": turn_id}
 if after_event_id:
     query["after_event_id"] = after_event_id
 url = f"{gateway_url}/v1/sessions/{session_id}/events?{urllib.parse.urlencode(query)}"
@@ -608,9 +616,8 @@ def flush(handle):
         reset()
         return False
     event_record = timeline_event(record)
-    if event_record.get("message_id") != message_id:
-        reset()
-        return False
+    if event_record.get("turn_id") != turn_id:
+        raise RuntimeError(f"received event for unexpected turn: {event_record.get('turn_id')}")
 
     if current["id"]:
         handle.write(f"id: {current['id']}\n")
@@ -640,7 +647,7 @@ except Exception as exc:
     print(f"collect_timeline_events failed: {exc}", file=sys.stderr)
     sys.exit(1)
 
-print(f"message stream ended before terminal event: {message_id}", file=sys.stderr)
+print(f"turn stream ended before terminal event: {turn_id}", file=sys.stderr)
 sys.exit(1)
 PY
 }
@@ -794,17 +801,19 @@ send_message_response() {
   local idempotency_key="${4:-}"
   local ack_json
   local message_id
+  local turn_id
   local events_log
 
   ack_json="$(send_message_ack "${session_id}" "${payload}" "${idempotency_key}")"
   message_id="$(json_get "${ack_json}" "message_id")"
-  if [[ -z "${message_id}" ]]; then
+  turn_id="$(json_get "${ack_json}" "turn_id")"
+  if [[ -z "${message_id}" || -z "${turn_id}" ]]; then
     printf '%s\n' "${ack_json}"
     return 0
   fi
 
   events_log="$(scenario_report_path "${log_name}_events.log")"
-  collect_timeline_events "${session_id}" "${message_id}" "${events_log}"
+  collect_timeline_events "${session_id}" "${turn_id}" "${events_log}"
   message_response_from_events "${ack_json}" "${events_log}"
 }
 
@@ -815,14 +824,16 @@ send_message_sse_log() {
   local idempotency_key="${4:-}"
   local ack_json
   local message_id
+  local turn_id
 
   ack_json="$(send_message_ack "${session_id}" "${payload}" "${idempotency_key}")"
   message_id="$(json_get "${ack_json}" "message_id")"
-  if [[ -z "${message_id}" ]]; then
+  turn_id="$(json_get "${ack_json}" "turn_id")"
+  if [[ -z "${message_id}" || -z "${turn_id}" ]]; then
     printf '%s\n' "${ack_json}" > "${output_path}"
     return 1
   fi
-  collect_timeline_events "${session_id}" "${message_id}" "${output_path}"
+  collect_timeline_events "${session_id}" "${turn_id}" "${output_path}"
 }
 
 log_case_json() {
