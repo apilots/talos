@@ -37,15 +37,16 @@ export function TextMessageBlock({
       ) : null}
       <div
         className={cn(
-          "min-w-0 rounded-[1.25rem] px-4 py-3",
+          "min-w-0",
           isUser
-            ? "max-w-[min(100%,39rem)] border border-brand/18 bg-brandDim/95 text-ink shadow-[0_10px_24px_rgba(194,109,39,0.08)]"
+            ? "max-w-[min(100%,39rem)] rounded-[1.25rem] border border-brand/18 bg-brandDim/95 px-4 py-3 text-ink shadow-[0_10px_24px_rgba(194,109,39,0.08)]"
             : isThinking
-              ? "flex-1 border border-border/70 bg-background/34 text-muted"
+              ? "flex-1 rounded-[1.25rem] border border-border/70 bg-background/34 px-4 py-3 text-muted"
               : isSystem
-                ? "flex-1 border border-border/65 bg-background/40 text-muted"
-                : "flex-1 border border-border bg-card/88 px-5 py-4 text-ink shadow-[0_12px_28px_rgba(95,84,64,0.04)] md:px-6 md:py-[1.15rem]",
+                ? "flex-1 rounded-[1.25rem] border border-border/65 bg-background/40 px-4 py-3 text-muted"
+                : "flex-1 px-1 py-2 text-ink",
         )}
+        data-response-surface={!isUser && !isThinking && !isSystem ? "plain" : undefined}
       >
         <div>
           {isUser ? (

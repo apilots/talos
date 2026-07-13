@@ -31,6 +31,8 @@ describe("MessageList", () => {
       expect(container.querySelector(".markdown-body h1")?.textContent).toBe("Title");
       expect(container.querySelector(".markdown-body ul")).not.toBeNull();
       expect(container.querySelector(".markdown-body pre code")?.textContent).toContain("const value = 1;");
+      expect(container.querySelector('[data-response-surface="plain"]')).not.toBeNull();
+      expect(container.querySelector('[data-response-actions="true"]')).not.toBeNull();
     });
   });
 
@@ -151,7 +153,7 @@ describe("MessageList", () => {
     });
   });
 
-  it("renders timeline blocks with distinct labels, one tool card, and duration", async () => {
+  it("renders a compact process timeline with distinct thinking and commentary roles", async () => {
     const { container, getAllByText, getByText } = render(
       <MessageList
         blocks={[
@@ -223,21 +225,27 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(getByText("Thinking / Acting")).not.toBeNull();
+    expect(getByText("Process")).not.toBeNull();
+    expect(getByText("4 events")).not.toBeNull();
     expect(getByText("46 tokens").parentElement?.textContent).toContain("Completed");
     expect(getByText((content) => content === "320ms")).not.toBeNull();
-    fireEvent.click(getByText("Thinking / Acting"));
+    expect(container.querySelector('[data-process-surface="rail"]')).not.toBeNull();
+    fireEvent.click(getByText("Process"));
 
     await waitFor(() => {
       expect(getByText("Checking context")).not.toBeNull();
       expect(getByText("I will inspect the workspace.")).not.toBeNull();
-      expect(getAllByText("Thinking")).toHaveLength(1);
-      expect(getByText("Commentary")).not.toBeNull();
       expect(getByText("Execution summary")).not.toBeNull();
       expect(getByText("Validation completed.")).not.toBeNull();
       expect(getAllByText(/Bash/)).toHaveLength(1);
       expect(getByText(/300ms/)).not.toBeNull();
       expect(container.querySelectorAll('[data-tool-call-card="true"]')).toHaveLength(1);
+      expect(container.querySelector('[data-timeline-role="thinking"]')).not.toBeNull();
+      expect(container.querySelector('[data-timeline-role="commentary"]')).not.toBeNull();
+      expect(container.querySelector('[data-timeline-surface="plain"]')).not.toBeNull();
+      expect(container.querySelector('[data-tool-call-variant="compact"]')).not.toBeNull();
+      expect(container.querySelector('[data-tool-surface="plain"]')).not.toBeNull();
+      expect(container.querySelectorAll('[data-process-step="true"]')).toHaveLength(4);
     });
   });
 
@@ -285,7 +293,7 @@ describe("MessageList", () => {
     expect(container.querySelectorAll("ol > li")).toHaveLength(3);
   });
 
-  it("keeps the same timeline item element when working text becomes a final answer", async () => {
+  it("moves unknown text from process commentary after the server commits a final answer", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -300,7 +308,7 @@ describe("MessageList", () => {
       startedAtMs: 1,
       completedAtMs: 9,
     };
-    const workingItem = {
+    const responseItem = {
       itemId: "answer-1",
       sourceItemId: "answer-1",
       kind: "assistant_text" as const,
@@ -316,7 +324,7 @@ describe("MessageList", () => {
             id: "timeline-session-1-message-1",
             kind: "timeline",
             live: true,
-            items: [processItem, workingItem],
+            items: [processItem, responseItem],
           },
         ]}
         emptyDetail=""
@@ -324,10 +332,34 @@ describe("MessageList", () => {
       />,
     );
 
-    const initialItem = container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]');
-    expect(initialItem).toBeInstanceOf(HTMLElement);
-    expect(initialItem?.getAttribute("data-timeline-response")).toBe("true");
-    expect(getByText("Working")).not.toBeNull();
+    const unknownItem = container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]');
+    expect(unknownItem?.getAttribute("data-timeline-role")).toBe("commentary");
+
+    rerender(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-session-1-message-1",
+            kind: "timeline",
+            live: true,
+            items: [processItem, { ...responseItem, phase: "final_answer", status: "running" }],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    const committedResponse = container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]');
+    expect(committedResponse?.getAttribute("data-timeline-response")).toBe("true");
+    expect(committedResponse?.getAttribute("data-response-surface")).toBe("plain");
+    expect(getByText("Final answer")).not.toBeNull();
+    expect(container.querySelector('[data-response-actions="true"]')).not.toBeNull();
+    expect(screen.getByLabelText("Helpful")).not.toBeNull();
+    expect(screen.getByLabelText("Not helpful")).not.toBeNull();
+    await waitFor(() => {
+      expect(container.querySelector(".markdown-body strong")?.textContent).toBe("answer");
+    });
 
     rerender(
       <MessageList
@@ -336,7 +368,10 @@ describe("MessageList", () => {
             id: "timeline-session-1-message-1",
             kind: "timeline",
             live: false,
-            items: [processItem, { ...workingItem, phase: "final_answer", status: "completed" }],
+            items: [
+              processItem,
+              { ...responseItem, phase: "final_answer", status: "completed" },
+            ],
           },
         ]}
         emptyDetail=""
@@ -344,14 +379,14 @@ describe("MessageList", () => {
       />,
     );
 
-    expect(container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]')).toBe(initialItem);
+    expect(container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]')).toBe(committedResponse);
     expect(getByText("Final answer")).not.toBeNull();
     await waitFor(() => {
       expect(container.querySelector(".markdown-body strong")?.textContent).toBe("answer");
     });
 
-    const responseItem = container.querySelector('[data-timeline-response="true"]');
-    const responseCopyButton = responseItem?.parentElement?.querySelector<HTMLButtonElement>(
+    const completedResponse = container.querySelector('[data-timeline-response="true"]');
+    const responseCopyButton = completedResponse?.parentElement?.querySelector<HTMLButtonElement>(
       'button[aria-label="Copy block"]',
     );
     expect(responseCopyButton).toBeInstanceOf(HTMLButtonElement);
@@ -360,6 +395,48 @@ describe("MessageList", () => {
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith("Streaming **answer**.");
     });
+  });
+
+  it("presents unknown assistant text followed by tool work as commentary", () => {
+    const { container } = render(
+      <MessageList
+        blocks={[
+          {
+            id: "timeline-commentary-before-tool",
+            kind: "timeline",
+            live: true,
+            items: [
+              {
+                itemId: "commentary-1",
+                kind: "assistant_text",
+                phase: "unknown",
+                status: "completed",
+                text: "I will inspect the implementation.",
+                startedAtMs: 1,
+                completedAtMs: 2,
+              },
+              {
+                itemId: "tool-1",
+                kind: "tool_call",
+                phase: "acting",
+                status: "running",
+                callId: "call-1",
+                toolName: "Read",
+                arguments: { path: "src/main.ts" },
+                progress: [],
+                startedAtMs: 3,
+              },
+            ],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(container.querySelector('[data-timeline-role="commentary"]')?.textContent).toContain(
+      "I will inspect the implementation.",
+    );
   });
 
   it("shows the timeline waiting indicator while a live turn is between completed tool work and the next server item", async () => {
@@ -419,7 +496,7 @@ describe("MessageList", () => {
     await waitFor(() => {
       expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
     });
-    fireEvent.click(getByText("Thinking / Acting"));
+    fireEvent.click(getByText("Process"));
     expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
 
     rerender(
@@ -445,7 +522,7 @@ describe("MessageList", () => {
       expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);
     });
 
-    fireEvent.click(getByText("Thinking / Acting"));
+    fireEvent.click(getByText("Process"));
     expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
 
     rerender(
@@ -506,7 +583,7 @@ describe("MessageList", () => {
       expect(container.querySelector("details")?.hasAttribute("open")).toBe(false);
     });
 
-    fireEvent.click(getByText("Thinking / Acting"));
+    fireEvent.click(getByText("Process"));
 
     await waitFor(() => {
       expect(container.querySelector("details")?.hasAttribute("open")).toBe(true);

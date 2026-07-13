@@ -107,4 +107,40 @@ describe("ToolCallBlock", () => {
     );
     expect(screen.getByText("tests passed").textContent).toBe("tests passed");
   });
+
+  it("presents a completed timeline tool as a plain execution step with compact result metadata", () => {
+    const { container } = render(
+      <ToolCallBlock
+        argumentsText={'{"pattern":"src/**/*.ts"}'}
+        callId="call-search"
+        contentItems={[{
+          type: "search_results",
+          query: "src/**/*.ts",
+          matches: [{
+            path: "src/app.ts",
+            line: 12,
+            column: 1,
+            text: "export const app = true;",
+            before: [],
+            after: [],
+          }],
+          offset: 0,
+          limit: 10,
+          total_matches: 1,
+          more_available: false,
+          partial: false,
+        }]}
+        progress={[]}
+        status="done"
+        timingMs={240}
+        toolName="Glob"
+        variant="timeline"
+      />,
+    );
+
+    expect(container.querySelector('[data-tool-surface="plain"]')).not.toBeNull();
+    expect(container.querySelector('[data-tool-status-presentation="inline"]')?.textContent).toContain("Completed");
+    expect(container.querySelector('[data-tool-result-preview="compact"]')?.textContent).toContain("1 result(s)");
+    expect(screen.getByText("240ms").textContent).toBe("240ms");
+  });
 });

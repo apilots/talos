@@ -16,8 +16,6 @@ import {
   upsertTimelineItemInStream,
 } from "./timeline-state";
 
-type StreamTextKind = "assistant" | "thinking" | "system";
-
 export interface ChatSlice {
   sessionAliases: Record<string, string>;
   transientStatuses: Record<string, SessionUiStatus>;
@@ -27,11 +25,6 @@ export interface ChatSlice {
   setSessionStatus: (sessionId: string, status: SessionUiStatus | undefined) => void;
   resetStream: (sessionId: string) => void;
   resetLiveResponse: (sessionId: string) => void;
-  appendStreamText: (
-    sessionId: string,
-    kind: StreamTextKind,
-    chunk: string,
-  ) => void;
   upsertUserInputBlock: (sessionId: string, messageId: string, text: string) => void;
   setPendingInput: (sessionId: string, input?: PendingInput) => void;
   upsertStreamTool: (
@@ -168,38 +161,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               awaitingFinalResponse: false,
               error: undefined,
             },
-          },
-        };
-      }),
-    appendStreamText: (sessionId, kind, chunk) =>
-      set((state) => {
-        const stream = ensureStreamState(state, sessionId);
-        const blocks = [...stream.blocks];
-        const lastBlock = blocks.at(-1);
-        if (
-          lastBlock &&
-          (lastBlock.kind === "assistant" ||
-            lastBlock.kind === "thinking" ||
-            lastBlock.kind === "system") &&
-          lastBlock.kind === kind
-        ) {
-          blocks[blocks.length - 1] = {
-            ...lastBlock,
-            text: lastBlock.text + chunk,
-            live: true,
-          };
-        } else {
-          blocks.push({
-            id: `${kind}-${Date.now()}-${blocks.length}`,
-            kind,
-            text: chunk,
-            live: true,
-          });
-        }
-        return {
-          streams: {
-            ...state.streams,
-            [sessionId]: { ...stream, isStreaming: true, blocks },
           },
         };
       }),

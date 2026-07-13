@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { jsonContentValue } from "@talos/sdk-browser";
+import { cn } from "@/shared/lib/cn";
 import type { TalosContentItem } from "@/shared/types/protocol";
 import type { ChatTimelineItem, ChatToolStatus } from "@/shared/types/ui";
 
@@ -47,14 +48,25 @@ export function buildToolResultModel({
 
 export function ToolResultRenderer(props: {
   contentItems?: TalosContentItem[];
+  compact?: boolean;
   fallbackOutput?: string;
   progress: ToolProgress;
   status: ChatToolStatus;
 }) {
   const model = buildToolResultModel(props);
+  const summary = props.compact
+    ? model.summary.replace(/^(Queued|Running|Waiting for input|Completed|Failed)(?: · )?/, "")
+    : model.summary;
   return (
-    <div className="space-y-3">
-      <ToolResultSummaryLine summary={model.summary} />
+    <div
+      className={cn(
+        "space-y-3",
+        props.compact &&
+          "[&_[data-tool-result-list=true]]:border-0 [&_[data-tool-result-list=true]]:bg-transparent [&_[data-tool-result-list=true]]:p-0",
+      )}
+      data-tool-result-renderer={props.compact ? "compact" : "default"}
+    >
+      {summary ? <ToolResultSummaryLine summary={summary} /> : null}
       {model.body}
     </div>
   );
@@ -62,17 +74,27 @@ export function ToolResultRenderer(props: {
 
 export function ToolResultPreview(props: {
   contentItems?: TalosContentItem[];
+  compact?: boolean;
   fallbackOutput?: string;
   progress: ToolProgress;
   status: ChatToolStatus;
 }) {
   const model = buildToolResultModel(props);
-  if (model.preview.length === 0) {
+  const summary = props.compact
+    ? model.summary.replace(/^(Queued|Running|Waiting for input|Completed|Failed)(?: · )?/, "")
+    : model.summary;
+  if (model.preview.length === 0 && !summary) {
     return null;
   }
   return (
-    <div className="space-y-1 border-t border-border/55 px-4 py-3 text-[12px] leading-5 text-muted">
-      <ToolResultSummaryLine summary={model.summary} />
+    <div
+      className={cn(
+        "space-y-1 text-[12px] leading-5 text-muted",
+        props.compact ? "px-1 pb-1 pt-0.5" : "border-t border-border/55 px-4 py-3",
+      )}
+      data-tool-result-preview={props.compact ? "compact" : "default"}
+    >
+      {summary ? <ToolResultSummaryLine summary={summary} /> : null}
       {model.preview.slice(0, 2).map((line, index) => (
         <div className="truncate" key={`${line}-${index}`}>
           {line}
@@ -302,7 +324,10 @@ function toolResultStateLabel(status: ChatToolStatus) {
 
 function ResultList({ lines }: { lines: string[] }) {
   return (
-    <div className="space-y-1 rounded-lg border border-border/70 bg-surface/85 p-3 text-[12px] leading-5 text-ink">
+    <div
+      className="space-y-1 rounded-lg border border-border/70 bg-surface/85 p-3 text-[12px] leading-5 text-ink"
+      data-tool-result-list="true"
+    >
       {lines.filter(Boolean).map((line, index) => (
         <div className={line.startsWith("  ") ? "pl-3 text-muted" : "font-medium"} key={`${line}-${index}`}>
           {line.trimStart()}

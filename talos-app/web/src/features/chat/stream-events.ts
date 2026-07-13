@@ -59,24 +59,6 @@ export function buildBlocksFromHistorySnapshot(
     return block;
   }
 
-  function appendAssistantText(messageId: string, text: string) {
-    if (!text.trim()) {
-      return;
-    }
-    const id = `assistant-${messageId}`;
-    const existing = blocks.find((block) => block.id === id);
-    if (existing?.kind === "assistant") {
-      existing.text += text;
-      return;
-    }
-    blocks.push({
-      id,
-      kind: "assistant",
-      text,
-      live: false,
-    });
-  }
-
   for (const message of snapshot?.messages ?? []) {
     messageIds.add(message.message_id);
     const messageMetrics = message.metrics
@@ -95,10 +77,6 @@ export function buildBlocksFromHistorySnapshot(
           inputItems.push({ messageId: message.message_id, itemIndex: inputIndex, text });
           inputIndex += 1;
         }
-        continue;
-      }
-      if (item.phase === "final_answer") {
-        appendAssistantText(message.message_id, timelineText(item.content));
         continue;
       }
       const chatItem = toChatTimelineItem(item);
@@ -302,10 +280,6 @@ function applyItemStarted(sessionId: string, messageId: string, item: TalosTimel
     }
     return;
   }
-  if (item.phase === "final_answer") {
-    useAppStore.getState().setTimelineLive(sessionId, false);
-    return;
-  }
   useAppStore.getState().upsertTimelineItem(sessionId, messageId, toChatTimelineItem(item));
 }
 
@@ -324,11 +298,7 @@ function applyItemDelta(
       if (!item) {
         return;
       }
-      if (item.item.phase === "final_answer") {
-        state.appendStreamText(sessionId, "assistant", delta.text);
-      } else {
-        state.appendTimelineItemText(sessionId, messageId, toChatTimelineItem(item.item), delta.text, sequence);
-      }
+      state.appendTimelineItemText(sessionId, messageId, toChatTimelineItem(item.item), delta.text, sequence);
       return;
     case "tool_arguments":
       if (item?.callId) {

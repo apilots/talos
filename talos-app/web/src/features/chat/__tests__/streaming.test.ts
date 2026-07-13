@@ -31,21 +31,22 @@ describe("timeline stream events", () => {
     useAppStore.getState().resetStream("sess-1");
   });
 
-  it("keeps final answer separate from commentary", () => {
+  it("streams explicit final answer deltas on the server timeline item", () => {
     applyStreamEvent("sess-1", itemStarted("commentary-1", "assistant_text", "commentary", 1));
     applyStreamEvent("sess-1", textDelta("commentary-1", "working", 2));
     applyStreamEvent("sess-1", itemStarted("final-1", "assistant_text", "final_answer", 3));
     applyStreamEvent("sess-1", textDelta("final-1", "done", 4));
+    applyStreamEvent("sess-1", textDelta("final-1", " now", 5));
 
     const blocks = useAppStore.getState().streams["sess-1"]?.blocks ?? [];
     const timeline = blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
       kind: "timeline",
-      items: [expect.objectContaining({ itemId: "commentary-1", phase: "commentary", text: "working" })],
+      items: [
+        expect.objectContaining({ itemId: "commentary-1", phase: "commentary", text: "working" }),
+        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "done now" }),
+      ],
     });
-    expect(blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "assistant", text: "done" }),
-    ]));
   });
 
   it("keeps unknown assistant text on the same timeline item when committed as final", () => {
@@ -68,6 +69,30 @@ describe("timeline stream events", () => {
         ],
       }),
     ]);
+  });
+
+  it("continues appending final answer deltas after the server commits the phase", () => {
+    applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "unknown", 1));
+    applyStreamEvent("sess-1", textDelta("answer-1", "first", 2));
+    applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 3));
+    applyStreamEvent("sess-1", textDelta("answer-1", " second", 4));
+    applyStreamEvent("sess-1", itemCompleted("answer-1", 5));
+
+    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find(
+      (block) => block.kind === "timeline",
+    );
+    expect(timeline).toMatchObject({
+      kind: "timeline",
+      items: [
+        expect.objectContaining({
+          itemId: "answer-1",
+          sourceItemId: "answer-1",
+          phase: "final_answer",
+          text: "first second",
+          status: "completed",
+        }),
+      ],
+    });
   });
 
   it("keeps unknown assistant text in the timeline when committed as commentary", () => {
@@ -326,7 +351,10 @@ describe("timeline stream events", () => {
       connectionState: "streaming",
     });
     expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: "assistant", text: "done" }),
+      expect.objectContaining({
+        kind: "timeline",
+        items: [expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "done" })],
+      }),
     ]));
   });
 
@@ -374,17 +402,14 @@ describe("timeline stream events", () => {
       stoppingResponseTitle: "stopping title",
     });
 
-    expect(blocks.map((block) => block.kind)).toEqual(["user", "timeline", "assistant"]);
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "timeline"]);
     expect(blocks[1]).toMatchObject({
       kind: "timeline",
       items: [
         expect.objectContaining({ itemId: "thinking-1", text: "I will inspect the module." }),
         expect.objectContaining({ itemId: "tool-1", kind: "tool_call", output: "lib.rs" }),
+        expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "The module is layered." }),
       ],
-    });
-    expect(blocks[2]).toMatchObject({
-      kind: "assistant",
-      text: "The module is layered.",
     });
   });
 
@@ -409,10 +434,15 @@ describe("timeline stream events", () => {
 
     expect(blocks).toEqual([
       expect.objectContaining({ kind: "user", text: "hello" }),
-      expect.objectContaining({ kind: "assistant", text: "direct answer" }),
       expect.objectContaining({
         kind: "timeline",
-        items: [],
+        items: [
+          expect.objectContaining({
+            itemId: "final-1",
+            phase: "final_answer",
+            text: "direct answer",
+          }),
+        ],
         metrics: expect.objectContaining({
           state: "completed",
           usage: expect.objectContaining({ total_tokens: 46 }),
@@ -445,11 +475,15 @@ describe("timeline stream events", () => {
 
     expect(blocks.map((block) => block.kind)).toEqual([
       "user",
-      "assistant",
+      "timeline",
       "user",
       "timeline",
     ]);
-    expect(blocks[1]).toMatchObject({ text: "previous answer", live: false });
+    expect(blocks[1]).toMatchObject({
+      kind: "timeline",
+      live: false,
+      items: [expect.objectContaining({ itemId: "final-history", text: "previous answer" })],
+    });
     expect(blocks.at(-1)).toMatchObject({
       kind: "timeline",
       live: true,

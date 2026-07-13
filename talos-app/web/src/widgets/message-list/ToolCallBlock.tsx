@@ -68,6 +68,7 @@ export function ToolCallBlock({
     .at(-1)?.elapsed_ms;
   const durationMs = timingMs ?? resultDurationMs;
   const durationLabel = durationMs !== null && durationMs !== undefined ? formatDuration(durationMs) : undefined;
+  const compact = variant === "timeline";
 
   useEffect(() => {
     if (status === "waiting_dynamic_input") {
@@ -76,8 +77,9 @@ export function ToolCallBlock({
   }, [status]);
 
   return (
-    <ToolCallCard.Root compact={variant === "timeline"}>
+    <ToolCallCard.Root compact={compact}>
       <ToolCallCard.Header
+        compact={compact}
         onToggle={() => setOpen((value) => !value)}
         open={open}
         durationLabel={durationLabel}
@@ -86,15 +88,16 @@ export function ToolCallBlock({
         tone={resolveTone(status)}
       />
       {open ? (
-        <ToolCallCard.Body>
+        <ToolCallCard.Body compact={compact}>
           <ToolResultRenderer
+            compact={compact}
             contentItems={contentItems}
             fallbackOutput={output}
             progress={progress}
             status={status}
           />
           {prompt ? <ToolCallCard.Prompt prompt={prompt} title={t("dynamicToolPrompt")} /> : null}
-          <ToolCallCard.Details title={t("details")}>
+          <ToolCallCard.Details compact={compact} title={t("details")}>
             <ToolCallCard.MetaLine label="call_id" value={callId} />
             <ToolCallCard.Input content={argumentsText} title={t("arguments")} />
             {progress.length > 0 ? <ToolCallCard.Progress entries={progress} title={t("progress")} /> : null}
@@ -102,6 +105,7 @@ export function ToolCallBlock({
         </ToolCallCard.Body>
       ) : (
         <ToolResultPreview
+          compact={compact}
           contentItems={contentItems}
           fallbackOutput={output}
           progress={progress}

@@ -1,11 +1,21 @@
 import type { ReactNode } from "react";
-import { Activity, Check, Clock3, Copy, LoaderCircle, Sparkles, Wrench } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Brain,
+  ChevronDown,
+  Clock3,
+  LoaderCircle,
+  MessageCircle,
+  Wrench,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ChatRenderBlock } from "@/shared/types/ui";
 import { Badge } from "@/shared/ui/Badge";
 import { Button } from "@/shared/ui/Button";
+import { CopyableBlock } from "./CopyableBlock";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { TextMessageBlock } from "./TextMessageBlock";
@@ -26,6 +36,8 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
   const { t } = useTranslation("chat");
   const copyBlockLabel = t("copyBlock");
   const copiedBlockLabel = t("copiedBlock");
+  const helpfulLabel = t("helpful");
+  const notHelpfulLabel = t("notHelpful");
 
   if (blocks.length === 0) {
     return (
@@ -51,7 +63,9 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
               block={block}
               copiedLabel={copiedBlockLabel}
               copyLabel={copyBlockLabel}
+              helpfulLabel={helpfulLabel}
               key={block.id}
+              notHelpfulLabel={notHelpfulLabel}
             />
           );
         }
@@ -87,80 +101,22 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
         }
 
         return (
-          <CopyableBlock copyLabel={copyBlockLabel} copyText={copyText} copiedLabel={copiedBlockLabel} key={block.id}>
+          <CopyableBlock
+            copiedLabel={copiedBlockLabel}
+            copyLabel={copyBlockLabel}
+            copyText={copyText}
+            helpfulLabel={helpfulLabel}
+            key={block.id}
+            notHelpfulLabel={notHelpfulLabel}
+            responseActionInset={block.kind === "assistant"}
+            variant={block.kind === "assistant" ? "response" : "hover"}
+          >
             <TextMessageBlock kind={block.kind} text={block.text} />
           </CopyableBlock>
         );
       })}
     </div>
   );
-}
-
-function CopyableBlock({
-  children,
-  copiedLabel,
-  copyLabel,
-  copyText,
-}: {
-  children: ReactNode;
-  copiedLabel: string;
-  copyLabel: string;
-  copyText: string;
-}) {
-  const [copied, setCopied] = useState(false);
-  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (resetTimerRef.current) {
-        clearTimeout(resetTimerRef.current);
-      }
-    };
-  }, []);
-
-  const copyBlock = async () => {
-    if (!copyText) {
-      return;
-    }
-    await writeClipboardText(copyText);
-    setCopied(true);
-    if (resetTimerRef.current) {
-      clearTimeout(resetTimerRef.current);
-    }
-    resetTimerRef.current = setTimeout(() => setCopied(false), 1200);
-  };
-
-  return (
-    <div className="group relative">
-      {children}
-      <button
-        aria-label={copied ? copiedLabel : copyLabel}
-        className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-[0.7rem] border border-border/70 bg-card/95 text-muted opacity-0 shadow-[0_10px_24px_rgba(95,84,64,0.08)] transition hover:border-brand/35 hover:text-brand focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand/30 group-hover:opacity-100"
-        onClick={() => void copyBlock()}
-        title={copied ? copiedLabel : copyLabel}
-        type="button"
-      >
-        {copied ? <Check size={15} /> : <Copy size={15} />}
-      </button>
-    </div>
-  );
-}
-
-async function writeClipboardText(text: string) {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
 }
 
 function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" }>) {
@@ -181,53 +137,60 @@ function TurnBlock({
   block,
   copiedLabel,
   copyLabel,
+  helpfulLabel,
+  notHelpfulLabel,
 }: {
   block: Extract<ChatRenderBlock, { kind: "timeline" }>;
   copiedLabel: string;
   copyLabel: string;
+  helpfulLabel: string;
+  notHelpfulLabel: string;
 }) {
   return (
-    <div className="flex items-start gap-3.5 md:gap-4">
-      <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/18 bg-brand/6 text-brand md:size-8">
-        <Sparkles size={16} />
-      </div>
-      <div className="min-w-0 flex-1 overflow-hidden rounded-[1.1rem] border border-border/70 bg-background/38 text-ink shadow-[0_10px_26px_rgba(95,84,64,0.035)]">
-        <MessageTimelineBlock
-          copiedLabel={copiedLabel}
-          copyLabel={copyLabel}
-          items={block.items}
-          live={Boolean(block.live)}
-          timelineId={block.id}
-        />
-        <TurnMetricsBlock metrics={block.metrics ?? null} />
-      </div>
-    </div>
+    <MessageTimelineBlock
+      copiedLabel={copiedLabel}
+      copyLabel={copyLabel}
+      helpfulLabel={helpfulLabel}
+      items={block.items}
+      live={Boolean(block.live)}
+      metrics={block.metrics ?? null}
+      notHelpfulLabel={notHelpfulLabel}
+      timelineId={block.id}
+    />
   );
 }
 
 function MessageTimelineBlock({
   copiedLabel,
   copyLabel,
+  helpfulLabel,
   items,
   live,
+  metrics,
+  notHelpfulLabel,
   timelineId,
 }: {
   copiedLabel: string;
   copyLabel: string;
+  helpfulLabel: string;
   items: Extract<ChatRenderBlock, { kind: "timeline" }>["items"];
   live: boolean;
+  metrics: Extract<ChatRenderBlock, { kind: "timeline" }>["metrics"];
+  notHelpfulLabel: string;
   timelineId: string;
 }) {
+  const { t } = useTranslation("chat");
   const responseItems = items.filter(
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
   const processItems = items.filter((item) => !isTimelineResponseItem(item));
   const hasRunningItem = processItems.some((item) => item.status === "running" || item.status === "waiting_dynamic_input");
-  const hasActiveTimeline = (live && processItems.length > 0) || hasRunningItem;
+  const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
   const isAwaitingTimelineDelta =
     (live || hasRunningItem) && responseItems.length === 0;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(processItems, nowMs);
+  const displayDuration = metrics?.duration_ms ?? totalDuration;
   const activitySignature = timelineActivitySignature(processItems);
   const [open, setOpen] = useState(hasActiveTimeline);
   const wasActiveRef = useRef(hasActiveTimeline);
@@ -254,123 +217,184 @@ function MessageTimelineBlock({
   }, [activitySignature, hasActiveTimeline]);
 
   return (
-    <>
+    <div className="space-y-4">
       {processItems.length > 0 ? (
-        <CopyableBlock
-          copiedLabel={copiedLabel}
-          copyLabel={copyLabel}
-          copyText={timelineItemsToMarkdown(processItems)}
-        >
-          <details
-            className="group/timeline text-ink"
-            open={open}
-          >
-            <summary
-              className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-medium marker:hidden"
-              onClick={(event) => {
-                event.preventDefault();
-                setOpen((current) => !current);
-              }}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span>Thinking / Acting</span>
-                <span className="rounded-full border border-border/70 px-2 py-0.5 text-[11px] font-normal text-muted">
-                  {processItems.length}
-                </span>
-              </span>
-              {totalDuration !== null ? (
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-normal text-muted">
-                  <Clock3 size={13} />
-                  {formatDuration(totalDuration)}
-                </span>
-              ) : null}
-            </summary>
-            <ol className="space-y-3 border-t border-border/60 px-3 py-3">
-              {processItems.map((item, index) => {
-                const statusLabel = visibleTimelineItemStatus(item);
-                const itemKey = timelineItemKey(timelineId, item.itemId);
-                return (
-                  <li
-                    className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5"
-                    data-timeline-item-key={itemKey}
-                    key={itemKey}
-                  >
-                    {index < processItems.length - 1 || isAwaitingTimelineDelta ? (
-                      <span className="absolute left-[0.72rem] top-8 h-[calc(100%-1.25rem)] w-px bg-border/70" />
-                    ) : null}
-                    <span className="relative z-[1] mt-2 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]">
-                      <TimelineItemIcon kind={item.kind} />
+        <div className="flex items-start gap-3.5 md:gap-4">
+          <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/18 bg-brand/6 text-brand md:size-8">
+            <Activity size={15} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <CopyableBlock copiedLabel={copiedLabel} copyLabel={copyLabel} copyText={timelineItemsToMarkdown(processItems)}>
+              <details
+                className="group/timeline text-ink"
+                data-process-surface="rail"
+                open={open}
+              >
+                <summary
+                  className="cursor-pointer list-none rounded-[1rem] px-4 py-3 marker:hidden transition-colors hover:bg-card/45"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setOpen((current) => !current);
+                  }}
+                >
+                  <div className="flex items-center justify-between gap-3 pr-8">
+                    <span className="flex min-w-0 items-center gap-2.5">
+                      <span className="text-sm font-semibold tracking-[-0.01em]">{t("process")}</span>
+                      <span className="text-[11px] font-medium text-muted">
+                        {t("processEventCount", { count: processItems.length })}
+                      </span>
                     </span>
-                    {item.kind === "tool_call" ? (
-                      <ToolCallBlock
-                        argumentsText={formatArguments(item.arguments)}
-                        callId={item.callId}
-                        contentItems={item.contentItems}
-                        output={item.output}
-                        progress={item.progress}
-                        prompt={item.prompt}
-                        status={timelineToolStatus(item)}
-                        timingMs={timelineItemDuration(item)}
-                        toolName={item.toolName}
-                        variant="timeline"
-                      />
-                    ) : (
-                      <article className="min-w-0 rounded-[0.9rem] border border-border/65 bg-card/72">
-                        <header className="flex items-center justify-between gap-3 px-3 py-2.5">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-sm font-medium">{timelineItemTitle(item)}</span>
-                          </span>
-                          {statusLabel ? <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span> : null}
-                        </header>
-                        <div className="border-t border-border/55 px-3 py-3">
-                          <TimelineTextContent item={item} />
-                        </div>
-                      </article>
-                    )}
-                  </li>
-                );
-              })}
-              {isAwaitingTimelineDelta ? (
-                <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
-                  <span
-                    aria-label="Waiting for timeline update"
-                    className="relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full border border-brand/18 bg-card text-brand shadow-[0_3px_10px_rgba(95,84,64,0.05)]"
-                  >
-                    <LoaderCircle className="animate-spin" size={13} />
-                  </span>
-                  <span className="min-h-7" />
-                </li>
-              ) : null}
-            </ol>
-          </details>
-        </CopyableBlock>
+                    <span className="flex shrink-0 items-center gap-3 text-[11px] font-normal text-muted">
+                      {displayDuration !== null ? (
+                        <span className="flex items-center gap-1.5">
+                          <Clock3 size={13} />
+                          {formatDuration(displayDuration)}
+                        </span>
+                      ) : null}
+                      <ChevronDown className="transition-transform duration-200 group-open/timeline:rotate-180" size={14} />
+                    </span>
+                  </div>
+                  <TurnMetricsBlock metrics={metrics ?? null} />
+                </summary>
+                <ol className="space-y-4 border-t border-border/35 px-3 py-3.5 md:px-4">
+                  {processItems.map((item, index) => {
+                    const statusLabel = visibleTimelineItemStatus(item);
+                    const itemKey = timelineItemKey(timelineId, item.itemId);
+                    const role = timelineItemRole(item);
+                    return (
+                      <li
+                        className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5"
+                        data-process-step="true"
+                        data-timeline-item-key={itemKey}
+                        data-timeline-role={role}
+                        key={itemKey}
+                      >
+                        {index < processItems.length - 1 || isAwaitingTimelineDelta ? (
+                          <span className="absolute left-[0.72rem] top-7 h-[calc(100%-0.9rem)] w-px bg-border/65" />
+                        ) : null}
+                        <span className={timelineIconClass(role)}>
+                          <TimelineItemIcon item={item} />
+                        </span>
+                        {item.kind === "tool_call" ? (
+                          <ToolCallBlock
+                            argumentsText={formatArguments(item.arguments)}
+                            callId={item.callId}
+                            contentItems={item.contentItems}
+                            output={item.output}
+                            progress={item.progress}
+                            prompt={item.prompt}
+                            status={timelineToolStatus(item)}
+                            timingMs={timelineItemDuration(item)}
+                            toolName={item.toolName}
+                            variant="timeline"
+                          />
+                        ) : (
+                          <article className={timelineTextCardClass(role)} data-timeline-surface="plain">
+                            {role === "system" || statusLabel ? (
+                              <header className="flex items-center justify-between gap-3 px-1 pb-1 pt-2">
+                                {role === "system" ? (
+                                  <span className="truncate text-[12px] font-semibold tracking-[0.01em]">{timelineItemTitle(item)}</span>
+                                ) : <span />}
+                                {statusLabel ? <span className="shrink-0 text-[11px] text-muted">{statusLabel}</span> : null}
+                              </header>
+                            ) : null}
+                            <div className={role === "system" || statusLabel ? "px-1 pb-2.5 pt-1" : "px-1 py-2.5"}>
+                              <TimelineTextContent item={item} role={role} />
+                            </div>
+                          </article>
+                        )}
+                      </li>
+                    );
+                  })}
+                  {isAwaitingTimelineDelta ? (
+                    <li className="relative grid grid-cols-[1.55rem_minmax(0,1fr)] gap-2.5" key="timeline-waiting-indicator">
+                      <span
+                        aria-label="Waiting for timeline update"
+                        className="relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full bg-background text-muted"
+                      >
+                        <LoaderCircle className="animate-spin" size={13} />
+                      </span>
+                      <span className="min-h-7" />
+                    </li>
+                  ) : null}
+                </ol>
+              </details>
+            </CopyableBlock>
+          </div>
+        </div>
       ) : null}
-      {responseItems.map((item, index) => {
+      {responseItems.map((item) => {
         const itemKey = timelineItemKey(timelineId, item.itemId);
+        const streaming = live && item.status === "running";
         return (
-          <CopyableBlock
-            copiedLabel={copiedLabel}
-            copyLabel={copyLabel}
-            copyText={item.text}
-            key={itemKey}
-          >
-            <section
-              className={`${processItems.length > 0 || index > 0 ? "border-t border-border/60 " : ""}bg-card/78 px-4 py-4 md:px-5`}
-              data-timeline-item-key={itemKey}
-              data-timeline-response="true"
-            >
-              <header className="mb-2.5 text-sm font-medium text-ink">{timelineItemTitle(item)}</header>
-              <TimelineTextContent item={item} />
-            </section>
-          </CopyableBlock>
+          <div className="flex items-start gap-3.5 md:gap-4" key={itemKey}>
+            <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/18 bg-brand/6 text-brand md:size-8">
+              <Bot size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <CopyableBlock
+                copiedLabel={copiedLabel}
+                copyLabel={copyLabel}
+                copyText={item.text}
+                helpfulLabel={helpfulLabel}
+                notHelpfulLabel={notHelpfulLabel}
+                variant="response"
+              >
+                <section
+                  className="px-1 py-2 text-ink"
+                  data-response-surface="plain"
+                  data-timeline-item-key={itemKey}
+                  data-timeline-response="true"
+                >
+                  <header className="mb-2.5 flex items-center gap-2 text-sm font-semibold tracking-[-0.01em] text-ink">
+                    <span>{t("finalAnswer")}</span>
+                    {streaming ? (
+                      <span
+                        aria-label={t("streamingFinalAnswer")}
+                        className="size-1.5 animate-pulse rounded-full bg-brand"
+                      />
+                    ) : null}
+                  </header>
+                  <TimelineTextContent item={item} markdown role="final-answer" />
+                  {processItems.length === 0 ? <TurnMetricsBlock metrics={metrics ?? null} /> : null}
+                </section>
+              </CopyableBlock>
+            </div>
+          </div>
         );
       })}
-    </>
+    </div>
   );
 }
 
 function isTimelineResponseItem(item: TimelineItem) {
-  return item.kind === "assistant_text" && (item.phase === "unknown" || item.phase === "final_answer");
+  return item.kind === "assistant_text" && item.phase === "final_answer";
+}
+
+function timelineItemRole(item: TimelineItem) {
+  if (item.kind === "tool_call") {
+    return "tool";
+  }
+  if (item.kind === "reasoning") {
+    return "thinking";
+  }
+  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "unknown")) {
+    return "commentary";
+  }
+  return "system";
+}
+
+function timelineIconClass(role: ReturnType<typeof timelineItemRole>) {
+  const base = "relative z-[1] mt-1 flex size-6 items-center justify-center rounded-full bg-background";
+  return role === "thinking" ? `${base} text-muted` : `${base} text-brand`;
+}
+
+function timelineTextCardClass(role: ReturnType<typeof timelineItemRole>) {
+  const base = "min-w-0";
+  if (role === "thinking") {
+    return `${base} text-muted`;
+  }
+  return `${base} text-ink`;
 }
 
 function TurnMetricsBlock({
@@ -394,11 +418,8 @@ function TurnMetricsBlock({
     `${metrics.tool_errors} errors`,
     `${formatMetricNumber(metrics.usage.total_tokens)} tokens`,
   ];
-  if (metrics.duration_ms != null) {
-    items.push(formatDuration(metrics.duration_ms));
-  }
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 px-4 py-2.5 text-[11px] text-muted">
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-normal text-muted">
       <span className="flex items-center gap-1.5 font-medium text-ink/72">
         <Activity size={13} />
         {label}
@@ -421,25 +442,35 @@ function formatMetricNumber(value: number) {
 }
 
 function TimelineItemIcon({
-  kind,
+  item,
 }: {
-  kind: Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number]["kind"];
+  item: TimelineItem;
 }) {
-  if (kind === "tool_call") {
-    return <Wrench className="shrink-0 text-brand" size={13} />;
+  if (item.kind === "tool_call") {
+    return <Wrench className="shrink-0" size={13} />;
   }
-  return <Sparkles className="shrink-0 text-brand" size={13} />;
+  if (item.kind === "reasoning") {
+    return <Brain className="shrink-0" size={13} />;
+  }
+  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "unknown")) {
+    return <MessageCircle className="shrink-0" size={13} />;
+  }
+  return <Activity className="shrink-0" size={13} />;
 }
 
 function TimelineTextContent({
   item,
+  markdown = false,
+  role,
 }: {
   item: Exclude<Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number], { kind: "tool_call" }>;
+  markdown?: boolean;
+  role: ReturnType<typeof timelineItemRole> | "final-answer";
 }) {
   if (!item.text.trim()) {
     return <div className="text-sm leading-6 text-muted">…</div>;
   }
-  if (item.phase === "final_answer") {
+  if (markdown || item.phase === "final_answer") {
     return (
       <MarkdownRenderer
         className="markdown-body prose prose-sm max-w-none prose-headings:font-display prose-headings:tracking-[-0.035em] prose-p:my-2 prose-p:leading-[1.9] prose-ul:my-3 prose-ol:my-3 prose-li:my-1 prose-li:leading-[1.8]"
@@ -448,7 +479,10 @@ function TimelineTextContent({
     );
   }
   return (
-    <p className="min-w-0 whitespace-pre-wrap break-words text-sm leading-6 text-muted" data-timeline-text="true">
+    <p
+      className={`min-w-0 whitespace-pre-wrap break-words text-sm leading-6 ${role === "thinking" ? "text-muted" : "text-ink/82"}`}
+      data-timeline-text="true"
+    >
       {item.text}
     </p>
   );
@@ -468,13 +502,13 @@ function timelineItemTitle(item: Extract<ChatRenderBlock, { kind: "timeline" }>[
     return "Context status";
   }
   if (item.kind === "assistant_text") {
-    if (item.phase === "commentary") {
+    if (item.phase === "commentary" || item.phase === "unknown") {
       return "Commentary";
     }
     if (item.phase === "final_answer") {
       return "Final answer";
     }
-    return "Working";
+    return "Commentary";
   }
   if (item.phase === "system") {
     return item.title || "System";
