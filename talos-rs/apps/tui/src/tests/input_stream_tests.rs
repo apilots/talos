@@ -108,10 +108,10 @@ async fn test_model_picker_confirm_writes_command_result_block() {
         .await
         .unwrap();
 
-    assert_eq!(app.reasoning_effort_override, None);
+    assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::Light));
     assert_eq!(
         app.current_model_selection().unwrap().reasoning_effort,
-        None
+        Some(ReasoningEffort::Light)
     );
 }
 
@@ -482,21 +482,21 @@ async fn test_app_server_initialize_loads_models_without_session() {
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     assert_eq!(app.session_id.as_deref(), None);
-    assert!(app.available_models.iter().any(|m| m == "qwen-plus"));
+    assert!(app.available_models.iter().any(|m| m == "mock:qwen-plus"));
     assert_eq!(app.connection_status, "connected");
-    assert_eq!(app.reasoning_effort_override, None);
+    assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::Medium));
 
     client.state.lock().unwrap().models[0]
         .model
         .reasoning_effort = ReasoningEffort::High;
     app.refresh_models_from_gateway().await.unwrap();
 
-    assert_eq!(app.reasoning_effort_override, None);
+    assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::Medium));
     assert_eq!(
         app.current_model_selection().unwrap().reasoning_effort,
-        None
+        Some(ReasoningEffort::Medium)
     );
-    assert_eq!(app.current_model_status_label(), "qwen-plus high");
+    assert_eq!(app.current_model_status_label(), "qwen-plus medium");
 }
 
 #[tokio::test]
@@ -531,7 +531,7 @@ async fn test_app_server_initialize_does_not_create_session() {
 async fn test_model_command_updates_app_server_session_model() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
-    app.input_buffer = "/model gpt-5.3 medium".to_string();
+    app.input_buffer = "/model mock:gpt-5.3 medium".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let should_quit = app.submit_input().await.unwrap();
     for _ in 0..10 {
@@ -544,7 +544,7 @@ async fn test_model_command_updates_app_server_session_model() {
     assert!(!should_quit);
     assert_eq!(app.current_model, "gpt-5.3 medium");
     let transcript = interactive_transcript_text(&app);
-    assert!(transcript.contains("/model gpt-5.3 medium"));
+    assert!(transcript.contains("/model mock:gpt-5.3 medium"));
     assert!(transcript.contains("Model changed to gpt-5.3 medium"));
 }
 

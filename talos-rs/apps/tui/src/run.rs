@@ -507,7 +507,7 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     app.cursor_index.hash(&mut hasher);
     hash_debug(&app.pasted_blocks, &mut hasher);
     app.selected_pasted_block.hash(&mut hasher);
-    app.current_model.hash(&mut hasher);
+    (&app.current_model_provider, &app.current_model).hash(&mut hasher);
     hash_debug(&app.reasoning_effort_override, &mut hasher);
     app.connection_status.hash(&mut hasher);
     hash_debug(&app.rendered_chat_cache_key, &mut hasher);

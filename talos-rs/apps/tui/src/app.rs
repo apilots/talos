@@ -35,6 +35,7 @@ impl TuiApp {
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
             current_model: String::new(),
+            current_model_provider: String::new(),
             reasoning_effort_override: None,
             session_usage: TokenUsage::default(),
             turn_metrics: None,
@@ -138,22 +139,21 @@ impl TuiApp {
     }
 
     pub(crate) fn current_model_info(&self) -> Option<&ModelInfo> {
-        self.available_model_info
-            .iter()
-            .find(|model| model.model.id == self.current_model)
+        self.available_model_info.iter().find(|model| {
+            model.provider == self.current_model_provider && model.model.id == self.current_model
+        })
     }
 
-    pub(crate) fn model_info_for_id(&self, model_id: &str) -> Option<&ModelInfo> {
+    pub(crate) fn model_info_for_ref(&self, model_ref: &ModelRef) -> Option<&ModelInfo> {
         self.available_model_info
             .iter()
-            .find(|model| model.model.id == model_id)
+            .find(|model| model.provider == model_ref.provider && model.model.id == model_ref.id)
     }
 
-    pub(crate) fn use_model_default_reasoning(&mut self) {
-        self.reasoning_effort_override = self
-            .current_model_info()
-            .filter(|model| model.model.reasoning)
-            .map(|model| model.model.reasoning_effort);
+    pub(crate) fn set_current_model_selection(&mut self, selection: &ModelSelection) {
+        self.current_model_provider = selection.model_ref.provider.clone();
+        self.current_model = selection.model_ref.id.clone();
+        self.reasoning_effort_override = selection.reasoning_effort;
     }
 
     pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<ReasoningEffort>) {
@@ -167,24 +167,32 @@ impl TuiApp {
         };
     }
 
-    pub(crate) fn model_status_label(&self, model_id: &str) -> String {
-        let Some(model) = self.model_info_for_id(model_id) else {
-            return model_id.to_string();
+    pub(crate) fn model_status_label(&self, model_ref: &ModelRef) -> String {
+        let Some(model) = self.model_info_for_ref(model_ref) else {
+            return format!("{}:{}", model_ref.provider, model_ref.id);
         };
         if !model.model.reasoning {
-            return model_id.to_string();
+            return model_ref.id.clone();
         }
-        let effort = if model.model.id == self.current_model {
+        let effort = if model.provider == self.current_model_provider
+            && model.model.id == self.current_model
+        {
             self.reasoning_effort_override
                 .unwrap_or(model.model.reasoning_effort)
         } else {
             model.model.reasoning_effort
         };
-        format!("{} {}", model_id, ReasoningOption::status_label_for(effort))
+        format!(
+            "{} {}",
+            model_ref.id,
+            ReasoningOption::status_label_for(effort)
+        )
     }
 
     pub(crate) fn current_model_status_label(&self) -> String {
-        self.model_status_label(&self.current_model)
+        self.current_model_selection()
+            .map(|selection| self.model_status_label(&selection.model_ref))
+            .unwrap_or_default()
     }
 
     pub async fn initialize_session(&mut self) {
@@ -247,8 +255,7 @@ impl TuiApp {
 
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
-        self.current_model = session.model_selection.model_ref.id.clone();
-        self.set_reasoning_effort_override(session.model_selection.reasoning_effort);
+        self.set_current_model_selection(&session.model_selection);
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

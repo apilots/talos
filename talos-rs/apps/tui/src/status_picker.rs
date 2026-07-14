@@ -54,9 +54,14 @@ impl TuiStatusSnapshot {
         auth: &AuthSessionReadResponse,
         workspace: &WorkspaceInfoResponse,
     ) -> TalosResult<TuiStatusSnapshot> {
-        let model_id = session
-            .map(|session| session.model_selection.model_ref.id.as_str())
-            .unwrap_or(app.current_model.as_str());
+        let model_ref = session
+            .map(|session| &session.model_selection.model_ref)
+            .cloned()
+            .unwrap_or_else(|| talos_sdk::ModelRef {
+                provider: app.current_model_provider.clone(),
+                id: app.current_model.clone(),
+            });
+        let model_id = model_ref.id.as_str();
         if model_id.trim().is_empty() {
             return Err(TalosError::ClientError(
                 "status requires a loaded model".to_string(),
@@ -66,7 +71,7 @@ impl TuiStatusSnapshot {
         let model_info = app
             .available_model_info
             .iter()
-            .find(|model| model.model.id == model_id)
+            .find(|model| model.provider == model_ref.provider && model.model.id == model_id)
             .ok_or_else(|| {
                 TalosError::ClientError(format!("status model metadata missing for {model_id}"))
             })?;
@@ -107,6 +112,7 @@ impl TuiStatusSnapshot {
                         app.reasoning_effort_override
                             .filter(|_| {
                                 model_info.model.reasoning
+                                    && model_info.provider == app.current_model_provider
                                     && model_info.model.id == app.current_model
                             })
                             .unwrap_or(model_info.model.reasoning_effort)

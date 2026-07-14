@@ -76,6 +76,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     app.available_model_info[0].model.reasoning = true;
     app.available_model_info[0].model.reasoning_effort = ReasoningEffort::High;
     app.current_model = "qwen-plus".to_string();
+    app.current_model_provider = "bailian".to_string();
     app.reasoning_effort_override = Some(ReasoningEffort::High);
     app.connection_status = "connected".to_string();
     app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
@@ -91,6 +92,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     });
 
     let mut session = session_info();
+    session.model_selection.model_ref.provider = "bailian".to_string();
     session.model_selection.reasoning_effort = Some(ReasoningEffort::Light);
     let snapshot =
         TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())

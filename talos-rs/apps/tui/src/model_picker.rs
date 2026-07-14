@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
 };
-use talos_sdk::{ModelInfo, ReasoningEffort};
+use talos_sdk::{ModelInfo, ModelRef, ReasoningEffort};
 
 use crate::render::frame::RenderFrame;
 
@@ -18,7 +18,7 @@ pub(crate) struct ModelPickerState {
     models: Vec<ModelInfo>,
     selected_model: usize,
     selected_reasoning: usize,
-    current_model: String,
+    current_model: ModelRef,
     reasoning_effort_override: Option<ReasoningEffort>,
 }
 
@@ -30,7 +30,7 @@ pub(crate) enum ModelPickerStep {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModelPickerSelection {
-    pub(crate) model: String,
+    pub(crate) model_ref: ModelRef,
     pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
@@ -42,12 +42,12 @@ pub(crate) struct ReasoningOption {
 }
 
 impl ReasoningOption {
-    pub(crate) const ALL: [Self; 5] = [
-        Self {
-            effort: None,
-            label: "Default",
-            description: "Use the model's configured reasoning level",
-        },
+    pub(crate) const NONE: [Self; 1] = [Self {
+        effort: None,
+        label: "None",
+        description: "Reasoning is not enabled for this model",
+    }];
+    pub(crate) const SUPPORTED: [Self; 4] = [
         Self {
             effort: Some(ReasoningEffort::Light),
             label: "Light",
@@ -70,6 +70,14 @@ impl ReasoningOption {
         },
     ];
 
+    fn for_model(model: &ModelInfo) -> &'static [Self] {
+        if model.model.reasoning {
+            &Self::SUPPORTED
+        } else {
+            &Self::NONE
+        }
+    }
+
     pub(crate) fn status_label_for(effort: ReasoningEffort) -> &'static str {
         match effort {
             ReasoningEffort::Light => "light",
@@ -83,19 +91,21 @@ impl ReasoningOption {
 impl ModelPickerState {
     pub(crate) fn new(
         models: &[ModelInfo],
-        current_model: &str,
+        current_model: &ModelRef,
         reasoning_effort_override: Option<ReasoningEffort>,
     ) -> Self {
         let selected_model = models
             .iter()
-            .position(|model| model.model.id == current_model)
+            .position(|model| {
+                model.provider == current_model.provider && model.model.id == current_model.id
+            })
             .unwrap_or(0);
         let mut state = Self {
             step: ModelPickerStep::Model,
             models: models.to_vec(),
             selected_model,
             selected_reasoning: 0,
-            current_model: current_model.to_string(),
+            current_model: current_model.clone(),
             reasoning_effort_override,
         };
         state.sync_selected_reasoning();
@@ -119,9 +129,10 @@ impl ModelPickerState {
                 self.sync_selected_reasoning();
             }
             ModelPickerStep::Reasoning => {
+                let option_count = self.reasoning_options().len();
                 self.selected_reasoning = move_selection(
                     self.selected_reasoning,
-                    ReasoningOption::ALL.len().saturating_sub(1),
+                    option_count.saturating_sub(1),
                     direction,
                 );
             }
@@ -140,21 +151,24 @@ impl ModelPickerState {
 
     pub(crate) fn confirm(&mut self) -> Option<ModelPickerSelection> {
         let model = self.models.get(self.selected_model)?.clone();
-        if model.model.reasoning && self.step == ModelPickerStep::Model {
+        if self.step == ModelPickerStep::Model {
             self.step = ModelPickerStep::Reasoning;
             self.sync_selected_reasoning();
             return None;
         }
 
         let reasoning_effort = if model.model.reasoning {
-            ReasoningOption::ALL
+            ReasoningOption::for_model(&model)
                 .get(self.selected_reasoning)
                 .and_then(|option| option.effort)
         } else {
             None
         };
         Some(ModelPickerSelection {
-            model: model.model.id,
+            model_ref: ModelRef {
+                provider: model.provider,
+                id: model.model.id,
+            },
             reasoning_effort,
         })
     }
@@ -162,7 +176,7 @@ impl ModelPickerState {
     pub(crate) fn render(&self, f: &mut impl RenderFrame, area: Rect, input_area: Option<Rect>) {
         let content_len = match self.step {
             ModelPickerStep::Model => self.models.len(),
-            ModelPickerStep::Reasoning => ReasoningOption::ALL.len(),
+            ModelPickerStep::Reasoning => self.reasoning_options().len(),
         };
         let popup_height = (content_len as u16 + 4).min(area.height.max(1));
         let y = input_area
@@ -224,11 +238,17 @@ impl ModelPickerState {
 
     fn model_item(&self, index: usize, model: &ModelInfo, bg_style: Style) -> ListItem<'static> {
         let selected = index == self.selected_model;
-        let current = model.model.id == self.current_model;
+        let current = model.provider == self.current_model.provider
+            && model.model.id == self.current_model.id;
         let name = if current {
-            format!("{}. {} (current)", index + 1, model.model.id)
+            format!(
+                "{}. {} / {} (current)",
+                index + 1,
+                model.provider,
+                model.model.id
+            )
         } else {
-            format!("{}. {}", index + 1, model.model.id)
+            format!("{}. {} / {}", index + 1, model.provider, model.model.id)
         };
         let description = if model.model.reasoning {
             "Reasoning model for complex work."
@@ -261,7 +281,7 @@ impl ModelPickerState {
     fn render_reasoning(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
         let model = self
             .selected_model_id()
-            .unwrap_or(self.current_model.as_str());
+            .unwrap_or(self.current_model.id.as_str());
         let header = Line::from(Span::styled(
             format!("Select Reasoning Level for {model}"),
             bg_style
@@ -277,11 +297,14 @@ impl ModelPickerState {
             area.height.saturating_sub(3),
         );
         if list_area.height > 0 {
-            let items = ReasoningOption::ALL
+            let items = self
+                .reasoning_options()
                 .iter()
                 .enumerate()
                 .map(|(index, option)| {
-                    let is_current = model == self.current_model
+                    let selected_model = &self.models[self.selected_model];
+                    let is_current = selected_model.provider == self.current_model.provider
+                        && model == self.current_model.id
                         && option.effort == self.reasoning_effort_override;
                     self.reasoning_item(index, option, is_current, bg_style)
                 })
@@ -334,16 +357,28 @@ impl ModelPickerState {
 
     fn sync_selected_reasoning(&mut self) {
         let effort = self.models.get(self.selected_model).and_then(|model| {
-            if model.model.id == self.current_model {
+            if model.provider == self.current_model.provider
+                && model.model.id == self.current_model.id
+            {
                 self.reasoning_effort_override
+            } else if model.model.reasoning {
+                Some(model.model.reasoning_effort)
             } else {
                 None
             }
         });
-        self.selected_reasoning = ReasoningOption::ALL
+        self.selected_reasoning = self
+            .reasoning_options()
             .iter()
             .position(|option| option.effort == effort)
             .unwrap_or_default();
+    }
+
+    fn reasoning_options(&self) -> &'static [ReasoningOption] {
+        self.models
+            .get(self.selected_model)
+            .map(ReasoningOption::for_model)
+            .unwrap_or(&ReasoningOption::NONE)
     }
 }
 
@@ -373,3 +408,7 @@ fn move_selection(current: usize, max: usize, direction: i32) -> usize {
         current
     }
 }
+
+#[cfg(test)]
+#[path = "model_picker_tests.rs"]
+mod tests;

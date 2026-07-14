@@ -9,6 +9,7 @@ mod commands;
 mod input;
 mod input_history;
 mod model_picker;
+mod model_selection;
 mod render;
 mod render_runtime;
 pub mod run;
@@ -69,6 +70,7 @@ pub struct TuiApp {
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_model: String,
+    pub(crate) current_model_provider: String,
     pub(crate) reasoning_effort_override: Option<ReasoningEffort>,
     pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,

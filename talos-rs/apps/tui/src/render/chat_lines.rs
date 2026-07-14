@@ -252,6 +252,7 @@ impl TuiApp {
         let mut hasher = DefaultHasher::new();
         "transcript".hash(&mut hasher);
         self.current_model.hash(&mut hasher);
+        self.current_model_provider.hash(&mut hasher);
         self.current_project_root.hash(&mut hasher);
         format!("{:?}", self.turn_metrics).hash(&mut hasher);
         format!("{:?}", self.render_runtime.store().blocks()).hash(&mut hasher);

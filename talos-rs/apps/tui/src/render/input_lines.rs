@@ -184,7 +184,10 @@ impl TuiApp {
         let context_window = self
             .available_model_info
             .iter()
-            .find(|model| model.model.id == self.current_model)
+            .find(|model| {
+                model.provider == self.current_model_provider
+                    && model.model.id == self.current_model
+            })
             .map(|model| model.model.context_window)
             .filter(|window| *window > 0)?;
         if context_window == 0 {

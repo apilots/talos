@@ -747,14 +747,23 @@ impl GatewayClient for MockGatewayClient {
                 "mock list_models failure".to_string(),
             ));
         }
+        let default_model = state
+            .models
+            .iter()
+            .find(|model| model.model.id == state.default_model)
+            .expect("mock default model should exist");
         Ok(talos_sdk::ModelListResponse {
             models: state.models.clone(),
-            default_model_selection: talos_sdk::ModelSelection::without_reasoning(
-                talos_sdk::ModelRef {
-                    provider: "mock".to_string(),
-                    id: state.default_model.clone(),
+            default_model_selection: talos_sdk::ModelSelection {
+                model_ref: talos_sdk::ModelRef {
+                    provider: default_model.provider.clone(),
+                    id: default_model.model.id.clone(),
                 },
-            ),
+                reasoning_effort: default_model
+                    .model
+                    .reasoning
+                    .then_some(default_model.model.reasoning_effort),
+            },
         })
     }
 
@@ -1071,7 +1080,8 @@ pub(crate) fn create_app_server_app_with_close_delay(delay_ms: u64) -> TuiApp {
 
 pub(crate) fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {
     app.available_model_info = vec![mock_model_info(model_id, context_window)];
-    app.available_models = vec![model_id.to_string()];
+    app.available_models = vec![format!("mock:{model_id}")];
+    app.current_model_provider = "mock".to_string();
 }
 
 pub(crate) fn line_plain_text(line: &ratatui::text::Line<'_>) -> String {

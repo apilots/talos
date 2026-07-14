@@ -14,7 +14,7 @@ use crate::types::{
 };
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_FORCE_TIMEOUT};
-use talos_sdk::{ReasoningEffort, SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
+use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -311,17 +311,17 @@ impl TuiApp {
             models,
             default_model_selection,
         } = catalog;
-        let ids = models
+        let model_keys = models
             .iter()
-            .map(|model| model.model.id.clone())
-            .filter(|id| !id.trim().is_empty())
+            .map(crate::model_selection::model_key)
+            .filter(|key| !key.trim().is_empty())
             .collect::<Vec<_>>();
-        if ids.is_empty() {
+        if model_keys.is_empty() {
             return Err(TalosError::ClientError(
                 "gateway returned empty model list".to_string(),
             ));
         }
-        let default_model = models
+        models
             .iter()
             .find(|model| {
                 model.provider == default_model_selection.model_ref.provider
@@ -334,17 +334,16 @@ impl TuiApp {
                     default_model_selection.model_ref.id
                 ))
             })?;
-        let default_model_id = default_model.model.id.clone();
-
-        let current_model_retained = ids.iter().any(|model| model == &self.current_model);
+        let current_model_retained = models.iter().any(|model| {
+            model.provider == self.current_model_provider && model.model.id == self.current_model
+        });
         let reasoning_effort_override = self.reasoning_effort_override;
         self.available_model_info = models;
-        self.available_models = ids;
+        self.available_models = model_keys;
         if current_model_retained {
             self.set_reasoning_effort_override(reasoning_effort_override);
         } else {
-            self.current_model = default_model_id;
-            self.set_reasoning_effort_override(default_model_selection.reasoning_effort);
+            self.set_current_model_selection(&default_model_selection);
         }
         Ok(())
     }
@@ -436,15 +435,16 @@ impl TuiApp {
     }
 
     pub(crate) fn switch_model_command(&mut self, requested: String) -> TalosResult<()> {
-        let Some(model_selection) = self.model_selection_for_id(&requested, None) else {
+        let Some(model_selection) =
+            crate::model_selection::selection_for_key(&self.available_model_info, &requested, None)
+        else {
             return Err(TalosError::ClientError(format!(
                 "model '{}' is not available in the current model catalog",
                 requested
             )));
         };
         if self.session_id.is_none() {
-            self.current_model = requested.clone();
-            self.use_model_default_reasoning();
+            self.set_current_model_selection(&model_selection);
             self.push_command_result(format!(
                 "Model changed to {}",
                 self.current_model_status_label()
@@ -466,25 +466,6 @@ impl TuiApp {
         })
     }
 
-    fn model_selection_for_id(
-        &self,
-        model_id: &str,
-        reasoning_effort: Option<ReasoningEffort>,
-    ) -> Option<talos_sdk::ModelSelection> {
-        let model = self.model_info_for_id(model_id)?;
-        let model_ref = talos_sdk::ModelRef {
-            provider: model.provider.clone(),
-            id: model.model.id.clone(),
-        };
-        Some(talos_sdk::ModelSelection {
-            model_ref,
-            reasoning_effort: model
-                .model
-                .reasoning
-                .then_some(reasoning_effort.unwrap_or(model.model.reasoning_effort)),
-        })
-    }
-
     pub(crate) fn toggle_model_picker(&mut self) {
         if self.model_picker.is_some() {
             self.close_model_picker();
@@ -496,7 +477,10 @@ impl TuiApp {
         }
         self.model_picker = Some(ModelPickerState::new(
             &self.available_model_info,
-            &self.current_model,
+            &talos_sdk::ModelRef {
+                provider: self.current_model_provider.clone(),
+                id: self.current_model.clone(),
+            },
             self.reasoning_effort_override,
         ));
     }
@@ -524,10 +508,8 @@ impl TuiApp {
 
     pub(crate) fn load_session_history(&mut self, session: SessionInfo) {
         let session_id = session.id.clone();
-        let model = session.model_selection.model_ref.id.clone();
         self.session_id = Some(session_id.clone());
-        self.current_model = model;
-        self.set_reasoning_effort_override(session.model_selection.reasoning_effort);
+        self.set_current_model_selection(&session.model_selection);
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
@@ -599,17 +581,21 @@ impl TuiApp {
     }
 
     fn apply_model_picker_selection(&mut self, selection: ModelPickerSelection) {
-        let model = selection.model;
+        let model_ref = selection.model_ref;
         let reasoning_effort = selection.reasoning_effort;
+        let model_key = format!("{}:{}", model_ref.provider, model_ref.id);
+        let model_selection = talos_sdk::ModelSelection {
+            model_ref: model_ref.clone(),
+            reasoning_effort,
+        };
         if self.session_id.is_none() {
-            self.current_model = model.clone();
-            self.set_reasoning_effort_override(reasoning_effort);
+            self.set_current_model_selection(&model_selection);
             self.close_model_picker();
             self.push_command_result(format!(
                 "Model changed to {}",
                 self.current_model_status_label()
             ));
-            self.push_right_event(format!("draft model set: {}", model));
+            self.push_right_event(format!("draft model set: {model_key}"));
             return;
         }
         let Some(client) = self.gateway_client.clone() else {
@@ -617,18 +603,9 @@ impl TuiApp {
             return;
         };
         let session_id = self.session_id.clone().expect("session checked above");
-        let requested = model.clone();
-        let Some(model_selection) = self.model_selection_for_id(&requested, reasoning_effort)
-        else {
-            self.close_model_picker();
-            self.push_system_notice(format!(
-                "Model `{}` is not available in the current catalog.",
-                requested
-            ));
-            return;
-        };
+        let requested = model_key.clone();
         let _ = self.spawn_command_task(
-            format!("model picker switching to: {}", model),
+            format!("model picker switching to: {model_key}"),
             async move {
                 let result = client
                     .update_session_model_selection(&session_id, &model_selection)

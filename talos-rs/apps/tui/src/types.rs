@@ -24,7 +24,7 @@ impl CommandSuggestion {
             CommandSuggestion {
                 name: "model".to_string(),
                 insert_text: "/model".to_string(),
-                display_text: "/model [id]".to_string(),
+                display_text: "/model [provider:id]".to_string(),
                 description: "Switch model (no args: show picker)".to_string(),
             },
             CommandSuggestion {

@@ -202,6 +202,7 @@ async fn test_completed_without_final_metrics_preserves_last_live_metrics() {
 #[test]
 fn test_metrics_line_renders_above_input_without_border() {
     let mut app = create_embedded_app();
+    set_test_model_info(&mut app, "kimi-k2.5", 128_000);
     app.current_model = "kimi-k2.5".to_string();
     app.turn_metrics = Some(TurnExecutionMetrics {
         model_rounds: 2,

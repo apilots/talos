@@ -61,9 +61,7 @@ async fn execute_exec_command(
         .session
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_selection = if let Some(model) = cmd.model.as_deref() {
-        Some(ModelSelection::without_reasoning(
-            resolve_cli_model_ref(client.as_ref(), model).await?,
-        ))
+        Some(resolve_cli_model_selection(client.as_ref(), model).await?)
     } else {
         None
     };
@@ -84,25 +82,33 @@ async fn execute_exec_command(
     Ok(())
 }
 
-async fn resolve_cli_model_ref(
+async fn resolve_cli_model_selection(
     client: &dyn TerminalGatewayClient,
-    model_id: &str,
-) -> Result<ModelRef, Box<dyn std::error::Error>> {
+    model_key: &str,
+) -> Result<ModelSelection, Box<dyn std::error::Error>> {
     let models = client.list_models().await?.models;
-    models
-        .iter()
-        .find(|model| model.model.id == model_id)
-        .map(|model| ModelRef {
+    let mut matches = models.iter().filter(|model| {
+        format!("{}:{}", model.provider, model.model.id) == model_key || model.model.id == model_key
+    });
+    let model = matches.next().ok_or_else(|| {
+        format!("model '{model_key}' is not available in the current model catalog")
+    })?;
+    if matches.next().is_some() {
+        return Err(format!(
+            "model id '{model_key}' exists under multiple providers; use provider:model"
+        )
+        .into());
+    }
+    Ok(ModelSelection {
+        model_ref: ModelRef {
             provider: model.provider.clone(),
             id: model.model.id.clone(),
-        })
-        .ok_or_else(|| {
-            format!(
-                "model '{}' is not available in the current model catalog",
-                model_id
-            )
-            .into()
-        })
+        },
+        reasoning_effort: model
+            .model
+            .reasoning
+            .then_some(model.model.reasoning_effort),
+    })
 }
 
 async fn execute_models_command(
@@ -144,9 +150,7 @@ async fn execute_session_command(
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let model_selection = ModelSelection::without_reasoning(
-                resolve_cli_model_ref(client.as_ref(), &model).await?,
-            );
+            let model_selection = resolve_cli_model_selection(client.as_ref(), &model).await?;
             let session = client
                 .update_session_model_selection(&session_id, &model_selection)
                 .await?;
