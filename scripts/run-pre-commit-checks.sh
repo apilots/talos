@@ -58,10 +58,12 @@ run_eslint() {
     (cd "${package_dir}" && pnpm exec eslint "$@")
 }
 
-for path in "${shell_files[@]}"; do
-    require_no_unstaged_changes "${path}"
-    bash -n "${path}"
-done
+if [[ "${#shell_files[@]}" -gt 0 ]]; then
+    for path in "${shell_files[@]}"; do
+        require_no_unstaged_changes "${path}"
+        bash -n "${path}"
+    done
+fi
 
 if [[ "${#web_files[@]}" -gt 0 ]]; then
     run_eslint talos-app/web "${web_files[@]}"
