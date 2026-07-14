@@ -310,12 +310,10 @@ impl SessionService {
             .session_id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let requested_selection = params.model_selection;
-        let agent_selection = params.agent_model_selection;
         let effective_selection = requested_selection
             .clone()
-            .or_else(|| agent_selection.clone())
             .unwrap_or_else(|| self.base_model_selection());
-        let base_conf = if requested_selection.is_some() || agent_selection.is_some() {
+        let base_conf = if requested_selection.is_some() {
             SessionConfigOverridePolicy::single_model_selection_conf(&effective_selection)
         } else {
             Default::default()

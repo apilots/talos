@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{CancelActiveTurnParams, ModelSelection, TalosSession};
+use talos_types::{CancelActiveTurnParams, TalosSession};
 
 /// Coordinator-owned session lifecycle facade.
 ///
@@ -12,14 +12,6 @@ pub trait SessionRuntime: Send + Sync {
     /// Resolve the Agent id that should handle the provided product context.
     async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
         Ok("default".to_string())
-    }
-
-    /// Resolve the selected Agent default model for initializing a new session.
-    async fn resolve_target_agent_model_selection(
-        &self,
-        _context: &TalosContext,
-    ) -> TalosResult<Option<ModelSelection>> {
-        Ok(None)
     }
 
     /// Invalidate any Coordinator-side cached state for a product session.

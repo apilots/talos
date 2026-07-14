@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
-    ModelSelectionConfig, ReasoningSelectionConfig,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
 use talos_tools::ToolRegistry;
-use talos_types::{ModelSelection, ReasoningSelection};
+use talos_types::ModelSelection;
 
 use crate::{agent::AgentHarnessParams, AgentHarnessImpl, SkillRootsResolver};
 
@@ -97,10 +96,6 @@ pub struct AgentDefinition {
     pub default_workspace_id: Option<String>,
     /// Concrete model and reasoning policy used to initialize this Agent runtime.
     pub model_selection: ModelSelection,
-    /// Agent-specific selection override applied when creating new product sessions.
-    ///
-    /// None means sessions inherit the current service-level LLM default.
-    pub model_selection_override: Option<ModelSelection>,
     /// Typed runtime configuration matched with kind.
     pub runtime_config: AgentRuntimeConfig,
 }
@@ -207,7 +202,6 @@ impl AgentHarnessFactory {
                     description: definition.description.clone(),
                     llm_provider_router: self.llm_provider_router.clone(),
                     model_selection: definition.model_selection.clone(),
-                    model_selection_override: definition.model_selection_override.clone(),
                     tool_registry: self.tool_registry.clone(),
                     kernel_config: kernel.clone(),
                     skill_roots_resolver: self.skill_roots_resolver.clone(),
@@ -257,11 +251,7 @@ fn synthesized_default_definition(
         enabled: true,
         description: "Default AI assistant".to_string(),
         default_workspace_id: Some(config.kernel.default_workspace_id.clone()),
-        model_selection: model_selection_or_default(
-            config.model_selection.as_ref(),
-            default_model_selection,
-        ),
-        model_selection_override: model_selection_from_config(config.model_selection.as_ref()),
+        model_selection: default_model_selection.clone(),
         runtime_config: AgentRuntimeConfig::Kernel {
             kernel: config.kernel.clone(),
         },
@@ -308,34 +298,8 @@ fn definition_from_config(
             .default_workspace_id
             .clone()
             .or_else(|| Some(config.kernel.default_workspace_id.clone())),
-        model_selection: model_selection_or_default(
-            definition.model_selection.as_ref(),
-            default_model_selection,
-        ),
-        model_selection_override: model_selection_from_config(definition.model_selection.as_ref()),
+        model_selection: default_model_selection.clone(),
         runtime_config,
-    })
-}
-
-fn model_selection_or_default(
-    selection: Option<&ModelSelectionConfig>,
-    default_selection: &ModelSelection,
-) -> ModelSelection {
-    model_selection_from_config(selection).unwrap_or_else(|| default_selection.clone())
-}
-
-fn model_selection_from_config(selection: Option<&ModelSelectionConfig>) -> Option<ModelSelection> {
-    selection.map(|selection| ModelSelection {
-        model_ref: talos_types::ModelRef {
-            provider: selection.model_ref.provider.trim().to_string(),
-            id: selection.model_ref.id.trim().to_string(),
-        },
-        reasoning: match selection.reasoning {
-            ReasoningSelectionConfig::ModelDefault => ReasoningSelection::ModelDefault,
-            ReasoningSelectionConfig::Effort { level } => ReasoningSelection::Effort {
-                level: level.into(),
-            },
-        },
     })
 }
 

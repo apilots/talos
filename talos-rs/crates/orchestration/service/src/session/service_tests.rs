@@ -98,7 +98,6 @@ fn create_session_params(
         context,
         target_agent: target_agent.to_string(),
         model_selection,
-        agent_model_selection: None,
         conf: None,
         workspace_id: None,
         project_id: None,
@@ -107,7 +106,7 @@ fn create_session_params(
 }
 
 #[tokio::test]
-async fn create_session_uses_agent_model_selection_before_global_default() {
+async fn create_session_without_selection_uses_global_default() {
     let mut base_config = talos_types::TalosConfig::default();
     base_config.llm.provider = "anthropic".to_string();
     base_config.llm.model = "global-model".to_string();
@@ -116,26 +115,14 @@ async fn create_session_uses_agent_model_selection_before_global_default() {
         Arc::new(MockProjectStore::new()),
         base_config,
     );
-    let mut params = create_session_params(context(), "default", None);
-    params.agent_model_selection = Some(ModelSelection::model_default(ModelRef {
-        provider: "openai".to_string(),
-        id: "agent-model".to_string(),
-    }));
-
     let session = service
-        .create_session(params)
+        .create_session(create_session_params(context(), "default", None))
         .await
         .expect("session should be created");
 
-    assert_eq!(session.config.llm.provider, "openai");
-    assert_eq!(session.config.llm.model, "agent-model");
-    assert_eq!(
-        session.conf.model_selection,
-        Some(ModelSelection::model_default(ModelRef {
-            provider: "openai".to_string(),
-            id: "agent-model".to_string(),
-        }))
-    );
+    assert_eq!(session.config.llm.provider, "anthropic");
+    assert_eq!(session.config.llm.model, "global-model");
+    assert_eq!(session.conf.model_selection, None);
 }
 
 #[tokio::test]

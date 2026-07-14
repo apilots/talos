@@ -9,7 +9,6 @@ pub struct CreateSessionParams {
     pub context: TalosContext,
     pub target_agent: String,
     pub model_selection: Option<ModelSelection>,
-    pub agent_model_selection: Option<ModelSelection>,
     pub conf: Option<SessionConf>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,

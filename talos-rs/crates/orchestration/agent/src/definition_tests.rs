@@ -2,14 +2,13 @@ use std::sync::Arc;
 
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKernelConfig, AgentKind as ConfigAgentKind,
-    AgentRuntimeConfig, ModelRefConfig, ModelSelectionConfig, ReasoningEffort,
-    ReasoningSelectionConfig,
+    AgentRuntimeConfig,
 };
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ReasoningOutput, Usage,
 };
 use talos_tools::ToolRegistry;
-use talos_types::{LlmReasoningEffort, ModelRef, ModelSelection, ReasoningSelection};
+use talos_types::{ModelRef, ModelSelection};
 
 use super::*;
 use crate::{empty_skill_roots_resolver, AgentHarness};
@@ -65,15 +64,6 @@ fn default_model_selection() -> ModelSelection {
 fn loader_builds_synthesized_default_definition() {
     let config = AgentConfig {
         name: "Talos".to_string(),
-        model_selection: Some(ModelSelectionConfig {
-            model_ref: ModelRefConfig {
-                provider: "test".to_string(),
-                id: "agent-model".to_string(),
-            },
-            reasoning: ReasoningSelectionConfig::Effort {
-                level: ReasoningEffort::High,
-            },
-        }),
         kernel: AgentKernelConfig {
             default_workspace_id: "workspace-default".to_string(),
             ..Default::default()
@@ -93,22 +83,7 @@ fn loader_builds_synthesized_default_definition() {
         definition.default_workspace_id.as_deref(),
         Some("workspace-default")
     );
-    assert_eq!(
-        definition.model_selection,
-        ModelSelection {
-            model_ref: ModelRef {
-                provider: "test".to_string(),
-                id: "agent-model".to_string(),
-            },
-            reasoning: ReasoningSelection::Effort {
-                level: LlmReasoningEffort::High,
-            },
-        }
-    );
-    assert_eq!(
-        definition.model_selection_override,
-        Some(definition.model_selection.clone())
-    );
+    assert_eq!(definition.model_selection, default_model_selection());
 }
 
 #[test]
@@ -126,7 +101,6 @@ fn loader_resolves_explicit_agent_definition() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_selection: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel { kernel }),
         }],
         ..Default::default()
@@ -145,7 +119,6 @@ fn loader_resolves_explicit_agent_definition() {
         Some("base-workspace")
     );
     assert_eq!(definition.model_selection, default_model_selection());
-    assert_eq!(definition.model_selection_override, None);
 }
 
 #[test]
@@ -159,7 +132,6 @@ fn loader_rejects_duplicate_agent_ids() {
                 enabled: true,
                 description: None,
                 default_workspace_id: None,
-                model_selection: None,
                 runtime_config: None,
             },
             AgentDefinitionConfig {
@@ -169,7 +141,6 @@ fn loader_rejects_duplicate_agent_ids() {
                 enabled: true,
                 description: None,
                 default_workspace_id: None,
-                model_selection: None,
                 runtime_config: None,
             },
         ],
@@ -192,7 +163,6 @@ fn loader_rejects_kind_runtime_mismatch() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_selection: None,
             runtime_config: None,
         }],
         ..Default::default()
@@ -214,7 +184,6 @@ fn factory_rejects_disabled_definition() {
             enabled: false,
             description: None,
             default_workspace_id: None,
-            model_selection: None,
             runtime_config: None,
         }],
         ..Default::default()

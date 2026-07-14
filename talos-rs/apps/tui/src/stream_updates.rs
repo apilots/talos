@@ -46,7 +46,7 @@ impl TuiApp {
 
         match update {
             CommandUpdate::ModelsLoaded(result) => match result {
-                Ok(models) => match self.apply_model_catalog(models) {
+                Ok(catalog) => match self.apply_model_catalog(catalog) {
                     Ok(()) => {
                         self.push_system_notice(format!(
                             "Available models: {}",

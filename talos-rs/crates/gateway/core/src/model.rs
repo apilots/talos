@@ -10,9 +10,6 @@ impl ServiceGateway {
         actor: &Actor,
         _request: ModelListRequest,
     ) -> TalosResult<ModelListResponse> {
-        self.service
-            .list_models(actor)
-            .await
-            .map(|models| ModelListResponse { models })
+        self.service.list_models(actor).await
     }
 }

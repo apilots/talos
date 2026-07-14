@@ -65,8 +65,6 @@ pub struct AgentHarnessImpl {
     pub llm_provider_router: Arc<dyn LlmProviderRouter>,
     /// Default model and reasoning policy for this Harness.
     pub model_selection: ModelSelection,
-    /// Agent-specific selection override applied to new product sessions.
-    pub model_selection_override: Option<ModelSelection>,
     /// Memory store used by current Kernel-backed behavior.
     pub memory_store: Arc<MemoryStore>,
     /// Tool registry shared by Harness and runtime execution.
@@ -90,7 +88,6 @@ pub(crate) struct AgentHarnessParams {
     pub(crate) description: String,
     pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
     pub(crate) model_selection: ModelSelection,
-    pub(crate) model_selection_override: Option<ModelSelection>,
     pub(crate) tool_registry: Arc<ToolRegistry>,
     pub(crate) kernel_config: AgentKernelConfig,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
@@ -112,8 +109,7 @@ impl AgentHarnessImpl {
             name,
             description,
             llm_provider_router,
-            model_selection: model_selection.clone(),
-            model_selection_override: Some(model_selection),
+            model_selection,
             tool_registry,
             kernel_config,
             skill_roots_resolver: empty_skill_roots_resolver(),
@@ -128,7 +124,6 @@ impl AgentHarnessImpl {
             description,
             llm_provider_router,
             model_selection,
-            model_selection_override,
             tool_registry,
             kernel_config,
             skill_roots_resolver,
@@ -146,7 +141,6 @@ impl AgentHarnessImpl {
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
             model_selection: model_selection.clone(),
-            model_selection_override,
             memory_store,
             tool_registry: tool_registry.clone(),
             kernel_config: kernel_config.clone(),
@@ -445,10 +439,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
 impl AgentHarness for AgentHarnessImpl {
     fn id(&self) -> &str {
         &self.id
-    }
-
-    fn default_model_selection(&self) -> Option<ModelSelection> {
-        self.model_selection_override.clone()
     }
 
     fn descriptor(&self) -> AgentDescriptor {

@@ -8,8 +8,10 @@ pub type TalosConfig = talos_config::Config;
 pub struct ModelListRequest {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelListResponse {
     pub models: Vec<ModelInfo>,
+    pub default_model_selection: ModelSelection,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

@@ -194,7 +194,6 @@ async fn application_runtime_registers_configured_default_agent() {
         enabled: true,
         description: Some("Review agent".to_string()),
         default_workspace_id: Some("default".to_string()),
-        model_selection: None,
         runtime_config: Some(AgentRuntimeConfig::Kernel {
             kernel: config.agent.kernel.clone(),
         }),
@@ -228,7 +227,6 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: false,
             description: None,
             default_workspace_id: None,
-            model_selection: None,
             runtime_config: None,
         },
         AgentDefinitionConfig {
@@ -238,7 +236,6 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             enabled: true,
             description: None,
             default_workspace_id: None,
-            model_selection: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel {
                 kernel: config.agent.kernel.clone(),
             }),

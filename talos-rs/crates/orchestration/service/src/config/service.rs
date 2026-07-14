@@ -5,7 +5,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_types::{
     resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
     ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest,
-    ConfigUpdateResponse, ConfigValue, ModelInfo, ModelSelection, ReasoningSelection,
+    ConfigUpdateResponse, ConfigValue, ModelInfo, ModelListResponse, ModelRef, ModelSelection,
+    ReasoningSelection,
 };
 use tokio::sync::RwLock;
 
@@ -35,8 +36,15 @@ impl ConfigService {
         }
     }
 
-    pub async fn list_models(&self) -> Vec<ModelInfo> {
-        self.models.read().await.clone()
+    pub async fn list_models(&self) -> TalosResult<ModelListResponse> {
+        let llm = self.llm_config_service.get()?;
+        Ok(ModelListResponse {
+            models: self.models.read().await.clone(),
+            default_model_selection: ModelSelection::model_default(ModelRef {
+                provider: llm.provider,
+                id: llm.model,
+            }),
+        })
     }
 
     pub fn validate_model_selection_supported(

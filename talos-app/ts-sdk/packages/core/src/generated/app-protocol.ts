@@ -178,7 +178,7 @@ export type EventUnsubscribeResponse = { subscription_id: string, unsubscribed: 
 
 export type ModelListRequest = Record<string, never>;
 
-export type ModelListResponse = { models: Array<ModelInfo>, };
+export type ModelListResponse = { models: Array<ModelInfo>, defaultModelSelection: ModelSelection, };
 
 export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, };
 

@@ -21,6 +21,24 @@ fn test_command_suggestions_expose_sessions_without_history_alias() {
     assert!(!commands.contains(&"/history".to_string()));
 }
 
+#[test]
+fn test_model_catalog_uses_explicit_default_instead_of_first_entry() {
+    let mut app = create_embedded_app();
+    let first = mock_model_info("deepseek-v4-flash", 128_000);
+    let default = mock_model_info("qwen3.6-flash", 128_000);
+
+    app.apply_model_catalog(talos_sdk::ModelListResponse {
+        models: vec![first, default],
+        default_model_selection: talos_sdk::ModelSelection::model_default(talos_sdk::ModelRef {
+            provider: "mock".to_string(),
+            id: "qwen3.6-flash".to_string(),
+        }),
+    })
+    .unwrap();
+
+    assert_eq!(app.current_model, "qwen3.6-flash");
+}
+
 #[tokio::test]
 async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step() {
     let mut app = create_embedded_app();

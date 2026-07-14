@@ -88,7 +88,7 @@ async fn resolve_cli_model_ref(
     client: &dyn TerminalGatewayClient,
     model_id: &str,
 ) -> Result<ModelRef, Box<dyn std::error::Error>> {
-    let models = client.list_models().await?;
+    let models = client.list_models().await?.models;
     models
         .iter()
         .find(|model| model.id == model_id)
@@ -109,7 +109,7 @@ async fn execute_models_command(
     client: Arc<dyn TerminalGatewayClient>,
     cmd: ModelsCmd,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let models = client.list_models().await?;
+    let models = client.list_models().await?.models;
     if cmd.format == "json" {
         println!("{}", serde_json::to_string_pretty(&models)?);
     } else {
@@ -162,7 +162,7 @@ async fn execute_status_command(
     client: Arc<dyn TerminalGatewayClient>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let sessions = client.list_sessions().await?;
-    let models = client.list_models().await?;
+    let models = client.list_models().await?.models;
     println!("Status: Talos runtime accessible");
     println!("Active sessions: {}", sessions.len());
     println!("Available models: {}", models.len());

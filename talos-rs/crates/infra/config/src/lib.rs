@@ -38,8 +38,7 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
-    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, ModelRefConfig,
-    ModelSelectionConfig, PlannerMode, ReasoningSelectionConfig,
+    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, PlannerMode,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};

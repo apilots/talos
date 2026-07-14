@@ -2,19 +2,19 @@ use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
     AuthSessionReadRequest, AuthSessionReadResponse, GatewayClient as SdkGatewayClient,
-    InterruptTurnRequest, ModelInfo, ModelListRequest, ModelSelection, RecoverTimelineRequest,
-    SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
-    SessionConf, SessionGetRequest, SessionHistoryRequest, SessionHistorySnapshot, SessionInfo,
-    SessionListRequest, SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest,
-    StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
-    TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    InterruptTurnRequest, ModelListRequest, ModelListResponse, ModelSelection,
+    RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
+    SessionCompactRequest, SessionConf, SessionGetRequest, SessionHistoryRequest,
+    SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
+    SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
+    TimelineEventEnvelope, TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
 
 #[async_trait]
 pub trait GatewayClient: Send + Sync {
-    async fn list_models(&self) -> TalosResult<Vec<ModelInfo>>;
+    async fn list_models(&self) -> TalosResult<ModelListResponse>;
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse>;
     async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse>;
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
@@ -54,11 +54,9 @@ impl<C> GatewayClient for Mutex<C>
 where
     C: SdkGatewayClient + Send,
 {
-    async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
+    async fn list_models(&self) -> TalosResult<ModelListResponse> {
         let mut client = self.lock().await;
-        SdkGatewayClient::list_models(&mut *client, ModelListRequest {})
-            .await
-            .map(|response| response.models)
+        SdkGatewayClient::list_models(&mut *client, ModelListRequest {}).await
     }
 
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {

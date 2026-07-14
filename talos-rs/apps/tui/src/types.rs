@@ -1,8 +1,6 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
-use talos_sdk::{
-    ModelInfo, SessionHistorySnapshot, SessionInfo, SkillSuggestion, TimelineRecoveryResponse,
-};
+use talos_sdk::{SessionHistorySnapshot, SessionInfo, SkillSuggestion, TimelineRecoveryResponse};
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
@@ -153,7 +151,7 @@ pub(crate) struct StatusLoad {
 // ── Command update ───────────────────────────────────────────────────────────
 
 pub(crate) enum CommandUpdate {
-    ModelsLoaded(TalosResult<Vec<ModelInfo>>),
+    ModelsLoaded(TalosResult<talos_sdk::ModelListResponse>),
     StatusLoaded(Box<TalosResult<StatusLoad>>),
     SessionCompacted(TalosResult<SessionInfo>),
     SessionCleared(TalosResult<SessionInfo>),

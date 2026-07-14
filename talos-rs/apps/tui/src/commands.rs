@@ -290,16 +290,20 @@ impl TuiApp {
             ));
         };
 
-        let models = client.list_models().await?;
-        self.apply_model_catalog(models)?;
+        let catalog = client.list_models().await?;
+        self.apply_model_catalog(catalog)?;
         self.push_right_event(format!("models loaded: {}", self.available_models.len()));
         Ok(())
     }
 
     pub(crate) fn apply_model_catalog(
         &mut self,
-        models: Vec<talos_sdk::ModelInfo>,
+        catalog: talos_sdk::ModelListResponse,
     ) -> TalosResult<()> {
+        let talos_sdk::ModelListResponse {
+            models,
+            default_model_selection,
+        } = catalog;
         let ids = models
             .iter()
             .map(|model| model.id.clone())
@@ -310,6 +314,20 @@ impl TuiApp {
                 "gateway returned empty model list".to_string(),
             ));
         }
+        let default_model = models
+            .iter()
+            .find(|model| {
+                model.provider == default_model_selection.model_ref.provider
+                    && model.id == default_model_selection.model_ref.id
+            })
+            .ok_or_else(|| {
+                TalosError::ClientError(format!(
+                    "configured default model '{}:{}' is missing from the gateway model catalog",
+                    default_model_selection.model_ref.provider,
+                    default_model_selection.model_ref.id
+                ))
+            })?;
+        let default_model_id = default_model.id.clone();
 
         let current_model_retained = ids.iter().any(|model| model == &self.current_model);
         let reasoning_effort_override = self.reasoning_effort_override;
@@ -318,7 +336,7 @@ impl TuiApp {
         if current_model_retained {
             self.set_reasoning_effort_override(reasoning_effort_override);
         } else {
-            self.current_model = self.available_models[0].clone();
+            self.current_model = default_model_id;
             self.use_model_default_reasoning();
         }
         Ok(())

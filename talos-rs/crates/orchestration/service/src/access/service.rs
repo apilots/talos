@@ -66,18 +66,12 @@ impl ResourceAccessService {
             self.ensure_project_access(actor, project_id_ref).await?;
         }
         let target_agent = self.resolve_target_agent(&context).await?;
-        let agent_model_selection = if params.model_selection.is_none() {
-            self.resolve_target_agent_model_selection(&context).await?
-        } else {
-            None
-        };
         self.sessions
             .create_session(CreateSessionParams {
                 session_id: Some(params.session_id),
                 context,
                 target_agent,
                 model_selection: params.model_selection,
-                agent_model_selection,
                 conf: None,
                 workspace_id: params.workspace_id,
                 project_id: params.project_id,
@@ -341,15 +335,6 @@ impl ResourceAccessService {
         context: &talos_types::talos::TalosContext,
     ) -> TalosResult<String> {
         self.session_runtime.resolve_target_agent(context).await
-    }
-
-    async fn resolve_target_agent_model_selection(
-        &self,
-        context: &talos_types::talos::TalosContext,
-    ) -> TalosResult<Option<ModelSelection>> {
-        self.session_runtime
-            .resolve_target_agent_model_selection(context)
-            .await
     }
 
     async fn invalidate_cached_session(&self, session_id: &str) -> TalosResult<()> {

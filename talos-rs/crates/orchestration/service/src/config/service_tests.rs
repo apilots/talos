@@ -84,6 +84,25 @@ fn get_llm_allows_regular_users() {
     assert_eq!(llm.provider, "anthropic");
 }
 
+#[tokio::test]
+async fn list_models_returns_explicit_configured_default() {
+    let service = test_service();
+
+    let response = service
+        .list_models()
+        .await
+        .expect("model catalog should load");
+
+    assert_eq!(
+        response.default_model_selection,
+        ModelSelection::model_default(ModelRef {
+            provider: "anthropic".to_string(),
+            id: "claude-3-5-sonnet".to_string(),
+        })
+    );
+    assert_eq!(response.models.len(), 1);
+}
+
 #[test]
 fn update_llm_invokes_reload_hook() {
     let calls = Arc::new(AtomicUsize::new(0));

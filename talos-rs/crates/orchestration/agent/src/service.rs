@@ -383,13 +383,6 @@ pub fn empty_skill_roots_resolver() -> Arc<dyn SkillRootsResolver> {
 pub trait AgentHarness: Send + Sync {
     /// Stable Agent identity registered in Coordinator.
     fn id(&self) -> &str;
-    /// Default model and reasoning policy selected for this Agent, when owned by the Harness.
-    ///
-    /// Coordinators use this only to initialize new product sessions. Runtime
-    /// execution must still read the resolved model from AgentRunConfig.
-    fn default_model_selection(&self) -> Option<ModelSelection> {
-        None
-    }
     /// Descriptor used for routing, validation, and management surfaces.
     fn descriptor(&self) -> AgentDescriptor {
         AgentDescriptor {

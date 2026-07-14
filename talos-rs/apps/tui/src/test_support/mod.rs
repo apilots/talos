@@ -40,6 +40,7 @@ impl TestTuiAppExt for TuiApp {
 #[derive(Default)]
 pub(crate) struct MockGatewayState {
     pub(crate) models: Vec<ModelInfo>,
+    pub(crate) default_model: String,
     pub(crate) session_id: String,
     pub(crate) current_model: String,
     pub(crate) current_reasoning: talos_sdk::ReasoningSelection,
@@ -675,6 +676,7 @@ impl MockGatewayClient {
                     mock_model_info("qwen-plus", 128_000),
                     mock_model_info("gpt-5.3 medium", 128_000),
                 ],
+                default_model: "qwen-plus".to_string(),
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
                 current_reasoning: talos_sdk::ReasoningSelection::ModelDefault,
@@ -735,7 +737,7 @@ impl MockGatewayClient {
 
 #[async_trait]
 impl GatewayClient for MockGatewayClient {
-    async fn list_models(&self) -> TalosResult<Vec<ModelInfo>> {
+    async fn list_models(&self) -> TalosResult<talos_sdk::ModelListResponse> {
         let mut state = self.state.lock().unwrap();
         if state.list_models_failures_remaining > 0 {
             state.list_models_failures_remaining -= 1;
@@ -743,7 +745,15 @@ impl GatewayClient for MockGatewayClient {
                 "mock list_models failure".to_string(),
             ));
         }
-        Ok(state.models.clone())
+        Ok(talos_sdk::ModelListResponse {
+            models: state.models.clone(),
+            default_model_selection: talos_sdk::ModelSelection::model_default(
+                talos_sdk::ModelRef {
+                    provider: "mock".to_string(),
+                    id: state.default_model.clone(),
+                },
+            ),
+        })
     }
 
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {

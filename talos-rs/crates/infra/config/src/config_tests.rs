@@ -26,13 +26,6 @@ agent:
       enabled: true
       description: Review-focused agent
       default_workspace_id: default
-      model_selection:
-        model_ref:
-          provider: ollama
-          id: qwen-plus
-        reasoning:
-          type: effort
-          level: high
       runtime_config:
         type: kernel
         kernel:
@@ -58,18 +51,6 @@ llm:
     assert_eq!(definition.name, "Reviewer");
     assert_eq!(definition.kind, AgentKind::Kernel);
     assert_eq!(definition.default_workspace_id.as_deref(), Some("default"));
-    assert_eq!(
-        definition.model_selection,
-        Some(ModelSelectionConfig {
-            model_ref: ModelRefConfig {
-                provider: "ollama".to_string(),
-                id: "qwen-plus".to_string(),
-            },
-            reasoning: ReasoningSelectionConfig::Effort {
-                level: ReasoningEffort::High,
-            },
-        })
-    );
     match definition
         .runtime_config
         .as_ref()
