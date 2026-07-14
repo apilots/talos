@@ -172,6 +172,7 @@ prepare_talos_home() {
   local using_default_home=0
   local test_home="${TALOS_HOME:-}"
   local config_src="${TALOS_TEST_CONFIG_TEMPLATE:-${REPO_ROOT}/conf/talos-dev.yaml}"
+  local env_src="${TALOS_TEST_ENV_TEMPLATE:-${REPO_ROOT}/.env}"
 
   if [[ -z "${test_home}" ]]; then
     using_default_home=1
@@ -189,8 +190,15 @@ prepare_talos_home() {
   fi
 
   local config_dst="${test_home}/conf/talos.yaml"
+  local env_dst="${test_home}/.env"
   mkdir -p "${test_home}/conf" "${test_home}/logs" "${test_home}/data"
   cp "${config_src}" "${config_dst}"
+  if [[ -f "${env_src}" ]]; then
+    cp "${env_src}" "${env_dst}"
+  else
+    : >"${env_dst}"
+  fi
+  chmod 600 "${env_dst}"
   apply_test_config_overrides "${config_dst}"
 }
 
@@ -221,6 +229,36 @@ def replace_section_value(content: str, section: str, key: str, value: str) -> s
             lines[index] = f"  {key}: {value}{newline}"
             return "".join(lines)
     raise SystemExit(f"missing config key: {section}.{key}")
+
+def replace_nested_section_value(
+    content: str,
+    parent: str,
+    section: str,
+    key: str,
+    value: str,
+) -> str:
+    lines = content.splitlines(keepends=True)
+    in_parent = False
+    in_section = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip(" "))
+        if indent == 0 and stripped == f"{parent}:":
+            in_parent = True
+            in_section = False
+            continue
+        if in_parent and stripped and indent == 0:
+            break
+        if in_parent and indent == 4 and stripped == f"{section}:":
+            in_section = True
+            continue
+        if in_section and stripped and indent <= 4:
+            break
+        if in_section and line.startswith(f"      {key}:"):
+            newline = "\n" if line.endswith("\n") else ""
+            lines[index] = f"      {key}: {value}{newline}"
+            return "".join(lines)
+    raise SystemExit(f"missing config key: {parent}.{section}.{key}")
 
 def add_e2e_skill_root(content: str, talos_home: Path) -> str:
     root_path = str(talos_home / "agents-skills")
@@ -312,6 +350,16 @@ else:
 gateway_port = os.environ.get("TALOS_TEST_PORT")
 if gateway_port:
     text = replace_section_value(text, "gateway", "port", gateway_port)
+
+compaction_threshold_bytes = os.environ.get("TALOS_TEST_COMPACTION_THRESHOLD_BYTES")
+if compaction_threshold_bytes:
+    text = replace_nested_section_value(
+        text,
+        "agent",
+        "memory",
+        "compaction_threshold_bytes",
+        compaction_threshold_bytes,
+    )
 
 text = add_e2e_skill_root(text, talos_home)
 

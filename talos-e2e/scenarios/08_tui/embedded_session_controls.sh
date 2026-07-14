@@ -7,7 +7,6 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/tui.sh"
 
-load_env
 require_command python3
 require_command mktemp
 require_command tmux
@@ -15,6 +14,7 @@ build_binaries
 
 TEST_TALOS_HOME="$(make_e2e_temp_dir "talos-tui-session-controls-home")"
 export TALOS_HOME="${TEST_TALOS_HOME}"
+export TALOS_TEST_COMPACTION_THRESHOLD_BYTES=1024
 prepare_talos_home
 
 WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
@@ -179,7 +179,8 @@ fi
 echo "CASE embedded_tui_session_controls_bootstrap PASS"
 
 message_marker="TUI_SESSION_CONTROLS_${RANDOM}_$$"
-tui_send_input "${TUI_SESSION_NAME}" "Remember marker ${message_marker} for this session, then reply briefly without calling tools."
+printf -v compaction_padding '%02048d' 0
+tui_send_input "${TUI_SESSION_NAME}" "Remember marker ${message_marker} and context ${compaction_padding} for this session, then reply briefly without calling tools."
 
 session_id="$(wait_for_session_id || true)"
 if [[ -z "${session_id}" ]]; then

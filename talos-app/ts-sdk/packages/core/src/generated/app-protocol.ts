@@ -506,7 +506,7 @@ export type MemorySearchRequest = { query: string, limit?: number, date_from?: s
 
 export type UserRole = "user" | "admin";
 
-export type UserType = "Free" | "Plus" | "Pro" | "Max";
+export type UserType = "free" | "plus" | "pro" | "max";
 
 export type UserDto = { user_id: string, username: string, email: string | null, role: UserRole, type: UserType, disabled: boolean, created_at: number, updated_at: number, };
 

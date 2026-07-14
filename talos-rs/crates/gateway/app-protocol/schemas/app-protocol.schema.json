@@ -5913,10 +5913,10 @@
     },
     "UserType": {
       "enum": [
-        "Free",
-        "Plus",
-        "Pro",
-        "Max"
+        "free",
+        "plus",
+        "pro",
+        "max"
       ],
       "type": "string"
     },

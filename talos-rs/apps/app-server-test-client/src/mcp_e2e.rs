@@ -479,18 +479,35 @@ fn extract_story_lines_from_latest_snapshot() -> Result<Vec<String>> {
 
 fn extract_story_lines_from_snapshot(contents: &str) -> Vec<String> {
     let mut stories = Vec::new();
+    let mut expects_story_link = false;
     for line in contents.lines() {
-        let Some(index) = line.find(". upvote ") else {
+        let trimmed = line.trim();
+        if snapshot_link_title(trimmed).is_some_and(|title| title == "upvote") {
+            expects_story_link = true;
             continue;
-        };
-        let mut title = &line[index + ". upvote ".len()..];
-        if let Some((value, _)) = title.split_once("\" [ref=") {
-            title = value;
-        } else if let Some((value, _)) = title.split_once("' [ref=") {
-            title = value;
         }
-        let title = trim_hacker_news_domain(title.trim().trim_matches('"').trim_matches('\''))
-            .replace("''", "'");
+
+        let title = if expects_story_link {
+            let Some(title) = snapshot_link_title(trimmed) else {
+                continue;
+            };
+            expects_story_link = false;
+            title
+        } else {
+            let Some(index) = line.find(". upvote ") else {
+                continue;
+            };
+            let title = &line[index + ". upvote ".len()..];
+            title
+                .split_once("\" [ref=")
+                .or_else(|| title.split_once("' [ref="))
+                .map(|(value, _)| value)
+                .unwrap_or(title)
+                .trim_matches('"')
+                .trim_matches('\'')
+                .replace("''", "'")
+        };
+        let title = trim_hacker_news_domain(title.trim()).to_string();
         if is_story_title(&title) && !is_domain_only(&title) && !stories.contains(&title) {
             stories.push(title);
         }
@@ -499,6 +516,20 @@ fn extract_story_lines_from_snapshot(contents: &str) -> Vec<String> {
         }
     }
     stories
+}
+
+fn snapshot_link_title(line: &str) -> Option<String> {
+    let value = line.strip_prefix("- link ")?;
+    if let Some(value) = value.strip_prefix('"') {
+        return value
+            .split_once("\" [ref=")
+            .map(|(title, _)| title.to_string());
+    }
+    value.strip_prefix('\'').and_then(|value| {
+        value
+            .split_once("' [ref=")
+            .map(|(title, _)| title.replace("''", "'"))
+    })
 }
 
 fn expanded_result_lines(text: &str) -> Vec<String> {
@@ -700,3 +731,7 @@ fn clean_file(path: &Path) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "mcp_e2e_tests.rs"]
+mod tests;

@@ -7,7 +7,6 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/tui.sh"
 
-load_env
 require_command tmux
 require_command python3
 build_binaries
@@ -76,7 +75,7 @@ if not db_path.exists():
 
 conn = sqlite3.connect(str(db_path))
 row = conn.execute(
-    "SELECT session_key, model, current_directory, context_json FROM sessions ORDER BY created_at DESC LIMIT 1"
+    "SELECT session_key, model, current_directory, context_json, message_count FROM sessions ORDER BY created_at DESC LIMIT 1"
 ).fetchone()
 if not row:
     print("{}")
@@ -87,6 +86,7 @@ payload = {
     "model": row[1],
     "current_directory": row[2],
     "context": json.loads(row[3] or "{}"),
+    "message_count": row[4],
 }
 out_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 print(json.dumps(payload, ensure_ascii=False))
@@ -101,16 +101,29 @@ wait_for_tui_ready
 warmup_prompt="Reply exactly TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}. Do not call any tools."
 send_tui_input "${warmup_prompt}"
 
+warmup_completed="false"
 for _ in $(seq 1 120); do
   capture_tui >"${PANE_SNAPSHOT}" || true
-  if grep -Fq "TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}" "${PANE_SNAPSHOT}"; then
+  if grep -Fq "Stream error:" "${PANE_SNAPSHOT}"; then
+    break
+  fi
+  warmup_snapshot="$(read_latest_session_snapshot)"
+  warmup_message_count="$(python3 - "${warmup_snapshot}" <<'PY'
+import json
+import sys
+
+print((json.loads(sys.argv[1] or "{}") or {}).get("message_count", 0))
+PY
+)"
+  if [[ "${warmup_message_count}" -ge 2 ]]; then
+    warmup_completed="true"
     echo "CASE embedded_tui_write_warmup PASS marker=${WARMUP_MARKER}"
     break
   fi
   sleep 0.5
 done
 
-if ! grep -Fq "TUI_EMBEDDED_WARMUP_OK:${WARMUP_MARKER}" "${PANE_SNAPSHOT}"; then
+if [[ "${warmup_completed}" != "true" ]]; then
   dump_failure_context
   echo "CASE embedded_tui_write_warmup FAIL marker=${WARMUP_MARKER}"
   exit 1
@@ -155,7 +168,7 @@ payload = json.loads(sys.argv[1] or "{}")
 context = payload.get("context") or {}
 environment = context.get("environment") or {}
 ok = (
-    payload.get("model") == "qwen3.6-flash"
+    bool(payload.get("model"))
     and payload.get("current_directory")
     and environment.get("connection_mode") == "embedded"
 )

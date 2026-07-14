@@ -7,7 +7,6 @@ source "${SCRIPT_DIR}/../../scripts/common.sh"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/tui.sh"
 
-load_env
 require_command python3
 require_command mktemp
 require_command tmux

@@ -6,7 +6,6 @@ export TALOS_TEST_PORT="${TALOS_AUTH_E2E_TALOS_PORT:-18081}"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/common.sh"
 
-load_env
 require_command cargo
 require_command curl
 require_command python3

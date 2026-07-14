@@ -35,6 +35,7 @@ impl UserRole {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum UserType {
     #[default]
     Free,
