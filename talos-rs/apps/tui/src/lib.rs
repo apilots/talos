@@ -130,7 +130,6 @@ pub struct TuiApp {
     pub(crate) left_panel_area: Option<Rect>,
     pub(crate) input_area: Option<Rect>,
     pub(crate) render_runtime: RenderRuntimeEngine,
-    pub(crate) suppress_transcript_for_terminal_flush: bool,
     pub(crate) terminal_footer_synced_for: Option<TranscriptBlockId>,
 }
 

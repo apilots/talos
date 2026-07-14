@@ -118,11 +118,15 @@ impl RenderRuntimeEngine {
         item_id: &str,
         phase: TalosTimelinePhase,
     ) {
-        apply_assistant_text_committed(&mut self.live, item_id, phase);
+        let finalized = apply_assistant_text_committed(&mut self.live, item_id, phase);
         if let Some(item) = self.timeline_items.get_mut(item_id) {
             item.phase = phase;
         }
-        self.runtime.handle_event(TuiRuntimeEvent::Stream);
+        if let Some(block) = finalized {
+            self.push_finalized(block);
+        } else {
+            self.runtime.handle_event(TuiRuntimeEvent::Stream);
+        }
     }
 
     pub(crate) fn apply_agent_event_payload(&mut self, payload: AgentEventPayload) {
@@ -445,6 +449,39 @@ mod tests {
         engine.apply_timeline_item_completed(&item, None);
 
         assert_eq!(pending_plain_text(&engine), vec!["hello"]);
+    }
+
+    #[test]
+    fn completed_unknown_text_waits_for_authoritative_phase_commit() {
+        let mut engine = RenderRuntimeEngine::default();
+        let item = timeline_text_item(TalosTimelinePhase::Unknown);
+
+        engine.apply_timeline_item_started(&item);
+        engine.apply_timeline_item_delta(
+            &item,
+            TalosTimelineDelta::Text {
+                text: "working update".to_string(),
+            },
+        );
+        engine.apply_timeline_item_completed(&item, None);
+
+        assert!(engine.pending_terminal_projection().is_empty());
+        assert_eq!(
+            engine
+                .live_projection_lines()
+                .iter()
+                .map(StyledLine::plain_text)
+                .collect::<Vec<_>>(),
+            vec!["working update".to_string()]
+        );
+
+        engine.apply_assistant_text_committed(&item.item_id, TalosTimelinePhase::Commentary);
+
+        let pending = engine.pending_terminal_projection();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].kind, TranscriptBlockKind::Commentary);
+        assert_eq!(pending[0].lines[0].plain_text(), "working update");
+        assert!(engine.live_projection_lines().is_empty());
     }
 
     #[test]

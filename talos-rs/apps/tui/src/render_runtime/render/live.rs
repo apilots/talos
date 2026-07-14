@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::tool_projection;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
-use talos_sdk::TalosContentItem;
+use talos_sdk::{TalosContentItem, TalosToolProgressKind};
+
+const TOOL_PROGRESS_BUFFER_LIMIT: usize = 4096;
 
 /// Live text role that can still receive deltas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,6 +31,14 @@ impl LiveTextKind {
 struct LiveTextBlock {
     kind: LiveTextKind,
     text: String,
+    completed: bool,
+    phase_resolved: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LiveTextPhaseResolution {
+    Pending,
+    Resolved,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +46,54 @@ struct LiveToolBlock {
     call_id: String,
     name: String,
     arguments: String,
-    progress: Vec<String>,
+    progress: LiveToolProgress,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct LiveToolProgress {
+    status: String,
+    stdout: String,
+    stderr: String,
+    latest_kind: Option<TalosToolProgressKind>,
+}
+
+impl LiveToolProgress {
+    fn append(&mut self, kind: TalosToolProgressKind, text_delta: &str) {
+        if text_delta.is_empty() {
+            return;
+        }
+        self.latest_kind = Some(kind);
+        let buffer = match kind {
+            TalosToolProgressKind::Status => {
+                self.status.clear();
+                &mut self.status
+            }
+            TalosToolProgressKind::Stdout => &mut self.stdout,
+            TalosToolProgressKind::Stderr => &mut self.stderr,
+        };
+        buffer.push_str(text_delta);
+        if buffer.len() > TOOL_PROGRESS_BUFFER_LIMIT {
+            let mut start = buffer.len().saturating_sub(TOOL_PROGRESS_BUFFER_LIMIT);
+            while !buffer.is_char_boundary(start) {
+                start += 1;
+            }
+            buffer.drain(..start);
+        }
+    }
+
+    fn latest_preview(&self) -> Option<String> {
+        let buffer = match self.latest_kind? {
+            TalosToolProgressKind::Status => &self.status,
+            TalosToolProgressKind::Stdout => &self.stdout,
+            TalosToolProgressKind::Stderr => &self.stderr,
+        };
+        buffer
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(tool_projection::compact_tool_preview)
+    }
 }
 
 /// Mutable live projection block consumed by the TUI viewport.
@@ -61,13 +118,38 @@ impl LiveReducer {
         kind: LiveTextKind,
         text: impl AsRef<str>,
     ) {
+        self.start_text_with_phase(item_id, kind, text, LiveTextPhaseResolution::Resolved);
+    }
+
+    pub(crate) fn start_unresolved_text(
+        &mut self,
+        item_id: impl Into<String>,
+        kind: LiveTextKind,
+        text: impl AsRef<str>,
+    ) {
+        self.start_text_with_phase(item_id, kind, text, LiveTextPhaseResolution::Pending);
+    }
+
+    fn start_text_with_phase(
+        &mut self,
+        item_id: impl Into<String>,
+        kind: LiveTextKind,
+        text: impl AsRef<str>,
+        phase_resolution: LiveTextPhaseResolution,
+    ) {
         let item_id = item_id.into();
         self.track_item_order(&item_id);
+        let phase_resolved = phase_resolution == LiveTextPhaseResolution::Resolved;
         let block = self.text_blocks.entry(item_id).or_insert(LiveTextBlock {
             kind,
             text: String::new(),
+            completed: false,
+            phase_resolved,
         });
-        block.kind = kind;
+        if phase_resolved || !block.phase_resolved {
+            block.kind = kind;
+        }
+        block.phase_resolved |= phase_resolved;
         block.text.push_str(text.as_ref());
     }
 
@@ -80,27 +162,29 @@ impl LiveReducer {
         }
     }
 
-    pub(crate) fn set_text(
-        &mut self,
-        item_id: impl Into<String>,
-        kind: LiveTextKind,
-        text: impl Into<String>,
-    ) {
-        let item_id = item_id.into();
-        self.track_item_order(&item_id);
-        self.text_blocks.insert(
-            item_id,
-            LiveTextBlock {
-                kind,
-                text: text.into(),
-            },
-        );
+    pub(crate) fn replace_text(&mut self, item_id: &str, text: impl Into<String>) {
+        if let Some(block) = self.text_blocks.get_mut(item_id) {
+            block.text = text.into();
+        }
     }
 
-    pub(crate) fn promote_text(&mut self, item_id: &str, kind: LiveTextKind) {
+    pub(crate) fn commit_text(
+        &mut self,
+        item_id: &str,
+        kind: LiveTextKind,
+    ) -> Option<FinalizedTranscriptBlock> {
         if let Some(block) = self.text_blocks.get_mut(item_id) {
             block.kind = kind;
+            block.phase_resolved = true;
         }
+        self.take_text_if_finalized(item_id)
+    }
+
+    pub(crate) fn complete_text(&mut self, item_id: &str) -> Option<FinalizedTranscriptBlock> {
+        if let Some(block) = self.text_blocks.get_mut(item_id) {
+            block.completed = true;
+        }
+        self.take_text_if_finalized(item_id)
     }
 
     pub(crate) fn finalize_text(&mut self, item_id: &str) -> Option<FinalizedTranscriptBlock> {
@@ -114,6 +198,14 @@ impl LiveReducer {
             block.kind.transcript_kind(),
             StyledLine::plain_lines(text),
         ))
+    }
+
+    fn take_text_if_finalized(&mut self, item_id: &str) -> Option<FinalizedTranscriptBlock> {
+        let ready = self
+            .text_blocks
+            .get(item_id)
+            .is_some_and(|block| block.completed && block.phase_resolved);
+        ready.then(|| self.finalize_text(item_id)).flatten()
     }
 
     pub(crate) fn start_tool(
@@ -143,18 +235,19 @@ impl LiveReducer {
                 call_id: call_id.clone(),
                 name: name.clone(),
                 arguments: arguments.clone(),
-                progress: Vec::new(),
+                progress: LiveToolProgress::default(),
             },
         );
     }
 
-    pub(crate) fn append_stable_tool_progress(&mut self, item_id: &str, text: impl Into<String>) {
-        let text = text.into();
-        if text.trim().is_empty() {
-            return;
-        }
+    pub(crate) fn append_tool_progress_delta(
+        &mut self,
+        item_id: &str,
+        kind: TalosToolProgressKind,
+        text_delta: &str,
+    ) {
         if let Some(block) = self.tool_blocks.get_mut(item_id) {
-            block.progress.push(text.clone());
+            block.progress.append(kind, text_delta);
         }
     }
 
@@ -212,11 +305,8 @@ impl LiveReducer {
                     &block.call_id,
                     &block.arguments,
                 )];
-                for progress in &block.progress {
-                    let progress = progress.trim();
-                    if !progress.is_empty() {
-                        tool_lines.push(StyledLine::plain(format!("  ⎿ {progress}")));
-                    }
+                if let Some(progress) = block.progress.latest_preview() {
+                    tool_lines.push(StyledLine::plain(format!("  ⎿ {progress}")));
                 }
                 lines.push(LiveProjectionBlock {
                     kind: TranscriptBlockKind::Tool,
@@ -250,7 +340,7 @@ impl LiveReducer {
 mod tests {
     use super::{LiveReducer, LiveTextKind};
     use crate::render_runtime::transcript::block::TranscriptBlockKind;
-    use talos_sdk::TalosContentItem;
+    use talos_sdk::{TalosContentItem, TalosToolProgressKind};
 
     #[test]
     fn finalizes_text_only_when_item_completed() {
@@ -266,12 +356,14 @@ mod tests {
     }
 
     #[test]
-    fn can_promote_unknown_text_to_final_answer_before_finalizing() {
+    fn finalizes_completed_unknown_text_after_phase_commit() {
         let mut reducer = LiveReducer::default();
-        reducer.start_text("item-1", LiveTextKind::Commentary, "answer");
-        reducer.promote_text("item-1", LiveTextKind::FinalAnswer);
+        reducer.start_unresolved_text("item-1", LiveTextKind::Commentary, "answer");
 
-        let finalized = reducer.finalize_text("item-1").unwrap();
+        assert!(reducer.complete_text("item-1").is_none());
+        let finalized = reducer
+            .commit_text("item-1", LiveTextKind::FinalAnswer)
+            .unwrap();
 
         assert_eq!(finalized.kind, TranscriptBlockKind::FinalAnswer);
     }
@@ -286,7 +378,11 @@ mod tests {
             "Read",
             r#"{"file_path":"/tmp/demo.rs"}"#,
         );
-        reducer.append_stable_tool_progress("tool-1", "Read 12 lines");
+        reducer.append_tool_progress_delta(
+            "tool-1",
+            TalosToolProgressKind::Status,
+            "Read 12 lines",
+        );
         let completed = reducer
             .complete_tool(
                 "tool-1",
@@ -361,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn interactive_projection_includes_active_tool_snapshot() {
+    fn interactive_projection_keeps_latest_active_tool_snapshot() {
         let mut reducer = LiveReducer::default();
         reducer.start_tool_with_arguments(
             "tool-1",
@@ -369,7 +465,12 @@ mod tests {
             "Read",
             r#"{"file_path":"/tmp/demo.rs"}"#,
         );
-        reducer.append_stable_tool_progress("tool-1", "Read 12 lines");
+        reducer.append_tool_progress_delta("tool-1", TalosToolProgressKind::Status, "Read 4 lines");
+        reducer.append_tool_progress_delta(
+            "tool-1",
+            TalosToolProgressKind::Status,
+            "Read 12 lines",
+        );
 
         let lines = reducer.interactive_projection_lines();
 

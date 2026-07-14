@@ -45,6 +45,7 @@ impl TuiApp {
         let composer_height = composer::height(self, left_inner.width);
         let transcript_composer_gap_height = self.transcript_composer_gap_height();
         let chat_panel_height = self.inline_chat_panel_height(
+            left_inner.width,
             left_inner.height,
             composer_height,
             transcript_composer_gap_height,
@@ -111,6 +112,7 @@ impl TuiApp {
             let transcript_composer_gap_height = self.transcript_composer_gap_height();
             self.inline_top_gap_height()
                 .saturating_add(self.inline_chat_panel_height(
+                    terminal_width,
                     terminal_height,
                     composer_height,
                     transcript_composer_gap_height,
@@ -160,6 +162,7 @@ impl TuiApp {
 
     fn inline_chat_panel_height(
         &self,
+        terminal_width: u16,
         terminal_height: u16,
         composer_height: u16,
         transcript_composer_gap_height: u16,
@@ -188,14 +191,9 @@ impl TuiApp {
         }
 
         let live_line_count = self
-            .render_runtime
-            .live_projection_lines()
-            .len()
+            .projected_live_chat_line_count(terminal_width)
             .min(u16::MAX as usize) as u16;
-        let working_extra = if self.is_agent_working() { 2 } else { 0 };
-        let target_height = live_line_count
-            .saturating_add(working_extra)
-            .max(MIN_LIVE_CHAT_PANEL_HEIGHT);
+        let target_height = live_line_count.max(MIN_LIVE_CHAT_PANEL_HEIGHT);
         target_height.min(available_height)
     }
 

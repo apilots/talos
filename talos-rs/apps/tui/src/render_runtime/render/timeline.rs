@@ -21,8 +21,12 @@ pub(crate) fn apply_item_started(
             TalosTimelineContent::Text { text },
         ) => text_finalized_block(TranscriptBlockKind::UserInput, text),
         (_, _, TalosTimelineContent::Text { text }) => {
-            if let Some(kind) = live_text_kind(item) {
-                live.start_text(&item.item_id, kind, text);
+            if let Some((kind, phase_resolved)) = live_text_state(item) {
+                if phase_resolved {
+                    live.start_text(&item.item_id, kind, text);
+                } else {
+                    live.start_unresolved_text(&item.item_id, kind, text);
+                }
             }
             Vec::new()
         }
@@ -56,14 +60,21 @@ pub(crate) fn apply_item_delta(
 ) -> Vec<FinalizedTranscriptBlock> {
     match delta {
         TalosTimelineDelta::Text { text } => {
-            if let Some(kind) = live_text_kind(item) {
-                live.start_text(&item.item_id, kind, "");
+            if let Some((kind, phase_resolved)) = live_text_state(item) {
+                if phase_resolved {
+                    live.start_text(&item.item_id, kind, "");
+                } else {
+                    live.start_unresolved_text(&item.item_id, kind, "");
+                }
                 live.append_text(&item.item_id, &text);
             }
             Vec::new()
         }
-        TalosTimelineDelta::ToolProgress { text_delta, .. } => {
-            live.append_stable_tool_progress(&item.item_id, text_delta);
+        TalosTimelineDelta::ToolProgress {
+            progress_kind,
+            text_delta,
+        } => {
+            live.append_tool_progress_delta(&item.item_id, progress_kind, &text_delta);
             Vec::new()
         }
         TalosTimelineDelta::ToolResult { content, is_error } => live
@@ -95,9 +106,13 @@ pub(crate) fn apply_item_completed(
     if let Some(content) = final_content {
         match content {
             TalosTimelineContent::Text { text } => {
-                if let Some(kind) = completed_text_kind(item) {
-                    live.set_text(&item.item_id, kind, text.clone());
-                    return live.finalize_text(&item.item_id).into_iter().collect();
+                if let Some((kind, phase_resolved)) = live_text_state(item) {
+                    if phase_resolved {
+                        live.start_text(&item.item_id, kind, "");
+                    } else {
+                        live.start_unresolved_text(&item.item_id, kind, "");
+                    }
+                    live.replace_text(&item.item_id, text.clone());
                 }
             }
             TalosTimelineContent::ToolCall { result, .. } => {
@@ -117,8 +132,8 @@ pub(crate) fn apply_item_completed(
         }
     }
 
-    if live_text_kind(item).is_some() {
-        return live.finalize_text(&item.item_id).into_iter().collect();
+    if live_text_state(item).is_some() {
+        return live.complete_text(&item.item_id).into_iter().collect();
     }
     Vec::new()
 }
@@ -128,36 +143,33 @@ pub(crate) fn apply_assistant_text_committed(
     live: &mut LiveReducer,
     item_id: &str,
     phase: TalosTimelinePhase,
-) {
-    if phase == TalosTimelinePhase::FinalAnswer {
-        live.promote_text(item_id, LiveTextKind::FinalAnswer);
-    } else if phase == TalosTimelinePhase::Commentary {
-        live.promote_text(item_id, LiveTextKind::Commentary);
+) -> Option<FinalizedTranscriptBlock> {
+    match phase {
+        TalosTimelinePhase::FinalAnswer => live.commit_text(item_id, LiveTextKind::FinalAnswer),
+        TalosTimelinePhase::Commentary => live.commit_text(item_id, LiveTextKind::Commentary),
+        TalosTimelinePhase::Unknown
+        | TalosTimelinePhase::Input
+        | TalosTimelinePhase::Thinking
+        | TalosTimelinePhase::Acting
+        | TalosTimelinePhase::System => None,
     }
 }
 
-fn live_text_kind(item: &TalosTimelineItem) -> Option<LiveTextKind> {
+fn live_text_state(item: &TalosTimelineItem) -> Option<(LiveTextKind, bool)> {
     match (&item.kind, item.phase) {
         (TalosTimelineItemKind::Reasoning, TalosTimelinePhase::Thinking) => {
-            Some(LiveTextKind::Thinking)
+            Some((LiveTextKind::Thinking, true))
         }
         (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::FinalAnswer) => {
-            Some(LiveTextKind::FinalAnswer)
+            Some((LiveTextKind::FinalAnswer, true))
         }
-        (
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::Unknown | TalosTimelinePhase::Commentary,
-        ) => Some(LiveTextKind::Commentary),
-        _ => None,
-    }
-}
-
-fn completed_text_kind(item: &TalosTimelineItem) -> Option<LiveTextKind> {
-    match (&item.kind, item.phase) {
+        (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::Commentary) => {
+            Some((LiveTextKind::Commentary, true))
+        }
         (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::Unknown) => {
-            Some(LiveTextKind::FinalAnswer)
+            Some((LiveTextKind::Commentary, false))
         }
-        _ => live_text_kind(item),
+        _ => None,
     }
 }
 
@@ -242,7 +254,12 @@ mod tests {
             },
         )
         .is_empty());
-        apply_assistant_text_committed(&mut live, &item.item_id, TalosTimelinePhase::FinalAnswer);
+        assert!(apply_assistant_text_committed(
+            &mut live,
+            &item.item_id,
+            TalosTimelinePhase::FinalAnswer
+        )
+        .is_none());
 
         let finalized = apply_item_completed(&mut live, &item, None);
 
@@ -273,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_unknown_assistant_text_defaults_to_final_answer() {
+    fn completed_unknown_assistant_text_waits_for_phase_commit() {
         let mut live = LiveReducer::default();
         let item = text_item(
             TalosTimelineItemKind::AssistantText,
@@ -290,9 +307,16 @@ mod tests {
             }),
         );
 
-        assert_eq!(finalized[0].kind, TranscriptBlockKind::FinalAnswer);
-        assert_eq!(finalized[0].lines[0].plain_text(), "final");
-        assert_eq!(finalized[0].lines[1].plain_text(), "answer");
+        assert!(finalized.is_empty());
+        let finalized = apply_assistant_text_committed(
+            &mut live,
+            &item.item_id,
+            TalosTimelinePhase::FinalAnswer,
+        )
+        .unwrap();
+        assert_eq!(finalized.kind, TranscriptBlockKind::FinalAnswer);
+        assert_eq!(finalized.lines[0].plain_text(), "final");
+        assert_eq!(finalized.lines[1].plain_text(), "answer");
     }
 
     #[test]

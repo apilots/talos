@@ -12,7 +12,7 @@ use ratatui::{
 
 use crate::{
     render::frame::BufferFrame,
-    terminal_surface::{suppress_wide_symbol_placeholder_cells, InlineTerminal},
+    terminal_surface::{suppress_wide_symbol_placeholder_cells, InlineResizeMode, InlineTerminal},
     utils::wrap_line_visual,
 };
 
@@ -44,9 +44,13 @@ impl PrimaryTerminal {
         self.surface.clear_screen()
     }
 
-    pub(crate) fn exit_transient_fullscreen(&mut self, inline_height: u16) -> io::Result<()> {
+    pub(crate) fn exit_transient_fullscreen(
+        &mut self,
+        inline_height: u16,
+        resize_mode: InlineResizeMode,
+    ) -> io::Result<()> {
         self.leave_transient_fullscreen()?;
-        self.surface.sync_inline_height(inline_height)
+        self.surface.sync_inline_height(inline_height, resize_mode)
     }
 
     pub(crate) fn leave_transient_fullscreen(&mut self) -> io::Result<()> {
@@ -133,6 +137,7 @@ mod tests {
 
     use super::TerminalAdapter;
     use crate::render::frame::RenderFrame;
+    use crate::terminal_surface::InlineResizeMode;
 
     #[test]
     fn fullscreen_geometry_restores_the_exact_inline_viewport() {
@@ -196,7 +201,7 @@ mod tests {
             .expect("restore inline surface");
         terminal
             .surface
-            .sync_inline_height(5)
+            .sync_inline_height(5, InlineResizeMode::PreserveBottom)
             .expect("restore resized inline geometry");
         assert_eq!(terminal.surface.viewport_area().width, 100);
         assert_eq!(terminal.surface.viewport_area().height, 5);

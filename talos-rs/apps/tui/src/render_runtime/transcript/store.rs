@@ -38,13 +38,12 @@ impl TranscriptStore {
                 TranscriptLine::new(line_id, line)
             })
             .collect();
-        let insert_index = self.insert_index_for(block.kind);
         let mut transcript_block = TranscriptBlock::new(id, block.kind, transcript_lines)
             .with_copy_markdown(block.copy_markdown);
         if let Some(round_duration_ms) = block.round_duration_ms {
             transcript_block = transcript_block.with_round_duration_ms(round_duration_ms);
         }
-        self.blocks.insert(insert_index, transcript_block);
+        self.blocks.push(transcript_block);
         id
     }
 
@@ -143,33 +142,6 @@ impl TranscriptStore {
             self.mark_terminal_synced(block_id);
         }
     }
-
-    fn insert_index_for(&self, kind: TranscriptBlockKind) -> usize {
-        if kind != TranscriptBlockKind::Thinking {
-            return self.blocks.len();
-        }
-
-        let round_start = self
-            .blocks
-            .iter()
-            .rposition(|block| {
-                matches!(
-                    block.kind,
-                    TranscriptBlockKind::UserInput | TranscriptBlockKind::CommandInput
-                )
-            })
-            .map_or(0, |index| index + 1);
-
-        self.blocks[round_start..]
-            .iter()
-            .position(|block| {
-                matches!(
-                    block.kind,
-                    TranscriptBlockKind::Commentary | TranscriptBlockKind::FinalAnswer
-                )
-            })
-            .map_or(self.blocks.len(), |offset| round_start + offset)
-    }
 }
 
 #[cfg(test)]
@@ -253,6 +225,41 @@ mod tests {
         assert_eq!(
             lines.iter().map(StyledLine::plain_text).collect::<Vec<_>>(),
             vec!["hello".to_string(), String::new(), "world".to_string()]
+        );
+    }
+
+    #[test]
+    fn preserves_finalized_block_insertion_order() {
+        let mut store = TranscriptStore::default();
+        store.push_block(
+            TranscriptBlockKind::UserInput,
+            vec![StyledLine::plain("review")],
+        );
+        store.push_block(
+            TranscriptBlockKind::Commentary,
+            vec![StyledLine::plain("checking files")],
+        );
+        store.push_block(
+            TranscriptBlockKind::Tool,
+            vec![StyledLine::plain("bash completed")],
+        );
+        store.push_block(
+            TranscriptBlockKind::Thinking,
+            vec![StyledLine::plain("inspect result")],
+        );
+
+        assert_eq!(
+            store
+                .blocks()
+                .iter()
+                .map(|block| block.kind)
+                .collect::<Vec<_>>(),
+            vec![
+                TranscriptBlockKind::UserInput,
+                TranscriptBlockKind::Commentary,
+                TranscriptBlockKind::Tool,
+                TranscriptBlockKind::Thinking,
+            ]
         );
     }
 

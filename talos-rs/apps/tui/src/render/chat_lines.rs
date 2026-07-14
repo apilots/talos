@@ -19,17 +19,16 @@ use crate::utils::{
 use crate::{TuiApp, SPINNER_FRAMES, WELCOME_TIP_LINE};
 
 const CHAT_VISIBLE_OVERSCAN: usize = 2;
+const TRANSCRIPT_WRAP_RESERVE: usize = 2;
+
+pub(crate) fn transcript_content_width(chat_width: usize) -> usize {
+    chat_width.saturating_sub(TRANSCRIPT_WRAP_RESERVE).max(1)
+}
 
 struct TranscriptRenderBlock {
     kind: TranscriptBlockKind,
     lines: Vec<(Option<TranscriptLineId>, StyledLine)>,
     round_duration_ms: Option<u64>,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct TranscriptRoundBlock {
-    index: usize,
-    render_kind: TranscriptBlockKind,
 }
 
 /// Window of chat lines passed to Ratatui for the current viewport.
@@ -51,6 +50,42 @@ impl TuiApp {
         self.rebuild_transcript_render_state(chat_content_rect);
     }
 
+    pub(crate) fn projected_live_chat_lines(&self, chat_width: u16) -> Vec<RenderedChatLine> {
+        let content_width = transcript_content_width(chat_width as usize);
+        let mut rendered = Vec::new();
+        for block in self.render_runtime.live_projection_blocks() {
+            if !rendered.is_empty() {
+                rendered.push(helpers::blank_chat_line());
+            }
+            let lines = block
+                .lines
+                .into_iter()
+                .map(|line| (None, line))
+                .collect::<Vec<_>>();
+            rendered.extend(render_live_transcript_block_lines(
+                block.kind,
+                &lines,
+                content_width,
+                self.spinner_index,
+            ));
+        }
+        if self.is_agent_working() {
+            if rendered
+                .last()
+                .is_some_and(|line| !line_plain_text(&line.display).is_empty())
+            {
+                rendered.push(helpers::blank_chat_line());
+            }
+            rendered.push(self.thinking_spinner_line(self.spinner_index));
+        }
+        rendered
+    }
+
+    pub(crate) fn projected_live_chat_line_count(&self, chat_width: u16) -> usize {
+        self.projected_live_chat_lines(chat_width).len()
+            + usize::from(self.inline_viewport_needs_leading_history_gap())
+    }
+
     fn rebuild_transcript_render_state(&mut self, chat_content_rect: Rect) {
         let cache_key = self.transcript_render_cache_key(chat_content_rect);
         if self.rendered_chat_cache_key == Some(cache_key) {
@@ -58,26 +93,23 @@ impl TuiApp {
         }
 
         self.rendered_chat_lines.clear();
-        let content_width = chat_content_rect.width.saturating_sub(2).max(1) as usize;
-        let finalized_blocks = if self.suppress_transcript_for_terminal_flush {
-            Vec::new()
-        } else {
-            self.render_runtime
-                .store()
-                .blocks()
-                .iter()
-                .filter(|block| !block.terminal_synced)
-                .map(|block| TranscriptRenderBlock {
-                    kind: block.kind,
-                    lines: block
-                        .lines
-                        .iter()
-                        .map(|line| (Some(line.id), line.content.clone()))
-                        .collect::<Vec<_>>(),
-                    round_duration_ms: block.round_duration_ms,
-                })
-                .collect::<Vec<_>>()
-        };
+        let content_width = transcript_content_width(chat_content_rect.width as usize);
+        let finalized_blocks = self
+            .render_runtime
+            .store()
+            .blocks()
+            .iter()
+            .filter(|block| !block.terminal_synced)
+            .map(|block| TranscriptRenderBlock {
+                kind: block.kind,
+                lines: block
+                    .lines
+                    .iter()
+                    .map(|line| (Some(line.id), line.content.clone()))
+                    .collect::<Vec<_>>(),
+                round_duration_ms: block.round_duration_ms,
+            })
+            .collect::<Vec<_>>();
         if self.inline_viewport_needs_leading_history_gap() {
             self.rendered_chat_lines.push(helpers::blank_chat_line());
         }
@@ -88,14 +120,12 @@ impl TuiApp {
                 .find(|&index| is_transcript_segment_start(finalized_blocks[index].kind))
                 .unwrap_or(finalized_blocks.len());
 
-            let round_blocks =
-                self.transcript_round_blocks(&finalized_blocks, round_start, round_end_exclusive);
+            let round_blocks = &finalized_blocks[round_start..round_end_exclusive];
             for (index, block) in round_blocks.iter().enumerate() {
-                let lines = &finalized_blocks[block.index].lines;
                 self.rendered_chat_lines
                     .extend(render_transcript_block_lines(
-                        block.render_kind,
-                        lines,
+                        block.kind,
+                        &block.lines,
                         content_width,
                     ));
                 if index + 1 < round_blocks.len() {
@@ -124,35 +154,15 @@ impl TuiApp {
             block_index = round_end_exclusive;
         }
 
-        let live_lines = self.render_runtime.live_projection_lines();
-        let has_live_lines = !live_lines.is_empty();
-        if has_live_lines {
-            if self
-                .rendered_chat_lines
-                .last()
-                .is_some_and(|line| !line_plain_text(&line.display).is_empty())
-            {
-                self.rendered_chat_lines.push(helpers::blank_chat_line());
-            }
-            for block in self.render_runtime.live_projection_blocks() {
-                let lines = block
-                    .lines
-                    .into_iter()
-                    .map(|line| (None, line))
-                    .collect::<Vec<_>>();
-                self.rendered_chat_lines
-                    .extend(render_live_transcript_block_lines(
-                        block.kind,
-                        &lines,
-                        content_width,
-                        self.spinner_index,
-                    ));
-            }
-        }
-        if self.rendered_chat_lines.is_empty() && self.render_runtime.store().blocks().is_empty() {
+        let has_live_blocks = !self.render_runtime.live_projection_blocks().is_empty();
+        if self.rendered_chat_lines.is_empty()
+            && self.render_runtime.store().blocks().is_empty()
+            && !has_live_blocks
+        {
             self.push_empty_transcript_state_lines();
         }
-        if self.is_agent_working() {
+        let live_lines = self.projected_live_chat_lines(chat_content_rect.width);
+        if !live_lines.is_empty() {
             if self
                 .rendered_chat_lines
                 .last()
@@ -160,8 +170,7 @@ impl TuiApp {
             {
                 self.rendered_chat_lines.push(helpers::blank_chat_line());
             }
-            self.rendered_chat_lines
-                .push(self.thinking_spinner_line(self.spinner_index));
+            self.rendered_chat_lines.extend(live_lines);
         }
         self.rendered_chat_cache_key = Some(cache_key);
     }
@@ -183,9 +192,6 @@ impl TuiApp {
     }
 
     fn inline_viewport_needs_leading_history_gap(&self) -> bool {
-        if self.suppress_transcript_for_terminal_flush {
-            return false;
-        }
         let blocks = self.render_runtime.store().blocks();
         let Some(first_visible_index) = blocks.iter().position(|block| !block.terminal_synced)
         else {
@@ -242,61 +248,9 @@ impl TuiApp {
         None
     }
 
-    fn transcript_round_blocks(
-        &self,
-        blocks: &[TranscriptRenderBlock],
-        round_start: usize,
-        round_end_exclusive: usize,
-    ) -> Vec<TranscriptRoundBlock> {
-        (round_start..round_end_exclusive)
-            .map(|block_index| TranscriptRoundBlock {
-                index: block_index,
-                render_kind: self.transcript_render_kind_for_block(
-                    blocks,
-                    round_start,
-                    round_end_exclusive,
-                    block_index,
-                ),
-            })
-            .collect::<Vec<_>>()
-    }
-
-    fn transcript_render_kind_for_block(
-        &self,
-        blocks: &[TranscriptRenderBlock],
-        round_start: usize,
-        round_end_exclusive: usize,
-        block_index: usize,
-    ) -> TranscriptBlockKind {
-        if blocks[block_index].kind != TranscriptBlockKind::Commentary
-            || self.in_flight
-            || self.turn_metrics_live
-            || blocks[round_start..round_end_exclusive]
-                .iter()
-                .any(|block| block.kind == TranscriptBlockKind::FinalAnswer)
-        {
-            return blocks[block_index].kind;
-        }
-
-        let last_commentary = blocks[round_start..round_end_exclusive]
-            .iter()
-            .enumerate()
-            .filter(|(_, block)| block.kind == TranscriptBlockKind::Commentary)
-            .map(|(offset, _)| round_start + offset)
-            .next_back();
-
-        if last_commentary == Some(block_index) {
-            TranscriptBlockKind::FinalAnswer
-        } else {
-            blocks[block_index].kind
-        }
-    }
-
     fn transcript_render_cache_key(&self, chat_content_rect: Rect) -> ChatRenderCacheKey {
         let mut hasher = DefaultHasher::new();
         "transcript".hash(&mut hasher);
-        self.suppress_transcript_for_terminal_flush
-            .hash(&mut hasher);
         self.current_model.hash(&mut hasher);
         self.current_project_root.hash(&mut hasher);
         format!("{:?}", self.turn_metrics).hash(&mut hasher);

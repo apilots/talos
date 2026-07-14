@@ -1245,10 +1245,41 @@ async fn test_tool_progress_updates_transcript_projection() {
             },
         }),
     ));
+    app.handle_stream_event(timeline_event(
+        "msg-tool-progress".to_string(),
+        "sess-test".to_string(),
+        3,
+        talos_sdk::AgentEventType::ItemDelta,
+        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "tool-call-bash".to_string(),
+            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
+                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
+                text_delta: "sec".to_string(),
+            },
+        }),
+    ));
+    app.handle_stream_event(timeline_event(
+        "msg-tool-progress".to_string(),
+        "sess-test".to_string(),
+        4,
+        talos_sdk::AgentEventType::ItemDelta,
+        talos_sdk::AgentEventPayload::ItemDelta(talos_sdk::TalosItemDeltaEvent {
+            request_id: "req-test".to_string(),
+            turn_id: "turn-test".to_string(),
+            item_id: "tool-call-bash".to_string(),
+            delta: talos_sdk::TalosTimelineDelta::ToolProgress {
+                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
+                text_delta: "ond\n".to_string(),
+            },
+        }),
+    ));
 
     let transcript = interactive_transcript_text(&app);
     assert!(transcript.contains("● Bash(printf 'first\\nsecond\\n')"));
-    assert!(transcript.contains("  ⎿ first"));
+    assert!(transcript.contains("  ⎿ second"));
+    assert!(!transcript.contains("  ⎿ ond"));
 }
 
 #[tokio::test]

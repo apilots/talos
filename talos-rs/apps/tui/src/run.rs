@@ -27,13 +27,14 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::render::chat_lines::render_transcript_block_lines;
+use crate::render::chat_lines::{render_transcript_block_lines, transcript_content_width};
 use crate::render_runtime::runtime::event_loop::{
     CrosstermRuntimeEventSource, TerminalRuntimeEvent,
 };
-use crate::render_runtime::transcript::block::TranscriptBlockKind;
+use crate::render_runtime::transcript::block::{TranscriptBlockId, TranscriptBlockKind};
 use crate::render_runtime::transcript::store::PendingTerminalBlock;
 use crate::terminal_adapter::PrimaryTerminal;
+use crate::terminal_surface::InlineResizeMode;
 
 use super::{GatewayClient, TuiApp};
 
@@ -101,11 +102,16 @@ async fn run_event_loop(
         if app.should_exit {
             return Ok(());
         }
-        sync_terminal_viewport(terminal, app)?;
+        let flush_plan = if app.uses_transient_fullscreen_surface() {
+            TerminalFlushPlan::None
+        } else {
+            plan_terminal_flush(terminal, app)?
+        };
+        sync_terminal_viewport(terminal, app, flush_plan.resize_mode())?;
         let flushed_transcript = if terminal.is_transient_fullscreen_active() {
             false
         } else {
-            flush_terminal_transcript(terminal, app)?
+            apply_terminal_flush_plan(terminal, app, flush_plan)?
         };
         let frame_fingerprint = tui_frame_fingerprint(app);
         if flushed_transcript || app.render_runtime.should_draw_frame(frame_fingerprint) {
@@ -139,43 +145,92 @@ fn leave_primary_screen_interaction(output: &mut impl io::Write) -> io::Result<(
     execute!(output, DisableBracketedPaste, Show)
 }
 
-fn sync_terminal_viewport(terminal: &mut PrimaryTerminal, app: &TuiApp) -> io::Result<()> {
+fn sync_terminal_viewport(
+    terminal: &mut PrimaryTerminal,
+    app: &TuiApp,
+    resize_mode: InlineResizeMode,
+) -> io::Result<()> {
     let (width, height) = crossterm::terminal::size()?;
     if app.uses_transient_fullscreen_surface() {
         return terminal.enter_transient_fullscreen();
     }
 
     let viewport_height = app.inline_viewport_height(width.max(1), height.max(1));
-    terminal.exit_transient_fullscreen(viewport_height)
+    terminal.exit_transient_fullscreen(viewport_height, resize_mode)
 }
 
 fn flush_terminal_transcript<T: TerminalTranscriptTarget>(
     terminal: &mut T,
     app: &mut TuiApp,
 ) -> io::Result<bool> {
+    let plan = plan_terminal_flush(terminal, app)?;
+    apply_terminal_flush_plan(terminal, app, plan)
+}
+
+#[derive(Debug)]
+enum TerminalFlushPlan {
+    None,
+    MarkSynced {
+        block_ids: Vec<TranscriptBlockId>,
+    },
+    Insert {
+        lines: Vec<Line<'static>>,
+        block_ids: Vec<TranscriptBlockId>,
+        footer_target: Option<TranscriptBlockId>,
+    },
+}
+
+impl TerminalFlushPlan {
+    fn resize_mode(&self) -> InlineResizeMode {
+        match self {
+            Self::Insert { .. } => InlineResizeMode::PrepareHistoryInsertion,
+            Self::None | Self::MarkSynced { .. } => InlineResizeMode::PreserveBottom,
+        }
+    }
+}
+
+fn plan_terminal_flush<T: TerminalTranscriptTarget>(
+    terminal: &T,
+    app: &TuiApp,
+) -> io::Result<TerminalFlushPlan> {
     if !app.in_flight && app.turn_metrics_live {
-        return Ok(false);
+        return Ok(TerminalFlushPlan::None);
     }
 
     let pending = app.render_runtime.pending_terminal_projection();
     if pending.is_empty() {
-        return flush_terminal_round_footer(terminal, app);
-    }
-    if app.in_flight && pending.iter().any(is_assistant_text_block) {
-        return Ok(false);
+        let Some(block_id) = completed_round_footer_target(app) else {
+            return Ok(TerminalFlushPlan::None);
+        };
+        if app.terminal_footer_synced_for == Some(block_id) {
+            return Ok(TerminalFlushPlan::None);
+        }
+        return Ok(TerminalFlushPlan::Insert {
+            lines: vec![
+                Line::from(""),
+                terminal_round_footer_line(
+                    app.turn_metrics
+                        .as_ref()
+                        .and_then(|metrics| metrics.duration_ms),
+                ),
+            ],
+            block_ids: Vec::new(),
+            footer_target: Some(block_id),
+        });
     }
     if pending.len() == 1 {
         match pending[0].kind {
             TranscriptBlockKind::UserInput if !app.should_exit && !app.in_flight => {
-                return Ok(false);
+                return Ok(TerminalFlushPlan::None);
             }
-            TranscriptBlockKind::CommandInput => return Ok(false),
+            TranscriptBlockKind::CommandInput => return Ok(TerminalFlushPlan::None),
             _ => {}
         }
     }
 
     let terminal_width = terminal.size()?.width.max(1) as usize;
-    let content_width = terminal_width.saturating_sub(crate::CHAT_CONTENT_PADDING_LEFT as usize);
+    let chat_width = terminal_width.saturating_sub(crate::CHAT_CONTENT_PADDING_LEFT as usize);
+    let content_width = transcript_content_width(chat_width);
     let block_ids = pending
         .iter()
         .map(|block| block.block_id)
@@ -197,75 +252,52 @@ fn flush_terminal_transcript<T: TerminalTranscriptTarget>(
         ));
     }
     if rendered_lines.is_empty() {
-        app.render_runtime.mark_terminal_blocks_synced(block_ids);
-        app.rendered_chat_cache_key = None;
-        return Ok(false);
+        return Ok(TerminalFlushPlan::MarkSynced { block_ids });
     }
 
-    app.rendered_chat_cache_key = None;
-    app.suppress_transcript_for_terminal_flush = true;
-    let clean_draw_result = terminal.draw_app(app);
-    app.suppress_transcript_for_terminal_flush = false;
-    clean_draw_result?;
-    terminal.insert_history_lines(&rendered_lines)?;
-    app.render_runtime.mark_terminal_blocks_synced(block_ids);
-    if let Some(block_id) = footer_target {
-        app.terminal_footer_synced_for = Some(block_id);
-    }
-    Ok(true)
+    Ok(TerminalFlushPlan::Insert {
+        lines: rendered_lines,
+        block_ids,
+        footer_target,
+    })
 }
 
-fn is_assistant_text_block(block: &PendingTerminalBlock) -> bool {
-    matches!(
-        block.kind,
-        TranscriptBlockKind::Thinking
-            | TranscriptBlockKind::Commentary
-            | TranscriptBlockKind::FinalAnswer
-    )
-}
-
-fn flush_terminal_round_footer<T: TerminalTranscriptTarget>(
+fn apply_terminal_flush_plan<T: TerminalTranscriptTarget>(
     terminal: &mut T,
     app: &mut TuiApp,
+    plan: TerminalFlushPlan,
 ) -> io::Result<bool> {
-    let Some(block_id) = completed_round_footer_target(app) else {
-        return Ok(false);
-    };
-    if app.terminal_footer_synced_for == Some(block_id) {
-        return Ok(false);
+    match plan {
+        TerminalFlushPlan::None => Ok(false),
+        TerminalFlushPlan::MarkSynced { block_ids } => {
+            app.render_runtime.mark_terminal_blocks_synced(block_ids);
+            app.rendered_chat_cache_key = None;
+            Ok(false)
+        }
+        TerminalFlushPlan::Insert {
+            lines,
+            block_ids,
+            footer_target,
+        } => {
+            terminal.insert_history_lines(&lines)?;
+            app.render_runtime.mark_terminal_blocks_synced(block_ids);
+            app.rendered_chat_cache_key = None;
+            if let Some(block_id) = footer_target {
+                app.terminal_footer_synced_for = Some(block_id);
+            }
+            Ok(true)
+        }
     }
-
-    let rendered_lines = vec![
-        Line::from(""),
-        terminal_round_footer_line(
-            app.turn_metrics
-                .as_ref()
-                .and_then(|metrics| metrics.duration_ms),
-        ),
-    ];
-    app.rendered_chat_cache_key = None;
-    app.suppress_transcript_for_terminal_flush = true;
-    let clean_draw_result = terminal.draw_app(app);
-    app.suppress_transcript_for_terminal_flush = false;
-    clean_draw_result?;
-    terminal.insert_history_lines(&rendered_lines)?;
-    app.terminal_footer_synced_for = Some(block_id);
-    Ok(true)
 }
 
 trait TerminalTranscriptTarget {
     fn size(&self) -> io::Result<Size>;
-    fn draw_app(&mut self, app: &mut TuiApp) -> io::Result<()>;
     fn insert_history_lines(&mut self, lines: &[Line<'static>]) -> io::Result<()>;
 }
 
 impl TerminalTranscriptTarget for PrimaryTerminal {
     fn size(&self) -> io::Result<Size> {
         PrimaryTerminal::size(self)
-    }
-
-    fn draw_app(&mut self, app: &mut TuiApp) -> io::Result<()> {
-        self.draw(|frame| app.render_ui(frame))
     }
 
     fn insert_history_lines(&mut self, lines: &[Line<'static>]) -> io::Result<()> {
@@ -277,10 +309,6 @@ impl TerminalTranscriptTarget for PrimaryTerminal {
 impl<B: Backend> TerminalTranscriptTarget for Terminal<B> {
     fn size(&self) -> io::Result<Size> {
         Terminal::size(self)
-    }
-
-    fn draw_app(&mut self, app: &mut TuiApp) -> io::Result<()> {
-        self.draw(|frame| app.render_ui(frame)).map(|_| ())
     }
 
     fn insert_history_lines(&mut self, lines: &[Line<'static>]) -> io::Result<()> {
@@ -310,13 +338,6 @@ fn render_terminal_transcript_lines(
 
         let segment_blocks = terminal_segment_blocks(segment_start, segment_end);
         for (offset, block_index) in segment_blocks.iter().enumerate() {
-            let render_kind = terminal_render_kind_for_block(
-                blocks,
-                segment_start,
-                segment_end,
-                *block_index,
-                app,
-            );
             let lines = blocks[*block_index]
                 .lines
                 .iter()
@@ -324,7 +345,7 @@ fn render_terminal_transcript_lines(
                 .map(|line| (None, line))
                 .collect::<Vec<_>>();
             rendered.extend(
-                render_transcript_block_lines(render_kind, &lines, content_width)
+                render_transcript_block_lines(blocks[*block_index].kind, &lines, content_width)
                     .into_iter()
                     .map(|line| line.display),
             );
@@ -469,37 +490,6 @@ fn terminal_segment_duration_ms(
     None
 }
 
-fn terminal_render_kind_for_block(
-    blocks: &[PendingTerminalBlock],
-    segment_start: usize,
-    segment_end: usize,
-    block_index: usize,
-    app: &TuiApp,
-) -> TranscriptBlockKind {
-    if blocks[block_index].kind != TranscriptBlockKind::Commentary
-        || app.in_flight
-        || app.turn_metrics_live
-        || blocks[segment_start..segment_end]
-            .iter()
-            .any(|block| block.kind == TranscriptBlockKind::FinalAnswer)
-    {
-        return blocks[block_index].kind;
-    }
-
-    let last_commentary = blocks[segment_start..segment_end]
-        .iter()
-        .enumerate()
-        .filter(|(_, block)| block.kind == TranscriptBlockKind::Commentary)
-        .map(|(offset, _)| segment_start + offset)
-        .next_back();
-
-    if last_commentary == Some(block_index) {
-        TranscriptBlockKind::FinalAnswer
-    } else {
-        blocks[block_index].kind
-    }
-}
-
 fn terminal_round_footer_line(duration_ms: Option<u64>) -> Line<'static> {
     let duration_text = duration_ms.map_or_else(
         || "✻ Brewed for a moment".to_string(),
@@ -521,7 +511,6 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     hash_debug(&app.reasoning_effort_override, &mut hasher);
     app.connection_status.hash(&mut hasher);
     hash_debug(&app.rendered_chat_cache_key, &mut hasher);
-    app.suppress_transcript_for_terminal_flush.hash(&mut hasher);
     hash_debug(&app.render_runtime.live_projection_lines(), &mut hasher);
     hash_debug(&app.message_queue, &mut hasher);
     app.in_flight.hash(&mut hasher);
@@ -570,7 +559,6 @@ mod tests {
     struct RecordingTerminal {
         size: Size,
         inserted: Vec<String>,
-        draw_count: usize,
         fail_insert: bool,
     }
 
@@ -579,7 +567,6 @@ mod tests {
             Self {
                 size: Size { width, height },
                 inserted: Vec::new(),
-                draw_count: 0,
                 fail_insert: false,
             }
         }
@@ -592,11 +579,6 @@ mod tests {
     impl super::TerminalTranscriptTarget for RecordingTerminal {
         fn size(&self) -> io::Result<Size> {
             Ok(self.size)
-        }
-
-        fn draw_app(&mut self, _app: &mut crate::TuiApp) -> io::Result<()> {
-            self.draw_count += 1;
-            Ok(())
         }
 
         fn insert_history_lines(&mut self, lines: &[Line<'static>]) -> io::Result<()> {
@@ -749,20 +731,20 @@ mod tests {
     }
 
     #[test]
-    fn terminal_transcript_projection_renders_thinking_before_final_answer() {
+    fn terminal_transcript_projection_preserves_thinking_before_final_answer() {
         let mut app = crate::TuiApp::build(None);
         app.render_runtime.append_user_input("analyze");
         app.render_runtime.append_history([
             crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
-                crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
-                vec![crate::render_runtime::common::style::StyledLine::plain(
-                    "final response",
-                )],
-            ),
-            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
                 crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
                 vec![crate::render_runtime::common::style::StyledLine::plain(
                     "reasoning preview",
+                )],
+            ),
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "final response",
                 )],
             ),
         ]);
@@ -932,25 +914,34 @@ mod tests {
     }
 
     #[test]
-    fn flush_terminal_transcript_defers_assistant_text_while_turn_metrics_are_live() {
+    fn flush_terminal_transcript_writes_completed_blocks_while_turn_is_in_flight() {
         let mut terminal = RecordingTerminal::new(20, 3);
         let mut app = crate::TuiApp::build(None);
         app.in_flight = true;
         app.turn_metrics_live = true;
-        app.render_runtime.append_user_input("pending");
-        append_test_final_answer(&mut app, "partial");
+        app.render_runtime.append_history([
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "inspect changes",
+                )],
+            ),
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::Commentary,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "running review",
+                )],
+            ),
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::Tool,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "● Bash completed",
+                )],
+            ),
+        ]);
 
-        let deferred = super::flush_terminal_transcript(&mut terminal, &mut app).unwrap();
-
-        assert!(!deferred);
-        assert!(!app
-            .render_runtime
-            .store()
-            .pending_terminal_projection()
-            .is_empty());
-        app.in_flight = false;
-        app.turn_metrics_live = false;
         let flushed = super::flush_terminal_transcript(&mut terminal, &mut app).unwrap();
+
         assert!(flushed);
         assert!(app
             .render_runtime
@@ -958,9 +949,66 @@ mod tests {
             .pending_terminal_projection()
             .is_empty());
         let output = terminal.output();
-        assert!(output.contains("● pending"));
-        assert!(output.contains("● partial"));
-        assert_eq!(output.matches("✻ Brewed").count(), 1);
+        let thinking = output.find("Thinking:").unwrap();
+        let commentary = output.find("● running review").unwrap();
+        let tool = output.find("● Bash completed").unwrap();
+        assert!(thinking < commentary);
+        assert!(commentary < tool);
+        assert!(!output.contains("✻ Brewed"));
+    }
+
+    #[test]
+    fn terminal_handoff_inserts_completed_block_once() {
+        let mut terminal = RecordingTerminal::new(80, 8);
+        let mut app = crate::TuiApp::build(None);
+        app.in_flight = true;
+        app.render_runtime.append_history([
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "completed thought",
+                )],
+            ),
+        ]);
+
+        let flushed = super::flush_terminal_transcript(&mut terminal, &mut app).unwrap();
+
+        assert!(flushed);
+        assert_eq!(terminal.output().matches("completed thought").count(), 1);
+    }
+
+    #[test]
+    fn terminal_flush_plan_uses_handoff_resize_only_for_insertions() {
+        let terminal = RecordingTerminal::new(80, 8);
+        let mut completed = crate::TuiApp::build(None);
+        completed.in_flight = true;
+        completed.render_runtime.append_history([
+            crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+                crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
+                vec![crate::render_runtime::common::style::StyledLine::plain(
+                    "completed thought",
+                )],
+            ),
+        ]);
+        let completed_mode = super::plan_terminal_flush(&terminal, &completed)
+            .unwrap()
+            .resize_mode();
+
+        let mut deferred = crate::TuiApp::build(None);
+        deferred
+            .render_runtime
+            .append_user_input("pending user input");
+        let deferred_mode = super::plan_terminal_flush(&terminal, &deferred)
+            .unwrap()
+            .resize_mode();
+
+        assert_eq!(
+            (completed_mode, deferred_mode),
+            (
+                crate::terminal_surface::InlineResizeMode::PrepareHistoryInsertion,
+                crate::terminal_surface::InlineResizeMode::PreserveBottom,
+            )
+        );
     }
 
     #[test]

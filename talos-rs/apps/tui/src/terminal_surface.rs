@@ -15,6 +15,13 @@ use ratatui::{
 
 use crate::render::frame::BufferFrame;
 
+/// Selects the terminal edge preserved while resizing the inline surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum InlineResizeMode {
+    PreserveBottom,
+    PrepareHistoryInsertion,
+}
+
 /// Owns one backend, one viewport, and the two buffers used for frame diffs.
 pub(crate) struct InlineTerminal<B>
 where
@@ -78,16 +85,24 @@ where
     }
 
     /// Changes inline height in place while keeping history immediately above it.
-    pub(crate) fn sync_inline_height(&mut self, requested_height: u16) -> io::Result<()> {
+    pub(crate) fn sync_inline_height(
+        &mut self,
+        requested_height: u16,
+        resize_mode: InlineResizeMode,
+    ) -> io::Result<()> {
         let screen_size = normalized_size(self.backend.size()?);
         let height = requested_height.clamp(1, screen_size.height.max(1));
         let previous_area = self.viewport_area;
-        let mut next_area = Rect::new(
-            /*x*/ 0,
-            previous_area.y,
-            screen_size.width.max(1),
-            height,
-        );
+        let next_y =
+            if height < previous_area.height && resize_mode == InlineResizeMode::PreserveBottom {
+                previous_area
+                    .bottom()
+                    .min(screen_size.height)
+                    .saturating_sub(height)
+            } else {
+                previous_area.y
+            };
+        let mut next_area = Rect::new(/*x*/ 0, next_y, screen_size.width.max(1), height);
 
         if next_area.bottom() > screen_size.height {
             let overflow = next_area.bottom().saturating_sub(screen_size.height);
@@ -274,22 +289,85 @@ pub(crate) fn suppress_wide_symbol_placeholder_cells(buffer: &mut Buffer) {
 mod tests {
     use ratatui::{backend::TestBackend, text::Line, widgets::Paragraph, widgets::Widget};
 
-    use super::InlineTerminal;
+    use super::{InlineResizeMode, InlineTerminal};
 
     #[test]
     fn inline_viewport_changes_height_without_replacing_backend() {
         let backend = TestBackend::new(40, 12);
         let mut terminal = InlineTerminal::new(backend, 3).expect("inline terminal");
 
-        terminal.sync_inline_height(7).expect("grow viewport");
+        terminal
+            .sync_inline_height(7, InlineResizeMode::PreserveBottom)
+            .expect("grow viewport");
         assert_eq!(terminal.viewport_area().height, 7);
 
-        terminal.sync_inline_height(3).expect("shrink viewport");
+        terminal
+            .sync_inline_height(3, InlineResizeMode::PreserveBottom)
+            .expect("shrink viewport");
         assert_eq!(terminal.viewport_area().height, 3);
         assert_eq!(
             terminal.size().expect("size"),
             ratatui::layout::Size::new(40, 12)
         );
+    }
+
+    #[test]
+    fn ordinary_inline_shrink_keeps_the_bottom_edge_stable() {
+        let backend = TestBackend::new(40, 12);
+        let mut terminal = InlineTerminal::new(backend, 5).expect("inline terminal");
+        terminal
+            .insert_before(/*height*/ 1, |buffer| {
+                Paragraph::new("history").render(buffer.area, buffer);
+            })
+            .expect("insert history");
+        let previous_bottom = terminal.viewport_area().bottom();
+
+        terminal
+            .sync_inline_height(3, InlineResizeMode::PreserveBottom)
+            .expect("shrink viewport");
+
+        assert_eq!(terminal.viewport_area().bottom(), previous_bottom);
+    }
+
+    #[test]
+    fn terminal_handoff_replaces_released_rows_without_a_gap() {
+        let backend = TestBackend::new(40, 12);
+        let mut terminal = InlineTerminal::new(backend, 5).expect("inline terminal");
+        terminal
+            .insert_before(/*height*/ 1, |buffer| {
+                Paragraph::new("previous").render(buffer.area, buffer);
+            })
+            .expect("insert previous history");
+        let previous_bottom = terminal.viewport_area().bottom();
+
+        terminal
+            .sync_inline_height(3, InlineResizeMode::PrepareHistoryInsertion)
+            .expect("shrink viewport");
+        terminal
+            .insert_before(/*height*/ 2, |buffer| {
+                Paragraph::new(vec![Line::from("first"), Line::from("second")])
+                    .render(buffer.area, buffer);
+            })
+            .expect("insert finalized history");
+
+        assert_eq!(terminal.viewport_area().height, 3);
+        assert_eq!(terminal.viewport_area().bottom(), previous_bottom);
+        let output = format!("{}", terminal.backend_mut());
+        let rows = output.lines().collect::<Vec<_>>();
+        let previous = rows
+            .iter()
+            .position(|row| row.contains("previous"))
+            .expect("previous history row");
+        let first = rows
+            .iter()
+            .position(|row| row.contains("first"))
+            .expect("first finalized row");
+        let second = rows
+            .iter()
+            .position(|row| row.contains("second"))
+            .expect("second finalized row");
+        assert_eq!(first, previous + 1);
+        assert_eq!(second, first + 1);
     }
 
     #[test]

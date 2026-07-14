@@ -434,7 +434,7 @@ fn project_generic(
         "error".to_string()
     } else {
         first_non_empty_line(output_lines.iter().map(String::as_str))
-            .map(|line| compact_inline(&line))
+            .map(|line| compact_tool_preview(&line))
             .unwrap_or_else(|| "Done".to_string())
     };
     ToolRenderData {
@@ -465,7 +465,7 @@ fn file_change_counts(file: &talos_types::talos::TalosToolFileDiff) -> (usize, u
 fn tool_title(name: &str, _call_id: &str, arguments: &str) -> String {
     let name = display_tool_name(name);
     tool_title_argument(name, arguments)
-        .map(|argument| format!("{name}({})", compact_inline(&argument)))
+        .map(|argument| format!("{name}({})", compact_tool_preview(&argument)))
         .unwrap_or_else(|| name.to_string())
 }
 
@@ -528,7 +528,7 @@ fn bash_summary(
 ) -> String {
     if is_error || matches!(status, TalosToolTaskStatus::Failed) {
         let detail = first_non_empty_line(stderr.lines().chain(stdout.lines()))
-            .map(|line| format!(" {}", compact_inline(&line)))
+            .map(|line| format!(" {}", compact_tool_preview(&line)))
             .unwrap_or_default();
         return exit_code
             .map(|code| format!("exit {code}{detail}{timing}"))
@@ -538,9 +538,9 @@ fn bash_summary(
     if let Some(line) = first_non_empty_line(stdout.lines().chain(stderr.lines())) {
         let status_text = task_status_text(status).trim_end_matches('.');
         if matches!(status, TalosToolTaskStatus::Completed) {
-            format!("Done {}{timing}", compact_inline(&line))
+            format!("Done {}{timing}", compact_tool_preview(&line))
         } else {
-            format!("{status_text} {}{timing}", compact_inline(&line))
+            format!("{status_text} {}{timing}", compact_tool_preview(&line))
         }
     } else {
         format!("{}{timing}", task_status_text(status))
@@ -553,7 +553,7 @@ fn preview_lines(stdout: &str, stderr: &str) -> Vec<String> {
         .chain(stderr.lines())
         .filter(|line| !line.trim().is_empty())
         .take(2)
-        .map(compact_inline)
+        .map(compact_tool_preview)
         .collect()
 }
 
@@ -562,7 +562,7 @@ fn preview_lines_from_output(output_lines: &[String], limit: usize) -> Vec<Strin
         .iter()
         .filter(|line| !line.trim().is_empty())
         .take(limit)
-        .map(|line| compact_inline(line))
+        .map(|line| compact_tool_preview(line))
         .collect()
 }
 
@@ -585,7 +585,7 @@ fn first_non_empty_line<'a>(lines: impl Iterator<Item = &'a str>) -> Option<Stri
         .map(str::to_string)
 }
 
-fn compact_inline(text: &str) -> String {
+pub(crate) fn compact_tool_preview(text: &str) -> String {
     let compact = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut chars = compact.chars();
     let preview = chars.by_ref().take(TOOL_PREVIEW_LIMIT).collect::<String>();

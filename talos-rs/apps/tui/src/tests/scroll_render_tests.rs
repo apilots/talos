@@ -398,16 +398,21 @@ fn test_live_round_is_separated_from_synced_history() {
     );
     app.in_flight = true;
 
-    app.rebuild_chat_render_state(Rect::new(0, 0, 60, 12));
-
-    let texts = app
-        .rendered_chat_lines
-        .iter()
-        .map(|line| line_plain_text(&line.display))
+    let viewport_height = app.inline_viewport_height(60, 30);
+    let backend = TestBackend::new(60, viewport_height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| app.render_ui(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let texts = (0..buffer.area.height)
+        .map(|y| {
+            (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect::<String>()
+        })
         .collect::<Vec<_>>();
 
-    assert_eq!(texts.first().map(String::as_str), Some(""));
-    assert_eq!(texts.get(1).map(String::as_str), Some("● live answer"));
+    assert!(texts[0].trim().is_empty());
+    assert!(texts[1].contains("● live answer"));
 }
 
 #[test]
@@ -736,7 +741,7 @@ fn test_final_answer_preserves_newlines_with_message_bullet() {
 }
 
 #[test]
-fn test_last_commentary_renders_as_final_answer_for_completed_round() {
+fn test_completed_commentary_preserves_authoritative_kind() {
     let mut app = create_embedded_app();
     app.render_runtime.append_user_input("summarize");
     app.render_runtime.append_history([
@@ -761,6 +766,10 @@ fn test_last_commentary_renders_as_final_answer_for_completed_round() {
         .iter()
         .map(|line| line_plain_text(&line.display))
         .collect::<Vec<_>>();
+    assert!(app.render_runtime.store().blocks()[1..]
+        .iter()
+        .all(|block| block.kind
+            == crate::render_runtime::transcript::block::TranscriptBlockKind::Commentary));
     assert!(texts
         .iter()
         .any(|line| line == "● I will inspect the workspace."));
@@ -770,20 +779,20 @@ fn test_last_commentary_renders_as_final_answer_for_completed_round() {
 }
 
 #[test]
-fn test_completed_round_renders_thinking_before_final_answer() {
+fn test_completed_round_preserves_thinking_before_final_answer() {
     let mut app = create_embedded_app();
     app.render_runtime.append_user_input("analyze");
     app.render_runtime.append_history([
         crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
-            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
-            vec![crate::render_runtime::common::style::StyledLine::plain(
-                "final response",
-            )],
-        ),
-        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
             crate::render_runtime::transcript::block::TranscriptBlockKind::Thinking,
             vec![crate::render_runtime::common::style::StyledLine::plain(
                 "reasoning preview",
+            )],
+        ),
+        crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            crate::render_runtime::transcript::block::TranscriptBlockKind::FinalAnswer,
+            vec![crate::render_runtime::common::style::StyledLine::plain(
+                "final response",
             )],
         ),
     ]);
@@ -931,16 +940,26 @@ fn test_live_model_feedback_preserves_kind_specific_rendering() {
 
     app.rebuild_chat_render_state(Rect::new(0, 0, 80, 12));
 
-    let joined = app
+    let texts = app
         .rendered_chat_lines
         .iter()
         .map(|line| line_plain_text(&line.display))
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect::<Vec<_>>();
+    let joined = texts.join("\n");
     assert!(joined.contains("∴ Thinking: inspect files (ctrl+o to expand)"));
     assert!(joined.contains("● Reading project"));
     assert!(joined.contains("Brewing"));
     assert!(!joined.contains("Brewed"));
+    let thinking_index = texts
+        .iter()
+        .position(|line| line.contains("Thinking: inspect files"))
+        .unwrap();
+    let commentary_index = texts
+        .iter()
+        .position(|line| line == "● Reading project")
+        .unwrap();
+    assert_eq!(texts[thinking_index + 1], "");
+    assert_eq!(commentary_index, thinking_index + 2);
 }
 
 #[test]

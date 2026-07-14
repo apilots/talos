@@ -95,7 +95,6 @@ impl TuiApp {
             left_panel_area: None,
             input_area: None,
             render_runtime: crate::render_runtime::runtime::engine::RenderRuntimeEngine::default(),
-            suppress_transcript_for_terminal_flush: false,
             terminal_footer_synced_for: None,
         };
 

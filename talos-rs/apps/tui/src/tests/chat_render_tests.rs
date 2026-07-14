@@ -161,6 +161,71 @@ fn test_live_feedback_uses_compact_inline_viewport_without_using_full_screen() {
 }
 
 #[test]
+fn test_multiline_thinking_preview_uses_visible_height() {
+    let mut single_line = create_embedded_app();
+    start_live_text(
+        &mut single_line.render_runtime,
+        "thinking-live",
+        crate::render_runtime::render::live::LiveTextKind::Thinking,
+        "inspect the workspace",
+    );
+    single_line.in_flight = true;
+
+    let mut multiline = create_embedded_app();
+    start_live_text(
+        &mut multiline.render_runtime,
+        "thinking-live",
+        crate::render_runtime::render::live::LiveTextKind::Thinking,
+        &(0..24)
+            .map(|index| format!("reasoning line {index}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    multiline.in_flight = true;
+
+    assert_eq!(
+        multiline.inline_viewport_height(100, 30),
+        single_line.inline_viewport_height(100, 30)
+    );
+}
+
+#[test]
+fn test_verbose_tool_progress_uses_bounded_visible_height() {
+    let mut single_update = create_embedded_app();
+    start_live_tool(
+        &mut single_update.render_runtime,
+        "tool-live",
+        "call-live",
+        "Bash",
+        r#"{"cmd":"git diff"}"#,
+    );
+    append_live_tool_progress(&mut single_update.render_runtime, "tool-live", "chunk 0");
+    single_update.in_flight = true;
+
+    let mut verbose = create_embedded_app();
+    start_live_tool(
+        &mut verbose.render_runtime,
+        "tool-live",
+        "call-live",
+        "Bash",
+        r#"{"cmd":"git diff"}"#,
+    );
+    for index in 0..24 {
+        append_live_tool_progress(
+            &mut verbose.render_runtime,
+            "tool-live",
+            &format!("chunk {index}"),
+        );
+    }
+    verbose.in_flight = true;
+
+    assert_eq!(
+        verbose.inline_viewport_height(100, 30),
+        single_update.inline_viewport_height(100, 30)
+    );
+}
+
+#[test]
 fn test_session_picker_uses_full_terminal_viewport() {
     let mut app = create_embedded_app();
     app.session_picker = Some(crate::session_picker::SessionPickerState::loading());
@@ -182,5 +247,5 @@ fn test_pending_execution_transcript_does_not_expand_live_viewport() {
 
     let height = app.inline_viewport_height(100, 30);
 
-    assert_eq!(height, 8);
+    assert_eq!(height, 7);
 }
