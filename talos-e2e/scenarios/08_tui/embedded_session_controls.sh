@@ -64,7 +64,7 @@ if not database_path.exists():
 
 connection = sqlite3.connect(str(database_path))
 row = connection.execute(
-    "SELECT title, message_count, usage_json FROM sessions WHERE session_key = ?",
+    "SELECT title, message_count, usage_json, conf_json FROM sessions WHERE session_key = ?",
     (session_id,),
 ).fetchone()
 if not row:
@@ -75,9 +75,23 @@ payload = {
     "title": row[0],
     "message_count": row[1],
     "usage": json.loads(row[2] or "{}"),
+    "model_selection": (json.loads(row[3] or "{}").get("modelSelection")),
 }
 snapshot_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 print(json.dumps(payload))
+PY
+}
+
+session_model_selection() {
+  local session_id="$1"
+  local state
+  state="$(read_session_state "${session_id}")"
+  python3 - "${state}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1] or "{}")
+print(json.dumps(payload.get("model_selection") or {}, separators=(",", ":")))
 PY
 }
 
@@ -207,7 +221,13 @@ if [[ ! -d "${session_dir}" ]]; then
   exit 1
 fi
 initial_message_count="$(session_message_count "${session_id}")"
-echo "CASE embedded_tui_session_controls_initial_turn PASS session_id=${session_id} message_count=${initial_message_count}"
+initial_model_selection="$(session_model_selection "${session_id}")"
+if [[ "$(json_get "${initial_model_selection}" "modelRef.provider")" == "" || "$(json_get "${initial_model_selection}" "modelRef.id")" == "" ]]; then
+  dump_failure_context
+  echo "CASE embedded_tui_session_controls_initial_turn FAIL missing_model_selection=${initial_model_selection}"
+  exit 1
+fi
+echo "CASE embedded_tui_session_controls_initial_turn PASS session_id=${session_id} message_count=${initial_message_count} model_selection=${initial_model_selection}"
 
 tui_send_command "${TUI_SESSION_NAME}" "/compact"
 if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Session compaction completed" 480 0.25 "${PANE_SNAPSHOT}"; then
@@ -221,9 +241,10 @@ if ! assert_summary_artifact "${session_dir}" "${session_id}"; then
   exit 1
 fi
 compact_message_count="$(session_message_count "${session_id}")"
-if [[ "${compact_message_count}" -ne "${initial_message_count}" ]]; then
+compact_model_selection="$(session_model_selection "${session_id}")"
+if [[ "${compact_message_count}" -ne "${initial_message_count}" ]] || ! json_equal "${compact_model_selection}" "${initial_model_selection}"; then
   dump_failure_context
-  echo "CASE embedded_tui_session_controls_compact FAIL message_count_changed before=${initial_message_count} after=${compact_message_count}"
+  echo "CASE embedded_tui_session_controls_compact FAIL message_count_before=${initial_message_count} message_count_after=${compact_message_count} selection_before=${initial_model_selection} selection_after=${compact_model_selection}"
   exit 1
 fi
 echo "CASE embedded_tui_session_controls_compact PASS session_id=${session_id} message_count=${compact_message_count}"
@@ -234,9 +255,10 @@ if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Session context cleared" 120 0.25 
   echo "CASE embedded_tui_session_controls_clear FAIL missing_tui_result session_id=${session_id}"
   exit 1
 fi
-if [[ -e "${session_dir}" ]] || ! assert_cleared_database_state "${session_id}"; then
+clear_model_selection="$(session_model_selection "${session_id}")"
+if [[ -e "${session_dir}" ]] || ! assert_cleared_database_state "${session_id}" || ! json_equal "${clear_model_selection}" "${initial_model_selection}"; then
   dump_failure_context
-  echo "CASE embedded_tui_session_controls_clear FAIL session_id=${session_id} session_dir=${session_dir}"
+  echo "CASE embedded_tui_session_controls_clear FAIL session_id=${session_id} session_dir=${session_dir} selection_before=${initial_model_selection} selection_after=${clear_model_selection}"
   exit 1
 fi
 echo "CASE embedded_tui_session_controls_clear PASS session_id=${session_id}"

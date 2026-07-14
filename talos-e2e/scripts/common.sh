@@ -530,6 +530,22 @@ else:
 PY
 }
 
+json_equal() {
+  local left="$1"
+  local right="$2"
+  LEFT_JSON="${left}" RIGHT_JSON="${right}" python3 - <<'PY'
+import json
+import os
+
+try:
+    left = json.loads(os.environ.get("LEFT_JSON", ""))
+    right = json.loads(os.environ.get("RIGHT_JSON", ""))
+except Exception:
+    raise SystemExit(1)
+raise SystemExit(0 if left == right else 1)
+PY
+}
+
 session_id_from_json() {
   local json="$1"
   local session_id

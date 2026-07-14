@@ -12,11 +12,12 @@ trap stop_server EXIT
 
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "select_models" "{}" "${models_json}"
-primary_model="$(select_e2e_model_from_json "${models_json}")"
-primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
-secondary_ref="$(python3 -c 'import json,sys; data=json.load(sys.stdin); arr=data.get("models", data.get("data", [])); item=(arr[1] if len(arr) > 1 else (arr[0] if arr else {})); print(item.get("provider", "") + "\t" + item.get("id", ""))' <<< "${models_json}")"
-secondary_provider="${secondary_ref%%$'\t'*}"
-secondary_model="${secondary_ref#*$'\t'}"
+default_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("defaultModelSelection") or {}, separators=(",", ":")))' <<< "${models_json}")"
+primary_provider="$(json_get "${default_selection}" "modelRef.provider")"
+primary_model="$(json_get "${default_selection}" "modelRef.id")"
+secondary_selection="$(PRIMARY_PROVIDER="${primary_provider}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); models=payload.get("models", payload.get("data", [])); item=next((model for model in models if model.get("provider") and model.get("provider") != os.environ["PRIMARY_PROVIDER"]), {}); effort=item.get("reasoning_effort") if item.get("reasoning") else None; print(json.dumps({"modelRef":{"provider":item.get("provider", ""),"id":item.get("id", "")},"reasoningEffort":effort}, separators=(",", ":")))' <<< "${models_json}")"
+secondary_provider="$(json_get "${secondary_selection}" "modelRef.provider")"
+secondary_model="$(json_get "${secondary_selection}" "modelRef.id")"
 if [[ -z "${primary_model}" || -z "${primary_provider}" || -z "${secondary_provider}" || -z "${secondary_model}" ]]; then
   echo "CASE select_models FAIL models=${models_json}"
   exit 1
@@ -32,14 +33,8 @@ create_payload='{
     "thread_id": null,
     "message_id": "msg-session-lifecycle",
     "trace_id": "trace-session-lifecycle"
-  },
-  "modelSelection": {
-    "modelRef": {"provider": "__PRIMARY_PROVIDER__", "id": "__PRIMARY_MODEL__"},
-    "reasoning": {"type": "modelDefault"}
   }
 }'
-create_payload="${create_payload/__PRIMARY_MODEL__/${primary_model}}"
-create_payload="${create_payload/__PRIMARY_PROVIDER__/${primary_provider}}"
 create_id="$(new_session_id)"
 remember_session_context "${create_id}" "${create_payload}"
 create_json="{\"id\":\"${create_id}\"}"
@@ -68,19 +63,21 @@ echo "CASE first_message PASS session_id=${first_message_session_id}"
 detail_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}"
 detail_id="$(json_get "${detail_json}" "session.id")"
-if [[ "${detail_id}" != "${session_id}" ]]; then
-  echo "CASE get_session FAIL expected=${session_id} actual=${detail_id}"
+detail_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${detail_json}")"
+if [[ "${detail_id}" != "${session_id}" ]] || ! json_equal "${detail_selection}" "${default_selection}"; then
+  echo "CASE get_session FAIL expected_id=${session_id} actual_id=${detail_id} expected_selection=${default_selection} actual_selection=${detail_selection}"
   exit 1
 fi
 echo "CASE get_session PASS id=${detail_id}"
 
 patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
-  -d "{\"conf\":{\"modelSelection\":{\"modelRef\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"},\"reasoning\":{\"type\":\"modelDefault\"}}}}")"
-log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"modelSelection\":{\"modelRef\":{\"provider\":\"${secondary_provider}\",\"id\":\"${secondary_model}\"},\"reasoning\":{\"type\":\"modelDefault\"}}}}" "${patch_json}"
+  -d "{\"conf\":{\"modelSelection\":${secondary_selection}}}")"
+log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"modelSelection\":${secondary_selection}}}" "${patch_json}"
 patch_session_id="$(json_get "${patch_json}" "session.id")"
-if [[ "${patch_session_id}" != "${session_id}" ]]; then
-  echo "CASE patch_session_model FAIL response=${patch_json}"
+patch_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${patch_json}")"
+if [[ "${patch_session_id}" != "${session_id}" ]] || ! json_equal "${patch_selection}" "${secondary_selection}"; then
+  echo "CASE patch_session_model FAIL expected_selection=${secondary_selection} actual_selection=${patch_selection} response=${patch_json}"
   exit 1
 fi
 echo "CASE patch_session_model PASS session_id=${patch_session_id}"

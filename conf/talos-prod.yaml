@@ -405,6 +405,43 @@ llm:
   ollama:
     base_url: "http://localhost:11434"
     protocol: "chat"
+    models:
+      - id: "qwen3:8b"
+        name: "Qwen3 8B"
+        context_window: 40960
+        reasoning: true
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+      - id: "deepseek-r1:8b"
+        name: "DeepSeek R1 8B"
+        context_window: 131072
+        reasoning: true
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
+      - id: "gpt-oss:20b"
+        name: "GPT OSS 20B"
+        context_window: 131072
+        reasoning: true
+        reasoning_effort: "medium"
+        speed: "standard"
+        input: ["text"]
+        cost:
+          input: 0
+          output: 0
+          cache_read: 0
+          cache_write: 0
 
 logging:
   level: "info"

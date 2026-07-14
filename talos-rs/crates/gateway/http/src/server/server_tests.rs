@@ -78,7 +78,11 @@ fn test_model_info() -> ModelInfo {
 }
 
 fn test_config() -> talos_types::TalosConfig {
-    talos_types::TalosConfig::default()
+    let mut config = talos_types::TalosConfig::default();
+    config.llm.provider = "bailian".to_string();
+    config.llm.model = "qwen-plus".to_string();
+    config.llm.bailian.models = vec![test_model_info().model];
+    config
 }
 
 fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {

@@ -115,6 +115,13 @@ async fn test_models() {
     assert_eq!(payload["models"][0]["provider"], "bailian");
     assert_eq!(payload["models"][0]["context_window"], 32_768);
     assert_eq!(payload["models"][0]["reasoning"], true);
+    assert_eq!(
+        payload["defaultModelSelection"],
+        serde_json::json!({
+            "modelRef": {"provider": "bailian", "id": "qwen-plus"},
+            "reasoningEffort": "medium"
+        })
+    );
 }
 
 #[tokio::test]
@@ -163,7 +170,7 @@ async fn test_patch_session_handler_returns_success_ack() {
                             "provider": "bailian",
                             "id": "qwen-plus"
                         },
-                        "reasoning": {"type": "modelDefault"}
+                        "reasoningEffort": "medium"
                     }
                 }
             }))

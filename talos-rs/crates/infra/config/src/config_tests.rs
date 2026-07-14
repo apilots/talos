@@ -465,7 +465,7 @@ models:
 }
 
 #[test]
-fn test_product_configs_include_deepseek_and_openrouter_models() {
+fn test_product_configs_include_configured_provider_models() {
     let repo_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../..");
     let config_paths = [
         repo_root.join("conf/talos.yaml"),
@@ -500,6 +500,27 @@ fn test_product_configs_include_deepseek_and_openrouter_models() {
         assert!(openrouter_models.contains(&("tencent/hy3:free", 262_144)));
         assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct", 131_072)));
         assert!(openrouter_models.contains(&("meta-llama/llama-3.3-70b-instruct:free", 131_072)));
+        assert_eq!(
+            config
+                .llm
+                .ollama
+                .models
+                .iter()
+                .map(|model| {
+                    (
+                        model.id.as_str(),
+                        model.context_window,
+                        model.reasoning,
+                        model.reasoning_effort,
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                ("qwen3:8b", 40_960, true, ReasoningEffort::Medium),
+                ("deepseek-r1:8b", 131_072, true, ReasoningEffort::Medium),
+                ("gpt-oss:20b", 131_072, true, ReasoningEffort::Medium),
+            ]
+        );
     }
 }
 

@@ -246,9 +246,9 @@ Reasoning 控件必须：
 
 创建 Session、切换模型或修改 effort 时，两端都提交完整 `ModelSelection`。mutation 完成后，以后端确认的 Session 为事实来源。
 
-## Ollama 默认模型目录
+## Ollama 预置模型配置
 
-根目录配置为 Ollama 增加少量默认模型，继续复用与其他 Provider 相同的 `ProviderModelConfig`：
+根目录配置为 Ollama 声明少量预置模型，继续复用与其他 Provider 相同的 `ProviderModelConfig`。这些条目只代表 Talos 的模型配置，不代表本地已经安装对应模型：
 
 ```yaml
 ollama:
@@ -257,8 +257,8 @@ ollama:
   protocol: "chat"
   models:
     - id: "qwen3:8b"
-      name: "Qwen 3 8B"
-      context_window: 262144
+      name: "Qwen3 8B"
+      context_window: 40960
       reasoning: true
       reasoning_effort: "medium"
       speed: "standard"
@@ -269,7 +269,7 @@ ollama:
       name: "DeepSeek R1 8B"
       context_window: 131072
       reasoning: true
-      reasoning_effort: "high"
+      reasoning_effort: "medium"
       speed: "standard"
       input: ["text"]
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 }
@@ -284,7 +284,7 @@ ollama:
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 }
 ```
 
-Ollama 模型目录与其他 Provider 一样完全来自配置。Talos 不调用模型发现接口，也不推断本地安装状态；dispatch 直接请求配置的 endpoint，并保留实际响应中的连接或模型错误。Talos 不自动安装模型，也不 fallback。
+Ollama 模型目录与其他 Provider 一样完全来自配置。用户需要自行保证配置的模型在目标 Ollama 服务中可用。Talos 不调用模型发现接口，也不推断本地安装状态；dispatch 直接请求配置的 endpoint，并保留实际响应中的连接或模型错误。Talos 不自动安装模型，也不 fallback。
 
 ## 职责边界
 

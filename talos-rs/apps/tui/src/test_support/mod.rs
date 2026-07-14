@@ -37,10 +37,9 @@ impl TestTuiAppExt for TuiApp {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct MockGatewayState {
     pub(crate) models: Vec<ModelInfo>,
-    pub(crate) default_model: String,
+    pub(crate) default_model: talos_sdk::ModelRef,
     pub(crate) session_id: String,
     pub(crate) current_model: String,
     pub(crate) current_reasoning_effort: Option<talos_sdk::ReasoningEffort>,
@@ -678,7 +677,10 @@ impl MockGatewayClient {
                     mock_model_info("qwen-plus", 128_000),
                     mock_model_info("gpt-5.3 medium", 128_000),
                 ],
-                default_model: "qwen-plus".to_string(),
+                default_model: talos_sdk::ModelRef {
+                    provider: "mock".to_string(),
+                    id: "qwen-plus".to_string(),
+                },
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
                 current_reasoning_effort: None,
@@ -750,7 +752,10 @@ impl GatewayClient for MockGatewayClient {
         let default_model = state
             .models
             .iter()
-            .find(|model| model.model.id == state.default_model)
+            .find(|model| {
+                model.provider == state.default_model.provider
+                    && model.model.id == state.default_model.id
+            })
             .expect("mock default model should exist");
         Ok(talos_sdk::ModelListResponse {
             models: state.models.clone(),
