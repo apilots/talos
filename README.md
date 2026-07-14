@@ -117,8 +117,10 @@ just e2e-case 01_health_and_models
 
 Talos 的 Rust workspace 使用根目录 `justfile` 统一开发入口。`just test`
 通过 `cargo-nextest` 运行测试；日常开发应优先按 package 或测试名缩小范围。
-提交标题必须使用 `type: description` 或 `type(scope): description` 格式；运行
-`just setup-git-hooks` 后，本地 Git 会使用仓库版本化的 `commit-msg` hook 执行校验。
+提交标题使用分类关键词时，必须采用 `type: description` 或
+`type(scope): description` 格式；没有分类关键词的普通标题允许提交，并在 release
+notes 中归入 Other。运行 `just setup-git-hooks` 后，本地 Git 会使用仓库版本化的
+`commit-msg` hook 执行校验。
 `just check` 使用独立的 `target/talos-check` 目录，避免日常类型检查继续膨胀
 `target/debug`。
 E2E 也可以通过 root `justfile` 运行：`just e2e` 会转发到

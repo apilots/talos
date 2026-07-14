@@ -16,6 +16,10 @@ install-tools:
 setup-git-hooks:
     git -C .. config core.hooksPath .githooks
 
+# Verify categorized and uncategorized commit subject behavior.
+test-commit-messages:
+    ../scripts/check-commit-message-tests.sh
+
 # Format all Rust crates in the workspace.
 fmt:
     cargo fmt --all
