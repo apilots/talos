@@ -47,7 +47,7 @@ describe("AppServerClient", () => {
       conf: {
         modelSelection: {
           modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
-          reasoning: { type: "modelDefault" },
+          reasoningEffort: null,
         },
       },
       project_id: null,
@@ -91,7 +91,7 @@ describe("AppServerClient", () => {
           conf: {
             modelSelection: {
               modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
-              reasoning: { type: "modelDefault" },
+              reasoningEffort: null,
             },
           },
           project_id: null,

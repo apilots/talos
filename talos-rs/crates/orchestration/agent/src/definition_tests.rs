@@ -54,7 +54,7 @@ impl LlmProviderRouter for TestLlmProviderRouter {
 }
 
 fn default_model_selection() -> ModelSelection {
-    ModelSelection::model_default(ModelRef {
+    ModelSelection::without_reasoning(ModelRef {
         provider: "test".to_string(),
         id: "global-model".to_string(),
     })

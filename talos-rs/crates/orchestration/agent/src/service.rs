@@ -10,7 +10,7 @@ use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     RunItem, StopReason, TalosInputItem, TalosReasoning, TalosSessionEnvironment, TokenUsage,
 };
-use talos_types::{ModelRef, ModelSelection, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{ModelSelection, TalosSession, DEFAULT_SESSION_TITLE};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -82,12 +82,11 @@ pub struct AgentRunConfig {
 impl AgentRunConfig {
     /// Build runtime config from the prepared product session.
     pub fn from_session(session: &TalosSession) -> Self {
-        let model_selection = session.conf.model_selection.clone().unwrap_or_else(|| {
-            ModelSelection::model_default(ModelRef {
-                provider: session.config.llm.provider.clone(),
-                id: session.config.llm.model.clone(),
-            })
-        });
+        let model_selection = session
+            .conf
+            .model_selection
+            .clone()
+            .expect("prepared sessions must have an explicit model selection");
         Self {
             agent: session.config.agent.clone(),
             llm: session.config.llm.clone(),

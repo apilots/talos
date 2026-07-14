@@ -72,7 +72,7 @@ fn static_router(provider: Arc<dyn LlmProvider>) -> Arc<dyn LlmProviderRouter> {
 }
 
 fn model_selection(id: &str) -> ModelSelection {
-    ModelSelection::model_default(ModelRef {
+    ModelSelection::without_reasoning(ModelRef {
         provider: "test".to_string(),
         id: id.to_string(),
     })
@@ -540,7 +540,7 @@ fn agent_run_config_resolves_deepseek_provider_config() {
     let config = AgentRunConfig {
         agent: talos_config::AgentConfig::default(),
         llm,
-        model_selection: ModelSelection::model_default(ModelRef {
+        model_selection: ModelSelection::without_reasoning(ModelRef {
             provider: "deepseek".to_string(),
             id: "deepseek-v4-pro".to_string(),
         }),
@@ -1297,7 +1297,7 @@ async fn test_run_uses_session_provider_for_llm_routing() {
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         Arc::new(RecordingLlmProviderRouter { primary, secondary }),
-        ModelSelection::model_default(ModelRef {
+        ModelSelection::without_reasoning(ModelRef {
             provider: "primary".to_string(),
             id: "primary-model".to_string(),
         }),

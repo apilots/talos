@@ -74,6 +74,19 @@ fn provider_model(id: &str) -> talos_config::ProviderModelConfig {
     }
 }
 
+fn config_with_model(provider: &str, model: &str) -> talos_types::TalosConfig {
+    let mut config = talos_types::TalosConfig::default();
+    config.llm.provider = provider.to_string();
+    config.llm.model = model.to_string();
+    let models = match provider {
+        "anthropic" => &mut config.llm.anthropic.models,
+        "openai" => &mut config.llm.openai.models,
+        other => panic!("unsupported test provider {other}"),
+    };
+    models.push(provider_model(model));
+    config
+}
+
 fn context() -> TalosContext {
     TalosContext {
         source_type: TalosSourceType::System,
@@ -107,9 +120,7 @@ fn create_session_params(
 
 #[tokio::test]
 async fn create_session_without_selection_uses_global_default() {
-    let mut base_config = talos_types::TalosConfig::default();
-    base_config.llm.provider = "anthropic".to_string();
-    base_config.llm.model = "global-model".to_string();
+    let base_config = config_with_model("anthropic", "global-model");
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
@@ -122,14 +133,40 @@ async fn create_session_without_selection_uses_global_default() {
 
     assert_eq!(session.config.llm.provider, "anthropic");
     assert_eq!(session.config.llm.model, "global-model");
-    assert_eq!(session.conf.model_selection, None);
+    assert_eq!(
+        session.conf.model_selection,
+        Some(ModelSelection::without_reasoning(ModelRef {
+            provider: "anthropic".to_string(),
+            id: "global-model".to_string(),
+        }))
+    );
+}
+
+#[tokio::test]
+async fn create_session_persists_configured_default_reasoning_effort() {
+    let mut config = config_with_model("anthropic", "reasoning-model");
+    config.llm.anthropic.models[0].reasoning = true;
+    config.llm.anthropic.models[0].reasoning_effort = talos_config::ReasoningEffort::High;
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
+
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        session.conf.model_selection.unwrap().reasoning_effort,
+        Some(talos_config::ReasoningEffort::High)
+    );
 }
 
 #[tokio::test]
 async fn update_base_llm_changes_new_session_default_model() {
-    let mut base_config = talos_types::TalosConfig::default();
-    base_config.llm.provider = "anthropic".to_string();
-    base_config.llm.model = "old-model".to_string();
+    let base_config = config_with_model("anthropic", "old-model");
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
@@ -138,6 +175,10 @@ async fn update_base_llm_changes_new_session_default_model() {
     let llm = talos_config::LlmConfig {
         provider: "openai".to_string(),
         model: "new-model".to_string(),
+        openai: talos_config::ProviderConfig {
+            models: vec![provider_model("new-model")],
+            ..Default::default()
+        },
         ..Default::default()
     };
 
@@ -177,7 +218,7 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
         .create_session(create_session_params(
             context(),
             "default",
-            Some(ModelSelection::model_default(ModelRef {
+            Some(ModelSelection::without_reasoning(ModelRef {
                 provider: "anthropic".to_string(),
                 id: "session-model".to_string(),
             })),
@@ -191,9 +232,8 @@ async fn requested_session_model_wins_when_provider_is_unchanged() {
 
 #[tokio::test]
 async fn create_session_conf_model_selection_matches_stored_model() {
-    let mut base_config = talos_types::TalosConfig::default();
-    base_config.llm.provider = "anthropic".to_string();
-    base_config.llm.model = "default-model".to_string();
+    let mut base_config = config_with_model("anthropic", "default-model");
+    base_config.llm.openai.models = vec![provider_model("conf-model")];
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(
         store.clone(),
@@ -202,7 +242,7 @@ async fn create_session_conf_model_selection_matches_stored_model() {
     );
     let mut params = create_session_params(context(), "default", None);
     params.conf = Some(SessionConf {
-        model_selection: Some(ModelSelection::model_default(ModelRef {
+        model_selection: Some(ModelSelection::without_reasoning(ModelRef {
             provider: "openai".to_string(),
             id: "conf-model".to_string(),
         })),
@@ -220,16 +260,10 @@ async fn create_session_conf_model_selection_matches_stored_model() {
 }
 
 #[tokio::test]
-async fn existing_session_without_model_selection_tracks_new_default() {
-    let mut base_config = talos_types::TalosConfig::default();
-    base_config.llm.provider = "anthropic".to_string();
-    base_config.llm.model = "old-default".to_string();
-    base_config.llm.anthropic.models = vec![provider_model("old-default")];
-    let service = SessionService::new(
-        Arc::new(MockSessionStore::new()),
-        Arc::new(MockProjectStore::new()),
-        base_config,
-    );
+async fn existing_session_keeps_persisted_selection_when_default_changes() {
+    let base_config = config_with_model("anthropic", "old-default");
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(store, Arc::new(MockProjectStore::new()), base_config);
 
     let original = service
         .create_session(create_session_params(context(), "default", None))
@@ -239,11 +273,11 @@ async fn existing_session_without_model_selection_tracks_new_default() {
     assert_eq!(original.config.llm.model, "old-default");
 
     let mut llm = talos_config::LlmConfig {
-        provider: "openai".to_string(),
+        provider: "anthropic".to_string(),
         model: "new-default".to_string(),
         ..Default::default()
     };
-    llm.openai.models = vec![provider_model("new-default")];
+    llm.anthropic.models = vec![provider_model("old-default"), provider_model("new-default")];
     service.update_base_llm(&llm);
 
     let reloaded = service
@@ -252,8 +286,69 @@ async fn existing_session_without_model_selection_tracks_new_default() {
         .expect("session read should succeed")
         .expect("session should exist");
 
-    assert_eq!(reloaded.config.llm.provider, "openai");
-    assert_eq!(reloaded.config.llm.model, "new-default");
+    assert_eq!(reloaded.config.llm.provider, "anthropic");
+    assert_eq!(reloaded.config.llm.model, "old-default");
+}
+
+#[tokio::test]
+async fn legacy_session_without_provider_migrates_unique_model_selection() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "legacy-model"),
+    );
+    let created = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+    {
+        let mut records = store.records.lock().unwrap();
+        records[0].conf = SessionConf::default();
+    }
+
+    let migrated = service
+        .get_session(&created.context.session_id)
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        migrated.conf.model_selection,
+        Some(ModelSelection::without_reasoning(ModelRef {
+            provider: "anthropic".to_string(),
+            id: "legacy-model".to_string(),
+        }))
+    );
+    assert_eq!(
+        store.records.lock().unwrap()[0].conf,
+        migrated.conf,
+        "migration must persist the normalized selection"
+    );
+}
+
+#[tokio::test]
+async fn legacy_session_migration_rejects_ambiguous_model_without_writing() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let mut config = config_with_model("anthropic", "shared-model");
+    config.llm.openai.models = vec![provider_model("shared-model")];
+    let service = SessionService::new(store.clone(), Arc::new(MockProjectStore::new()), config);
+    let created = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+    store.records.lock().unwrap()[0].conf = SessionConf::default();
+
+    let error = service
+        .get_session(&created.context.session_id)
+        .await
+        .expect_err("ambiguous legacy model must fail migration");
+
+    assert!(error.to_string().contains("found 2"));
+    assert_eq!(
+        store.records.lock().unwrap()[0].conf,
+        SessionConf::default()
+    );
 }
 
 #[tokio::test]
@@ -261,7 +356,7 @@ async fn create_session_preserves_workspace_routing_key() {
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
-        talos_types::TalosConfig::default(),
+        config_with_model("anthropic", "claude-3-5-sonnet"),
     );
 
     let session = service

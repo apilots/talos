@@ -135,7 +135,7 @@ describe("ChatSessionPage", () => {
       state: { message_count: 0 },
       modelSelection: {
         modelRef: { provider: "mock", id: "model-1" },
-        reasoning: { type: "modelDefault" },
+        reasoningEffort: null,
       },
     };
     mocks.sessionHistoryError = undefined;
@@ -200,7 +200,7 @@ describe("ChatSessionPage", () => {
 
     expect(mocks.mutateModel).toHaveBeenCalledWith({
       modelRef: { provider: "mock", id: "model-1" },
-      reasoning: { type: "effort", level: "high" },
+      reasoningEffort: "high",
     });
   });
 
@@ -240,9 +240,10 @@ describe("ChatSessionPage", () => {
     expect(mocks.sendTurn).toHaveBeenCalledWith({
       modelSelection: {
         modelRef: { provider: "mock", id: "model-1" },
-        reasoning: { type: "modelDefault" },
+        reasoningEffort: "medium",
       },
       project: undefined,
+      skills: undefined,
     });
   });
 

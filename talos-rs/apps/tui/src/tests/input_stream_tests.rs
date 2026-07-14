@@ -30,10 +30,12 @@ fn test_model_catalog_uses_explicit_default_instead_of_first_entry() {
 
     app.apply_model_catalog(talos_sdk::ModelListResponse {
         models: vec![first, default],
-        default_model_selection: talos_sdk::ModelSelection::model_default(talos_sdk::ModelRef {
-            provider: "mock".to_string(),
-            id: "qwen3.6-flash".to_string(),
-        }),
+        default_model_selection: talos_sdk::ModelSelection::without_reasoning(
+            talos_sdk::ModelRef {
+                provider: "mock".to_string(),
+                id: "qwen3.6-flash".to_string(),
+            },
+        ),
     })
     .unwrap();
 
@@ -108,8 +110,8 @@ async fn test_model_picker_confirm_writes_command_result_block() {
 
     assert_eq!(app.reasoning_effort_override, None);
     assert_eq!(
-        app.current_model_selection().unwrap().reasoning,
-        talos_sdk::ReasoningSelection::ModelDefault
+        app.current_model_selection().unwrap().reasoning_effort,
+        None
     );
 }
 
@@ -491,8 +493,8 @@ async fn test_app_server_initialize_loads_models_without_session() {
 
     assert_eq!(app.reasoning_effort_override, None);
     assert_eq!(
-        app.current_model_selection().unwrap().reasoning,
-        talos_sdk::ReasoningSelection::ModelDefault
+        app.current_model_selection().unwrap().reasoning_effort,
+        None
     );
     assert_eq!(app.current_model_status_label(), "qwen-plus high");
 }
@@ -903,10 +905,8 @@ async fn test_modes_alias_works_as_models() {
     assert!(interactive_transcript_text(&app).contains("Available models"));
     assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::High));
     assert_eq!(
-        app.current_model_selection().unwrap().reasoning,
-        talos_sdk::ReasoningSelection::Effort {
-            level: ReasoningEffort::High,
-        }
+        app.current_model_selection().unwrap().reasoning_effort,
+        Some(ReasoningEffort::High)
     );
 }
 

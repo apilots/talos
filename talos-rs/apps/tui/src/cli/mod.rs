@@ -61,7 +61,7 @@ async fn execute_exec_command(
         .session
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let model_selection = if let Some(model) = cmd.model.as_deref() {
-        Some(ModelSelection::model_default(
+        Some(ModelSelection::without_reasoning(
             resolve_cli_model_ref(client.as_ref(), model).await?,
         ))
     } else {
@@ -144,7 +144,7 @@ async fn execute_session_command(
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
-            let model_selection = ModelSelection::model_default(
+            let model_selection = ModelSelection::without_reasoning(
                 resolve_cli_model_ref(client.as_ref(), &model).await?,
             );
             let session = client

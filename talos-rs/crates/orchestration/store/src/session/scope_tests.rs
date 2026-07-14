@@ -6,9 +6,7 @@ use crate::project::{ProjectStore, StorageProjectStore};
 use serde_json::Value;
 use talos_storage::{Row, SqliteStorage, Storage};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{
-    ModelRef, ModelSelection, ReasoningSelection, SessionConf, DEFAULT_SESSION_TITLE,
-};
+use talos_types::{ModelRef, ModelSelection, ReasoningEffort, SessionConf, DEFAULT_SESSION_TITLE};
 
 fn sample_context() -> TalosContext {
     TalosContext {
@@ -88,7 +86,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
                 provider: "deepseek".to_string(),
                 id: "deepseek-v4-flash".to_string(),
             },
-            reasoning: ReasoningSelection::ModelDefault,
+            reasoning_effort: None,
         }),
     };
 
@@ -140,6 +138,89 @@ async fn test_get_session_record_reports_invalid_conf_json() {
     assert!(error
         .to_string()
         .contains("parse session 'session-1' conf_json"));
+}
+
+#[tokio::test]
+async fn test_get_session_record_marks_legacy_model_default_for_service_migration() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let record = record("session-1", "user-1", None, None);
+    store
+        .insert_session_record(&record, "agent-a", "api")
+        .await
+        .unwrap();
+    let legacy = serde_json::json!({
+        "modelSelection": {
+            "modelRef": {"provider": "openai", "id": "gpt-5.5"},
+            "reasoning": {"type": "modelDefault"}
+        }
+    });
+    storage
+        .update(
+            "sessions",
+            &Row::new(
+                vec!["conf_json".to_string()],
+                vec![Value::String(legacy.to_string())],
+            ),
+            "session_key = ?",
+            &["session-1"],
+        )
+        .await
+        .unwrap();
+
+    let loaded = store
+        .get_session_record("session-1")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(loaded.conf.model_selection, None);
+}
+
+#[tokio::test]
+async fn test_get_session_record_migrates_legacy_low_effort_to_light() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let record = record("session-1", "user-1", None, None);
+    store
+        .insert_session_record(&record, "agent-a", "api")
+        .await
+        .unwrap();
+    let legacy = serde_json::json!({
+        "modelSelection": {
+            "modelRef": {"provider": "openai", "id": "gpt-5.5"},
+            "reasoning": {"type": "effort", "level": "low"}
+        }
+    });
+    storage
+        .update(
+            "sessions",
+            &Row::new(
+                vec!["conf_json".to_string()],
+                vec![Value::String(legacy.to_string())],
+            ),
+            "session_key = ?",
+            &["session-1"],
+        )
+        .await
+        .unwrap();
+
+    let loaded = store
+        .get_session_record("session-1")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        loaded.conf.model_selection,
+        Some(ModelSelection::new(
+            ModelRef {
+                provider: "openai".to_string(),
+                id: "gpt-5.5".to_string(),
+            },
+            Some(ReasoningEffort::Light),
+        ))
+    );
 }
 
 #[tokio::test]

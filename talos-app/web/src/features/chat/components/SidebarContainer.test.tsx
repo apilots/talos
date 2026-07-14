@@ -57,7 +57,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         project_id: "project-known",
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
-          reasoning: { type: "modelDefault" },
+          reasoningEffort: null,
         },
         created_at: 1,
         last_activity: 3,
@@ -68,7 +68,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         project_id: "project-missing",
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
-          reasoning: { type: "modelDefault" },
+          reasoningEffort: null,
         },
         created_at: 1,
         last_activity: 2,
@@ -79,7 +79,7 @@ vi.mock("../hooks/useChatQueries", () => ({
         project_id: null,
         modelSelection: {
           modelRef: { provider: "mock", id: "model-1" },
-          reasoning: { type: "modelDefault" },
+          reasoningEffort: null,
         },
         created_at: 1,
         last_activity: 1,

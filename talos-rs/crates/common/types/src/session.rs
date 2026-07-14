@@ -1,4 +1,4 @@
-use crate::model::{ModelSelection, ReasoningSelection, TalosConfig};
+use crate::model::{ModelSelection, TalosConfig};
 use crate::talos;
 use crate::turn_api::TimelineActiveTurnSnapshot;
 use schemars::JsonSchema;
@@ -222,15 +222,11 @@ impl From<&TalosSession> for SessionInfo {
             user_id: session.user_id.clone(),
             source_type: session.context.source_type.clone(),
             provider: session.context.provider.clone(),
-            model_selection: session.conf.model_selection.clone().unwrap_or_else(|| {
-                ModelSelection {
-                    model_ref: crate::ModelRef {
-                        provider: session.config.llm.provider.clone(),
-                        id: session.config.llm.model.clone(),
-                    },
-                    reasoning: ReasoningSelection::ModelDefault,
-                }
-            }),
+            model_selection: session
+                .conf
+                .model_selection
+                .clone()
+                .expect("loaded sessions must have an explicit model selection"),
             created_at: session.state.created_at,
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,

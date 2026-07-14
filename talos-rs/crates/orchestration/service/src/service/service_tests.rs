@@ -42,6 +42,21 @@ enum TestCancelMode {
 struct TestLlmProvider;
 struct TestAuthService;
 
+fn configured_test_config() -> TalosConfig {
+    let mut config = TalosConfig::default();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: config.llm.model.clone(),
+        name: "Default test model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
+    config
+}
+
 #[async_trait]
 impl TurnExecutor for TestTurnExecutor {
     async fn start_turn_stream(
@@ -269,17 +284,21 @@ fn create_session_params(
 
 #[tokio::test]
 async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
-    let mut config = TalosConfig::default();
-    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
-        id: "turn-model".to_string(),
-        name: "Turn Model".to_string(),
-        context_window: 128_000,
-        reasoning: true,
-        reasoning_effort: talos_config::ReasoningEffort::Medium,
-        speed: talos_config::ModelSpeed::Standard,
-        input: vec![talos_config::ModelInputKind::Text],
-        cost: talos_config::ModelCostConfig::default(),
-    }];
+    let mut config = configured_test_config();
+    config
+        .llm
+        .anthropic
+        .models
+        .push(talos_config::ProviderModelConfig {
+            id: "turn-model".to_string(),
+            name: "Turn Model".to_string(),
+            context_window: 128_000,
+            reasoning: true,
+            reasoning_effort: talos_config::ReasoningEffort::Medium,
+            speed: talos_config::ModelSpeed::Standard,
+            input: vec![talos_config::ModelInputKind::Text],
+            cost: talos_config::ModelCostConfig::default(),
+        });
     let (service, _store) = test_application(
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
@@ -297,7 +316,7 @@ async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
         .expect("session should be created");
 
     let mut request = start_turn_request("session-model-ref", "hello");
-    request.model_selection = Some(talos_types::ModelSelection::model_default(
+    request.model_selection = Some(talos_types::ModelSelection::without_reasoning(
         talos_types::ModelRef {
             provider: "anthropic".to_string(),
             id: "turn-model".to_string(),
@@ -374,7 +393,7 @@ async fn assert_session_creation_rolled_back(
 
 #[tokio::test]
 async fn first_turn_timeout_does_not_leave_session_record() {
-    let mut config = TalosConfig::default();
+    let mut config = configured_test_config();
     config.agent.kernel.timeline_events.first_event_timeout_ms = 1;
     let (service, store) = test_application(
         Arc::new(TestTurnExecutor {
@@ -403,7 +422,7 @@ async fn first_turn_closed_stream_does_not_leave_session_record() {
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
 
@@ -426,7 +445,7 @@ async fn first_turn_idempotency_conflict_does_not_leave_session_record() {
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
     let reservation = store
@@ -466,7 +485,7 @@ async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
     store
@@ -504,7 +523,7 @@ async fn interrupt_turn_without_active_turn_is_idempotent() {
             cancel_mode: TestCancelMode::MissingRuntimeTurn,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
     let actor = Actor::regular("member-user");
@@ -539,7 +558,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
             cancel_mode: TestCancelMode::MissingRuntimeTurn,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
 
@@ -567,7 +586,7 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
             cancel_mode: TestCancelMode::MissingRuntimeTurn,
             cancelled_turn_ids: cancelled_turn_ids.clone(),
         }),
-        TalosConfig::default(),
+        configured_test_config(),
     )
     .await;
     let actor = Actor::regular("member-user");

@@ -591,7 +591,7 @@ fn start_turn_request(
         }],
         workspace_id: None,
         context: Some(test_talos_context()),
-        model_selection: test_model_ref().map(ModelSelection::model_default),
+        model_selection: test_model_ref().map(ModelSelection::without_reasoning),
         project_id: None,
         current_directory: None,
         client_request_id,

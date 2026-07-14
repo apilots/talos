@@ -111,11 +111,50 @@ impl DatabaseSessionStore {
         let Some(conf_json) = conf_json else {
             return Ok(SessionConf::default());
         };
-        serde_json::from_str(&conf_json).map_err(|error| {
+        let mut value = serde_json::from_str::<Value>(&conf_json).map_err(|error| {
+            talos_error::TalosError::SerializationError(format!(
+                "parse session '{session_id}' conf_json: {error}"
+            ))
+        })?;
+        Self::migrate_legacy_model_selection(&mut value);
+        serde_json::from_value(value).map_err(|error| {
             talos_error::TalosError::SerializationError(format!(
                 "parse session '{session_id}' conf_json: {error}"
             ))
         })
+    }
+
+    fn migrate_legacy_model_selection(value: &mut Value) {
+        let Some(conf) = value.as_object_mut() else {
+            return;
+        };
+        let Some(selection) = conf
+            .get_mut("modelSelection")
+            .and_then(Value::as_object_mut)
+        else {
+            return;
+        };
+        let Some(reasoning) = selection.remove("reasoning") else {
+            return;
+        };
+        let reasoning_type = reasoning.get("type").and_then(Value::as_str);
+        match reasoning_type {
+            Some("modelDefault") => {
+                conf.remove("modelSelection");
+            }
+            Some("effort") => {
+                if let Some(level) = reasoning.get("level").and_then(Value::as_str) {
+                    let level = if level == "low" { "light" } else { level };
+                    selection.insert(
+                        "reasoningEffort".to_string(),
+                        Value::String(level.to_string()),
+                    );
+                }
+            }
+            _ => {
+                selection.insert("reasoning".to_string(), reasoning);
+            }
+        }
     }
 
     pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {

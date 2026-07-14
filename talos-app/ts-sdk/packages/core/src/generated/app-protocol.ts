@@ -184,9 +184,7 @@ export type ModelInfo = { provider: string, id: string, name: string, context_wi
 
 export type ModelRef = { provider: string, id: string, };
 
-export type ModelSelection = { modelRef: ModelRef, reasoning: ReasoningSelection, };
-
-export type ReasoningSelection = { "type": "modelDefault" } | { "type": "effort", level: ReasoningEffort, };
+export type ModelSelection = { modelRef: ModelRef, reasoningEffort: ReasoningEffort | null, };
 
 export type LlmConfig = {
 /**

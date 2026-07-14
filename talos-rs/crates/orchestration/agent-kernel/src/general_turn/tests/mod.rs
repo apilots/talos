@@ -695,7 +695,7 @@ fn build_ctx_with_stream_for_session(
         workspace_id: "w1".to_string(),
         project_root: None,
         input: "hello".to_string(),
-        model_selection: talos_types::ModelSelection::model_default(talos_types::ModelRef {
+        model_selection: talos_types::ModelSelection::without_reasoning(talos_types::ModelRef {
             provider: "p1".to_string(),
             id: "m1".to_string(),
         }),

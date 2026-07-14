@@ -31,15 +31,26 @@ pub struct ModelRef {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelSelection {
     pub model_ref: ModelRef,
-    pub reasoning: ReasoningSelection,
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 impl ModelSelection {
-    /// Creates a selection that follows the selected model's configured reasoning default.
-    pub fn model_default(model_ref: ModelRef) -> Self {
+    pub fn new(model_ref: ModelRef, reasoning_effort: Option<ReasoningEffort>) -> Self {
         Self {
             model_ref,
-            reasoning: ReasoningSelection::ModelDefault,
+            reasoning_effort,
+        }
+    }
+
+    pub fn without_reasoning(model_ref: ModelRef) -> Self {
+        Self::new(model_ref, None)
+    }
+
+    /// Creates the explicit default selection declared by configured model metadata.
+    pub fn from_model(model_ref: ModelRef, model: &ProviderModelConfig) -> Self {
+        Self {
+            model_ref,
+            reasoning_effort: model.reasoning.then_some(model.reasoning_effort),
         }
     }
 
@@ -52,31 +63,15 @@ impl ModelSelection {
             )));
         }
 
-        match (model.model.reasoning, self.reasoning) {
-            (false, ReasoningSelection::ModelDefault) => Ok(EffectiveReasoning::Unsupported),
-            (false, ReasoningSelection::Effort { .. }) => {
-                Err(crate::TalosError::ValidationError(format!(
-                    "model '{}:{}' does not support reasoning effort selection",
-                    model.provider, model.model.id
-                )))
-            }
-            (true, ReasoningSelection::ModelDefault) => {
-                Ok(EffectiveReasoning::Effort(model.model.reasoning_effort))
-            }
-            (true, ReasoningSelection::Effort { level }) => Ok(EffectiveReasoning::Effort(level)),
+        match (model.model.reasoning, self.reasoning_effort) {
+            (false, Some(_)) => Err(crate::TalosError::ValidationError(format!(
+                "model '{}:{}' does not support reasoning effort selection",
+                model.provider, model.model.id
+            ))),
+            (_, None) => Ok(EffectiveReasoning::Unsupported),
+            (true, Some(level)) => Ok(EffectiveReasoning::Effort(level)),
         }
     }
-}
-
-/// Describes whether a selection follows model defaults or explicitly overrides effort.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum ReasoningSelection {
-    #[default]
-    ModelDefault,
-    Effort {
-        level: ReasoningEffort,
-    },
 }
 
 /// Reasoning policy resolved from a model's capabilities and a request selection.
@@ -125,4 +120,19 @@ pub fn resolve_model_catalog(llm: &LlmConfig) -> Vec<ModelInfo> {
             .map(move |model| ModelInfo::from_provider_model(provider, model))
     })
     .collect()
+}
+
+/// Resolves the configured default model into a complete persisted selection.
+pub fn resolve_default_model_selection(llm: &LlmConfig) -> crate::TalosResult<ModelSelection> {
+    let model_ref = ModelRef {
+        provider: llm.provider.clone(),
+        id: llm.model.clone(),
+    };
+    let model = resolve_model_catalog(llm)
+        .into_iter()
+        .find(|model| model.provider == model_ref.provider && model.model.id == model_ref.id)
+        .ok_or_else(|| {
+            crate::TalosError::UnsupportedModel(format!("{}:{}", model_ref.provider, model_ref.id))
+        })?;
+    Ok(ModelSelection::from_model(model_ref, &model.model))
 }

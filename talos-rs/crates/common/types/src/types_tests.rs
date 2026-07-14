@@ -208,7 +208,7 @@ fn test_session_override_policy_accepts_model_selection() {
                 provider: "openai".to_string(),
                 id: "gpt-4o".to_string(),
             },
-            reasoning: ReasoningSelection::ModelDefault,
+            reasoning_effort: None,
         }),
     };
     SessionConfigOverridePolicy::validate_conf(&conf)
@@ -222,9 +222,7 @@ fn test_session_override_policy_builds_model_selection_conf() {
             provider: "openai".to_string(),
             id: "gpt-4o".to_string(),
         },
-        reasoning: ReasoningSelection::Effort {
-            level: ReasoningEffort::High,
-        },
+        reasoning_effort: Some(ReasoningEffort::High),
     };
     let conf = SessionConfigOverridePolicy::single_model_selection_conf(&selection);
     let extracted = SessionConfigOverridePolicy::extract_model_selection(&conf)
@@ -234,15 +232,15 @@ fn test_session_override_policy_builds_model_selection_conf() {
 }
 
 #[test]
-fn test_model_selection_resolves_model_default_effort() {
-    let selection = ModelSelection {
-        model_ref: ModelRef {
+fn test_model_selection_uses_configured_default_effort_when_created_from_model() {
+    let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
+    let selection = ModelSelection::from_model(
+        ModelRef {
             provider: "openai".to_string(),
             id: "gpt-5.5".to_string(),
         },
-        reasoning: ReasoningSelection::ModelDefault,
-    };
-    let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
+        &model.model,
+    );
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
@@ -257,9 +255,7 @@ fn test_model_selection_resolves_explicit_effort() {
             provider: "openai".to_string(),
             id: "gpt-5.5".to_string(),
         },
-        reasoning: ReasoningSelection::Effort {
-            level: ReasoningEffort::XHigh,
-        },
+        reasoning_effort: Some(ReasoningEffort::XHigh),
     };
     let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
 
@@ -270,13 +266,13 @@ fn test_model_selection_resolves_explicit_effort() {
 }
 
 #[test]
-fn test_model_selection_resolves_unsupported_model_default() {
+fn test_model_selection_resolves_disabled_reasoning() {
     let selection = ModelSelection {
         model_ref: ModelRef {
             provider: "ollama".to_string(),
             id: "qwen".to_string(),
         },
-        reasoning: ReasoningSelection::ModelDefault,
+        reasoning_effort: None,
     };
     let model = model_info("ollama", "qwen", "Qwen", false);
 
@@ -293,9 +289,7 @@ fn test_model_selection_rejects_explicit_effort_for_unsupported_model() {
             provider: "ollama".to_string(),
             id: "qwen".to_string(),
         },
-        reasoning: ReasoningSelection::Effort {
-            level: ReasoningEffort::High,
-        },
+        reasoning_effort: Some(ReasoningEffort::High),
     };
     let model = model_info("ollama", "qwen", "Qwen", false);
 
@@ -313,9 +307,7 @@ fn test_model_selection_serializes_as_single_wire_object() {
             provider: "openai".to_string(),
             id: "gpt-5.5".to_string(),
         },
-        reasoning: ReasoningSelection::Effort {
-            level: ReasoningEffort::High,
-        },
+        reasoning_effort: Some(ReasoningEffort::High),
     };
 
     let encoded = serde_json::to_value(&selection).unwrap();
@@ -324,7 +316,7 @@ fn test_model_selection_serializes_as_single_wire_object() {
         encoded,
         serde_json::json!({
             "modelRef": {"provider": "openai", "id": "gpt-5.5"},
-            "reasoning": {"type": "effort", "level": "high"}
+            "reasoningEffort": "high"
         })
     );
 }

@@ -1,10 +1,7 @@
 use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
-use talos_sdk::{
-    AuthSessionReadResponse, ReasoningEffort, ReasoningSelection, SessionInfo,
-    WorkspaceInfoResponse,
-};
+use talos_sdk::{AuthSessionReadResponse, ReasoningEffort, SessionInfo, WorkspaceInfoResponse};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
 use crate::utils::{text_display_width, APP_VERSION};
@@ -105,10 +102,7 @@ impl TuiStatusSnapshot {
                 context_window: model_info.model.context_window,
                 reasoning: model_info.model.reasoning,
                 reasoning_effort: session
-                    .map(|session| match session.model_selection.reasoning {
-                        ReasoningSelection::ModelDefault => model_info.model.reasoning_effort,
-                        ReasoningSelection::Effort { level } => level,
-                    })
+                    .and_then(|session| session.model_selection.reasoning_effort)
                     .unwrap_or_else(|| {
                         app.reasoning_effort_override
                             .filter(|_| {

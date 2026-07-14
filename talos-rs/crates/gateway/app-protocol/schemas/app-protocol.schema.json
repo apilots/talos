@@ -2697,13 +2697,19 @@
         "modelRef": {
           "$ref": "#/definitions/ModelRef"
         },
-        "reasoning": {
-          "$ref": "#/definitions/ReasoningSelection"
+        "reasoningEffort": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
-        "modelRef",
-        "reasoning"
+        "modelRef"
       ],
       "type": "object"
     },
@@ -3280,43 +3286,6 @@
         "xhigh"
       ],
       "type": "string"
-    },
-    "ReasoningSelection": {
-      "description": "Describes whether a selection follows model defaults or explicitly overrides effort.",
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "modelDefault"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "level": {
-              "$ref": "#/definitions/ReasoningEffort"
-            },
-            "type": {
-              "enum": [
-                "effort"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "level",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "RecoverTimelineRequest": {
       "properties": {

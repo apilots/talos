@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Arc::new(StaticLlmProviderRouter {
             provider: llm_provider,
         }),
-        ModelSelection::model_default(ModelRef {
+        ModelSelection::without_reasoning(ModelRef {
             provider: "demo".to_string(),
             id: "demo-model".to_string(),
         }),

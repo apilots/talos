@@ -1,5 +1,4 @@
 export const defaultLocale = "en" as const;
-
 export const resources = {
   en: {
     common: {
@@ -111,7 +110,7 @@ export const resources = {
       fullAccess: "Full access",
       fullAccessDescription: "Unrestricted access to the internet and any file on your computer.",
       reasoningLabel: "Reasoning",
-      reasoningLight: "Light",
+      reasoningNone: "None", reasoningLight: "Light",
       reasoningMedium: "Medium",
       reasoningHigh: "High",
       reasoningExtraHigh: "Extra High",
@@ -635,7 +634,7 @@ export const resources = {
       fullAccess: "Full access",
       fullAccessDescription: "允许访问互联网和你电脑上的任意文件。",
       reasoningLabel: "推理强度",
-      reasoningLight: "轻量",
+      reasoningNone: "无", reasoningLight: "轻量",
       reasoningMedium: "中",
       reasoningHigh: "高",
       reasoningExtraHigh: "极高",

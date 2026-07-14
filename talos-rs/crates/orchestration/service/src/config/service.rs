@@ -3,9 +3,10 @@ use std::sync::Arc;
 use talos_config::{provider_config_for_llm, LlmConfig, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
 use talos_types::{
-    resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
-    ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest,
-    ConfigUpdateResponse, ConfigValue, ModelInfo, ModelListResponse, ModelRef, ModelSelection,
+    resolve_default_model_selection, resolve_model_catalog, ConfigDeleteRequest,
+    ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
+    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, ConfigValue, ModelInfo,
+    ModelListResponse, ModelRef, ModelSelection,
 };
 use tokio::sync::RwLock;
 
@@ -37,11 +38,7 @@ impl ConfigService {
 
     pub async fn list_models(&self) -> TalosResult<ModelListResponse> {
         let llm = self.llm_config_service.get()?;
-        let default_model_selection = ModelSelection::model_default(ModelRef {
-            provider: llm.provider,
-            id: llm.model,
-        });
-        self.validate_model_selection_supported(&default_model_selection)?;
+        let default_model_selection = resolve_default_model_selection(&llm)?;
         Ok(ModelListResponse {
             models: self.models.read().await.clone(),
             default_model_selection,
@@ -52,7 +49,12 @@ impl ConfigService {
         &self,
         selection: &ModelSelection,
     ) -> TalosResult<()> {
-        let model_ref = &selection.model_ref;
+        let model = self.model_info_for_ref(&selection.model_ref)?;
+        selection.resolve_reasoning(&model)?;
+        Ok(())
+    }
+
+    fn model_info_for_ref(&self, model_ref: &ModelRef) -> TalosResult<ModelInfo> {
         if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
             return Err(TalosError::UnsupportedModel(format!(
                 "{}:{}",
@@ -71,11 +73,10 @@ impl ConfigService {
             .iter()
             .find(|entry| entry.id == model_ref.id)
         {
-            selection.resolve_reasoning(&ModelInfo::from_provider_model(
+            return Ok(ModelInfo::from_provider_model(
                 model_ref.provider.clone(),
                 model.clone(),
-            ))?;
-            return Ok(());
+            ));
         }
         Err(TalosError::UnsupportedModel(format!(
             "{}:{}",

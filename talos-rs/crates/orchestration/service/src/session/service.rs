@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use talos_config::{resolve_runtime_path, LlmConfig};
+use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{SessionPatchAck, SessionQuery, SessionRecord, SessionStore};
 use talos_types::talos::{TalosConnectionMode, TalosContext};
 use talos_types::{
-    connection_mode_from_context, normalize_current_directory, resolve_effective_project_root,
-    ModelRef, ModelSelection, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch,
-    SessionConfigOverridePolicy, SessionContext, SessionPatch, SessionState, TalosConfig,
-    TalosSession, DEFAULT_SESSION_TITLE,
+    connection_mode_from_context, normalize_current_directory, resolve_default_model_selection,
+    resolve_effective_project_root, resolve_model_catalog, ModelInfo, ModelRef, ModelSelection,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConfigOverridePolicy,
+    SessionContext, SessionPatch, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
@@ -44,12 +44,64 @@ impl SessionService {
         self
     }
 
-    fn base_model_selection(&self) -> ModelSelection {
+    fn base_model_selection(&self) -> TalosResult<ModelSelection> {
         let base_config = self.base_config_snapshot();
-        ModelSelection::model_default(ModelRef {
-            provider: base_config.llm.provider,
-            id: base_config.llm.model,
-        })
+        resolve_default_model_selection(&base_config.llm)
+    }
+
+    fn validate_model_selection(&self, selection: &ModelSelection) -> TalosResult<()> {
+        let llm = &self.base_config_snapshot().llm;
+        let model = provider_config_for_llm(llm, &selection.model_ref.provider)
+            .and_then(|provider| {
+                provider
+                    .models
+                    .iter()
+                    .find(|model| model.id == selection.model_ref.id)
+            })
+            .ok_or_else(|| {
+                TalosError::UnsupportedModel(format!(
+                    "{}:{}",
+                    selection.model_ref.provider, selection.model_ref.id
+                ))
+            })?;
+        selection.resolve_reasoning(&ModelInfo::from_provider_model(
+            selection.model_ref.provider.clone(),
+            model.clone(),
+        ))?;
+        Ok(())
+    }
+
+    async fn ensure_explicit_model_selection(&self, record: &mut SessionRecord) -> TalosResult<()> {
+        if let Some(selection) = record.conf.model_selection.as_ref() {
+            return self.validate_model_selection(selection);
+        }
+
+        let matches = resolve_model_catalog(&self.base_config_snapshot().llm)
+            .into_iter()
+            .filter(|model| model.model.id == record.model)
+            .collect::<Vec<_>>();
+        let [model] = matches.as_slice() else {
+            return Err(TalosError::ValidationError(format!(
+                "cannot migrate session '{}' model '{}': expected exactly one configured provider, found {}",
+                record.id,
+                record.model,
+                matches.len()
+            )));
+        };
+        record.conf.model_selection = Some(ModelSelection::from_model(
+            ModelRef {
+                provider: model.provider.clone(),
+                id: model.model.id.clone(),
+            },
+            &model.model,
+        ));
+        if !self.session_store.update_session_record(record).await? {
+            return Err(TalosError::ResourceNotFound(format!(
+                "session {}",
+                record.id
+            )));
+        }
+        Ok(())
     }
 
     fn base_config_snapshot(&self) -> TalosConfig {
@@ -165,9 +217,10 @@ impl SessionService {
     }
 
     pub async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
-        let records = self.session_store.list_session_records(&query).await?;
+        let mut records = self.session_store.list_session_records(&query).await?;
         let mut sessions = Vec::with_capacity(records.len());
-        for record in &records {
+        for record in &mut records {
+            self.ensure_explicit_model_selection(record).await?;
             let mut session =
                 self.build_session(record, Some(self.default_workspace_id.clone()))?;
             session.context.project_root = self.resolve_effective_root(&session).await?;
@@ -190,9 +243,10 @@ impl SessionService {
         session_id: &str,
         workspace_id: Option<String>,
     ) -> TalosResult<Option<TalosSession>> {
-        let Some(record) = self.session_store.get_session_record(session_id).await? else {
+        let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(None);
         };
+        self.ensure_explicit_model_selection(&mut record).await?;
         let mut session = self.build_session(
             &record,
             workspace_id.or_else(|| Some(self.default_workspace_id.clone())),
@@ -310,24 +364,22 @@ impl SessionService {
             .session_id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let requested_selection = params.model_selection;
-        let effective_selection = requested_selection
-            .clone()
-            .unwrap_or_else(|| self.base_model_selection());
-        let base_conf = if requested_selection.is_some() {
-            SessionConfigOverridePolicy::single_model_selection_conf(&effective_selection)
-        } else {
-            Default::default()
+        let effective_selection = match requested_selection {
+            Some(selection) => selection,
+            None => self.base_model_selection()?,
         };
+        let base_conf =
+            SessionConfigOverridePolicy::single_model_selection_conf(&effective_selection);
         let conf = params
             .conf
             .as_ref()
             .map(|patch_conf| SessionConfigOverridePolicy::merge_conf(&base_conf, patch_conf))
             .unwrap_or(base_conf);
         SessionConfigOverridePolicy::validate_conf(&conf)?;
-        let stored_model = SessionConfigOverridePolicy::extract_model_selection(&conf)?
-            .unwrap_or(effective_selection)
-            .model_ref
-            .id;
+        let stored_selection = SessionConfigOverridePolicy::extract_model_selection(&conf)?
+            .unwrap_or(effective_selection);
+        self.validate_model_selection(&stored_selection)?;
+        let stored_model = stored_selection.model_ref.id;
         let now = chrono::Utc::now().timestamp_millis();
         let record = SessionRecord {
             id: session_id,
@@ -362,6 +414,7 @@ impl SessionService {
         record.conf = SessionConfigOverridePolicy::merge_conf(&record.conf, &patch_conf);
         if let Some(selection) = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?
         {
+            self.validate_model_selection(&selection)?;
             record.model = selection.model_ref.id;
         }
         if let Some(project_id_patch) = &patch.project_id {

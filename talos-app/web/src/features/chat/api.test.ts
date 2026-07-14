@@ -20,7 +20,7 @@ describe("chat api initial turn request", () => {
       "hello",
       {
         modelRef: { provider: "bailian", id: "qwen-max" },
-        reasoning: { type: "modelDefault" },
+        reasoningEffort: null,
       },
       undefined,
     );
@@ -30,7 +30,7 @@ describe("chat api initial turn request", () => {
       input: [{ type: "text", text: "hello" }],
       modelSelection: {
         modelRef: { provider: "bailian", id: "qwen-max" },
-        reasoning: { type: "modelDefault" },
+        reasoningEffort: null,
       },
       context: expect.objectContaining({
         user_id: "user-1",

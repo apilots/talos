@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use talos_sdk::{
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ModelRef,
-    ModelSelection, ReasoningEffort, ReasoningSelection, SessionInfo, UserRole,
-    WorkspaceInfoResponse,
+    ModelSelection, ReasoningEffort, SessionInfo, UserRole, WorkspaceInfoResponse,
 };
 use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
 
@@ -23,7 +22,7 @@ fn session_info() -> SessionInfo {
                 provider: "mock".to_string(),
                 id: "qwen-plus".to_string(),
             },
-            reasoning: ReasoningSelection::ModelDefault,
+            reasoning_effort: None,
         },
         created_at: 1,
         last_activity: 2,
@@ -92,9 +91,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     });
 
     let mut session = session_info();
-    session.model_selection.reasoning = ReasoningSelection::Effort {
-        level: ReasoningEffort::Light,
-    };
+    session.model_selection.reasoning_effort = Some(ReasoningEffort::Light);
     let snapshot =
         TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
             .unwrap();

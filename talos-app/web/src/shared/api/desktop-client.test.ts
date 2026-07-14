@@ -271,7 +271,7 @@ describe("createDesktopTalosClient", () => {
       },
       modelSelection: {
         modelRef: { provider: "bailian", id: "kimi-k2.5" },
-        reasoning: { type: "modelDefault" },
+        reasoningEffort: null,
       },
     });
 

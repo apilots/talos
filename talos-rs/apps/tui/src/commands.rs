@@ -344,7 +344,7 @@ impl TuiApp {
             self.set_reasoning_effort_override(reasoning_effort_override);
         } else {
             self.current_model = default_model_id;
-            self.use_model_default_reasoning();
+            self.set_reasoning_effort_override(default_model_selection.reasoning_effort);
         }
         Ok(())
     }
@@ -476,13 +476,12 @@ impl TuiApp {
             provider: model.provider.clone(),
             id: model.model.id.clone(),
         };
-        let reasoning = match reasoning_effort {
-            Some(level) if model.model.reasoning => talos_sdk::ReasoningSelection::Effort { level },
-            _ => talos_sdk::ReasoningSelection::ModelDefault,
-        };
         Some(talos_sdk::ModelSelection {
             model_ref,
-            reasoning,
+            reasoning_effort: model
+                .model
+                .reasoning
+                .then_some(reasoning_effort.unwrap_or(model.model.reasoning_effort)),
         })
     }
 
@@ -528,14 +527,7 @@ impl TuiApp {
         let model = session.model_selection.model_ref.id.clone();
         self.session_id = Some(session_id.clone());
         self.current_model = model;
-        match session.model_selection.reasoning {
-            talos_sdk::ReasoningSelection::ModelDefault => {
-                self.use_model_default_reasoning();
-            }
-            talos_sdk::ReasoningSelection::Effort { level } => {
-                self.set_reasoning_effort_override(Some(level));
-            }
-        }
+        self.set_reasoning_effort_override(session.model_selection.reasoning_effort);
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

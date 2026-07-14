@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "NativeToolAgent".to_string(),
         "Demonstrates native tool calling flow".to_string(),
         Arc::new(StaticLlmProviderRouter { provider }),
-        ModelSelection::model_default(ModelRef {
+        ModelSelection::without_reasoning(ModelRef {
             provider: "mock".to_string(),
             id: "mock-model".to_string(),
         }),

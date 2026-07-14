@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
     id: string;
     modelSelection: {
       modelRef: { provider: string; id: string };
-      reasoning: { type: "modelDefault" };
+      reasoningEffort: null;
     };
     usage: { total_tokens: number; cache_read_input_tokens?: number };
     message_count: number;

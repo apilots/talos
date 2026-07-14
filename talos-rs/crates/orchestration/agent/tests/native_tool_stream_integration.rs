@@ -404,7 +404,7 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
         "Integration Agent".to_string(),
         "Agent for integration tests".to_string(),
         Arc::new(StaticLlmProviderRouter { provider }),
-        ModelSelection::model_default(ModelRef {
+        ModelSelection::without_reasoning(ModelRef {
             provider: "mock".to_string(),
             id: "mock-model".to_string(),
         }),

@@ -7,11 +7,17 @@ import type {
 
 import type { ReasoningLevel } from "@/shared/types/ui";
 
-export function reasoningLevelToEffort(level: ReasoningLevel): ReasoningEffort {
+export function reasoningLevelToEffort(level: ReasoningLevel): ReasoningEffort | null {
+  if (level === "none") {
+    return null;
+  }
   return level === "extra_high" ? "xhigh" : level;
 }
 
-export function reasoningLevelForEffort(effort: ReasoningEffort): ReasoningLevel {
+export function reasoningLevelForEffort(effort: ReasoningEffort | null): ReasoningLevel {
+  if (effort === null) {
+    return "none";
+  }
   return effort === "xhigh" ? "extra_high" : effort;
 }
 
@@ -24,15 +30,14 @@ export function modelSelectionForId(
   if (!model) {
     return undefined;
   }
-  const selectedEffort = reasoningLevel && model.reasoning
-    ? reasoningLevelToEffort(reasoningLevel)
-    : undefined;
-  const reasoning = selectedEffort && selectedEffort !== model.reasoning_effort
-    ? { type: "effort" as const, level: selectedEffort }
-    : { type: "modelDefault" as const };
+  const reasoningEffort = model.reasoning
+    ? reasoningLevel === undefined
+      ? model.reasoning_effort
+      : reasoningLevelToEffort(reasoningLevel)
+    : null;
   return {
     modelRef: { provider: model.provider, id: model.id },
-    reasoning,
+    reasoningEffort,
   };
 }
 
@@ -41,7 +46,7 @@ export function reasoningLevelForModel(
   modelId: string | undefined,
 ): ReasoningLevel {
   const model = models?.find((entry) => entry.id === modelId);
-  return reasoningLevelForEffort(model?.reasoning_effort ?? "medium");
+  return model?.reasoning ? reasoningLevelForEffort(model.reasoning_effort) : "none";
 }
 
 export function reasoningLevelForSession(
@@ -52,8 +57,5 @@ export function reasoningLevelForSession(
   if (!session) {
     return reasoningLevelForModel(models, draftModel);
   }
-  if (session.modelSelection.reasoning.type === "effort") {
-    return reasoningLevelForEffort(session.modelSelection.reasoning.level);
-  }
-  return reasoningLevelForModel(models, session.modelSelection.modelRef.id);
+  return reasoningLevelForEffort(session.modelSelection.reasoningEffort);
 }

@@ -8,7 +8,8 @@ use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{SessionQuery, SessionRecord, SessionStore};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{
-    ProjectPatch, SessionConf, SessionListRequest, SessionPatch, TalosConfig, DEFAULT_SESSION_TITLE,
+    ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest, SessionPatch,
+    TalosConfig, DEFAULT_SESSION_TITLE,
 };
 
 #[derive(Default)]
@@ -33,10 +34,22 @@ impl RecordingSessionStore {
 fn recording_session_service(
     store: Arc<RecordingSessionStore>,
 ) -> Arc<crate::session::SessionService> {
+    let mut config = TalosConfig::default();
+    config.llm.model = "default".to_string();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: config.llm.model.clone(),
+        name: "Default test model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
     Arc::new(crate::session::SessionService::new(
         store.clone(),
         store,
-        TalosConfig::default(),
+        config,
     ))
 }
 
@@ -250,6 +263,16 @@ fn record_for(
     project_id: Option<String>,
     current_directory: Option<PathBuf>,
 ) -> SessionRecord {
+    let conf = if conf.model_selection.is_some() {
+        conf
+    } else {
+        SessionConf {
+            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                provider: "anthropic".to_string(),
+                id: "default".to_string(),
+            })),
+        }
+    };
     SessionRecord {
         id: session_id.to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),

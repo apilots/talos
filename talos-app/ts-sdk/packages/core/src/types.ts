@@ -22,7 +22,6 @@ import type {
   ProviderModelConfig as ProtocolProviderModelConfig,
   ProviderProtocolCapabilities as ProtocolProviderProtocolCapabilities,
   ReasoningEffort as ProtocolReasoningEffort,
-  ReasoningSelection as ProtocolReasoningSelection,
   SessionClearResponse as ProtocolSessionClearResponse,
   SessionCloseResponse as ProtocolSessionCloseResponse,
   SessionCompactResponse as ProtocolSessionCompactResponse,
@@ -309,7 +308,6 @@ export type TalosActiveTurn = ProtocolTimelineActiveTurnSnapshot;
 export type ModelInfo = ProtocolModelInfo;
 export type ModelRef = ProtocolModelRef;
 export type ModelSelection = ProtocolModelSelection;
-export type ReasoningSelection = ProtocolReasoningSelection;
 export type ModelListResponse = ProtocolModelListResponse;
 export type SessionInfo = ProtocolSessionInfo;
 export type SessionListRequest = ProtocolSessionListRequest;

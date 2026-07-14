@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
 use talos_error::TalosError;
-use talos_types::{
-    resolve_model_catalog, ModelRef, ModelSelection, ReasoningEffort, ReasoningSelection,
-};
+use talos_types::{resolve_model_catalog, ModelRef, ModelSelection, ReasoningEffort};
 
 use super::ConfigService;
 
@@ -38,7 +36,7 @@ fn validate_model_selection_supported_rejects_unknown_provider() {
     let service = test_service();
 
     let error = service
-        .validate_model_selection_supported(&ModelSelection::model_default(ModelRef {
+        .validate_model_selection_supported(&ModelSelection::without_reasoning(ModelRef {
             provider: "missing".to_string(),
             id: "unknown-model".to_string(),
         }))
@@ -55,9 +53,7 @@ fn validate_model_selection_supported_rejects_effort_for_unsupported_model() {
             provider: "anthropic".to_string(),
             id: "qwen-plus".to_string(),
         },
-        reasoning: ReasoningSelection::Effort {
-            level: ReasoningEffort::High,
-        },
+        reasoning_effort: Some(ReasoningEffort::High),
     };
 
     let error = service
@@ -89,7 +85,7 @@ async fn list_models_returns_explicit_configured_default() {
 
     assert_eq!(
         response.default_model_selection,
-        ModelSelection::model_default(ModelRef {
+        ModelSelection::without_reasoning(ModelRef {
             provider: "anthropic".to_string(),
             id: "qwen-plus".to_string(),
         })
@@ -119,7 +115,7 @@ fn validate_model_selection_uses_exact_provider_identity() {
     let service = test_service();
 
     let error = service
-        .validate_model_selection_supported(&ModelSelection::model_default(ModelRef {
+        .validate_model_selection_supported(&ModelSelection::without_reasoning(ModelRef {
             provider: "Anthropic".to_string(),
             id: "qwen-plus".to_string(),
         }))

@@ -43,7 +43,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) default_model: String,
     pub(crate) session_id: String,
     pub(crate) current_model: String,
-    pub(crate) current_reasoning: talos_sdk::ReasoningSelection,
+    pub(crate) current_reasoning_effort: Option<talos_sdk::ReasoningEffort>,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) auth_email: Option<String>,
     pub(crate) workspace_root: PathBuf,
@@ -98,7 +98,7 @@ impl MockGatewayState {
                     provider: "mock".to_string(),
                     id: self.current_model.clone(),
                 },
-                reasoning: self.current_reasoning,
+                reasoning_effort: self.current_reasoning_effort,
             },
             created_at: 1,
             last_activity: 2,
@@ -681,7 +681,7 @@ impl MockGatewayClient {
                 default_model: "qwen-plus".to_string(),
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
-                current_reasoning: talos_sdk::ReasoningSelection::ModelDefault,
+                current_reasoning_effort: None,
                 current_project_root: None,
                 auth_email: Some("talos@example.com".to_string()),
                 workspace_root: PathBuf::from("/tmp/talos-workspace"),
@@ -749,7 +749,7 @@ impl GatewayClient for MockGatewayClient {
         }
         Ok(talos_sdk::ModelListResponse {
             models: state.models.clone(),
-            default_model_selection: talos_sdk::ModelSelection::model_default(
+            default_model_selection: talos_sdk::ModelSelection::without_reasoning(
                 talos_sdk::ModelRef {
                     provider: "mock".to_string(),
                     id: state.default_model.clone(),
@@ -840,7 +840,7 @@ impl GatewayClient for MockGatewayClient {
     ) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.current_model = model_selection.model_ref.id.clone();
-        state.current_reasoning = model_selection.reasoning;
+        state.current_reasoning_effort = model_selection.reasoning_effort;
         state.updated_model = Some(model_selection.model_ref.id.clone());
         Ok(state.session_info(3))
     }

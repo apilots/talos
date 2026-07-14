@@ -9,8 +9,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{
-    ModelInfo, ModelRef, ModelSelection, ReasoningEffort, ReasoningSelection, SessionInfo,
-    TalosContext, TalosProvider, TalosSourceType,
+    ModelInfo, ModelRef, ModelSelection, ReasoningEffort, SessionInfo, TalosContext, TalosProvider,
+    TalosSourceType,
 };
 use talos_types::talos::TokenUsage;
 
@@ -129,13 +129,11 @@ impl TuiApp {
             provider: model.provider.clone(),
             id: model.model.id.clone(),
         };
-        let reasoning = match self.reasoning_effort_override {
-            Some(level) if model.model.reasoning => ReasoningSelection::Effort { level },
-            _ => ReasoningSelection::ModelDefault,
-        };
         Some(ModelSelection {
             model_ref,
-            reasoning,
+            reasoning_effort: self
+                .reasoning_effort_override
+                .filter(|_| model.model.reasoning),
         })
     }
 
@@ -152,7 +150,10 @@ impl TuiApp {
     }
 
     pub(crate) fn use_model_default_reasoning(&mut self) {
-        self.reasoning_effort_override = None;
+        self.reasoning_effort_override = self
+            .current_model_info()
+            .filter(|model| model.model.reasoning)
+            .map(|model| model.model.reasoning_effort);
     }
 
     pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<ReasoningEffort>) {
@@ -247,12 +248,7 @@ impl TuiApp {
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
         self.current_model = session.model_selection.model_ref.id.clone();
-        match session.model_selection.reasoning {
-            ReasoningSelection::ModelDefault => self.use_model_default_reasoning(),
-            ReasoningSelection::Effort { level } => {
-                self.set_reasoning_effort_override(Some(level));
-            }
-        }
+        self.set_reasoning_effort_override(session.model_selection.reasoning_effort);
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;

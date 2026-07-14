@@ -47,9 +47,9 @@ use talos_types::talos::{
     AgentEventPayload, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
 };
 use talos_types::{
-    resolve_model_catalog, AgentDispatchResult, AgentDispatchRuntime, McpServerDefinition,
-    McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition, ModelSelection,
-    StartTurnRequest, TalosContext, TalosSession,
+    resolve_default_model_selection, resolve_model_catalog, AgentDispatchResult,
+    AgentDispatchRuntime, McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource,
+    McpTransportDefinition, StartTurnRequest, TalosContext, TalosSession,
 };
 use tokio::signal;
 use tokio::task::JoinSet;
@@ -764,10 +764,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
             gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
         },
     ));
-    let default_model_selection = ModelSelection::model_default(ModelRef {
-        provider: config.llm.provider.clone(),
-        id: config.llm.model.clone(),
-    });
+    let default_model_selection = resolve_default_model_selection(&config.llm)?;
     let agent_definitions = AgentDefinitionLoader::load(&config.agent, &default_model_selection)?;
     let default_agent_id = agent_definitions
         .iter()
