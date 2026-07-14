@@ -621,7 +621,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
-        reasoning: EffectiveReasoning::Unsupported,
+        reasoning_effort: None,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
@@ -703,7 +703,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         project_root: None,
         selected_model: "mock-model".to_string(),
         max_output_tokens: None,
-        reasoning: EffectiveReasoning::Unsupported,
+        reasoning_effort: None,
         speed: Default::default(),
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user(

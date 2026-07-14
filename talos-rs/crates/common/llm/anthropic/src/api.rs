@@ -5,9 +5,8 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream,
-    EffectiveReasoning, LlmProvider, ModelBlockStream, PromptCacheSupport, ReasoningEffort,
-    ReasoningSupport,
+    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    ModelBlockStream, PromptCacheSupport, ReasoningEffort,
 };
 use tracing::{debug, error, info};
 
@@ -141,13 +140,13 @@ impl AnthropicProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<messages_protocol::MessagesRequest> {
-        let thinking = match request.reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(messages_protocol::MessagesThinkingConfig {
-                r#type: "enabled".to_string(),
-                budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
-            }),
-        };
+        let thinking =
+            request
+                .reasoning_effort
+                .map(|effort| messages_protocol::MessagesThinkingConfig {
+                    r#type: "enabled".to_string(),
+                    budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
+                });
         messages_protocol::request(
             request,
             stream,
@@ -165,15 +164,6 @@ impl AnthropicProvider {
             ReasoningEffort::High => 4096,
             ReasoningEffort::XHigh => 8192,
         }
-    }
-
-    pub(crate) fn supports_reasoning_model(model: &str) -> bool {
-        let normalized = model.trim().to_ascii_lowercase();
-        normalized.starts_with("claude-3-7-sonnet")
-            || normalized.starts_with("claude-haiku-4")
-            || normalized.starts_with("claude-sonnet-4")
-            || normalized.starts_with("claude-opus-4")
-            || normalized.starts_with("claude-4")
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -257,14 +247,6 @@ impl LlmProvider for AnthropicProvider {
             .as_deref()
             .unwrap_or("claude-sonnet-4-6")
             .to_string()
-    }
-
-    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
-        if Self::supports_reasoning_model(model) {
-            ReasoningSupport::Supported
-        } else {
-            ReasoningSupport::Unsupported
-        }
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

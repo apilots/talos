@@ -24,7 +24,7 @@ use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
 use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvider};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelRef,
-    PromptCacheSupport, ReasoningSupport, ReloadableLlmProviderRouter,
+    PromptCacheSupport, ReloadableLlmProviderRouter,
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
@@ -1126,10 +1126,6 @@ impl LlmProvider for ReloadableLlmProvider {
 
     fn default_model(&self) -> String {
         self.current().default_model()
-    }
-
-    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
-        self.current().reasoning_support(model)
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

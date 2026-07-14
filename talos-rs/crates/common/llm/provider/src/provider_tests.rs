@@ -19,7 +19,7 @@ fn test_chat_request_builder() {
     assert_eq!(req.messages.len(), 1);
     assert_eq!(req.model, "claude-3-5-sonnet");
     assert_eq!(req.temperature, Some(0.7));
-    assert_eq!(req.reasoning, EffectiveReasoning::Unsupported);
+    assert_eq!(req.reasoning_effort, None);
 }
 
 #[test]

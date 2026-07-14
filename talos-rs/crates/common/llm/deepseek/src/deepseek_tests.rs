@@ -1,7 +1,7 @@
 use super::*;
 use talos_llm_provider::{
-    ChatMessage, EffectiveReasoning, FunctionCall, LlmProvider, ModelBlockStream,
-    ModelBlockStreamEvent, ReasoningContinuation, ReasoningEffort,
+    ChatMessage, FunctionCall, LlmProvider, ModelBlockStream, ModelBlockStreamEvent,
+    ReasoningContinuation, ReasoningEffort,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -44,23 +44,37 @@ async fn collect_events(mut stream: ModelBlockStream) -> Vec<ModelBlockStreamEve
 }
 
 #[test]
-fn chat_maps_low_effort_to_high_and_enables_thinking() {
+fn chat_maps_supported_efforts_and_omits_disabled_reasoning() {
+    for effort in [
+        ReasoningEffort::Light,
+        ReasoningEffort::Medium,
+        ReasoningEffort::High,
+    ] {
+        let request = ChatRequest::builder()
+            .model("deepseek-v4-pro")
+            .message("hello")
+            .temperature(0.7)
+            .top_p(0.9)
+            .reasoning_effort(Some(effort))
+            .build();
+        let actual =
+            serde_json::to_value(DeepSeekProvider::build_chat_request(request, false).unwrap())
+                .unwrap();
+        assert_eq!(actual["thinking"]["type"], "enabled");
+        assert_eq!(actual["reasoning_effort"], "high");
+        assert!(actual.get("temperature").is_none());
+        assert!(actual.get("top_p").is_none());
+    }
+
     let request = ChatRequest::builder()
         .model("deepseek-v4-pro")
         .message("hello")
-        .temperature(0.7)
-        .top_p(0.9)
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Light))
         .build();
-
-    let request =
-        DeepSeekProvider::build_chat_request(request, false).expect("chat request should build");
-    let actual = serde_json::to_value(request).expect("chat request should serialize");
-
-    assert_eq!(actual["thinking"]["type"], "enabled");
-    assert_eq!(actual["reasoning_effort"], "high");
-    assert!(actual.get("temperature").is_none());
-    assert!(actual.get("top_p").is_none());
+    let actual =
+        serde_json::to_value(DeepSeekProvider::build_chat_request(request, false).unwrap())
+            .unwrap();
+    assert!(actual.get("thinking").is_none());
+    assert!(actual.get("reasoning_effort").is_none());
 }
 
 #[test]
@@ -68,7 +82,7 @@ fn chat_maps_xhigh_effort_to_max() {
     let request = ChatRequest::builder()
         .model("deepseek-v4-pro")
         .message("hello")
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::XHigh))
+        .reasoning_effort(Some(ReasoningEffort::XHigh))
         .build();
 
     let request =
@@ -83,7 +97,7 @@ fn messages_maps_effort_without_budget_tokens() {
     let request = ChatRequest::builder()
         .model("deepseek-v4-pro")
         .message("hello")
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::XHigh))
+        .reasoning_effort(Some(ReasoningEffort::XHigh))
         .build();
 
     let request = DeepSeekProvider::build_messages_request(request, None)
@@ -134,7 +148,7 @@ async fn chat_stream_reasoning_content_replays_after_tool_call() {
     let request = ChatRequest::builder()
         .model("deepseek-v4-pro")
         .message("hello")
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
+        .reasoning_effort(Some(ReasoningEffort::High))
         .build();
 
     let events = collect_events(

@@ -2,9 +2,7 @@ use super::*;
 use async_trait::async_trait;
 use chrono::Utc;
 use talos_error::TalosResult;
-use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, ReasoningSupport, Usage,
-};
+use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, Usage};
 use tempfile::TempDir;
 
 use crate::{Memory, WorkspaceMemoryRecord};
@@ -47,10 +45,6 @@ impl LlmProvider for MockLlmProvider {
 
     fn default_model(&self) -> String {
         "mock-model".to_string()
-    }
-
-    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
-        ReasoningSupport::Unsupported
     }
 }
 

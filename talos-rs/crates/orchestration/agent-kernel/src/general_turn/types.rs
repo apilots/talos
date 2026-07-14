@@ -88,7 +88,7 @@ pub struct PreparedGeneralTurn {
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub max_output_tokens: Option<u32>,
-    pub reasoning: EffectiveReasoning,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
@@ -308,7 +308,7 @@ pub struct GeneralTurnStepRequest {
     pub messages: Vec<ChatMessage>,
     pub tool_definitions: Vec<ToolDefinition>,
     pub parallel_tool_calls: bool,
-    pub reasoning: EffectiveReasoning,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
     pub pre_final_execution_summary: Option<String>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
@@ -338,7 +338,7 @@ impl GeneralTurnStepRequest {
                 .parallel_tool_calls(self.parallel_tool_calls);
         }
 
-        builder = builder.reasoning(self.reasoning);
+        builder = builder.reasoning_effort(self.reasoning_effort);
 
         builder = builder.speed(self.speed);
 

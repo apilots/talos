@@ -244,7 +244,7 @@ fn test_model_selection_uses_configured_default_effort_when_created_from_model()
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
-        EffectiveReasoning::Effort(ReasoningEffort::Medium)
+        Some(ReasoningEffort::Medium)
     );
 }
 
@@ -261,7 +261,7 @@ fn test_model_selection_resolves_explicit_effort() {
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
-        EffectiveReasoning::Effort(ReasoningEffort::XHigh)
+        Some(ReasoningEffort::XHigh)
     );
 }
 
@@ -276,10 +276,7 @@ fn test_model_selection_resolves_disabled_reasoning() {
     };
     let model = model_info("ollama", "qwen", "Qwen", false);
 
-    assert_eq!(
-        selection.resolve_reasoning(&model).unwrap(),
-        EffectiveReasoning::Unsupported
-    );
+    assert_eq!(selection.resolve_reasoning(&model).unwrap(), None);
 }
 
 #[test]

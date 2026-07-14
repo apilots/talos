@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
-pub use talos_types::{EffectiveReasoning, ModelRef, ModelSpeed, ReasoningEffort};
+pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -148,10 +148,6 @@ pub trait LlmProvider: Send + Sync {
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse>;
     async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream>;
     fn default_model(&self) -> String;
-    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
-        ReasoningSupport::Unsupported
-    }
-
     fn prompt_cache_support(&self) -> PromptCacheSupport {
         PromptCacheSupport::Unsupported
     }
@@ -191,7 +187,7 @@ pub struct ChatRequest {
     pub tools: Option<Vec<ToolDefinition>>,
     pub tool_choice: Option<ToolChoice>,
     pub parallel_tool_calls: Option<bool>,
-    pub reasoning: EffectiveReasoning,
+    pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: Option<ModelSpeed>,
 }
 
@@ -211,23 +207,9 @@ impl ChatRequest {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
-            reasoning: EffectiveReasoning::Unsupported,
+            reasoning_effort: None,
             speed: None,
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningSupport {
-    #[default]
-    Unsupported,
-    Supported,
-}
-
-impl ReasoningSupport {
-    pub fn is_supported(self) -> bool {
-        matches!(self, Self::Supported)
     }
 }
 
@@ -730,7 +712,7 @@ pub struct ChatRequestBuilder {
     tools: Option<Vec<ToolDefinition>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
-    reasoning: Option<EffectiveReasoning>,
+    reasoning_effort: Option<ReasoningEffort>,
     speed: Option<ModelSpeed>,
 }
 
@@ -786,8 +768,8 @@ impl ChatRequestBuilder {
         self
     }
 
-    pub fn reasoning(mut self, reasoning: EffectiveReasoning) -> Self {
-        self.reasoning = Some(reasoning);
+    pub fn reasoning_effort(mut self, reasoning_effort: Option<ReasoningEffort>) -> Self {
+        self.reasoning_effort = reasoning_effort;
         self
     }
 
@@ -807,7 +789,7 @@ impl ChatRequestBuilder {
             tools: self.tools,
             tool_choice: self.tool_choice,
             parallel_tool_calls: self.parallel_tool_calls,
-            reasoning: self.reasoning.unwrap_or(EffectiveReasoning::Unsupported),
+            reasoning_effort: self.reasoning_effort,
             speed: self.speed,
         }
     }

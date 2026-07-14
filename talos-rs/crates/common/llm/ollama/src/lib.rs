@@ -5,8 +5,8 @@ use reqwest::{header, Client, Response};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, EffectiveReasoning,
-    LlmProvider, ModelBlockStream, ReasoningEffort,
+    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    ModelBlockStream, ReasoningEffort,
 };
 
 /// Ollama API configuration.
@@ -85,17 +85,14 @@ impl OllamaProvider {
         request: ChatRequest,
         stream: bool,
     ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
-        let reasoning_effort = match request.reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(
-                match effort {
-                    ReasoningEffort::Light => "low",
-                    ReasoningEffort::Medium => "medium",
-                    ReasoningEffort::High | ReasoningEffort::XHigh => "high",
-                }
-                .to_string(),
-            ),
-        };
+        let reasoning_effort = request.reasoning_effort.map(|effort| {
+            match effort {
+                ReasoningEffort::Light => "low",
+                ReasoningEffort::Medium => "medium",
+                ReasoningEffort::High | ReasoningEffort::XHigh => "high",
+            }
+            .to_string()
+        });
         chat_protocol::request(
             request,
             stream,

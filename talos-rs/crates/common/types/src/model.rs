@@ -55,7 +55,10 @@ impl ModelSelection {
     }
 
     /// Resolves the product-level selection against the selected model's capabilities.
-    pub fn resolve_reasoning(&self, model: &ModelInfo) -> crate::TalosResult<EffectiveReasoning> {
+    pub fn resolve_reasoning(
+        &self,
+        model: &ModelInfo,
+    ) -> crate::TalosResult<Option<ReasoningEffort>> {
         if self.model_ref.provider != model.provider || self.model_ref.id != model.model.id {
             return Err(crate::TalosError::ValidationError(format!(
                 "model selection '{}:{}' does not match model metadata '{}:{}'",
@@ -68,19 +71,10 @@ impl ModelSelection {
                 "model '{}:{}' does not support reasoning effort selection",
                 model.provider, model.model.id
             ))),
-            (_, None) => Ok(EffectiveReasoning::Unsupported),
-            (true, Some(level)) => Ok(EffectiveReasoning::Effort(level)),
+            (_, None) => Ok(None),
+            (true, Some(level)) => Ok(Some(level)),
         }
     }
-}
-
-/// Reasoning policy resolved from a model's capabilities and a request selection.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-#[serde(tag = "type", content = "level", rename_all = "camelCase")]
-pub enum EffectiveReasoning {
-    #[default]
-    Unsupported,
-    Effort(ReasoningEffort),
 }
 
 /// Adds provider identity to canonical configured model metadata.

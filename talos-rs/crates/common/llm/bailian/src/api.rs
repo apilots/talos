@@ -5,8 +5,8 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, EffectiveReasoning,
-    LlmProvider, ModelBlockStream, PromptCacheSupport, ReasoningEffort, ReasoningSupport,
+    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    ModelBlockStream, PromptCacheSupport, ReasoningEffort,
 };
 use tracing::{error, info};
 
@@ -50,12 +50,6 @@ pub struct BailianThinkingConfig {
     pub budget_tokens: Option<u32>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BailianModelCapability {
-    Basic,
-    Thinking,
-}
-
 /// Bailian LLM provider.
 pub struct BailianProvider {
     config: BailianConfig,
@@ -85,26 +79,13 @@ impl BailianProvider {
         headers
     }
 
-    pub(crate) fn model_capability(model: &str) -> BailianModelCapability {
-        let normalized = model.trim().to_ascii_lowercase();
-        if normalized.starts_with("qwen3.7-")
-            || normalized == "qwen3.6-flash"
-            || normalized.starts_with("qwq")
-        {
-            BailianModelCapability::Thinking
-        } else {
-            BailianModelCapability::Basic
-        }
-    }
-
     pub(crate) fn thinking_config(request: &ChatRequest) -> Option<BailianThinkingConfig> {
-        match request.reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(BailianThinkingConfig {
+        request
+            .reasoning_effort
+            .map(|effort| BailianThinkingConfig {
                 mode: BailianThinkingMode::Enabled,
                 budget_tokens: Some(Self::reasoning_budget_tokens(effort)),
-            }),
-        }
+            })
     }
 
     fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
@@ -211,13 +192,6 @@ impl LlmProvider for BailianProvider {
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {
         PromptCacheSupport::RequestLevel
-    }
-
-    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
-        match Self::model_capability(model) {
-            BailianModelCapability::Thinking => ReasoningSupport::Supported,
-            BailianModelCapability::Basic => ReasoningSupport::Unsupported,
-        }
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

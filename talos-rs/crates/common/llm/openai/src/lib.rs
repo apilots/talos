@@ -6,8 +6,7 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, responses as responses_protocol},
-    ChatRequest, ChatResponse, ChatStream, EffectiveReasoning, LlmProvider, ModelBlockStream,
-    ReasoningEffort, ReasoningSupport,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
 use tracing::{debug, error, info};
 
@@ -117,7 +116,7 @@ impl OpenAIProvider {
 
     fn request_options(request: &ChatRequest) -> chat_protocol::ChatCompletionRequestOptions {
         chat_protocol::ChatCompletionRequestOptions {
-            reasoning_effort: Self::effective_reasoning_effort(request.reasoning),
+            reasoning_effort: Self::effective_reasoning_effort(request.reasoning_effort),
             reasoning_continuation: chat_protocol::ChatReasoningContinuationFormat::Reasoning,
             ..Default::default()
         }
@@ -135,7 +134,7 @@ impl OpenAIProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<responses_protocol::ResponsesRequest> {
-        let reasoning = Self::effective_reasoning_effort(request.reasoning)
+        let reasoning = Self::effective_reasoning_effort(request.reasoning_effort)
             .map(|effort| responses_protocol::ResponsesReasoning { effort });
         let include = reasoning
             .as_ref()
@@ -163,19 +162,8 @@ impl OpenAIProvider {
         .to_string()
     }
 
-    fn effective_reasoning_effort(reasoning: EffectiveReasoning) -> Option<String> {
-        match reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(Self::convert_reasoning_effort(effort)),
-        }
-    }
-
-    fn supports_reasoning_model(model: &str) -> bool {
-        let normalized = model.trim().to_ascii_lowercase();
-        normalized.starts_with("o1")
-            || normalized.starts_with("o3")
-            || normalized.starts_with("o4")
-            || normalized.starts_with("gpt-5")
+    fn effective_reasoning_effort(reasoning_effort: Option<ReasoningEffort>) -> Option<String> {
+        reasoning_effort.map(Self::convert_reasoning_effort)
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
@@ -310,14 +298,6 @@ impl LlmProvider for OpenAIProvider {
 
     fn default_model(&self) -> String {
         self.config.default_model.clone()
-    }
-
-    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
-        if Self::supports_reasoning_model(model) {
-            ReasoningSupport::Supported
-        } else {
-            ReasoningSupport::Unsupported
-        }
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

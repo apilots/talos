@@ -7,8 +7,7 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, messages as messages_protocol},
-    ChatRequest, ChatResponse, ChatStream, EffectiveReasoning, LlmProvider, ModelBlockStream,
-    ReasoningEffort, ReasoningSupport,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
 use tracing::info;
 
@@ -80,7 +79,7 @@ impl DeepSeekProvider {
         mut request: ChatRequest,
         stream: bool,
     ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
-        let effort = Self::reasoning_effort(request.reasoning);
+        let effort = Self::reasoning_effort(request.reasoning_effort);
         if effort.is_some() {
             request.temperature = None;
             request.top_p = None;
@@ -107,7 +106,7 @@ impl DeepSeekProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<messages_protocol::MessagesRequest> {
-        let effort = Self::reasoning_effort(request.reasoning);
+        let effort = Self::reasoning_effort(request.reasoning_effort);
         let thinking = effort
             .as_ref()
             .map(|_| messages_protocol::MessagesThinkingConfig {
@@ -125,19 +124,14 @@ impl DeepSeekProvider {
         )
     }
 
-    fn reasoning_effort(reasoning: EffectiveReasoning) -> Option<String> {
-        match reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(
-                match effort {
-                    ReasoningEffort::Light | ReasoningEffort::Medium | ReasoningEffort::High => {
-                        "high"
-                    }
-                    ReasoningEffort::XHigh => "max",
-                }
-                .to_string(),
-            ),
-        }
+    fn reasoning_effort(reasoning_effort: Option<ReasoningEffort>) -> Option<String> {
+        reasoning_effort.map(|effort| {
+            match effort {
+                ReasoningEffort::Light | ReasoningEffort::Medium | ReasoningEffort::High => "high",
+                ReasoningEffort::XHigh => "max",
+            }
+            .to_string()
+        })
     }
 
     fn endpoint_url(&self, endpoint: &str) -> String {
@@ -274,10 +268,6 @@ impl LlmProvider for DeepSeekProvider {
 
     fn default_model(&self) -> String {
         self.config.default_model.clone()
-    }
-
-    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
-        ReasoningSupport::Supported
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

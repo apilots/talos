@@ -74,8 +74,7 @@ impl LlmProvider for FinalizationReasoningProvider {
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(
-            request.reasoning,
-            EffectiveReasoning::Unsupported,
+            request.reasoning_effort, None,
             "final-answer phase must use the visible response channel"
         );
         assert!(

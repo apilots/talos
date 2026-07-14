@@ -2,9 +2,9 @@ use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
     protocols::messages as messages_protocol, CacheControl, CacheControlKind, ChatMessage,
-    ChatRequest, EffectiveReasoning, LlmProvider, ModelBlockDelta, ModelBlockKind,
-    ModelBlockStream, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
-    ReasoningEffort, ReasoningSupport, ToolDefinition,
+    ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
+    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
+    ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -225,32 +225,6 @@ fn test_provider_name() {
 }
 
 #[test]
-fn test_reasoning_support_is_model_gated() {
-    let provider = AnthropicProvider::new(AnthropicConfig::new("test-key"));
-
-    assert_eq!(
-        provider.reasoning_support("claude-3-5-sonnet-20241022"),
-        ReasoningSupport::Unsupported
-    );
-    assert_eq!(
-        provider.reasoning_support("claude-3-7-sonnet-20250219"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("claude-opus-4-8"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("claude-sonnet-4-6"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("claude-haiku-4-5-20251001"),
-        ReasoningSupport::Supported
-    );
-}
-
-#[test]
 fn test_build_headers() {
     let config = AnthropicConfig::new("test-api-key");
     let provider = AnthropicProvider::new(config);
@@ -311,16 +285,29 @@ fn test_convert_tools() {
 
 #[test]
 fn test_build_request_maps_reasoning_budget() {
+    for (effort, budget) in [
+        (ReasoningEffort::Light, 1024),
+        (ReasoningEffort::Medium, 2048),
+        (ReasoningEffort::High, 4096),
+        (ReasoningEffort::XHigh, 8192),
+    ] {
+        let request = ChatRequest::builder()
+            .model("claude-3-5-sonnet-20241022")
+            .messages(vec![ChatMessage::user("hello")])
+            .reasoning_effort(Some(effort))
+            .build();
+        let built = AnthropicProvider::build_request(request, None).unwrap();
+        let json = serde_json::to_value(built).unwrap();
+        assert_eq!(json["thinking"]["budget_tokens"], budget);
+    }
+
     let request = ChatRequest::builder()
-        .model("claude-3-5-sonnet-20241022")
-        .messages(vec![ChatMessage::user("hello")])
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
+        .model("claude")
+        .message("hello")
         .build();
-
-    let built = AnthropicProvider::build_request(request, None).expect("request should build");
-    let json = serde_json::to_value(&built).expect("request should serialize");
-
-    assert_eq!(json["thinking"]["budget_tokens"], 4096);
+    let json =
+        serde_json::to_value(AnthropicProvider::build_request(request, None).unwrap()).unwrap();
+    assert!(json.get("thinking").is_none());
 }
 
 #[test]

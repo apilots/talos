@@ -3,9 +3,7 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::TalosResult;
-use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ReasoningSupport, Usage,
-};
+use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_memory::MemoryStore;
 
 #[derive(Clone)]
@@ -45,10 +43,6 @@ impl LlmProvider for MockLlmProvider {
 
     fn default_model(&self) -> String {
         "mock-model".to_string()
-    }
-
-    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
-        ReasoningSupport::Unsupported
     }
 }
 

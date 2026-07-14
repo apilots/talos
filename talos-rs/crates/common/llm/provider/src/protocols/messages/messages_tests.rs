@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    EffectiveReasoning, ReasoningBlock, ReasoningContinuation, ReasoningEffort,
-    ReasoningEncryptedBlock, ReasoningTextBlock,
+    ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningEncryptedBlock,
+    ReasoningTextBlock,
 };
 
 #[test]
@@ -10,7 +10,7 @@ fn request_uses_provider_owned_thinking_options() {
         ChatRequest::builder()
             .model("claude-sonnet-4-6")
             .message("hello")
-            .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
+            .reasoning_effort(Some(ReasoningEffort::High))
             .build(),
         Some(true),
         MessagesRequestOptions {

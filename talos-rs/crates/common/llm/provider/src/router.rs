@@ -6,7 +6,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockStream,
-    ModelRef, PromptCacheSupport, ReasoningSupport,
+    ModelRef, PromptCacheSupport,
 };
 
 /// Factory used by the reloadable router to build a provider for a model ref.
@@ -104,10 +104,6 @@ impl LlmProvider for SelectedModelLlmProvider {
 
     fn default_model(&self) -> String {
         self.model.clone()
-    }
-
-    fn reasoning_support(&self, model: &str) -> ReasoningSupport {
-        self.inner.reasoning_support(model)
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

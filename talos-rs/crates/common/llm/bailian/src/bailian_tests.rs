@@ -2,9 +2,8 @@ use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
     protocols::chat as chat_protocol, CacheControl, CacheControlKind, ChatMessage, ChatRequest,
-    EffectiveReasoning, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
-    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
-    ReasoningSupport,
+    LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent,
+    PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -405,39 +404,32 @@ async fn test_stream_model_blocks_fails_invalid_sse_json() {
 }
 
 #[test]
-fn test_reasoning_support_is_qwen_gated() {
-    let provider = BailianProvider::new(BailianConfig::new("test-key"));
-    assert_eq!(
-        provider.prompt_cache_support(),
-        PromptCacheSupport::RequestLevel
-    );
-    assert_eq!(
-        provider.reasoning_support("qwen3.7-plus"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("qwen3.7-max"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("qwen3.6-flash"),
-        ReasoningSupport::Supported
-    );
-}
-
-#[test]
 fn test_build_request_maps_reasoning_to_bailian_fields() {
-    let request = ChatRequest::builder()
-        .model("qwen3.7-plus")
-        .messages(vec![ChatMessage::user("hello")])
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Light))
-        .build();
+    for (effort, budget) in [
+        (ReasoningEffort::Light, 1024),
+        (ReasoningEffort::Medium, 2048),
+        (ReasoningEffort::High, 4096),
+        (ReasoningEffort::XHigh, 8192),
+    ] {
+        let request = ChatRequest::builder()
+            .model("qwen3.7-plus")
+            .message("hello")
+            .reasoning_effort(Some(effort))
+            .build();
+        let json =
+            serde_json::to_value(BailianProvider::build_request(request, true).unwrap()).unwrap();
+        assert_eq!(json["enable_thinking"], true);
+        assert_eq!(json["thinking_budget"], budget);
+    }
 
-    let built = BailianProvider::build_request(request, true).expect("request should build");
-    let json = serde_json::to_value(&built).expect("request should serialize");
-    assert_eq!(json["enable_thinking"], true);
-    assert_eq!(json["thinking_budget"], 1024);
-    assert_eq!(json["stream"], true);
+    let request = ChatRequest::builder()
+        .model("qwen")
+        .message("hello")
+        .build();
+    let json =
+        serde_json::to_value(BailianProvider::build_request(request, false).unwrap()).unwrap();
+    assert!(json.get("enable_thinking").is_none());
+    assert!(json.get("thinking_budget").is_none());
 }
 
 #[test]

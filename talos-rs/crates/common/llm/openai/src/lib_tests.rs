@@ -1,8 +1,8 @@
 use super::*;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, EffectiveReasoning, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
-    ReasoningEffort, ToolDefinition,
+    CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta, ModelBlockKind,
+    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
+    ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -336,15 +336,27 @@ fn test_openai_request_serialization_with_tools() {
 
 #[test]
 fn test_build_request_maps_reasoning_effort() {
+    for (effort, expected) in [
+        (ReasoningEffort::Light, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::XHigh, "xhigh"),
+    ] {
+        let request = ChatRequest::builder()
+            .model("gpt-5")
+            .message("hello")
+            .reasoning_effort(Some(effort))
+            .build();
+        let built = OpenAIProvider::build_request(request, false).unwrap();
+        assert_eq!(built.reasoning_effort.as_deref(), Some(expected));
+    }
+
     let request = ChatRequest::builder()
-        .model("gpt-4o")
-        .messages(vec![ChatMessage::user("hello")])
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
+        .model("gpt-5")
+        .message("hello")
         .build();
-
-    let built = OpenAIProvider::build_request(request, false).expect("request should build");
-
-    assert_eq!(built.reasoning_effort.as_deref(), Some("high"));
+    let built = OpenAIProvider::build_request(request, false).unwrap();
+    assert_eq!(built.reasoning_effort, None);
 }
 
 #[test]
@@ -393,24 +405,6 @@ fn test_openai_request_does_not_serialize_cache_control_for_unsupported_provider
 
     let json = serde_json::to_string(&request).expect("request should serialize");
     assert!(!json.contains("cache_control"));
-}
-
-#[test]
-fn test_reasoning_support_is_model_gated() {
-    let provider = OpenAIProvider::new(OpenAIConfig::new("test-key"));
-
-    assert_eq!(
-        provider.reasoning_support("o3-mini"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("gpt-5"),
-        ReasoningSupport::Supported
-    );
-    assert_eq!(
-        provider.reasoning_support("gpt-4o"),
-        ReasoningSupport::Unsupported
-    );
 }
 
 #[test]

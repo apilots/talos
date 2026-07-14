@@ -1,8 +1,7 @@
 use super::*;
 use talos_llm_provider::{
-    ChatMessage, EffectiveReasoning, FunctionCall, LlmProvider, ModelBlockStream,
-    ModelBlockStreamEvent, ReasoningBlock, ReasoningContinuation, ReasoningEffort,
-    ReasoningTextBlock,
+    ChatMessage, FunctionCall, LlmProvider, ModelBlockStream, ModelBlockStreamEvent,
+    ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningTextBlock,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -48,18 +47,32 @@ fn reasoning_request(effort: ReasoningEffort) -> ChatRequest {
     ChatRequest::builder()
         .model("provider/model")
         .message("hello")
-        .reasoning(EffectiveReasoning::Effort(effort))
+        .reasoning_effort(Some(effort))
         .build()
 }
 
 #[test]
 fn chat_maps_reasoning_effort_to_openrouter_object() {
-    let request =
-        OpenRouterProvider::build_chat_request(reasoning_request(ReasoningEffort::XHigh), false)
+    for (effort, expected) in [
+        (ReasoningEffort::Light, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::XHigh, "xhigh"),
+    ] {
+        let request = OpenRouterProvider::build_chat_request(reasoning_request(effort), false)
             .expect("chat request should build");
-    let actual = serde_json::to_value(request).expect("chat request should serialize");
+        let actual = serde_json::to_value(request).unwrap();
+        assert_eq!(actual["reasoning"]["effort"], expected);
+    }
 
-    assert_eq!(actual["reasoning"]["effort"], "xhigh");
+    let request = ChatRequest::builder()
+        .model("provider/model")
+        .message("hello")
+        .build();
+    let actual =
+        serde_json::to_value(OpenRouterProvider::build_chat_request(request, false).unwrap())
+            .unwrap();
+    assert!(actual.get("reasoning").is_none());
 }
 
 #[test]

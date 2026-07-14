@@ -28,7 +28,7 @@ Talos 已经在 `llm` 配置树中保存了选择和运行模型所需的产品�
 5. 创建 Session 或切换模型时，把模型配置中的 Reasoning effort 明确写入 Session。
 6. Web 和 TUI 使用相同的模型与 Reasoning 语义。
 7. Talos 维护稳定的 effort 档位，具体厂商参数只在 Provider adapter 中映射。
-8. 为 Ollama 增加可用的默认模型目录，但不自动安装本地模型。
+8. Ollama 与其他 Provider 使用相同的静态模型目录和 dispatch 链路。
 
 ## 非目标
 
@@ -137,7 +137,7 @@ pub struct ModelInfo {
 }
 ```
 
-模型目录按 `anthropic`、`openai`、`bailian`、`deepseek`、`ollama`、`openrouter` 的配置字段顺序，以及各 Provider 内的模型配置顺序，遍历所有非空模型列表。Provider 是否已配置凭证、远程服务是否可达或 Ollama 模型是否已安装，不影响目录枚举；这些属于 dispatch readiness。它不得：
+模型目录按 `anthropic`、`openai`、`bailian`、`deepseek`、`ollama`、`openrouter` 的配置字段顺序，以及各 Provider 内的模型配置顺序，遍历所有非空模型列表。Provider 凭证或 endpoint 的实际运行状态不影响配置目录枚举。它不得：
 
 - 只返回 `llm.provider` 对应的模型。
 - 跨 Provider 按模型 ID 去重。
@@ -284,7 +284,7 @@ ollama:
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 }
 ```
 
-配置中的 Ollama 模型只是目录项，不代表本地已经安装。dispatch 前由 Ollama 边界检查本地可用性；模型缺失时返回包含模型上下文的错误，不自动安装，也不 fallback。
+Ollama 模型目录与其他 Provider 一样完全来自配置。Talos 不调用模型发现接口，也不推断本地安装状态；dispatch 直接请求配置的 endpoint，并保留实际响应中的连接或模型错误。Talos 不自动安装模型，也不 fallback。
 
 ## 职责边界
 
@@ -296,7 +296,7 @@ ollama:
 | Gateway/App Protocol/SDK | 传输共享对象，不重复定义 |
 | Web/TUI | 渲染目录元数据并提交完整选择 |
 | Provider adapter | 将权威 effort 映射到 Provider wire 字段 |
-| Ollama adapter | 校验本地模型可用性并执行模型特定映射 |
+| Ollama adapter | 执行 effort 映射并请求配置的 endpoint |
 
 ## 兼容与迁移
 
@@ -325,7 +325,7 @@ ollama:
 - 跨 Provider 切换 Session 模型，断言 Provider、模型和 effort 同时更新。
 - 拒绝为 `reasoning: false` 的模型设置 effort。
 - 分别验证每个 Provider adapter 的 Light/Medium/High/XHigh 请求映射。
-- 验证 Ollama 模型缺失时返回明确错误，且不 fallback、不安装。
+- 验证 Ollama 直接请求配置的 endpoint，且不执行模型发现、fallback 或安装。
 
 ### Web 与 TUI
 
@@ -345,5 +345,5 @@ ollama:
 ## 风险与后续
 
 1. Provider 文档可能独立变化。映射测试必须断言实际 wire request，确保变化只影响 Provider adapter。
-2. 配置模型可能因为凭证、远程下线或本地未安装而不可用。这些属于运行时 readiness 错误，不应改变配置对象模型。
+2. 配置模型可能因为凭证、endpoint 下线或服务端模型状态而不可用。实际 dispatch 错误不应改变配置对象模型。
 3. 如果未来需要远程模型发现，应通过相同的 Provider-qualified 模型目录合并，不能替代配置元数据。

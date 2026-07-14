@@ -116,15 +116,15 @@ async fn test_planning_request_processor_preserves_resolved_reasoning() {
     let mut ctx = mock_ctx();
     let mut request = LlmRequestEnvelope {
         branch: ExecutionBranch::ModelThinking,
-        reasoning: talos_types::EffectiveReasoning::Effort(talos_types::ReasoningEffort::XHigh),
+        reasoning_effort: Some(talos_types::ReasoningEffort::XHigh),
         ..LlmRequestEnvelope::default()
     };
 
     processor.run(&mut ctx, &mut request).await.unwrap();
 
     assert_eq!(
-        request.reasoning,
-        talos_types::EffectiveReasoning::Effort(talos_types::ReasoningEffort::XHigh)
+        request.reasoning_effort,
+        Some(talos_types::ReasoningEffort::XHigh)
     );
     assert!(request.planning_instruction.is_none());
 }

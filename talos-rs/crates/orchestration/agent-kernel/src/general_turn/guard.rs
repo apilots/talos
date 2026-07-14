@@ -160,7 +160,7 @@ pub(crate) async fn run_forced_finalization_step(
             messages: messages.clone(),
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning: EffectiveReasoning::Unsupported,
+            reasoning_effort: None,
             speed: Default::default(),
             pre_final_execution_summary: pre_final_execution_summary.clone(),
             stream_tx: stream_tx.clone(),
@@ -207,7 +207,7 @@ async fn run_salvage_finalization_step(
             messages,
             tool_definitions: Vec::new(),
             parallel_tool_calls: false,
-            reasoning: EffectiveReasoning::Unsupported,
+            reasoning_effort: None,
             speed: Default::default(),
             pre_final_execution_summary: if prior_step.execution_summary_streamed {
                 None

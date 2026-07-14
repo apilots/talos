@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    EffectiveReasoning, ReasoningBlock, ReasoningContinuation, ReasoningEncryptedBlock,
-    ReasoningSummaryBlock, ReasoningTextBlock,
+    ReasoningBlock, ReasoningContinuation, ReasoningEncryptedBlock, ReasoningSummaryBlock,
+    ReasoningTextBlock,
 };
 
 #[test]
@@ -16,7 +16,7 @@ fn request_replays_text_reasoning_before_tool_call() {
             .with_reasoning_continuation(ReasoningContinuation::Text(
                 "reasoning".to_string(),
             ))])
-            .reasoning(EffectiveReasoning::Unsupported)
+            .reasoning_effort(None)
             .build(),
         false,
         ChatCompletionRequestOptions {

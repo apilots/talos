@@ -9,8 +9,7 @@ use talos_llm_provider::{
     protocols::{
         chat as chat_protocol, messages as messages_protocol, responses as responses_protocol,
     },
-    ChatRequest, ChatResponse, ChatStream, EffectiveReasoning, LlmProvider, ModelBlockStream,
-    ReasoningEffort, ReasoningSupport,
+    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
 use tracing::info;
 
@@ -83,7 +82,7 @@ impl OpenRouterProvider {
         request: ChatRequest,
         stream: bool,
     ) -> TalosResult<chat_protocol::ChatCompletionRequest> {
-        let reasoning = Self::reasoning_effort(request.reasoning)
+        let reasoning = Self::reasoning_effort(request.reasoning_effort)
             .map(|effort| chat_protocol::ChatCompletionReasoningConfig { effort });
         chat_protocol::request(
             request,
@@ -101,7 +100,7 @@ impl OpenRouterProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<responses_protocol::ResponsesRequest> {
-        let reasoning = Self::reasoning_effort(request.reasoning)
+        let reasoning = Self::reasoning_effort(request.reasoning_effort)
             .map(|effort| responses_protocol::ResponsesReasoning { effort });
         let include = reasoning
             .as_ref()
@@ -117,7 +116,7 @@ impl OpenRouterProvider {
         request: ChatRequest,
         stream: Option<bool>,
     ) -> TalosResult<messages_protocol::MessagesRequest> {
-        let output_config = Self::reasoning_effort(request.reasoning)
+        let output_config = Self::reasoning_effort(request.reasoning_effort)
             .map(|effort| messages_protocol::MessagesOutputConfig { effort });
         messages_protocol::request(
             request,
@@ -129,19 +128,16 @@ impl OpenRouterProvider {
         )
     }
 
-    fn reasoning_effort(reasoning: EffectiveReasoning) -> Option<String> {
-        match reasoning {
-            EffectiveReasoning::Unsupported => None,
-            EffectiveReasoning::Effort(effort) => Some(
-                match effort {
-                    ReasoningEffort::Light => "low",
-                    ReasoningEffort::Medium => "medium",
-                    ReasoningEffort::High => "high",
-                    ReasoningEffort::XHigh => "xhigh",
-                }
-                .to_string(),
-            ),
-        }
+    fn reasoning_effort(reasoning_effort: Option<ReasoningEffort>) -> Option<String> {
+        reasoning_effort.map(|effort| {
+            match effort {
+                ReasoningEffort::Light => "low",
+                ReasoningEffort::Medium => "medium",
+                ReasoningEffort::High => "high",
+                ReasoningEffort::XHigh => "xhigh",
+            }
+            .to_string()
+        })
     }
 
     fn endpoint_url(&self, endpoint: &str) -> String {
@@ -284,10 +280,6 @@ impl LlmProvider for OpenRouterProvider {
 
     fn default_model(&self) -> String {
         self.config.default_model.clone()
-    }
-
-    fn reasoning_support(&self, _model: &str) -> ReasoningSupport {
-        ReasoningSupport::Supported
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

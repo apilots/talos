@@ -1,7 +1,6 @@
 use super::*;
 use talos_llm_provider::{
-    ChatMessage, EffectiveReasoning, FunctionCall, LlmProvider, ReasoningContinuation,
-    ReasoningEffort,
+    ChatMessage, FunctionCall, LlmProvider, ReasoningContinuation, ReasoningEffort,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -9,17 +8,29 @@ use tokio::sync::oneshot;
 
 #[test]
 fn chat_maps_reasoning_effort_for_ollama() {
+    for (effort, expected) in [
+        (ReasoningEffort::Light, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::XHigh, "high"),
+    ] {
+        let request = ChatRequest::builder()
+            .model("gpt-oss:20b")
+            .message("hello")
+            .reasoning_effort(Some(effort))
+            .build();
+        let actual =
+            serde_json::to_value(OllamaProvider::build_request(request, false).unwrap()).unwrap();
+        assert_eq!(actual["reasoning_effort"], expected);
+    }
+
     let request = ChatRequest::builder()
         .model("gpt-oss:20b")
         .message("hello")
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::XHigh))
         .build();
-
-    let request =
-        OllamaProvider::build_request(request, false).expect("Ollama chat request should build");
-    let actual = serde_json::to_value(request).expect("chat request should serialize");
-
-    assert_eq!(actual["reasoning_effort"], "high");
+    let actual =
+        serde_json::to_value(OllamaProvider::build_request(request, false).unwrap()).unwrap();
+    assert!(actual.get("reasoning_effort").is_none());
 }
 
 #[test]
@@ -67,15 +78,8 @@ async fn chat_uses_ollama_v1_endpoint_and_identity() {
 
         let body = serde_json::json!({
             "model": "qwen3",
-            "choices": [{
-                "message": {"content": "ok"},
-                "finish_reason": "stop"
-            }],
-            "usage": {
-                "prompt_tokens": 1,
-                "completion_tokens": 1,
-                "total_tokens": 2
-            }
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
         })
         .to_string();
         let response = format!(

@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    EffectiveReasoning, ReasoningBlock, ReasoningContinuation, ReasoningEffort,
-    ReasoningEncryptedBlock, ReasoningSummaryBlock,
+    ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningEncryptedBlock,
+    ReasoningSummaryBlock,
 };
 
 #[test]
@@ -47,7 +47,7 @@ fn responses_request_serializes_tools_reasoning_and_function_output() {
                 name: "read".to_string(),
             })
             .parallel_tool_calls(true)
-            .reasoning(EffectiveReasoning::Effort(ReasoningEffort::High))
+            .reasoning_effort(Some(ReasoningEffort::High))
             .build(),
         Some(true),
         ResponsesRequestOptions {
