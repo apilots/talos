@@ -9,12 +9,12 @@ import {
   modelPickerOptions,
   modelRefForKey,
   modelRefKey,
+  reasoningLevelForEffort,
   reasoningLevelForModel,
   useCreateProjectMutation,
   useModelsQuery,
   useProjectsView,
 } from "@/features/chat";
-import { useLlmConfigQuery } from "@/features/settings";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
 import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
@@ -34,10 +34,8 @@ export function ChatHomePage() {
   const navigate = useNavigate();
   const location = useLocation();
   const locationState = location.state as HomeLocationState | null;
-  const { data: models } = useModelsQuery();
-  const { data: llmConfigRead } = useLlmConfigQuery();
-  const configuredModel = llmConfigRead?.config.model;
-  const configuredProvider = llmConfigRead?.config.provider;
+  const { data: modelCatalog } = useModelsQuery();
+  const models = modelCatalog?.models;
   const projectsView = useProjectsView();
   const createProject = useCreateProjectMutation();
   const projects = projectsView.projects;
@@ -57,15 +55,12 @@ export function ChatHomePage() {
   );
 
   useEffect(() => {
-    const configuredModelRef =
-      configuredProvider && configuredModel
-        ? { provider: configuredProvider, id: configuredModel }
-        : undefined;
-    if (!selectedModel && modelInfoForRef(models, configuredModelRef)) {
-      setSelectedModel(configuredModelRef);
-      setSelectedReasoningLevel(reasoningLevelForModel(models, configuredModelRef));
+    const defaultSelection = modelCatalog?.defaultModelSelection;
+    if (!selectedModel && defaultSelection) {
+      setSelectedModel(defaultSelection.modelRef);
+      setSelectedReasoningLevel(reasoningLevelForEffort(defaultSelection.reasoningEffort));
     }
-  }, [configuredModel, configuredProvider, models, selectedModel]);
+  }, [modelCatalog, selectedModel]);
 
   useEffect(() => {
     if (activeProject && activeProject.id !== activeProjectId) {

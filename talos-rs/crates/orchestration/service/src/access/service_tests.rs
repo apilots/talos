@@ -94,17 +94,10 @@ impl SessionStore for RecordingSessionStore {
             record_for(
                 query.user_id.as_deref().unwrap_or("member-user"),
                 "session-1",
-                SessionConf::default(),
                 None,
                 None,
             ),
-            record_for(
-                "other-user",
-                "session-2",
-                SessionConf::default(),
-                None,
-                None,
-            ),
+            record_for("other-user", "session-2", None, None),
         ])
     }
 
@@ -259,19 +252,14 @@ impl SessionRuntime for RecordingSessionRuntime {
 fn record_for(
     user_id: &str,
     session_id: &str,
-    conf: SessionConf,
     project_id: Option<String>,
     current_directory: Option<PathBuf>,
 ) -> SessionRecord {
-    let conf = if conf.model_selection.is_some() {
-        conf
-    } else {
-        SessionConf {
-            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
-                provider: "anthropic".to_string(),
-                id: "default".to_string(),
-            })),
-        }
+    let conf = SessionConf {
+        model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+            provider: "anthropic".to_string(),
+            id: "default".to_string(),
+        })),
     };
     SessionRecord {
         id: session_id.to_string(),
@@ -325,7 +313,6 @@ async fn regular_actor_cannot_read_or_patch_other_user_session() {
     let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
         "other-user",
         "session-1",
-        SessionConf::default(),
         None,
         None,
     )]));
@@ -359,7 +346,6 @@ async fn delete_session_prepares_runtime_then_deletes_record() {
     let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
         "member-user",
         "session-1",
-        SessionConf::default(),
         None,
         None,
     )]));
@@ -386,20 +372,8 @@ async fn delete_session_prepares_runtime_then_deletes_record() {
 #[tokio::test]
 async fn open_mode_actor_only_sees_anonymous_sessions() {
     let store = Arc::new(RecordingSessionStore::from_records(vec![
-        record_for(
-            "anonymous",
-            "session-anonymous",
-            SessionConf::default(),
-            None,
-            None,
-        ),
-        record_for(
-            "member-user",
-            "session-member",
-            SessionConf::default(),
-            None,
-            None,
-        ),
+        record_for("anonymous", "session-anonymous", None, None),
+        record_for("member-user", "session-member", None, None),
     ]));
     let access = recording_access_service(Arc::new(NoopSessionRuntime), store.clone());
 

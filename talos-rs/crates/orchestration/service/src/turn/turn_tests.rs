@@ -15,8 +15,8 @@ use talos_types::talos::{
     StopReason, TalosProvider, TalosSourceType, TalosTurnCompletedEvent, TokenUsage,
 };
 use talos_types::{
-    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, SessionConf, SessionContext,
-    SessionState, StartTurnRequest, TalosConfig, TalosSession,
+    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, ModelRef, ModelSelection,
+    SessionConf, SessionContext, SessionState, StartTurnRequest, TalosConfig, TalosSession,
 };
 
 #[derive(Default)]
@@ -155,10 +155,11 @@ async fn test_service(
         TimelineEventRetentionConfig::default(),
     ));
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
+    let config = test_config();
     let sessions = Arc::new(SessionService::new(
         store.clone(),
         Arc::new(MockProjectStore::new()),
-        TalosConfig::default(),
+        config.clone(),
     ));
     let session_runtime: Arc<dyn SessionRuntime> = Arc::new(NoopSessionRuntime);
     (
@@ -168,11 +169,34 @@ async fn test_service(
             idempotency_store,
             sessions,
             session_runtime,
-            TalosConfig::default(),
+            config,
         ),
         event_service,
         store,
     )
+}
+
+fn test_model_selection() -> ModelSelection {
+    ModelSelection::without_reasoning(ModelRef {
+        provider: "anthropic".to_string(),
+        id: "test-model".to_string(),
+    })
+}
+
+fn test_config() -> TalosConfig {
+    let mut config = TalosConfig::default();
+    config.llm.model = "test-model".to_string();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: "test-model".to_string(),
+        name: "Test model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
+    config
 }
 
 fn test_session() -> TalosSession {
@@ -194,10 +218,12 @@ fn test_session() -> TalosSession {
             project_root: None,
             environment: None,
         },
-        conf: SessionConf::default(),
+        conf: SessionConf {
+            model_selection: Some(test_model_selection()),
+        },
         project_id: None,
         current_directory: None,
-        config: TalosConfig::default(),
+        config: test_config(),
         state: SessionState::default(),
     }
 }

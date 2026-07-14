@@ -38,7 +38,7 @@ pub(crate) struct ExecCmd {
     #[arg(long)]
     pub(crate) session: Option<String>,
 
-    /// Model override for this request.
+    /// Provider-qualified model override (`provider:model`).
     #[arg(short, long)]
     pub(crate) model: Option<String>,
 
@@ -70,7 +70,7 @@ pub(crate) enum SessionCommands {
     SetModel {
         /// Session ID to update.
         session_id: String,
-        /// New model.
+        /// Provider-qualified model (`provider:model`).
         model: String,
     },
 }

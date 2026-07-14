@@ -3,7 +3,6 @@ import type {
   ModelRef,
   ModelSelection,
   ReasoningEffort,
-  SessionInfo,
 } from "@talos/sdk-browser";
 
 import type { ReasoningLevel } from "@/shared/types/ui";
@@ -49,11 +48,6 @@ export function modelInfoForRef(
   );
 }
 
-export function firstModelRef(models: ModelInfo[] | undefined): ModelRef | undefined {
-  const model = models?.[0];
-  return model ? { provider: model.provider, id: model.id } : undefined;
-}
-
 export function modelPickerOptions(models: ModelInfo[] | undefined) {
   return (models ?? []).map((model) => ({
     id: modelRefKey({ provider: model.provider, id: model.id }),
@@ -88,15 +82,4 @@ export function reasoningLevelForModel(
 ): ReasoningLevel {
   const model = modelInfoForRef(models, modelRef);
   return model?.reasoning ? reasoningLevelForEffort(model.reasoning_effort) : "none";
-}
-
-export function reasoningLevelForSession(
-  session: SessionInfo | undefined,
-  models: ModelInfo[] | undefined,
-  draftModel: ModelRef | undefined,
-): ReasoningLevel {
-  if (!session) {
-    return reasoningLevelForModel(models, draftModel);
-  }
-  return reasoningLevelForEffort(session.modelSelection.reasoningEffort);
 }

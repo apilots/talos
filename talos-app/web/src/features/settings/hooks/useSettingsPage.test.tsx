@@ -10,10 +10,16 @@ import { useSettingsPage } from "./useSettingsPage";
 
 vi.mock("@/features/chat", () => ({
   useModelsQuery: () => ({
-    data: [
-      { id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000 },
-      { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", context_window: 128000 },
-    ],
+    data: {
+      defaultModelSelection: {
+        modelRef: { provider: "zhipu", id: "glm-5" },
+        reasoningEffort: null,
+      },
+      models: [
+        { id: "glm-5", name: "GLM-5", provider: "zhipu", context_window: 128000 },
+        { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", context_window: 128000 },
+      ],
+    },
   }),
 }));
 

@@ -56,33 +56,30 @@ vi.mock("@/features/chat", () => ({
       name: model.name,
       provider: model.provider,
     })),
+  reasoningLevelForEffort: (effort: string | null) =>
+    effort === "xhigh" ? "extra_high" : (effort ?? "none"),
   reasoningLevelForModel: () => "high",
   useModelsQuery: () => ({
-    data: [
-      { provider: "ollama", id: "llama-3.3", name: "Llama 3.3", reasoning: true },
-      {
-        provider: "openrouter",
-        id: "tencent/hy3:free",
-        name: "Tencent HY3 Free",
-        reasoning: true,
+    data: {
+      defaultModelSelection: {
+        modelRef: { provider: "openrouter", id: "tencent/hy3:free" },
+        reasoningEffort: "high",
       },
-    ],
+      models: [
+        { provider: "ollama", id: "llama-3.3", name: "Llama 3.3", reasoning: true },
+        {
+          provider: "openrouter",
+          id: "tencent/hy3:free",
+          name: "Tencent HY3 Free",
+          reasoning: true,
+        },
+      ],
+    },
   }),
   useProjectsView: () => ({
     activeProjectId: useAppStore.getState().activeProjectId,
     projects: useAppStore.getState().projects,
     setActiveProjectId: setActiveProjectIdMock,
-  }),
-}));
-
-vi.mock("@/features/settings", () => ({
-  useLlmConfigQuery: () => ({
-    data: {
-      config: {
-        provider: "openrouter",
-        model: "tencent/hy3:free",
-      },
-    },
   }),
 }));
 

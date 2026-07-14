@@ -8,9 +8,9 @@ use talos_store::session::{SessionPatchAck, SessionQuery, SessionRecord, Session
 use talos_types::talos::{TalosConnectionMode, TalosContext};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_default_model_selection,
-    resolve_effective_project_root, resolve_model_catalog, ModelInfo, ModelRef, ModelSelection,
-    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConfigOverridePolicy,
-    SessionContext, SessionPatch, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    resolve_effective_project_root, ModelInfo, ModelSelection, OptionalCurrentDirectoryPatch,
+    OptionalProjectIdPatch, SessionConfigOverridePolicy, SessionContext, SessionPatch,
+    SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
@@ -71,37 +71,14 @@ impl SessionService {
         Ok(())
     }
 
-    async fn ensure_explicit_model_selection(&self, record: &mut SessionRecord) -> TalosResult<()> {
-        if let Some(selection) = record.conf.model_selection.as_ref() {
-            return self.validate_model_selection(selection);
-        }
-
-        let matches = resolve_model_catalog(&self.base_config_snapshot().llm)
-            .into_iter()
-            .filter(|model| model.model.id == record.model)
-            .collect::<Vec<_>>();
-        let [model] = matches.as_slice() else {
-            return Err(TalosError::ValidationError(format!(
-                "cannot migrate session '{}' model '{}': expected exactly one configured provider, found {}",
-                record.id,
-                record.model,
-                matches.len()
-            )));
-        };
-        record.conf.model_selection = Some(ModelSelection::from_model(
-            ModelRef {
-                provider: model.provider.clone(),
-                id: model.model.id.clone(),
-            },
-            &model.model,
-        ));
-        if !self.session_store.update_session_record(record).await? {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
+    fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
+        let selection = record.conf.model_selection.as_ref().ok_or_else(|| {
+            TalosError::SerializationError(format!(
+                "session '{}' uses an incompatible persisted session format: missing modelSelection",
                 record.id
-            )));
-        }
-        Ok(())
+            ))
+        })?;
+        self.validate_model_selection(selection)
     }
 
     fn base_config_snapshot(&self) -> TalosConfig {
@@ -217,10 +194,10 @@ impl SessionService {
     }
 
     pub async fn list_sessions(&self, query: SessionQuery) -> TalosResult<Vec<TalosSession>> {
-        let mut records = self.session_store.list_session_records(&query).await?;
+        let records = self.session_store.list_session_records(&query).await?;
         let mut sessions = Vec::with_capacity(records.len());
-        for record in &mut records {
-            self.ensure_explicit_model_selection(record).await?;
+        for record in &records {
+            self.validate_persisted_model_selection(record)?;
             let mut session =
                 self.build_session(record, Some(self.default_workspace_id.clone()))?;
             session.context.project_root = self.resolve_effective_root(&session).await?;
@@ -243,10 +220,10 @@ impl SessionService {
         session_id: &str,
         workspace_id: Option<String>,
     ) -> TalosResult<Option<TalosSession>> {
-        let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
+        let Some(record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(None);
         };
-        self.ensure_explicit_model_selection(&mut record).await?;
+        self.validate_persisted_model_selection(&record)?;
         let mut session = self.build_session(
             &record,
             workspace_id.or_else(|| Some(self.default_workspace_id.clone())),
@@ -263,6 +240,7 @@ impl SessionService {
         let Some(record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(SessionPatchAck { success: false });
         };
+        self.validate_persisted_model_selection(&record)?;
         let patch = self.normalize_session_patch(record.context.clone(), patch)?;
         if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
             self.validate_project_id(project_id).await?;
@@ -274,6 +252,7 @@ impl SessionService {
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(SessionPatchAck { success: false });
         };
+        self.validate_persisted_model_selection(&record)?;
         record.title = DEFAULT_SESSION_TITLE.to_string();
         record.last_activity = chrono::Utc::now()
             .timestamp_millis()
@@ -298,6 +277,7 @@ impl SessionService {
                 session_id
             )));
         };
+        self.validate_persisted_model_selection(&record)?;
         record.last_activity = chrono::Utc::now()
             .timestamp_millis()
             .try_into()
@@ -322,6 +302,7 @@ impl SessionService {
                 session_id
             )));
         };
+        self.validate_persisted_model_selection(&record)?;
         record.title = normalized.to_string();
         if !self.session_store.update_session_record(&record).await? {
             return Err(TalosError::ResourceNotFound(format!(

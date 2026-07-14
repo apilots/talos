@@ -298,17 +298,15 @@ Ollama 模型目录与其他 Provider 一样完全来自配置。用户需要自
 | Provider adapter | 将权威 effort 映射到 Provider wire 字段 |
 | Ollama adapter | 执行 effort 映射并请求配置的 endpoint |
 
-## 兼容与迁移
+## 不兼容处理
 
-本设计会修改当前主版本协议和持久化 Session schema。实现必须：
+本设计会修改当前主版本协议和持久化 Session schema，按 breaking change 处理：
 
-1. 将配置和公共 API 中的 Talos effort 序列化值从 `low` 改成 `light`。
-2. 在同一变更中重新生成 Rust/TypeScript schema，并更新 SDK 调用方。
-3. 在删除旧 Session 表达前，使用一次性持久化迁移将旧 Reasoning 状态转换成 `Option<ReasoningEffort>`。迁移按单个 Session 原子写入；失败时保留该 Session 原记录，不影响其他 Session 恢复。
-4. 旧 Session 已保存 Provider 时直接使用该值；未保存 Provider 时，按模型 ID 在全部配置 Provider 中查找。仅有一个匹配项时补全 Provider，零个或多个匹配项时该 Session 迁移失败并报告歧义，不猜测默认 Provider。
-5. 已明确保存的 effort 保持原值，仅把 `low` 转换为 `light`。
-6. 同步更新根目录开发、生产、默认配置以及 Desktop、E2E 和测试 fixture。
-7. `low` 只由一次性迁移读取并写回为 `light`；正常配置、API 和 Session 读取路径只接受新值。迁移完成后不保留永久 alias、fallback parser 或重复公共类型。
+1. 配置、公共 API 和持久化 Session 只接受当前 `ModelSelection` 结构以及 `light/medium/high/xhigh` effort。
+2. Session 必须明确保存 Provider、模型 ID 和 Reasoning effort；缺少 `modelSelection` 的 Session 直接返回不兼容格式错误。
+3. 不读取旧 tagged `reasoning`、`modelDefault` 或 `low`，不按裸模型 ID 猜测 Provider，也不执行迁移、写回、alias 或 fallback parser。
+4. 同步更新 Rust/TypeScript schema、SDK 调用方、根目录配置、Desktop、E2E 和测试 fixture。
+5. 针对不兼容 Session 只验证当前错误边界，不保留针对已删除旧结构的反向测试和 fixture。
 
 ## 验证策略
 
@@ -334,6 +332,7 @@ Ollama 模型目录与其他 Provider 一样完全来自配置。用户需要自
 - 验证切换模型后 effort 使用目标模型配置。
 - 验证 `reasoning: false` 展示禁用的 `None`。
 - 验证已存在 Session 展示自身保存的 effort。
+- 验证不兼容 Session 返回明确错误且不修改持久化数据。
 - 为动态 Provider、模型和 effort 更新增加 Web/TUI E2E。
 
 ### Breaking change 审查

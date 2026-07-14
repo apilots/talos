@@ -57,8 +57,7 @@ interface CreateProjectInput {
 }
 
 export async function listModels() {
-  const response = await getTalosClient().models.list();
-  return response.models;
+  return getTalosClient().models.list();
 }
 
 export async function listProjects() {

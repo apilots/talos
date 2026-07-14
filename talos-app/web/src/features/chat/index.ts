@@ -18,14 +18,13 @@ export {
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
 export {
-  firstModelRef,
   modelInfoForRef,
   modelPickerOptions,
   modelRefForKey,
   modelRefKey,
   modelSelectionForRef,
+  reasoningLevelForEffort,
   reasoningLevelForModel,
-  reasoningLevelForSession,
 } from "./model-selection";
 export { SidebarContainer } from "./components/SidebarContainer";
 export { useChatSession } from "./hooks/useChatSession";

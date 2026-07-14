@@ -291,12 +291,12 @@ async fn existing_session_keeps_persisted_selection_when_default_changes() {
 }
 
 #[tokio::test]
-async fn legacy_session_without_provider_migrates_unique_model_selection() {
+async fn session_without_explicit_model_selection_is_rejected_without_writing() {
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(
         store.clone(),
         Arc::new(MockProjectStore::new()),
-        config_with_model("anthropic", "legacy-model"),
+        config_with_model("anthropic", "current-model"),
     );
     let created = service
         .create_session(create_session_params(context(), "default", None))
@@ -307,47 +307,18 @@ async fn legacy_session_without_provider_migrates_unique_model_selection() {
         records[0].conf = SessionConf::default();
     }
 
-    let migrated = service
-        .get_session(&created.context.session_id)
-        .await
-        .unwrap()
-        .unwrap();
-
-    assert_eq!(
-        migrated.conf.model_selection,
-        Some(ModelSelection::without_reasoning(ModelRef {
-            provider: "anthropic".to_string(),
-            id: "legacy-model".to_string(),
-        }))
-    );
-    assert_eq!(
-        store.records.lock().unwrap()[0].conf,
-        migrated.conf,
-        "migration must persist the normalized selection"
-    );
-}
-
-#[tokio::test]
-async fn legacy_session_migration_rejects_ambiguous_model_without_writing() {
-    let store = Arc::new(RecordingSessionStore::default());
-    let mut config = config_with_model("anthropic", "shared-model");
-    config.llm.openai.models = vec![provider_model("shared-model")];
-    let service = SessionService::new(store.clone(), Arc::new(MockProjectStore::new()), config);
-    let created = service
-        .create_session(create_session_params(context(), "default", None))
-        .await
-        .unwrap();
-    store.records.lock().unwrap()[0].conf = SessionConf::default();
-
     let error = service
         .get_session(&created.context.session_id)
         .await
-        .expect_err("ambiguous legacy model must fail migration");
+        .expect_err("persisted session without model selection must fail");
 
-    assert!(error.to_string().contains("found 2"));
+    assert!(error
+        .to_string()
+        .contains("incompatible persisted session format"));
     assert_eq!(
         store.records.lock().unwrap()[0].conf,
-        SessionConf::default()
+        SessionConf::default(),
+        "failed reads must not mutate persisted session state"
     );
 }
 

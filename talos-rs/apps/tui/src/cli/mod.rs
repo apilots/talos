@@ -87,18 +87,12 @@ async fn resolve_cli_model_selection(
     model_key: &str,
 ) -> Result<ModelSelection, Box<dyn std::error::Error>> {
     let models = client.list_models().await?.models;
-    let mut matches = models.iter().filter(|model| {
-        format!("{}:{}", model.provider, model.model.id) == model_key || model.model.id == model_key
-    });
-    let model = matches.next().ok_or_else(|| {
-        format!("model '{model_key}' is not available in the current model catalog")
-    })?;
-    if matches.next().is_some() {
-        return Err(format!(
-            "model id '{model_key}' exists under multiple providers; use provider:model"
-        )
-        .into());
-    }
+    let model = models
+        .iter()
+        .find(|model| format!("{}:{}", model.provider, model.model.id) == model_key)
+        .ok_or_else(|| {
+            format!("model '{model_key}' is not available in the current model catalog")
+        })?;
     Ok(ModelSelection {
         model_ref: ModelRef {
             provider: model.provider.clone(),
@@ -137,8 +131,12 @@ async fn execute_session_command(
             println!("Active Sessions:");
             for (i, session) in sessions.iter().take(limit).enumerate() {
                 println!(
-                    "{}. ID: {} | Model: {} | Messages: {}",
-                    i, session.id, session.model_selection.model_ref.id, session.message_count
+                    "{}. ID: {} | Model: {}:{} | Messages: {}",
+                    i,
+                    session.id,
+                    session.model_selection.model_ref.provider,
+                    session.model_selection.model_ref.id,
+                    session.message_count
                 );
             }
         }
@@ -146,7 +144,10 @@ async fn execute_session_command(
             let session = client.get_session(&session_id).await?;
             println!("Session Info:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model_selection.model_ref.id);
+            println!(
+                "  Model: {}:{}",
+                session.model_selection.model_ref.provider, session.model_selection.model_ref.id
+            );
             println!("  Messages: {}", session.message_count);
         }
         SessionCommands::SetModel { session_id, model } => {
@@ -156,7 +157,10 @@ async fn execute_session_command(
                 .await?;
             println!("Session model updated:");
             println!("  ID: {}", session.id);
-            println!("  Model: {}", session.model_selection.model_ref.id);
+            println!(
+                "  Model: {}:{}",
+                session.model_selection.model_ref.provider, session.model_selection.model_ref.id
+            );
         }
     }
     Ok(())

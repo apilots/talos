@@ -475,14 +475,18 @@ impl TuiApp {
             self.push_system_notice("No models loaded. Run /models first.");
             return;
         }
-        self.model_picker = Some(ModelPickerState::new(
+        let picker = ModelPickerState::new(
             &self.available_model_info,
             &talos_sdk::ModelRef {
                 provider: self.current_model_provider.clone(),
                 id: self.current_model.clone(),
             },
             self.reasoning_effort_override,
-        ));
+        );
+        match picker {
+            Ok(picker) => self.model_picker = Some(picker),
+            Err(error) => self.push_system_notice(error.to_string()),
+        }
     }
 
     pub(crate) fn close_model_picker(&mut self) {

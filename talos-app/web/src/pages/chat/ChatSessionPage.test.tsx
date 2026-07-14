@@ -72,15 +72,21 @@ vi.mock("@/features/chat", async (importOriginal) => {
       },
     }),
     useModelsQuery: () => ({
-      data: [
-        {
-          id: "model-1",
-          name: "Model 1",
-          provider: "mock",
-          reasoning: true,
-          reasoning_effort: "medium",
+      data: {
+        defaultModelSelection: {
+          modelRef: { provider: "mock", id: "model-1" },
+          reasoningEffort: "medium",
         },
-      ],
+        models: [
+          {
+            id: "model-1",
+            name: "Model 1",
+            provider: "mock",
+            reasoning: true,
+            reasoning_effort: "medium",
+          },
+        ],
+      },
     }),
     useProjectsView: () => ({
       activeProjectId: "__unbound_project__",

@@ -4,14 +4,13 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
-  firstModelRef,
   modelInfoForRef,
   modelPickerOptions,
   modelRefForKey,
   modelRefKey,
   modelSelectionForRef,
+  reasoningLevelForEffort,
   reasoningLevelForModel,
-  reasoningLevelForSession,
   useChatSession,
   useModelsQuery,
   useProjectsView,
@@ -60,7 +59,8 @@ export function ChatSessionPage() {
     locationState?.initialProjectId,
   );
   const { data: session } = useSessionQuery(sessionId, !locationState?.initialPrompt);
-  const { data: models } = useModelsQuery();
+  const { data: modelCatalog } = useModelsQuery();
+  const models = modelCatalog?.models;
   const projectsView = useProjectsView();
   const {
     blocks,
@@ -87,13 +87,13 @@ export function ChatSessionPage() {
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
-  const currentModelRef =
-    session?.modelSelection.modelRef ?? draftModel ?? firstModelRef(models);
+  const currentModelRef = session?.modelSelection.modelRef ?? draftModel ?? modelCatalog?.defaultModelSelection.modelRef;
   const currentModel = currentModelRef ? modelRefKey(currentModelRef) : undefined;
   const currentModelInfo = modelInfoForRef(models, currentModelRef);
-  const currentReasoningLevel = session
-    ? reasoningLevelForSession(session, models, draftModel)
-    : draftReasoningLevel ?? reasoningLevelForModel(models, currentModelRef);
+  const currentReasoningLevel = session ? reasoningLevelForEffort(session.modelSelection.reasoningEffort)
+    : draftReasoningLevel ?? (draftModel
+        ? reasoningLevelForModel(models, draftModel)
+        : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);

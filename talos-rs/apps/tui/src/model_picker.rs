@@ -4,6 +4,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
 };
+use talos_error::{TalosError, TalosResult};
 use talos_sdk::{ModelInfo, ModelRef, ReasoningEffort};
 
 use crate::render::frame::RenderFrame;
@@ -93,13 +94,25 @@ impl ModelPickerState {
         models: &[ModelInfo],
         current_model: &ModelRef,
         reasoning_effort_override: Option<ReasoningEffort>,
-    ) -> Self {
+    ) -> TalosResult<Self> {
         let selected_model = models
             .iter()
             .position(|model| {
                 model.provider == current_model.provider && model.model.id == current_model.id
             })
-            .unwrap_or(0);
+            .ok_or_else(|| {
+                TalosError::ClientError(format!(
+                    "current model '{}:{}' is missing from the model picker catalog",
+                    current_model.provider, current_model.id
+                ))
+            })?;
+        let model = &models[selected_model];
+        if model.model.reasoning != reasoning_effort_override.is_some() {
+            return Err(TalosError::ClientError(format!(
+                "current model '{}:{}' has inconsistent reasoning state",
+                current_model.provider, current_model.id
+            )));
+        }
         let mut state = Self {
             step: ModelPickerStep::Model,
             models: models.to_vec(),
@@ -109,13 +122,7 @@ impl ModelPickerState {
             reasoning_effort_override,
         };
         state.sync_selected_reasoning();
-        state
-    }
-
-    pub(crate) fn selected_model_id(&self) -> Option<&str> {
-        self.models
-            .get(self.selected_model)
-            .map(|model| model.model.id.as_str())
+        Ok(state)
     }
 
     pub(crate) fn move_selection(&mut self, direction: i32) {
@@ -150,7 +157,7 @@ impl ModelPickerState {
     }
 
     pub(crate) fn confirm(&mut self) -> Option<ModelPickerSelection> {
-        let model = self.models.get(self.selected_model)?.clone();
+        let model = self.models[self.selected_model].clone();
         if self.step == ModelPickerStep::Model {
             self.step = ModelPickerStep::Reasoning;
             self.sync_selected_reasoning();
@@ -158,9 +165,7 @@ impl ModelPickerState {
         }
 
         let reasoning_effort = if model.model.reasoning {
-            ReasoningOption::for_model(&model)
-                .get(self.selected_reasoning)
-                .and_then(|option| option.effort)
+            ReasoningOption::for_model(&model)[self.selected_reasoning].effort
         } else {
             None
         };
@@ -196,25 +201,19 @@ impl ModelPickerState {
     }
 
     fn render_models(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
-        let header_lines = vec![
-            Line::from(Span::styled(
-                "Select Model and Effort",
-                bg_style
-                    .fg(Color::Rgb(242, 243, 245))
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(Span::styled(
-                "Access legacy models by running talos -m <model_name> or in your config.toml",
-                bg_style.fg(Color::Rgb(180, 182, 190)),
-            )),
-        ];
+        let header_lines = vec![Line::from(Span::styled(
+            "Select Model and Effort",
+            bg_style
+                .fg(Color::Rgb(242, 243, 245))
+                .add_modifier(Modifier::BOLD),
+        ))];
         f.render_widget(Paragraph::new(header_lines).style(bg_style), area);
 
         let list_area = Rect::new(
             area.x,
-            area.y.saturating_add(3),
+            area.y.saturating_add(2),
             area.width,
-            area.height.saturating_sub(4),
+            area.height.saturating_sub(3),
         );
         if list_area.height > 0 {
             let items = self
@@ -279,9 +278,7 @@ impl ModelPickerState {
     }
 
     fn render_reasoning(&self, f: &mut impl RenderFrame, area: Rect, bg_style: Style) {
-        let model = self
-            .selected_model_id()
-            .unwrap_or(self.current_model.id.as_str());
+        let model = self.models[self.selected_model].model.id.as_str();
         let header = Line::from(Span::styled(
             format!("Select Reasoning Level for {model}"),
             bg_style
@@ -356,29 +353,25 @@ impl ModelPickerState {
     }
 
     fn sync_selected_reasoning(&mut self) {
-        let effort = self.models.get(self.selected_model).and_then(|model| {
-            if model.provider == self.current_model.provider
-                && model.model.id == self.current_model.id
-            {
-                self.reasoning_effort_override
-            } else if model.model.reasoning {
-                Some(model.model.reasoning_effort)
-            } else {
-                None
-            }
-        });
+        let model = &self.models[self.selected_model];
+        let effort = if model.provider == self.current_model.provider
+            && model.model.id == self.current_model.id
+        {
+            self.reasoning_effort_override
+        } else if model.model.reasoning {
+            Some(model.model.reasoning_effort)
+        } else {
+            None
+        };
         self.selected_reasoning = self
             .reasoning_options()
             .iter()
             .position(|option| option.effort == effort)
-            .unwrap_or_default();
+            .expect("validated model reasoning state must have a picker option");
     }
 
     fn reasoning_options(&self) -> &'static [ReasoningOption] {
-        self.models
-            .get(self.selected_model)
-            .map(ReasoningOption::for_model)
-            .unwrap_or(&ReasoningOption::NONE)
+        ReasoningOption::for_model(&self.models[self.selected_model])
     }
 }
 
