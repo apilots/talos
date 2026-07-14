@@ -1,0 +1,1 @@
+# Repository-relative paths for intentional blobs larger than 500 KiB.

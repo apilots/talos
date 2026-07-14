@@ -64,7 +64,7 @@ describe("useAuthBootstrap", () => {
       username: "ada",
       email: "ada@example.com",
       role: "admin",
-      type: "Max",
+      type: "max",
       disabled: false,
       created_at: 0,
       updated_at: 0,
@@ -77,7 +77,7 @@ describe("useAuthBootstrap", () => {
         user_id: "user-1",
         username: "ada",
         role: "admin",
-        type: "Max",
+        type: "max",
       },
     });
     getCurrentUserWithTokenMock.mockResolvedValue(user);
@@ -100,7 +100,7 @@ describe("useAuthBootstrap", () => {
       username: "linus",
       email: null,
       role: "user",
-      type: "Plus",
+      type: "plus",
       disabled: false,
       created_at: 0,
       updated_at: 0,

@@ -18,6 +18,6 @@
     "test": "pnpm -r test",
     "check": "pnpm --filter talos-web check",
     "check:repo": "node ./scripts/check-repo.mjs",
-    "ci:frontend-app": "pnpm check && pnpm check:repo"
+    "ci:frontend-app": "pnpm lint && pnpm test && pnpm typecheck && pnpm build && pnpm check:repo"
   }
 }

@@ -1,0 +1,51 @@
+name: talos-rust
+
+on:
+  pull_request:
+    paths:
+      - "talos-rs/**"
+      - "justfile"
+      - ".github/workflows/talos-rust.yml"
+  push:
+    paths:
+      - "talos-rs/**"
+      - "justfile"
+      - ".github/workflows/talos-rust.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  rust-quality:
+    name: rust-format-and-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Talos
+        uses: actions/checkout@v6
+
+      - name: Checkout Talos Cloud SDK
+        uses: actions/checkout@v6
+        with:
+          repository: apilots/talos-cloud
+          path: talos-cloud
+          token: ${{ secrets.TALOS_SOURCE_READ_TOKEN || github.token }}
+
+      - name: Link Talos Cloud SDK path dependency
+        run: ln -sfn "${GITHUB_WORKSPACE}/talos-cloud" "${GITHUB_WORKSPACE}/../talos-cloud"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Check Rust formatting
+        run: just fmt-check
+
+      - name: Check Rust workspace
+        run: just check

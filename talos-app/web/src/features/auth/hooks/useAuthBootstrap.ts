@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { useConnectionSettings } from "@/features/connection";
+import { accountTypeFromWire } from "@/shared/types/account";
 
 export function useAuthBootstrap() {
   const { connection, setConnection } = useConnectionSettings();
@@ -65,7 +66,7 @@ export function useAuthBootstrap() {
           authStatus: "authenticated",
           authUsername: user.username,
           authRole: user.role,
-          accountType: user.type,
+          accountType: accountTypeFromWire(user.type),
           userId: user.user_id,
         });
       })

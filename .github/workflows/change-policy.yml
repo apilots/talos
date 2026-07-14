@@ -1,0 +1,53 @@
+name: change-policy
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  changed-files:
+    name: changed-file-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Resolve comparison range
+        id: range
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            base="${PR_BASE_SHA}"
+          elif [[ -n "${PUSH_BASE_SHA}" && "${PUSH_BASE_SHA}" != "0000000000000000000000000000000000000000" ]]; then
+            base="${PUSH_BASE_SHA}"
+          else
+            base="$(git rev-parse "${HEAD_SHA}^")"
+          fi
+          echo "base=${base}" >> "${GITHUB_OUTPUT}"
+          echo "head=${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Test repository policy scripts
+        run: |
+          python3 -m unittest discover -s scripts -p 'check_changed_files_tests.py'
+          scripts/check-commit-message-tests.sh
+          bash -n .githooks/* scripts/*.sh
+
+      - name: Check changed files
+        run: >-
+          python3 scripts/check_changed_files.py
+          --base "${{ steps.range.outputs.base }}"
+          --head "${{ steps.range.outputs.head }}"

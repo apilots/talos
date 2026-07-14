@@ -12,6 +12,7 @@ import {
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
 import { Panel } from "@/shared/ui/Panel";
+import { accountTypeFromWire } from "@/shared/types/account";
 
 export function AuthPage() {
   const navigate = useNavigate();
@@ -60,7 +61,7 @@ export function AuthPage() {
             authStatus: "authenticated",
             authUsername: response.user.username,
             authRole: response.user.role,
-            accountType: response.user.type,
+            accountType: accountTypeFromWire(response.user.type),
             userId: response.user.user_id,
           });
           navigate(nextPath, { replace: true });

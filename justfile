@@ -20,6 +20,14 @@ setup-git-hooks:
 test-commit-messages:
     ../scripts/check-commit-message-tests.sh
 
+# Verify changed-file policy behavior.
+test-change-policy:
+    python3 ../scripts/check_changed_files_tests.py
+
+# Run the checks applied to the current staged snapshot.
+check-staged:
+    ../scripts/run-pre-commit-checks.sh
+
 # Format all Rust crates in the workspace.
 fmt:
     cargo fmt --all

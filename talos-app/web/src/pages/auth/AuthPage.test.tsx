@@ -66,7 +66,7 @@ describe("AuthPage", () => {
         username: "xiliu",
         email: null,
         role: "user",
-        type: "Pro",
+        type: "pro",
         disabled: false,
         created_at: 0,
         updated_at: 0,
