@@ -8,41 +8,18 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 031 |
 | `fix` | 005 |
-| `refactor` | 037 |
+| `refactor` | 039 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
-| feat-020 | `feat-020-cloud-auth-metrics` | draft |
-| feat-021 | `feat-021-user-scoped-agent-workspace` | draft |
-| feat-022 | `feat-022-release-cloud-production-readiness` | draft |
-| feat-023 | `feat-023-unified-cloud-login-adapter` | draft |
-| feat-024 | `feat-024-project-directory-picker` | draft |
-| feat-026 | `feat-026-talos-skills-system` | draft |
-| feat-027 | `feat-027-plugin-marketplace-skill-install` | draft |
-| feat-028 | `feat-028-talos-mcp-system` | implemented |
-| feat-029 | `feat-029-server-container-release` | partially implemented |
-| feat-030 | `feat-030-tui-tool-call-rendering` | draft |
-| fix-004 | `fix-004-bash-runtime-lifecycle` | partially implemented |
-| refactor-023 | `refactor-023-agent-kernel-simplification` | draft |
-| refactor-024 | `refactor-024-agent-kernel-final-answer-simplification` | draft |
-| refactor-025 | `refactor-025-talos-tool-capability-alignment` | draft |
-| refactor-027 | `refactor-027-core-api-object-boundary` | implemented |
-| refactor-028 | `refactor-028-orchestration-store-service-layout` | implemented |
-| refactor-029 | `refactor-029-plugin-install-state-layout` | draft |
-| refactor-030 | `refactor-030-tui-embedded-sdk-transport` | draft |
-| refactor-031 | `refactor-031-api-concept-alignment` | implemented |
-| refactor-032 | `refactor-032-agent-harness-api` | implemented |
-| refactor-033 | `refactor-033-agent-framework-api-standardization` | draft |
-| refactor-034 | `refactor-034-model-driven-agent-loop` | draft |
-| refactor-035 | `refactor-035-tui-render-runtime` | completed |
-| refactor-036 | `refactor-036-provider-reasoning-selection` | implemented |
+| refactor-038 | `refactor-038-llm-model-selection` | active |
 
 ## Archived Specs
 
-Historical root specs were reorganized on 2026-05-08.
+All superseded specs were consolidated under `archive/2026/` on 2026-07-14. Archived documents are historical snapshots and are not active implementation entrypoints.
 
 | ID | Directory | Status |
 | --- | --- | --- |
@@ -65,9 +42,20 @@ Historical root specs were reorganized on 2026-05-08.
 | feat-017 | `archive/2026/feat-017-web-ui-design` | archived |
 | feat-018 | `archive/2026/feat-018-web-ui-phase2-server-shared-api` | archived |
 | feat-019 | `archive/2026/feat-019-web-ui-project-page` | archived |
+| feat-020 | `archive/2026/feat-020-cloud-auth-metrics` | archived |
+| feat-021 | `archive/2026/feat-021-user-scoped-agent-workspace` | archived |
+| feat-022 | `archive/2026/feat-022-release-cloud-production-readiness` | archived |
+| feat-023 | `archive/2026/feat-023-unified-cloud-login-adapter` | archived |
+| feat-024 | `archive/2026/feat-024-project-directory-picker` | archived |
+| feat-026 | `archive/2026/feat-026-talos-skills-system` | archived |
+| feat-027 | `archive/2026/feat-027-plugin-marketplace-skill-install` | archived |
+| feat-028 | `archive/2026/feat-028-talos-mcp-system` | archived |
+| feat-029 | `archive/2026/feat-029-server-container-release` | archived |
+| feat-030 | `archive/2026/feat-030-tui-tool-call-rendering` | archived |
 | fix-001 | `archive/2026/fix-001-http-sse-tool-reliability-and-prompt-continuity` | archived |
 | fix-002 | `archive/2026/fix-002-tool-stream-ux-stabilization` | archived |
 | fix-003 | `archive/2026/fix-003-plan-react-local-arch-analysis-remediation` | archived |
+| fix-004 | `archive/2026/fix-004-bash-runtime-lifecycle` | archived |
 | refactor-001 | `archive/2026/refactor-001-arch-review-remediation-plan` | archived |
 | refactor-002 | `archive/2026/refactor-002-context-window-threshold-compaction-governance` | archived |
 | refactor-003 | `archive/2026/refactor-003-desktop-appserver-shared-application-service` | archived |
@@ -90,4 +78,18 @@ Historical root specs were reorganized on 2026-05-08.
 | refactor-020 | `archive/2026/refactor-020-application-timeline-recovery-stream` | archived |
 | refactor-021 | `archive/2026/refactor-021-kernel-stream-phase-ownership` | archived |
 | refactor-022 | `archive/2026/refactor-022-provider-neutral-agent-stream` | archived |
+| refactor-023 | `archive/2026/refactor-023-agent-kernel-simplification` | archived |
+| refactor-024 | `archive/2026/refactor-024-agent-kernel-final-answer-simplification` | archived |
+| refactor-025 | `archive/2026/refactor-025-talos-tool-capability-alignment` | archived |
 | refactor-026 | `archive/2026/refactor-026-provider-protocol-abstraction` | archived |
+| refactor-027 | `archive/2026/refactor-027-core-api-object-boundary` | archived |
+| refactor-028 | `archive/2026/refactor-028-orchestration-store-service-layout` | archived |
+| refactor-029 | `archive/2026/refactor-029-plugin-install-state-layout` | archived |
+| refactor-030 | `archive/2026/refactor-030-tui-embedded-sdk-transport` | archived |
+| refactor-031 | `archive/2026/refactor-031-api-concept-alignment` | archived |
+| refactor-032 | `archive/2026/refactor-032-agent-harness-api` | archived |
+| refactor-033 | `archive/2026/refactor-033-agent-framework-api-standardization` | archived |
+| refactor-034 | `archive/2026/refactor-034-model-driven-agent-loop` | archived |
+| refactor-035 | `archive/2026/refactor-035-tui-render-runtime` | archived |
+| refactor-036 | `archive/2026/refactor-036-provider-reasoning-selection` | archived |
+| refactor-037 | `archive/2026/refactor-037-web-desktop-timeline-render-runtime` | archived |

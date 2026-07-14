@@ -74,6 +74,8 @@ Archive a spec only when:
 
 Archived specs live under `spec/archive/<year>/` and keep their original typed ID. Do not edit archived specs for new work. Create a new `feat-*`, `fix-*`, or `refactor-*` spec and reference the archived one.
 
+The active set is intentionally small. `REGISTRY.md` is the authoritative index; directories under `archive/` are historical context and must not be treated as current design requirements.
+
 ## AI Collaboration Rules
 
 - Read the relevant active spec before changing code.
@@ -82,6 +84,6 @@ Archived specs live under `spec/archive/<year>/` and keep their original typed I
 - Record final validation evidence in the execution output or implementation `PLAN`, not in the design spec.
 - Prefer concise, current specs over large historical documents. Historical material belongs in `archive/`.
 
-## Legacy Specs
+## Archived Specs
 
-Root-level historical specs have been archived into typed directories under `spec/archive/2026/` based on filename and title. They are treated as already implemented historical references.
+All superseded specs have been moved into typed directories under `spec/archive/2026/`. Their `archived` status means they are no longer active design entrypoints; it does not retroactively claim that every draft was implemented.
