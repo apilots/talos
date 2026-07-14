@@ -159,7 +159,7 @@ impl TuiApp {
         self.poll_stream_events();
         self.poll_command_updates();
         self.poll_close_updates();
-        self.poll_close_timeout();
+        self.poll_close_progress();
 
         if self.in_flight {
             if let Some(last_event_at) = self.last_stream_event_at {

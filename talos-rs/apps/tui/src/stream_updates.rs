@@ -1,11 +1,11 @@
 use std::time::Duration;
 
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosError;
 use tokio::sync::mpsc::error::TryRecvError;
 
 use crate::status_picker::{render_status_card, TuiStatusSnapshot};
 use crate::types::CommandUpdate;
-use crate::TuiApp;
+use crate::{TuiApp, SESSION_CLOSE_SLOW_NOTICE};
 
 impl TuiApp {
     fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::SessionInfo) {
@@ -211,20 +211,23 @@ impl TuiApp {
     }
 
     pub(crate) fn poll_close_updates(&mut self) {
-        let mut result: Option<TalosResult<String>> = None;
+        let mut update = None;
         let mut should_clear = false;
 
         if let Some(rx) = self.pending_close_update.as_mut() {
             match rx.try_recv() {
-                Ok(update) => {
-                    result = Some(update);
+                Ok(result) => {
+                    update = Some(result);
                     should_clear = true;
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    result = Some(Err(TalosError::ClientError(
-                        "session close channel dropped".to_string(),
-                    )));
+                    update = Some(crate::types::SessionCloseUpdate {
+                        result: Err(TalosError::ClientError(
+                            "session close channel dropped".to_string(),
+                        )),
+                        client_shutdown_completed: false,
+                    });
                     should_clear = true;
                 }
             }
@@ -235,11 +238,16 @@ impl TuiApp {
             self.pending_close_task = None;
         }
 
-        match result {
-            Some(Ok(session_id)) => {
+        let Some(update) = update else {
+            return;
+        };
+        self.client_shutdown_completed = update.client_shutdown_completed;
+
+        match update.result {
+            Ok(session_id) => {
                 self.close_in_progress = false;
                 self.close_started_at = None;
-                self.close_timeout_reported = false;
+                self.close_slow_notice_reported = false;
                 self.closing_session_id = None;
                 self.connection_status = "closed".to_string();
                 self.push_right_event(format!("session close completed: {}", session_id));
@@ -249,30 +257,32 @@ impl TuiApp {
                 ));
                 self.should_exit = true;
             }
-            Some(Err(err)) => {
+            Err(err) => {
                 self.close_in_progress = false;
                 self.close_started_at = None;
-                self.close_timeout_reported = false;
+                self.close_slow_notice_reported = false;
                 self.closing_session_id = None;
                 self.push_system_notice(format!("Failed to close session: {}", err));
                 self.push_right_event("session close failed".to_string());
             }
-            None => {}
         }
     }
 
-    pub(crate) fn poll_close_timeout(&mut self) {
-        if !self.close_in_progress || self.close_timeout_reported {
+    pub(crate) fn poll_close_progress(&mut self) {
+        if !self.close_in_progress || self.close_slow_notice_reported {
             return;
         }
 
-        if self.is_close_timed_out() {
-            self.close_timeout_reported = true;
+        if self
+            .close_started_at
+            .is_some_and(|started_at| started_at.elapsed() >= SESSION_CLOSE_SLOW_NOTICE)
+        {
+            self.close_slow_notice_reported = true;
             self.show_status_hint(
-                "Session close timed out. Press /quit again to force exit.",
+                "Memory flush is still in progress. Talos will keep waiting.",
                 Duration::from_secs(4),
             );
-            self.push_right_event("session close timed out".to_string());
+            self.push_right_event("session memory flush still in progress".to_string());
         }
     }
 }

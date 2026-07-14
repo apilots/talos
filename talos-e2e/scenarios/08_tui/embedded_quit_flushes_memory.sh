@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../../scripts/tui.sh"
 
 load_env
 require_command python3
@@ -13,9 +15,7 @@ build_binaries
 
 TEST_TALOS_HOME="$(make_e2e_temp_dir "talos-tui-quit-home")"
 cleanup() {
-  if [[ -n "${TUI_SESSION_NAME:-}" ]] && tmux has-session -t "${TUI_SESSION_NAME}" 2>/dev/null; then
-    tmux kill-session -t "${TUI_SESSION_NAME}" || true
-  fi
+  tui_stop "${TUI_SESSION_NAME:-}"
   rm -rf "${TEST_TALOS_HOME}"
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
@@ -24,37 +24,20 @@ prepare_talos_home
 trap cleanup EXIT
 
 WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
-ROOT_MEMORY_FILE="${WORKSPACE_DIR}/MEMORY.md"
-DAY_FILE="${WORKSPACE_DIR}/memory/$(date '+%Y-%m-%d').md"
+USER_WORKSPACE_DIR="${WORKSPACE_DIR}/users/local"
+ROOT_MEMORY_FILE="${USER_WORKSPACE_DIR}/MEMORY.md"
+DAY_FILE="${USER_WORKSPACE_DIR}/memory/$(date '+%Y-%m-%d').md"
 TALOS_LOG_FILE="${TALOS_HOME}/logs/talos.log"
+QUIT_PANE_HISTORY="$(scenario_report_path "tui_quit_pane_history.txt")"
 mkdir -p "${WORKSPACE_DIR}"
 TUI_SESSION_NAME="talos-tui-quit-$$"
 
 capture_tui() {
-  tmux capture-pane -t "${TUI_SESSION_NAME}" -p
+  tui_capture "${TUI_SESSION_NAME}"
 }
 
 get_session_id_from_sqlite() {
-  SESSION_ID_FROM_SQLITE="$(python3 - "${TALOS_HOME}/data/talos.db" <<'PY'
-import sqlite3
-import sys
-from pathlib import Path
-
-db_path = Path(sys.argv[1])
-if not db_path.exists():
-    print("")
-    raise SystemExit(0)
-try:
-    conn = sqlite3.connect(str(db_path))
-    row = conn.execute(
-        "SELECT session_key FROM sessions ORDER BY created_at DESC LIMIT 1"
-    ).fetchone()
-except Exception:
-    print("")
-    raise SystemExit(0)
-print(row[0] if row else "")
-PY
-)"
+  SESSION_ID_FROM_SQLITE="$(tui_latest_session_id "${TALOS_HOME}/data/talos.db")"
 }
 
 log_line_contains() {
@@ -90,29 +73,18 @@ dump_failure_context() {
 
 send_tui_input() {
   local text="$1"
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-u >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" -l "${text}" >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-m >/dev/null
+  tui_send_input "${TUI_SESSION_NAME}" "${text}"
 }
 
 send_tui_command() {
   local text="$1"
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-u >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" -l "${text}" >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-m >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-m >/dev/null
+  tui_send_command "${TUI_SESSION_NAME}" "${text}"
 }
 
 wait_for_tui_ready() {
-  local i
-  for i in $(seq 1 120); do
-    local snapshot
-    snapshot="$(capture_tui || true)"
-    if echo "${snapshot}" | grep -Fq "Type a message or use /help"; then
-      return 0
-    fi
-    sleep 0.25
-  done
+  if tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message or use /help" 120 0.25; then
+    return 0
+  fi
   echo "CASE tui_bootstrap FAIL timeout waiting for ready prompt"
   dump_failure_context
   exit 1
@@ -142,13 +114,24 @@ fi
 message_marker="tui-quit-memory-${RANDOM}-$(date '+%Y%m%d%H%M%S')"
 send_tui_input "Please remember this marker for flush: ${message_marker}. This is an explicit memory target, and we should write it to today's daily memory file on session close."
 
+turn_completed="false"
 for _ in $(seq 1 360); do
   snapshot="$(capture_tui || true)"
+  if echo "${snapshot}" | grep -Fq "Stream error:"; then
+    break
+  fi
   if echo "${snapshot}" | grep -Fq "${message_marker}" && echo "${snapshot}" | grep -Fq "Brewed for"; then
+    turn_completed="true"
     break
   fi
   sleep 0.25
 done
+if [[ "${turn_completed}" != "true" ]]; then
+  dump_failure_context
+  echo "CASE embedded_tui_quit_turn FAIL marker=${message_marker}"
+  exit 1
+fi
+echo "CASE embedded_tui_quit_turn PASS marker=${message_marker}"
 
 session_id=""
 for _ in $(seq 1 120); do
@@ -165,17 +148,30 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE embedded_tui_quit_get_session PASS session_id=${session_id}"
 
+: >"${QUIT_PANE_HISTORY}"
 send_tui_command "/quit"
-for _ in $(seq 1 240); do
+session_exited="false"
+for _ in $(seq 1 280); do
   if ! tmux has-session -t "${TUI_SESSION_NAME}" 2>/dev/null; then
+    session_exited="true"
     break
   fi
   snapshot="$(capture_tui || true)"
-  if echo "${snapshot}" | grep -Fq "Shutting down TUI. Closed session"; then
-    break
+  printf '%s\n' "${snapshot}" >>"${QUIT_PANE_HISTORY}"
+  if echo "${snapshot}" | grep -Fq "Session close timed out"; then
+    dump_failure_context
+    echo "CASE embedded_tui_quit_no_false_timeout FAIL pane_history=${QUIT_PANE_HISTORY}"
+    exit 1
   fi
   sleep 0.25
 done
+if [[ "${session_exited}" != "true" ]]; then
+  dump_failure_context
+  echo "CASE embedded_tui_quit_exit FAIL pane_history=${QUIT_PANE_HISTORY}"
+  exit 1
+fi
+echo "CASE embedded_tui_quit_no_false_timeout PASS pane_history=${QUIT_PANE_HISTORY}"
+echo "CASE embedded_tui_quit_exit PASS session_id=${session_id}"
 
 flush_started_seen="false"
 flush_completed_seen="false"
@@ -228,4 +224,32 @@ if [[ "${background_drain_completed_seen}" != "true" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${DAY_FILE}" ]]; then
+  dump_failure_context
+  echo "CASE close_session_for_embedded_tui_quit FAIL missing_memory_file path=${DAY_FILE}"
+  exit 1
+fi
+
+if ! grep -Fq "${message_marker}" "${DAY_FILE}"; then
+  dump_failure_context
+  echo "CASE close_session_for_embedded_tui_quit FAIL missing_memory_marker marker=${message_marker} path=${DAY_FILE}"
+  exit 1
+fi
+
+if [[ "${post_size}" -le "${pre_size}" ]]; then
+  dump_failure_context
+  echo "CASE close_session_for_embedded_tui_quit FAIL memory_file_not_grown pre_size=${pre_size} post_size=${post_size}"
+  exit 1
+fi
+
+background_drain_started_count="$(grep -Fc "background task drain started" "${TALOS_LOG_FILE}" || true)"
+background_drain_completed_count="$(grep -Fc "background task drain completed" "${TALOS_LOG_FILE}" || true)"
+if [[ "${background_drain_started_count}" -ne 1 || "${background_drain_completed_count}" -ne 1 ]]; then
+  dump_failure_context
+  echo "CASE close_session_for_embedded_tui_quit FAIL unexpected_drain_count started=${background_drain_started_count} completed=${background_drain_completed_count}"
+  exit 1
+fi
+
+echo "CASE close_session_for_embedded_tui_quit_memory PASS marker=${message_marker} path=${DAY_FILE}"
+echo "CASE close_session_for_embedded_tui_quit_single_drain PASS started=${background_drain_started_count} completed=${background_drain_completed_count}"
 echo "CASE close_session_for_embedded_tui_quit PASS session_id=${session_id} marker=${message_marker} pre_size=${pre_size} post_size=${post_size}"

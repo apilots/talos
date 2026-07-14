@@ -1200,7 +1200,10 @@ async fn test_quit_enters_closing_state_before_session_close_finishes() {
 
 #[tokio::test]
 async fn test_quit_exits_after_session_close_completes() {
-    let mut app = create_app_server_app();
+    let client = std::sync::Arc::new(MockGatewayClient::new());
+    let state = client.state.clone();
+    let gateway_client: std::sync::Arc<dyn GatewayClient> = client;
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
@@ -1218,6 +1221,8 @@ async fn test_quit_exits_after_session_close_completes() {
 
     assert!(app.should_exit);
     assert!(!app.close_in_progress);
+    assert!(app.client_shutdown_completed);
+    assert_eq!(state.lock().unwrap().shutdown_calls, 1);
     assert!(app
         .right_panel_events
         .iter()
@@ -1225,29 +1230,44 @@ async fn test_quit_exits_after_session_close_completes() {
 }
 
 #[tokio::test]
-async fn test_quit_timeout_requires_second_quit_to_force_exit() {
-    let mut app = create_app_server_app_with_close_delay(5_000);
+async fn test_slow_quit_reports_progress_before_force_exit_deadline() {
+    let mut app = create_app_server_app_with_close_delay(70_000);
     app.initialize_session().await;
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let _ = app.submit_input().await.unwrap();
 
-    app.close_started_at = Some(Instant::now() - SESSION_CLOSE_TIMEOUT - Duration::from_millis(1));
+    app.close_started_at =
+        Some(Instant::now() - SESSION_CLOSE_SLOW_NOTICE - Duration::from_millis(1));
     app.on_tick().await;
 
     assert!(app.close_in_progress);
-    assert!(app.close_timeout_reported);
+    assert!(app.close_slow_notice_reported);
+    assert!(!app.can_force_close());
     assert!(app
         .status_hint
         .as_ref()
-        .map(|(msg, _)| msg.contains("Press /quit again"))
+        .map(|(msg, _)| msg.contains("Memory flush is still in progress"))
         .unwrap_or(false));
+    assert!(!app
+        .right_panel_events
+        .iter()
+        .any(|line| line.contains("timed out")));
 
     app.input_buffer = "/quit".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let should_quit = app.submit_input().await.unwrap();
     assert!(!should_quit);
+    assert!(!app.should_exit);
+
+    app.close_started_at =
+        Some(Instant::now() - SESSION_CLOSE_FORCE_TIMEOUT - Duration::from_millis(1));
+    app.input_buffer = "/quit".to_string();
+    app.cursor_index = app.input_buffer.chars().count();
+    let should_quit = app.submit_input().await.unwrap();
+    assert!(!should_quit);
     assert!(app.should_exit);
+    assert!(app.force_exit_without_shutdown);
     assert!(app
         .right_panel_events
         .iter()

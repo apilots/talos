@@ -9,9 +9,11 @@ use crate::client::GatewayClient;
 use crate::input_history::InputHistoryNavigation;
 use crate::model_picker::{ModelPickerSelection, ModelPickerState};
 use crate::session_picker::SessionPickerState;
-use crate::types::{CommandUpdate, QueuedMessage, SessionHistoryLoad, StatusLoad};
+use crate::types::{
+    CommandUpdate, QueuedMessage, SessionCloseUpdate, SessionHistoryLoad, StatusLoad,
+};
 use crate::utils::summarize_for_queue;
-use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_TIMEOUT};
+use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_FORCE_TIMEOUT};
 use talos_sdk::{LlmReasoningEffort, SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 impl TuiApp {
@@ -69,7 +71,7 @@ impl TuiApp {
 
         if self.close_in_progress && cmd != "quit" {
             self.show_status_hint(
-                "Session is closing. Wait or press /quit again after timeout.",
+                "Session is closing and memory flush is in progress.",
                 Duration::from_secs(2),
             );
             return Ok(false);
@@ -134,17 +136,22 @@ impl TuiApp {
             }
             "quit" => {
                 if self.close_in_progress {
-                    if self.is_close_timed_out() {
+                    if self.can_force_close() {
+                        if let Some(task) = self.pending_close_task.take() {
+                            task.abort();
+                        }
+                        self.pending_close_update = None;
                         self.push_right_event("session force exit".to_string());
                         self.push_system_notice(
-                            "Forcing local exit while session closes in background.".to_string(),
+                            "Forcing local exit before memory flush completes.".to_string(),
                         );
+                        self.force_exit_without_shutdown = true;
                         self.should_exit = true;
                         return Ok(false);
                     }
 
                     self.show_status_hint(
-                        "Session is still closing. Wait or press /quit again after timeout.",
+                        "Session is still closing and memory flush is in progress.",
                         Duration::from_secs(2),
                     );
                     return Ok(false);
@@ -655,11 +662,11 @@ impl TuiApp {
         self.pending_close_update = Some(rx);
         self.close_in_progress = true;
         self.close_started_at = Some(Instant::now());
-        self.close_timeout_reported = false;
+        self.close_slow_notice_reported = false;
         self.closing_session_id = Some(closing_session_id.clone());
         self.connection_status = "closing".to_string();
         self.show_status_hint(
-            "Closing session. Memory flush continues in background.",
+            "Closing session and flushing memory.",
             Duration::from_secs(2),
         );
         self.push_right_event(format!("session close started: {}", closing_session_id));
@@ -704,9 +711,9 @@ impl TuiApp {
         Ok(())
     }
 
-    pub(crate) fn is_close_timed_out(&self) -> bool {
+    pub(crate) fn can_force_close(&self) -> bool {
         self.close_started_at
-            .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_TIMEOUT)
+            .map(|started_at| started_at.elapsed() >= SESSION_CLOSE_FORCE_TIMEOUT)
             .unwrap_or(false)
     }
 }
@@ -725,7 +732,7 @@ async fn close_session_and_shutdown(
     client: Arc<dyn GatewayClient>,
     session_id: Option<String>,
     fallback_session_id: String,
-) -> TalosResult<String> {
+) -> SessionCloseUpdate {
     let close_result = if let Some(session_id) = session_id.as_deref() {
         client
             .close_session(session_id)
@@ -735,12 +742,17 @@ async fn close_session_and_shutdown(
         Ok(fallback_session_id)
     };
     let shutdown_result = client.shutdown().await;
-    match (close_result, shutdown_result) {
+    let client_shutdown_completed = shutdown_result.is_ok();
+    let result = match (close_result, shutdown_result) {
         (Ok(session_id), Ok(())) => Ok(session_id),
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(error)) => Err(error),
         (Err(close_error), Err(shutdown_error)) => Err(TalosError::ClientError(format!(
             "close session failed: {close_error}; shutdown failed: {shutdown_error}"
         ))),
+    };
+    SessionCloseUpdate {
+        result,
+        client_shutdown_completed,
     }
 }

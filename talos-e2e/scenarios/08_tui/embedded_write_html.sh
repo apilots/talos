@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/../../scripts/common.sh"
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/../../scripts/tui.sh"
 
 load_env
 require_command tmux
@@ -24,22 +26,18 @@ MARKER="TUI_EMBEDDED_WRITE_${RANDOM}_$$"
 WARMUP_MARKER="TUI_EMBEDDED_WARMUP_${RANDOM}_$$"
 
 cleanup() {
-  if [[ -n "${TUI_SESSION_NAME:-}" ]] && tmux has-session -t "${TUI_SESSION_NAME}" 2>/dev/null; then
-    tmux kill-session -t "${TUI_SESSION_NAME}" || true
-  fi
+  tui_stop "${TUI_SESSION_NAME:-}"
   rm -rf "${TEST_TALOS_HOME}"
 }
 trap cleanup EXIT
 
 capture_tui() {
-  tmux capture-pane -t "${TUI_SESSION_NAME}" -p
+  tui_capture "${TUI_SESSION_NAME}"
 }
 
 send_tui_input() {
   local text="$1"
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-u >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" -l "${text}" >/dev/null
-  tmux send-keys -t "${TUI_SESSION_NAME}" C-m >/dev/null
+  tui_send_input "${TUI_SESSION_NAME}" "${text}"
 }
 
 dump_failure_context() {
@@ -55,12 +53,9 @@ dump_failure_context() {
 }
 
 wait_for_tui_ready() {
-  for _ in $(seq 1 120); do
-    if capture_tui | grep -Fq "Type a message or use /help"; then
-      return 0
-    fi
-    sleep 0.25
-  done
+  if tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message or use /help" 120 0.25; then
+    return 0
+  fi
   dump_failure_context
   echo "CASE embedded_tui_write_bootstrap FAIL"
   exit 1

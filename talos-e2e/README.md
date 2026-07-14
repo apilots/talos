@@ -55,6 +55,7 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 - Scope: embedded TUI lifecycle validation
 - Files:
   - `embedded_quit_flushes_memory.sh`
+  - `embedded_session_controls.sh`
   - `embedded_write_html.sh`
 
 9. `scenarios/09_app_server/`

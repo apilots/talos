@@ -62,7 +62,11 @@ pub async fn run_tui_app_with_gateway_client(
     }
 
     let run_result = run_event_loop(&mut terminal, &mut app).await;
-    let shutdown_result = shutdown_client.shutdown().await;
+    let shutdown_result = if app.client_shutdown_completed || app.force_exit_without_shutdown {
+        Ok(())
+    } else {
+        shutdown_client.shutdown().await
+    };
 
     if app.uses_transient_fullscreen_surface() {
         app.session_picker = None;
@@ -543,7 +547,9 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     app.skill_autocomplete_selected.hash(&mut hasher);
     hash_debug(&app.skill_suggestions, &mut hasher);
     app.close_in_progress.hash(&mut hasher);
-    app.close_timeout_reported.hash(&mut hasher);
+    app.close_slow_notice_reported.hash(&mut hasher);
+    app.client_shutdown_completed.hash(&mut hasher);
+    app.force_exit_without_shutdown.hash(&mut hasher);
     app.should_exit.hash(&mut hasher);
     hasher.finish()
 }

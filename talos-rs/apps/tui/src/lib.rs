@@ -52,7 +52,8 @@ use tokio::sync::mpsc;
 pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
 pub(crate) const MAX_QUEUE_LEN: usize = 3;
 pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
-pub(crate) const SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(4);
+pub(crate) const SESSION_CLOSE_SLOW_NOTICE: Duration = Duration::from_secs(4);
+pub(crate) const SESSION_CLOSE_FORCE_TIMEOUT: Duration = Duration::from_secs(65);
 pub(crate) const SPINNER_FRAMES: &[char] = &['✻', '✢', '✳', '✶'];
 pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 0;
 pub(crate) const WELCOME_TIP_LINE: &str =
@@ -97,7 +98,7 @@ pub struct TuiApp {
     pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEventEnvelope>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<CommandUpdate>>,
     pub(crate) pending_command_task: Option<tokio::task::JoinHandle<()>>,
-    pub(crate) pending_close_update: Option<mpsc::Receiver<TalosResult<String>>>,
+    pub(crate) pending_close_update: Option<mpsc::Receiver<types::SessionCloseUpdate>>,
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) active_stream_message_id: Option<String>,
     pub(crate) last_stream_sequence: Option<u64>,
@@ -121,8 +122,10 @@ pub struct TuiApp {
     pub(crate) selected_skills: Vec<SkillSuggestion>,
     pub(crate) close_in_progress: bool,
     pub(crate) close_started_at: Option<Instant>,
-    pub(crate) close_timeout_reported: bool,
+    pub(crate) close_slow_notice_reported: bool,
     pub(crate) closing_session_id: Option<String>,
+    pub(crate) client_shutdown_completed: bool,
+    pub(crate) force_exit_without_shutdown: bool,
     pub(crate) should_exit: bool,
     pub(crate) left_panel_area: Option<Rect>,
     pub(crate) input_area: Option<Rect>,

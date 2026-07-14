@@ -223,32 +223,60 @@ def replace_section_value(content: str, section: str, key: str, value: str) -> s
     raise SystemExit(f"missing config key: {section}.{key}")
 
 def add_e2e_skill_root(content: str, talos_home: Path) -> str:
-    marker = '    planner_mode: "built_in"\n'
     root_path = str(talos_home / "agents-skills")
     if root_path in content:
         return content
 
-    root_entry = (
-        "        - kind: skill\n"
-        f"          path: {json.dumps(root_path)}\n"
-        "          read_only: true\n"
-    )
+    def root_entry(sequence_indent: int) -> str:
+        item_indent = " " * sequence_indent
+        field_indent = " " * (sequence_indent + 2)
+        return (
+            f"{item_indent}- kind: skill\n"
+            f"{field_indent}path: {json.dumps(root_path)}\n"
+            f"{field_indent}read_only: true\n"
+        )
 
     plugins_marker = "    plugins:\n"
     roots_marker = "      roots:\n"
+
+    def block_end(block_start: int, child_indent: int) -> int:
+        cursor = block_start
+        for line in content[block_start:].splitlines(keepends=True):
+            stripped = line.strip()
+            indent = len(line) - len(line.lstrip(" "))
+            if stripped and indent < child_indent:
+                return cursor
+            cursor += len(line)
+        return len(content)
+
     plugins_start = content.find(plugins_marker)
     if plugins_start >= 0:
-        plugins_end = content.find(marker, plugins_start)
-        if plugins_end < 0:
-            raise SystemExit("unable to locate agent.kernel planner_mode after plugins block")
-        plugins_block = content[plugins_start:plugins_end]
+        plugins_content_start = plugins_start + len(plugins_marker)
+        plugins_end = block_end(plugins_content_start, 6)
+        plugins_block = content[plugins_content_start:plugins_end]
         roots_start = plugins_block.find(roots_marker)
         if roots_start >= 0:
+            roots_content_start = plugins_content_start + roots_start + len(roots_marker)
             insert_at = plugins_end
-            return content[:insert_at] + root_entry + content[insert_at:]
+            sequence_indent = None
+            cursor = roots_content_start
+            for line in content[roots_content_start:plugins_end].splitlines(keepends=True):
+                stripped = line.strip()
+                indent = len(line) - len(line.lstrip(" "))
+                if stripped.startswith("-") and sequence_indent is None:
+                    sequence_indent = indent
+                if stripped and indent == 6 and not stripped.startswith("-"):
+                    insert_at = cursor
+                    break
+                cursor += len(line)
+            return (
+                content[:insert_at]
+                + root_entry(sequence_indent if sequence_indent is not None else 8)
+                + content[insert_at:]
+            )
 
-        insert_at = plugins_start + len(plugins_marker)
-        roots_block = "      roots:\n" + root_entry
+        insert_at = plugins_content_start
+        roots_block = "      roots:\n" + root_entry(8)
         return content[:insert_at] + roots_block + content[insert_at:]
 
     block = (
@@ -265,10 +293,11 @@ def add_e2e_skill_root(content: str, talos_home: Path) -> str:
         "          sparse_paths:\n"
         "            - \"skills\"\n"
         "      roots:\n"
-        f"{root_entry}"
+        f"{root_entry(8)}"
     )
-    if marker in content:
-        return content.replace(marker, block + marker)
+    planner_start = content.find("    planner_mode:")
+    if planner_start >= 0:
+        return content[:planner_start] + block + content[planner_start:]
     raise SystemExit("unable to locate agent.kernel plugins block")
 
 gateway_auth = os.environ.get("TALOS_TEST_GATEWAY_AUTH")

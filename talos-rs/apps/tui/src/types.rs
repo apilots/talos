@@ -148,6 +148,11 @@ pub(crate) struct StatusLoad {
     pub(crate) workspace: talos_sdk::WorkspaceInfoResponse,
 }
 
+pub(crate) struct SessionCloseUpdate {
+    pub(crate) result: TalosResult<String>,
+    pub(crate) client_shutdown_completed: bool,
+}
+
 // ── Command update ───────────────────────────────────────────────────────────
 
 pub(crate) enum CommandUpdate {
