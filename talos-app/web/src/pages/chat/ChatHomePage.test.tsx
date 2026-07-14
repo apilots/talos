@@ -35,11 +35,37 @@ vi.mock("@/features/chat", () => ({
     mutateAsync: createProjectMutateAsync,
   }),
   generateSessionId: () => "session-1",
+  modelInfoForRef: (
+    models: Array<{ provider: string; id: string }> | undefined,
+    modelRef: { provider: string; id: string } | undefined,
+  ) =>
+    modelRef
+      ? models?.find(
+          (model) => model.provider === modelRef.provider && model.id === modelRef.id,
+        )
+      : undefined,
+  modelRefForKey: (key: string) => {
+    const separator = key.indexOf(":");
+    return { provider: key.slice(0, separator), id: key.slice(separator + 1) };
+  },
+  modelRefKey: (modelRef: { provider: string; id: string }) =>
+    `${modelRef.provider}:${modelRef.id}`,
+  modelPickerOptions: (models: Array<{ provider: string; id: string; name: string }>) =>
+    models.map((model) => ({
+      id: `${model.provider}:${model.id}`,
+      name: model.name,
+      provider: model.provider,
+    })),
   reasoningLevelForModel: () => "high",
   useModelsQuery: () => ({
     data: [
-      { id: "llama-3.3", name: "Llama 3.3" },
-      { id: "tencent/hy3:free", name: "Tencent HY3 Free" },
+      { provider: "ollama", id: "llama-3.3", name: "Llama 3.3", reasoning: true },
+      {
+        provider: "openrouter",
+        id: "tencent/hy3:free",
+        name: "Tencent HY3 Free",
+        reasoning: true,
+      },
     ],
   }),
   useProjectsView: () => ({
@@ -108,7 +134,9 @@ describe("ChatHomePage", () => {
     });
 
     expect(screen.getByTestId("composer-project").textContent).toBe(createDefaultProjects()[0]?.id);
-    expect(screen.getByTestId("composer-model").textContent).toBe("tencent/hy3:free");
+    expect(screen.getByTestId("composer-model").textContent).toBe(
+      "openrouter:tencent/hy3:free",
+    );
     expect(screen.getByTestId("composer-reasoning").textContent).toBe("high");
   });
 });

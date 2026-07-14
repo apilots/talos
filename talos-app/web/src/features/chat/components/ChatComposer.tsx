@@ -23,6 +23,7 @@ import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
+import { ComposerModelSelect, composerModelItems } from "./ComposerModelSelect";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
@@ -38,7 +39,7 @@ interface ChatComposerProps {
   disabled?: boolean;
   isStreaming?: boolean;
   isCancelling?: boolean;
-  models: Array<{ id: string; name: string }>;
+  models: Array<{ id: string; name: string; provider?: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   projects: ProjectView[];
@@ -49,6 +50,7 @@ interface ChatComposerProps {
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   reasoningLevel?: ReasoningLevel;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
+  reasoningEnabled?: boolean;
   showProjectSelector?: boolean;
   showRuntimeModeSelector?: boolean;
   compact?: boolean;
@@ -92,6 +94,7 @@ export function ChatComposer({
   onRuntimeModeChange,
   reasoningLevel = "medium",
   onReasoningLevelChange,
+  reasoningEnabled = true,
   showProjectSelector = true,
   showRuntimeModeSelector = true,
   compact = false,
@@ -329,18 +332,15 @@ export function ChatComposer({
     }
   };
 
-  const modelItems: DropdownItem[] = models.map((m, i) => ({
-    value: m.id,
-    label: m.name,
-    icon: i === 0 ? <Zap size={12} /> : undefined,
-  }));
-
-  const reasoningItems: DropdownItem[] = [
-    { value: "none", label: t("chat:reasoningNone") }, { value: "light", label: t("chat:reasoningLight") },
-    { value: "medium", label: t("chat:reasoningMedium") },
-    { value: "high", label: t("chat:reasoningHigh") },
-    { value: "extra_high", label: t("chat:reasoningExtraHigh") },
-  ];
+  const modelItems: DropdownItem[] = composerModelItems(models);
+  const reasoningItems: DropdownItem[] = reasoningEnabled
+    ? [
+        { value: "light", label: t("chat:reasoningLight") },
+        { value: "medium", label: t("chat:reasoningMedium") },
+        { value: "high", label: t("chat:reasoningHigh") },
+        { value: "extra_high", label: t("chat:reasoningExtraHigh") },
+      ]
+    : [{ value: "none", label: t("chat:reasoningNone") }];
 
   const sendButton = (
     <button
@@ -380,17 +380,12 @@ export function ChatComposer({
       <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card p-0 backdrop-blur-none">
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
-            <select
-              className="min-w-[10rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm outline-none transition focus:border-brand/50 md:max-w-[15rem]"
-              onChange={(event) => onModelChange?.(event.target.value)}
-              value={selectedModel}
-            >
-              {models.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {model.name}
-                </option>
-              ))}
-            </select>
+            <ComposerModelSelect
+              fallbackGroupLabel={t("chat:modelLabel")}
+              models={models}
+              onChange={onModelChange}
+              selectedModel={selectedModel}
+            />
             <select
               className="min-w-[12rem] flex-[1.2] rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm outline-none transition focus:border-brand/50 md:max-w-[22rem]"
               onChange={(event) => onProjectChange(event.target.value)}
@@ -507,6 +502,7 @@ export function ChatComposer({
                 value={selectedModel}
               />
               <ComposerDropdown
+                disabled={!reasoningEnabled}
                 header={t("chat:reasoningLabel")}
                 items={reasoningItems}
                 onChange={(v) => onReasoningLevelChange?.(v as ReasoningLevel)}

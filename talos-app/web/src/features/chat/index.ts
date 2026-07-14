@@ -18,7 +18,12 @@ export {
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
 export {
-  modelSelectionForId,
+  firstModelRef,
+  modelInfoForRef,
+  modelPickerOptions,
+  modelRefForKey,
+  modelRefKey,
+  modelSelectionForRef,
   reasoningLevelForModel,
   reasoningLevelForSession,
 } from "./model-selection";

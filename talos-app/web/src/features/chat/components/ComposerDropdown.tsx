@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { Check, ChevronDown } from "lucide-react";
 
@@ -9,6 +9,7 @@ export interface DropdownItem {
   label: string;
   description?: string;
   disabled?: boolean;
+  group?: string;
   icon?: React.ReactNode;
 }
 
@@ -19,6 +20,7 @@ interface ComposerDropdownProps {
   onChange: (value: string) => void;
   triggerIcon?: React.ReactNode;
   className?: string;
+  disabled?: boolean;
 }
 
 export function ComposerDropdown({
@@ -28,6 +30,7 @@ export function ComposerDropdown({
   onChange,
   triggerIcon,
   className,
+  disabled = false,
 }: ComposerDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -52,6 +55,7 @@ export function ComposerDropdown({
     <div className={cn("relative", className)} ref={ref}>
       <button
         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-ink/70 outline-none transition hover:bg-muted/15 focus:outline-none"
+        disabled={disabled}
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
@@ -63,35 +67,45 @@ export function ComposerDropdown({
       {open ? (
         <div className="absolute bottom-[calc(100%+6px)] left-0 z-50 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-card py-1 shadow-lg">
           <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-muted">{header}</div>
-          {items.map((item) => (
-            <button
-              aria-disabled={item.disabled}
-              className={cn(
-                "flex w-full items-start gap-2 px-3 py-2 text-left text-[13px] text-ink transition focus:outline-none",
-                item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-muted/10",
-              )}
-              disabled={item.disabled}
-              key={item.value}
-              onClick={() => {
-                if (item.disabled) {
-                  return;
-                }
-                onChange(item.value);
-                setOpen(false);
-              }}
-              type="button"
-            >
-              {item.icon ? <span className="mt-0.5 shrink-0 text-muted">{item.icon}</span> : null}
-              <span className="min-w-0 flex-1">
-                <span className="block">{item.label}</span>
-                {item.description ? (
-                  <span className="mt-0.5 block text-[12px] leading-snug text-muted">
-                    {item.description}
-                  </span>
+          {items.map((item, index) => (
+            <Fragment key={item.value}>
+              {item.group && item.group !== items[index - 1]?.group ? (
+                <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted">
+                  {item.group}
+                </div>
+              ) : null}
+              <button
+                aria-disabled={item.disabled}
+                className={cn(
+                  "flex w-full items-start gap-2 px-3 py-2 text-left text-[13px] text-ink transition focus:outline-none",
+                  item.disabled ? "cursor-not-allowed opacity-45" : "hover:bg-muted/10",
+                )}
+                disabled={item.disabled}
+                onClick={() => {
+                  if (item.disabled) {
+                    return;
+                  }
+                  onChange(item.value);
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                {item.icon ? (
+                  <span className="mt-0.5 shrink-0 text-muted">{item.icon}</span>
                 ) : null}
-              </span>
-              {item.value === value ? <Check size={12} className="shrink-0 text-brand" /> : null}
-            </button>
+                <span className="min-w-0 flex-1">
+                  <span className="block">{item.label}</span>
+                  {item.description ? (
+                    <span className="mt-0.5 block text-[12px] leading-snug text-muted">
+                      {item.description}
+                    </span>
+                  ) : null}
+                </span>
+                {item.value === value ? (
+                  <Check size={12} className="shrink-0 text-brand" />
+                ) : null}
+              </button>
+            </Fragment>
           ))}
         </div>
       ) : null}

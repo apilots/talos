@@ -158,6 +158,13 @@ describe("ChatComposer controls", () => {
     expect(onRuntimeModeChange).not.toHaveBeenCalledWith("cloud");
   });
 
+  it("shows only a disabled none control when reasoning is unsupported", () => {
+    renderComposer({ reasoningEnabled: false, reasoningLevel: "none" });
+
+    expect(screen.getByRole("button", { name: /none/i })).toBeDisabled();
+    expect(screen.queryByText("Light")).not.toBeInTheDocument();
+  });
+
   it("closes the project picker when clicking outside the composer", () => {
     render(
       <div>

@@ -5,6 +5,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatComposer,
   generateSessionId,
+  modelInfoForRef,
+  modelPickerOptions,
+  modelRefForKey,
+  modelRefKey,
   reasoningLevelForModel,
   useCreateProjectMutation,
   useModelsQuery,
@@ -13,7 +17,7 @@ import {
 import { useLlmConfigQuery } from "@/features/settings";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
-import type { SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface HomeLocationState {
@@ -33,6 +37,7 @@ export function ChatHomePage() {
   const { data: models } = useModelsQuery();
   const { data: llmConfigRead } = useLlmConfigQuery();
   const configuredModel = llmConfigRead?.config.model;
+  const configuredProvider = llmConfigRead?.config.provider;
   const projectsView = useProjectsView();
   const createProject = useCreateProjectMutation();
   const projects = projectsView.projects;
@@ -42,8 +47,9 @@ export function ChatHomePage() {
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
   const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
-  const [selectedModel, setSelectedModel] = useState<string>();
-  const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("medium");
+  const [selectedModel, setSelectedModel] = useState<ModelRef>();
+  const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("none");
+  const selectedModelInfo = modelInfoForRef(models, selectedModel);
 
   const activeProject = useMemo(
     () => resolveProjectView(projects, activeProjectId),
@@ -51,11 +57,15 @@ export function ChatHomePage() {
   );
 
   useEffect(() => {
-    if (!selectedModel && configuredModel) {
-      setSelectedModel(configuredModel);
-      setSelectedReasoningLevel(reasoningLevelForModel(models, configuredModel));
+    const configuredModelRef =
+      configuredProvider && configuredModel
+        ? { provider: configuredProvider, id: configuredModel }
+        : undefined;
+    if (!selectedModel && modelInfoForRef(models, configuredModelRef)) {
+      setSelectedModel(configuredModelRef);
+      setSelectedReasoningLevel(reasoningLevelForModel(models, configuredModelRef));
     }
-  }, [configuredModel, models, selectedModel]);
+  }, [configuredModel, configuredProvider, models, selectedModel]);
 
   useEffect(() => {
     if (activeProject && activeProject.id !== activeProjectId) {
@@ -103,13 +113,17 @@ export function ChatHomePage() {
           disabled={false}
           draft={draft}
           isStreaming={false}
-          models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
+          models={modelPickerOptions(models)}
           onCreateProject={handleCreateProject}
           onDraftChange={setDraft}
           initialSelectedSkills={initialSkills}
           onModelChange={(model) => {
-            setSelectedModel(model);
-            setSelectedReasoningLevel(reasoningLevelForModel(models, model));
+            const modelRef = modelRefForKey(model);
+            if (!modelRef) {
+              return;
+            }
+            setSelectedModel(modelRef);
+            setSelectedReasoningLevel(reasoningLevelForModel(models, modelRef));
           }}
           onProjectChange={setActiveProjectId}
           onRuntimeModeChange={(mode) => {
@@ -121,8 +135,9 @@ export function ChatHomePage() {
           onSend={(skills) => handleStartDraft(draft, skills)}
           projects={projects}
           runtimeMode={connection.runtimeMode}
-          selectedModel={selectedModel}
+          selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}
           reasoningLevel={selectedReasoningLevel}
+          reasoningEnabled={selectedModelInfo?.reasoning ?? false}
           showProjectSelector
         />
       </div>

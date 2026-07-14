@@ -4,7 +4,12 @@ import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
-  modelSelectionForId,
+  firstModelRef,
+  modelInfoForRef,
+  modelPickerOptions,
+  modelRefForKey,
+  modelRefKey,
+  modelSelectionForRef,
   reasoningLevelForModel,
   reasoningLevelForSession,
   useChatSession,
@@ -15,18 +20,18 @@ import {
   useUpdateSessionProjectMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { getSessionModel, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
+import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
 import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
-import type { SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 
 interface SessionLocationState {
   initialPrompt?: string;
-  initialModel?: string;
+  initialModel?: ModelRef;
   initialReasoningLevel?: ReasoningLevel;
   initialProjectId?: string;
   initialProject?: ProjectView;
@@ -47,7 +52,7 @@ export function ChatSessionPage() {
   const mountedRef = useRef(false);
   const activeSessionIdRef = useRef(sessionId);
   const locationState = location.state as SessionLocationState | null;
-  const [draftModel, setDraftModel] = useState<string | undefined>(locationState?.initialModel);
+  const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
   const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
     locationState?.initialReasoningLevel,
   );
@@ -82,10 +87,13 @@ export function ChatSessionPage() {
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
-  const currentModel = session ? getSessionModel(session) : draftModel ?? models?.[0]?.id;
+  const currentModelRef =
+    session?.modelSelection.modelRef ?? draftModel ?? firstModelRef(models);
+  const currentModel = currentModelRef ? modelRefKey(currentModelRef) : undefined;
+  const currentModelInfo = modelInfoForRef(models, currentModelRef);
   const currentReasoningLevel = session
     ? reasoningLevelForSession(session, models, draftModel)
-    : draftReasoningLevel ?? reasoningLevelForModel(models, currentModel);
+    : draftReasoningLevel ?? reasoningLevelForModel(models, currentModelRef);
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
@@ -126,7 +134,7 @@ export function ChatSessionPage() {
       locationState?.initialProject ??
       projects.find((entry) => entry.id === locationState?.initialProjectId);
     void sendText(initialPrompt, {
-      modelSelection: modelSelectionForId(
+      modelSelection: modelSelectionForRef(
         models,
         locationState?.initialModel,
         locationState?.initialReasoningLevel,
@@ -225,16 +233,20 @@ export function ChatSessionPage() {
             inputHistory={inputHistory}
             isCancelling={isCancelling}
             isStreaming={isStreaming}
-            models={(models ?? []).map((model) => ({ id: model.id, name: model.name }))}
+            models={modelPickerOptions(models)}
             onCancel={() => void stopResponse()}
             onDraftChange={setDraft}
             onModelChange={(model) => {
-              if (!session) {
-                setDraftModel(model);
-                setDraftReasoningLevel(reasoningLevelForModel(models, model));
+              const modelRef = modelRefForKey(model);
+              if (!modelRef) {
                 return;
               }
-              const modelSelection = modelSelectionForId(models, model);
+              if (!session) {
+                setDraftModel(modelRef);
+                setDraftReasoningLevel(reasoningLevelForModel(models, modelRef));
+                return;
+              }
+              const modelSelection = modelSelectionForRef(models, modelRef);
               if (modelSelection) {
                 updateModel.mutate(modelSelection);
               }
@@ -260,7 +272,7 @@ export function ChatSessionPage() {
                 setDraftReasoningLevel(level);
                 return;
               }
-              const modelSelection = modelSelectionForId(models, currentModel, level);
+              const modelSelection = modelSelectionForRef(models, currentModelRef, level);
               if (modelSelection) {
                 updateModel.mutate(modelSelection);
               }
@@ -271,9 +283,9 @@ export function ChatSessionPage() {
               if (!session) {
                 const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
                 return sendTurn({
-                  modelSelection: modelSelectionForId(
+                  modelSelection: modelSelectionForRef(
                     models,
-                    currentModel,
+                    currentModelRef,
                     currentReasoningLevel,
                   ),
                   project: selectedProject,
@@ -285,6 +297,7 @@ export function ChatSessionPage() {
             projects={projects}
             runtimeMode={connection.runtimeMode}
             reasoningLevel={currentReasoningLevel}
+            reasoningEnabled={currentModelInfo?.reasoning ?? false}
             selectedModel={currentModel}
             showProjectSelector={false}
             showRuntimeModeSelector={false}
