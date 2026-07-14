@@ -12,6 +12,10 @@ install-tools:
     cargo install --locked just
     cargo install --locked cargo-nextest
 
+# Enable the repository-managed Git hooks for this clone.
+setup-git-hooks:
+    git -C .. config core.hooksPath .githooks
+
 # Format all Rust crates in the workspace.
 fmt:
     cargo fmt --all
