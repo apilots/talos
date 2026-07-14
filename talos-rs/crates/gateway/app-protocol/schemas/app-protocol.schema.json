@@ -2366,183 +2366,110 @@
       "type": "object"
     },
     "LlmConfig": {
+      "description": "LLM configuration",
       "properties": {
         "anthropic": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "Anthropic config"
         },
         "bailian": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "Bailian config"
         },
         "deepseek": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "DeepSeek config"
         },
         "model": {
+          "default": "claude-3-5-sonnet",
+          "description": "Default model",
           "type": "string"
         },
         "ollama": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "Ollama config"
         },
         "openai": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "OpenAI config"
         },
         "openrouter": {
-          "$ref": "#/definitions/LlmProviderConfig"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProviderConfig"
+            }
+          ],
+          "default": {
+            "api_key": null,
+            "base_url": null,
+            "models": [],
+            "protocol": null
+          },
+          "description": "OpenRouter config"
         },
         "provider": {
+          "default": "anthropic",
+          "description": "Default provider",
           "type": "string"
         }
       },
-      "required": [
-        "anthropic",
-        "bailian",
-        "deepseek",
-        "model",
-        "ollama",
-        "openai",
-        "openrouter",
-        "provider"
-      ],
       "type": "object"
-    },
-    "LlmModelConfig": {
-      "properties": {
-        "context_window": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "cost": {
-          "$ref": "#/definitions/LlmModelCost"
-        },
-        "id": {
-          "type": "string"
-        },
-        "input": {
-          "items": {
-            "$ref": "#/definitions/LlmModelInputKind"
-          },
-          "type": "array"
-        },
-        "name": {
-          "type": "string"
-        },
-        "reasoning": {
-          "type": "boolean"
-        },
-        "reasoning_effort": {
-          "$ref": "#/definitions/LlmReasoningEffort"
-        },
-        "speed": {
-          "$ref": "#/definitions/LlmModelSpeed"
-        }
-      },
-      "required": [
-        "context_window",
-        "cost",
-        "id",
-        "input",
-        "name",
-        "reasoning",
-        "reasoning_effort",
-        "speed"
-      ],
-      "type": "object"
-    },
-    "LlmModelCost": {
-      "properties": {
-        "cache_read": {
-          "format": "double",
-          "type": "number"
-        },
-        "cache_write": {
-          "format": "double",
-          "type": "number"
-        },
-        "input": {
-          "format": "double",
-          "type": "number"
-        },
-        "output": {
-          "format": "double",
-          "type": "number"
-        }
-      },
-      "required": [
-        "cache_read",
-        "cache_write",
-        "input",
-        "output"
-      ],
-      "type": "object"
-    },
-    "LlmModelInputKind": {
-      "enum": [
-        "text",
-        "image",
-        "audio",
-        "video",
-        "file"
-      ],
-      "type": "string"
-    },
-    "LlmModelSpeed": {
-      "enum": [
-        "standard",
-        "fast"
-      ],
-      "type": "string"
     },
     "LlmProtocol": {
       "enum": [
         "chat",
         "responses",
         "messages"
-      ],
-      "type": "string"
-    },
-    "LlmProviderConfig": {
-      "properties": {
-        "api_key": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "base_url": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "models": {
-          "default": [],
-          "items": {
-            "$ref": "#/definitions/LlmModelConfig"
-          },
-          "type": "array"
-        },
-        "protocol": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/LlmProtocol"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        }
-      },
-      "type": "object"
-    },
-    "LlmReasoningEffort": {
-      "enum": [
-        "low",
-        "medium",
-        "high",
-        "xhigh"
       ],
       "type": "string"
     },
@@ -2709,6 +2636,41 @@
       ],
       "type": "object"
     },
+    "ModelCostConfig": {
+      "properties": {
+        "cache_read": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "cache_write": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "input": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        },
+        "output": {
+          "default": 0.0,
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "ModelInputKind": {
+      "enum": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "file"
+      ],
+      "type": "string"
+    },
     "ModelListRequest": {
       "type": "object"
     },
@@ -2744,6 +2706,13 @@
         "reasoning"
       ],
       "type": "object"
+    },
+    "ModelSpeed": {
+      "enum": [
+        "standard",
+        "fast"
+      ],
+      "type": "string"
     },
     "OptionalCurrentDirectoryPatch": {
       "oneOf": [
@@ -3199,6 +3168,119 @@
       ],
       "type": "object"
     },
+    "ProviderConfig": {
+      "description": "Provider config",
+      "properties": {
+        "api_key": {
+          "default": null,
+          "description": "API key",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_url": {
+          "default": null,
+          "description": "Base URL for custom endpoint",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "models": {
+          "default": [],
+          "description": "Provider-specific model metadata",
+          "items": {
+            "$ref": "#/definitions/ProviderModelConfig"
+          },
+          "type": "array"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LlmProtocol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Wire protocol used for this provider."
+        }
+      },
+      "type": "object"
+    },
+    "ProviderModelConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "context_window": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "cost": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelCostConfig"
+            }
+          ],
+          "default": {
+            "cache_read": 0.0,
+            "cache_write": 0.0,
+            "input": 0.0,
+            "output": 0.0
+          }
+        },
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "default": [],
+          "items": {
+            "$ref": "#/definitions/ModelInputKind"
+          },
+          "type": "array"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "reasoning": {
+          "default": false,
+          "type": "boolean"
+        },
+        "reasoning_effort": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReasoningEffort"
+            }
+          ],
+          "default": "medium"
+        },
+        "speed": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/ModelSpeed"
+            }
+          ],
+          "default": "standard"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
+    "ReasoningEffort": {
+      "enum": [
+        "light",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "type": "string"
+    },
     "ReasoningSelection": {
       "description": "Describes whether a selection follows model defaults or explicitly overrides effort.",
       "oneOf": [
@@ -3219,7 +3301,7 @@
         {
           "properties": {
             "level": {
-              "$ref": "#/definitions/LlmReasoningEffort"
+              "$ref": "#/definitions/ReasoningEffort"
             },
             "type": {
               "enum": [

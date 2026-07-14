@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
 };
-use talos_sdk::{LlmReasoningEffort, ModelInfo};
+use talos_sdk::{ModelInfo, ReasoningEffort};
 
 use crate::render::frame::RenderFrame;
 
@@ -19,7 +19,7 @@ pub(crate) struct ModelPickerState {
     selected_model: usize,
     selected_reasoning: usize,
     current_model: String,
-    reasoning_effort_override: Option<LlmReasoningEffort>,
+    reasoning_effort_override: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -31,12 +31,12 @@ pub(crate) enum ModelPickerStep {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModelPickerSelection {
     pub(crate) model: String,
-    pub(crate) reasoning_effort: Option<LlmReasoningEffort>,
+    pub(crate) reasoning_effort: Option<ReasoningEffort>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct ReasoningOption {
-    pub(crate) effort: Option<LlmReasoningEffort>,
+    pub(crate) effort: Option<ReasoningEffort>,
     label: &'static str,
     description: &'static str,
 }
@@ -49,33 +49,33 @@ impl ReasoningOption {
             description: "Use the model's configured reasoning level",
         },
         Self {
-            effort: Some(LlmReasoningEffort::Low),
-            label: "Low",
+            effort: Some(ReasoningEffort::Light),
+            label: "Light",
             description: "Fast responses with lighter reasoning",
         },
         Self {
-            effort: Some(LlmReasoningEffort::Medium),
+            effort: Some(ReasoningEffort::Medium),
             label: "Medium",
             description: "Balances speed and reasoning depth for everyday tasks",
         },
         Self {
-            effort: Some(LlmReasoningEffort::High),
+            effort: Some(ReasoningEffort::High),
             label: "High",
             description: "Greater reasoning depth for complex problems",
         },
         Self {
-            effort: Some(LlmReasoningEffort::XHigh),
+            effort: Some(ReasoningEffort::XHigh),
             label: "Extra high",
             description: "Extra high reasoning depth for complex problems",
         },
     ];
 
-    pub(crate) fn status_label_for(effort: LlmReasoningEffort) -> &'static str {
+    pub(crate) fn status_label_for(effort: ReasoningEffort) -> &'static str {
         match effort {
-            LlmReasoningEffort::Low => "low",
-            LlmReasoningEffort::Medium => "medium",
-            LlmReasoningEffort::High => "high",
-            LlmReasoningEffort::XHigh => "xhigh",
+            ReasoningEffort::Light => "light",
+            ReasoningEffort::Medium => "medium",
+            ReasoningEffort::High => "high",
+            ReasoningEffort::XHigh => "xhigh",
         }
     }
 }
@@ -84,11 +84,11 @@ impl ModelPickerState {
     pub(crate) fn new(
         models: &[ModelInfo],
         current_model: &str,
-        reasoning_effort_override: Option<LlmReasoningEffort>,
+        reasoning_effort_override: Option<ReasoningEffort>,
     ) -> Self {
         let selected_model = models
             .iter()
-            .position(|model| model.id == current_model)
+            .position(|model| model.model.id == current_model)
             .unwrap_or(0);
         let mut state = Self {
             step: ModelPickerStep::Model,
@@ -105,7 +105,7 @@ impl ModelPickerState {
     pub(crate) fn selected_model_id(&self) -> Option<&str> {
         self.models
             .get(self.selected_model)
-            .map(|model| model.id.as_str())
+            .map(|model| model.model.id.as_str())
     }
 
     pub(crate) fn move_selection(&mut self, direction: i32) {
@@ -140,13 +140,13 @@ impl ModelPickerState {
 
     pub(crate) fn confirm(&mut self) -> Option<ModelPickerSelection> {
         let model = self.models.get(self.selected_model)?.clone();
-        if model.reasoning && self.step == ModelPickerStep::Model {
+        if model.model.reasoning && self.step == ModelPickerStep::Model {
             self.step = ModelPickerStep::Reasoning;
             self.sync_selected_reasoning();
             return None;
         }
 
-        let reasoning_effort = if model.reasoning {
+        let reasoning_effort = if model.model.reasoning {
             ReasoningOption::ALL
                 .get(self.selected_reasoning)
                 .and_then(|option| option.effort)
@@ -154,7 +154,7 @@ impl ModelPickerState {
             None
         };
         Some(ModelPickerSelection {
-            model: model.id,
+            model: model.model.id,
             reasoning_effort,
         })
     }
@@ -224,13 +224,13 @@ impl ModelPickerState {
 
     fn model_item(&self, index: usize, model: &ModelInfo, bg_style: Style) -> ListItem<'static> {
         let selected = index == self.selected_model;
-        let current = model.id == self.current_model;
+        let current = model.model.id == self.current_model;
         let name = if current {
-            format!("{}. {} (current)", index + 1, model.id)
+            format!("{}. {} (current)", index + 1, model.model.id)
         } else {
-            format!("{}. {}", index + 1, model.id)
+            format!("{}. {}", index + 1, model.model.id)
         };
-        let description = if model.reasoning {
+        let description = if model.model.reasoning {
             "Reasoning model for complex work."
         } else {
             "Fast model for everyday work."
@@ -334,7 +334,7 @@ impl ModelPickerState {
 
     fn sync_selected_reasoning(&mut self) {
         let effort = self.models.get(self.selected_model).and_then(|model| {
-            if model.id == self.current_model {
+            if model.model.id == self.current_model {
                 self.reasoning_effort_override
             } else {
                 None

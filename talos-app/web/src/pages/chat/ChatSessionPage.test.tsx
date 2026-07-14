@@ -28,7 +28,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
       disabled?: boolean;
       onModelChange?: (model: string) => void;
       onProjectChange: (projectId: string) => void;
-      onReasoningLevelChange?: (level: "low" | "medium" | "high" | "extra_high") => void;
+      onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
       onSend: () => Promise<void>;
       showRuntimeModeSelector?: boolean;
     }) => {

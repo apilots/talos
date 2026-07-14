@@ -14,7 +14,7 @@ use crate::types::{
 };
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_FORCE_TIMEOUT};
-use talos_sdk::{LlmReasoningEffort, SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
+use talos_sdk::{ReasoningEffort, SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -313,7 +313,7 @@ impl TuiApp {
         } = catalog;
         let ids = models
             .iter()
-            .map(|model| model.id.clone())
+            .map(|model| model.model.id.clone())
             .filter(|id| !id.trim().is_empty())
             .collect::<Vec<_>>();
         if ids.is_empty() {
@@ -325,7 +325,7 @@ impl TuiApp {
             .iter()
             .find(|model| {
                 model.provider == default_model_selection.model_ref.provider
-                    && model.id == default_model_selection.model_ref.id
+                    && model.model.id == default_model_selection.model_ref.id
             })
             .ok_or_else(|| {
                 TalosError::ClientError(format!(
@@ -334,7 +334,7 @@ impl TuiApp {
                     default_model_selection.model_ref.id
                 ))
             })?;
-        let default_model_id = default_model.id.clone();
+        let default_model_id = default_model.model.id.clone();
 
         let current_model_retained = ids.iter().any(|model| model == &self.current_model);
         let reasoning_effort_override = self.reasoning_effort_override;
@@ -469,15 +469,15 @@ impl TuiApp {
     fn model_selection_for_id(
         &self,
         model_id: &str,
-        reasoning_effort: Option<LlmReasoningEffort>,
+        reasoning_effort: Option<ReasoningEffort>,
     ) -> Option<talos_sdk::ModelSelection> {
         let model = self.model_info_for_id(model_id)?;
         let model_ref = talos_sdk::ModelRef {
             provider: model.provider.clone(),
-            id: model.id.clone(),
+            id: model.model.id.clone(),
         };
         let reasoning = match reasoning_effort {
-            Some(level) if model.reasoning => talos_sdk::ReasoningSelection::Effort { level },
+            Some(level) if model.model.reasoning => talos_sdk::ReasoningSelection::Effort { level },
             _ => talos_sdk::ReasoningSelection::ModelDefault,
         };
         Some(talos_sdk::ModelSelection {

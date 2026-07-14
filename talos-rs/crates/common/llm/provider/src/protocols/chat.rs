@@ -148,7 +148,7 @@ pub fn request(
 
 pub fn reasoning_effort(effort: ReasoningEffort) -> String {
     match effort {
-        ReasoningEffort::Low => "low",
+        ReasoningEffort::Light => "low",
         ReasoningEffort::Medium => "medium",
         ReasoningEffort::High => "high",
         ReasoningEffort::XHigh => "xhigh",

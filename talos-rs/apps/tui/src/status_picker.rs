@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AuthSessionReadResponse, LlmReasoningEffort, ReasoningSelection, SessionInfo,
+    AuthSessionReadResponse, ReasoningEffort, ReasoningSelection, SessionInfo,
     WorkspaceInfoResponse,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
@@ -36,7 +36,7 @@ struct StatusModel {
     provider: String,
     context_window: u32,
     reasoning: bool,
-    reasoning_effort: LlmReasoningEffort,
+    reasoning_effort: ReasoningEffort,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,11 +69,11 @@ impl TuiStatusSnapshot {
         let model_info = app
             .available_model_info
             .iter()
-            .find(|model| model.id == model_id)
+            .find(|model| model.model.id == model_id)
             .ok_or_else(|| {
                 TalosError::ClientError(format!("status model metadata missing for {model_id}"))
             })?;
-        if model_info.context_window == 0 {
+        if model_info.model.context_window == 0 {
             return Err(TalosError::ClientError(format!(
                 "status model context window missing for {model_id}"
             )));
@@ -100,19 +100,22 @@ impl TuiStatusSnapshot {
 
         Ok(TuiStatusSnapshot {
             model: StatusModel {
-                id: model_info.id.clone(),
+                id: model_info.model.id.clone(),
                 provider: model_info.provider.clone(),
-                context_window: model_info.context_window,
-                reasoning: model_info.reasoning,
+                context_window: model_info.model.context_window,
+                reasoning: model_info.model.reasoning,
                 reasoning_effort: session
                     .map(|session| match session.model_selection.reasoning {
-                        ReasoningSelection::ModelDefault => model_info.reasoning_effort,
+                        ReasoningSelection::ModelDefault => model_info.model.reasoning_effort,
                         ReasoningSelection::Effort { level } => level,
                     })
                     .unwrap_or_else(|| {
                         app.reasoning_effort_override
-                            .filter(|_| model_info.reasoning && model_info.id == app.current_model)
-                            .unwrap_or(model_info.reasoning_effort)
+                            .filter(|_| {
+                                model_info.model.reasoning
+                                    && model_info.model.id == app.current_model
+                            })
+                            .unwrap_or(model_info.model.reasoning_effort)
                     }),
             },
             agent_workspace,
@@ -203,12 +206,12 @@ fn format_model(model: &StatusModel) -> String {
     )
 }
 
-fn format_reasoning_effort(effort: LlmReasoningEffort) -> &'static str {
+fn format_reasoning_effort(effort: ReasoningEffort) -> &'static str {
     match effort {
-        LlmReasoningEffort::Low => "low",
-        LlmReasoningEffort::Medium => "medium",
-        LlmReasoningEffort::High => "high",
-        LlmReasoningEffort::XHigh => "xhigh",
+        ReasoningEffort::Light => "light",
+        ReasoningEffort::Medium => "medium",
+        ReasoningEffort::High => "high",
+        ReasoningEffort::XHigh => "xhigh",
     }
 }
 

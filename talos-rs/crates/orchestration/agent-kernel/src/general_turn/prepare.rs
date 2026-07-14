@@ -114,7 +114,7 @@ fn build_compacted_prompt_load_policy(
 }
 
 fn resolve_compaction_input_budget_tokens(model_info: &talos_types::ModelInfo) -> Option<usize> {
-    let context_window = model_info.context_window as usize;
+    let context_window = model_info.model.context_window as usize;
     if context_window == 0 {
         return None;
     }
@@ -988,7 +988,7 @@ pub async fn prepare_general_turn(
     let reasoning = ctx
         .model_selection
         .resolve_reasoning(&ctx.selected_model_info)?;
-    let speed = ctx.selected_model_info.speed;
+    let speed = ctx.selected_model_info.model.speed;
 
     let tool_selection_request =
         build_tool_selection_request(&session_id, input, phase, kernel_config);

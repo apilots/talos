@@ -336,7 +336,7 @@ export function ChatComposer({
   }));
 
   const reasoningItems: DropdownItem[] = [
-    { value: "low", label: t("chat:reasoningLow") },
+    { value: "light", label: t("chat:reasoningLight") },
     { value: "medium", label: t("chat:reasoningMedium") },
     { value: "high", label: t("chat:reasoningHigh") },
     { value: "extra_high", label: t("chat:reasoningExtraHigh") },

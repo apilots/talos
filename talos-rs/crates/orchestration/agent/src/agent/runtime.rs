@@ -201,31 +201,23 @@ impl KernelAgent {
         Ok((kernel_config, memory_store))
     }
 
-    fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> ModelInfo {
+    fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> TalosResult<ModelInfo> {
         let selected_model = config.model_selection.model_ref.id.clone();
         let provider_name = config.model_selection.model_ref.provider.clone();
 
-        if let Some(provider_config) = config.current_provider_config() {
-            if let Some(model) = provider_config
-                .models
-                .iter()
-                .find(|model| model.id == selected_model)
-            {
-                return ModelInfo::from_provider_model(provider_name, model.clone());
-            }
-        }
+        let model = config
+            .current_provider_config()
+            .and_then(|provider| {
+                provider
+                    .models
+                    .iter()
+                    .find(|model| model.id == selected_model)
+            })
+            .ok_or_else(|| {
+                TalosError::UnsupportedModel(format!("{provider_name}:{selected_model}"))
+            })?;
 
-        ModelInfo {
-            id: selected_model.clone(),
-            name: selected_model,
-            provider: provider_name,
-            context_window: 0,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-        }
+        Ok(ModelInfo::from_provider_model(provider_name, model.clone()))
     }
 
     fn extract_text_input(input: &[TalosInputItem]) -> String {
@@ -253,7 +245,7 @@ impl KernelAgent {
         invocation_id: String,
         stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
         kernel_config: &AgentKernelConfig,
-    ) -> InvocationContext {
+    ) -> TalosResult<InvocationContext> {
         let session_id = agent_request.context.session_id.clone();
         let message_id = agent_request.context.message_id.clone();
         let workspace_id = agent_request
@@ -262,7 +254,7 @@ impl KernelAgent {
             .clone()
             .unwrap_or_default();
 
-        InvocationContext {
+        Ok(InvocationContext {
             session_id: session_id.clone(),
             message_id,
             invocation_id,
@@ -271,7 +263,7 @@ impl KernelAgent {
             project_root: agent_request.context.project_root.clone(),
             input,
             model_selection: agent_request.config.model_selection.clone(),
-            selected_model_info: self.resolve_selected_model_info(&agent_request.config),
+            selected_model_info: self.resolve_selected_model_info(&agent_request.config)?,
             phase: agent_request.phase.clone(),
             planning_instruction: agent_request.planning_instruction.clone(),
             transfer_to: agent_request.transfer_to.clone(),
@@ -294,7 +286,7 @@ impl KernelAgent {
             )],
             transcript_service: None,
             stream_tx,
-        }
+        })
     }
 
     async fn build_general_turn_resume(
@@ -432,7 +424,7 @@ impl KernelAgent {
             invocation_id,
             None,
             &kernel_config,
-        );
+        )?;
 
         let result = run_general_turn_with_resume(
             &mut context,
@@ -497,13 +489,19 @@ impl KernelAgent {
                 }
             };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
-            let kernel_ctx = this.build_invocation_context(
+            let kernel_ctx = match this.build_invocation_context(
                 &agent_request,
                 input.clone(),
                 invocation_id,
                 Some(kernel_tx),
                 &kernel_config,
-            );
+            ) {
+                Ok(context) => context,
+                Err(err) => {
+                    let _ = tx.send(timeline.fail_turn(&err)).await;
+                    return Err(err.into());
+                }
+            };
             let resume = match Self::build_general_turn_resume(
                 memory_store.as_ref(),
                 &session_id,

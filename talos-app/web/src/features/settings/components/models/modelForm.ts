@@ -8,7 +8,7 @@ import type React from "react";
 import { File, Image, Mic, Type, Video } from "lucide-react";
 
 export const INPUT_KINDS: ModelInputKind[] = ["text", "image", "audio", "video", "file"];
-export const REASONING_EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh"];
+export const REASONING_EFFORTS: ReasoningEffort[] = ["light", "medium", "high", "xhigh"];
 export const MODEL_SPEEDS: ModelSpeed[] = ["standard", "fast"];
 
 export const INPUT_KIND_ICONS: Record<ModelInputKind, React.ElementType> = {

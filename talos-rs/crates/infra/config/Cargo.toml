@@ -12,6 +12,8 @@ repository.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 serde_yaml = "0.9"
+schemars = { version = "0.8", features = ["derive"] }
+ts-rs = "10.1"
 
 # Config loading
 config = "0.14"

@@ -9,7 +9,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{
-    LlmReasoningEffort, ModelInfo, ModelRef, ModelSelection, ReasoningSelection, SessionInfo,
+    ModelInfo, ModelRef, ModelSelection, ReasoningEffort, ReasoningSelection, SessionInfo,
     TalosContext, TalosProvider, TalosSourceType,
 };
 use talos_types::talos::TokenUsage;
@@ -127,10 +127,10 @@ impl TuiApp {
         let model = self.current_model_info()?;
         let model_ref = ModelRef {
             provider: model.provider.clone(),
-            id: model.id.clone(),
+            id: model.model.id.clone(),
         };
         let reasoning = match self.reasoning_effort_override {
-            Some(level) if model.reasoning => ReasoningSelection::Effort { level },
+            Some(level) if model.model.reasoning => ReasoningSelection::Effort { level },
             _ => ReasoningSelection::ModelDefault,
         };
         Some(ModelSelection {
@@ -142,23 +142,23 @@ impl TuiApp {
     pub(crate) fn current_model_info(&self) -> Option<&ModelInfo> {
         self.available_model_info
             .iter()
-            .find(|model| model.id == self.current_model)
+            .find(|model| model.model.id == self.current_model)
     }
 
     pub(crate) fn model_info_for_id(&self, model_id: &str) -> Option<&ModelInfo> {
         self.available_model_info
             .iter()
-            .find(|model| model.id == model_id)
+            .find(|model| model.model.id == model_id)
     }
 
     pub(crate) fn use_model_default_reasoning(&mut self) {
         self.reasoning_effort_override = None;
     }
 
-    pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<LlmReasoningEffort>) {
+    pub(crate) fn set_reasoning_effort_override(&mut self, effort: Option<ReasoningEffort>) {
         self.reasoning_effort_override = if self
             .current_model_info()
-            .is_some_and(|model| model.reasoning)
+            .is_some_and(|model| model.model.reasoning)
         {
             effort
         } else {
@@ -170,14 +170,14 @@ impl TuiApp {
         let Some(model) = self.model_info_for_id(model_id) else {
             return model_id.to_string();
         };
-        if !model.reasoning {
+        if !model.model.reasoning {
             return model_id.to_string();
         }
-        let effort = if model.id == self.current_model {
+        let effort = if model.model.id == self.current_model {
             self.reasoning_effort_override
-                .unwrap_or(model.reasoning_effort)
+                .unwrap_or(model.model.reasoning_effort)
         } else {
-            model.reasoning_effort
+            model.model.reasoning_effort
         };
         format!("{} {}", model_id, ReasoningOption::status_label_for(effort))
     }

@@ -425,7 +425,7 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
     config.compaction.tool_output_keep_last = 1;
     configure_test_skill_root(&mut config, &workspace_dir);
     let mut ctx = build_ctx_with_stream_for_session("working-context-budget", None);
-    ctx.selected_model_info.context_window = 1_536;
+    ctx.selected_model_info.model.context_window = 1_536;
 
     let error = run_general_turn(
         &mut ctx,

@@ -134,7 +134,7 @@ impl OpenRouterProvider {
             EffectiveReasoning::Unsupported => None,
             EffectiveReasoning::Effort(effort) => Some(
                 match effort {
-                    ReasoningEffort::Low => "low",
+                    ReasoningEffort::Light => "low",
                     ReasoningEffort::Medium => "medium",
                     ReasoningEffort::High => "high",
                     ReasoningEffort::XHigh => "xhigh",

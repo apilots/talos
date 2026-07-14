@@ -442,7 +442,7 @@ pub struct InvocationContext {
 
 impl InvocationContext {
     pub fn selected_model_id(&self) -> &str {
-        self.selected_model_info.id.as_str()
+        self.selected_model_info.model.id.as_str()
     }
 
     pub fn set_planning_response(&mut self, value: impl Into<String>) {

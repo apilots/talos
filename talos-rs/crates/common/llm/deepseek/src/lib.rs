@@ -130,7 +130,7 @@ impl DeepSeekProvider {
             EffectiveReasoning::Unsupported => None,
             EffectiveReasoning::Effort(effort) => Some(
                 match effort {
-                    ReasoningEffort::Low | ReasoningEffort::Medium | ReasoningEffort::High => {
+                    ReasoningEffort::Light | ReasoningEffort::Medium | ReasoningEffort::High => {
                         "high"
                     }
                     ReasoningEffort::XHigh => "max",

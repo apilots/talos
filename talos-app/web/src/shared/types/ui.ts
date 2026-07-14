@@ -9,7 +9,7 @@ import type {
 } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
-export type ReasoningLevel = "low" | "medium" | "high" | "extra_high";
+export type ReasoningLevel = "light" | "medium" | "high" | "extra_high";
 export type SessionUiStatus = "running" | "done" | "error";
 
 export interface ProjectView {

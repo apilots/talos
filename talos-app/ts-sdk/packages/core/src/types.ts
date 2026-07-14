@@ -8,20 +8,20 @@ import type {
   ConfigUpdateResponse as ProtocolConfigUpdateResponse,
   ConfigValue as ProtocolConfigValue,
   LlmConfig as ProtocolLlmConfig,
-  LlmModelConfig as ProtocolLlmModelConfig,
-  LlmModelCost as ProtocolLlmModelCost,
-  LlmModelInputKind as ProtocolLlmModelInputKind,
-  LlmModelSpeed as ProtocolLlmModelSpeed,
   LlmProtocol as ProtocolLlmProtocol,
-  LlmProviderConfig as ProtocolLlmProviderConfig,
-  LlmReasoningEffort as ProtocolLlmReasoningEffort,
+  ModelCostConfig as ProtocolModelCostConfig,
   ModelInfo as ProtocolModelInfo,
+  ModelInputKind as ProtocolModelInputKind,
   ModelListResponse as ProtocolModelListResponse,
   ModelReadiness as ProtocolModelReadiness,
   ModelRef as ProtocolModelRef,
   ModelSelection as ProtocolModelSelection,
+  ModelSpeed as ProtocolModelSpeed,
+  ProviderConfig as ProtocolProviderConfig,
   ProviderKeyStatus as ProtocolProviderKeyStatus,
+  ProviderModelConfig as ProtocolProviderModelConfig,
   ProviderProtocolCapabilities as ProtocolProviderProtocolCapabilities,
+  ReasoningEffort as ProtocolReasoningEffort,
   ReasoningSelection as ProtocolReasoningSelection,
   SessionClearResponse as ProtocolSessionClearResponse,
   SessionCloseResponse as ProtocolSessionCloseResponse,
@@ -351,13 +351,13 @@ export type MemoryFileDetail = ProtocolMemoryFileDetail;
 export type WorkspaceDocKind = ProtocolWorkspaceDocKind;
 export type WorkspaceDocSummary = ProtocolWorkspaceDocSummary;
 export type WorkspaceDocInfo = ProtocolWorkspaceDocInfo;
-export type ModelInputKind = ProtocolLlmModelInputKind;
-export type ModelCostConfig = ProtocolLlmModelCost;
-export type ReasoningEffort = ProtocolLlmReasoningEffort;
-export type ModelSpeed = ProtocolLlmModelSpeed;
-export type ProviderModelConfig = ProtocolLlmModelConfig;
+export type ModelInputKind = ProtocolModelInputKind;
+export type ModelCostConfig = ProtocolModelCostConfig;
+export type ReasoningEffort = ProtocolReasoningEffort;
+export type ModelSpeed = ProtocolModelSpeed;
+export type ProviderModelConfig = ProtocolProviderModelConfig;
 export type LlmProtocol = ProtocolLlmProtocol;
-export type ProviderConfig = ProtocolLlmProviderConfig;
+export type ProviderConfig = ProtocolProviderConfig;
 export type LlmConfig = ProtocolLlmConfig;
 export type ModelReadiness = ProtocolModelReadiness;
 export type ProviderKeyStatus = ProtocolProviderKeyStatus;

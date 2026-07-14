@@ -180,29 +180,77 @@ export type ModelListRequest = Record<string, never>;
 
 export type ModelListResponse = { models: Array<ModelInfo>, defaultModelSelection: ModelSelection, };
 
-export type ModelInfo = { id: string, name: string, provider: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, };
+export type ModelInfo = { provider: string, id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type ModelRef = { provider: string, id: string, };
 
 export type ModelSelection = { modelRef: ModelRef, reasoning: ReasoningSelection, };
 
-export type ReasoningSelection = { "type": "modelDefault" } | { "type": "effort", level: LlmReasoningEffort, };
+export type ReasoningSelection = { "type": "modelDefault" } | { "type": "effort", level: ReasoningEffort, };
 
-export type LlmConfig = { provider: string, model: string, anthropic: LlmProviderConfig, openai: LlmProviderConfig, bailian: LlmProviderConfig, deepseek: LlmProviderConfig, ollama: LlmProviderConfig, openrouter: LlmProviderConfig, };
+export type LlmConfig = {
+/**
+ * Default provider
+ */
+provider: string,
+/**
+ * Default model
+ */
+model: string,
+/**
+ * Anthropic config
+ */
+anthropic: ProviderConfig,
+/**
+ * OpenAI config
+ */
+openai: ProviderConfig,
+/**
+ * Bailian config
+ */
+bailian: ProviderConfig,
+/**
+ * DeepSeek config
+ */
+deepseek: ProviderConfig,
+/**
+ * Ollama config
+ */
+ollama: ProviderConfig,
+/**
+ * OpenRouter config
+ */
+openrouter: ProviderConfig, };
 
-export type LlmProviderConfig = { api_key?: string, base_url?: string, protocol?: LlmProtocol, models: Array<LlmModelConfig>, };
+export type ProviderConfig = {
+/**
+ * API key
+ */
+api_key?: string,
+/**
+ * Base URL for custom endpoint
+ */
+base_url?: string,
+/**
+ * Wire protocol used for this provider.
+ */
+protocol?: LlmProtocol,
+/**
+ * Provider-specific model metadata
+ */
+models: Array<ProviderModelConfig>, };
 
-export type LlmModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: LlmReasoningEffort, speed: LlmModelSpeed, input: Array<LlmModelInputKind>, cost: LlmModelCost, };
+export type ProviderModelConfig = { id: string, name: string, context_window: number, reasoning: boolean, reasoning_effort: ReasoningEffort, speed: ModelSpeed, input: Array<ModelInputKind>, cost: ModelCostConfig, };
 
 export type LlmProtocol = "chat" | "responses" | "messages";
 
-export type LlmReasoningEffort = "low" | "medium" | "high" | "xhigh";
+export type ReasoningEffort = "light" | "medium" | "high" | "xhigh";
 
-export type LlmModelSpeed = "standard" | "fast";
+export type ModelSpeed = "standard" | "fast";
 
-export type LlmModelInputKind = "text" | "image" | "audio" | "video" | "file";
+export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
-export type LlmModelCost = { input: number, output: number, cache_read: number, cache_write: number, };
+export type ModelCostConfig = { input: number, output: number, cache_read: number, cache_write: number, };
 
 export type ConfigGetRequest = { path?: string, };
 

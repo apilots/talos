@@ -1,4 +1,71 @@
 use super::*;
+
+fn model_info(provider: &str, id: &str, name: &str, reasoning: bool) -> ModelInfo {
+    ModelInfo::from_provider_model(
+        provider,
+        ProviderModelConfig {
+            id: id.to_string(),
+            name: name.to_string(),
+            context_window: 1_000_000,
+            reasoning,
+            reasoning_effort: ReasoningEffort::Medium,
+            speed: ModelSpeed::Standard,
+            input: vec![ModelInputKind::Text],
+            cost: ModelCostConfig::default(),
+        },
+    )
+}
+
+#[test]
+fn test_model_catalog_preserves_provider_order_and_duplicate_ids() {
+    let mut llm = LlmConfig::default();
+    let shared_model = ProviderModelConfig {
+        id: "shared-model".to_string(),
+        name: "Shared Model".to_string(),
+        context_window: 128_000,
+        reasoning: true,
+        reasoning_effort: ReasoningEffort::High,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    };
+    llm.anthropic.models = vec![shared_model.clone()];
+    llm.openai.models = vec![shared_model.clone()];
+
+    assert_eq!(
+        resolve_model_catalog(&llm),
+        vec![
+            ModelInfo::from_provider_model("anthropic", shared_model.clone()),
+            ModelInfo::from_provider_model("openai", shared_model),
+        ]
+    );
+}
+
+#[test]
+fn test_model_info_serializes_canonical_model_fields_flat() {
+    let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
+
+    assert_eq!(
+        serde_json::to_value(model).unwrap(),
+        serde_json::json!({
+            "provider": "openai",
+            "id": "gpt-5.5",
+            "name": "GPT-5.5",
+            "context_window": 1_000_000,
+            "reasoning": true,
+            "reasoning_effort": "medium",
+            "speed": "standard",
+            "input": ["text"],
+            "cost": {
+                "input": 0.0,
+                "output": 0.0,
+                "cache_read": 0.0,
+                "cache_write": 0.0
+            }
+        })
+    );
+}
+
 #[test]
 fn test_agent_id() {
     let id = AgentId::new("test");
@@ -175,17 +242,7 @@ fn test_model_selection_resolves_model_default_effort() {
         },
         reasoning: ReasoningSelection::ModelDefault,
     };
-    let model = ModelInfo {
-        id: "gpt-5.5".to_string(),
-        name: "GPT-5.5".to_string(),
-        provider: "openai".to_string(),
-        context_window: 1_000_000,
-        reasoning: true,
-        reasoning_effort: ReasoningEffort::Medium,
-        speed: ModelSpeed::Standard,
-        input: vec![ModelInputKind::Text],
-        cost: ModelCostConfig::default(),
-    };
+    let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
@@ -204,17 +261,7 @@ fn test_model_selection_resolves_explicit_effort() {
             level: ReasoningEffort::XHigh,
         },
     };
-    let model = ModelInfo {
-        id: "gpt-5.5".to_string(),
-        name: "GPT-5.5".to_string(),
-        provider: "openai".to_string(),
-        context_window: 1_000_000,
-        reasoning: true,
-        reasoning_effort: ReasoningEffort::Medium,
-        speed: ModelSpeed::Standard,
-        input: vec![ModelInputKind::Text],
-        cost: ModelCostConfig::default(),
-    };
+    let model = model_info("openai", "gpt-5.5", "GPT-5.5", true);
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
@@ -231,17 +278,7 @@ fn test_model_selection_resolves_unsupported_model_default() {
         },
         reasoning: ReasoningSelection::ModelDefault,
     };
-    let model = ModelInfo {
-        id: "qwen".to_string(),
-        name: "Qwen".to_string(),
-        provider: "ollama".to_string(),
-        context_window: 32_768,
-        reasoning: false,
-        reasoning_effort: ReasoningEffort::Medium,
-        speed: ModelSpeed::Standard,
-        input: vec![ModelInputKind::Text],
-        cost: ModelCostConfig::default(),
-    };
+    let model = model_info("ollama", "qwen", "Qwen", false);
 
     assert_eq!(
         selection.resolve_reasoning(&model).unwrap(),
@@ -260,17 +297,7 @@ fn test_model_selection_rejects_explicit_effort_for_unsupported_model() {
             level: ReasoningEffort::High,
         },
     };
-    let model = ModelInfo {
-        id: "qwen".to_string(),
-        name: "Qwen".to_string(),
-        provider: "ollama".to_string(),
-        context_window: 32_768,
-        reasoning: false,
-        reasoning_effort: ReasoningEffort::Medium,
-        speed: ModelSpeed::Standard,
-        input: vec![ModelInputKind::Text],
-        cost: ModelCostConfig::default(),
-    };
+    let model = model_info("ollama", "qwen", "Qwen", false);
 
     let error = selection
         .resolve_reasoning(&model)

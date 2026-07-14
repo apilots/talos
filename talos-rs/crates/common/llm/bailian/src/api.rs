@@ -109,7 +109,7 @@ impl BailianProvider {
 
     fn reasoning_budget_tokens(effort: ReasoningEffort) -> u32 {
         match effort {
-            ReasoningEffort::Low => 1024,
+            ReasoningEffort::Light => 1024,
             ReasoningEffort::Medium => 2048,
             ReasoningEffort::High => 4096,
             ReasoningEffort::XHigh => 8192,

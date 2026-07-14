@@ -26,9 +26,9 @@ fn append_transcript_answer(app: &mut TuiApp, user: &str, answer: &str) {
 fn test_input_status_line_uses_dynamic_token_left_percent() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "kimi-k2.5", 32_768);
-    app.available_model_info[0].reasoning = true;
+    app.available_model_info[0].model.reasoning = true;
     app.current_model = "kimi-k2.5".to_string();
-    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::High);
+    app.reasoning_effort_override = Some(talos_sdk::ReasoningEffort::High);
     app.session_usage = TokenUsage {
         input_tokens: 964,
         output_tokens: 16,

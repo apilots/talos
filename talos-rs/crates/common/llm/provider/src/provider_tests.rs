@@ -24,7 +24,7 @@ fn test_chat_request_builder() {
 
 #[test]
 fn test_provider_config() {
-    let config = ProviderConfig::anthropic("test-key");
+    let config = ProviderRuntimeConfig::anthropic("test-key");
     assert_eq!(config.name, "anthropic");
     assert!(config.base_url.contains("anthropic.com"));
 }

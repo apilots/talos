@@ -1,5 +1,7 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use ts_rs::TS;
 
 /// Gateway configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,7 +254,7 @@ impl Default for TelegramGroupConfig {
 }
 
 /// LLM configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct LlmConfig {
     /// Default provider
     #[serde(default = "default_provider")]
@@ -310,7 +312,7 @@ impl Default for LlmConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProtocol {
     Chat,
@@ -354,7 +356,7 @@ const PROVIDER_PROTOCOLS: &[(&str, LlmProtocol, &[LlmProtocol])] = &[
 ];
 
 /// Protocol capabilities exposed to configuration clients for one provider.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ProviderProtocolCapabilities {
     pub default_protocol: LlmProtocol,
     pub protocols: Vec<LlmProtocol>,
@@ -402,18 +404,21 @@ pub fn llm_provider_supports_protocol(provider: &str, protocol: LlmProtocol) -> 
 }
 
 /// Provider config
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ProviderConfig {
     /// API key
     #[serde(default)]
+    #[ts(optional)]
     pub api_key: Option<String>,
 
     /// Base URL for custom endpoint
     #[serde(default)]
+    #[ts(optional)]
     pub base_url: Option<String>,
 
     /// Wire protocol used for this provider.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[ts(optional)]
     pub protocol: Option<LlmProtocol>,
 
     /// Provider-specific model metadata
@@ -421,7 +426,7 @@ pub struct ProviderConfig {
     pub models: Vec<ProviderModelConfig>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderModelConfig {
     pub id: String,
@@ -451,10 +456,10 @@ impl ProviderModelConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ReasoningEffort {
-    Low,
+    Light,
     #[default]
     Medium,
     High,
@@ -462,7 +467,7 @@ pub enum ReasoningEffort {
     XHigh,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelSpeed {
     #[default]
@@ -470,7 +475,7 @@ pub enum ModelSpeed {
     Fast,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelInputKind {
     Text,
@@ -480,7 +485,7 @@ pub enum ModelInputKind {
     File,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ModelCostConfig {
     #[serde(default)]
     pub input: f64,

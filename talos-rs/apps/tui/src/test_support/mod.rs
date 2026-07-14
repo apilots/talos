@@ -70,17 +70,19 @@ pub(crate) struct MockGatewayClient {
 }
 
 pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
-    ModelInfo {
-        id: id.to_string(),
-        name: id.to_string(),
-        provider: "mock".to_string(),
-        context_window,
-        reasoning: false,
-        reasoning_effort: Default::default(),
-        speed: Default::default(),
-        input: vec![talos_types::ModelInputKind::Text],
-        cost: talos_types::ModelCostConfig::default(),
-    }
+    ModelInfo::from_provider_model(
+        "mock",
+        talos_types::ProviderModelConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            context_window,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: vec![talos_types::ModelInputKind::Text],
+            cost: talos_types::ModelCostConfig::default(),
+        },
+    )
 }
 
 impl MockGatewayState {

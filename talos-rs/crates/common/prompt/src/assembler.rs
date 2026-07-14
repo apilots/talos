@@ -857,9 +857,9 @@ fn build_cache_state(
         .map(|section| crate::compute_prompt_fingerprint(&[section.payload.as_str()]));
     let model_fingerprint = builder.model_info.as_ref().map(|model| {
         crate::compute_prompt_fingerprint(&[
-            model.id.as_str(),
+            model.model.id.as_str(),
             model.provider.as_str(),
-            &model.context_window.to_string(),
+            &model.model.context_window.to_string(),
         ])
     });
 
@@ -985,7 +985,7 @@ fn resolve_window_usage(
         builder
             .model_info
             .as_ref()
-            .map(|model| model.context_window as usize)
+            .map(|model| model.model.context_window as usize)
             .unwrap_or_default(),
         static_prefix_tokens,
         dynamic_suffix_tokens,

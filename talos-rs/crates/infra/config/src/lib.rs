@@ -21,11 +21,13 @@
 //! println!("Agent name: {}", config.agent.name);
 //! ```
 
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use talos_error::TalosResult;
 use talos_logging::LoggingConfig;
+use ts_rs::TS;
 
 pub mod domains;
 pub mod env;
@@ -126,7 +128,7 @@ pub struct Config {
     pub llm: LlmConfig,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ModelReadiness {
     pub ready: bool,
     pub provider: String,
@@ -134,7 +136,7 @@ pub struct ModelReadiness {
     pub issues: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 pub struct ProviderKeyStatus {
     pub api_key_configured: bool,
 }
@@ -267,7 +269,7 @@ impl Config {
 }
 
 pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
-    let provider_name = llm.provider.trim().to_ascii_lowercase();
+    let provider_name = llm.provider.clone();
     let mut issues = Vec::new();
 
     let Some(provider) = provider_config_for_llm(llm, &provider_name) else {
@@ -318,9 +320,7 @@ pub fn model_readiness_for_llm(llm: &LlmConfig) -> ModelReadiness {
 
     if llm.model.trim().is_empty() || validate::is_unresolved_placeholder(&llm.model) {
         issues.push("llm.model is empty or unresolved placeholder".to_string());
-    } else if !provider.models.is_empty()
-        && !provider.models.iter().any(|model| model.id == llm.model)
-    {
+    } else if !provider.models.iter().any(|model| model.id == llm.model) {
         issues.push(format!(
             "llm.model '{}' is not configured under llm.{}.models",
             llm.model, provider_name
@@ -339,7 +339,7 @@ pub fn provider_config_for_llm<'a>(
     llm: &'a LlmConfig,
     provider: &str,
 ) -> Option<&'a ProviderConfig> {
-    match provider.trim().to_ascii_lowercase().as_str() {
+    match provider {
         "anthropic" => Some(&llm.anthropic),
         "openai" => Some(&llm.openai),
         "bailian" => Some(&llm.bailian),

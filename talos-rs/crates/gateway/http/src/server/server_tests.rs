@@ -62,17 +62,19 @@ trait SessionService: Send + Sync {
 }
 
 fn test_model_info() -> ModelInfo {
-    ModelInfo {
-        id: "qwen-plus".to_string(),
-        name: "Qwen Plus".to_string(),
-        provider: "bailian".to_string(),
-        context_window: 32_768,
-        reasoning: true,
-        reasoning_effort: Default::default(),
-        speed: Default::default(),
-        input: vec![talos_types::ModelInputKind::Text],
-        cost: talos_types::ModelCostConfig::default(),
-    }
+    ModelInfo::from_provider_model(
+        "bailian",
+        talos_types::ProviderModelConfig {
+            id: "qwen-plus".to_string(),
+            name: "Qwen Plus".to_string(),
+            context_window: 32_768,
+            reasoning: true,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: vec![talos_types::ModelInputKind::Text],
+            cost: talos_types::ModelCostConfig::default(),
+        },
+    )
 }
 
 fn test_config() -> talos_types::TalosConfig {

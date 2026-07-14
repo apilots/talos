@@ -269,11 +269,22 @@ fn create_session_params(
 
 #[tokio::test]
 async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
+    let mut config = TalosConfig::default();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: "turn-model".to_string(),
+        name: "Turn Model".to_string(),
+        context_window: 128_000,
+        reasoning: true,
+        reasoning_effort: talos_config::ReasoningEffort::Medium,
+        speed: talos_config::ModelSpeed::Standard,
+        input: vec![talos_config::ModelInputKind::Text],
+        cost: talos_config::ModelCostConfig::default(),
+    }];
     let (service, _store) = test_application(
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
         }),
-        TalosConfig::default(),
+        config,
     )
     .await;
     let actor = Actor::regular("member-user");

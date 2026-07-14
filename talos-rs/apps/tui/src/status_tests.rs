@@ -1,8 +1,9 @@
 use std::path::PathBuf;
 
 use talos_sdk::{
-    AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, LlmReasoningEffort,
-    ModelRef, ModelSelection, ReasoningSelection, SessionInfo, UserRole, WorkspaceInfoResponse,
+    AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ModelRef,
+    ModelSelection, ReasoningEffort, ReasoningSelection, SessionInfo, UserRole,
+    WorkspaceInfoResponse,
 };
 use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
 
@@ -73,10 +74,10 @@ fn test_status_snapshot_renders_card_from_real_state() {
     let mut app = TuiApp::build(None);
     set_test_model_info(&mut app, "qwen-plus", 200_000);
     app.available_model_info[0].provider = "bailian".to_string();
-    app.available_model_info[0].reasoning = true;
-    app.available_model_info[0].reasoning_effort = LlmReasoningEffort::High;
+    app.available_model_info[0].model.reasoning = true;
+    app.available_model_info[0].model.reasoning_effort = ReasoningEffort::High;
     app.current_model = "qwen-plus".to_string();
-    app.reasoning_effort_override = Some(LlmReasoningEffort::High);
+    app.reasoning_effort_override = Some(ReasoningEffort::High);
     app.connection_status = "connected".to_string();
     app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
     app.trace_event_count = 128;
@@ -92,7 +93,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
 
     let mut session = session_info();
     session.model_selection.reasoning = ReasoningSelection::Effort {
-        level: LlmReasoningEffort::Low,
+        level: ReasoningEffort::Light,
     };
     let snapshot =
         TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
@@ -101,7 +102,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
 
     assert!(!card.lines().any(|line| line == "/status"));
     assert!(card.contains("Talos TUI"));
-    assert!(card.contains("Model:            qwen-plus (bailian, reasoning low, summaries auto)"));
+    assert!(card.contains("Model:            qwen-plus (bailian, reasoning light, summaries auto)"));
     assert!(card.contains("Agent Workspace:  /tmp/talos-workspace"));
     assert!(card.contains("Directory:        /tmp/talos-project"));
     assert!(card.contains("Account:          status@example.com"));

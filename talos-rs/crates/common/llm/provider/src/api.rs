@@ -669,9 +669,9 @@ impl Default for RetryConfig {
     }
 }
 
-/// Provider configuration.
+/// Runtime transport configuration for one Provider client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProviderConfig {
+pub struct ProviderRuntimeConfig {
     pub name: String,
     pub base_url: String,
     #[serde(skip_serializing)]
@@ -686,7 +686,7 @@ fn default_timeout() -> u64 {
     60
 }
 
-impl ProviderConfig {
+impl ProviderRuntimeConfig {
     pub fn anthropic(api_key: impl Into<String>) -> Self {
         Self {
             name: "anthropic".into(),

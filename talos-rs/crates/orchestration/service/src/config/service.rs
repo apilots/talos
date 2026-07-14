@@ -6,7 +6,6 @@ use talos_types::{
     resolve_model_catalog, ConfigDeleteRequest, ConfigDeleteResponse, ConfigGetRequest,
     ConfigGetResponse, ConfigReloadRequest, ConfigReloadResponse, ConfigUpdateRequest,
     ConfigUpdateResponse, ConfigValue, ModelInfo, ModelListResponse, ModelRef, ModelSelection,
-    ReasoningSelection,
 };
 use tokio::sync::RwLock;
 
@@ -38,12 +37,14 @@ impl ConfigService {
 
     pub async fn list_models(&self) -> TalosResult<ModelListResponse> {
         let llm = self.llm_config_service.get()?;
+        let default_model_selection = ModelSelection::model_default(ModelRef {
+            provider: llm.provider,
+            id: llm.model,
+        });
+        self.validate_model_selection_supported(&default_model_selection)?;
         Ok(ModelListResponse {
             models: self.models.read().await.clone(),
-            default_model_selection: ModelSelection::model_default(ModelRef {
-                provider: llm.provider,
-                id: llm.model,
-            }),
+            default_model_selection,
         })
     }
 
@@ -59,8 +60,7 @@ impl ConfigService {
             )));
         }
         let llm = self.llm_config_service.get()?;
-        let provider_name = model_ref.provider.trim().to_ascii_lowercase();
-        let Some(provider) = provider_config_for_llm(&llm, &provider_name) else {
+        let Some(provider) = provider_config_for_llm(&llm, &model_ref.provider) else {
             return Err(TalosError::UnsupportedModel(format!(
                 "{}:{}",
                 model_ref.provider, model_ref.id
@@ -72,28 +72,15 @@ impl ConfigService {
             .find(|entry| entry.id == model_ref.id)
         {
             selection.resolve_reasoning(&ModelInfo::from_provider_model(
-                provider_name,
+                model_ref.provider.clone(),
                 model.clone(),
             ))?;
             return Ok(());
         }
-        if provider.models.is_empty()
-            && matches!(selection.reasoning, ReasoningSelection::ModelDefault)
-        {
-            return Ok(());
-        }
-
-        if provider.models.is_empty() {
-            Err(TalosError::ValidationError(format!(
-                "model '{}:{}' has no configured reasoning capability metadata",
-                model_ref.provider, model_ref.id
-            )))
-        } else {
-            Err(TalosError::UnsupportedModel(format!(
-                "{}:{}",
-                model_ref.provider, model_ref.id
-            )))
-        }
+        Err(TalosError::UnsupportedModel(format!(
+            "{}:{}",
+            model_ref.provider, model_ref.id
+        )))
     }
 
     pub fn get_llm(&self) -> TalosResult<LlmConfig> {
@@ -108,7 +95,7 @@ impl ConfigService {
     pub fn update_config(&self, request: ConfigUpdateRequest) -> TalosResult<ConfigUpdateResponse> {
         Self::validate_config_path(Some(&request.path))?;
         let ConfigValue::Llm(llm) = request.value;
-        self.update_llm(llm.into())?;
+        self.update_llm(llm)?;
         self.llm_config_service.get_read().map(Into::into)
     }
 

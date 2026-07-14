@@ -4,13 +4,16 @@ use std::sync::Arc;
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
 use talos_error::TalosError;
 use talos_types::{
-    ModelCostConfig, ModelInfo, ModelRef, ModelSelection, ReasoningEffort, ReasoningSelection,
+    resolve_model_catalog, ModelRef, ModelSelection, ReasoningEffort, ReasoningSelection,
 };
 
 use super::ConfigService;
 
 fn test_service() -> ConfigService {
-    let mut llm = talos_config::LlmConfig::default();
+    let mut llm = talos_config::LlmConfig {
+        model: "qwen-plus".to_string(),
+        ..Default::default()
+    };
     llm.anthropic.models = vec![talos_config::ProviderModelConfig {
         id: "qwen-plus".to_string(),
         name: "Qwen Plus".to_string(),
@@ -21,21 +24,12 @@ fn test_service() -> ConfigService {
         input: Vec::new(),
         cost: Default::default(),
     }];
+    let models = resolve_model_catalog(&llm);
     ConfigService::new(
         Arc::new(LlmConfigManager::new(Arc::new(
             InMemoryLlmConfigStore::new(llm),
         ))),
-        vec![ModelInfo {
-            id: "qwen-plus".to_string(),
-            name: "Qwen Plus".to_string(),
-            provider: "anthropic".to_string(),
-            context_window: 32_768,
-            reasoning: true,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: ModelCostConfig::default(),
-        }],
+        models,
     )
 }
 
@@ -97,10 +91,41 @@ async fn list_models_returns_explicit_configured_default() {
         response.default_model_selection,
         ModelSelection::model_default(ModelRef {
             provider: "anthropic".to_string(),
-            id: "claude-3-5-sonnet".to_string(),
+            id: "qwen-plus".to_string(),
         })
     );
     assert_eq!(response.models.len(), 1);
+}
+
+#[tokio::test]
+async fn list_models_rejects_default_missing_from_provider_catalog() {
+    let service = ConfigService::new(
+        Arc::new(LlmConfigManager::new(Arc::new(
+            InMemoryLlmConfigStore::new(talos_config::LlmConfig::default()),
+        ))),
+        Vec::new(),
+    );
+
+    let error = service
+        .list_models()
+        .await
+        .expect_err("unconfigured default model should be rejected");
+
+    assert!(matches!(error, TalosError::UnsupportedModel(_)));
+}
+
+#[test]
+fn validate_model_selection_uses_exact_provider_identity() {
+    let service = test_service();
+
+    let error = service
+        .validate_model_selection_supported(&ModelSelection::model_default(ModelRef {
+            provider: "Anthropic".to_string(),
+            id: "qwen-plus".to_string(),
+        }))
+        .expect_err("provider identity should be case-sensitive");
+
+    assert!(matches!(error, TalosError::UnsupportedModel(_)));
 }
 
 #[test]

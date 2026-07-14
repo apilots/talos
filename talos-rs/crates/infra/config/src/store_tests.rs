@@ -19,7 +19,15 @@ llm:
   model: claude-3-5-sonnet
   anthropic:
     api_key: {api_key}
-    models: []
+    models:
+      - id: claude-3-5-sonnet
+        name: Claude 3.5 Sonnet
+        context_window: 200000
+        reasoning: true
+        reasoning_effort: medium
+        speed: standard
+        input: [text]
+        cost: {{ input: 0, output: 0, cache_read: 0, cache_write: 0 }}
   openai:
     models: []
   bailian:

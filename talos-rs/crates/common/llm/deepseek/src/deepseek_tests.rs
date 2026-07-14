@@ -50,7 +50,7 @@ fn chat_maps_low_effort_to_high_and_enables_thinking() {
         .message("hello")
         .temperature(0.7)
         .top_p(0.9)
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Low))
+        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Light))
         .build();
 
     let request =

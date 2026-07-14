@@ -1,5 +1,6 @@
 use super::*;
 use crate::types::CommandSuggestion;
+use talos_sdk::ReasoningEffort;
 
 fn interactive_transcript_text(app: &TuiApp) -> String {
     app.render_runtime
@@ -43,10 +44,10 @@ fn test_model_catalog_uses_explicit_default_instead_of_first_entry() {
 async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "gpt-5.5", 128_000);
-    app.available_model_info[0].reasoning = true;
-    app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::High;
+    app.available_model_info[0].model.reasoning = true;
+    app.available_model_info[0].model.reasoning_effort = ReasoningEffort::High;
     app.current_model = "gpt-5.5".to_string();
-    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::High);
+    app.reasoning_effort_override = Some(ReasoningEffort::High);
 
     app.toggle_model_picker();
     app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -71,10 +72,10 @@ async fn test_model_picker_enters_reasoning_step_and_esc_returns_to_model_step()
 async fn test_model_picker_confirm_writes_command_result_block() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "gpt-5.5", 128_000);
-    app.available_model_info[0].reasoning = true;
-    app.available_model_info[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+    app.available_model_info[0].model.reasoning = true;
+    app.available_model_info[0].model.reasoning_effort = ReasoningEffort::Medium;
     app.current_model = "gpt-5.5".to_string();
-    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::Medium);
+    app.reasoning_effort_override = Some(ReasoningEffort::Medium);
 
     app.toggle_model_picker();
     app.handle_input(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
@@ -89,10 +90,7 @@ async fn test_model_picker_confirm_writes_command_result_block() {
 
     let transcript = interactive_transcript_text(&app);
     assert!(app.model_picker.is_none());
-    assert_eq!(
-        app.reasoning_effort_override,
-        Some(talos_sdk::LlmReasoningEffort::High)
-    );
+    assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::High));
     assert!(transcript.contains("Model changed to gpt-5.5 high"));
 
     app.toggle_model_picker();
@@ -475,8 +473,8 @@ async fn test_app_server_initialize_loads_models_without_session() {
     let client = Arc::new(MockGatewayClient::new());
     {
         let mut state = client.state.lock().unwrap();
-        state.models[0].reasoning = true;
-        state.models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+        state.models[0].model.reasoning = true;
+        state.models[0].model.reasoning_effort = ReasoningEffort::Medium;
     }
     let gateway_client: Arc<dyn GatewayClient> = client.clone();
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
@@ -486,7 +484,9 @@ async fn test_app_server_initialize_loads_models_without_session() {
     assert_eq!(app.connection_status, "connected");
     assert_eq!(app.reasoning_effort_override, None);
 
-    client.state.lock().unwrap().models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::High;
+    client.state.lock().unwrap().models[0]
+        .model
+        .reasoning_effort = ReasoningEffort::High;
     app.refresh_models_from_gateway().await.unwrap();
 
     assert_eq!(app.reasoning_effort_override, None);
@@ -880,14 +880,16 @@ async fn test_modes_alias_works_as_models() {
     let client = Arc::new(MockGatewayClient::new());
     {
         let mut state = client.state.lock().unwrap();
-        state.models[0].reasoning = true;
-        state.models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Medium;
+        state.models[0].model.reasoning = true;
+        state.models[0].model.reasoning_effort = ReasoningEffort::Medium;
     }
     let gateway_client: Arc<dyn GatewayClient> = client.clone();
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
-    app.reasoning_effort_override = Some(talos_sdk::LlmReasoningEffort::High);
-    client.state.lock().unwrap().models[0].reasoning_effort = talos_sdk::LlmReasoningEffort::Low;
+    app.reasoning_effort_override = Some(ReasoningEffort::High);
+    client.state.lock().unwrap().models[0]
+        .model
+        .reasoning_effort = ReasoningEffort::Light;
     app.input_buffer = "/modes".to_string();
     app.cursor_index = app.input_buffer.chars().count();
     let _ = app.submit_input().await.unwrap();
@@ -899,14 +901,11 @@ async fn test_modes_alias_works_as_models() {
         }
     }
     assert!(interactive_transcript_text(&app).contains("Available models"));
-    assert_eq!(
-        app.reasoning_effort_override,
-        Some(talos_sdk::LlmReasoningEffort::High)
-    );
+    assert_eq!(app.reasoning_effort_override, Some(ReasoningEffort::High));
     assert_eq!(
         app.current_model_selection().unwrap().reasoning,
         talos_sdk::ReasoningSelection::Effort {
-            level: talos_sdk::LlmReasoningEffort::High,
+            level: ReasoningEffort::High,
         }
     );
 }

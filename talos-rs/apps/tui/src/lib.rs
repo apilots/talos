@@ -44,7 +44,7 @@ use std::{
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    LlmReasoningEffort, ModelInfo, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
+    ModelInfo, ReasoningEffort, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -69,7 +69,7 @@ pub struct TuiApp {
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) current_model: String,
-    pub(crate) reasoning_effort_override: Option<LlmReasoningEffort>,
+    pub(crate) reasoning_effort_override: Option<ReasoningEffort>,
     pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,

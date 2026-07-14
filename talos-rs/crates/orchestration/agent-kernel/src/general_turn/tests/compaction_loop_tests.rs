@@ -181,7 +181,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 
     let (stream_tx, mut stream_rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(stream_tx));
-    ctx.selected_model_info.context_window = 3_000;
+    ctx.selected_model_info.model.context_window = 3_000;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -353,7 +353,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
     config.compaction.hard_ratio_percent = 100;
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 6_000;
+    ctx.selected_model_info.model.context_window = 6_000;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -441,7 +441,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 2_400;
+    ctx.selected_model_info.model.context_window = 2_400;
 
     let result = run_general_turn(
         &mut ctx,
@@ -531,7 +531,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 900;
+    ctx.selected_model_info.model.context_window = 900;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -622,7 +622,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
     config.compaction.recent_messages_keep = 24;
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 900;
+    ctx.selected_model_info.model.context_window = 900;
 
     let prepared = prepare_general_turn(
         &mut ctx,
@@ -722,7 +722,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
         talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
 
     let mut ctx = build_ctx_with_stream(None);
-    ctx.selected_model_info.context_window = 128;
+    ctx.selected_model_info.model.context_window = 128;
 
     let error = run_general_turn(
         &mut ctx,
@@ -798,7 +798,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     configure_test_skill_root(&mut config, &workspace_dir);
 
     let mut normal_ctx = build_ctx_with_stream(None);
-    normal_ctx.selected_model_info.context_window = 16_384;
+    normal_ctx.selected_model_info.model.context_window = 16_384;
     let normal_prepared = prepare_general_turn(
         &mut normal_ctx,
         "talos",
@@ -823,7 +823,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     assert!(normal_rendered.contains("historical assistant message 1"));
 
     let mut recovery_ctx = build_ctx_with_stream(None);
-    recovery_ctx.selected_model_info.context_window = 16_384;
+    recovery_ctx.selected_model_info.model.context_window = 16_384;
     recovery_ctx.session.state.insert(
         StateNamespace::Session,
         SESSION_COMPACTION_STATE_KEY.to_string(),

@@ -5,6 +5,22 @@ use talos_skills::{
     SkillPromptRequest, SkillRoot, SkillRoots, SkillSelector,
 };
 
+fn model_info(id: &str, context_window: u32) -> ModelInfo {
+    ModelInfo::from_provider_model(
+        "test",
+        talos_types::ProviderModelConfig {
+            id: id.to_string(),
+            name: id.to_string(),
+            context_window,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+        },
+    )
+}
+
 #[tokio::test]
 async fn test_prompt_builder_basic() {
     let assembly = PromptBuilder::new()
@@ -157,17 +173,7 @@ async fn test_prompt_builder_keeps_active_skill_instructions_when_trimming_dynam
 
     let assembly = PromptBuilder::new()
         .config(config)
-        .model_info(ModelInfo {
-            id: "tiny-window".to_string(),
-            name: "tiny-window".to_string(),
-            provider: "test".to_string(),
-            context_window: 256,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-        })
+        .model_info(model_info("tiny-window", 256))
         .skill_prompt_context(SkillPromptContext {
             available_summary: "available skill summary\n".repeat(500),
             injections: vec![SkillPromptInjection {
@@ -315,17 +321,7 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
 
     let baseline = PromptBuilder::new()
         .config(config.clone())
-        .model_info(ModelInfo {
-            id: "baseline".to_string(),
-            name: "baseline".to_string(),
-            provider: "test".to_string(),
-            context_window: 16_384,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-        })
+        .model_info(model_info("baseline", 16_384))
         .planning_instruction(Some("keep planning".to_string()))
         .user_input("hello")
         .assemble()
@@ -352,17 +348,10 @@ async fn test_prompt_builder_drops_expanded_tool_catalog_before_higher_priority_
         .tools(&registry)
         .config(config)
         .planning_instruction(Some("keep planning".to_string()))
-        .model_info(ModelInfo {
-            id: "tight-window".to_string(),
-            name: "tight-window".to_string(),
-            provider: "test".to_string(),
-            context_window: (effective_budget + 256 + 128) as u32,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: Vec::new(),
-            cost: Default::default(),
-        })
+        .model_info(model_info(
+            "tight-window",
+            (effective_budget + 256 + 128) as u32,
+        ))
         .user_input("hello")
         .assemble()
         .await

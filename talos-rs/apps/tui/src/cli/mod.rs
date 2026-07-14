@@ -91,10 +91,10 @@ async fn resolve_cli_model_ref(
     let models = client.list_models().await?.models;
     models
         .iter()
-        .find(|model| model.id == model_id)
+        .find(|model| model.model.id == model_id)
         .map(|model| ModelRef {
             provider: model.provider.clone(),
-            id: model.id.clone(),
+            id: model.model.id.clone(),
         })
         .ok_or_else(|| {
             format!(
@@ -115,7 +115,7 @@ async fn execute_models_command(
     } else {
         println!("Available models:");
         for (i, model) in models.iter().enumerate() {
-            println!("{}. {} ({})", i, model.id, model.provider);
+            println!("{}. {} ({})", i, model.model.id, model.provider);
         }
     }
     Ok(())

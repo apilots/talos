@@ -1,6 +1,13 @@
 use super::*;
 
 #[test]
+fn reasoning_effort_uses_light_product_value() {
+    let effort: ReasoningEffort = serde_yaml::from_str("light").unwrap();
+
+    assert_eq!(effort, ReasoningEffort::Light);
+}
+
+#[test]
 fn test_default_config() {
     let config = Config::default();
     assert_eq!(config.agent.name, "talos");
@@ -297,6 +304,16 @@ fn test_model_readiness_reports_missing_provider_api_key() {
     config.llm.provider = "openai".to_string();
     config.llm.model = "gpt-4o".to_string();
     config.llm.openai.base_url = Some("https://api.openai.com/v1".to_string());
+    config.llm.openai.models = vec![ProviderModelConfig {
+        id: "gpt-4o".to_string(),
+        name: "GPT-4o".to_string(),
+        context_window: 128_000,
+        reasoning: true,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Standard,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    }];
     config.llm.openai.api_key = None;
     assert!(config.validate_runtime().is_ok());
     let readiness = config.model_readiness();

@@ -78,7 +78,7 @@ fn responses_maps_reasoning_effort_and_encrypted_continuation() {
 #[test]
 fn messages_maps_reasoning_effort_to_output_config() {
     let request =
-        OpenRouterProvider::build_messages_request(reasoning_request(ReasoningEffort::Low), None)
+        OpenRouterProvider::build_messages_request(reasoning_request(ReasoningEffort::Light), None)
             .expect("messages request should build");
     let actual = serde_json::to_value(request).expect("messages request should serialize");
 

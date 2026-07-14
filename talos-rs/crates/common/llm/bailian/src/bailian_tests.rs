@@ -430,7 +430,7 @@ fn test_build_request_maps_reasoning_to_bailian_fields() {
     let request = ChatRequest::builder()
         .model("qwen3.7-plus")
         .messages(vec![ChatMessage::user("hello")])
-        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Low))
+        .reasoning(EffectiveReasoning::Effort(ReasoningEffort::Light))
         .build();
 
     let built = BailianProvider::build_request(request, true).expect("request should build");
