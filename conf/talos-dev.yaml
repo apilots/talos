@@ -176,8 +176,8 @@ channels:
   feishu:
     enabled: false
 llm:
-  provider: openrouter
-  model: tencent/hy3:free
+  provider: deepseek
+  model: deepseek-v4-flash
   anthropic:
     api_key: ${TALOS_LLM_ANTHROPIC_API_KEY}
     base_url: https://api.anthropic.com/v1
