@@ -12,6 +12,7 @@ import {
   reasoningLevelForEffort,
   reasoningLevelForModel,
   useChatSession,
+  useConfiguredSessionModelSelection,
   useModelsQuery,
   useProjectsView,
   useSessionQuery,
@@ -20,22 +21,14 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
+import type { ReasoningLevel } from "@/shared/types/ui";
 import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
 import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
+import type { SessionLocationState } from "./chatSessionLocation";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
-
-interface SessionLocationState {
-  initialPrompt?: string;
-  initialModel?: ModelRef;
-  initialReasoningLevel?: ReasoningLevel;
-  initialProjectId?: string;
-  initialProject?: ProjectView;
-  initialSkills?: SkillSuggestion[];
-}
 
 function selectedSkillsOption(skills?: SkillSuggestion[]) {
   return skills && skills.length > 0 ? skills : undefined;
@@ -43,10 +36,9 @@ function selectedSkillsOption(skills?: SkillSuggestion[]) {
 
 export function ChatSessionPage() {
   const { t } = useTranslation(["chat"]);
-  const params = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const sessionId = params.sessionId ?? "";
+  const sessionId = useParams().sessionId ?? "";
   const initialPromptHandledRef = useRef(false);
   const mountedRef = useRef(false);
   const activeSessionIdRef = useRef(sessionId);
@@ -79,7 +71,7 @@ export function ChatSessionPage() {
     streamError,
     sessionHistoryQuery,
   } = useChatSession(sessionId, session?.message_count, session?.title);
-  const updateModel = useUpdateSessionModelMutation(sessionId);
+  const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
@@ -87,10 +79,17 @@ export function ChatSessionPage() {
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
   const activeProjectId = projectsView.activeProjectId;
   const setActiveProjectId = projectsView.setActiveProjectId;
-  const currentModelRef = session?.modelSelection.modelRef ?? draftModel ?? modelCatalog?.defaultModelSelection.modelRef;
+  const activeSessionModelSelection = useConfiguredSessionModelSelection({
+    catalog: modelCatalog,
+    selection: session?.modelSelection,
+    sessionId,
+    updateSelection: updateSessionModel,
+  });
+  const currentModelRef = activeSessionModelSelection?.modelRef ?? draftModel ?? modelCatalog?.defaultModelSelection.modelRef;
   const currentModel = currentModelRef ? modelRefKey(currentModelRef) : undefined;
   const currentModelInfo = modelInfoForRef(models, currentModelRef);
-  const currentReasoningLevel = session ? reasoningLevelForEffort(session.modelSelection.reasoningEffort)
+  const currentReasoningLevel = activeSessionModelSelection
+    ? reasoningLevelForEffort(activeSessionModelSelection.reasoningEffort)
     : draftReasoningLevel ?? (draftModel
         ? reasoningLevelForModel(models, draftModel)
         : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
@@ -248,7 +247,7 @@ export function ChatSessionPage() {
               }
               const modelSelection = modelSelectionForRef(models, modelRef);
               if (modelSelection) {
-                updateModel.mutate(modelSelection);
+                updateSessionModel(modelSelection);
               }
             }}
             onProjectChange={(projectId) => {
@@ -274,7 +273,7 @@ export function ChatSessionPage() {
               }
               const modelSelection = modelSelectionForRef(models, currentModelRef, level);
               if (modelSelection) {
-                updateModel.mutate(modelSelection);
+                updateSessionModel(modelSelection);
               }
             }}
             onSend={(skills) => {

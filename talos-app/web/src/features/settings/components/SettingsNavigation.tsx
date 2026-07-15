@@ -11,20 +11,41 @@ import {
   UserRoundCog,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 
+import {
+  closePreparedExternalWindow,
+  getCloudAuthUrl,
+  prepareExternalAuthWindow,
+  redirectToExternalUrl,
+} from "@/features/auth";
 import { cn } from "@/shared/lib/cn";
 import type { SettingsSection } from "../hooks/useSettingsPage";
 
-export type SettingsNavigationItem = {
+type InternalSettingsNavigationItem = {
   id: SettingsSection;
   icon: LucideIcon;
+  external?: false;
+};
+
+type ExternalSettingsNavigationItem = {
+  id: "account";
+  icon: LucideIcon;
+  external: true;
+};
+
+export type SettingsNavigationItem = InternalSettingsNavigationItem | ExternalSettingsNavigationItem;
+
+type SettingsNavigationProps = {
+  activeSection: SettingsSection;
+  canOpenAccount: boolean;
 };
 
 const personalNavigation: SettingsNavigationItem[] = [
   { id: "profile", icon: UserCircle },
   { id: "general", icon: Settings2 },
-  { id: "account", icon: UserCircle },
+  { id: "account", icon: UserCircle, external: true },
   { id: "appearance", icon: Brush },
   { id: "models", icon: Bot },
   { id: "agent-workspace", icon: UserRoundCog },
@@ -45,15 +66,26 @@ export const settingsNavigation: SettingsNavigationItem[] = [
   ...advancedNavigation,
 ];
 
-interface SettingsNavigationProps {
-  activeSection: SettingsSection;
-}
-
-export function SettingsNavigation({ activeSection }: SettingsNavigationProps) {
+export function SettingsNavigation({ activeSection, canOpenAccount }: SettingsNavigationProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const [accountOpenError, setAccountOpenError] = useState(false);
+  const openAccount = () => {
+    const preparedWindow = prepareExternalAuthWindow();
+    setAccountOpenError(false);
+    void getCloudAuthUrl()
+      .then((cloudAuthUrl) => {
+        const targetUrl = new URL("/account", cloudAuthUrl).toString();
+        redirectToExternalUrl(targetUrl, preparedWindow);
+      })
+      .catch((error: unknown) => {
+        closePreparedExternalWindow(preparedWindow);
+        setAccountOpenError(true);
+        console.error("Failed to open Cloud account management.", error);
+      });
+  };
 
   return (
-    <aside className="flex h-screen w-full flex-col border-r border-border/70 bg-card/95 px-4 py-5">
+    <aside className="flex h-screen w-full flex-col border-r border-border/70 bg-background px-4 py-5">
       <Link
         className="mb-7 inline-flex items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-sm text-muted transition hover:bg-card/80 hover:text-ink"
         to="/"
@@ -62,22 +94,49 @@ export function SettingsNavigation({ activeSection }: SettingsNavigationProps) {
         <span>{t("settings:backToApp")}</span>
       </Link>
       <nav className="space-y-1">
-        <NavigationGroup activeSection={activeSection} items={personalNavigation} label={t("settings:navigation.personal")} />
-        <NavigationGroup activeSection={activeSection} items={extensionNavigation} label={t("settings:navigation.extensions")} />
-        <NavigationGroup activeSection={activeSection} items={advancedNavigation} label={t("settings:navigation.advanced")} />
+        <NavigationGroup
+          activeSection={activeSection}
+          canOpenAccount={canOpenAccount}
+          items={personalNavigation}
+          label={t("settings:navigation.personal")}
+          onAccountClick={openAccount}
+        />
+        <NavigationGroup
+          activeSection={activeSection}
+          canOpenAccount={canOpenAccount}
+          items={extensionNavigation}
+          label={t("settings:navigation.extensions")}
+          onAccountClick={openAccount}
+        />
+        <NavigationGroup
+          activeSection={activeSection}
+          canOpenAccount={canOpenAccount}
+          items={advancedNavigation}
+          label={t("settings:navigation.advanced")}
+          onAccountClick={openAccount}
+        />
       </nav>
+      {accountOpenError ? (
+        <p className="px-3 text-xs leading-5 text-danger" role="alert">
+          {t("settings:account.openError")}
+        </p>
+      ) : null}
     </aside>
   );
 }
 
 function NavigationGroup({
   activeSection,
+  canOpenAccount,
   items,
   label,
+  onAccountClick,
 }: {
   activeSection: SettingsSection;
+  canOpenAccount: boolean;
   items: SettingsNavigationItem[];
   label: string;
+  onAccountClick: () => void;
 }) {
   const { t } = useTranslation("settings");
 
@@ -87,14 +146,32 @@ function NavigationGroup({
       <div className="space-y-1">
         {items.map((item) => {
           const Icon = item.icon;
-          const isCurrent = activeSection === item.id;
+          const isCurrent = item.external ? false : activeSection === item.id;
+          const className = cn(
+            "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30",
+            isCurrent && "bg-card/95 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.55)]",
+            item.external && "disabled:cursor-not-allowed disabled:opacity-55",
+          );
+
+          if (item.external) {
+            return (
+              <button
+                className={className}
+                disabled={!canOpenAccount}
+                key={item.id}
+                onClick={onAccountClick}
+                type="button"
+              >
+                <Icon aria-hidden="true" size={16} />
+                <span>{t(`sections.${item.id}`)}</span>
+              </button>
+            );
+          }
+
           return (
             <Link
               aria-current={isCurrent ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30",
-                isCurrent && "bg-card/95 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.55)]",
-              )}
+              className={className}
               key={item.id}
               to={item.id === "profile" ? "/settings" : `/settings/${item.id}`}
             >

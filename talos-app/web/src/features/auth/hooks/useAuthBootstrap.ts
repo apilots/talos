@@ -7,6 +7,7 @@ import {
   getGatewayHealth,
   readDesktopCloudSession,
 } from "../api";
+import { clearWebAuthToken, readWebAuthToken } from "../web-auth-session";
 import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { useConnectionSettings } from "@/features/connection";
 import { accountTypeFromWire } from "@/shared/types/account";
@@ -37,6 +38,7 @@ export function useAuthBootstrap() {
           return;
         }
         if (!health.auth_enabled) {
+          clearWebAuthToken();
           attemptedKeyRef.current = attemptKey;
           setConnection({
             authStatus: "open",
@@ -53,6 +55,8 @@ export function useAuthBootstrap() {
           const session = await readDesktopCloudSession();
           if (session?.access_token) {
             restoredToken = session.access_token;
+          } else {
+            restoredToken = readWebAuthToken() ?? "";
           }
         }
         const authToken = restoredToken || connection.authToken;
@@ -75,6 +79,7 @@ export function useAuthBootstrap() {
           return;
         }
         void clearDesktopCloudSession();
+        clearWebAuthToken();
         attemptedKeyRef.current = attemptKey;
         setConnection({
           authStatus: "unauthenticated",

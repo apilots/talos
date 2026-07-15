@@ -6,7 +6,6 @@ import { useConnectionSettings } from "@/features/connection";
 export type SettingsSection =
   | "profile"
   | "general"
-  | "account"
   | "appearance"
   | "models"
   | "agent-workspace"
@@ -17,7 +16,6 @@ export type SettingsSection =
 export const settingsSections: SettingsSection[] = [
   "profile",
   "general",
-  "account",
   "appearance",
   "models",
   "agent-workspace",

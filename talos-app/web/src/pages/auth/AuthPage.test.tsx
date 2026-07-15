@@ -12,6 +12,7 @@ import {
   prepareExternalAuthWindow,
   redirectToExternalUrl,
   startCloudLogin,
+  storeWebAuthToken,
 } from "@/features/auth";
 import { useAppStore } from "@/shared/store/app-store";
 import { AuthPage } from "./AuthPage";
@@ -22,6 +23,7 @@ vi.mock("@/features/auth", () => ({
   prepareExternalAuthWindow: vi.fn(),
   redirectToExternalUrl: vi.fn(),
   startCloudLogin: vi.fn(),
+  storeWebAuthToken: vi.fn(),
 }));
 
 const closePreparedExternalWindowMock = vi.mocked(closePreparedExternalWindow);
@@ -29,6 +31,7 @@ const getCloudLoginStatusMock = vi.mocked(getCloudLoginStatus);
 const prepareExternalAuthWindowMock = vi.mocked(prepareExternalAuthWindow);
 const startCloudLoginMock = vi.mocked(startCloudLogin);
 const redirectToExternalUrlMock = vi.mocked(redirectToExternalUrl);
+const storeWebAuthTokenMock = vi.mocked(storeWebAuthToken);
 
 function renderAuthPage(initialEntry: string) {
   return render(
@@ -47,6 +50,7 @@ describe("AuthPage", () => {
   const preparedWindow = { closed: false } as Window;
 
   beforeEach(() => {
+    window.sessionStorage.clear();
     closePreparedExternalWindowMock.mockReset();
     prepareExternalAuthWindowMock.mockReset();
     prepareExternalAuthWindowMock.mockReturnValue(preparedWindow);
@@ -73,6 +77,7 @@ describe("AuthPage", () => {
       },
     });
     redirectToExternalUrlMock.mockReset();
+    storeWebAuthTokenMock.mockReset();
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
       storage: createJSONStorage(() => ({
@@ -142,6 +147,7 @@ describe("AuthPage", () => {
     expect(useAppStore.getState().connection.authUsername).toBe("xiliu");
     expect(useAppStore.getState().connection.accountType).toBe("Pro");
     expect(useAppStore.getState().connection.authToken).toBe("web-token");
+    expect(storeWebAuthTokenMock).toHaveBeenCalledWith("web-token");
     expect(redirectToExternalUrlMock).toHaveBeenCalledTimes(1);
   });
 

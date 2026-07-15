@@ -198,8 +198,11 @@ export function useUpdateSessionModelMutation(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   const sessionKey = chatKeys.session(connectionKey, sessionId);
+  const mutationKey = ["session-model", connectionKey, sessionId] as const;
   return useMutation({
-    mutationFn: updateSessionModel.bind(null, sessionId),
+    mutationKey,
+    scope: { id: `session-model:${connectionKey}:${sessionId}` },
+    mutationFn: (modelSelection) => updateSessionModel(sessionId, modelSelection),
     onMutate: async (modelSelection: ModelSelection) => {
       await queryClient.cancelQueries({ queryKey: sessionKey });
       const previousSession = queryClient.getQueryData<SessionInfo>(sessionKey);
@@ -208,12 +211,22 @@ export function useUpdateSessionModelMutation(sessionId: string) {
       );
       return { previousSession };
     },
-    onError: (_error, _modelSelection, context) => {
+    onError: (_error, modelSelection, context) => {
       if (context?.previousSession) {
-        queryClient.setQueryData(sessionKey, context.previousSession);
+        queryClient.setQueryData<SessionInfo>(sessionKey, (current) => {
+          const currentSelection = current?.modelSelection;
+          const failedSelectionIsCurrent =
+            currentSelection?.modelRef.provider === modelSelection.modelRef.provider &&
+            currentSelection.modelRef.id === modelSelection.modelRef.id &&
+            currentSelection.reasoningEffort === modelSelection.reasoningEffort;
+          return failedSelectionIsCurrent ? context.previousSession : current;
+        });
       }
     },
     onSettled: async () => {
+      if (queryClient.isMutating({ mutationKey }) > 1) {
+        return;
+      }
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       await queryClient.invalidateQueries({ queryKey: sessionKey });
     },

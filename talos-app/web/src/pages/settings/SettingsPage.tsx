@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
 
 import {
-  SettingsAccountSection,
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
@@ -47,7 +46,10 @@ export function SettingsPage() {
 
   return (
     <div className="grid h-full w-full grid-cols-[320px_minmax(0,1fr)] overflow-hidden bg-background">
-      <SettingsNavigation activeSection={activeSection} />
+      <SettingsNavigation
+        activeSection={activeSection}
+        canOpenAccount={connection.authStatus === "authenticated"}
+      />
       <div className="min-h-0 overflow-y-auto">
         <div className="mx-auto w-full max-w-[1040px] px-8 py-7">
           <header className="mb-8 flex min-h-8 items-center justify-between gap-4">
@@ -73,8 +75,6 @@ export function SettingsPage() {
                 uiTheme={uiTheme}
               />
             ) : null}
-
-            {activeSection === "account" ? <SettingsAccountSection connection={connection} /> : null}
 
             {activeSection === "models" ? <SettingsModelsSection /> : null}
 

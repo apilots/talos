@@ -190,6 +190,26 @@ describe("ChatComposer controls", () => {
     expect(screen.queryByRole("button", { name: "DeepSeek V4 Pro" })).not.toBeInTheDocument();
   });
 
+  it("keeps the selected model when the current provider is selected again", () => {
+    const onModelChange = vi.fn();
+    renderComposer({
+      models: [
+        { id: "deepseek:deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "deepseek" },
+        { id: "deepseek:deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek" },
+        { id: "anthropic:claude-opus", name: "Claude Opus", provider: "anthropic" },
+      ],
+      onModelChange,
+      selectedModel: "deepseek:deepseek-v4-pro",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "deepseek" }));
+    const providerButtons = screen.getAllByRole("button", { name: "deepseek" });
+    fireEvent.click(providerButtons[providerButtons.length - 1]);
+
+    expect(onModelChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /deepseek v4 pro/i })).toBeInTheDocument();
+  });
+
   it("closes the project picker when clicking outside the composer", () => {
     render(
       <div>
@@ -198,7 +218,7 @@ describe("ChatComposer controls", () => {
           activeProjectId={UNBOUND_PROJECT_ID}
           draft=""
           isStreaming={false}
-          models={[{ id: "model-1", name: "Model 1" }]}
+          models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
           onCancel={vi.fn()}
           onDraftChange={vi.fn()}
           onModelChange={vi.fn()}
@@ -207,7 +227,7 @@ describe("ChatComposer controls", () => {
           onSend={vi.fn()}
           projects={createDefaultProjects()}
           runtimeMode="local"
-          selectedModel="model-1"
+          selectedModel="mock:model-1"
           showProjectSelector
         />
       </div>,

@@ -7,7 +7,6 @@ export {
 export type { SettingsPageState } from "./hooks/useSettingsPage";
 export { llmConfigKey, useLlmConfigQuery } from "./hooks/useLlmConfigQuery";
 export {
-  SettingsAccountSection,
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,

@@ -15,3 +15,4 @@ export {
   redirectToExternalUrl,
   type PreparedExternalWindow,
 } from "./navigation";
+export { storeWebAuthToken } from "./web-auth-session";

@@ -27,6 +27,7 @@ describe("useAuthBootstrap", () => {
   });
 
   beforeEach(() => {
+    window.sessionStorage.clear();
     getGatewayHealthMock.mockReset();
     getCurrentUserMock.mockReset();
     getCurrentUserWithTokenMock.mockReset();
@@ -120,6 +121,31 @@ describe("useAuthBootstrap", () => {
     expect(readDesktopCloudSessionMock).not.toHaveBeenCalled();
     expect(useAppStore.getState().connection.accountType).toBe("Plus");
     expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
+  });
+
+  it("restores and verifies a browser token from session storage", async () => {
+    const user = {
+      user_id: "user-3",
+      username: "grace",
+      email: null,
+      role: "user",
+      type: "pro",
+      disabled: false,
+      created_at: 0,
+      updated_at: 0,
+    };
+    window.sessionStorage.setItem("talos-web-auth-token", "stored-web-token");
+    getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
+    readDesktopCloudSessionMock.mockResolvedValue(null);
+    getCurrentUserWithTokenMock.mockResolvedValue(user);
+
+    renderHook(() => useAuthBootstrap());
+
+    await waitFor(() => {
+      expect(useAppStore.getState().connection.authStatus).toBe("authenticated");
+    });
+    expect(getCurrentUserWithTokenMock).toHaveBeenCalledWith("stored-web-token");
+    expect(useAppStore.getState().connection.authToken).toBe("stored-web-token");
   });
 
   it("marks the connection unauthenticated when bearer verification fails", async () => {

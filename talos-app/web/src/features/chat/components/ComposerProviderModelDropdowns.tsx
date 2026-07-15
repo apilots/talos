@@ -1,4 +1,4 @@
-import { Zap } from "lucide-react";
+import { Waypoints, Zap } from "lucide-react";
 
 import { ComposerDropdown } from "./ComposerDropdown";
 import {
@@ -34,6 +34,7 @@ export function ComposerProviderModelDropdowns({
           label: provider || modelLabel,
         }))}
         onChange={changeProvider}
+        triggerIcon={<Waypoints size={12} className="text-brand" />}
         value={activeProvider}
       />
       <ComposerDropdown

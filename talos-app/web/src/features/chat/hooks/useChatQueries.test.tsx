@@ -25,6 +25,7 @@ vi.mock("@/shared/store/app-store", () => ({
 describe("useUpdateSessionModelMutation", () => {
   afterEach(() => {
     cleanup();
+    apiMocks.updateSessionModel.mockReset();
     vi.restoreAllMocks();
   });
 
@@ -61,5 +62,65 @@ describe("useUpdateSessionModelMutation", () => {
     });
 
     resolveUpdate?.();
+  });
+
+  it("persists consecutive selections in the order they were made", async () => {
+    const resolvers: Array<() => void> = [];
+    apiMocks.updateSessionModel.mockImplementation(
+      () => new Promise<void>((resolve) => resolvers.push(resolve)),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const sessionKey = chatKeys.session("token|user-1", "session-1");
+    queryClient.setQueryData(sessionKey, {
+      modelSelection: {
+        modelRef: { provider: "deepseek", id: "deepseek-v4-flash" },
+        reasoningEffort: "light",
+      },
+    } as SessionInfo);
+    const wrapper = ({ children }: PropsWithChildren) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useUpdateSessionModelMutation("session-1"), { wrapper });
+    const firstSelection: ModelSelection = {
+      modelRef: { provider: "anthropic", id: "claude-opus" },
+      reasoningEffort: "medium",
+    };
+    const finalSelection: ModelSelection = {
+      modelRef: { provider: "anthropic", id: "claude-opus" },
+      reasoningEffort: "high",
+    };
+
+    act(() => {
+      result.current.mutate(firstSelection);
+      result.current.mutate(finalSelection);
+    });
+
+    await waitFor(() => expect(apiMocks.updateSessionModel).toHaveBeenCalledTimes(1));
+    expect(apiMocks.updateSessionModel).toHaveBeenNthCalledWith(
+      1,
+      "session-1",
+      firstSelection,
+    );
+    expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+      finalSelection,
+    );
+
+    act(() => resolvers[0]?.());
+
+    await waitFor(() => expect(apiMocks.updateSessionModel).toHaveBeenCalledTimes(2));
+    expect(apiMocks.updateSessionModel).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      finalSelection,
+    );
+    expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+      finalSelection,
+    );
+
+    act(() => resolvers[1]?.());
+    await waitFor(() => {
+      expect(queryClient.getQueryData<SessionInfo>(sessionKey)?.modelSelection).toEqual(
+        finalSelection,
+      );
+    });
   });
 });

@@ -167,10 +167,6 @@ try {
     ["settings-appearance", "#/settings/appearance"],
     ["settings-server", "#/settings/server"],
   ];
-  if (serverInfo.auth_enabled === true) {
-    settingsRoutes.splice(3, 0, ["settings-account", "#/settings/account"]);
-  }
-
   for (const [name, route] of settingsRoutes) {
     await clickAnchorByHash(cdp, route);
     await waitForHash(cdp, route, 30_000);

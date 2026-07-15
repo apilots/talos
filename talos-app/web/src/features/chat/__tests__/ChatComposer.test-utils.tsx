@@ -13,7 +13,7 @@ export function renderComposer(overrides: Partial<React.ComponentProps<typeof Ch
       activeProjectId={UNBOUND_PROJECT_ID}
       draft=""
       isStreaming={false}
-      models={[{ id: "model-1", name: "Model 1" }]}
+      models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
       onCancel={vi.fn()}
       onDraftChange={vi.fn()}
       onModelChange={vi.fn()}
@@ -22,7 +22,7 @@ export function renderComposer(overrides: Partial<React.ComponentProps<typeof Ch
       onSend={vi.fn()}
       projects={createDefaultProjects()}
       runtimeMode="local"
-      selectedModel="model-1"
+      selectedModel="mock:model-1"
       showProjectSelector={false}
       {...overrides}
     />,
@@ -42,7 +42,7 @@ export function renderControlledComposer({
         disabled={false}
         draft={draft}
         isStreaming={false}
-        models={[{ id: "model-1", name: "Model 1" }]}
+        models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
         onCancel={vi.fn()}
         onDraftChange={setDraft}
         onModelChange={vi.fn()}
@@ -51,7 +51,7 @@ export function renderControlledComposer({
         onSend={vi.fn()}
         projects={createDefaultProjects()}
         runtimeMode="local"
-        selectedModel="model-1"
+        selectedModel="mock:model-1"
         showProjectSelector={false}
         {...overrides}
       />
@@ -72,7 +72,7 @@ export function renderControlledComposerWithRebuiltHistory(texts: string[]) {
         draft={draft}
         inputHistory={committedHistory(...texts)}
         isStreaming={false}
-        models={[{ id: "model-1", name: "Model 1" }]}
+        models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
         onCancel={vi.fn()}
         onDraftChange={setDraft}
         onModelChange={vi.fn()}
@@ -81,7 +81,7 @@ export function renderControlledComposerWithRebuiltHistory(texts: string[]) {
         onSend={vi.fn()}
         projects={createDefaultProjects()}
         runtimeMode="local"
-        selectedModel="model-1"
+        selectedModel="mock:model-1"
         showProjectSelector={false}
       />
     );

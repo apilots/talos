@@ -5,6 +5,7 @@ import { getDesktopServerInfo } from "@talos/sdk-app-server/desktop";
 import { getTalosClient } from "@/shared/api/client";
 import { resolveServerBaseUrl } from "@/shared/api/server-base-url";
 import { getDesktopBridge, isDesktopRuntime } from "@/shared/api/desktop-client";
+import { clearWebAuthToken } from "./web-auth-session";
 
 export interface HealthResponse {
   status: string;
@@ -17,10 +18,15 @@ export interface HealthResponse {
 const envCloudAuthUrl = import.meta.env.VITE_TALOS_CLOUD_AUTH_URL as string | undefined;
 
 export async function logoutUser(): Promise<void> {
-  if (isDesktopRuntime()) {
-    await clearDesktopCloudSession();
+  try {
+    await getTalosClient().auth.logout();
+  } finally {
+    if (isDesktopRuntime()) {
+      await clearDesktopCloudSession();
+    } else {
+      clearWebAuthToken();
+    }
   }
-  return getTalosClient().auth.logout();
 }
 
 export async function getCurrentUser(): Promise<UserDto> {

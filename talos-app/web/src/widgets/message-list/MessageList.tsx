@@ -231,7 +231,7 @@ function MessageTimelineBlock({
                 open={open}
               >
                 <summary
-                  className="cursor-pointer list-none rounded-[1rem] px-4 py-3 marker:hidden transition-colors hover:bg-card/45"
+                  className="cursor-pointer list-none rounded-[1rem] px-1 py-3 marker:hidden transition-colors hover:bg-card/45"
                   onClick={(event) => {
                     event.preventDefault();
                     setOpen((current) => !current);

@@ -28,6 +28,7 @@ export {
 } from "./model-selection";
 export { SidebarContainer } from "./components/SidebarContainer";
 export { useChatSession } from "./hooks/useChatSession";
+export { useConfiguredSessionModelSelection } from "./hooks/useConfiguredSessionModelSelection";
 export {
   chatKeys,
   useCreateProjectMutation,

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 export interface ComposerModelOption {
   id: string;
   name: string;
-  provider?: string;
+  provider: string;
 }
 
 interface ComposerModelSelectProps {
@@ -19,25 +19,31 @@ export function useComposerModelOptions(
   selectedModel: string | undefined,
   onChange: ((model: string) => void) | undefined,
 ) {
-  const providers = [...new Set(models.map((model) => model.provider ?? ""))];
-  const selectedProvider = models.find((model) => model.id === selectedModel)?.provider ?? providers[0] ?? "";
-  const [activeProvider, setActiveProvider] = useState(selectedProvider);
+  const providers = [...new Set(models.map((model) => model.provider))];
+  const selectedProvider = models.find((model) => model.id === selectedModel)?.provider;
+  const [activeProvider, setActiveProvider] = useState(selectedProvider ?? "");
+  const [pendingModel, setPendingModel] = useState<string>();
 
   useEffect(() => {
-    if (selectedProvider) {
-      setActiveProvider(selectedProvider);
-    }
-  }, [selectedProvider]);
+    setActiveProvider(selectedProvider ?? "");
+    setPendingModel(undefined);
+  }, [selectedModel, selectedProvider]);
 
-  const providerModels = models.filter((model) => (model.provider ?? "") === activeProvider);
+  const providerModels = models.filter((model) => model.provider === activeProvider);
   const activeModel = providerModels.some((model) => model.id === selectedModel)
     ? selectedModel
-    : providerModels[0]?.id;
+    : providerModels.some((model) => model.id === pendingModel)
+      ? pendingModel
+      : undefined;
 
   const changeProvider = (provider: string) => {
+    if (provider === activeProvider) {
+      return;
+    }
     setActiveProvider(provider);
-    const firstConfiguredModel = models.find((model) => (model.provider ?? "") === provider);
+    const firstConfiguredModel = models.find((model) => model.provider === provider);
     if (firstConfiguredModel) {
+      setPendingModel(firstConfiguredModel.id);
       onChange?.(firstConfiguredModel.id);
     }
   };
@@ -65,8 +71,8 @@ export function ComposerModelSelect({
         value={activeProvider}
       >
         {providers.map((provider) => (
-          <option key={provider || "models"} value={provider}>
-            {provider || modelLabel}
+          <option key={provider} value={provider}>
+            {provider}
           </option>
         ))}
       </select>

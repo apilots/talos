@@ -14,7 +14,6 @@ vi.mock("@/features/settings", async () => {
   return {
     ...actual,
     SettingsAgentWorkspaceSection: () => <div>Agent workspace content</div>,
-    SettingsAccountSection: () => <div>Account content</div>,
     SettingsAppearanceSection: () => <div>Appearance content</div>,
     SettingsGeneralSection: () => <div>General content</div>,
     SettingsMcpServersSection: () => <div>MCP servers content</div>,
@@ -129,10 +128,10 @@ describe("SettingsPage", () => {
     expect(screen.getByText("General content")).toBeTruthy();
   });
 
-  it("renders the account handoff section", () => {
+  it("redirects the removed account page to the settings profile", () => {
     renderSettings("/settings/account", "authenticated", "admin");
 
-    expect(screen.getByText("Account content")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Account & Tokens" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Profile content")).toBeTruthy();
+    expect(screen.queryByText("Account content")).toBeNull();
   });
 });

@@ -8,6 +8,7 @@ import {
   prepareExternalAuthWindow,
   redirectToExternalUrl,
   startCloudLogin,
+  storeWebAuthToken,
 } from "@/features/auth";
 import { useConnectionSettings } from "@/features/connection";
 import { Button } from "@/shared/ui/Button";
@@ -56,6 +57,7 @@ export function AuthPage() {
         }
         if (response.status === "authenticated") {
           if (canceled) return;
+          storeWebAuthToken(response.access_token);
           setConnection({
             authToken: response.access_token,
             authStatus: "authenticated",
@@ -101,6 +103,7 @@ export function AuthPage() {
     const authWindow = prepareExternalAuthWindow();
     setIsCompleting(true);
     setError("");
+    storeWebAuthToken("");
     setConnection({ authToken: "", authStatus: "loading" });
     try {
       const response = await startCloudLogin();

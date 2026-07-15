@@ -39,7 +39,7 @@ interface ChatComposerProps {
   disabled?: boolean;
   isStreaming?: boolean;
   isCancelling?: boolean;
-  models: Array<{ id: string; name: string; provider?: string }>;
+  models: Array<{ id: string; name: string; provider: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   projects: ProjectView[];
