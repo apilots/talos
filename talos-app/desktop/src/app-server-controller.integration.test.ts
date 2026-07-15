@@ -79,7 +79,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       command: process.env.TALOS_APP_SERVER_BIN ?? "app-server",
       cwd: process.env.TALOS_APP_SERVER_CWD,
       clientName: "talos-desktop-crash-recovery-smoke",
-      clientVersion: "0.1.3",
+      clientVersion: "0.1.4",
       restartDelayMs: 10,
       bridgeFactory: (options: AppServerClientOptions) => {
         const bridge = new RecordingBridge(createDesktopMainAppServerBridge(options));

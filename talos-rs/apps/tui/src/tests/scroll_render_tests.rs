@@ -1097,7 +1097,7 @@ fn test_completed_diff_tool_rendering_is_expanded_by_default() {
 fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
     let mut app = create_embedded_app();
     app.render_runtime
-        .append_system_notice("Talos TUI (v0.1.3)");
+        .append_system_notice("Talos TUI (v0.1.4)");
     app.rebuild_chat_render_state(Rect::new(0, 0, 40, 12));
 }
 
