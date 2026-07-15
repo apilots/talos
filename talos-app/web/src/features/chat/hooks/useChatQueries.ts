@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
 
 import {
   cancelActiveTurn,
@@ -196,11 +197,25 @@ export function useUpdateProjectNameMutation() {
 export function useUpdateSessionModelMutation(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
+  const sessionKey = chatKeys.session(connectionKey, sessionId);
   return useMutation({
     mutationFn: updateSessionModel.bind(null, sessionId),
-    onSuccess: async () => {
+    onMutate: async (modelSelection: ModelSelection) => {
+      await queryClient.cancelQueries({ queryKey: sessionKey });
+      const previousSession = queryClient.getQueryData<SessionInfo>(sessionKey);
+      queryClient.setQueryData<SessionInfo>(sessionKey, (current) =>
+        current ? { ...current, modelSelection } : current,
+      );
+      return { previousSession };
+    },
+    onError: (_error, _modelSelection, context) => {
+      if (context?.previousSession) {
+        queryClient.setQueryData(sessionKey, context.previousSession);
+      }
+    },
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-      await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
+      await queryClient.invalidateQueries({ queryKey: sessionKey });
     },
   });
 }

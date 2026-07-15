@@ -11,7 +11,6 @@ import {
   Shield,
   Square,
   TriangleAlert,
-  Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { SkillSuggestion } from "@talos/sdk-browser";
@@ -23,7 +22,8 @@ import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
-import { ComposerModelSelect, composerModelItems } from "./ComposerModelSelect";
+import { ComposerModelSelect } from "./ComposerModelSelect";
+import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
@@ -99,7 +99,7 @@ export function ChatComposer({
   showRuntimeModeSelector = true,
   compact = false,
 }: ChatComposerProps) {
-  const { t } = useTranslation(["chat", "common"]);
+  const { t } = useTranslation(["chat", "common", "settings"]);
   const isBusy = Boolean(isStreaming || isCancelling);
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
@@ -332,7 +332,6 @@ export function ChatComposer({
     }
   };
 
-  const modelItems: DropdownItem[] = composerModelItems(models);
   const reasoningItems: DropdownItem[] = reasoningEnabled
     ? [
         { value: "light", label: t("chat:reasoningLight") },
@@ -381,9 +380,10 @@ export function ChatComposer({
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <ComposerModelSelect
-              fallbackGroupLabel={t("chat:modelLabel")}
+              modelLabel={t("chat:modelLabel")}
               models={models}
               onChange={onModelChange}
+              providerLabel={t("settings:modelsPanel.activeProvider")}
               selectedModel={selectedModel}
             />
             <select
@@ -494,12 +494,12 @@ export function ChatComposer({
 
           {!compact && (
             <>
-              <ComposerDropdown
-                header={t("chat:modelLabel")}
-                items={modelItems}
-                onChange={(v) => onModelChange?.(v)}
-                triggerIcon={<Zap size={12} className="text-brand" />}
-                value={selectedModel}
+              <ComposerProviderModelDropdowns
+                modelLabel={t("chat:modelLabel")}
+                models={models}
+                onChange={onModelChange}
+                providerLabel={t("settings:modelsPanel.activeProvider")}
+                selectedModel={selectedModel}
               />
               <ComposerDropdown
                 disabled={!reasoningEnabled}

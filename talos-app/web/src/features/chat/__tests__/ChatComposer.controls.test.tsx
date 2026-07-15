@@ -165,6 +165,31 @@ describe("ChatComposer controls", () => {
     expect(screen.queryByText("Light")).not.toBeInTheDocument();
   });
 
+  it("selects the first configured model and filters models when the provider changes", () => {
+    const onModelChange = vi.fn();
+    renderComposer({
+      models: [
+        { id: "deepseek:deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "deepseek" },
+        { id: "deepseek:deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek" },
+        { id: "anthropic:claude-opus", name: "Claude Opus", provider: "anthropic" },
+        { id: "anthropic:claude-sonnet", name: "Claude Sonnet", provider: "anthropic" },
+      ],
+      onModelChange,
+      selectedModel: "deepseek:deepseek-v4-flash",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "deepseek" }));
+    fireEvent.click(screen.getByRole("button", { name: "anthropic" }));
+
+    expect(onModelChange).toHaveBeenCalledWith("anthropic:claude-opus");
+    expect(screen.getByRole("button", { name: /claude opus/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /claude opus/i }));
+
+    expect(screen.getByRole("button", { name: "Claude Sonnet" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "DeepSeek V4 Pro" })).not.toBeInTheDocument();
+  });
+
   it("closes the project picker when clicking outside the composer", () => {
     render(
       <div>
