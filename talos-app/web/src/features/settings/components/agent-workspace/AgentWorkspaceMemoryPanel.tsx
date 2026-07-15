@@ -28,7 +28,7 @@ export function AgentWorkspaceMemoryPanel({ canEdit }: AgentWorkspaceMemoryPanel
   return (
     <div className="grid gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
       <AgentWorkspaceMemoryListPanel dates={memoryDates} memory={memory} showingSearch={showingSearch} />
-      <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/90 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/35 p-5 shadow-none backdrop-blur-none">
         {showingSearch ? (
           <MemorySearchDetail memory={memory} />
         ) : (

@@ -376,7 +376,7 @@ export function ChatComposer({
 
   return (
     <div className="relative">
-      <Panel className="overflow-visible rounded-[1.5rem] border-border/80 bg-card p-0 backdrop-blur-none">
+      <Panel className="overflow-visible rounded-[1.5rem] border-border/70 bg-card p-0 shadow-[0_16px_34px_rgba(104,94,78,0.07)] backdrop-blur-none">
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <ComposerModelSelect
@@ -387,7 +387,7 @@ export function ChatComposer({
               selectedModel={selectedModel}
             />
             <select
-              className="min-w-[12rem] flex-[1.2] rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm outline-none transition focus:border-brand/50 md:max-w-[22rem]"
+              className="form-control-focus min-w-[12rem] flex-[1.2] rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm transition md:max-w-[22rem]"
               onChange={(event) => onProjectChange(event.target.value)}
               value={activeProjectId}
             >
@@ -411,7 +411,7 @@ export function ChatComposer({
           />
           <Textarea
             className={cn(
-              "resize-none border-0 bg-transparent px-5 text-[14px] leading-[1.6] focus:border-0",
+              "resize-none border-0 bg-transparent px-5 text-[14px] leading-[1.6] focus:border-0 focus:shadow-none",
               compact ? "min-h-10 pt-3" : "min-h-12 pt-4",
             )}
             data-smoke="chat-composer-input"
@@ -514,8 +514,8 @@ export function ChatComposer({
           {sendButton}
         </div>
 
-        <div className="border-t border-border/50">
-          <div className="flex flex-wrap items-center gap-1 px-3">
+        <div className="mx-3 border-t border-border/50">
+          <div className="flex flex-wrap items-center gap-1">
             {showCollapsibleProject && (
               <>
                 <button
@@ -590,7 +590,7 @@ export function ChatComposer({
                 />
                 <input
                   autoFocus
-                  className="w-full rounded-xl border border-border/50 bg-background/60 py-1.5 pl-7 pr-3 text-[12px] outline-none placeholder:text-muted focus:border-brand/50 focus:ring-0"
+                  className="form-control-focus w-full rounded-xl border border-border/50 bg-background/60 py-1.5 pl-7 pr-3 text-[12px] placeholder:text-muted"
                   onChange={(e) => setProjectSearch(e.target.value)}
                   placeholder={t("chat:searchProjects")}
                   value={projectSearch}

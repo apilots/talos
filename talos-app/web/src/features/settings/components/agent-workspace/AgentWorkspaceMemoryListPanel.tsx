@@ -22,7 +22,7 @@ export function AgentWorkspaceMemoryListPanel({
   const busy = memory.isSearchPending || memory.isSearching;
 
   return (
-    <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-card/78 p-2.5">
+    <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/28 p-2.5 shadow-none backdrop-blur-none">
       <div className="px-2 pt-2">
         <div className="text-[11px] uppercase tracking-[0.22em] text-muted/80">{t("common:search")}</div>
         <div className="relative mt-3">
@@ -53,8 +53,8 @@ export function AgentWorkspaceMemoryListPanel({
               className={[
                 "w-full rounded-[var(--radius-control)] border px-3.5 py-3 text-left transition",
                 memory.selectedDate === date
-                  ? "border-border/80 bg-background/88 text-ink shadow-[0_10px_24px_rgba(95,84,64,0.045)]"
-                  : "border-transparent text-muted hover:border-border/60 hover:bg-background/55",
+                  ? "border-border/80 bg-surface/80 text-ink shadow-sm"
+                  : "border-transparent text-muted hover:border-border/60 hover:bg-surface/50",
               ].join(" ")}
               key={date}
               onClick={() => memory.selectDate(date)}

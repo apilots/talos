@@ -31,7 +31,7 @@ export function AgentWorkspaceInstructionsPanel({
 
   return (
     <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,1fr)]">
-      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-card/78 p-2.5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/28 p-2.5 shadow-none backdrop-blur-none">
         <div className="mb-2 px-2 pt-2 text-[11px] uppercase tracking-[0.22em] text-muted/80">
           {t("workspaceDocs:documents")}
         </div>
@@ -41,8 +41,8 @@ export function AgentWorkspaceInstructionsPanel({
               className={[
                 "w-full rounded-[var(--radius-control)] border px-3.5 py-3 text-left transition",
                 workspaceDocs.selectedDocKind === kind
-                  ? "border-border/80 bg-background/88 text-ink shadow-[0_10px_24px_rgba(95,84,64,0.045)]"
-                  : "border-transparent text-muted hover:border-border/60 hover:bg-background/55",
+                  ? "border-border/80 bg-surface/80 text-ink shadow-sm"
+                  : "border-transparent text-muted hover:border-border/60 hover:bg-surface/50",
               ].join(" ")}
               key={kind}
               onClick={() => workspaceDocs.setSelectedDocKind(kind)}
@@ -54,7 +54,7 @@ export function AgentWorkspaceInstructionsPanel({
           ))}
         </div>
       </Panel>
-      <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/90 p-5">
+      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/35 p-5 shadow-none backdrop-blur-none">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="text-xs uppercase tracking-[0.22em] text-muted">{t("settings:agentInstructions")}</div>
@@ -95,7 +95,7 @@ export function AgentWorkspaceInstructionsPanel({
         ) : null}
         {editorMode === "edit" && canEdit ? (
           <Textarea
-            className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.32),rgba(255,255,255,0.16))] font-mono text-sm leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+            className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/72 font-mono text-sm leading-6 shadow-none"
             onChange={(event) => workspaceDocs.setDocDraft(event.target.value)}
             value={workspaceDocs.docDraft}
           />

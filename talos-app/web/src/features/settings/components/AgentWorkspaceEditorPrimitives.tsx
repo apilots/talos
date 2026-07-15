@@ -14,11 +14,11 @@ export function EditorModeSwitch({
   const { t } = useTranslation("common");
 
   return (
-    <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-border/70 bg-background/48 p-1">
+    <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-border/70 bg-surface/50 p-1">
       <button
         className={[
           "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-          mode === "preview" ? "bg-card text-ink shadow-panel" : "text-muted hover:text-ink",
+          mode === "preview" ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
         ].join(" ")}
         onClick={() => setMode("preview")}
         type="button"
@@ -28,7 +28,7 @@ export function EditorModeSwitch({
       <button
         className={[
           "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-          mode === "edit" ? "bg-card text-ink shadow-panel" : "text-muted hover:text-ink",
+          mode === "edit" ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
         ].join(" ")}
         onClick={() => setMode("edit")}
         type="button"
@@ -41,7 +41,7 @@ export function EditorModeSwitch({
 
 export function MarkdownPreview({ text, emptyText }: { text: string; emptyText: string }) {
   return (
-    <div className="mt-4 rounded-[var(--radius-panel)] border border-border/70 bg-background/36 p-5">
+    <div className="mt-4 rounded-[var(--radius-panel)] border border-border/70 bg-surface/35 p-5">
       {text.trim() ? (
         <MarkdownRenderer className="markdown-body prose prose-sm max-w-none" text={text} />
       ) : (

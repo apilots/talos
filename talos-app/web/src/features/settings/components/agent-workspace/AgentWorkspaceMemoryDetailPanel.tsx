@@ -89,7 +89,7 @@ export function MemoryDailyDetail({
       </div>
       {editorMode === "edit" && canEdit ? (
         <Textarea
-          className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.32),rgba(255,255,255,0.16))] font-mono text-sm leading-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]"
+          className="mt-4 min-h-[440px] rounded-[var(--radius-panel)] border-border/70 bg-surface/72 font-mono text-sm leading-6 shadow-none"
           onChange={(event) => memory.setEditorContent(event.target.value)}
           value={memory.editorContent}
         />

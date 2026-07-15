@@ -8,7 +8,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
     <input
       {...props}
       className={cn(
-        "w-full rounded-[var(--radius-control)] border border-border/85 bg-surface/88 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-brand/60 focus:bg-background/92",
+        "form-control-focus w-full rounded-[var(--radius-control)] border border-border/85 bg-surface/88 px-4 py-3 text-sm text-ink transition placeholder:text-muted",
         props.className,
       )}
     />
@@ -21,7 +21,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaHTMLAttributes<H
       <textarea
         {...props}
         className={cn(
-          "w-full rounded-[var(--radius-control)] border border-border/85 bg-surface/88 px-4 py-3 text-sm text-ink outline-none transition placeholder:text-muted focus:border-brand/60 focus:bg-background/92",
+          "form-control-focus w-full rounded-[var(--radius-control)] border border-border/85 bg-surface/88 px-4 py-3 text-sm text-ink transition placeholder:text-muted",
           props.className,
         )}
         ref={ref}

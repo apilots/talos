@@ -40,7 +40,7 @@ export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps)
   const title = session?.title ?? staticPageTitle(location.pathname);
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/55 bg-background px-4">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/55 bg-card px-4">
       <button
         aria-label="Open sidebar"
         className="flex size-8 items-center justify-center rounded-[var(--radius-control)] border border-border/70 bg-background/90 text-muted shadow-[0_10px_24px_rgba(95,84,64,0.08)] transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"

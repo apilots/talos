@@ -2,7 +2,7 @@
 
 import { createElement, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
@@ -128,5 +128,20 @@ describe("SettingsAgentWorkspaceSection", () => {
     });
     expect(screen.queryByText("2026-05-06")).toBeNull();
     expect(screen.queryByText("MEMORY.md")).toBeNull();
+  });
+
+  it("exposes and updates the selected workspace mode", () => {
+    render(<SettingsAgentWorkspaceSection />, { wrapper: createWrapper() });
+
+    const generalTab = screen.getByRole("button", { name: "General" });
+    const instructionsTab = screen.getByRole("button", { name: "Instructions" });
+
+    expect(generalTab.getAttribute("aria-pressed")).toBe("true");
+    expect(instructionsTab.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(instructionsTab);
+
+    expect(generalTab.getAttribute("aria-pressed")).toBe("false");
+    expect(instructionsTab.getAttribute("aria-pressed")).toBe("true");
   });
 });

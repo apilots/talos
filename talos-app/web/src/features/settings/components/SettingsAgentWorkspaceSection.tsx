@@ -21,18 +21,19 @@ export function SettingsAgentWorkspaceSection() {
 
   return (
     <div className="space-y-5">
-      <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/88 p-6">
+      <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/35 p-6 shadow-none backdrop-blur-none">
         <SectionHeader
           icon={<Brain size={18} />}
           subtitle={t("agentWorkspaceDetail")}
           title={t("agentWorkspaceTitle")}
         />
-        <div className="mt-5 flex flex-wrap gap-2 rounded-[var(--radius-control)] border border-border/70 bg-background/48 p-1">
+        <div className="mt-5 flex gap-1 rounded-[var(--radius-control)] border border-border/70 bg-surface/50 p-1">
           {workspaceModes.map((workspaceMode) => (
             <button
+              aria-pressed={mode === workspaceMode}
               className={[
-                "rounded-[var(--radius-control)] px-3 py-2 text-sm transition",
-                mode === workspaceMode ? "bg-card text-ink shadow-panel" : "text-muted hover:text-ink",
+                "flex min-w-0 flex-1 items-center justify-center rounded-[calc(var(--radius-control)-0.2rem)] px-3 py-2 text-sm font-medium transition",
+                mode === workspaceMode ? "bg-card text-ink shadow-sm" : "text-muted hover:text-ink",
               ].join(" ")}
               key={workspaceMode}
               onClick={() => setMode(workspaceMode)}

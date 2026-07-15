@@ -52,7 +52,7 @@ export function SidebarProjectRenameDialog({
       >
         <DialogHeader detail="Keep it short and recognizable" onClose={onClose} title="Rename project" />
         <input
-          className="mt-6 h-12 w-full rounded-[0.95rem] border border-border/85 bg-background px-4 text-lg text-ink outline-none transition focus:border-brand/50 focus:ring-2 focus:ring-brand/20"
+          className="form-control-focus mt-6 h-12 w-full rounded-[0.95rem] border border-border/85 bg-background px-4 text-lg text-ink transition"
           onChange={(event) => setName(event.target.value)}
           ref={inputRef}
           value={name}

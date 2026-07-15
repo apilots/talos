@@ -17,7 +17,7 @@ export function PluginCatalogSearch({ query, onQueryChange }: PluginCatalogSearc
           size={16}
         />
         <input
-          className="h-11 w-full rounded-full border border-border/80 bg-card pl-10 pr-4 text-sm outline-none transition placeholder:text-muted focus:border-brand/45"
+          className="form-control-focus h-11 w-full rounded-full border border-border/80 bg-card pl-10 pr-4 text-sm transition placeholder:text-muted"
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t("searchPlaceholder")}
           value={query}

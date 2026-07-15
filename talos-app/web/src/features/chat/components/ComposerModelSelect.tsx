@@ -65,7 +65,7 @@ export function ComposerModelSelect({
     <>
       <select
         aria-label={providerLabel}
-        className="min-w-[8rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm outline-none transition focus:border-brand/50 md:max-w-[12rem]"
+        className="form-control-focus min-w-[8rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm transition md:max-w-[12rem]"
         disabled={providers.length <= 1}
         onChange={(event) => changeProvider(event.target.value)}
         value={activeProvider}
@@ -78,7 +78,7 @@ export function ComposerModelSelect({
       </select>
       <select
         aria-label={modelLabel}
-        className="min-w-[10rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm outline-none transition focus:border-brand/50 md:max-w-[15rem]"
+        className="form-control-focus min-w-[10rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm transition md:max-w-[15rem]"
         onChange={(event) => onChange?.(event.target.value)}
         value={activeModel}
       >

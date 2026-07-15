@@ -30,7 +30,7 @@ export function TextInput({
 }) {
   return (
     <input
-      className="h-10 w-full rounded-[0.75rem] border border-border/75 bg-background/60 px-3 text-sm font-medium text-ink placeholder:text-muted/70 read-only:text-muted focus:border-brand/40 focus:outline-none focus:ring-2 focus:ring-brand/15"
+      className="form-control-focus h-10 w-full rounded-[0.75rem] border border-border/75 bg-background/60 px-3 text-sm font-medium text-ink placeholder:text-muted/70 read-only:text-muted"
       defaultValue={defaultValue}
       placeholder={placeholder}
       readOnly={readOnly}

@@ -19,7 +19,7 @@ export function AgentWorkspaceGeneralPanel() {
   const userWorkspacePath = workspaceInfoQuery.data?.user_workspace_dir ?? "";
 
   return (
-    <Panel className="rounded-[var(--radius-panel)] border-border/75 bg-card/90 p-5">
+    <Panel className="rounded-[var(--radius-panel)] border-border/70 bg-background/35 p-5 shadow-none backdrop-blur-none">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <div className="text-xs uppercase tracking-[0.22em] text-muted">

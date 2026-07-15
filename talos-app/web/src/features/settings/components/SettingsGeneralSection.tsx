@@ -38,7 +38,7 @@ export function SettingsGeneralSection({
         <div className="mt-6 grid gap-5 md:grid-cols-2">
           <FieldBlock label={t("common:language")}>
             <select
-              className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none transition focus:border-brand/50"
+              className="form-control-focus w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm transition"
               onChange={(event) => setLocale(event.target.value as "en" | "zh-CN")}
               value={locale}
             >
@@ -49,7 +49,7 @@ export function SettingsGeneralSection({
           </FieldBlock>
           <FieldBlock label={t("common:runtimeMode")}>
             <select
-              className="w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm outline-none transition focus:border-brand/50"
+              className="form-control-focus w-full rounded-2xl border border-border bg-card px-4 py-3 text-sm transition"
               onChange={(event) =>
                 setDraft((current) => ({
                   ...current,

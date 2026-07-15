@@ -68,7 +68,7 @@ export function AddPluginMarketplaceDialog({
           <Field label={t("plugins:dialog.sourceLabel")}>
             <input
               autoFocus
-              className="h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
+              className="form-control-focus h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] transition placeholder:text-muted"
               onChange={(event) => setSource(event.target.value)}
               placeholder="openai/plugins or git@github.com:org/repo.git"
               value={source}
@@ -76,7 +76,7 @@ export function AddPluginMarketplaceDialog({
           </Field>
           <Field label={t("plugins:dialog.gitRefLabel")}>
             <input
-              className="h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
+              className="form-control-focus h-12 w-full rounded-[0.8rem] border border-border bg-background/70 px-4 text-[17px] transition placeholder:text-muted"
               onChange={(event) => setGitRef(event.target.value)}
               placeholder="main"
               value={gitRef}
@@ -84,7 +84,7 @@ export function AddPluginMarketplaceDialog({
           </Field>
           <Field label={t("plugins:dialog.sparsePathsLabel")}>
             <textarea
-              className="min-h-28 w-full resize-y rounded-[0.8rem] border border-border bg-background/70 px-4 py-3 text-[17px] outline-none transition placeholder:text-muted focus:border-brand"
+              className="form-control-focus min-h-28 w-full resize-y rounded-[0.8rem] border border-border bg-background/70 px-4 py-3 text-[17px] transition placeholder:text-muted"
               onChange={(event) => setSparsePaths(event.target.value)}
               placeholder="plugins/codex"
               value={sparsePaths}

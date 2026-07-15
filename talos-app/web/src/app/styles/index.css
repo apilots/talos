@@ -100,6 +100,14 @@ select {
 }
 
 @layer components {
+  .form-control-focus {
+    outline: none;
+  }
+
+  .form-control-focus:focus {
+    box-shadow: 0 0 0 2px rgb(var(--color-ink) / 0.06);
+  }
+
   .markdown-body {
     --tw-prose-body: rgb(var(--color-ink) / 0.92);
     --tw-prose-headings: rgb(var(--color-ink));
