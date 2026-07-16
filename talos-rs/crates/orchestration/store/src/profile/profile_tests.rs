@@ -79,6 +79,7 @@ async fn waiting_usage_is_hidden_until_the_turn_finalizes() {
     let summary = store.usage_summary("user-1").await.unwrap();
     assert_eq!(summary.usage, usage_with_cache(30, 5, 2, 4));
     assert!(summary.usage_available);
+    assert_eq!(summary.usage_session_count, 1);
     assert_eq!(summary.usage_started_at_ms, Some(1_000));
 
     let daily = store
@@ -104,6 +105,28 @@ async fn duplicate_execution_segment_is_not_counted_twice() {
     assert_eq!(
         store.usage_summary("user-1").await.unwrap().usage,
         usage_with_cache(30, 5, 2, 4)
+    );
+}
+
+#[tokio::test]
+async fn usage_summary_counts_distinct_finalized_sessions() {
+    let store = store().await;
+    store
+        .record_turn_usage(update("request-1", StopReason::EndTurn, usage(10, 2)))
+        .await
+        .unwrap();
+    let mut second_session = update("request-2", StopReason::EndTurn, usage(20, 3));
+    second_session.session_id = "session-2".to_string();
+    second_session.turn_id = "turn-2".to_string();
+    store.record_turn_usage(second_session).await.unwrap();
+
+    assert_eq!(
+        store
+            .usage_summary("user-1")
+            .await
+            .unwrap()
+            .usage_session_count,
+        2
     );
 }
 
@@ -146,4 +169,46 @@ async fn aggregate_usage_is_scoped_to_the_requesting_user() {
         store.usage_summary("user-1").await.unwrap().usage,
         usage(10, 2)
     );
+}
+
+#[tokio::test]
+async fn deletion_keeps_recent_and_unfinished_usage() {
+    let store = store().await;
+    let mut oldest = update("request-1", StopReason::EndTurn, usage(10, 2));
+    oldest.completed_at_ms = 100;
+    store.record_turn_usage(oldest).await.unwrap();
+
+    let mut another_old = update("request-2", StopReason::EndTurn, usage(20, 3));
+    another_old.session_id = "session-2".to_string();
+    another_old.turn_id = "turn-2".to_string();
+    another_old.completed_at_ms = 150;
+    store.record_turn_usage(another_old).await.unwrap();
+
+    let mut recent = update("request-3", StopReason::EndTurn, usage(30, 4));
+    recent.session_id = "session-3".to_string();
+    recent.turn_id = "turn-3".to_string();
+    recent.completed_at_ms = 300;
+    store.record_turn_usage(recent).await.unwrap();
+
+    let mut unfinished = update("request-4", StopReason::WaitingDynamicInput, usage(40, 5));
+    unfinished.session_id = "session-4".to_string();
+    unfinished.turn_id = "turn-4".to_string();
+    unfinished.completed_at_ms = 50;
+    store.record_turn_usage(unfinished).await.unwrap();
+
+    assert_eq!(store.delete_finalized_before(200, 1).await.unwrap(), 1);
+    assert_eq!(store.delete_finalized_before(200, 10).await.unwrap(), 1);
+
+    let finalized: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage WHERE finalized = 1")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+    let unfinished: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM profile_turn_usage WHERE finalized = 0")
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+    assert_eq!(finalized, 1);
+    assert_eq!(unfinished, 1);
 }

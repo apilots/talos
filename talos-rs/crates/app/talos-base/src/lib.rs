@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use talos_agent::{AgentDefinitionLoader, AgentHarness, AgentHarnessFactory, SkillRootsResolver};
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
+use talos_automation::Automation;
 use talos_channel::{ChannelServer, TelegramChannel};
 use talos_config::{
     effective_llm_protocol, AgentKernelConfig, Config, LlmConfigManager, LlmConfigService,
@@ -57,6 +58,7 @@ use tracing::{error, info, warn};
 
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
+mod application_automation;
 mod application_storage;
 
 #[derive(Clone)]
@@ -145,6 +147,7 @@ pub struct TalosServerRuntime {
     gateway_url: String,
     shutdown_token: CancellationToken,
     lifecycle: Arc<ServerLifecycle>,
+    automation: Automation,
 }
 
 #[derive(Clone)]
@@ -157,14 +160,7 @@ pub struct TalosApplicationRuntime {
     pub agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime>,
     pub coordinator: Arc<CoordinatorImpl>,
     pub tool_registry: Arc<ToolRegistry>,
-}
-
-impl TalosApplicationRuntime {
-    pub async fn shutdown(&self) -> TalosResult<()> {
-        self.coordinator
-            .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
-            .await
-    }
+    automation: Automation,
 }
 
 struct ApplicationCollaborationHost {
@@ -567,6 +563,7 @@ impl TalosServerRuntime {
             gateway_url: _,
             shutdown_token,
             lifecycle,
+            automation,
         } = self;
 
         let signal_shutdown = shutdown_token.clone();
@@ -614,36 +611,10 @@ impl TalosServerRuntime {
         signal_task.abort();
         quiesce_task.abort();
 
-        perform_shutdown(&coordinator, &lifecycle).await;
-
-        result
+        let shutdown_result =
+            application_automation::shutdown_server(&coordinator, &automation, &lifecycle).await;
+        application_automation::combine(result, shutdown_result)
     }
-}
-
-async fn perform_shutdown(coordinator: &Arc<CoordinatorImpl>, lifecycle: &Arc<ServerLifecycle>) {
-    if lifecycle.current() == ServerLifecycleState::Stopped {
-        return;
-    }
-
-    if !lifecycle.current().is_quiescing_or_later() {
-        lifecycle.store(ServerLifecycleState::Quiescing);
-    }
-    lifecycle.store(ServerLifecycleState::Draining);
-
-    let pending_flushes = coordinator.pending_memory_flushes().await;
-    info!(
-        pending_flushes,
-        timeout_secs = MEMORY_FLUSH_DRAIN_TIMEOUT.as_secs(),
-        "draining background tasks before shutdown"
-    );
-    if let Err(err) = coordinator
-        .drain_background_tasks(MEMORY_FLUSH_DRAIN_TIMEOUT)
-        .await
-    {
-        warn!(error = %err, "background task drain failed on shutdown");
-    }
-
-    lifecycle.store(ServerLifecycleState::Stopped);
 }
 
 pub fn init_logging(
@@ -707,6 +678,7 @@ pub async fn start_server(
         gateway_url: format!("http://{}:{}", config.gateway.host, config.gateway.port),
         shutdown_token: CancellationToken::new(),
         lifecycle: http_server.lifecycle(),
+        automation: runtime.automation,
         http_server,
         channel_server,
     })
@@ -714,6 +686,7 @@ pub async fn start_server(
 
 pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
     let runtime = build_application_runtime(config.clone()).await?;
+    let automation = runtime.automation.clone();
     let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
@@ -727,7 +700,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
         runtime.auth_service,
         service.account.clone(),
     ));
-    talos_app_server::run_stdio(
+    let result = talos_app_server::run_stdio(
         app,
         validator,
         talos_app_server::AppServerConfig {
@@ -737,10 +710,12 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
         },
     )
     .await
-    .map_err(|error| TalosError::InternalError(error.message))
+    .map_err(|error| TalosError::InternalError(error.message));
+    application_automation::finish(result, &automation).await
 }
 
 pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
+    config.validate_runtime()?;
     let (storage_impl, profile_store) =
         application_storage::build_application_storage(&config).await?;
     let storage: Arc<dyn talos_storage::Storage> = storage_impl;
@@ -867,13 +842,12 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         provider_router_reloader.reload();
         Ok(())
     });
-
     let service = Arc::new(TalosService::new_with_reload_hook(
         turn_executor,
         session_runtime,
         session_store,
         project_store,
-        profile_store,
+        profile_store.clone(),
         event_service.clone(),
         idempotency_store,
         config.clone(),
@@ -893,6 +867,12 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
+    let automation = application_automation::start_profile_usage(
+        profile_store,
+        config.automation.profile_usage_retention.clone(),
+        talos_config::parse_timezone(&config.timezone)?,
+    )
+    .await?;
 
     Ok(TalosApplicationRuntime {
         config,
@@ -903,6 +883,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         agent_dispatch_runtime,
         coordinator,
         tool_registry,
+        automation,
     })
 }
 

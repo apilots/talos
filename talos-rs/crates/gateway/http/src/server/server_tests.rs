@@ -56,10 +56,19 @@ impl ProfileStore for EmptyProfileStore {
         Ok(())
     }
 
+    async fn delete_finalized_before(
+        &self,
+        _completed_before_ms: i64,
+        _limit: usize,
+    ) -> TalosResult<u64> {
+        Ok(0)
+    }
+
     async fn usage_summary(&self, _user_id: &str) -> TalosResult<ProfileUsageSummary> {
         Ok(ProfileUsageSummary {
             usage: TokenUsage::default(),
             usage_available: false,
+            usage_session_count: 0,
             usage_started_at_ms: None,
         })
     }

@@ -48,7 +48,7 @@ export function SettingsProfileSection({
       label: t("settings:profile.mostUsedModel"),
       value: primaryModel ?? t("settings:profile.noModelUsage"),
     },
-    { icon: <TrendingUp size={16} />, label: t("settings:profile.averageTokensSession"), value: profile.usageAvailable ? formatNumber(averageTokens(totalTokens, profile.sessionCount)) : t("settings:profile.unavailable") },
+    { icon: <TrendingUp size={16} />, label: t("settings:profile.averageTokensSession"), value: profile.usageAvailable ? formatNumber(averageTokens(totalTokens, profile.usageSessionCount)) : t("settings:profile.unavailable") },
     { icon: <Folder size={16} />, label: t("settings:profile.activeProjects"), value: formatNumber(profile.projectCount) },
   ];
   const modelRows: ProfileMetricView[] =

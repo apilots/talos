@@ -208,6 +208,14 @@ fn test_kernel_defaults() {
     );
     assert!(config.agent.kernel.prompt.bootstrap.include_memory);
     assert_eq!(config.timezone, "UTC");
+    assert_eq!(
+        config.automation.profile_usage_retention.cron,
+        "0 15 3 * * 1"
+    );
+    assert_eq!(
+        config.automation.profile_usage_retention.retention_days,
+        366
+    );
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
         config.agent.kernel.workspace_dir,
@@ -284,6 +292,42 @@ fn test_validate_runtime_requires_cloud_when_auth_enabled() {
     config.llm.model = "qwen-max".to_string();
     config.llm.ollama.base_url = Some("http://localhost:11434".to_string());
     assert!(config.validate_runtime().is_ok());
+}
+
+#[test]
+fn test_validate_runtime_rejects_zero_profile_usage_retention_batch_size() {
+    let mut config = Config::default();
+    config.automation.profile_usage_retention.batch_size = 0;
+
+    let error = config.validate_runtime().unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("profile_usage_retention.batch_size"));
+}
+
+#[test]
+fn test_validate_runtime_rejects_zero_profile_usage_retention_days() {
+    let mut config = Config::default();
+    config.automation.profile_usage_retention.retention_days = 0;
+
+    let error = config.validate_runtime().unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("profile_usage_retention.retention_days"));
+}
+
+#[test]
+fn test_validate_runtime_rejects_invalid_profile_usage_retention_cron() {
+    let mut config = Config::default();
+    config.automation.profile_usage_retention.cron = "not-a-cron".to_string();
+
+    let error = config.validate_runtime().unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("profile_usage_retention.cron is invalid"));
 }
 
 #[test]

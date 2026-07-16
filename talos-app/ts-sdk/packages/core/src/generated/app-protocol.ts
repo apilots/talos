@@ -28,7 +28,7 @@ export type ActorCredential = { "type": "existing_session_token", token: string,
 
 export type ProfileReadRequest = Record<string, never>;
 
-export type ProfileReadResponse = { sessionCount: number, messageCount: number, projectCount: number, usage: TokenUsage, usageAvailable: boolean, usageStartedAt: number | null, asOfDate: string, dailyUsage: Array<ProfileDailyUsage>, modelUsage: Array<ProfileModelUsage>, };
+export type ProfileReadResponse = { sessionCount: number, messageCount: number, projectCount: number, usage: TokenUsage, usageAvailable: boolean, usageSessionCount: number, usageStartedAt: number | null, asOfDate: string, dailyUsage: Array<ProfileDailyUsage>, modelUsage: Array<ProfileModelUsage>, };
 
 export type ProfileDailyUsage = { date: string, usage: TokenUsage, usageAvailable: boolean, };
 

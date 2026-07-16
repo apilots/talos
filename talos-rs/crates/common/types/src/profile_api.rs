@@ -23,6 +23,8 @@ pub struct ProfileReadResponse {
     pub project_count: u64,
     pub usage: TokenUsage,
     pub usage_available: bool,
+    #[ts(type = "number")]
+    pub usage_session_count: u64,
     #[ts(type = "number | null")]
     pub usage_started_at: Option<i64>,
     pub as_of_date: String,

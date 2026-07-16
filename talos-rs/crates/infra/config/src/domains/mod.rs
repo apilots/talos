@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod automation;
 pub mod cloud;
 pub mod fs;
 pub mod kernel;

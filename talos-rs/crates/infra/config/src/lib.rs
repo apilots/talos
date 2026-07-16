@@ -42,6 +42,7 @@ pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, PlannerMode,
 };
+pub use domains::automation::{AutomationConfig, ProfileUsageRetentionConfig};
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
@@ -94,6 +95,10 @@ pub struct Config {
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
     pub timezone: String,
+
+    /// Scheduled maintenance configuration.
+    #[serde(default)]
+    pub automation: AutomationConfig,
 
     /// Agent 配置
     #[serde(default)]
@@ -153,6 +158,7 @@ impl Default for Config {
         let mut config = Self {
             source_path: None,
             timezone: default_timezone(),
+            automation: AutomationConfig::default(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),

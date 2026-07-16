@@ -155,6 +155,39 @@ pub(super) async fn discard_turn_usage(
     Ok(())
 }
 
+pub(super) async fn delete_finalized_before(
+    pool: &SqlitePool,
+    completed_before_ms: i64,
+    limit: usize,
+) -> TalosResult<u64> {
+    if limit == 0 {
+        return Err(TalosError::ValidationError(
+            "profile usage retention batch size must be > 0".to_string(),
+        ));
+    }
+    let limit = i64::try_from(limit).map_err(|_| {
+        TalosError::ValidationError("profile usage retention batch size is too large".to_string())
+    })?;
+    let result = sqlx::query(
+        r#"
+        DELETE FROM profile_turn_usage
+        WHERE id IN (
+            SELECT id
+            FROM profile_turn_usage
+            WHERE finalized = 1 AND completed_at_ms < ?
+            ORDER BY completed_at_ms ASC, id ASC
+            LIMIT ?
+        )
+        "#,
+    )
+    .bind(completed_before_ms)
+    .bind(limit)
+    .execute(pool)
+    .await
+    .map_err(storage_error("delete expired profile usage"))?;
+    Ok(result.rows_affected())
+}
+
 fn validate_existing_turn(
     row: &sqlx::sqlite::SqliteRow,
     update: &TurnUsageUpdate,

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => {
       cache_creation_input_tokens: null,
     },
     usageAvailable: true,
+    usageSessionCount: 0,
     usageStartedAt: null,
     asOfDate: "2026-07-16",
     dailyUsage: [],

@@ -68,6 +68,7 @@ impl ProfileService {
             project_count,
             usage: usage.usage,
             usage_available: usage.usage_available,
+            usage_session_count: usage.usage_session_count,
             usage_started_at: usage
                 .usage_started_at_ms
                 .map(|timestamp| timestamp.div_euclid(1_000)),

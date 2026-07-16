@@ -5,6 +5,7 @@ use talos_types::{ModelRef, StopReason, TokenUsage};
 pub struct ProfileUsageSummary {
     pub usage: TokenUsage,
     pub usage_available: bool,
+    pub usage_session_count: u64,
     pub usage_started_at_ms: Option<i64>,
 }
 

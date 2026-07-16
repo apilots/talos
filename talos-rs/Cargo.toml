@@ -18,6 +18,7 @@ members = [
     "crates/infra/logging",
     "crates/infra/storage",
     "crates/infra/auth",
+    "crates/infra/automation",
     # Perception
     "crates/perception/channels",
     # Cognition
@@ -87,6 +88,7 @@ toml = "0.8"
 
 # Storage
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "migrate"] }
+croner = "2.2"
 redis = "0.24"
 
 # Networking
@@ -120,6 +122,7 @@ talos-tools-policy = { path = "crates/action/tools-policy" }
 talos-tools-sandbox = { path = "crates/action/tools-sandbox" }
 talos-memory = { path = "crates/cognition/memory" }
 talos-auth = { path = "crates/infra/auth" }
+talos-automation = { path = "crates/infra/automation" }
 talos-gateway = { path = "crates/gateway/core" }
 talos-app-protocol = { path = "crates/gateway/app-protocol" }
 talos-app-server = { path = "crates/gateway/app-server" }

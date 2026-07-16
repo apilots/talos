@@ -3207,6 +3207,11 @@
         "usageAvailable": {
           "type": "boolean"
         },
+        "usageSessionCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "usageStartedAt": {
           "format": "int64",
           "type": [
@@ -3223,7 +3228,8 @@
         "projectCount",
         "sessionCount",
         "usage",
-        "usageAvailable"
+        "usageAvailable",
+        "usageSessionCount"
       ],
       "type": "object"
     },

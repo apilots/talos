@@ -9,7 +9,9 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
-use talos_config::{AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol};
+use talos_config::{
+    AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol, ProviderModelConfig,
+};
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -134,6 +136,19 @@ fn canonical(path: PathBuf) -> PathBuf {
     path.canonicalize().unwrap_or(path)
 }
 
+fn provider_model(id: &str) -> ProviderModelConfig {
+    ProviderModelConfig {
+        id: id.to_string(),
+        name: id.to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }
+}
+
 async fn spawn_json_server(body: impl Into<String>) -> (String, oneshot::Receiver<String>) {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
@@ -172,6 +187,7 @@ async fn application_runtime_builds_when_model_key_is_missing() {
     let mut config = Config::default();
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
+    config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
     config.llm.anthropic.api_key = None;
 
     let runtime = build_application_runtime(config)
@@ -179,6 +195,22 @@ async fn application_runtime_builds_when_model_key_is_missing() {
         .expect("runtime should start before model setup is complete");
 
     assert_eq!(runtime.config.llm.provider, "anthropic");
+    runtime.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn application_runtime_rejects_invalid_profile_usage_retention() {
+    let mut config = Config::default();
+    config.automation.profile_usage_retention.retention_days = 0;
+
+    let error = match build_application_runtime(config).await {
+        Ok(_) => panic!("invalid Profile retention should prevent runtime startup"),
+        Err(error) => error,
+    };
+
+    assert!(error
+        .to_string()
+        .contains("profile_usage_retention.retention_days"));
 }
 
 #[tokio::test]
@@ -187,6 +219,7 @@ async fn application_runtime_registers_configured_default_agent() {
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
     config.llm.model = "global-model".to_string();
+    config.llm.anthropic.models = vec![provider_model("global-model")];
     config.agent.agents = vec![AgentDefinitionConfig {
         id: "reviewer".to_string(),
         name: "Reviewer".to_string(),
@@ -211,6 +244,7 @@ async fn application_runtime_registers_configured_default_agent() {
         .expect("configured agent should register");
     assert_eq!(registration.descriptor.name, "Reviewer");
     assert_eq!(runtime.coordinator.registry().len().await, 1);
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -219,6 +253,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
     config.llm.model = "global-model".to_string();
+    config.llm.anthropic.models = vec![provider_model("global-model")];
     config.agent.agents = vec![
         AgentDefinitionConfig {
             id: "disabled".to_string(),
@@ -254,6 +289,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
         .is_err());
     assert!(runtime.coordinator.registry().get("enabled").await.is_ok());
     assert_eq!(runtime.coordinator.registry().len().await, 1);
+    runtime.shutdown().await.unwrap();
 }
 
 #[tokio::test]
@@ -284,6 +320,7 @@ async fn openrouter_provider_uses_chat_completions_path_and_concrete_provider() 
     config.llm.model = "test-model".to_string();
     config.llm.openrouter.api_key = Some("test-key".to_string());
     config.llm.openrouter.base_url = Some(base_url);
+    config.llm.openrouter.models = vec![provider_model("test-model")];
 
     let provider = create_llm_provider(&config).expect("provider should be created");
     assert_eq!(provider.name(), "openrouter");
@@ -310,6 +347,7 @@ async fn openai_provider_uses_responses_path_when_protocol_selected() {
     config.llm.openai.api_key = Some("test-key".to_string());
     config.llm.openai.base_url = Some(base_url);
     config.llm.openai.protocol = Some(LlmProtocol::Responses);
+    config.llm.openai.models = vec![provider_model("gpt-test")];
 
     let provider = create_llm_provider(&config).expect("provider should be created");
     assert_eq!(provider.name(), "openai");
@@ -333,6 +371,7 @@ async fn deepseek_provider_uses_chat_completions_path_and_concrete_provider() {
     config.llm.model = "deepseek-v4-pro".to_string();
     config.llm.deepseek.api_key = Some("test-key".to_string());
     config.llm.deepseek.base_url = Some(base_url);
+    config.llm.deepseek.models = vec![provider_model("deepseek-v4-pro")];
 
     let provider = create_llm_provider(&config).expect("provider should be created");
     let response = provider

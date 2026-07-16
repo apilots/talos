@@ -13,6 +13,7 @@ tracing = { workspace = true }
 talos-agent = { path = "../../orchestration/agent" }
 talos-service = { workspace = true }
 talos-auth = { path = "../../infra/auth" }
+talos-automation = { workspace = true }
 talos-channel = { workspace = true }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }

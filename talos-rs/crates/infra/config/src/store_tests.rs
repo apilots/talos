@@ -147,8 +147,15 @@ fn test_save_then_load_raw_roundtrip() {
     let loaded = store.load_raw().unwrap();
     assert_eq!(loaded.provider, "bailian");
     assert_eq!(loaded.model, "qwen-max");
-    assert_eq!(loaded.anthropic.models.len(), 1);
-    assert_eq!(loaded.anthropic.models[0].id, "test-model");
+    assert_eq!(
+        loaded
+            .anthropic
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["claude-3-5-sonnet", "test-model"]
+    );
 }
 
 #[test]

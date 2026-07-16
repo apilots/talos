@@ -1,5 +1,12 @@
 timezone: "Asia/Shanghai"
 
+automation:
+  profile_usage_retention:
+    cron: "0 15 3 * * 1"
+    retention_days: 366
+    batch_size: 1000
+    max_batches: 10
+
 # Production profile for Talos Cloud.
 gateway:
   port: 8080

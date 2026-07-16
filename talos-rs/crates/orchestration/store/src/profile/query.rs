@@ -11,7 +11,8 @@ pub(super) async fn usage_summary(
 ) -> TalosResult<ProfileUsageSummary> {
     let row = sqlx::query(
         r#"
-        SELECT COUNT(*) AS turn_count, SUM(input_tokens) AS input_tokens,
+        SELECT COUNT(*) AS turn_count, COUNT(DISTINCT session_id) AS usage_session_count,
+               SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens, SUM(total_tokens) AS total_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)
                     THEN SUM(cache_creation_input_tokens) END AS cache_creation_input_tokens,
@@ -34,6 +35,7 @@ pub(super) async fn usage_summary(
         return Ok(ProfileUsageSummary {
             usage: TokenUsage::default(),
             usage_available: false,
+            usage_session_count: 0,
             usage_started_at_ms: None,
         });
     }
@@ -44,6 +46,13 @@ pub(super) async fn usage_summary(
             .map_err(storage_error("read profile usage availability"))?
             .unwrap_or_default()
             != 0,
+        usage_session_count: u64::try_from(
+            row.try_get::<i64, _>("usage_session_count")
+                .map_err(storage_error("read profile usage session count"))?,
+        )
+        .map_err(|_| {
+            TalosError::StorageError("profile usage session count is negative".to_string())
+        })?,
         usage_started_at_ms: row
             .try_get("usage_started_at")
             .map_err(storage_error("read profile usage start"))?,

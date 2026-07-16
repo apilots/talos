@@ -83,6 +83,35 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
 
     crate::parse_timezone(&config.timezone)?;
 
+    let profile_retention = &config.automation.profile_usage_retention;
+    if profile_retention.cron.trim().is_empty() {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.profile_usage_retention.cron must not be empty".to_string(),
+        ));
+    }
+    let mut cron = croner::Cron::new(&profile_retention.cron);
+    cron.with_seconds_required().with_dom_and_dow();
+    cron.parse().map_err(|error| {
+        TalosError::InvalidConfiguration(format!(
+            "automation.profile_usage_retention.cron is invalid: {error}"
+        ))
+    })?;
+    if profile_retention.retention_days == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.profile_usage_retention.retention_days must be > 0".to_string(),
+        ));
+    }
+    if profile_retention.batch_size == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.profile_usage_retention.batch_size must be > 0".to_string(),
+        ));
+    }
+    if profile_retention.max_batches == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.profile_usage_retention.max_batches must be > 0".to_string(),
+        ));
+    }
+
     if config.agent.name.trim().is_empty() || is_unresolved_placeholder(&config.agent.name) {
         return Err(TalosError::InvalidConfiguration(
             "agent.name is empty or unresolved placeholder".to_string(),

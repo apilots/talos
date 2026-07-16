@@ -22,7 +22,7 @@ pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDate, MemoryListCommand, MemorySearchCommand, MemoryService};
 pub use plugin::PluginManagerService;
-pub use profile::ProfileService;
+pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};
 pub use session::{scope as session_scope, CreateSessionParams, SessionService};
 pub use skills::SkillsService;
