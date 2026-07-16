@@ -105,8 +105,10 @@ chrono-tz = "0.10"
 sha2 = "0.10"
 moka = { version = "0.12", features = ["sync"] }
 
-# HTTP Client for tests
-reqwest = { version = "0.11", features = ["json"] }
+# HTTP
+reqwest = { version = "0.12", features = ["json"] }
+firecrawl = "2.11"
+tavily = "2.1"
 rmcp = { version = "1.7.0", default-features = false }
 cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 

@@ -39,7 +39,7 @@ Talos 目标是实现接近 Claude Code 的代码协作体验。Claude Code 是�
 | 文件工具 | 有 `Read` / `Edit` / `Write`，含 read-before-edit/write 检查 | 需要增强 runtime |
 | 搜索工具 | 有 `Grep` / `Glob`，但 `Grep` 不是真 ripgrep | 需要重做搜索 runtime |
 | Shell | 有 sessionized `Bash` / `TaskOutput` / `TaskStop` | 需要补安全语义、权限决策和风险分类 |
-| Web | `WebSearch` 抓 DuckDuckGo HTML；`WebFetch` 简单 HTML text | demo 级，需要正式 provider |
+| Web | `WebSearch` 支持正式 search provider；`WebFetch` 简单 HTML text | provider 已接入，页面读取仍需增强 |
 | Patch | config 有 `enable_apply_patch`，但无工具实现 | 必须补齐 |
 | MCP / Skill | 有基础 MCP tool 和 `Skill` / `ToolSearch` | 需要 resource 与 lazy discovery |
 
@@ -73,7 +73,7 @@ Talos 目标是实现接近 Claude Code 的代码协作体验。Claude Code 是�
 
 | 工具 | 当前能力 | 需要补齐 |
 | --- | --- | --- |
-| `WebSearch` | DuckDuckGo HTML 抓取和字符串解析 | 正式 search provider、recency、domain filters、result refs、citations、错误分类、限额、合规来源归因 |
+| `WebSearch` | Firecrawl / Brave / Tavily provider adapter | recency、domain filters、result refs、citations、错误分类、限额、合规来源归因 |
 | `WebFetch` | GET + HTML stripping + max chars | readability/Markdown、redirect 信息、domain permission、auth/private URL 提醒、prompt-based extraction、MIME 处理、内容持久化策略 |
 
 `WebSearch` 必须对外暴露稳定的 `WebSearchRequest` / `WebSearchResponse` runtime schema。外部使用方只调用统一 search 接口，不感知具体 provider；provider 选择、API key、base URL、timeout 等只从 `AgentKernelConfig.tools.web_search` 进入 runtime。
@@ -85,9 +85,10 @@ agent:
   kernel:
     tools:
       web_search:
-        provider: duckduckgo # duckduckgo | brave | tavily
-        duckduckgo:
-          base_url: https://api.duckduckgo.com/
+        provider: firecrawl # firecrawl | brave | tavily
+        firecrawl:
+          api_key_env: TALOS_WEB_SEARCH_FIRECRAWL_API_KEY
+          base_url: https://api.firecrawl.dev
           timeout_ms: 15000
         brave:
           api_key_env: TALOS_WEB_SEARCH_BRAVE_API_KEY
@@ -95,13 +96,13 @@ agent:
           timeout_ms: 15000
         tavily:
           api_key_env: TALOS_WEB_SEARCH_TAVILY_API_KEY
-          base_url: https://api.tavily.com/search
+          base_url: https://api.tavily.com
           timeout_ms: 15000
 ```
 
 Provider 约束：
 
-- `duckduckgo` 是默认无 key base provider，用于本地开发和基础可用性。
+- `firecrawl` 是默认 provider，支持无 key free tier，也可通过配置或环境变量提供 API key。
 - `brave` / `tavily` 通过 provider adapter 接入，API key 可来自配置值或环境变量。
 - `recency_days`、domain allow/block、limit 在标准 request 中表达，由 provider adapter 映射到厂商参数；response 必须暴露 `provider`、`recency_days`、`freshness_applied` 和标准 hits。
 - Tool 层只把标准 response 映射到 canonical `WebReference` / `Text` content items，不把 provider 原始响应作为 UI/SDK/replay 主路径。

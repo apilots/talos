@@ -63,19 +63,15 @@ impl Tool for WebSearchTool {
                     "items": { "type": "string" },
                     "description": "Optional domain blocklist."
                 },
-                "domains": {
-                    "type": "array",
-                    "items": { "type": "string" },
-                    "description": "Alias for allowed_domains."
-                },
                 "recency_days": {
                     "type": "integer",
                     "minimum": 1,
-                    "description": "Requested freshness window in days. Provider support is exposed in the structured result."
+                    "description": "Requested freshness window in days. The structured response reports whether the selected provider applied it."
                 },
                 "limit": {
                     "type": "integer",
                     "minimum": 1,
+                    "maximum": 20,
                     "description": "Maximum number of hits to return."
                 }
             }
@@ -103,20 +99,19 @@ impl Tool for WebSearchTool {
         let mut content_items = response
             .hits
             .iter()
-            .enumerate()
-            .map(|(index, hit)| TalosContentItem::WebReference {
+            .map(|hit| TalosContentItem::WebReference {
                 url: hit.url.clone(),
                 title: Some(hit.title.clone()),
-                citation_id: Some(format!("web-{}", index + 1)),
+                citation_id: Some(format!("web-{}", hit.rank)),
                 snippet: Some(hit.snippet.clone()).filter(|value| !value.trim().is_empty()),
                 source_domain: hit.source_domain.clone(),
-                published_at: hit.published_at.clone(),
-                provider_rank: hit.provider_rank,
+                published_at: None,
+                provider_rank: Some(hit.rank),
             })
             .collect::<Vec<_>>();
         if content_items.is_empty() {
             content_items.push(TalosContentItem::Text {
-                text: response.summary.clone(),
+                text: "No search results matched the requested filters.".to_string(),
             });
         }
         Ok(ToolOutputPayload::success_with_content_items(

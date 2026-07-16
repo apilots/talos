@@ -35,9 +35,10 @@ agent:
     tools:
       enable_collaboration_tools: true
       web_search:
-        provider: "duckduckgo"
-        duckduckgo:
-          base_url: "https://api.duckduckgo.com/"
+        provider: "firecrawl"
+        firecrawl:
+          api_key_env: "TALOS_WEB_SEARCH_FIRECRAWL_API_KEY"
+          base_url: "https://api.firecrawl.dev"
           timeout_ms: 15000
         brave:
           api_key_env: "TALOS_WEB_SEARCH_BRAVE_API_KEY"
@@ -45,7 +46,7 @@ agent:
           timeout_ms: 15000
         tavily:
           api_key_env: "TALOS_WEB_SEARCH_TAVILY_API_KEY"
-          base_url: "https://api.tavily.com/search"
+          base_url: "https://api.tavily.com"
           timeout_ms: 15000
     skills:
       max_skill_md_bytes: 65536

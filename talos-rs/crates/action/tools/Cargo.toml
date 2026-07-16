@@ -23,7 +23,9 @@ talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 async-trait = "0.1"
 dashmap = "5.5"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest.workspace = true
+firecrawl.workspace = true
+tavily.workspace = true
 tokio-util = { workspace = true }
 futures-util = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

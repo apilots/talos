@@ -11,7 +11,11 @@ fn web_search_defaults_to_keyless_base_provider() {
     let config = ToolsRuntimeConfig::default();
     assert_eq!(
         config.web_search.provider,
-        WebSearchProviderConfig::DuckDuckGoInstantAnswer
+        WebSearchProviderConfig::Firecrawl
+    );
+    assert_eq!(
+        config.web_search.firecrawl.base_url.as_deref(),
+        Some("https://api.firecrawl.dev")
     );
     assert!(config.web_search.brave.api_key_env.is_some());
     assert!(config.web_search.tavily.api_key_env.is_some());
@@ -21,9 +25,10 @@ fn web_search_defaults_to_keyless_base_provider() {
 fn web_search_provider_config_deserializes_from_snake_case() {
     let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
         "web_search": {
-            "provider": "duckduckgo",
-            "duckduckgo": {
-                "base_url": "https://duckduckgo.example/"
+            "provider": "firecrawl",
+            "firecrawl": {
+                "api_key_env": "FIRECRAWL_API_KEY",
+                "base_url": "https://firecrawl.example"
             }
         }
     }))
@@ -31,11 +36,15 @@ fn web_search_provider_config_deserializes_from_snake_case() {
 
     assert_eq!(
         config.web_search.provider,
-        WebSearchProviderConfig::DuckDuckGoInstantAnswer
+        WebSearchProviderConfig::Firecrawl
     );
     assert_eq!(
-        config.web_search.duckduckgo.base_url.as_deref(),
-        Some("https://duckduckgo.example/")
+        config.web_search.firecrawl.api_key_env.as_deref(),
+        Some("FIRECRAWL_API_KEY")
+    );
+    assert_eq!(
+        config.web_search.firecrawl.base_url.as_deref(),
+        Some("https://firecrawl.example")
     );
 
     let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
@@ -60,4 +69,25 @@ fn web_search_provider_config_deserializes_from_snake_case() {
         Some("https://search.example/v1")
     );
     assert_eq!(config.web_search.brave.timeout_ms, 5000);
+
+    let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
+        "web_search": {
+            "provider": "tavily",
+            "tavily": {
+                "api_key": "test-key",
+                "base_url": "https://tavily.example"
+            }
+        }
+    }))
+    .expect("web search config should deserialize");
+
+    assert_eq!(config.web_search.provider, WebSearchProviderConfig::Tavily);
+    assert_eq!(
+        config.web_search.tavily.api_key.as_deref(),
+        Some("test-key")
+    );
+    assert_eq!(
+        config.web_search.tavily.base_url.as_deref(),
+        Some("https://tavily.example")
+    );
 }

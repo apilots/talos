@@ -47,7 +47,7 @@ pub struct WebSearchToolConfig {
     #[serde(default)]
     pub provider: WebSearchProviderConfig,
     #[serde(default)]
-    pub duckduckgo: WebSearchProviderRuntimeConfig,
+    pub firecrawl: WebSearchProviderRuntimeConfig,
     #[serde(default)]
     pub brave: WebSearchProviderRuntimeConfig,
     #[serde(default)]
@@ -58,8 +58,9 @@ impl Default for WebSearchToolConfig {
     fn default() -> Self {
         Self {
             provider: WebSearchProviderConfig::default(),
-            duckduckgo: WebSearchProviderRuntimeConfig {
-                base_url: Some("https://api.duckduckgo.com/".to_string()),
+            firecrawl: WebSearchProviderRuntimeConfig {
+                api_key_env: Some("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY".to_string()),
+                base_url: Some("https://api.firecrawl.dev".to_string()),
                 ..WebSearchProviderRuntimeConfig::default()
             },
             brave: WebSearchProviderRuntimeConfig {
@@ -69,7 +70,7 @@ impl Default for WebSearchToolConfig {
             },
             tavily: WebSearchProviderRuntimeConfig {
                 api_key_env: Some("TALOS_WEB_SEARCH_TAVILY_API_KEY".to_string()),
-                base_url: Some("https://api.tavily.com/search".to_string()),
+                base_url: Some("https://api.tavily.com".to_string()),
                 ..WebSearchProviderRuntimeConfig::default()
             },
         }
@@ -80,8 +81,7 @@ impl Default for WebSearchToolConfig {
 #[serde(rename_all = "snake_case")]
 pub enum WebSearchProviderConfig {
     #[default]
-    #[serde(rename = "duckduckgo")]
-    DuckDuckGoInstantAnswer,
+    Firecrawl,
     Brave,
     Tavily,
 }
