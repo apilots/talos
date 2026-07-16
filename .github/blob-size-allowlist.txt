@@ -1,1 +1,5 @@
 # Repository-relative paths for intentional blobs larger than 500 KiB.
+build/brand/talos-logo.png
+build/desktop/icons/icon.icns
+build/desktop/icons/icon.png
+talos-app/web/public/logo.png
