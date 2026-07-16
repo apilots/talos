@@ -60,6 +60,10 @@ describe("desktop IPC guard", () => {
     expect(result.actorCredentials?.credential.type).toBe("existing_session_token");
   });
 
+  it("allows profile reads with empty parameters", () => {
+    expect(() => assertDesktopRendererInvoke("profile/read", {})).not.toThrow();
+  });
+
   it("allows desktop cloud session cache read and clear methods", () => {
     expect(() => assertDesktopRendererInvoke("auth.session.read", {})).not.toThrow();
     expect(() => assertDesktopRendererInvoke("auth.session.clear", {})).not.toThrow();

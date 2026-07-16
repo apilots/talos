@@ -38,20 +38,20 @@ use talos_types::{
     PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
     PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
     PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
-    ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest,
-    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
-    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
-    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsReadResponse,
-    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -59,6 +59,8 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
 use talos_types::talos::TimelineEventEnvelope;
+
+mod response;
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -400,6 +402,13 @@ impl GatewayClient for AppServerClient {
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse> {
         self.request_typed("user.current", request).await
+    }
+
+    async fn read_profile(
+        &mut self,
+        request: ProfileReadRequest,
+    ) -> TalosResult<ProfileReadResponse> {
+        self.request_typed("profile/read", request).await
     }
 
     async fn list_models(&mut self, request: ModelListRequest) -> TalosResult<ModelListResponse> {
@@ -828,20 +837,23 @@ fn spawn_stdout_reader(
             let bytes = match read_result {
                 Ok(bytes) => bytes,
                 Err(error) => {
-                    fail_pending_responses(&pending_responses, error.to_string()).await;
+                    response::fail_pending_responses(&pending_responses, error.to_string()).await;
                     return;
                 }
             };
             if bytes == 0 {
-                fail_pending_responses(&pending_responses, "app-server stdout closed".to_string())
-                    .await;
+                response::fail_pending_responses(
+                    &pending_responses,
+                    "app-server stdout closed".to_string(),
+                )
+                .await;
                 return;
             }
 
             let message = match serde_json::from_str::<JsonRpcMessage>(line.trim_end()) {
                 Ok(message) => message,
                 Err(error) => {
-                    fail_pending_responses(&pending_responses, error.to_string()).await;
+                    response::fail_pending_responses(&pending_responses, error.to_string()).await;
                     return;
                 }
             };
@@ -904,19 +916,6 @@ fn spawn_stdout_reader(
             }
         }
     });
-}
-
-async fn fail_pending_responses(
-    pending_responses: &Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
-    message: String,
-) {
-    let pending = {
-        let mut guard = pending_responses.lock().await;
-        std::mem::take(&mut *guard)
-    };
-    for (_, sender) in pending {
-        let _ = sender.send(Err(TalosError::ClientError(message.clone())));
-    }
 }
 
 async fn dispatch_application_event(

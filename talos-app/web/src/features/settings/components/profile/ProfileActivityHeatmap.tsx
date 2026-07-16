@@ -1,7 +1,7 @@
 import { cn } from "@/shared/lib/cn";
 
 export interface ProfileActivityPoint {
-  timestamp: number;
+  date: string;
   tokens: number;
 }
 
@@ -70,7 +70,7 @@ function createActivityHeatmap(activity: ProfileActivityPoint[]) {
   const tokensByDay = new Map<number, number>();
 
   for (const point of activity) {
-    const date = startOfLocalDay(new Date(point.timestamp * 1000));
+    const date = startOfLocalDay(new Date(`${point.date}T00:00:00`));
     if (date < start || date > today) {
       continue;
     }

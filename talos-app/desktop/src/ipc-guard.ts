@@ -131,6 +131,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "plugin.uninstall": pluginInstallIdParams,
   "plugin.enable": pluginInstallIdParams,
   "plugin.disable": pluginInstallIdParams,
+  "profile/read": emptyParams,
   "skills.list": emptyParams,
   "skills.refresh": emptyParams,
   "skills.suggest": (params) =>

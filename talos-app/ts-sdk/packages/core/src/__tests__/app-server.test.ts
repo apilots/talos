@@ -42,6 +42,7 @@ describe("AppServerClient", () => {
     const client = new AppServerClient(transport);
 
     await client.listModels();
+    await client.readProfile();
     await client.patchSession({
       session_id: "session-1",
       conf: {
@@ -84,6 +85,7 @@ describe("AppServerClient", () => {
 
     expect(transport.requests).toEqual([
       { method: "model.list", params: {} },
+      { method: "profile/read", params: {} },
       {
         method: "session.patch",
         params: {

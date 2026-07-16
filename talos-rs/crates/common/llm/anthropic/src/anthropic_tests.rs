@@ -79,6 +79,7 @@ fn test_anthropic_config_builder() {
 #[tokio::test]
 async fn test_stream_model_blocks_maps_content_block_lifecycle() {
     let body = concat!(
+        "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":10,\"cache_creation_input_tokens\":20,\"cache_read_input_tokens\":30}}}\n\n",
         "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"think\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"signed\"}}\n\n",
@@ -134,7 +135,11 @@ async fn test_stream_model_blocks_maps_content_block_lifecycle() {
     assert!(events.iter().any(|event| matches!(
         event,
         ModelBlockStreamEvent::Done { usage: Some(usage), .. }
-            if usage.completion_tokens == 2
+            if usage.prompt_tokens == 60
+                && usage.completion_tokens == 2
+                && usage.total_tokens == 62
+                && usage.cache_creation_input_tokens == Some(20)
+                && usage.cache_read_input_tokens == Some(30)
     )));
 }
 

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
 use talos_types::{ProjectPatch, ProjectStatus};
 
@@ -13,6 +13,9 @@ pub trait ProjectStore: Send + Sync {
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>>;
 
     async fn get_project(&self, project_id: &str) -> TalosResult<Option<ProjectRecord>>;
+
+    /// Returns the current number of projects owned by one user.
+    async fn count_projects_for_owner(&self, user_id: &str) -> TalosResult<u64>;
 
     async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord>;
 
@@ -85,6 +88,25 @@ impl ProjectStore for StorageProjectStore {
             .into_iter()
             .next()
             .map(|row| Self::parse_project_record(&row)))
+    }
+
+    async fn count_projects_for_owner(&self, user_id: &str) -> TalosResult<u64> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT COUNT(*) AS project_count FROM projects WHERE user_id = ?",
+                &[user_id],
+            )
+            .await?;
+        let row = rows.first().ok_or_else(|| {
+            TalosError::StorageError("count projects returned no aggregate row".to_string())
+        })?;
+        let count = row.get_i64("project_count").ok_or_else(|| {
+            TalosError::StorageError("count projects returned an invalid total".to_string())
+        })?;
+        u64::try_from(count).map_err(|_| {
+            TalosError::StorageError("count projects returned a negative total".to_string())
+        })
     }
 
     async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {

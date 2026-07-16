@@ -249,7 +249,7 @@ impl DeepSeekProvider {
                             "DeepSeek Messages response parsing failed: {error}"
                         ))
                     })?;
-                Ok(messages_protocol::chat_response(response))
+                messages_protocol::chat_response(response)
             }
         }
     }

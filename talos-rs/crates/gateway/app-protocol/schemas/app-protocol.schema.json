@@ -563,6 +563,7 @@
     "ClientMethod": {
       "enum": [
         "initialize",
+        "profile/read",
         "session.list",
         "session.get",
         "session.patch",
@@ -653,6 +654,24 @@
             },
             "params": {
               "$ref": "#/definitions/InitializeParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "profile/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/ProfileReadRequest"
             }
           },
           "required": [
@@ -3096,6 +3115,115 @@
       "required": [
         "conflict_policy",
         "install_id"
+      ],
+      "type": "object"
+    },
+    "ProfileDailyUsage": {
+      "description": "Represents finalized usage attributed to one calendar day.",
+      "properties": {
+        "date": {
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/definitions/TokenUsage"
+        },
+        "usageAvailable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "date",
+        "usage",
+        "usageAvailable"
+      ],
+      "type": "object"
+    },
+    "ProfileModelUsage": {
+      "description": "Represents finalized usage grouped by its recorded model.",
+      "properties": {
+        "modelRef": {
+          "$ref": "#/definitions/ModelRef"
+        },
+        "turnCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "usage": {
+          "$ref": "#/definitions/TokenUsage"
+        },
+        "usageAvailable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "modelRef",
+        "turnCount",
+        "usage",
+        "usageAvailable"
+      ],
+      "type": "object"
+    },
+    "ProfileReadRequest": {
+      "description": "Requests the authenticated user's Profile usage summary.",
+      "type": "object"
+    },
+    "ProfileReadResponse": {
+      "description": "Returns the authenticated user's current resource counts and historical usage.\n\nGateway, SDK, and UI boundaries share this DTO. It does not expose database records or support querying another user's data.",
+      "properties": {
+        "asOfDate": {
+          "type": "string"
+        },
+        "dailyUsage": {
+          "items": {
+            "$ref": "#/definitions/ProfileDailyUsage"
+          },
+          "type": "array"
+        },
+        "messageCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelUsage": {
+          "items": {
+            "$ref": "#/definitions/ProfileModelUsage"
+          },
+          "type": "array"
+        },
+        "projectCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessionCount": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "usage": {
+          "$ref": "#/definitions/TokenUsage"
+        },
+        "usageAvailable": {
+          "type": "boolean"
+        },
+        "usageStartedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "asOfDate",
+        "dailyUsage",
+        "messageCount",
+        "modelUsage",
+        "projectCount",
+        "sessionCount",
+        "usage",
+        "usageAvailable"
       ],
       "type": "object"
     },
@@ -6064,6 +6192,9 @@
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
     },
+    "profile_read_response": {
+      "$ref": "#/definitions/ProfileReadResponse"
+    },
     "recover_timeline_request": {
       "$ref": "#/definitions/RecoverTimelineRequest"
     },
@@ -6131,6 +6262,7 @@
     "interrupt_turn_request",
     "interrupt_turn_response",
     "jsonrpc_message",
+    "profile_read_response",
     "recover_timeline_request",
     "retry_turn_request",
     "retry_turn_response",

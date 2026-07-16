@@ -3,7 +3,7 @@ use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
-use super::{SessionQuery, SessionRecord, SessionStore};
+use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
 
 pub struct MockSessionStore;
 
@@ -64,6 +64,10 @@ impl SessionStore for MockSessionStore {
 
     async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
         Ok(0)
+    }
+
+    async fn summarize_sessions(&self, _user_id: &str) -> TalosResult<SessionSummary> {
+        Ok(SessionSummary::default())
     }
 
     async fn update_session_record(&self, _record: &SessionRecord) -> TalosResult<bool> {

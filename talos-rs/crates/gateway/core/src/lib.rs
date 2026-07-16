@@ -5,6 +5,7 @@ pub mod gateway_service;
 mod memory;
 mod model;
 mod plugin;
+mod profile;
 mod project;
 
 mod session;

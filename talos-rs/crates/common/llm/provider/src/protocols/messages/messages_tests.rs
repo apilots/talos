@@ -124,3 +124,23 @@ fn response_separates_display_reasoning_from_replay_blocks() {
         Some(ReasoningContinuation::Blocks(blocks)) if blocks.len() == 2
     ));
 }
+
+#[test]
+fn usage_includes_messages_cache_read_and_creation_tokens() {
+    let usage = usage_from_messages(
+        &MessagesUsage {
+            input_tokens: 10,
+            output_tokens: 3,
+            cache_creation_input_tokens: Some(20),
+            cache_read_input_tokens: Some(30),
+        },
+        3,
+    )
+    .expect("usage should map");
+
+    assert_eq!(usage.prompt_tokens, 60);
+    assert_eq!(usage.completion_tokens, 3);
+    assert_eq!(usage.total_tokens, 63);
+    assert_eq!(usage.cache_creation_input_tokens, Some(20));
+    assert_eq!(usage.cache_read_input_tokens, Some(30));
+}

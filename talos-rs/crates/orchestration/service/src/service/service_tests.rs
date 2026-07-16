@@ -9,6 +9,8 @@ use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_storage::SqliteStorage;
+use talos_store::migration::run_migrations;
+use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::StorageProjectStore;
 use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
@@ -205,6 +207,9 @@ async fn test_application_with_runtime(
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool()).await.unwrap();
+    let profile_store: Arc<dyn ProfileStore> =
+        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let event_store: Arc<dyn TimelineEventStore> = store.clone();
@@ -226,6 +231,7 @@ async fn test_application_with_runtime(
         session_runtime,
         store.clone(),
         project_store,
+        profile_store,
         event_service,
         idempotency_store,
         config,

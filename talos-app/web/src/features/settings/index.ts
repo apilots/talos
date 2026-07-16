@@ -6,6 +6,7 @@ export {
 } from "./hooks/useSettingsPage";
 export type { SettingsPageState } from "./hooks/useSettingsPage";
 export { llmConfigKey, useLlmConfigQuery } from "./hooks/useLlmConfigQuery";
+export { profileKey, useProfileQuery } from "./hooks/useProfileQuery";
 export {
   SettingsAgentWorkspaceSection,
   SettingsAppearanceSection,
@@ -17,4 +18,4 @@ export {
   SettingsProfileSection,
   SettingsServerSection,
 } from "./components";
-export { getLlmConfig, updateLlmConfig } from "./api";
+export { getLlmConfig, getProfile, updateLlmConfig } from "./api";

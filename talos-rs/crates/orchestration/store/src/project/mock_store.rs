@@ -25,6 +25,10 @@ impl ProjectStore for MockProjectStore {
         Ok(None)
     }
 
+    async fn count_projects_for_owner(&self, _user_id: &str) -> TalosResult<u64> {
+        Ok(0)
+    }
+
     async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
         self.create_project_for_owner(name, directory, "").await
     }

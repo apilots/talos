@@ -21,6 +21,7 @@ pub struct AppProtocolSchemaRoot {
     pub server_notification: ServerNotification,
     pub server_request: ServerRequest,
     pub error: AppServerErrorBody,
+    pub profile_read_response: talos_types::ProfileReadResponse,
     pub start_turn_request: talos_types::StartTurnRequest,
     pub start_turn_response: talos_types::StartTurnResponse,
     pub retry_turn_request: talos_types::RetryTurnRequest,
@@ -70,6 +71,10 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
+    output.push_str(&export::<talos_types::ProfileReadRequest>());
+    output.push_str(&export::<talos_types::ProfileReadResponse>());
+    output.push_str(&export::<talos_types::ProfileDailyUsage>());
+    output.push_str(&export::<talos_types::ProfileModelUsage>());
     output.push_str(&export::<talos_types::SessionListRequest>());
     output.push_str(&export::<talos_types::SessionListResponse>());
     output.push_str(&export::<talos_types::SessionGetRequest>());

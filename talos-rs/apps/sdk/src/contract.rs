@@ -25,20 +25,20 @@ use talos_types::{
     PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
     PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
     PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
-    ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest,
-    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
-    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
-    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsReadResponse,
-    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
+    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 
@@ -101,6 +101,12 @@ pub trait GatewayClient: Send {
         &mut self,
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse>;
+
+    /// Reads the authenticated caller's Profile usage summary.
+    async fn read_profile(
+        &mut self,
+        request: ProfileReadRequest,
+    ) -> TalosResult<ProfileReadResponse>;
 
     async fn list_models(&mut self, request: ModelListRequest) -> TalosResult<ModelListResponse>;
 

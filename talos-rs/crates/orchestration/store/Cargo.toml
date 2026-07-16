@@ -10,6 +10,7 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sqlx = { workspace = true }
 talos-error = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-storage = { workspace = true }

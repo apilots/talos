@@ -33,7 +33,6 @@ use talos_service::{
     TimelineSubscribeCommand, TimelineSubscriptionMessage,
 };
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
-use talos_storage::{create_storage, StorageConfig};
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{
     ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
@@ -57,6 +56,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
+
+mod application_storage;
 
 #[derive(Clone)]
 struct AgentSkillRootsResolver {
@@ -740,13 +741,9 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
 }
 
 pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
-    let storage_impl = create_storage(&StorageConfig {
-        database_type: config.storage.database_type,
-        connection_string: config.storage.connection_string.clone(),
-        max_connections: config.storage.max_connections,
-    })
-    .await?;
-    let storage: Arc<dyn talos_storage::Storage> = Arc::from(storage_impl);
+    let (storage_impl, profile_store) =
+        application_storage::build_application_storage(&config).await?;
+    let storage: Arc<dyn talos_storage::Storage> = storage_impl;
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
     let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
@@ -876,6 +873,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         session_runtime,
         session_store,
         project_store,
+        profile_store,
         event_service.clone(),
         idempotency_store,
         config.clone(),

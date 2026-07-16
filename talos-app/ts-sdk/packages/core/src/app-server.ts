@@ -16,6 +16,7 @@ import type {
   ConfigValue,
   LlmConfig,
   ModelListResponse,
+  ProfileReadResponse,
   ProjectCreateResponse,
   ProjectDeleteResponse,
   ProjectListResponse,
@@ -133,6 +134,12 @@ export class AppServerClient {
 
   getCurrentUser(): Promise<UserCurrentResponse> {
     return this.transport.request("user.current", {});
+  }
+
+  readProfile(
+    params: AppProtocol.ProfileReadRequest = {},
+  ): Promise<ProfileReadResponse> {
+    return this.transport.request("profile/read", params);
   }
 
   listPluginSources(

@@ -14,11 +14,11 @@ use talos_types::{
     PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
     PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
     PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
-    PluginUpdateRequest, ProjectCreateRequest, ProjectDeleteRequest, ProjectListRequest,
-    ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest,
-    SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest, SessionCompactRequest,
-    SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest, SessionListRequest,
-    SessionPatchRequest, StartTurnRequest, SubmitDynamicToolResultRequest,
+    PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest, ProjectDeleteRequest,
+    ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
+    RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
+    SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
+    SessionListRequest, SessionPatchRequest, StartTurnRequest, SubmitDynamicToolResultRequest,
     SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
     WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
@@ -43,6 +43,8 @@ pub struct DeferredClientMethod {
 pub enum ClientMethod {
     #[serde(rename = "initialize")]
     Initialize,
+    #[serde(rename = "profile/read")]
+    ProfileRead,
     #[serde(rename = "session.list")]
     SessionList,
     #[serde(rename = "session.get")]
@@ -169,6 +171,7 @@ impl ClientMethod {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Initialize => "initialize",
+            Self::ProfileRead => "profile/read",
             Self::SessionList => "session.list",
             Self::SessionGet => "session.get",
             Self::SessionPatch => "session.patch",
@@ -245,6 +248,7 @@ impl FromStr for ClientMethod {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "initialize" => Ok(Self::Initialize),
+            "profile/read" => Ok(Self::ProfileRead),
             "session.list" => Ok(Self::SessionList),
             "session.get" => Ok(Self::SessionGet),
             "session.patch" => Ok(Self::SessionPatch),
@@ -315,6 +319,8 @@ impl FromStr for ClientMethod {
 pub enum ClientRequestParams {
     #[serde(rename = "initialize")]
     Initialize(InitializeParams),
+    #[serde(rename = "profile/read")]
+    ProfileRead(ProfileReadRequest),
     #[serde(rename = "session.list")]
     SessionList(SessionListRequest),
     #[serde(rename = "session.get")]
@@ -452,6 +458,7 @@ impl ClientRequest {
         let params_value = params.unwrap_or(serde_json::Value::Object(Default::default()));
         let params = match method_kind {
             ClientMethod::Initialize => ClientRequestParams::Initialize(decode(params_value)?),
+            ClientMethod::ProfileRead => ClientRequestParams::ProfileRead(decode(params_value)?),
             ClientMethod::SessionList => ClientRequestParams::SessionList(decode(params_value)?),
             ClientMethod::SessionGet => ClientRequestParams::SessionGet(decode(params_value)?),
             ClientMethod::SessionPatch => ClientRequestParams::SessionPatch(decode(params_value)?),

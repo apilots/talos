@@ -1,15 +1,11 @@
-use std::sync::Arc;
-
 use sha2::{Digest, Sha256};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{IdempotencyRecord, MessageCommandResult};
 use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem};
-use tokio::sync::mpsc;
 use tracing::{error, warn};
 
 use crate::session::SessionService;
-use crate::timeline::TimelineEventService;
 
 mod service;
 mod types;
@@ -60,52 +56,6 @@ fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<Mess
             record.status.as_str()
         ))
     })
-}
-
-fn spawn_event_forwarder(
-    event_service: Arc<TimelineEventService>,
-    turn_executor: Arc<dyn TurnExecutor>,
-    sessions: Arc<SessionService>,
-    session_runtime: Arc<dyn SessionRuntime>,
-    assistant_model: String,
-    initial_completed_turn: Option<(String, String)>,
-    mut stream_rx: mpsc::Receiver<AgentEvent>,
-) {
-    tokio::spawn(async move {
-        let mut completed_turn = initial_completed_turn;
-        while let Some(event) = stream_rx.recv().await {
-            let progress_event = event.clone();
-            if let Err(err) = event_service.record_talos_event(event).await {
-                error!(error = %err, "failed to persist timeline stream event");
-                continue;
-            }
-            record_completed_turn_progress(
-                sessions.as_ref(),
-                session_runtime.as_ref(),
-                &progress_event,
-                &assistant_model,
-            )
-            .await;
-            if let Some(turn) = completed_turn_from_event(&progress_event) {
-                completed_turn = Some(turn);
-            }
-        }
-
-        if let Some((session_id, turn_id)) = completed_turn {
-            if let Some(title) = turn_executor
-                .take_generated_session_title(&session_id, &turn_id)
-                .await
-            {
-                record_session_title(
-                    sessions.as_ref(),
-                    session_runtime.as_ref(),
-                    &session_id,
-                    &title,
-                )
-                .await;
-            }
-        }
-    });
 }
 
 fn completed_turn_from_event(event: &AgentEvent) -> Option<(String, String)> {

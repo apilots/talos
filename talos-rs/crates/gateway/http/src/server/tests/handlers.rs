@@ -17,6 +17,7 @@ fn test_state_with_config_and_plugin_manager(
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
         Arc::new(talos_store::project::MockProjectStore::new()),
+        Arc::new(EmptyProfileStore),
         event_service.clone(),
         event_store,
         config.clone(),
@@ -122,6 +123,20 @@ async fn test_models() {
             "reasoningEffort": "medium"
         })
     );
+}
+
+#[tokio::test]
+async fn test_profile_handler_returns_shared_profile_response() {
+    let state = test_state(false);
+
+    let response = read_profile_handler(State(state), axum::extract::Extension(test_auth()))
+        .await
+        .expect("profile read should succeed");
+
+    assert_eq!(response.0.session_count, 0);
+    assert_eq!(response.0.message_count, 0);
+    assert_eq!(response.0.project_count, 0);
+    assert!(!response.0.usage_available);
 }
 
 #[tokio::test]

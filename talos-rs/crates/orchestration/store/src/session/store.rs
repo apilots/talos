@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use std::sync::Arc;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
 use talos_types::talos::{TalosContext, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
-use super::{SessionQuery, SessionRecord};
+use super::{SessionQuery, SessionRecord, SessionSummary};
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -22,6 +22,9 @@ pub trait SessionStore: Send + Sync {
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>>;
 
     async fn count_session_records(&self, query: &SessionQuery) -> TalosResult<usize>;
+
+    /// Returns current Session and Message counts for one owner.
+    async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary>;
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool>;
 
@@ -352,6 +355,41 @@ impl SessionStore for DatabaseSessionStore {
             return Ok(0);
         };
         Ok(row.get_i64("total").unwrap_or_default().max(0) as usize)
+    }
+
+    async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT COUNT(*) AS session_count, COALESCE(SUM(message_count), 0) AS message_count FROM sessions WHERE user_id = ?",
+                &[user_id],
+            )
+            .await?;
+        let row = rows.first().ok_or_else(|| {
+            TalosError::StorageError("summarize sessions returned no aggregate row".to_string())
+        })?;
+        let session_count = row.get_i64("session_count").ok_or_else(|| {
+            TalosError::StorageError(
+                "summarize sessions returned an invalid session count".to_string(),
+            )
+        })?;
+        let message_count = row.get_i64("message_count").ok_or_else(|| {
+            TalosError::StorageError(
+                "summarize sessions returned an invalid message count".to_string(),
+            )
+        })?;
+        Ok(SessionSummary {
+            session_count: u64::try_from(session_count).map_err(|_| {
+                TalosError::StorageError(
+                    "summarize sessions returned a negative session count".to_string(),
+                )
+            })?,
+            message_count: u64::try_from(message_count).map_err(|_| {
+                TalosError::StorageError(
+                    "summarize sessions returned a negative message count".to_string(),
+                )
+            })?,
+        })
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
