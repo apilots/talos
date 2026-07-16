@@ -222,7 +222,7 @@ export const resources = {
         averageTokensSession: "Average tokens/session", activeProjects: "Active projects",
         usageInsights: "Usage insights", authStatus: "Auth status", totalMessages: "Total messages",
         cacheRead: "Cache read", mostUsedModels: "Most used models",
-        runs: "{{count}} runs", noModelUsage: "No model usage yet.",
+        runs: "{{count}} runs", noModelUsage: "No model usage yet.", loading: "Loading profile data...", loadError: "Profile data failed to load.", unavailable: "Unavailable",
       },
       mcpServers: {
         title: "MCP servers", detail: "Connect external tools and data sources through installed MCP server plugins.",
@@ -724,7 +724,7 @@ export const resources = {
         averageTokensSession: "平均 tokens/session", activeProjects: "活跃项目",
         usageInsights: "使用概览", authStatus: "认证状态", totalMessages: "总消息数",
         cacheRead: "缓存读取", mostUsedModels: "常用模型",
-        runs: "{{count}} 次运行", noModelUsage: "还没有模型使用记录。",
+        runs: "{{count}} 次运行", noModelUsage: "还没有模型使用记录。", loading: "正在加载资料数据…", loadError: "资料数据加载失败。", unavailable: "不可用",
       },
       mcpServers: {
         title: "MCP servers", detail: "通过已安装的 MCP server 插件连接外部工具和数据源。",

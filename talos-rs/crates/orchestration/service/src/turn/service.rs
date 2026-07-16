@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
+use talos_store::profile::{ProfileStore, TurnUsageUpdate};
 use talos_store::session::{
     ActiveTurnStatus, IdempotencyReservation, IdempotencyStatus, MessageCommandResult,
     MessageIdempotencyStore, PendingUserAction,
@@ -12,7 +13,7 @@ use talos_types::agent_dispatch::{
     AgentDispatchResumeToolCall,
 };
 use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem, TalosTurnErrorEvent};
-use talos_types::{StartTurnRequest, TalosConfig, TalosSession};
+use talos_types::{ModelRef, StartTurnRequest, TalosConfig, TalosSession};
 use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
@@ -21,16 +22,24 @@ use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
 
 use super::{
-    completed_turn_from_event, record_completed_turn_progress, result_from_idempotency_record,
-    retry_idempotency_key, spawn_event_forwarder, turn_submission_hash, validate_retry_request,
-    validate_text_input, TurnExecutor, TurnRetryParams,
+    completed_turn_from_event, record_completed_turn_progress, record_session_title,
+    result_from_idempotency_record, retry_idempotency_key, turn_submission_hash,
+    validate_retry_request, validate_text_input, TurnExecutor, TurnRetryParams,
 };
+
+#[derive(Clone)]
+struct ProfileTurnContext {
+    user_id: String,
+    model_ref: ModelRef,
+    timezone: String,
+}
 
 #[derive(Clone)]
 pub struct TurnService {
     executor: Arc<dyn TurnExecutor>,
     event_service: Arc<TimelineEventService>,
     idempotency_store: Arc<dyn MessageIdempotencyStore>,
+    profile_store: Arc<dyn ProfileStore>,
     sessions: Arc<SessionService>,
     session_runtime: Arc<dyn SessionRuntime>,
     base_config: TalosConfig,
@@ -52,6 +61,7 @@ impl TurnService {
         executor: Arc<dyn TurnExecutor>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
+        profile_store: Arc<dyn ProfileStore>,
         sessions: Arc<SessionService>,
         session_runtime: Arc<dyn SessionRuntime>,
         base_config: TalosConfig,
@@ -60,6 +70,7 @@ impl TurnService {
             executor,
             event_service,
             idempotency_store,
+            profile_store,
             sessions,
             session_runtime,
             base_config,
@@ -81,6 +92,161 @@ impl TurnService {
         let mut dispatch_session = session.clone();
         dispatch_session.context.message_id = message_id;
         dispatch_session
+    }
+
+    fn profile_turn_context(&self, session: &TalosSession) -> ProfileTurnContext {
+        ProfileTurnContext {
+            user_id: session.user_id.clone(),
+            model_ref: ModelRef {
+                provider: session.config.llm.provider.clone(),
+                id: session.config.llm.model.clone(),
+            },
+            timezone: self.base_config.agent.kernel.timezone.clone(),
+        }
+    }
+
+    fn spawn_event_forwarder(
+        &self,
+        assistant_model: String,
+        profile_context: Option<ProfileTurnContext>,
+        initial_completed_turn: Option<(String, String)>,
+        mut stream_rx: mpsc::Receiver<AgentEvent>,
+    ) {
+        let event_service = self.event_service.clone();
+        let profile_store = self.profile_store.clone();
+        let turn_executor = self.executor.clone();
+        let sessions = self.sessions.clone();
+        let session_runtime = self.session_runtime.clone();
+        tokio::spawn(async move {
+            let mut completed_turn = initial_completed_turn;
+            while let Some(event) = stream_rx.recv().await {
+                let progress_event = event.clone();
+                if let Err(err) = event_service.record_talos_event(event).await {
+                    error!(error = %err, "failed to persist timeline stream event");
+                    continue;
+                }
+                if let Some(profile_context) = profile_context.as_ref() {
+                    Self::record_profile_turn_usage(
+                        profile_store.as_ref(),
+                        profile_context,
+                        &progress_event,
+                    )
+                    .await;
+                }
+                record_completed_turn_progress(
+                    sessions.as_ref(),
+                    session_runtime.as_ref(),
+                    &progress_event,
+                    &assistant_model,
+                )
+                .await;
+                if let Some(turn) = completed_turn_from_event(&progress_event) {
+                    completed_turn = Some(turn);
+                }
+            }
+
+            if let Some((session_id, turn_id)) = completed_turn {
+                if let Some(title) = turn_executor
+                    .take_generated_session_title(&session_id, &turn_id)
+                    .await
+                {
+                    record_session_title(
+                        sessions.as_ref(),
+                        session_runtime.as_ref(),
+                        &session_id,
+                        &title,
+                    )
+                    .await;
+                }
+            }
+        });
+    }
+
+    async fn record_profile_turn_usage(
+        profile_store: &dyn ProfileStore,
+        context: &ProfileTurnContext,
+        event: &AgentEvent,
+    ) {
+        if matches!(event.payload, AgentEventPayload::TurnError(_)) {
+            if let Err(error) = profile_store
+                .discard_turn_usage(&event.session_id, &event.turn_id)
+                .await
+            {
+                error!(
+                    session_id = %event.session_id,
+                    turn_id = %event.turn_id,
+                    error = %error,
+                    "failed to discard unfinished profile turn usage"
+                );
+            }
+            return;
+        }
+        let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
+            return;
+        };
+        let completed_at_ms = match i64::try_from(completed.completed_at_ms) {
+            Ok(value) => value,
+            Err(_) => {
+                error!(
+                    session_id = %event.session_id,
+                    turn_id = %event.turn_id,
+                    completed_at_ms = completed.completed_at_ms,
+                    "profile usage timestamp exceeds supported range"
+                );
+                return;
+            }
+        };
+        let timezone = match talos_config::parse_timezone(&context.timezone) {
+            Ok(timezone) => timezone,
+            Err(error) => {
+                error!(
+                    session_id = %event.session_id,
+                    turn_id = %event.turn_id,
+                    error = %error,
+                    "profile usage timezone is invalid"
+                );
+                return;
+            }
+        };
+        let usage_date = match chrono::DateTime::from_timestamp_millis(completed_at_ms) {
+            Some(timestamp) => timestamp
+                .with_timezone(&timezone)
+                .date_naive()
+                .format("%Y-%m-%d")
+                .to_string(),
+            None => {
+                error!(
+                    session_id = %event.session_id,
+                    turn_id = %event.turn_id,
+                    completed_at_ms,
+                    "profile usage timestamp is invalid"
+                );
+                return;
+            }
+        };
+        if let Err(error) = profile_store
+            .record_turn_usage(TurnUsageUpdate {
+                user_id: context.user_id.clone(),
+                session_id: event.session_id.clone(),
+                turn_id: event.turn_id.clone(),
+                request_id: completed.request_id.clone(),
+                model_ref: context.model_ref.clone(),
+                usage: completed.usage.clone(),
+                usage_available: usage_is_available(&completed.usage),
+                stop_reason: completed.stop_reason,
+                timezone: context.timezone.clone(),
+                completed_at_ms,
+                usage_date,
+            })
+            .await
+        {
+            error!(
+                session_id = %event.session_id,
+                turn_id = %event.turn_id,
+                error = %error,
+                "failed to persist profile turn usage"
+            );
+        }
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
@@ -164,6 +330,7 @@ impl TurnService {
             input: submission.input.clone(),
         };
         let assistant_model = session.config.llm.model.clone();
+        let profile_context = self.profile_turn_context(&session);
 
         let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
@@ -224,14 +391,17 @@ impl TurnService {
             .record_talos_event(first_event)
             .await
             .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
+        Self::record_profile_turn_usage(
+            self.profile_store.as_ref(),
+            &profile_context,
+            &progress_event,
+        )
+        .await;
         self.record_completed_turn_progress(&progress_event, &assistant_model)
             .await;
-        spawn_event_forwarder(
-            self.event_service.clone(),
-            self.executor.clone(),
-            self.sessions.clone(),
-            self.session_runtime.clone(),
+        self.spawn_event_forwarder(
             assistant_model,
+            Some(profile_context),
             completed_turn_from_event(&progress_event),
             stream_rx,
         );
@@ -391,6 +561,7 @@ impl TurnService {
             input: Vec::new(),
         };
         let assistant_model = session.config.llm.model.clone();
+        let profile_context = self.profile_turn_context(&session);
         let mut stream_rx = self.executor.start_turn_stream(dispatch_request).await?;
         let first_event_timeout = Duration::from_millis(
             self.base_config
@@ -436,14 +607,17 @@ impl TurnService {
             .record_talos_event(first_event)
             .await
             .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
+        Self::record_profile_turn_usage(
+            self.profile_store.as_ref(),
+            &profile_context,
+            &progress_event,
+        )
+        .await;
         self.record_completed_turn_progress(&progress_event, &assistant_model)
             .await;
-        spawn_event_forwarder(
-            self.event_service.clone(),
-            self.executor.clone(),
-            self.sessions.clone(),
-            self.session_runtime.clone(),
+        self.spawn_event_forwarder(
             assistant_model,
+            Some(profile_context),
             completed_turn_from_event(&progress_event),
             stream_rx,
         );
@@ -540,15 +714,19 @@ impl TurnService {
                 "failed to persist first-event timeout error event"
             );
         }
-        spawn_event_forwarder(
-            self.event_service.clone(),
-            self.executor.clone(),
-            self.sessions.clone(),
-            self.session_runtime.clone(),
-            assistant_model.to_string(),
-            None,
-            stream_rx,
-        );
+        if let Err(err) = self
+            .profile_store
+            .discard_turn_usage(session_id, turn_id)
+            .await
+        {
+            error!(
+                session_id = %session_id,
+                turn_id = %turn_id,
+                error = %err,
+                "failed to discard unfinished profile turn usage"
+            );
+        }
+        self.spawn_event_forwarder(assistant_model.to_string(), None, None, stream_rx);
 
         let result = MessageCommandResult {
             request_id: request_id.to_string(),
@@ -592,4 +770,12 @@ impl TurnService {
         )
         .await;
     }
+}
+
+fn usage_is_available(usage: &talos_types::TokenUsage) -> bool {
+    usage.total_tokens > 0
+        || usage.input_tokens > 0
+        || usage.output_tokens > 0
+        || usage.cache_creation_input_tokens.unwrap_or_default() > 0
+        || usage.cache_read_input_tokens.unwrap_or_default() > 0
 }

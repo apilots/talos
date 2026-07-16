@@ -50,6 +50,7 @@ fn touches_cached_session_only_for_business_methods() {
     assert!(!is_business_method("auth.login.status"));
     assert!(!is_business_method("auth.login.cancel"));
     assert!(is_business_method("user.current"));
+    assert!(is_business_method("profile/read"));
     assert!(is_business_method("session.list"));
 }
 

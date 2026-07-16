@@ -25,22 +25,23 @@ use talos_types::{
     PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
     PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
     PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProjectCreateRequest,
-    ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest,
-    ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest,
-    ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse,
-    SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse,
-    SessionCloseRequest, SessionCloseResponse, SessionCompactRequest, SessionCompactResponse,
-    SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest, SessionGetResponse,
-    SessionHistoryRequest, SessionHistoryResponse, SessionListRequest, SessionListResponse,
-    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
-    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
+    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
+    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
+    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
+    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
+    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
+    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
+    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+    SkillsSuggestResponse, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 
 use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -141,6 +142,14 @@ fn unused_gateway<T>(method: &str) -> TalosResult<T> {
 
 #[async_trait]
 impl Gateway for MockGateway {
+    async fn read_profile(
+        &self,
+        _actor: &Actor,
+        _request: ProfileReadRequest,
+    ) -> TalosResult<ProfileReadResponse> {
+        unused_gateway("read_profile")
+    }
+
     async fn start_turn(
         &self,
         _actor: &Actor,

@@ -100,6 +100,12 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::Initialize(_) => Err(AppServerErrorBody::invalid_request(
                 "initialize is handled by the app-server runtime",
             )),
+            ClientRequestParams::ProfileRead(params) => to_value(
+                self.gateway
+                    .read_profile(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
             ClientRequestParams::SessionList(params) => {
                 to_value(self.list_sessions(actor, params).await?)
             }

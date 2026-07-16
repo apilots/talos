@@ -21,6 +21,10 @@ import type {
   ProviderKeyStatus as ProtocolProviderKeyStatus,
   ProviderModelConfig as ProtocolProviderModelConfig,
   ProviderProtocolCapabilities as ProtocolProviderProtocolCapabilities,
+  ProfileDailyUsage as ProtocolProfileDailyUsage,
+  ProfileModelUsage as ProtocolProfileModelUsage,
+  ProfileReadRequest as ProtocolProfileReadRequest,
+  ProfileReadResponse as ProtocolProfileReadResponse,
   ReasoningEffort as ProtocolReasoningEffort,
   SessionClearResponse as ProtocolSessionClearResponse,
   SessionCloseResponse as ProtocolSessionCloseResponse,
@@ -268,6 +272,10 @@ export type TalosContext = GeneratedTalosContext;
 export type UserRole = ProtocolUserRole;
 export type UserDto = ProtocolUserDto;
 export type TokenUsage = ProtocolTokenUsage;
+export type ProfileReadRequest = ProtocolProfileReadRequest;
+export type ProfileReadResponse = ProtocolProfileReadResponse;
+export type ProfileDailyUsage = ProtocolProfileDailyUsage;
+export type ProfileModelUsage = ProtocolProfileModelUsage;
 
 export type TalosReasoning = ProtocolTalosReasoning;
 

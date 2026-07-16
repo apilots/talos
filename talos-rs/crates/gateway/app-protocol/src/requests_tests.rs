@@ -26,6 +26,16 @@ fn decodes_typed_request_params() {
 }
 
 #[test]
+fn decodes_profile_read_params() {
+    let request = ClientRequest::decode("profile/read", Some(json!({})))
+        .expect("profile read request should decode");
+    assert!(matches!(
+        request.params,
+        ClientRequestParams::ProfileRead(ProfileReadRequest {})
+    ));
+}
+
+#[test]
 fn turn_start_input_uses_shared_talos_input_item() {
     let value = json!({
         "type": "skill_selection",

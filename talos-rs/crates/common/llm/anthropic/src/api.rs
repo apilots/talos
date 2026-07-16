@@ -201,7 +201,7 @@ impl AnthropicProvider {
             .await
             .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
 
-        Ok(messages_protocol::chat_response(anthropic_resp))
+        messages_protocol::chat_response(anthropic_resp)
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {

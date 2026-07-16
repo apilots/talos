@@ -114,11 +114,14 @@ impl Default for StorageConfig {
 }
 
 /// Create a storage instance from config
-pub async fn create_storage(config: &StorageConfig) -> TalosResult<Box<dyn Storage>> {
+pub async fn create_storage(config: &StorageConfig) -> TalosResult<SqliteStorage> {
     match config.database_type {
         DatabaseType::Sqlite => {
-            let storage = SqliteStorage::new(&config.connection_string).await?;
-            Ok(Box::new(storage))
+            SqliteStorage::new_with_max_connections(
+                &config.connection_string,
+                config.max_connections,
+            )
+            .await
         }
         DatabaseType::Postgres => Err(TalosError::StorageError(format!(
             "Unsupported database type: {}",

@@ -13,6 +13,7 @@ import type {
   MemorySearchRequest,
   MemorySearchResponse,
   ModelListResponse,
+  ProfileReadResponse,
   PluginDisableRequest,
   PluginDisableResponse,
   PluginEnableRequest,
@@ -137,6 +138,11 @@ export class TalosClient {
     current: async (): Promise<UserCurrentResponse> => {
       return this.http.request<UserCurrentResponse>(this.url("/v1/user"));
     },
+  };
+
+  profile = {
+    read: (): Promise<ProfileReadResponse> =>
+      this.http.request<ProfileReadResponse>(this.url("/v1/profile")),
   };
 
   llm = {

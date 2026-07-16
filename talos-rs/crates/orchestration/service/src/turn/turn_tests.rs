@@ -1,10 +1,12 @@
 use super::*;
 use crate::session::SessionService;
-use crate::TimelineEventRetentionConfig;
+use crate::{TimelineEventRetentionConfig, TimelineEventService};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_storage::SqliteStorage;
+use talos_store::migration::run_migrations;
+use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
@@ -18,6 +20,7 @@ use talos_types::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, ModelRef, ModelSelection,
     SessionConf, SessionContext, SessionState, StartTurnRequest, TalosConfig, TalosSession,
 };
+use tokio::sync::mpsc;
 
 #[derive(Default)]
 struct RecordingTurnExecutor {
@@ -146,6 +149,9 @@ async fn test_service(
     Arc<DatabaseSessionStore>,
 ) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool()).await.unwrap();
+    let profile_store: Arc<dyn ProfileStore> =
+        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let event_store: Arc<dyn TimelineEventStore> = store.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
@@ -167,6 +173,7 @@ async fn test_service(
             turn_executor,
             event_service.clone(),
             idempotency_store,
+            profile_store,
             sessions,
             session_runtime,
             config,

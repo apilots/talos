@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
 use talos_store::project::{ProjectRecord, ProjectStore};
-use talos_store::session::{SessionQuery, SessionRecord, SessionStore};
+use talos_store::session::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{
     ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest, SessionPatch,
@@ -105,6 +105,20 @@ impl SessionStore for RecordingSessionStore {
         Ok(2)
     }
 
+    async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary> {
+        let records = self.records.lock().unwrap();
+        let (session_count, message_count) = records
+            .iter()
+            .filter(|record| record.user_id == user_id)
+            .fold((0_u64, 0_u64), |(count, messages), record| {
+                (count + 1, messages + record.message_count)
+            });
+        Ok(SessionSummary {
+            session_count,
+            message_count,
+        })
+    }
+
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
         let mut records = self.records.lock().unwrap();
         let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
@@ -140,6 +154,16 @@ impl ProjectStore for RecordingSessionStore {
             .iter()
             .find(|project| project.project_id == project_id)
             .cloned())
+    }
+
+    async fn count_projects_for_owner(&self, user_id: &str) -> TalosResult<u64> {
+        Ok(self
+            .projects
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|project| project.user_id == user_id)
+            .count() as u64)
     }
 
     async fn create_project(

@@ -77,3 +77,10 @@ pub struct SessionQuery {
 pub struct SessionPatchAck {
     pub success: bool,
 }
+
+/// Represents current user-scoped Session counts for higher-level read models.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub session_count: u64,
+    pub message_count: u64,
+}

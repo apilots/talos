@@ -3,7 +3,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use talos_error::TalosResult;
 use talos_store::project::MockProjectStore;
-use talos_store::session::{MockSessionStore, SessionQuery, SessionRecord, SessionStore};
+use talos_store::session::{
+    MockSessionStore, SessionQuery, SessionRecord, SessionStore, SessionSummary,
+};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{ModelRef, ModelSelection, SessionConf};
 
@@ -42,6 +44,20 @@ impl SessionStore for RecordingSessionStore {
 
     async fn count_session_records(&self, _query: &SessionQuery) -> TalosResult<usize> {
         Ok(self.records.lock().unwrap().len())
+    }
+
+    async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary> {
+        let records = self.records.lock().unwrap();
+        let (session_count, message_count) = records
+            .iter()
+            .filter(|record| record.user_id == user_id)
+            .fold((0_u64, 0_u64), |(count, messages), record| {
+                (count + 1, messages + record.message_count)
+            });
+        Ok(SessionSummary {
+            session_count,
+            message_count,
+        })
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {

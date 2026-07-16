@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 031 |
+| `feat` | 032 |
 | `fix` | 005 |
 | `refactor` | 039 |
 | `docs` | 001 |
@@ -16,6 +16,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Directory | Status |
 | --- | --- | --- |
 | refactor-038 | `refactor-038-llm-model-selection` | active |
+| feat-031 | `feat-031-profile-usage-statistics` | active |
 
 ## Archived Specs
 

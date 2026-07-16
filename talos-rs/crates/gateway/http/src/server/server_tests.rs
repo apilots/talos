@@ -13,12 +13,16 @@ use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_service::{TalosService, TurnExecutor};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_store::profile::{
+    ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileStore, ProfileUsageSummary,
+    TurnUsageUpdate,
+};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
     PendingDynamicToolResult, PendingUserAction, SessionPatchAck, SessionQuery, SessionRecord,
-    SessionStore, TimelineEventId, TimelineEventStore,
+    SessionStore, SessionSummary, TimelineEventId, TimelineEventStore,
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosContext, TalosItemDeltaEvent,
@@ -39,6 +43,44 @@ use crate::server::misc::get_llm_handler;
 #[path = "tests/support.rs"]
 mod support;
 use support::*;
+
+struct EmptyProfileStore;
+
+#[async_trait]
+impl ProfileStore for EmptyProfileStore {
+    async fn record_turn_usage(&self, _update: TurnUsageUpdate) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn discard_turn_usage(&self, _session_id: &str, _turn_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn usage_summary(&self, _user_id: &str) -> TalosResult<ProfileUsageSummary> {
+        Ok(ProfileUsageSummary {
+            usage: TokenUsage::default(),
+            usage_available: false,
+            usage_started_at_ms: None,
+        })
+    }
+
+    async fn daily_usage(
+        &self,
+        _user_id: &str,
+        _start_date: &str,
+        _end_date: &str,
+    ) -> TalosResult<Vec<ProfileDailyUsageSummary>> {
+        Ok(Vec::new())
+    }
+
+    async fn model_usage(
+        &self,
+        _user_id: &str,
+        _limit: usize,
+    ) -> TalosResult<Vec<ProfileModelUsageSummary>> {
+        Ok(Vec::new())
+    }
+}
 
 #[async_trait]
 trait SessionService: Send + Sync {
@@ -135,6 +177,7 @@ fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
         )),
         Arc::new(SessionStoreAdapter::new(config.session_service)),
         Arc::new(MockProjectStore::new()),
+        Arc::new(EmptyProfileStore),
         event_service.clone(),
         config.event_store,
         config.base_config.clone(),
@@ -330,6 +373,10 @@ impl SessionStore for SessionStoreAdapter {
                 offset: query.offset,
             })
             .await
+    }
+
+    async fn summarize_sessions(&self, _user_id: &str) -> talos_error::TalosResult<SessionSummary> {
+        Ok(SessionSummary::default())
     }
 
     async fn update_session_record(

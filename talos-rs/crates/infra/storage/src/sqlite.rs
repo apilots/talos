@@ -17,6 +17,14 @@ pub struct SqliteStorage {
 impl SqliteStorage {
     /// Create a new SQLite storage
     pub async fn new(database_path: &str) -> TalosResult<Self> {
+        Self::new_with_max_connections(database_path, 5).await
+    }
+
+    /// Creates SQLite storage with an explicit connection-pool size.
+    pub async fn new_with_max_connections(
+        database_path: &str,
+        max_connections: u32,
+    ) -> TalosResult<Self> {
         info!("Connecting to SQLite database: {}", database_path);
 
         let connection_string = Self::normalize_connection_string(database_path);
@@ -34,7 +42,7 @@ impl SqliteStorage {
         }
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(max_connections)
             .connect(&connection_string)
             .await
             .map_err(|e| {
@@ -82,11 +90,7 @@ impl SqliteStorage {
 
         let path = Path::new(database_path);
         let rendered = path.to_string_lossy();
-        if path.is_absolute() {
-            format!("sqlite://{}?mode=rwc", rendered)
-        } else {
-            format!("sqlite://{}?mode=rwc", rendered)
-        }
+        format!("sqlite://{rendered}?mode=rwc")
     }
 
     fn database_parent_dir(database_path: &str) -> Option<&Path> {

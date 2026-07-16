@@ -1,7 +1,9 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_config::{
+    InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService, ProviderModelConfig,
+};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
@@ -9,6 +11,8 @@ use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usa
 use talos_service::{Actor, AgentDispatchTurnExecutor, TalosService};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
+use talos_store::migration::run_migrations;
+use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{
     ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
@@ -165,8 +169,11 @@ impl UserService for TestAuthService {
 }
 
 async fn test_gateway() -> ServiceGateway {
-    let config = TalosConfig::default();
+    let config = test_config();
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool()).await.unwrap();
+    let profile_store: Arc<dyn ProfileStore> =
+        Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let project_store_impl = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let session_store: Arc<dyn SessionStore> = store.clone();
@@ -195,6 +202,7 @@ async fn test_gateway() -> ServiceGateway {
         session_runtime,
         session_store,
         project_store,
+        profile_store,
         event_service,
         idempotency_store,
         config,
@@ -205,6 +213,23 @@ async fn test_gateway() -> ServiceGateway {
         user_service,
     ));
     ServiceGateway::new(service)
+}
+
+fn test_config() -> TalosConfig {
+    let mut config = TalosConfig::default();
+    config.llm.provider = "anthropic".to_string();
+    config.llm.model = "claude-3-5-sonnet".to_string();
+    config.llm.anthropic.models = vec![ProviderModelConfig {
+        id: config.llm.model.clone(),
+        name: "Claude 3.5 Sonnet".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
+    config
 }
 
 fn request_context() -> TalosContext {

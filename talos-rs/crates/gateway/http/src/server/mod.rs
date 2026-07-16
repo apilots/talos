@@ -9,6 +9,7 @@ mod memory_files;
 mod messages;
 mod misc;
 mod plugin;
+mod profile;
 mod projects;
 mod sessions;
 mod skills;
@@ -53,6 +54,7 @@ use self::plugin::{
     refresh_plugin_source_handler, remove_plugin_source_handler, search_plugins_handler,
     uninstall_plugin_handler, update_plugin_handler,
 };
+use self::profile::read_profile_handler;
 use self::projects::{
     create_project_handler, delete_project_handler, get_project_handler, list_projects_handler,
     patch_project_handler,
@@ -172,6 +174,7 @@ impl HttpServer {
             .route("/v1/auth/login/status", get(cloud_login_status_handler))
             .route("/v1/auth/login/cancel", post(cancel_cloud_login_handler))
             .route("/v1/user", get(current_user_handler))
+            .route("/v1/profile", get(read_profile_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
             .route(
                 "/v1/fs/directory",

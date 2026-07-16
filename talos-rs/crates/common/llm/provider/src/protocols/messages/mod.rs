@@ -1,9 +1,9 @@
 use crate::{
-    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
+    CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
     ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
     ReasoningEncryptedBlock, ReasoningOutput, ReasoningTextBlock, Role, SseLineDecoder, ToolChoice,
-    ToolDefinition, Usage,
+    ToolDefinition,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
+mod usage;
+
+pub use usage::{chat_response, MessagesUsage};
+use usage::{stream_input_usage, usage_from_messages};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessagesMessage {
@@ -110,16 +114,6 @@ pub struct MessagesContent {
     pub name: Option<String>,
     #[serde(default)]
     pub input: Option<Value>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct MessagesUsage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-    #[serde(default)]
-    pub cache_creation_input_tokens: Option<u32>,
-    #[serde(default)]
-    pub cache_read_input_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -343,24 +337,6 @@ pub fn request(
     })
 }
 
-pub fn chat_response(response: MessagesResponse) -> ChatResponse {
-    let (content, reasoning, tool_calls) = response_content(&response.content);
-    ChatResponse {
-        content,
-        reasoning,
-        model: response.model,
-        usage: Usage {
-            prompt_tokens: response.usage.input_tokens,
-            completion_tokens: response.usage.output_tokens,
-            total_tokens: response.usage.input_tokens + response.usage.output_tokens,
-            cache_creation_input_tokens: response.usage.cache_creation_input_tokens,
-            cache_read_input_tokens: response.usage.cache_read_input_tokens,
-        },
-        finish_reason: response.stop_reason,
-        tool_calls,
-    }
-}
-
 #[cfg(test)]
 #[path = "messages_tests.rs"]
 mod tests;
@@ -483,6 +459,7 @@ pub fn model_blocks(
         let mut active_blocks: HashMap<usize, ActiveMessagesBlock> = HashMap::new();
         let mut reasoning_blocks: Vec<(usize, ReasoningBlock)> = Vec::new();
         let mut stop_reason: Option<String> = None;
+        let mut input_usage: Option<MessagesUsage> = None;
         let mut output_tokens: Option<u32> = None;
         let mut decoder = SseLineDecoder::new();
 
@@ -527,6 +504,13 @@ pub fn model_blocks(
                                     .await;
                                 return;
                             }
+                            "message_start" => match stream_input_usage(&event) {
+                                Ok(usage) => input_usage = usage,
+                                Err(error) => {
+                                    let _ = tx.send(Err(error)).await;
+                                    return;
+                                }
+                            },
                             "content_block_start" => {
                                 if !start_content_block(
                                     &tx,
@@ -582,13 +566,18 @@ pub fn model_blocks(
                                         .await;
                                     return;
                                 }
-                                let usage = output_tokens.map(|out| Usage {
-                                    prompt_tokens: 0,
-                                    completion_tokens: out,
-                                    total_tokens: out,
-                                    cache_creation_input_tokens: None,
-                                    cache_read_input_tokens: None,
-                                });
+                                let usage = match (input_usage.take(), output_tokens) {
+                                    (Some(input), Some(output)) => {
+                                        match usage_from_messages(&input, output) {
+                                            Ok(usage) => Some(usage),
+                                            Err(error) => {
+                                                let _ = tx.send(Err(error)).await;
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    _ => None,
+                                };
                                 if !reasoning_blocks.is_empty() {
                                     reasoning_blocks.sort_by_key(|(index, _)| *index);
                                     let blocks: Vec<_> = reasoning_blocks

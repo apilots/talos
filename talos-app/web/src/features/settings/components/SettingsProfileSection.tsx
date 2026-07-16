@@ -1,8 +1,8 @@
 import { Box, Folder, MessageSquare, TrendingUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { useProjectsView, useSessionsQuery } from "@/features/chat";
 import type { SettingsPageState } from "../hooks/useSettingsPage";
+import { useProfileQuery } from "../hooks/useProfileQuery";
 import { ProfileActivityHeatmap } from "./profile/ProfileActivityHeatmap";
 import { ProfileIdentity } from "./profile/ProfileIdentity";
 import { ProfileInsightsGrid, type ProfileMetricView } from "./profile/ProfileInsightsGrid";
@@ -12,31 +12,35 @@ export function SettingsProfileSection({
   connection,
 }: Pick<SettingsPageState, "connection">) {
   const { t } = useTranslation(["settings", "auth"]);
-  const sessionsQuery = useSessionsQuery();
-  const projectsView = useProjectsView();
-  const projects = projectsView.projects;
-  const sessions = sessionsQuery.data ?? [];
-  const totalTokens = sessions.reduce((sum, session) => sum + session.usage.total_tokens, 0);
-  const messageCount = sessions.reduce((sum, session) => sum + session.message_count, 0);
-  const cacheReadTokens = sessions.reduce((sum, session) => sum + (session.usage.cache_read_input_tokens ?? 0), 0);
-  const modelsById = new Map<string, number>();
-  sessions.forEach((session) => {
-    const modelId = session.modelSelection.modelRef.id;
-    modelsById.set(modelId, (modelsById.get(modelId) ?? 0) + 1);
-  });
-  const mostUsedModels = [...modelsById.entries()]
-    .sort((left, right) => right[1] - left[1])
-    .slice(0, 3);
-  const primaryModel = mostUsedModels[0]?.[0];
+  const profileQuery = useProfileQuery();
   const avatarLabel = connection.authUsername.trim().charAt(0).toUpperCase() || "A";
   const accountTypeLabel = connection.authStatus === "open" ? "Open" : connection.accountType;
 
+  if (profileQuery.isLoading) {
+    return <ProfileShell accountTypeLabel={accountTypeLabel} avatarLabel={avatarLabel} connection={connection} message={t("settings:profile.loading")} />;
+  }
+
+  if (profileQuery.error || !profileQuery.data) {
+    const detail = profileQuery.error instanceof Error
+      ? profileQuery.error.message
+      : t("settings:profile.loadError");
+    return <ProfileShell accountTypeLabel={accountTypeLabel} avatarLabel={avatarLabel} connection={connection} message={`${t("settings:profile.loadError")} ${detail}`} />;
+  }
+
+  const profile = profileQuery.data;
+  const totalTokens = profile.usage.total_tokens;
+  const cacheReadTokens = profile.usage.cache_read_input_tokens ?? 0;
+  const mostUsedModels = [...profile.modelUsage]
+    .sort((left, right) => right.usage.total_tokens - left.usage.total_tokens)
+    .slice(0, 3);
+  const primaryModel = mostUsedModels[0]?.modelRef.id;
+
   const stats: ProfileStatView[] = [
-    { label: t("settings:profile.sessions"), value: formatNumber(sessions.length) },
-    { label: t("settings:profile.tokens"), value: formatCompact(totalTokens) },
-    { label: t("settings:profile.messages"), value: formatNumber(messageCount) },
-    { label: t("settings:profile.projects"), value: formatNumber(projects.length) },
-    { label: t("settings:profile.cacheRead"), value: formatCompact(cacheReadTokens) },
+    { label: t("settings:profile.sessions"), value: formatNumber(profile.sessionCount) },
+    { label: t("settings:profile.tokens"), value: formatUsage(profile.usageAvailable, totalTokens, t("settings:profile.unavailable")) },
+    { label: t("settings:profile.messages"), value: formatNumber(profile.messageCount) },
+    { label: t("settings:profile.projects"), value: formatNumber(profile.projectCount) },
+    { label: t("settings:profile.cacheRead"), value: formatUsage(profile.usageAvailable, cacheReadTokens, t("settings:profile.unavailable")) },
   ];
   const usageRows: ProfileMetricView[] = [
     {
@@ -44,15 +48,15 @@ export function SettingsProfileSection({
       label: t("settings:profile.mostUsedModel"),
       value: primaryModel ?? t("settings:profile.noModelUsage"),
     },
-    { icon: <TrendingUp size={16} />, label: t("settings:profile.averageTokensSession"), value: formatNumber(averageTokens(totalTokens, sessions.length)) },
-    { icon: <Folder size={16} />, label: t("settings:profile.activeProjects"), value: formatNumber(projects.length) },
+    { icon: <TrendingUp size={16} />, label: t("settings:profile.averageTokensSession"), value: profile.usageAvailable ? formatNumber(averageTokens(totalTokens, profile.sessionCount)) : t("settings:profile.unavailable") },
+    { icon: <Folder size={16} />, label: t("settings:profile.activeProjects"), value: formatNumber(profile.projectCount) },
   ];
   const modelRows: ProfileMetricView[] =
     mostUsedModels.length > 0
-      ? mostUsedModels.map(([modelId, count]) => ({
+      ? mostUsedModels.map((model) => ({
           icon: <Box size={16} />,
-          label: modelId,
-          value: t("settings:profile.runs", { count }),
+          label: model.modelRef.id,
+          value: t("settings:profile.runs", { count: model.turnCount }),
         }))
       : [
           {
@@ -64,19 +68,12 @@ export function SettingsProfileSection({
 
   return (
     <div className="mx-auto max-w-[960px]">
-      <ProfileIdentity
-        accountTypeLabel={accountTypeLabel}
-        avatarLabel={avatarLabel}
-        displayName={displayName(connection.authUsername)}
-        openMode={connection.authStatus === "open"}
-        username={connection.authUsername}
-      />
+      <ProfileIdentity accountTypeLabel={accountTypeLabel} avatarLabel={avatarLabel} displayName={displayName(connection.authUsername)} openMode={connection.authStatus === "open"} username={connection.authUsername} />
       <ProfileStatsStrip stats={stats} />
       <ProfileActivityHeatmap
-        activity={sessions.map((session) => ({
-          timestamp: session.last_activity,
-          tokens: session.usage.total_tokens,
-        }))}
+        activity={profile.dailyUsage
+          .filter((day) => day.usageAvailable)
+          .map((day) => ({ date: day.date, tokens: day.usage.total_tokens }))}
         cumulativeLabel={t("settings:profile.cumulative")}
         dailyLabel={t("settings:profile.daily")}
         title={t("settings:profile.tokenActivity")}
@@ -91,6 +88,26 @@ export function SettingsProfileSection({
     </div>
   );
 }
+
+function ProfileShell({
+  accountTypeLabel,
+  avatarLabel,
+  connection,
+  message,
+}: Pick<SettingsProfileSectionProps, "connection"> & {
+  accountTypeLabel: string;
+  avatarLabel: string;
+  message: string;
+}) {
+  return (
+    <div className="mx-auto max-w-[960px]">
+      <ProfileIdentity accountTypeLabel={accountTypeLabel} avatarLabel={avatarLabel} displayName={displayName(connection.authUsername)} openMode={connection.authStatus === "open"} username={connection.authUsername} />
+      <p className="mx-auto mt-10 max-w-[760px] rounded-[var(--radius-control)] border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger" role="alert">{message}</p>
+    </div>
+  );
+}
+
+type SettingsProfileSectionProps = Pick<SettingsPageState, "connection">;
 
 function averageTokens(totalTokens: number, sessionCount: number) {
   if (sessionCount === 0) {
@@ -112,4 +129,8 @@ function formatNumber(value: number) {
 
 function formatCompact(value: number) {
   return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+}
+
+function formatUsage(available: boolean, value: number, unavailable: string) {
+  return available ? formatCompact(value) : unavailable;
 }

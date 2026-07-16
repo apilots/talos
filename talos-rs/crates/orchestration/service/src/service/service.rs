@@ -4,6 +4,7 @@ use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
 use talos_coordinator::SessionRuntime;
 use talos_llm_provider::LlmProvider;
+use talos_store::profile::ProfileStore;
 use talos_store::project::ProjectStore;
 use talos_store::session::{
     ActiveTurnStatus, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
@@ -24,7 +25,7 @@ use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::fs::FsService;
 use crate::project::ProjectService;
 use crate::{
-    AccountService, Actor, ConfigService, MemoryService, PluginManagerService,
+    AccountService, Actor, ConfigService, MemoryService, PluginManagerService, ProfileService,
     RuntimeConfigReloadHook, SessionHistoryService, SessionService, SkillsService,
     TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
     TimelineSubscriptionSource, TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
@@ -34,6 +35,7 @@ use crate::{
 pub struct TalosService {
     access: ResourceAccessService,
     pub account: AccountService,
+    pub profile: ProfileService,
     turns: TurnService,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
@@ -51,6 +53,7 @@ impl TalosService {
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
         project_store: Arc<dyn ProjectStore>,
+        profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -65,6 +68,7 @@ impl TalosService {
             session_runtime,
             session_store,
             project_store,
+            profile_store,
             event_service,
             idempotency_store,
             base_config,
@@ -82,6 +86,7 @@ impl TalosService {
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
         project_store: Arc<dyn ProjectStore>,
+        profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -100,7 +105,7 @@ impl TalosService {
         sessions = sessions
             .with_default_workspace_id(base_config.agent.kernel.default_workspace_id.clone());
         let sessions = Arc::new(sessions);
-        let projects = Arc::new(ProjectService::new(project_store));
+        let projects = Arc::new(ProjectService::new(project_store.clone()));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
             let sessions = sessions.clone();
             Some(Arc::new(move |llm: &talos_config::LlmConfig| {
@@ -136,9 +141,16 @@ impl TalosService {
                 turn_executor,
                 event_service.clone(),
                 idempotency_store,
+                profile_store.clone(),
                 sessions,
                 session_runtime,
                 base_config.clone(),
+            ),
+            profile: ProfileService::new(
+                session_store,
+                project_store,
+                profile_store,
+                base_config.agent.kernel.timezone.clone(),
             ),
             events: TimelineSubscriptionService::new(event_service.clone()),
             history: SessionHistoryService::new(base_config.clone(), event_service.clone()),
@@ -156,6 +168,7 @@ impl TalosService {
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
         project_store: Arc<dyn ProjectStore>,
+        profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -170,6 +183,7 @@ impl TalosService {
             session_runtime,
             session_store,
             project_store,
+            profile_store,
             event_service,
             idempotency_store,
             base_config,
@@ -200,6 +214,14 @@ impl TalosService {
         request: SessionListRequest,
     ) -> ServiceResult<Vec<TalosSession>> {
         self.access.list_sessions(actor, request).await
+    }
+
+    /// Reads the authenticated user's Profile usage view.
+    pub async fn read_profile(
+        &self,
+        actor: &Actor,
+    ) -> ServiceResult<talos_types::ProfileReadResponse> {
+        self.profile.read_profile(actor).await
     }
 
     pub async fn get_session(
