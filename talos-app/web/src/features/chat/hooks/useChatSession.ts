@@ -41,7 +41,7 @@ export function useChatSession(
   const { retryTimeline } = useSessionTimelineEvents(
     sessionId,
     sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
-    Boolean(sessionId),
+    Boolean(sessionId) && (sessionAvailable || Boolean(streamState?.activeMessageId)),
   );
   const contextCompactionStage = activeContextCompactionStage(streamState);
   const pendingInput = streamState?.pendingInput;

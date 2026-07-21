@@ -69,11 +69,17 @@ export function buildSessionBlocks({
     recoveredInputItems,
     streamState?.pendingInput,
   );
-  const pendingInputBlock = historyHasPendingInput ? undefined : createPendingInputBlock(streamState);
   const liveBlocks =
     historyHasActiveMessage && !streamState?.isStreaming ? [] : streamState?.blocks ?? [];
+  const liveBlockIds = new Set(liveBlocks.map((block) => block.id));
+  const liveHasPendingInput = Boolean(
+    streamState?.pendingInput?.serverMessageId &&
+      liveBlockIds.has(`user-${streamState.pendingInput.serverMessageId}`),
+  );
+  const pendingInputBlock =
+    historyHasPendingInput || liveHasPendingInput ? undefined : createPendingInputBlock(streamState);
   const nextBlocks = [
-    ...historyBlocks,
+    ...historyBlocks.filter((block) => !liveBlockIds.has(block.id)),
     ...(pendingInputBlock ? [pendingInputBlock] : []),
     ...liveBlocks,
   ];

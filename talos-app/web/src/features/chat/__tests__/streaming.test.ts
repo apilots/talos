@@ -428,7 +428,7 @@ describe("timeline stream events", () => {
       itemCompleted("input-1", 2),
       itemStarted("thinking-1", "assistant_text", "commentary", 3),
       textDelta("thinking-1", "Searching.", 4),
-    ].forEach((event) => applyStreamEvent("sess-1", event));
+    ].map((event) => withMessage(event, "msg-2", "turn-2")).forEach((event) => applyStreamEvent("sess-1", event));
 
     const blocks = buildSessionBlocks({
       sessionId: "sess-1",
@@ -457,4 +457,5 @@ describe("timeline stream events", () => {
       items: [expect.objectContaining({ itemId: "thinking-1", text: "Searching." })],
     });
   });
+
 });

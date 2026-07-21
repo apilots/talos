@@ -78,9 +78,18 @@ describe("useChatSession", () => {
     expect(result.current.draft).toBe("keep this input");
   });
 
-  it("subscribes to the session timeline before the session exists", () => {
-    renderHook(() => useChatSession("session-1"));
+  it("starts the new session timeline after the first turn is accepted", () => {
+    const { rerender } = renderHook(() => useChatSession("session-1"));
 
-    expect(mocks.timeline).toHaveBeenCalledWith("session-1", undefined, true);
+    expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, false);
+
+    act(() => {
+      useAppStore.getState().setStreamMeta("session-1", {
+        activeMessageId: "message-1",
+      });
+    });
+    rerender();
+
+    expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, true);
   });
 });
