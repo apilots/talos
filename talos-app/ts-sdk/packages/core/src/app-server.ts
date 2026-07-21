@@ -6,6 +6,8 @@ import type {
   MemoryFileWriteRequest,
   MemoryFileWriteResponse,
   MemoryFileListRequest,
+  MemoryGetRequest,
+  MemoryGetResponse,
   MemorySearchRequest,
   MemorySearchResponse,
   FsDirectoryCreateResponse,
@@ -385,7 +387,11 @@ export class AppServerClient {
   }
 
   searchMemory(request: MemorySearchRequest): Promise<MemorySearchResponse> {
-    return this.transport.request<MemorySearchResponse>("memory.search", request);
+    return this.transport.request<MemorySearchResponse>("memory/search", request);
+  }
+
+  getMemory(request: MemoryGetRequest): Promise<MemoryGetResponse> {
+    return this.transport.request<MemoryGetResponse>("memory/get", request);
   }
 
   writeMemoryFile(request: MemoryFileWriteRequest): Promise<MemoryFileWriteResponse> {

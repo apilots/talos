@@ -33,17 +33,11 @@ fn tool_failure_recovery_nudge_rejects_repeating_failed_targets() {
         output_items: Vec::new(),
         tool_messages: Vec::new(),
         pending_dynamic_requests: Vec::new(),
-        retrieved_memories: Vec::new(),
         logs: vec![ToolResultLog {
             call_id: "call-1".to_string(),
             tool: "Bash".to_string(),
             payload: serde_json::json!({ "value": { "exit_code": 1 } }),
-            envelope: Value::Null,
             is_error: false,
-            truncated: false,
-            size_bytes: 0,
-            semantic_events: Vec::new(),
-            next_turn_failure: None,
         }],
         error_count: 0,
     };

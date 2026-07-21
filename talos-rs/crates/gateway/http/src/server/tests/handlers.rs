@@ -1,6 +1,6 @@
 use super::*;
 
-fn test_state_with_config_and_plugin_manager(
+async fn test_state_with_config_and_plugin_manager(
     config: talos_types::TalosConfig,
     plugin_manager: talos_service::PluginManagerService,
     auth_disabled: bool,
@@ -12,16 +12,22 @@ fn test_state_with_config_and_plugin_manager(
         InMemoryLlmConfigStore::new(config.llm.clone()),
     )));
     let session_service: Arc<dyn SessionService> = Arc::new(MockSessionService::default());
+    let memory = talos_service::MemoryService::new(
+        config.clone(),
+        Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
+    )
+    .unwrap();
     let app = TalosService::new_with_session_store(
         Arc::new(MockGateway),
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
+        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         Arc::new(talos_store::project::MockProjectStore::new()),
         Arc::new(EmptyProfileStore),
         event_service.clone(),
         event_store,
         config.clone(),
-        Arc::new(MockLlmProvider),
+        memory,
         llm_config_service,
         vec![test_model_info()],
         auth_service.clone(),
@@ -46,7 +52,7 @@ fn test_state_with_config_and_plugin_manager(
 
 #[tokio::test]
 async fn test_health() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let app = Router::new()
         .route("/health", get(health_handler))
         .with_state(state);
@@ -70,7 +76,7 @@ async fn test_health() {
 
 #[tokio::test]
 async fn test_health_reports_auth_disabled() {
-    let state = test_state(true);
+    let state = test_state(true).await;
     let app = Router::new()
         .route("/health", get(health_handler))
         .with_state(state);
@@ -93,7 +99,7 @@ async fn test_health_reports_auth_disabled() {
 
 #[tokio::test]
 async fn test_models() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state);
@@ -127,7 +133,7 @@ async fn test_models() {
 
 #[tokio::test]
 async fn test_profile_handler_returns_shared_profile_response() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = read_profile_handler(State(state), axum::extract::Extension(test_auth()))
         .await
@@ -141,7 +147,7 @@ async fn test_profile_handler_returns_shared_profile_response() {
 
 #[tokio::test]
 async fn test_list_sessions_handler_returns_data_array() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = list_sessions_handler(
         State(state),
@@ -156,7 +162,7 @@ async fn test_list_sessions_handler_returns_data_array() {
 
 #[tokio::test]
 async fn test_get_session_handler_returns_not_found_for_unknown_session() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let err = get_session_handler(
         State(state),
@@ -171,7 +177,7 @@ async fn test_get_session_handler_returns_not_found_for_unknown_session() {
 
 #[tokio::test]
 async fn test_patch_session_handler_returns_success_ack() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = patch_session_handler(
         State(state),
@@ -200,7 +206,7 @@ async fn test_patch_session_handler_returns_success_ack() {
 
 #[tokio::test]
 async fn test_close_session_handler_returns_success() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = close_session_handler(
         State(state),
@@ -215,7 +221,7 @@ async fn test_close_session_handler_returns_success() {
 
 #[tokio::test]
 async fn test_delete_session_handler_returns_success() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = delete_session_handler(
         State(state),
@@ -230,7 +236,7 @@ async fn test_delete_session_handler_returns_success() {
 
 #[tokio::test]
 async fn test_compact_session_handler_returns_session_payload() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = compact_session_handler(
         State(state),
@@ -245,8 +251,36 @@ async fn test_compact_session_handler_returns_session_payload() {
 }
 
 #[tokio::test]
+async fn test_compact_session_handler_maps_active_turn_to_conflict() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-running".to_string(),
+            message_id: Some("msg-running".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: None,
+            pending_user_action: None,
+            updated_at: 1,
+        })
+        .await
+        .expect("active turn should be inserted");
+    let state = test_state_with_event_store(false, event_store).await;
+
+    let error = compact_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect_err("active session compaction should be rejected");
+
+    assert_eq!(error.into_response().status(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
 async fn test_clear_session_handler_returns_reset_session_payload() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let response = clear_session_handler(
         State(state),
@@ -264,7 +298,7 @@ async fn test_clear_session_handler_returns_reset_session_payload() {
 #[tokio::test]
 async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() {
     let (config, workspace_dir) = isolated_test_config();
-    let state = test_state_with_config(config, false);
+    let state = test_state_with_config(config, false).await;
 
     let response = get_workspace_doc_handler(
         State(state),
@@ -283,7 +317,7 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
 #[tokio::test]
 async fn test_get_workspace_info_handler_returns_effective_paths() {
     let (config, workspace_dir) = isolated_test_config();
-    let state = test_state_with_config(config, false);
+    let state = test_state_with_config(config, false).await;
 
     let response = get_workspace_info_handler(State(state), axum::extract::Extension(test_auth()))
         .await
@@ -308,7 +342,7 @@ async fn test_get_workspace_info_handler_returns_effective_paths() {
 #[tokio::test]
 async fn test_put_and_get_memory_file_handlers_roundtrip() {
     let (config, workspace_dir) = isolated_test_config();
-    let state = test_state_with_config(config, false);
+    let state = test_state_with_config(config, false).await;
 
     let put_response = put_memory_file_handler(
         State(state.clone()),
@@ -362,7 +396,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
     };
 
     let (config, workspace_dir) = isolated_test_config();
-    let state = test_state_with_config(config, false);
+    let state = test_state_with_config(config, false).await;
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
     let actor = talos_service::Actor::regular("static-token");
 
@@ -486,7 +520,7 @@ Use this skill for protocol contract verification.
         },
         PluginStateStore::new(temp.path().join("plugin-state")),
     ));
-    let state = test_state_with_config_and_plugin_manager(config, plugin_manager, false);
+    let state = test_state_with_config_and_plugin_manager(config, plugin_manager, false).await;
 
     let added = add_plugin_source_handler(
         State(state.clone()),
@@ -549,17 +583,15 @@ async fn test_search_memory_files_handler_returns_matching_data() {
         "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n",
     )
     .expect("memory file should write");
-    let state = test_state_with_config(config, false);
+    let state = test_state_with_config(config, false).await;
 
     let response = search_memory_files_handler(
-        State(state),
+        State(state.clone()),
         axum::extract::Extension(test_auth()),
         Query(
             serde_json::from_value(serde_json::json!({
                 "query": "stable",
-                "limit": 5,
-                "date_from": "2026-04-01",
-                "date_to": "2026-04-30"
+                "limit": 5
             }))
             .unwrap(),
         ),
@@ -567,13 +599,28 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     .await
     .expect("search memory should succeed");
 
-    assert_eq!(response.0["results"][0]["date"], "2026-04-04");
+    assert_eq!(response.0["data"][0]["source"]["date"], "2026-04-04");
+    let memory_id = response.0["data"][0]["memoryId"]
+        .as_str()
+        .expect("search result should include memoryId")
+        .to_string();
+    let detail = get_memory_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path(memory_id.clone()),
+    )
+    .await
+    .expect("get memory should succeed");
+    assert_eq!(detail.0["memory"]["memoryId"], memory_id);
+    assert!(detail.0["memory"]["body"]
+        .as_str()
+        .is_some_and(|body| body.contains("stable fact")));
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
-#[test]
-fn test_http_server_listen_addr_uses_configured_host() {
-    let state = test_state(false);
+#[tokio::test]
+async fn test_http_server_listen_addr_uses_configured_host() {
+    let state = test_state(false).await;
     let server = HttpServer::new(
         state.app.clone(),
         state.event_service.clone(),

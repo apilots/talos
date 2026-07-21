@@ -5,7 +5,56 @@ import type { DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { createDesktopTalosClient } from "./desktop-client";
 
 describe("createDesktopTalosClient streaming", () => {
-  it("streams desktop turn events by message ack even when event request ids differ", async () => {
+  it.each([
+    {
+      name: "closes the default session event subscription when idle or terminal",
+      options: undefined,
+      closeWhenIdle: true,
+      closeOnTerminal: true,
+    },
+    {
+      name: "keeps an explicitly persistent session event subscription open across turns",
+      options: { persistent: true },
+      closeWhenIdle: false,
+      closeOnTerminal: false,
+    },
+  ])("$name", async ({ options, closeWhenIdle, closeOnTerminal }) => {
+    let subscribeParams: AppProtocol.SubscribeTimelineRequest | undefined;
+    const controller = new AbortController();
+    const bridge: DesktopRendererBridge = {
+      invoke: async function <T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
+        if (method === "event.subscribe") {
+          subscribeParams = params as AppProtocol.SubscribeTimelineRequest;
+          queueMicrotask(() => controller.abort());
+          return { subscription_id: "sub-session" } as T;
+        }
+        if (method === "event.unsubscribe") {
+          return { unsubscribed: true } as T;
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+      onEvent: () => () => undefined,
+      onSubscriptionTerminated: () => () => undefined,
+    };
+    const client = createDesktopTalosClient(bridge);
+
+    await client.turns.events(
+      "session-1",
+      undefined,
+      () => undefined,
+      controller.signal,
+      options,
+    );
+
+    expect(subscribeParams).toMatchObject({
+      session_id: "session-1",
+      turn_id: null,
+      close_when_idle: closeWhenIdle,
+      close_on_terminal: closeOnTerminal,
+    });
+  });
+
+  it("keeps standalone desktop streaming methods functional", async () => {
     let eventHandler: ((envelope: AppProtocol.TimelineEventEnvelope) => void) | undefined;
     const received: string[] = [];
     let subscribeParams: AppProtocol.SubscribeTimelineRequest | undefined;

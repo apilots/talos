@@ -22,6 +22,9 @@ impl TuiApp {
             self.reset_input();
             return Ok(false);
         }
+        if self.reject_input_while_context_compacting() {
+            return Ok(false);
+        }
 
         let original_input = self.input_buffer.clone();
         let original_pasted_blocks = self.pasted_blocks.clone();
@@ -64,16 +67,16 @@ impl TuiApp {
     }
 
     pub(crate) async fn execute_command(&mut self, command_line: &str) -> TalosResult<bool> {
+        if self.reject_input_while_context_compacting() {
+            return Ok(false);
+        }
         let trimmed = command_line.trim_start_matches('/').trim();
         let mut parts = trimmed.split_whitespace();
         let cmd = parts.next().unwrap_or_default();
         let args = parts.collect::<Vec<_>>().join(" ");
 
         if self.close_in_progress && cmd != "quit" {
-            self.show_status_hint(
-                "Session is closing and memory flush is in progress.",
-                Duration::from_secs(2),
-            );
+            self.show_status_hint("Session is closing.", Duration::from_secs(2));
             return Ok(false);
         }
 
@@ -143,17 +146,14 @@ impl TuiApp {
                         self.pending_close_update = None;
                         self.push_right_event("session force exit".to_string());
                         self.push_system_notice(
-                            "Forcing local exit before memory flush completes.".to_string(),
+                            "Forcing local exit before session close completes.".to_string(),
                         );
                         self.force_exit_without_shutdown = true;
                         self.should_exit = true;
                         return Ok(false);
                     }
 
-                    self.show_status_hint(
-                        "Session is still closing and memory flush is in progress.",
-                        Duration::from_secs(2),
-                    );
+                    self.show_status_hint("Session is still closing.", Duration::from_secs(2));
                     return Ok(false);
                 }
                 self.close_session_command()?;
@@ -198,6 +198,9 @@ impl TuiApp {
         user_message: String,
         skills: Vec<SkillSuggestion>,
     ) -> TalosResult<bool> {
+        if self.reject_input_while_context_compacting() {
+            return Ok(false);
+        }
         if self.close_in_progress {
             self.show_status_hint(
                 "Session is closing. New messages are blocked.",
@@ -415,9 +418,63 @@ impl TuiApp {
         let Some(session_id) = self.active_session_id_for_control_command("compact") else {
             return Ok(());
         };
-        self.spawn_command_task("session compact started", async move {
-            CommandUpdate::SessionCompacted(client.compact_session(&session_id).await)
-        })
+        if self.pending_command_update.is_some() {
+            self.show_status_hint("Another command is still running.", Duration::from_secs(2));
+            return Ok(());
+        }
+
+        self.abort_pending_stream_task();
+        self.in_flight = true;
+        self.received_output_delta = false;
+        self.stream_started_at = Some(Instant::now());
+        self.last_stream_event_at = Some(Instant::now());
+        self.pending_stream = None;
+        self.active_stream_message_id = None;
+        self.last_stream_sequence = None;
+        self.last_stream_event_id = None;
+        self.timeline_items.clear();
+
+        let (stream_tx, stream_rx) = mpsc::channel(1);
+        self.pending_stream_connect = Some(stream_rx);
+        let (command_tx, command_rx) = mpsc::channel(1);
+        self.pending_command_update = Some(command_rx);
+        self.push_right_event("session compact started".to_string());
+
+        let handle = tokio::spawn(async move {
+            let stream = async {
+                let recovery = client.recover_timeline(&session_id, None).await?;
+                let since_event_id = recovery.snapshot.replay.high_water_mark_event_id;
+                client
+                    .subscribe_session_timeline(&session_id, since_event_id)
+                    .await
+            }
+            .await;
+            match stream {
+                Ok(receiver) => {
+                    if stream_tx.send(Ok(receiver)).await.is_err() {
+                        error!("failed to deliver compaction stream to TUI task");
+                        return;
+                    }
+                }
+                Err(err) => {
+                    let message = err.to_string();
+                    let _ = stream_tx.send(Err(err)).await;
+                    let _ = command_tx
+                        .send(CommandUpdate::SessionCompacted(Err(
+                            TalosError::ClientError(message),
+                        )))
+                        .await;
+                    return;
+                }
+            }
+
+            let update = CommandUpdate::SessionCompacted(client.compact_session(&session_id).await);
+            if command_tx.send(update).await.is_err() {
+                error!("failed to deliver command result to TUI task");
+            }
+        });
+        self.pending_command_task = Some(handle);
+        Ok(())
     }
 
     pub(crate) fn clear_session_command(&mut self) -> TalosResult<()> {

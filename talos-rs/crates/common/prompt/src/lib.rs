@@ -18,7 +18,9 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use builder::{render_prompt_assembly, render_prompt_blocks, PromptBuilder};
+pub use builder::{
+    render_prompt_assembly, render_prompt_blocks, render_retrieved_memories, PromptBuilder,
+};
 pub use context::PromptContext;
 pub use manager::PromptManager;
 pub use regions::{
@@ -27,12 +29,15 @@ pub use regions::{
 pub use template::PromptTemplate;
 pub use types::{
     compute_prompt_fingerprint, determine_prompt_cache_break_reason, BootstrapFileDiagnostic,
-    BootstrapFileScope, BudgetTier, CompactionTrimUnitKind, ContinuityAnswerMode,
-    ContinuityToolOutcome, ContinuityToolSummary, DynamicTrimPolicy, PlannerMode, PromptAssembly,
-    PromptBlock, PromptBlockCacheScope, PromptBlockKind, PromptBuildConfig, PromptCacheBreakReason,
-    PromptCacheState, PromptDiagnostics, PromptLoadPolicy, PromptMode, PromptPhase, PromptSection,
-    PromptSectionKind, PromptWarningState, PromptWindowUsage, RegionEnvelopePolicy,
-    RegionPlacement, RegionPriority, RequestContextInjection, SectionCacheScope, SessionContinuity,
-    SessionHistoryCompaction, SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger,
-    VerifiedPathEvidence, WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
+    BootstrapFileScope, BudgetTier, CompactPromptCursor, CompactionTrimUnitKind,
+    ContinuityAnswerMode, ContinuityToolOutcome, ContinuityToolSummary, DynamicTrimPolicy,
+    PlannerMode, PromptAssembly, PromptBlock, PromptBlockCacheScope, PromptBlockKind,
+    PromptBuildConfig, PromptCacheBreakReason, PromptCacheState, PromptDiagnostics,
+    PromptLoadPolicy, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
+    PromptWarningState, PromptWindowUsage, RegionEnvelopePolicy, RegionPlacement, RegionPriority,
+    RequestContextInjection, SectionCacheScope, SessionContinuity, SessionHistoryCompaction,
+    SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger, SessionPromptContext,
+    SessionPromptMessage, SessionPromptSummary, SessionToolExchangeContext,
+    SessionToolExchangeOutcome, SessionToolResultContext, TalosMessageRole, VerifiedPathEvidence,
+    WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
 };

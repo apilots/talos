@@ -138,8 +138,21 @@ impl TuiApp {
                 .clone()
                 .unwrap_or_else(|| "unknown".to_string());
             format!(
-                "closing {} · flushing memory · {}{}{}",
+                "closing {} · {}{}{}",
                 session_id, directory, history_indicator, pasted_indicator
+            )
+        } else if let Some(stage) = self.active_context_compaction_stage() {
+            format!(
+                "Context compacting... {} · {}{}{}",
+                crate::stream_events::context_compaction_stage_label(stage),
+                directory,
+                history_indicator,
+                pasted_indicator
+            )
+        } else if self.context_compaction_in_flight() {
+            format!(
+                "Context compacting... preparing · {}{}{}",
+                directory, history_indicator, pasted_indicator
             )
         } else {
             format!(

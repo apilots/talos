@@ -9,8 +9,8 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{
-    ModelInfo, ModelRef, ModelSelection, ReasoningEffort, SessionInfo, TalosContext, TalosProvider,
-    TalosSourceType,
+    ContextCompactionStage, ModelInfo, ModelRef, ModelSelection, ReasoningEffort, SessionInfo,
+    TalosContext, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineItemStatus,
 };
 use talos_types::talos::TokenUsage;
 
@@ -238,6 +238,37 @@ impl TuiApp {
 
     pub(crate) fn is_agent_working(&self) -> bool {
         self.in_flight
+    }
+
+    pub(crate) fn active_context_compaction_stage(&self) -> Option<ContextCompactionStage> {
+        self.timeline_items.values().find_map(|item| {
+            if item.status != TalosTimelineItemStatus::Running {
+                return None;
+            }
+            let TalosTimelineContent::ContextCompaction { stage, .. } = &item.content else {
+                return None;
+            };
+            matches!(
+                *stage,
+                ContextCompactionStage::Preparing
+                    | ContextCompactionStage::Summarizing
+                    | ContextCompactionStage::RebuildingPrompt
+                    | ContextCompactionStage::Trimming
+            )
+            .then_some(*stage)
+        })
+    }
+
+    pub(crate) fn context_compaction_in_flight(&self) -> bool {
+        self.in_flight && self.active_message.is_none()
+    }
+
+    pub(crate) fn reject_input_while_context_compacting(&mut self) -> bool {
+        if !self.context_compaction_in_flight() {
+            return false;
+        }
+        self.show_status_hint("Context compacting... Please wait.", Duration::from_secs(2));
+        true
     }
 
     pub(crate) fn thinking_spinner_line(&self, spinner_index: usize) -> RenderedChatLine {

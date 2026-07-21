@@ -223,7 +223,14 @@ export type {
   MemoryFileReadResponse,
   MemoryFileWriteRequest,
   MemoryFileWriteResponse,
+  MemoryGetRequest,
+  MemoryGetResponse,
+  MemoryImportance,
+  MemoryInfo,
+  MemoryKind,
   MemorySearchRequest,
+  MemorySearchHit,
+  MemorySourceInfo,
   ModelListRequest,
   SkillPlugin,
   RetryTurnRequest,
@@ -257,7 +264,6 @@ export type {
   WorkspaceInfoRequest,
   WorkspaceInfoResponse,
   MemorySearchResponse,
-  MemorySearchResult,
 } from "./generated/app-protocol";
 
 export type TalosConnectionMode = ProtocolTalosConnectionMode;

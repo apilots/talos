@@ -1,6 +1,6 @@
 use super::*;
 use chrono::Utc;
-use talos_memory::TalosTurn;
+use talos_store::session::TalosTurn;
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, RunItem, SessionHistoryMessage, StopReason, TalosContentItem,
     TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,

@@ -21,6 +21,7 @@ interface ComposerDropdownProps {
   triggerIcon?: React.ReactNode;
   className?: string;
   disabled?: boolean;
+  triggerRef?: React.Ref<HTMLButtonElement>;
 }
 
 export function ComposerDropdown({
@@ -31,6 +32,7 @@ export function ComposerDropdown({
   triggerIcon,
   className,
   disabled = false,
+  triggerRef,
 }: ComposerDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -57,6 +59,7 @@ export function ComposerDropdown({
         className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium text-ink/70 outline-none transition hover:bg-muted/15 focus:outline-none"
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}
+        ref={triggerRef}
         type="button"
       >
         {triggerIcon}

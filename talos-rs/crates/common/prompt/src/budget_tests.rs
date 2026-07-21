@@ -21,7 +21,7 @@ fn test_trim_dynamic_suffix_follows_spec_drop_order() {
         section(PromptSectionKind::RecentMessages, uniform_content),
         section(PromptSectionKind::ExpandedToolCatalog, uniform_content),
         section(PromptSectionKind::RecentTaskContinuity, uniform_content),
-        section(PromptSectionKind::RetrievedMemories, uniform_content),
+        section(PromptSectionKind::RecentToolOutputs, uniform_content),
     ];
     let section_cost = estimate_sections_tokens(&[section(
         PromptSectionKind::ExpandedToolCatalog,
@@ -36,7 +36,7 @@ fn test_trim_dynamic_suffix_follows_spec_drop_order() {
         dropped_sections,
         vec![
             PromptSectionKind::ExpandedToolCatalog,
-            PromptSectionKind::RetrievedMemories,
+            PromptSectionKind::RecentToolOutputs,
             PromptSectionKind::RecentMessages,
             PromptSectionKind::SessionSummary,
         ]

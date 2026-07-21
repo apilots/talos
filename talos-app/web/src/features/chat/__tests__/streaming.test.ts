@@ -9,8 +9,6 @@ import { useAppStore } from "@/shared/store/app-store";
 import {
   activeTurn,
   assistantTextCommitted,
-  contextCompactionDelta,
-  contextCompactionStarted,
   executionMetrics,
   historyTextItem,
   historyToolItem,
@@ -134,37 +132,6 @@ describe("timeline stream events", () => {
           status: "completed",
           output: "Example\nhttps://example.com\nExample snippet",
           progress: [{ kind: "status", message: "running" }],
-        }),
-      ],
-    });
-  });
-
-  it("renders live context compaction timeline status", () => {
-    applyStreamEvent("sess-1", contextCompactionStarted(
-      "compact-1",
-      "preparing",
-      "Preparing session history compaction.",
-      1,
-    ));
-    applyStreamEvent("sess-1", contextCompactionDelta(
-      "compact-1",
-      "completed",
-      "applied",
-      "Session history compaction finished.",
-      2,
-    ));
-    applyStreamEvent("sess-1", itemCompleted("compact-1", 3));
-
-    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
-    expect(timeline).toMatchObject({
-      kind: "timeline",
-      items: [
-        expect.objectContaining({
-          itemId: "compact-1",
-          kind: "context_compaction",
-          phase: "system",
-          status: "completed",
-          text: "Session history compaction finished.",
         }),
       ],
     });

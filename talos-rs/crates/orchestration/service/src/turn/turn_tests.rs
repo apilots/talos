@@ -28,6 +28,7 @@ struct RecordingTurnExecutor {
     stream_error: Mutex<Option<TalosError>>,
     dynamic_turn_id: Mutex<Option<String>>,
     title_update: Mutex<Option<String>>,
+    completed_stop_reason: Mutex<Option<StopReason>>,
 }
 
 struct NoopSessionRuntime;
@@ -36,7 +37,7 @@ struct NoopSessionRuntime;
 impl SessionRuntime for NoopSessionRuntime {
     async fn compact_session(
         &self,
-        _session: talos_types::TalosSession,
+        _params: talos_coordinator::AgentSessionCompactionParams,
     ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in turn service tests")
     }
@@ -85,9 +86,15 @@ impl TurnExecutor for RecordingTurnExecutor {
                 request_id: "req-test".to_string(),
                 turn_id: request.turn_id,
                 completed_at_ms: 1,
-                stop_reason: StopReason::EndTurn,
+                stop_reason: self
+                    .completed_stop_reason
+                    .lock()
+                    .unwrap()
+                    .take()
+                    .unwrap_or(StopReason::EndTurn),
                 usage: TokenUsage::default(),
                 metrics: None,
+                artifact_seq: Some(1),
             }),
         };
         tx.send(event).await.unwrap();
@@ -275,7 +282,46 @@ async fn submit_start_turn_records_completed_turn_progress() {
         .await
         .expect("session record should be readable")
         .expect("session record should exist");
-    assert_eq!(record.message_count, 2);
+    assert_eq!((record.message_count, record.latest_turn_seq), (2, 1));
+}
+
+#[tokio::test]
+async fn cancelled_turn_does_not_advance_session_progress() {
+    let turn_executor = Arc::new(RecordingTurnExecutor::default());
+    turn_executor
+        .completed_stop_reason
+        .lock()
+        .unwrap()
+        .replace(StopReason::Cancelled);
+    let (service, _event_service, store) = test_service(turn_executor).await;
+    create_test_session_record(store.clone()).await;
+
+    service
+        .submit_start_turn(
+            test_session(),
+            StartTurnRequest {
+                session_id: "s1".to_string(),
+                input: vec![TalosInputItem::Text {
+                    text: "hello".to_string(),
+                }],
+                workspace_id: None,
+                context: None,
+                model_selection: None,
+                project_id: None,
+                current_directory: None,
+                client_request_id: None,
+            },
+            None,
+        )
+        .await
+        .expect("cancelled turn should complete its command lifecycle");
+
+    let record = store
+        .get_session_record("s1")
+        .await
+        .expect("session record should be readable")
+        .expect("session record should exist");
+    assert_eq!((record.message_count, record.latest_turn_seq), (0, 0));
 }
 
 #[tokio::test]

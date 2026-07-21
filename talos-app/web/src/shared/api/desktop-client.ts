@@ -8,6 +8,7 @@ import type {
   MemoryFileListRequest,
   MemoryFileReadRequest,
   MemoryFileWriteRequest,
+  MemoryGetRequest,
   MemorySearchRequest,
   RetryTurnRequest,
   StartTurnRequest,
@@ -71,9 +72,10 @@ export function createDesktopTalosClient(
       afterEventId: string | undefined,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
+      options?: { persistent?: boolean },
     ) => streamTimelineEvents(client, sessionId, afterEventId ?? null, (event) => {
       onEvent(toTimelineEnvelope(event));
-    }, signal),
+    }, signal, options?.persistent ?? false),
     eventsForMessage: (
       sessionId: string,
       messageId: string,
@@ -192,6 +194,7 @@ export function createDesktopTalosClient(
       put: (request: MemoryFileWriteRequest) =>
         client.writeMemoryFile(request).then((response) => response),
       search: (query: MemorySearchRequest) => client.searchMemory(query),
+      getEntry: (request: MemoryGetRequest) => client.getMemory(request),
     },
     workspaceDocs: {
       info: () => client.getWorkspaceInfo(),
@@ -298,10 +301,11 @@ function streamTimelineEvents(
   sinceEventId: string | null,
   onEvent: (event: AppProtocol.TimelineEventEnvelope) => void,
   signal?: AbortSignal,
+  persistent = false,
 ): Promise<void> {
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
-  }, undefined, sinceEventId, null, true, true);
+  }, undefined, sinceEventId, null, !persistent, !persistent);
 }
 
 function streamUntilTerminal(

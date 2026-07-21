@@ -22,19 +22,23 @@ export function MemoryPage() {
     files,
     searchResults,
     searchResultDates,
+    selectedMemory,
     selectedDate,
     selectedDetail,
     editorContent,
     setEditorContent,
     selectDate,
+    selectMemory,
     saveCurrent,
     isDirty,
     isLoadingList,
     isLoadingDetail,
+    isLoadingMemory,
     isSearching,
     isSearchPending,
     isSaving,
     searchError,
+    memoryError,
     saveError,
   } = useMemoryPage();
 
@@ -142,6 +146,34 @@ export function MemoryPage() {
                   </div>
 
                   <div className="mt-5 space-y-3">
+                    {isLoadingMemory ? (
+                      <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+                        {t("common:loading")}
+                      </div>
+                    ) : null}
+                    {memoryError ? (
+                      <div className="rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
+                        {memoryError}
+                      </div>
+                    ) : null}
+                    {selectedMemory ? (
+                      <div className="rounded-[var(--radius-control)] border border-brand/25 bg-background/70 px-4 py-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <div className="text-xs uppercase tracking-[0.18em] text-muted">
+                              {selectedMemory.kind} · {selectedMemory.importance}
+                            </div>
+                            <div className="mt-2 text-base font-medium text-ink">{selectedMemory.title}</div>
+                          </div>
+                          <Button onClick={() => selectDate(selectedMemory.source.date)}>
+                            {t("memory:openDailyMemory")}
+                          </Button>
+                        </div>
+                        <div className="mt-3 text-sm leading-6 text-ink">
+                          <MarkdownRenderer className="markdown-body prose prose-sm max-w-none" text={selectedMemory.body} />
+                        </div>
+                      </div>
+                    ) : null}
                     {searchError ? (
                       <div className="rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
                         {searchError}
@@ -155,21 +187,19 @@ export function MemoryPage() {
                       searchResults.map((result) => (
                         <button
                           className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
-                          key={`${result.date}:${result.start_line}:${result.end_line}`}
-                          onClick={() => selectDate(result.date)}
+                          key={result.memoryId}
+                          onClick={() => selectMemory(result.memoryId)}
                           type="button"
                         >
                           <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
                               <div className="text-xs uppercase tracking-[0.18em] text-muted">
-                                {result.date}
+                                {result.source.date}
                               </div>
                             </div>
-                            <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/68 px-2.5 py-1 text-[11px] text-muted">
-                              {t("memory:lineRange", { start: result.start_line, end: result.end_line })}
-                            </div>
+                            <div className="text-sm font-medium text-ink">{result.title}</div>
                           </div>
-                          <div className="mt-3 text-sm leading-6 text-ink">{result.snippet}</div>
+                          <div className="mt-3 text-sm leading-6 text-ink">{result.preview}</div>
                         </button>
                       ))
                     )}

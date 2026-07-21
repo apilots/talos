@@ -8,10 +8,11 @@ export {
   generateSessionId,
   getActiveTurn,
   getSession,
+  isActiveTurnRunningError,
   listModels,
   listSessions,
-  sendTimelineEvents,
-  retryTimelineEvents,
+  retryTimelineTurn,
+  startTimelineTurn,
   updateProjectName,
   updateSessionModel,
   updateSessionProject,
@@ -48,7 +49,6 @@ export {
 } from "./hooks/useChatQueries";
 export { useSessionBlocks } from "./hooks/useSessionBlocks";
 export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
-export { useSessionReconnect } from "./hooks/useSessionReconnect";
 export { useSessionStreaming } from "./hooks/useSessionStreaming";
 export { createChatSlice, type ChatSlice, type ChatSliceSetter } from "./store";
 export { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "./stream-events";

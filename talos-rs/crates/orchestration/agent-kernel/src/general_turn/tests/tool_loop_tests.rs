@@ -377,7 +377,7 @@ async fn test_run_general_turn_bash_completes_directly() {
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -415,7 +415,7 @@ async fn test_run_general_turn_fails_before_provider_when_working_context_remain
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -479,7 +479,7 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -518,23 +518,6 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
             "dynamic provider continuation".to_string()
         ))
     );
-    let transcript = memory_store
-        .load_transcript_records(
-            "tool-loop-pending-dynamic",
-            Some("i1"),
-            talos_memory::SessionTranscriptBranch::ReactiveLoop,
-        )
-        .await
-        .expect("dynamic request transcript should load");
-    assert!(transcript.iter().any(|record| {
-        matches!(
-            &record.payload,
-            talos_memory::SessionTranscriptPayload::DynamicToolRequest { payload }
-                if payload.reasoning_continuation == Some(ReasoningContinuation::Text(
-                    "dynamic provider continuation".to_string()
-                ))
-        )
-    }));
     assert!(
         result.output_items.iter().all(|item| !matches!(
             item,
@@ -574,7 +557,7 @@ async fn test_run_general_turn_activates_external_tool_with_tool_search_in_same_
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -606,7 +589,6 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -615,6 +597,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
     let policy = Arc::new(RecordingStepPolicy::default());
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -647,10 +630,8 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
 
     let result = execute_general_turn_loop_with_policy(
         prepared,
-        "talos",
         provider.clone(),
         tool_registry,
-        memory_store,
         &config,
         None,
         policy.clone(),
@@ -689,7 +670,6 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -697,6 +677,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
     let provider = Arc::new(DynamicResumeProvider::default());
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -747,10 +728,8 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
 
     let result = execute_general_turn_loop_with_resume(
         prepared,
-        "talos",
         provider.clone(),
         tool_registry.clone(),
-        memory_store,
         &config,
         Some(resume),
     )

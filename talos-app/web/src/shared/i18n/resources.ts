@@ -1,4 +1,6 @@
 export const defaultLocale = "en" as const;
+import { composerResources } from "./composerResources";
+
 export const resources = {
   en: {
     common: {
@@ -50,7 +52,7 @@ export const resources = {
       addPath: "Add path",
       attachments: "Attachments",
       mentionFiles: "@ Mention files",
-      askTalos: "Ask Talos to analyze, change, or inspect your workspace.",
+      ...composerResources.en,
       waitingResponseTitle: "Waiting for server response",
       waitingResponseDetail: "Talos is still preparing the first reply chunk.",
       finalResponseWaitTitle: "Preparing final response",
@@ -86,7 +88,6 @@ export const resources = {
       refreshingDetail: "Checking whether the server has already finished the current reply.",
       interruptedDetail: "Refresh, retry, or stop the response.",
       stop: "Stop",
-      send: "Send",
       stopping: "Stopping...",
       workInProject: "Work in a project",
       searchProjects: "Search projects",
@@ -136,8 +137,8 @@ export const resources = {
       searching: "Searching…",
       fileCount: "{{count}} files",
       dailyMemory: "Daily memory",
+      openDailyMemory: "Open daily memory",
       searchResultsCount: "{{count}} matches",
-      lineRange: "Lines {{start}}-{{end}}",
       emptyPreview: "This memory file is empty.",
       editorTitle: "Daily memory file",
       newFileTitle: "New daily memory file",
@@ -557,7 +558,7 @@ export const resources = {
       addPath: "添加路径",
       attachments: "附件",
       mentionFiles: "@ 引用文件",
-      askTalos: "让 Talos 分析、修改或检查你的工作区。",
+      ...composerResources.zh,
       waitingResponseTitle: "等待服务端返回",
       waitingResponseDetail: "Talos 正在准备首段回复内容。",
       finalResponseWaitTitle: "正在整理最终回复",
@@ -592,7 +593,6 @@ export const resources = {
       refreshingDetail: "正在检查服务端是否已经完成当前回复。",
       interruptedDetail: "可刷新、重试或停止当前回答。",
       stop: "停止",
-      send: "发送",
       stopping: "停止中...",
       workInProject: "选择项目",
       searchProjects: "搜索项目",
@@ -641,8 +641,8 @@ export const resources = {
       searching: "搜索中…",
       fileCount: "{{count}} 个文件",
       dailyMemory: "每日记忆",
+      openDailyMemory: "打开每日记忆",
       searchResultsCount: "{{count}} 条命中",
-      lineRange: "第 {{start}}-{{end}} 行",
       emptyPreview: "该记忆文件暂无内容。",
       editorTitle: "每日记忆文件",
       newFileTitle: "新的每日记忆文件",

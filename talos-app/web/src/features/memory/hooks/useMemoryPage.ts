@@ -22,7 +22,11 @@ function buildMissingDetail(date: string): MemoryFileDetail {
 }
 
 export function getTodayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, "0");
+  const day = String(today.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export function formatMemoryDate(updatedAt?: number | null) {
@@ -45,6 +49,7 @@ export function useMemoryPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selectedDate, setSelectedDate] = useState<string>(getTodayDateString());
+  const [selectedMemoryId, setSelectedMemoryId] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState("");
 
   const normalizedQuery = query.trim();
@@ -67,7 +72,7 @@ export function useMemoryPage() {
             { query: normalizedDebouncedQuery, limit: 20 },
             { signal },
           )
-          .then((response) => response.results),
+          .then((response) => response.data),
         new Promise<never>((_, reject) => {
           window.setTimeout(() => {
             reject(new Error("Memory search timed out. Try a narrower query."));
@@ -97,6 +102,17 @@ export function useMemoryPage() {
     refetchOnWindowFocus: false,
   });
 
+  const memoryEntryQuery = useQuery({
+    queryKey: ["talos", connectionKey, "memory-entry", selectedMemoryId],
+    queryFn: async () => {
+      const response = await getTalosClient().memory.getEntry({ memoryId: selectedMemoryId! });
+      return response.memory;
+    },
+    enabled: Boolean(selectedMemoryId),
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+
   useEffect(() => {
     if (!selectedDate && listQuery.data?.[0]?.date) {
       setSelectedDate(listQuery.data[0].date);
@@ -116,6 +132,10 @@ export function useMemoryPage() {
     return () => {
       window.clearTimeout(handle);
     };
+  }, [normalizedQuery]);
+
+  useEffect(() => {
+    setSelectedMemoryId(null);
   }, [normalizedQuery]);
 
   useEffect(() => {
@@ -149,7 +169,7 @@ export function useMemoryPage() {
     () =>
       Array.from(
         new Map(
-          searchResults.map((result) => [result.date, result.date]),
+          searchResults.map((result) => [result.source.date, result.source.date]),
         ).values(),
       ),
     [searchResults],
@@ -157,10 +177,17 @@ export function useMemoryPage() {
 
   function selectDate(date: string) {
     setSelectedDate(date);
+    setSelectedMemoryId(null);
+    setQuery("");
+    setDebouncedQuery("");
+  }
+
+  function selectMemory(memoryId: string) {
+    setSelectedMemoryId(memoryId);
   }
 
   function openToday() {
-    setSelectedDate(getTodayDateString());
+    selectDate(getTodayDateString());
   }
 
   return {
@@ -169,20 +196,24 @@ export function useMemoryPage() {
     files,
     searchResults,
     searchResultDates,
+    selectedMemory: memoryEntryQuery.data ?? null,
     selectedDate,
     selectedDetail,
     editorContent,
     setEditorContent,
     selectDate,
+    selectMemory,
     openToday,
     saveCurrent: () => saveMutation.mutateAsync(),
     isDirty,
     isLoadingList: listQuery.isLoading,
     isLoadingDetail: detailQuery.isLoading,
+    isLoadingMemory: memoryEntryQuery.isLoading,
     isSearching: searchQuery.isFetching,
     isSearchPending,
     isSaving: saveMutation.isPending,
     searchError: searchQuery.error instanceof Error ? searchQuery.error.message : null,
+    memoryError: memoryEntryQuery.error instanceof Error ? memoryEntryQuery.error.message : null,
     saveError: saveMutation.error instanceof Error ? saveMutation.error.message : null,
   };
 }

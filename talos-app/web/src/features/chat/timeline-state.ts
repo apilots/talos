@@ -4,6 +4,55 @@ import type {
   StreamSessionState,
 } from "@/shared/types/ui";
 import type { TalosTimelinePhase } from "@talos/sdk-core";
+import type { ContextCompactionStage } from "@/shared/types/protocol";
+
+const ACTIVE_CONTEXT_COMPACTION_STAGES: ReadonlySet<ContextCompactionStage> = new Set([
+  "preparing",
+  "summarizing",
+  "rebuilding_prompt",
+  "trimming",
+]);
+
+export function activeContextCompactionStage(
+  stream: StreamSessionState | undefined,
+): ContextCompactionStage | undefined {
+  if (!stream) {
+    return undefined;
+  }
+  for (const block of stream?.blocks ?? []) {
+    if (block.kind !== "timeline" || !block.live) {
+      continue;
+    }
+    for (let index = block.items.length - 1; index >= 0; index -= 1) {
+      const item = block.items[index];
+      if (
+        item.kind === "context_compaction" &&
+        item.status === "running" &&
+        ACTIVE_CONTEXT_COMPACTION_STAGES.has(item.stage)
+      ) {
+        return item.stage;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function contextCompactionStageLabel(stage: ContextCompactionStage) {
+  switch (stage) {
+    case "preparing":
+      return "preparing";
+    case "summarizing":
+      return "summarizing";
+    case "rebuilding_prompt":
+      return "rebuilding prompt";
+    case "trimming":
+      return "trimming";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+  }
+}
 
 function timelineBlockId(sessionId: string, messageId: string) {
   return `timeline-${sessionId}-${messageId}`;

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use talos_coordinator::SessionRuntime;
+use talos_coordinator::{
+    AgentSessionCompactionIdentity, AgentSessionCompactionParams, SessionRuntime,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
@@ -92,6 +94,7 @@ impl ResourceAccessService {
             project_id: request.project_id,
             limit: request.limit,
             offset: request.offset,
+            ..SessionQuery::default()
         };
         let sessions = self.sessions.list_sessions(query).await?;
         Ok(self.filter_sessions(actor, sessions))
@@ -132,11 +135,19 @@ impl ResourceAccessService {
         &self,
         actor: &Actor,
         session_id: &str,
+        identity: AgentSessionCompactionIdentity,
+        event_tx: tokio::sync::mpsc::Sender<talos_types::talos::AgentEvent>,
     ) -> TalosResult<TalosSession> {
         let session = self.get_session(actor, session_id).await?;
-        let usage = self.compact_runtime_session(session.clone()).await?;
+        let usage = self
+            .compact_runtime_session(AgentSessionCompactionParams {
+                session: session.clone(),
+                identity,
+                event_tx,
+            })
+            .await?;
         self.sessions
-            .record_turn_progress(session_id, 0, &session.config.llm.model, &usage)
+            .record_usage(session_id, &session.config.llm.model, &usage)
             .await?;
         self.invalidate_cached_session(session_id).await?;
         self.get_session(actor, session_id).await
@@ -345,9 +356,9 @@ impl ResourceAccessService {
 
     async fn compact_runtime_session(
         &self,
-        session: TalosSession,
+        params: AgentSessionCompactionParams,
     ) -> TalosResult<talos_types::talos::TokenUsage> {
-        self.session_runtime.compact_session(session).await
+        self.session_runtime.compact_session(params).await
     }
 
     async fn clear_runtime_session(&self, session: TalosSession) -> TalosResult<()> {

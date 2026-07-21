@@ -1267,7 +1267,7 @@ async fn test_slow_quit_reports_progress_before_force_exit_deadline() {
     assert!(app
         .status_hint
         .as_ref()
-        .map(|(msg, _)| msg.contains("Memory flush is still in progress"))
+        .map(|(msg, _)| msg.contains("Session close is still in progress"))
         .unwrap_or(false));
     assert!(!app
         .right_panel_events

@@ -105,6 +105,9 @@ impl TuiApp {
                     self.push_right_event("session compacted".to_string());
                 }
                 Err(err) => {
+                    if self.in_flight {
+                        self.finish_active_stream("session compaction failed", true, false);
+                    }
                     self.push_system_notice(format!("Failed to compact session: {}", err));
                     self.push_right_event("session compact failed".to_string());
                 }
@@ -279,10 +282,10 @@ impl TuiApp {
         {
             self.close_slow_notice_reported = true;
             self.show_status_hint(
-                "Memory flush is still in progress. Talos will keep waiting.",
+                "Session close is still in progress. Talos will keep waiting.",
                 Duration::from_secs(4),
             );
-            self.push_right_event("session memory flush still in progress".to_string());
+            self.push_right_event("session close still in progress".to_string());
         }
     }
 }

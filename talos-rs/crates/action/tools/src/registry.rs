@@ -6,6 +6,7 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_llm_provider::ToolDefinition;
+use talos_memory::MemoryReader;
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
 use talos_tools_sandbox::{ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode};
 use tracing::warn;
@@ -125,6 +126,7 @@ pub struct ToolRegistry {
     router: ToolRouter,
     policy_checker: ToolPolicyChecker,
     collaboration_runtime: DashMap<&'static str, Arc<CollaborationRuntime>>,
+    memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
 }
 
 impl ToolRegistry {
@@ -461,6 +463,7 @@ impl ToolRegistry {
             router: ToolRouter,
             policy_checker: ToolPolicyChecker::new(policy),
             collaboration_runtime: DashMap::new(),
+            memory_reader: DashMap::new(),
         }
     }
 
@@ -695,7 +698,7 @@ impl ToolRegistry {
                 })
                 .collect(),
         );
-        if let Some(runtime) = self
+        let ctx = if let Some(runtime) = self
             .collaboration_runtime
             .get("default")
             .map(|entry| entry.value().clone())
@@ -703,11 +706,24 @@ impl ToolRegistry {
             ctx.with_collaboration_runtime(runtime)
         } else {
             ctx
+        };
+        if let Some(reader) = self
+            .memory_reader
+            .get("default")
+            .map(|entry| entry.value().clone())
+        {
+            ctx.with_memory_reader(reader)
+        } else {
+            ctx
         }
     }
 
     pub fn set_collaboration_runtime(&self, runtime: Arc<CollaborationRuntime>) {
         self.collaboration_runtime.insert("default", runtime);
+    }
+
+    pub fn set_memory_reader(&self, reader: Arc<dyn MemoryReader>) {
+        self.memory_reader.insert("default", reader);
     }
 
     /// Update the policy for the registry.

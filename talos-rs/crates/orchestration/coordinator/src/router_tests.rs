@@ -101,7 +101,10 @@ impl AgentHarness for DescriptorAgent {
         Ok(rx)
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+    async fn compact_session(
+        &self,
+        _params: talos_agent::AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage> {
         Ok(TokenUsage::default())
     }
 
@@ -111,18 +114,6 @@ impl AgentHarness for DescriptorAgent {
 
     async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
-    }
-
-    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        0
-    }
-
-    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
-        false
     }
 
     fn has_active_turn(&self, _session_id: &str) -> bool {

@@ -24,6 +24,26 @@ pub struct AutomationJob {
 }
 
 impl AutomationJob {
+    /// Creates a cron job that waits for its first scheduled occurrence.
+    pub fn cron<F, Fut>(
+        name: impl Into<String>,
+        expression: impl Into<String>,
+        timezone: Tz,
+        task: F,
+    ) -> Self
+    where
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = TalosResult<()>> + Send + 'static,
+    {
+        Self {
+            name: name.into(),
+            expression: expression.into(),
+            timezone,
+            run_on_start: false,
+            task: Arc::new(move || Box::pin(task())),
+        }
+    }
+
     /// Creates a cron job that also runs once after automation starts.
     pub fn cron_on_start<F, Fut>(
         name: impl Into<String>,

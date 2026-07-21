@@ -100,16 +100,6 @@ describe("createDesktopTalosClient", () => {
               version_token: "memory-token-2",
             },
       },
-      "memory.search": {
-            results: [
-              {
-                date: "2026-06-24",
-                snippet: "Updated memory",
-                start_line: 1,
-                end_line: 1,
-              },
-            ],
-      },
       "workspace.doc.read": {
             doc: {
               kind: "memory",
@@ -140,12 +130,6 @@ describe("createDesktopTalosClient", () => {
       content: "# Updated memory",
       expected_version: "memory-token",
     })).resolves.toMatchObject({ file: { version_token: "memory-token-2" } });
-    await expect(client.memory.search({
-      query: "Updated",
-      limit: 5,
-      date_from: "2026-06-01",
-      date_to: "2026-06-30",
-    })).resolves.toMatchObject({ results: [{ date: "2026-06-24" }] });
     await expect(client.workspaceDocs.get("memory")).resolves.toMatchObject({ doc: { content: "# Workspace memory" } });
     await expect(client.workspaceDocs.put("memory", {
       content: "# Updated workspace memory",
@@ -153,15 +137,15 @@ describe("createDesktopTalosClient", () => {
     })).resolves.toMatchObject({ doc: { version_token: "doc-token-2" } });
   });
 
-  it("passes memory search query and date filters to the desktop bridge", async () => {
+  it("passes memory search filters to the desktop bridge", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge = bridgeWithInvoke(async function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
-        if (method === "memory.search") {
-          return { results: [] } as T;
+        if (method === "memory/search") {
+          return { data: [] } as T;
         }
         throw new Error(`unexpected method: ${method}`);
     });
@@ -170,18 +154,18 @@ describe("createDesktopTalosClient", () => {
     await client.memory.search({
       query: "memory",
       limit: 5,
-      date_from: "2026-06-01",
-      date_to: "2026-06-30",
+      sinceAt: 1,
+      untilAt: 2,
     });
 
     expect(calls).toEqual([
       {
-        method: "memory.search",
+        method: "memory/search",
         params: {
           query: "memory",
           limit: 5,
-          date_from: "2026-06-01",
-          date_to: "2026-06-30",
+          sinceAt: 1,
+          untilAt: 2,
         },
       },
     ]);

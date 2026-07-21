@@ -2,6 +2,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// Maximum canonical size of one workspace MEMORY.md file.
+pub const MEMORY_FILE_MAX_CHARS: usize = 8_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum ExpectedFileVersion {
@@ -61,31 +64,97 @@ pub struct MemoryFileWriteResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MemorySearchRequest {
     pub query: String,
     #[serde(default)]
     #[ts(optional)]
-    pub limit: Option<usize>,
+    pub limit: Option<u32>,
     #[serde(default)]
     #[ts(optional)]
-    pub date_from: Option<String>,
+    pub kinds: Option<Vec<MemoryKind>>,
     #[serde(default)]
     #[ts(optional)]
-    pub date_to: Option<String>,
+    #[ts(type = "number | null")]
+    pub since_at: Option<i64>,
+    #[serde(default)]
+    #[ts(optional)]
+    #[ts(type = "number | null")]
+    pub until_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct MemorySearchResponse {
-    #[serde(default)]
-    pub results: Vec<MemorySearchResult>,
+    pub data: Vec<MemorySearchHit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct MemorySearchResult {
+#[serde(rename_all = "camelCase")]
+pub struct MemorySearchHit {
+    pub memory_id: String,
+    pub title: String,
+    pub preview: String,
+    pub kind: MemoryKind,
+    pub importance: MemoryImportance,
+    #[ts(type = "number")]
+    pub occurred_at: i64,
+    pub rank: u32,
+    pub source: MemorySourceInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryGetRequest {
+    pub memory_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryGetResponse {
+    pub memory: MemoryInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryInfo {
+    pub memory_id: String,
+    pub title: String,
+    pub body: String,
+    pub kind: MemoryKind,
+    pub importance: MemoryImportance,
+    #[ts(type = "number")]
+    pub occurred_at: i64,
+    pub source: MemorySourceInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemorySourceInfo {
     pub date: String,
-    pub snippet: String,
-    pub start_line: usize,
-    pub end_line: usize,
+    pub session_id: Option<String>,
+    #[ts(type = "number | null")]
+    pub from_seq: Option<u64>,
+    #[ts(type = "number | null")]
+    pub until_seq: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MemoryKind {
+    Preference,
+    Fact,
+    Decision,
+    Task,
+    Episode,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MemoryImportance {
+    Low,
+    Normal,
+    High,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

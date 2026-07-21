@@ -103,6 +103,7 @@ fn terminal_event(sequence: u64) -> AgentEvent {
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             metrics: None,
+            artifact_seq: None,
         }),
     }
 }

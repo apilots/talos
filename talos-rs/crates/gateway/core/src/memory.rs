@@ -2,7 +2,8 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse,
+    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
+    MemorySearchRequest, MemorySearchResponse,
 };
 
 use crate::gateway_service::ServiceGateway;
@@ -50,9 +51,14 @@ impl ServiceGateway {
         actor: &Actor,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        self.service
-            .memory
-            .search_files_with_request(actor, request)
-            .await
+        self.service.memory.search(actor, request).await
+    }
+
+    pub(crate) async fn get_memory(
+        &self,
+        actor: &Actor,
+        request: MemoryGetRequest,
+    ) -> TalosResult<MemoryGetResponse> {
+        self.service.memory.get(actor, request).await
     }
 }

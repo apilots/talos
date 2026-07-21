@@ -40,6 +40,11 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         since_event_id: Option<String>,
     ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
+    async fn subscribe_session_timeline(
+        &self,
+        session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>>;
     async fn recover_timeline(
         &self,
         session_id: &str,
@@ -247,6 +252,27 @@ where
                 replay_limit: Some(256),
                 close_when_idle: Some(false),
                 close_on_terminal: Some(true),
+            },
+        )
+        .await?;
+        Ok(subscription.stream.into_inner())
+    }
+
+    async fn subscribe_session_timeline(
+        &self,
+        session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        let mut client = self.lock().await;
+        let subscription = SdkGatewayClient::open_timeline_stream(
+            &mut *client,
+            SubscribeTimelineRequest {
+                session_id: session_id.to_string(),
+                turn_id: None,
+                since_event_id,
+                replay_limit: Some(256),
+                close_when_idle: Some(false),
+                close_on_terminal: Some(false),
             },
         )
         .await?;

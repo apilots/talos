@@ -8,13 +8,21 @@ license.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 sqlx = { workspace = true }
 talos-error = { workspace = true }
+talos-fs = { workspace = true }
 talos-llm-provider = { workspace = true }
+talos-memory = { workspace = true }
 talos-storage = { workspace = true }
 talos-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
+
+[dev-dependencies]
+tempfile = "3.8"

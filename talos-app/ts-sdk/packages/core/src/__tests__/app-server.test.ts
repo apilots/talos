@@ -15,7 +15,7 @@ class RecordingTransport implements AppServerTransport {
     if (method === "model.list") {
       return Promise.resolve({ models: [] } as T);
     }
-    if (method === "memory.search") {
+    if (method === "memory/search") {
       return Promise.resolve({ data: [] } as T);
     }
     if (method === "project.list") {
@@ -145,7 +145,7 @@ describe("AppServerClient", () => {
           expected_version: "memory-token",
         },
       },
-      { method: "memory.search", params: { query: "stable fact", limit: 3 } },
+      { method: "memory/search", params: { query: "stable fact", limit: 3 } },
     ]);
   });
 });

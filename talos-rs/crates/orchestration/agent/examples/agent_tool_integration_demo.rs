@@ -1,9 +1,12 @@
 //! Demo to validate Agent with Tool Integration
 
+mod support;
+
 use std::sync::Arc;
+use support::NoopMemoryWriter;
 use talos_agent::{
-    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
-    AgentRunParams, AgentRunSessionState,
+    empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
+    AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
 };
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -86,20 +89,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create an agent with a mock provider
     let llm_provider = Arc::new(DemoLlmProvider {});
-    let agent = AgentHarnessImpl::new(
-        "demo_agent_1".to_string(),
-        "Demo Agent".to_string(),
-        "An agent for demonstration purposes".to_string(),
-        Arc::new(StaticLlmProviderRouter {
+    let agent = AgentHarnessImpl::new(AgentHarnessParams {
+        id: "demo_agent_1".to_string(),
+        name: "Demo Agent".to_string(),
+        description: "An agent for demonstration purposes".to_string(),
+        llm_provider_router: Arc::new(StaticLlmProviderRouter {
             provider: llm_provider,
         }),
-        ModelSelection::without_reasoning(ModelRef {
-            provider: "demo".to_string(),
+        model_selection: ModelSelection::without_reasoning(ModelRef {
+            provider: "openai".to_string(),
             id: "demo-model".to_string(),
         }),
         tool_registry,
-        Default::default(),
-    )?;
+        kernel_config: Default::default(),
+        skill_roots_resolver: empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(NoopMemoryWriter),
+    })?;
 
     println!("1. Agent created successfully");
 
@@ -115,10 +122,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test the agent's message handling
     println!("\n3. Testing agent message handling:");
+    let mut config = talos_config::Config::default();
+    config.llm.openai.models = vec![talos_config::ProviderModelConfig {
+        id: "demo-model".to_string(),
+        name: "demo-model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
     let session = TalosSession {
         title: "Untitled Session".to_string(),
         user_id: "demo-user".to_string(),
-        conf: talos_types::SessionConf::default(),
+        conf: talos_types::SessionConf {
+            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                provider: "openai".to_string(),
+                id: "demo-model".to_string(),
+            })),
+        },
         project_id: None,
         current_directory: None,
         context: SessionContext {
@@ -136,7 +159,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             thread_id: None,
             environment: None,
         },
-        config: talos_config::Config::default(),
+        config,
         state: SessionState::default(),
     };
     match agent

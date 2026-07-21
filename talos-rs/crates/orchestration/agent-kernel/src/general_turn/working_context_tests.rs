@@ -3,6 +3,7 @@ use super::*;
 fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
     PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "m1".to_string(),
         invocation_id: "turn-1".to_string(),
         agent_id: "talos".to_string(),
@@ -42,13 +43,47 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
 fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
     let prepared = prepared_with_budget(80);
     let mut state = GeneralTurnLoopState::new(&prepared);
+    let body = "The user prefers tea. ".repeat(80);
+    let memory = talos_types::MemoryInfo {
+        memory_id: "mem-1".to_string(),
+        title: "Tea preference".to_string(),
+        body,
+        kind: talos_types::MemoryKind::Preference,
+        importance: talos_types::MemoryImportance::High,
+        occurred_at: 1,
+        source: talos_types::MemorySourceInfo {
+            date: "2026-07-20".to_string(),
+            session_id: None,
+            from_seq: None,
+            until_seq: None,
+        },
+    };
+    let batch =
+        super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
+            call_id: "call-old".to_string(),
+            tool_name: "MemoryGet".to_string(),
+            outcome: ToolDispatchOutcome::executed(
+                ToolOutputPayload::success_json(
+                    &MemoryGetResponse {
+                        memory: memory.clone(),
+                    },
+                    "serialize test memory",
+                )
+                .expect("memory payload"),
+            ),
+            is_error: false,
+        }]);
     state.messages = vec![
         ChatMessage::assistant("old assistant text ".repeat(80)),
         ChatMessage::assistant_with_tool_calls(
             "old call",
-            vec![FunctionCall::new("call-old", "Read", serde_json::json!({}))],
+            vec![FunctionCall::new(
+                "call-old",
+                "MemoryGet",
+                serde_json::json!({}),
+            )],
         ),
-        ChatMessage::tool("call-old", "Read", "old output ".repeat(80)),
+        batch.tool_messages[0].clone(),
         ChatMessage::assistant_with_tool_calls(
             "fresh call",
             vec![FunctionCall::new(
@@ -60,7 +95,14 @@ fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
         ChatMessage::tool("call-fresh", "Read", "fresh output"),
     ];
 
-    let report = working_context::trim_working_context_to_budget(&prepared, &mut state, 80, 1);
+    let report = working_context::trim_working_context_to_budget(
+        &prepared,
+        &mut state,
+        80,
+        1,
+        &AgentKernelConfig::default(),
+    )
+    .expect("working context should trim");
 
     assert!(report.trimmed_messages > 0);
     assert!(state.messages.iter().any(|message| {
@@ -77,6 +119,55 @@ fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
                 .as_ref()
                 .is_some_and(|calls| calls.iter().any(|call| call.id == "call-old"))
     }));
+    assert_eq!(state.retrieved_memories, vec![memory]);
+}
+
+#[test]
+fn test_working_context_trim_skips_failed_memory_get_result() {
+    let prepared = prepared_with_budget(16);
+    let mut state = GeneralTurnLoopState::new(&prepared);
+    let batch =
+        super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
+            call_id: "call-memory".to_string(),
+            tool_name: "MemoryGet".to_string(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::failure_structured(
+                "memory was not found ".repeat(20),
+                None,
+            )),
+            is_error: true,
+        }]);
+    state.messages = vec![
+        ChatMessage::assistant_with_tool_calls(
+            "memory call",
+            vec![FunctionCall::new(
+                "call-memory",
+                "MemoryGet",
+                serde_json::json!({}),
+            )],
+        ),
+        batch.tool_messages[0].clone(),
+        ChatMessage::assistant_with_tool_calls(
+            "fresh call",
+            vec![FunctionCall::new(
+                "call-fresh",
+                "Read",
+                serde_json::json!({}),
+            )],
+        ),
+        ChatMessage::tool("call-fresh", "Read", "fresh output"),
+    ];
+
+    let report = working_context::trim_working_context_to_budget(
+        &prepared,
+        &mut state,
+        16,
+        1,
+        &AgentKernelConfig::default(),
+    )
+    .expect("failed MemoryGet should be removable");
+
+    assert!(report.trimmed_messages > 0);
+    assert!(state.retrieved_memories.is_empty());
 }
 
 #[test]
@@ -85,8 +176,52 @@ fn test_working_context_trim_fails_when_latest_group_is_too_large() {
     let mut state = GeneralTurnLoopState::new(&prepared);
     state.messages = vec![ChatMessage::assistant("x".repeat(4_000))];
 
-    let report = working_context::trim_working_context_to_budget(&prepared, &mut state, 16, 1);
+    let report = working_context::trim_working_context_to_budget(
+        &prepared,
+        &mut state,
+        16,
+        1,
+        &AgentKernelConfig::default(),
+    )
+    .expect("working context should report the exhausted budget");
 
     assert!(report.post_tokens > 16);
     assert_eq!(state.messages.len(), 1);
+}
+
+#[test]
+fn test_working_context_trim_rejects_invalid_memory_get_result() {
+    let prepared = prepared_with_budget(16);
+    let mut state = GeneralTurnLoopState::new(&prepared);
+    state.messages = vec![
+        ChatMessage::assistant_with_tool_calls(
+            "memory call",
+            vec![FunctionCall::new(
+                "call-memory",
+                "MemoryGet",
+                serde_json::json!({}),
+            )],
+        ),
+        ChatMessage::tool("call-memory", "MemoryGet", "invalid result"),
+        ChatMessage::assistant_with_tool_calls(
+            "fresh call",
+            vec![FunctionCall::new(
+                "call-fresh",
+                "Read",
+                serde_json::json!({}),
+            )],
+        ),
+        ChatMessage::tool("call-fresh", "Read", "fresh output"),
+    ];
+
+    let error = working_context::trim_working_context_to_budget(
+        &prepared,
+        &mut state,
+        16,
+        1,
+        &AgentKernelConfig::default(),
+    )
+    .expect_err("invalid MemoryGet result should fail context rebuild");
+
+    assert!(matches!(error, TalosError::SerializationError(_)));
 }

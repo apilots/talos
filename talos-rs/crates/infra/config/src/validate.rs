@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::path::{Component, Path};
 
 use talos_error::TalosResult;
 
@@ -13,11 +14,7 @@ const REQUIRED_CONFIG_PATHS: &[&str] = &[
     "llm.model",
 ];
 
-const FORBIDDEN_CONFIG_PATHS: &[&str] = &[
-    "logging.file",
-    "storage.connection_string",
-    "agent.kernel.memory.workspace_dir",
-];
+const FORBIDDEN_CONFIG_PATHS: &[&str] = &["logging.file", "storage.connection_string"];
 
 pub(crate) fn validate_required_paths(root: &Value) -> TalosResult<()> {
     use talos_error::TalosError;
@@ -112,6 +109,30 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
+    let memory_maintenance = &config.automation.memory_daily_maintenance;
+    if memory_maintenance.cron.trim().is_empty() {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.memory_daily_maintenance.cron must not be empty".to_string(),
+        ));
+    }
+    let mut cron = croner::Cron::new(&memory_maintenance.cron);
+    cron.with_seconds_required().with_dom_and_dow();
+    cron.parse().map_err(|error| {
+        TalosError::InvalidConfiguration(format!(
+            "automation.memory_daily_maintenance.cron is invalid: {error}"
+        ))
+    })?;
+    if memory_maintenance.batch_size == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.memory_daily_maintenance.batch_size must be > 0".to_string(),
+        ));
+    }
+    if memory_maintenance.max_batches == 0 {
+        return Err(TalosError::InvalidConfiguration(
+            "automation.memory_daily_maintenance.max_batches must be > 0".to_string(),
+        ));
+    }
+
     if config.agent.name.trim().is_empty() || is_unresolved_placeholder(&config.agent.name) {
         return Err(TalosError::InvalidConfiguration(
             "agent.name is empty or unresolved placeholder".to_string(),
@@ -146,36 +167,34 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.kernel.workspace_dir is empty or unresolved placeholder".to_string(),
         ));
     }
-    if config.agent.kernel.memory.hot_recent_messages == 0 {
+    if config.memory.file_list_default_limit == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.hot_recent_messages must be > 0".to_string(),
+            "memory.file_list_default_limit must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.memory.compaction_threshold_bytes == 0 {
+    if config.memory.file_list_max_limit == 0 {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.compaction_threshold_bytes must be > 0".to_string(),
+            "memory.file_list_max_limit must be > 0".to_string(),
         ));
     }
-    if config.agent.kernel.memory.file_list_default_limit == 0 {
+    if config.memory.file_list_default_limit >= config.memory.file_list_max_limit {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.file_list_default_limit must be > 0".to_string(),
+            "memory.file_list_default_limit must be < memory.file_list_max_limit".to_string(),
         ));
     }
-    if config.agent.kernel.memory.file_list_max_limit == 0 {
+    if config.memory.root_memory_filename.trim() != "MEMORY.md" {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.file_list_max_limit must be > 0".to_string(),
+            "memory.root_memory_filename must be MEMORY.md".to_string(),
         ));
     }
-    if config.agent.kernel.memory.file_list_default_limit
-        >= config.agent.kernel.memory.file_list_max_limit
+    let memory_dirname = config.memory.memory_dirname.as_str();
+    let mut memory_components = Path::new(memory_dirname).components();
+    if memory_dirname.trim() != memory_dirname
+        || !matches!(memory_components.next(), Some(Component::Normal(_)))
+        || memory_components.next().is_some()
     {
         return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.file_list_default_limit must be < agent.kernel.memory.file_list_max_limit".to_string(),
-        ));
-    }
-    if config.agent.kernel.memory.root_memory_filename.trim() != "MEMORY.md" {
-        return Err(TalosError::InvalidConfiguration(
-            "agent.kernel.memory.root_memory_filename must be MEMORY.md".to_string(),
+            "memory.memory_dirname must be one relative directory name".to_string(),
         ));
     }
     if config.agent.kernel.prompt.bootstrap.max_chars_per_file == 0 {

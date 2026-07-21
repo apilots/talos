@@ -24,7 +24,6 @@ export TALOS_HOME="${TEST_TALOS_HOME}"
 
 MEMORY_DATE="$(date '+%Y-%m-%d')"
 MEMORY_MARKER="memory-get-marker-$(date '+%Y%m%d%H%M%S')-$$"
-MEMORY_FILE_PATH="memory/${MEMORY_DATE}.md"
 
 build_binaries
 start_server
@@ -129,7 +128,7 @@ create_memory_payload="$(python3 - <<PY
 import json
 print(json.dumps({
     "date": "${MEMORY_DATE}",
-    "content": "# Memory\\n${MEMORY_MARKER}\\n",
+    "content": "## [09:30] Memory get fixture\\n\\n${MEMORY_MARKER}\\n",
 }))
 PY
 )"
@@ -143,6 +142,21 @@ if [[ "${status}" != "200" ]]; then
 fi
 echo "CASE seed_memory_file_for_memory_get PASS status=${status}"
 
+memory_search_json="$(curl -sS "${GATEWAY_URL}/v1/memory/search?query=${MEMORY_MARKER}&limit=1")"
+memory_id="$(MEMORY_SEARCH_JSON="${memory_search_json}" python3 - <<'PY'
+import json
+import os
+
+data = json.loads(os.environ["MEMORY_SEARCH_JSON"]).get("data", [])
+print(data[0].get("memoryId", "") if data else "")
+PY
+)"
+if [[ -z "${memory_id}" ]]; then
+  echo "CASE seed_memory_search_for_memory_get FAIL response=${memory_search_json}"
+  exit 1
+fi
+echo "CASE seed_memory_search_for_memory_get PASS memory_id=${memory_id}"
+
 session_payload="$(build_session_context)"
 session_id="$(new_session_id)"
 remember_session_context "${session_id}" "${session_payload}"
@@ -154,7 +168,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE memory_get_session_id PASS session_id=${session_id}"
 
-memory_get_input="You must call tool 'MemoryGet' exactly once with path ${MEMORY_FILE_PATH}. After the tool call, respond with exactly MEMORY_GET_OK:${MEMORY_MARKER}"
+memory_get_input="You must call tool 'MemoryGet' exactly once with memoryId ${memory_id}. After the tool call, respond with exactly MEMORY_GET_OK:${MEMORY_MARKER}"
 memory_get_payload="$(build_payload "${memory_get_input}")"
 memory_get_json="$(send_message_response "${session_id}" "${memory_get_payload}" "memory_get")"
 log_case_json "tool_memory_get" "${memory_get_payload}" "${memory_get_json}"
@@ -169,17 +183,30 @@ if ! echo "${memory_get_output}" | grep -Fq "MEMORY_GET_OK:${MEMORY_MARKER}"; th
   exit 1
 fi
 
-tool_result_tool="$(MEMORY_GET_JSON="${memory_get_json}" python3 - <<'PY'
+tool_result_check="$(MEMORY_GET_JSON="${memory_get_json}" MEMORY_ID="${memory_id}" MEMORY_MARKER="${MEMORY_MARKER}" python3 - <<'PY'
 import json
 import os
 
 data = json.loads(os.environ["MEMORY_GET_JSON"])
+calls = [item for item in data.get("output", []) if item.get("type") == "tool_call"]
 results = [item for item in data.get("output", []) if item.get("type") == "tool_result"]
-print(results[0].get("tool_name", "") if results else "")
+call = calls[0] if calls else {}
+result = results[0] if results else {}
+content = json.dumps(result.get("content", []), ensure_ascii=False)
+valid = (
+    len(calls) == 1
+    and len(results) == 1
+    and call.get("name") == "MemoryGet"
+    and call.get("arguments", {}).get("memoryId") == os.environ["MEMORY_ID"]
+    and result.get("tool_name") == "MemoryGet"
+    and result.get("is_error") is False
+    and os.environ["MEMORY_MARKER"] in content
+)
+print("ok" if valid else "invalid")
 PY
 )"
-if [[ "${tool_result_tool}" != "MemoryGet" ]]; then
-  echo "CASE tool_memory_get FAIL unexpected_tool result=${tool_result_tool}"
+if [[ "${tool_result_check}" != "ok" ]]; then
+  echo "CASE tool_memory_get FAIL invalid_tool_result response=${memory_get_json}"
   exit 1
 fi
 

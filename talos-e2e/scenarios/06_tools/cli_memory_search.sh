@@ -38,7 +38,7 @@ echo "CASE cli_stream_memory_session_id PASS session_id=${memory_session_id}"
 
 memory_stream_input="You must call MemorySearch exactly once with query talos项目 before any final answer. Do not answer from prior knowledge, prior messages, or workspace context. If no result is found, say so in one short sentence after the tool call."
 
-run_cli exec --session "${memory_session_id}" --model "${primary_model}" "${memory_stream_input}" \
+run_cli exec --session "${memory_session_id}" --model "${primary_provider}:${primary_model}" "${memory_stream_input}" \
   >"${memory_stream_stdout}" 2>"${memory_stream_stderr}"
 
 memory_stdout_text="$(cat "${memory_stream_stdout}")"

@@ -60,6 +60,7 @@ impl TimelineBuilder {
         stop_reason: StopReason,
         usage: TokenUsage,
         metrics: Option<TurnExecutionMetrics>,
+        artifact_seq: Option<u64>,
     ) -> AgentEvent {
         let payload = AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
             request_id: self.request_id.clone(),
@@ -68,6 +69,7 @@ impl TimelineBuilder {
             stop_reason,
             usage,
             metrics,
+            artifact_seq,
         });
         self.event(AgentEventType::TurnCompleted, payload)
     }

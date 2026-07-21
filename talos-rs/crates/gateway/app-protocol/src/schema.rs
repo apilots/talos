@@ -183,8 +183,13 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::MemoryFileWriteResponse>());
     output.push_str(&export::<talos_types::MemoryFileSummary>());
     output.push_str(&export::<talos_types::MemoryFileDetail>());
-    output.push_str(&export::<talos_types::MemorySearchResult>());
+    output.push_str(&export::<talos_types::MemoryKind>());
+    output.push_str(&export::<talos_types::MemoryImportance>());
+    output.push_str(&export::<talos_types::MemorySourceInfo>());
+    output.push_str(&export::<talos_types::MemorySearchHit>());
     output.push_str(&export::<talos_types::MemorySearchResponse>());
+    output.push_str(&export::<talos_types::MemoryInfo>());
+    output.push_str(&export::<talos_types::MemoryGetResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocListRequest>());
     output.push_str(&export::<talos_types::WorkspaceDocListResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocReadRequest>());
@@ -311,6 +316,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::UserCurrentRequest>());
     output.push_str(&export::<talos_types::UserCurrentResponse>());
     output.push_str(&export::<talos_types::MemorySearchRequest>());
+    output.push_str(&export::<talos_types::MemoryGetRequest>());
     output.push_str(&export::<talos_auth::UserRole>());
     output.push_str(&export::<talos_auth::UserType>());
     output.push_str(&export::<talos_auth::UserDto>());

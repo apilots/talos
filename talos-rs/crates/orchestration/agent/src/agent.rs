@@ -10,6 +10,7 @@ mod lifecycle;
 mod mock;
 mod request;
 mod runtime;
+mod runtime_compaction;
 mod session;
 #[cfg(test)]
 #[path = "agent/agent_tests.rs"]
@@ -20,10 +21,10 @@ pub use mock::MockAgent;
 use lifecycle::{ActiveTurnHandle, AgentRunMode, QueuedTurn};
 
 use crate::{
-    empty_skill_roots_resolver, flush_manager::MemoryFlushManager, AgentDescriptor, AgentError,
-    AgentErrorKind, AgentHarness, AgentInput, AgentInputParams, AgentInputResult,
-    AgentInterruptParams, AgentInterruptResult, AgentResult, AgentResumeParams, AgentRunConfig,
-    AgentRunParams, AgentRunResult, AgentRunSessionState, AgentStatus, SkillRootsResolver,
+    AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentInput, AgentInputParams,
+    AgentInputResult, AgentInterruptParams, AgentInterruptResult, AgentResult, AgentResumeParams,
+    AgentRunConfig, AgentRunParams, AgentRunResult, AgentRunSessionState,
+    AgentSessionCompactionParams, AgentStatus, SkillRootsResolver,
 };
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
@@ -32,7 +33,8 @@ use talos_agent_kernel::TimelineBuilder;
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
-use talos_memory::MemoryStore;
+use talos_memory::MemoryWriter;
+use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
 use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
 use talos_types::{normalize_session_title, ModelSelection};
@@ -65,59 +67,54 @@ pub struct AgentHarnessImpl {
     pub llm_provider_router: Arc<dyn LlmProviderRouter>,
     /// Default model and reasoning policy for this Harness.
     pub model_selection: ModelSelection,
-    /// Memory store used by current Kernel-backed behavior.
-    pub memory_store: Arc<MemoryStore>,
+    /// Long-term memory persistence injected by the composition root.
+    memory_writer: Arc<dyn MemoryWriter>,
+    /// Recoverable session artifact persistence injected by the composition root.
+    session_artifact_store: Arc<dyn SessionArtifactStore>,
+    /// Session state persistence used for memory formation cursors.
+    session_store: Arc<dyn SessionStore>,
     /// Tool registry shared by Harness and runtime execution.
     pub tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
     active_turns: Arc<DashMap<String, ActiveTurnHandle>>,
     generated_session_titles: Arc<DashMap<String, String>>,
     session_backlogs: Arc<Mutex<HashMap<String, VecDeque<QueuedTurn>>>>,
-    memory_flush_manager: Arc<MemoryFlushManager>,
     runtime: KernelAgent,
 }
 
-/// Internal constructor inputs for the default Harness implementation.
+/// Constructor inputs for the default Harness implementation.
 ///
 /// The Agent module owns runtime construction. Callers provide already-merged
 /// Agent definition data and shared services, but must not pass runtime-private
 /// state through this boundary.
-pub(crate) struct AgentHarnessParams {
-    pub(crate) id: String,
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) llm_provider_router: Arc<dyn LlmProviderRouter>,
-    pub(crate) model_selection: ModelSelection,
-    pub(crate) tool_registry: Arc<ToolRegistry>,
-    pub(crate) kernel_config: AgentKernelConfig,
-    pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+pub struct AgentHarnessParams {
+    /// Stable routing identifier.
+    pub id: String,
+    /// User-visible Agent name.
+    pub name: String,
+    /// User-visible Agent description.
+    pub description: String,
+    /// Provider selection boundary.
+    pub llm_provider_router: Arc<dyn LlmProviderRouter>,
+    /// Default model selection.
+    pub model_selection: ModelSelection,
+    /// Tools available to this Harness.
+    pub tool_registry: Arc<ToolRegistry>,
+    /// Resolved Kernel runtime configuration.
+    pub kernel_config: AgentKernelConfig,
+    /// Resolver for configured skill roots.
+    pub skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    /// Recoverable session artifact persistence.
+    pub session_artifact_store: Arc<dyn SessionArtifactStore>,
+    /// Session state persistence.
+    pub session_store: Arc<dyn SessionStore>,
+    /// Long-term memory persistence.
+    pub memory_writer: Arc<dyn MemoryWriter>,
 }
 
 impl AgentHarnessImpl {
     /// Construct the default Kernel-backed Harness implementation.
-    pub fn new(
-        id: String,
-        name: String,
-        description: String,
-        llm_provider_router: Arc<dyn LlmProviderRouter>,
-        model_selection: ModelSelection,
-        tool_registry: Arc<ToolRegistry>,
-        kernel_config: AgentKernelConfig,
-    ) -> TalosResult<Self> {
-        Self::new_with_skill_roots_resolver(AgentHarnessParams {
-            id,
-            name,
-            description,
-            llm_provider_router,
-            model_selection,
-            tool_registry,
-            kernel_config,
-            skill_roots_resolver: empty_skill_roots_resolver(),
-        })
-    }
-
-    /// Construct the default Harness with an explicit skill roots resolver.
-    pub(crate) fn new_with_skill_roots_resolver(params: AgentHarnessParams) -> TalosResult<Self> {
+    pub fn new(params: AgentHarnessParams) -> TalosResult<Self> {
         let AgentHarnessParams {
             id,
             name,
@@ -127,13 +124,12 @@ impl AgentHarnessImpl {
             tool_registry,
             kernel_config,
             skill_roots_resolver,
+            session_artifact_store,
+            session_store,
+            memory_writer,
         } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
-        let llm_provider = llm_provider_router.provider_for(&model_selection.model_ref)?;
-        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
-            &kernel_config,
-            llm_provider.clone(),
-        ));
+        llm_provider_router.provider_for(&model_selection.model_ref)?;
 
         Ok(Self {
             id: id.clone(),
@@ -141,13 +137,14 @@ impl AgentHarnessImpl {
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
             model_selection: model_selection.clone(),
-            memory_store,
+            memory_writer: memory_writer.clone(),
+            session_artifact_store: session_artifact_store.clone(),
+            session_store: session_store.clone(),
             tool_registry: tool_registry.clone(),
             kernel_config: kernel_config.clone(),
             active_turns: Arc::new(DashMap::new()),
             generated_session_titles: Arc::new(DashMap::new()),
             session_backlogs: Arc::new(Mutex::new(HashMap::new())),
-            memory_flush_manager: Arc::new(MemoryFlushManager::new()),
             runtime: KernelAgent::new(KernelAgentParams {
                 id,
                 name,
@@ -156,6 +153,9 @@ impl AgentHarnessImpl {
                 tool_registry,
                 kernel_config,
                 skill_roots_resolver,
+                session_artifact_store,
+                session_store,
+                memory_writer,
             }),
         })
     }
@@ -179,19 +179,11 @@ impl AgentHarnessImpl {
         Ok(())
     }
 
-    /// Replace Kernel runtime configuration and rebuild dependent Harness state.
+    /// Replace Kernel runtime configuration.
     pub fn update_kernel_config(&mut self, config: AgentKernelConfig) -> TalosResult<()> {
         let kernel_config = Self::normalized_kernel_config(config);
-        let llm_provider = self
-            .llm_provider_router
-            .provider_for(&self.model_selection.model_ref)?;
-        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
-            &kernel_config,
-            llm_provider,
-        ));
         self.kernel_config = kernel_config;
         self.runtime.set_kernel_config(self.kernel_config.clone());
-        self.memory_store = memory_store;
         Ok(())
     }
 
@@ -528,24 +520,15 @@ impl AgentHarness for AgentHarnessImpl {
         self.close_session_impl(session).await
     }
 
-    async fn compact_session(&self, session: talos_types::TalosSession) -> TalosResult<TokenUsage> {
-        self.compact_session_impl(session).await
+    async fn compact_session(
+        &self,
+        params: AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage> {
+        self.compact_session_impl(params).await
     }
 
     async fn clear_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
         self.clear_session_impl(session).await
-    }
-
-    async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
-        self.drain_pending_memory_flushes(timeout).await
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        self.pending_memory_flush_count()
-    }
-
-    async fn has_pending_memory_flush(&self, session_id: &str) -> bool {
-        AgentHarnessImpl::has_pending_memory_flush(self, session_id).await
     }
 
     fn has_active_turn(&self, session_id: &str) -> bool {

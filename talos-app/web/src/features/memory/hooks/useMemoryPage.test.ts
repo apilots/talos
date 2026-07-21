@@ -10,6 +10,7 @@ import { getTodayDateString, useMemoryPage } from "./useMemoryPage";
 const listMemoryFiles = vi.fn();
 const getMemoryFile = vi.fn();
 const searchMemory = vi.fn();
+const getMemoryEntry = vi.fn();
 const putMemoryFile = vi.fn();
 
 vi.mock("@/shared/api/client", () => ({
@@ -18,6 +19,7 @@ vi.mock("@/shared/api/client", () => ({
       list: listMemoryFiles,
       get: getMemoryFile,
       search: searchMemory,
+      getEntry: getMemoryEntry,
       put: putMemoryFile,
     },
   }),
@@ -73,14 +75,40 @@ describe("useMemoryPage helpers", () => {
     });
 
     searchMemory.mockResolvedValue({
-      results: [
+      data: [
         {
-          date: today,
-          snippet: "Talos architecture memory result",
-          start_line: 1,
-          end_line: 4,
+          memoryId: "mem-1",
+          title: "Talos architecture",
+          preview: "Talos architecture memory result",
+          kind: "fact",
+          importance: "normal",
+          occurredAt: 1,
+          rank: 1,
+          source: {
+            date: today,
+            sessionId: null,
+            fromSeq: null,
+            untilSeq: null,
+          },
         },
       ],
+    });
+
+    getMemoryEntry.mockResolvedValue({
+      memory: {
+        memoryId: "mem-1",
+        title: "Talos architecture",
+        body: "Complete Talos architecture memory.",
+        kind: "fact",
+        importance: "normal",
+        occurredAt: 1,
+        source: {
+          date: today,
+          sessionId: null,
+          fromSeq: null,
+          untilSeq: null,
+        },
+      },
     });
 
     putMemoryFile.mockResolvedValue({
@@ -94,8 +122,11 @@ describe("useMemoryPage helpers", () => {
     });
   });
 
-  it("returns an ISO day string for today", () => {
-    expect(getTodayDateString()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  it("uses the browser-local calendar day", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 21, 0, 30));
+
+    expect(getTodayDateString()).toBe("2026-07-21");
   });
 
   it("calls memory search and derives dates from search results", async () => {
@@ -153,5 +184,26 @@ describe("useMemoryPage helpers", () => {
       content: "# Updated memory",
       expected_version: "token-1",
     });
+  });
+
+  it("loads a search result by memory id before opening its daily file", async () => {
+    const { result } = renderHook(() => useMemoryPage(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.selectMemory("mem-1");
+    });
+
+    await waitFor(() => {
+      expect(getMemoryEntry).toHaveBeenCalledWith({ memoryId: "mem-1" });
+      expect(result.current.selectedMemory?.body).toBe("Complete Talos architecture memory.");
+    });
+
+    act(() => {
+      result.current.selectDate(getTodayDateString());
+    });
+
+    expect(result.current.selectedMemory).toBeNull();
   });
 });

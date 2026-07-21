@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn test_start_turn_handler_reuses_idempotent_response() {
     let event_store = Arc::new(RecordingEventStore::default());
-    let state = test_state_with_event_store(false, event_store.clone());
+    let state = test_state_with_event_store(false, event_store.clone()).await;
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -70,7 +70,7 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
 #[tokio::test]
 async fn test_start_turn_handler_accepts_shared_request() {
     let event_store = Arc::new(RecordingEventStore::default());
-    let state = test_state_with_event_store(false, event_store.clone());
+    let state = test_state_with_event_store(false, event_store.clone()).await;
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -115,7 +115,7 @@ async fn test_start_turn_handler_accepts_shared_request() {
 
 #[tokio::test]
 async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
-    let state = test_state_with_event_store(false, Arc::new(RecordingEventStore::default()));
+    let state = test_state_with_event_store(false, Arc::new(RecordingEventStore::default())).await;
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -164,7 +164,7 @@ async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
 #[tokio::test]
 async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
     let event_store = Arc::new(RecordingEventStore::default());
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -232,7 +232,8 @@ async fn test_start_turn_handler_timeout_stores_failed_idempotency() {
         false,
         event_store,
         config,
-    );
+    )
+    .await;
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -300,7 +301,7 @@ async fn test_retry_turn_rejects_running_active_turn() {
             updated_at: 123,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -350,7 +351,7 @@ async fn test_retry_turn_rejects_completed_active_turn() {
             updated_at: 124,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -400,7 +401,7 @@ async fn test_retry_turn_allows_failed_active_turn() {
             updated_at: 125,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route("/v1/turns/retry", post(retry_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -481,7 +482,7 @@ async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
             updated_at: 125,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route(
             "/v1/tools/dynamic-results/submit",

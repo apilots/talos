@@ -20,6 +20,7 @@ pub enum AgentErrorKind {
     InvalidExecutionContext,
     RunFailure(TalosRunErrorCode),
     RunNotFound,
+    ActiveTurnRunning,
     RunConflict,
     InputRejected,
     ApprovalExpired,
@@ -127,6 +128,7 @@ impl AgentError {
             AgentErrorKind::RunNotFound
             | AgentErrorKind::ContinuationNotFound
             | AgentErrorKind::BackendTaskCompleted => TalosError::ResourceNotFound(self.message),
+            AgentErrorKind::ActiveTurnRunning => TalosError::ActiveTurnRunning(self.message),
             AgentErrorKind::RunConflict | AgentErrorKind::ContinuationConflict => {
                 TalosError::Conflict(self.message)
             }
@@ -173,9 +175,11 @@ impl From<TalosError> for AgentError {
         match error {
             TalosError::AgentNotFound(message) => Self::new(AgentErrorKind::AgentNotFound, message),
             TalosError::ResourceNotFound(message) => Self::run_not_found(message),
+            TalosError::ActiveTurnRunning(message) => {
+                Self::new(AgentErrorKind::ActiveTurnRunning, message)
+            }
             TalosError::Conflict(message)
             | TalosError::IdempotencyConflict(message)
-            | TalosError::ActiveTurnRunning(message)
             | TalosError::RetryActiveTurnRunning(message) => Self::run_conflict(message),
             TalosError::ValidationError(message)
             | TalosError::RetrySourceCompleted(message)

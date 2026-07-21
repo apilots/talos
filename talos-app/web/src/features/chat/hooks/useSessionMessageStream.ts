@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 
-import { retryTimelineEvents, sendTimelineEvents, subscribeTimelineEventsForMessage } from "../api";
-import { applyStreamEvent } from "../stream-events";
+import { retryTimelineTurn, startTimelineTurn } from "../api";
+import { useAppStore } from "@/shared/store/app-store";
 import type { RetryTurnRequest, StartTurnRequest } from "@talos/sdk-browser";
 
 export function useSessionMessageStream(sessionId: string) {
@@ -23,12 +23,8 @@ export function useSessionMessageStream(sessionId: string) {
       abortRef.current = controller;
 
       try {
-        await sendTimelineEvents(
-          request,
-          (event) => applyStreamEvent(sessionId, event),
-          controller.signal,
-          onAcceptedMessageId,
-        );
+        const messageId = await startTimelineTurn(request, onAcceptedMessageId);
+        await waitForMessageTerminal(sessionId, messageId, controller.signal);
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
@@ -42,29 +38,6 @@ export function useSessionMessageStream(sessionId: string) {
     abortRef.current?.abort();
     abortRef.current = null;
   }, []);
-
-  const reconnectMessage = useCallback(
-    async (messageId: string, afterEventId?: string) => {
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      try {
-        await subscribeTimelineEventsForMessage(
-          sessionId,
-          messageId,
-          (event) => applyStreamEvent(sessionId, event),
-          controller.signal,
-          afterEventId,
-        );
-      } finally {
-        if (abortRef.current === controller) {
-          abortRef.current = null;
-        }
-      }
-    },
-    [sessionId],
-  );
 
   const retryMessage = useCallback(
     async ({
@@ -83,17 +56,16 @@ export function useSessionMessageStream(sessionId: string) {
       abortRef.current = controller;
 
       try {
-        await retryTimelineEvents(
+        const messageId = await retryTimelineTurn(
           {
             session_id: sessionId,
             client_message_id: clientMessageId,
             retry_of_message_id: retryOfMessageId,
             input: [{ type: "text", text }],
           } satisfies RetryTurnRequest,
-          (event) => applyStreamEvent(sessionId, event),
-          controller.signal,
           onAcceptedMessageId,
         );
+        await waitForMessageTerminal(sessionId, messageId, controller.signal);
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
@@ -103,13 +75,49 @@ export function useSessionMessageStream(sessionId: string) {
     [sessionId],
   );
 
-  const hasActiveConnection = useCallback(() => abortRef.current !== null, []);
-
   return {
     eventMessage,
     cancelStream,
-    reconnectMessage,
     retryMessage,
-    hasActiveConnection,
   };
+}
+
+function waitForMessageTerminal(
+  sessionId: string,
+  messageId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let unsubscribe: () => void = () => undefined;
+    const onAbort = () => finish(new DOMException("Aborted", "AbortError"));
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      unsubscribe();
+      signal.removeEventListener("abort", onAbort);
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+    const isTerminal = () => {
+      const stream = useAppStore.getState().streams[sessionId];
+      return stream?.activeMessageId === messageId && !stream.isStreaming;
+    };
+    unsubscribe = useAppStore.subscribe(() => {
+      if (isTerminal()) {
+        finish();
+      }
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+    } else if (isTerminal()) {
+      finish();
+    }
+  });
 }

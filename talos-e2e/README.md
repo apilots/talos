@@ -46,15 +46,13 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `agent.sh`
 
 7. `scenarios/07_memory/`
-- Scope: memory flush and workspace docs
+- Scope: memory and workspace docs
 - Files:
-  - `session_close_flushes_memory.sh`
   - `workspace_docs_api.sh`
 
 8. `scenarios/08_tui/`
 - Scope: embedded TUI lifecycle validation
 - Files:
-  - `embedded_quit_flushes_memory.sh`
   - `embedded_session_controls.sh`
   - `embedded_write_html.sh`
 

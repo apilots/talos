@@ -2,15 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { TalosHttpError } from "@talos/sdk-browser";
 
 import { useSessionBlocks } from "./useSessionBlocks";
-import { useSessionReconnect } from "./useSessionReconnect";
 import { useSessionStreaming } from "./useSessionStreaming";
+import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import {
   useActiveTurnQuery,
   useSessionHistoryQuery,
   useLiveRecoveryQuery,
 } from "./useChatQueries";
-import { createInitialTurnRequest } from "../api";
+import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
+import { activeContextCompactionStage } from "../timeline-state";
 import { useAppStore } from "@/shared/store/app-store";
 import type { PendingInput, ProjectView, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
 import type { ModelSelection, SkillSuggestion } from "@talos/sdk-browser";
@@ -37,27 +38,24 @@ export function useChatSession(
     shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
   );
   const streamState = useAppStore((state) => state.streams[sessionId]);
+  const { retryTimeline } = useSessionTimelineEvents(
+    sessionId,
+    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
+    Boolean(sessionId),
+  );
+  const contextCompactionStage = activeContextCompactionStage(streamState);
   const pendingInput = streamState?.pendingInput;
   const pendingInputServerMessageId = streamState?.pendingInput?.serverMessageId;
   const {
-    hasActiveConnection,
     isCancelling,
     isStreaming,
-    reconnectMessage,
     retryResponse,
     sendMutation,
     sendText: streamText,
     stopResponse,
-    streamState: liveStreamState,
     canRetryResponse,
   } =
     useSessionStreaming(sessionId, serverMessageCount, sessionTitle);
-  const { retryStream } = useSessionReconnect({
-    hasActiveConnection,
-    reconnectMessage,
-    sessionId,
-    streamState: liveStreamState,
-  });
   const blocks = useSessionBlocks({
     sessionId,
     streamState,
@@ -151,6 +149,9 @@ export function useChatSession(
     if (!content) {
       return Promise.resolve();
     }
+    if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
+      return Promise.resolve();
+    }
     const request = options
       ? createInitialTurnRequest(
           sessionId,
@@ -175,6 +176,9 @@ export function useChatSession(
       if (!text) {
         return Promise.resolve();
       }
+      if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
+        return Promise.resolve();
+      }
       setDraft("");
       const request = options
         ? createInitialTurnRequest(
@@ -186,14 +190,21 @@ export function useChatSession(
             options.skills,
           )
         : undefined;
-      return sendMutation.mutateAsync({ text, appendUserInput: true, request });
+      return sendMutation.mutateAsync({ text, appendUserInput: true, request }).catch((error: unknown) => {
+        if (isActiveTurnRunningError(error)) {
+          setDraft(text);
+          return;
+        }
+        throw error;
+      });
     },
-    retryStream,
+    retryStream: retryTimeline,
     retryResponse,
     canRetryResponse,
     stopResponse,
     isStreaming,
     isCancelling,
+    contextCompactionStage,
     streamConnectionState: streamState?.connectionState ?? "idle",
     showReconnectControls: streamState?.showReconnectControls ?? false,
     streamError: streamState?.error,

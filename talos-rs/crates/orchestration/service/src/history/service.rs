@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
+use talos_config::resolve_effective_kernel_workspace;
 use talos_error::TalosResult;
-use talos_memory::MemoryStore;
-use talos_store::session::TimelineEventId;
+use talos_store::session::{SessionArtifactStore, TimelineEventId};
 use talos_types::talos::{SessionHistoryMessage, SessionHistorySnapshot};
-use talos_types::TalosConfig;
+use talos_types::TalosSession;
 
 use super::message_merge::{
     history_messages_from_completed_events, map_turns_to_history_messages,
@@ -17,20 +17,30 @@ const STABLE_EVENT_SCAN_BATCH_SIZE: usize = 2048;
 
 #[derive(Clone)]
 pub struct SessionHistoryService {
-    memory_store: Arc<MemoryStore>,
+    session_artifact_store: Arc<dyn SessionArtifactStore>,
     event_service: Arc<TimelineEventService>,
 }
 
 impl SessionHistoryService {
-    pub fn new(base_config: TalosConfig, event_service: Arc<TimelineEventService>) -> Self {
+    pub fn new(
+        session_artifact_store: Arc<dyn SessionArtifactStore>,
+        event_service: Arc<TimelineEventService>,
+    ) -> Self {
         Self {
-            memory_store: Arc::new(MemoryStore::from_config(&base_config.agent.kernel)),
+            session_artifact_store,
             event_service,
         }
     }
 
-    pub async fn snapshot(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
-        let turns = self.memory_store.load_session_turns(session_id).await?;
+    pub async fn snapshot(&self, session: &TalosSession) -> TalosResult<SessionHistorySnapshot> {
+        let session_id = &session.context.session_id;
+        let workspace_root =
+            resolve_effective_kernel_workspace(&session.config.agent.kernel, &session.user_id)?
+                .user_workspace_dir;
+        let turns = self
+            .session_artifact_store
+            .load_turns(&workspace_root, session_id)
+            .await?;
         let mut messages = map_turns_to_history_messages(turns);
         let completed_timeline_messages = self.completed_timeline_messages(session_id).await?;
         let last_stable_event_id = self
@@ -40,7 +50,7 @@ impl SessionHistoryService {
             merge_completed_timeline_message(&mut messages, timeline_message);
         }
         Ok(SessionHistorySnapshot {
-            session_id: session_id.to_string(),
+            session_id: session_id.clone(),
             messages,
             generated_at_ms: chrono::Utc::now().timestamp_millis(),
             last_stable_event_id,

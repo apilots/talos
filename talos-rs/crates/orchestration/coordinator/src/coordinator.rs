@@ -131,21 +131,15 @@ impl CoordinatorImpl {
                 session_id
             )));
         }
-        if agent.has_pending_memory_flush(&session_id).await {
-            return Err(talos_error::TalosError::ValidationError(format!(
-                "cannot delete session `{}` while memory flush is pending",
-                session_id
-            )));
-        }
         agent.clear_session(session).await
     }
 
     async fn compact_session_runtime(
         &self,
-        session: TalosSession,
+        params: talos_agent::AgentSessionCompactionParams,
     ) -> TalosResult<talos_types::TokenUsage> {
-        let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
-        agent.compact_session(session).await
+        let (_target_agent, agent) = self.resolve_session_agent(&params.session).await?;
+        agent.compact_session(params).await
     }
 
     async fn clear_session_runtime(&self, session: TalosSession) -> TalosResult<()> {
@@ -293,8 +287,11 @@ impl SessionRuntime for CoordinatorImpl {
         Ok(())
     }
 
-    async fn compact_session(&self, session: TalosSession) -> TalosResult<talos_types::TokenUsage> {
-        self.compact_session_runtime(session).await
+    async fn compact_session(
+        &self,
+        params: talos_agent::AgentSessionCompactionParams,
+    ) -> TalosResult<talos_types::TokenUsage> {
+        self.compact_session_runtime(params).await
     }
 
     async fn clear_session(&self, session: TalosSession) -> TalosResult<()> {

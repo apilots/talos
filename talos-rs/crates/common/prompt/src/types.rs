@@ -4,11 +4,69 @@ use std::collections::BTreeSet;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use talos_config::{
-    default_timezone, AgentKernelMemoryConfig, AgentKernelPromptConfig, ReservedOutputPolicy,
-    ToolsRuntimeConfig,
+    default_timezone, AgentKernelPromptConfig, ReservedOutputPolicy, ToolsRuntimeConfig,
 };
 use talos_error::{TalosError, TalosResult};
-use talos_memory::TalosMessageRole;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosMessageRole {
+    User,
+    Assistant,
+    System,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionPromptSummary {
+    pub id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionPromptMessage {
+    pub id: String,
+    pub role: TalosMessageRole,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionToolExchangeOutcome {
+    Succeeded,
+    Failed,
+    Pending,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionToolExchangeContext {
+    pub tool_name: String,
+    pub arguments_preview: String,
+    pub outcome: SessionToolExchangeOutcome,
+    pub output_preview: Option<String>,
+    pub output_truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionToolResultContext {
+    pub tool_name: String,
+    pub content: String,
+    pub is_error: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SessionPromptContext {
+    pub summaries: Vec<SessionPromptSummary>,
+    pub recent_messages: Vec<SessionPromptMessage>,
+    pub recent_tool_results: Vec<SessionToolResultContext>,
+    pub recent_tool_exchanges: Vec<SessionToolExchangeContext>,
+}
+
+/// Inclusive canonical turn sequence already covered by session compaction.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompactPromptCursor {
+    pub covers_until_seq: u64,
+}
 
 /// Prompt build phase.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -536,12 +594,11 @@ fn derive_reserved_output_tokens(context_window: usize) -> usize {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptLoadPolicy {
     #[serde(default)]
-    pub compact_cursor: Option<talos_memory::CompactPromptCursor>,
+    pub compact_cursor: Option<CompactPromptCursor>,
     pub include_session_summary: bool,
     pub include_recent_messages: bool,
     pub include_recent_tool_history: bool,
     pub include_recent_tool_outputs: bool,
-    pub include_retrieved_memories: bool,
     pub session_recent_limit: usize,
     pub session_recent_max_chars: usize,
     pub recent_tool_history_limit: usize,
@@ -550,8 +607,6 @@ pub struct PromptLoadPolicy {
     pub recent_tool_outputs_max_chars: usize,
     pub session_summary_recent_count: usize,
     pub session_summary_max_chars: usize,
-    pub retrieved_memory_max_items: usize,
-    pub retrieved_memory_max_chars: usize,
     pub unified_recent_limit: usize,
 }
 
@@ -563,7 +618,6 @@ impl Default for PromptLoadPolicy {
             include_recent_messages: true,
             include_recent_tool_history: true,
             include_recent_tool_outputs: true,
-            include_retrieved_memories: true,
             session_recent_limit: 24,
             session_recent_max_chars: 4_000,
             recent_tool_history_limit: 8,
@@ -572,8 +626,6 @@ impl Default for PromptLoadPolicy {
             recent_tool_outputs_max_chars: 2_000,
             session_summary_recent_count: 2,
             session_summary_max_chars: 1_200,
-            retrieved_memory_max_items: 4,
-            retrieved_memory_max_chars: 2000,
             unified_recent_limit: 10,
         }
     }
@@ -586,7 +638,6 @@ pub struct PromptBuildConfig {
     #[serde(default)]
     pub workspace_dir: String,
     pub prompt: AgentKernelPromptConfig,
-    pub memory: AgentKernelMemoryConfig,
     pub tools: ToolsRuntimeConfig,
     #[serde(default = "default_timezone")]
     pub timezone: String,
@@ -598,7 +649,6 @@ impl Default for PromptBuildConfig {
             load_policy: PromptLoadPolicy::default(),
             workspace_dir: String::new(),
             prompt: AgentKernelPromptConfig::default(),
-            memory: AgentKernelMemoryConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             timezone: default_timezone(),
         }

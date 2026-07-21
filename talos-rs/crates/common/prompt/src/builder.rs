@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use talos_error::TalosResult;
 use talos_llm_provider::ChatMessage;
-use talos_memory::{MemoryStore, RetrievedMemoryItem};
 use talos_skills::{SkillPromptContext, SkillPromptRequest, SkillProvider};
 use talos_tools::{ToolDefinitionProvider, ToolSelectionPhase, ToolSelectionRequest};
 use talos_types::{talos::TalosSessionEnvironment, ModelInfo};
@@ -24,9 +23,8 @@ pub struct PromptBuilder<'a> {
     pub(crate) skill_provider: Option<Arc<dyn SkillProvider>>,
     pub(crate) skill_prompt_request: Option<SkillPromptRequest>,
     pub(crate) skill_prompt_context: Option<SkillPromptContext>,
-    pub(crate) memory_store: Option<&'a MemoryStore>,
+    pub(crate) session_prompt_context: Option<SessionPromptContext>,
     pub(crate) session_id: Option<&'a str>,
-    pub(crate) retrieved_memories: Vec<RetrievedMemoryItem>,
     pub(crate) session_environment: Option<TalosSessionEnvironment>,
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) session_continuity: Option<SessionContinuity>,
@@ -55,9 +53,8 @@ impl<'a> PromptBuilder<'a> {
             skill_provider: None,
             skill_prompt_request: None,
             skill_prompt_context: None,
-            memory_store: None,
+            session_prompt_context: None,
             session_id: None,
-            retrieved_memories: Vec::new(),
             session_environment: None,
             project_root: None,
             session_continuity: None,
@@ -113,9 +110,13 @@ impl<'a> PromptBuilder<'a> {
         self
     }
 
-    pub fn memory_store(mut self, session_id: &'a str, memory_store: &'a MemoryStore) -> Self {
+    pub fn session_prompt_context(
+        mut self,
+        session_id: &'a str,
+        context: SessionPromptContext,
+    ) -> Self {
         self.session_id = Some(session_id);
-        self.memory_store = Some(memory_store);
+        self.session_prompt_context = Some(context);
         self
     }
 
@@ -131,11 +132,6 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn dynamic_trim_policy(mut self, policy: DynamicTrimPolicy) -> Self {
         self.dynamic_trim_policy = policy;
-        self
-    }
-
-    pub fn retrieved_memories(mut self, memories: Vec<RetrievedMemoryItem>) -> Self {
-        self.retrieved_memories = memories;
         self
     }
 
@@ -325,4 +321,14 @@ pub fn render_prompt_assembly(assembly: &PromptAssembly) -> Vec<ChatMessage> {
 
 pub fn render_prompt_blocks(assembly: &PromptAssembly) -> Vec<PromptBlock> {
     renderer::render_prompt_blocks(assembly)
+}
+
+/// Render bounded retrieved MemoryInfo values as one dynamic prompt section.
+pub fn render_retrieved_memories(
+    memories: &[talos_types::MemoryInfo],
+    max_items: usize,
+    max_chars: usize,
+) -> Option<ChatMessage> {
+    assembler::build_retrieved_memories_section(memories, max_items, max_chars)
+        .map(|section| ChatMessage::system(renderer::render_section_text(&section)))
 }

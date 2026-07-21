@@ -64,38 +64,14 @@ pub(crate) enum QueuedTurn {
 }
 
 impl AgentHarnessImpl {
-    /// Ensure no Harness-owned run or backlog exists before session mutation.
-    ///
-    /// Session compaction and clearing are memory/session operations, but the
-    /// active-run and queued-run checks belong to the Harness lifecycle model.
-    pub(crate) async fn ensure_session_is_idle(
-        &self,
-        session_id: &str,
-        action: &str,
-    ) -> TalosResult<()> {
-        if self.active_turns.contains_key(session_id) {
-            return Err(TalosError::ValidationError(format!(
-                "cannot {} session `{}` while a turn is active",
-                action, session_id
-            )));
-        }
-        if self.has_queued_turns(session_id).await {
-            return Err(TalosError::ValidationError(format!(
-                "cannot {} session `{}` while queued turns are pending",
-                action, session_id
-            )));
-        }
-        Ok(())
-    }
-
     /// Reserve the Harness lifecycle slot for a session before runtime start.
     ///
     /// A Reserved slot prevents concurrent turns from starting while the
     /// runtime stream or task is being constructed.
     pub(crate) fn try_reserve_active_turn(&self, session_id: &str) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
-            Entry::Occupied(_) => Err(TalosError::ValidationError(format!(
-                "cannot start a new turn for session `{session_id}` while another turn is active"
+            Entry::Occupied(_) => Err(TalosError::ActiveTurnRunning(format!(
+                "session `{session_id}` already has an active turn"
             ))),
             Entry::Vacant(entry) => {
                 entry.insert(ActiveTurnHandle::Reserved);
@@ -204,7 +180,7 @@ impl AgentHarnessImpl {
         }
     }
 
-    /// Reserve a session for a unary run or enqueue it behind the active run.
+    /// Reserve a session for a unary run or enqueue an internal resume.
     ///
     /// This method is the Harness lifecycle gate for non-streaming execution.
     /// It must not call concrete runtime code or mutate Service active-turn
@@ -215,6 +191,10 @@ impl AgentHarnessImpl {
         request: AgentRunParams,
     ) -> AgentResult<Option<oneshot::Receiver<AgentResult<AgentRunResult>>>> {
         let session_id = request.context.session_id.clone();
+        if mode == AgentRunMode::Start {
+            self.try_reserve_active_turn(&session_id)?;
+            return Ok(None);
+        }
         if self.has_queued_turns(&session_id).await {
             let (response_tx, response_rx) = oneshot::channel();
             self.enqueue_turn(
@@ -247,7 +227,7 @@ impl AgentHarnessImpl {
         }
     }
 
-    /// Reserve a session for a streaming run or enqueue it behind the active run.
+    /// Reserve a session for a streaming run or enqueue an internal resume.
     ///
     /// This method owns Harness backlog ordering for streamed execution. The
     /// returned boolean means the caller may start the runtime immediately.
@@ -258,6 +238,10 @@ impl AgentHarnessImpl {
         event_tx: mpsc::Sender<AgentEvent>,
     ) -> AgentResult<bool> {
         let session_id = request.context.session_id.clone();
+        if mode == AgentRunMode::Start {
+            self.try_reserve_active_turn(&session_id)?;
+            return Ok(true);
+        }
         if self.has_queued_turns(&session_id).await {
             self.enqueue_turn(
                 &session_id,

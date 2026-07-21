@@ -623,7 +623,8 @@
         "auth.session.read",
         "auth.session.clear",
         "user.current",
-        "memory.search"
+        "memory/search",
+        "memory/get"
       ],
       "type": "string"
     },
@@ -1746,12 +1747,30 @@
           "properties": {
             "method": {
               "enum": [
-                "memory.search"
+                "memory/search"
               ],
               "type": "string"
             },
             "params": {
               "$ref": "#/definitions/MemorySearchRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "memory/get"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MemoryGetRequest"
             }
           },
           "required": [
@@ -2095,6 +2114,7 @@
       "description": "Terminal result of a context compaction maintenance item.",
       "enum": [
         "applied",
+        "no_changes",
         "rejected_missing_summary",
         "trimmed_fallback_applied",
         "failed_context_still_too_large",
@@ -2118,6 +2138,7 @@
     "ContextCompactionTrigger": {
       "description": "Reason a run entered the context compaction maintenance stage.",
       "enum": [
+        "user_requested",
         "threshold_exceeded",
         "hard_threshold_exceeded",
         "budget_exceeded",
@@ -2621,25 +2642,42 @@
       ],
       "type": "object"
     },
+    "MemoryGetRequest": {
+      "properties": {
+        "memoryId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "memoryId"
+      ],
+      "type": "object"
+    },
+    "MemoryKind": {
+      "enum": [
+        "preference",
+        "fact",
+        "decision",
+        "task",
+        "episode"
+      ],
+      "type": "string"
+    },
     "MemorySearchRequest": {
       "properties": {
-        "date_from": {
+        "kinds": {
           "default": null,
+          "items": {
+            "$ref": "#/definitions/MemoryKind"
+          },
           "type": [
-            "string",
-            "null"
-          ]
-        },
-        "date_to": {
-          "default": null,
-          "type": [
-            "string",
+            "array",
             "null"
           ]
         },
         "limit": {
           "default": null,
-          "format": "uint",
+          "format": "uint32",
           "minimum": 0.0,
           "type": [
             "integer",
@@ -2648,6 +2686,22 @@
         },
         "query": {
           "type": "string"
+        },
+        "sinceAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "untilAt": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       },
       "required": [

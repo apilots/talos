@@ -75,7 +75,10 @@ export class DesktopAppServerController {
       await this.reconnecting;
     }
 
-    const result = await this.ensureBridge().invoke<T>(method, params, options);
+    const effectiveParams = method === "event.unsubscribe"
+      ? this.resolveUnsubscribeParams(params as AppProtocol.EventUnsubscribeRequest)
+      : params;
+    const result = await this.ensureBridge().invoke<T>(method, effectiveParams, options);
     if (method === "event.subscribe") {
       this.recordSubscription(params as AppProtocol.SubscribeTimelineRequest, result as AppProtocol.SubscribeTimelineResponse);
     }
@@ -192,7 +195,7 @@ export class DesktopAppServerController {
         subscriptionId: response.subscription_id,
         lastEventId: response.high_water_mark_event_id ?? subscription.lastEventId,
       });
-      this.sessionsBySubscriptionId.delete(subscription.subscriptionId);
+      this.sessionsBySubscriptionId.set(subscription.subscriptionId, subscription.sessionId);
       this.sessionsBySubscriptionId.set(response.subscription_id, subscription.sessionId);
     }
   }
@@ -203,7 +206,11 @@ export class DesktopAppServerController {
   ): void {
     const previous = this.subscriptions.get(params.session_id);
     if (previous) {
-      this.sessionsBySubscriptionId.delete(previous.subscriptionId);
+      for (const [subscriptionId, sessionId] of this.sessionsBySubscriptionId) {
+        if (sessionId === params.session_id) {
+          this.sessionsBySubscriptionId.delete(subscriptionId);
+        }
+      }
     }
     this.subscriptions.set(params.session_id, {
       sessionId: response.session_id,
@@ -222,8 +229,24 @@ export class DesktopAppServerController {
     if (!sessionId) {
       return;
     }
-    this.sessionsBySubscriptionId.delete(subscriptionId);
+    for (const [knownSubscriptionId, knownSessionId] of this.sessionsBySubscriptionId) {
+      if (knownSessionId === sessionId) {
+        this.sessionsBySubscriptionId.delete(knownSubscriptionId);
+      }
+    }
     this.subscriptions.delete(sessionId);
+  }
+
+  private resolveUnsubscribeParams(
+    params: AppProtocol.EventUnsubscribeRequest,
+  ): AppProtocol.EventUnsubscribeRequest {
+    const sessionId = this.sessionsBySubscriptionId.get(params.subscription_id);
+    const currentSubscriptionId = sessionId
+      ? this.subscriptions.get(sessionId)?.subscriptionId
+      : undefined;
+    return {
+      subscription_id: currentSubscriptionId ?? params.subscription_id,
+    };
   }
 
   private emitRuntimeState(kind: TalosRuntimeState["kind"], message: string | null): void {

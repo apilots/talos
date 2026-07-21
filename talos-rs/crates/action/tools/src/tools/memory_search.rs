@@ -1,32 +1,10 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, MemorySearchQuery, MemorySearchResponse};
-use talos_types::MemorySearchResult;
+use talos_types::MemorySearchRequest;
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
-
-fn resolve_search_defaults(context: &ToolContext) -> usize {
-    context
-        .kernel_config()
-        .map(|config| config.memory.search_max_results)
-        .unwrap_or(6)
-        .max(1)
-}
-
-fn memory_search_result_from_store(
-    result: talos_memory::MemorySearchResult,
-) -> Option<MemorySearchResult> {
-    let file_name = result.path.rsplit('/').next()?;
-    let date = file_name.strip_suffix(".md")?;
-    Some(MemorySearchResult {
-        date: date.to_string(),
-        snippet: result.snippet,
-        start_line: result.start_line,
-        end_line: result.end_line,
-    })
-}
 
 pub struct MemorySearchTool;
 
@@ -45,7 +23,7 @@ impl Tool for MemorySearchTool {
     }
 
     fn description(&self) -> &str {
-        "Search memory/*.md for prior work, decisions, dates, preferences, and todos. Use this before answering memory-dependent questions."
+        "Search long-term memory and return bounded summaries with stable memory IDs."
     }
 
     fn behavior_flags(&self) -> ToolBehaviorFlags {
@@ -71,7 +49,13 @@ impl Tool for MemorySearchTool {
             "required": ["query"],
             "properties": {
                 "query": {"type": "string"},
-                "max_results": {"type": "integer", "minimum": 1}
+                "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                "kinds": {
+                    "type": "array",
+                    "items": {"enum": ["preference", "fact", "decision", "task", "episode"]}
+                },
+                "sinceAt": {"type": "integer"},
+                "untilAt": {"type": "integer"}
             }
         }))
     }
@@ -93,38 +77,15 @@ impl Tool for MemorySearchTool {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let Some(memory) = context.memory_store() else {
-            return Err(TalosError::ToolError(
-                "memory_search requires an injected memory store in tool context".to_string(),
-            ));
-        };
-        let query = input
-            .get("query")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        let default_max_results = resolve_search_defaults(&context);
-        let max_results = input
-            .get("max_results")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize)
-            .unwrap_or(default_max_results)
-            .max(1);
-        let results = memory
-            .search_memory(&MemorySearchQuery { query, max_results })
-            .await?;
-        let results = results
-            .into_iter()
-            .filter_map(memory_search_result_from_store)
-            .collect();
-        ToolOutputPayload::success_json(
-            &MemorySearchResponse { results },
-            "serialize memory_search result",
-        )
+        let reader = context.memory_reader().ok_or_else(|| {
+            TalosError::ToolError("memory_search requires memory access".to_string())
+        })?;
+        let scope = context.memory_scope().ok_or_else(|| {
+            TalosError::ToolError("memory_search requires a memory scope".to_string())
+        })?;
+        let request = serde_json::from_value::<MemorySearchRequest>(input)
+            .map_err(|err| TalosError::ValidationError(err.to_string()))?;
+        let response = reader.search(scope, request).await?;
+        ToolOutputPayload::success_json(&response, "serialize memory_search result")
     }
 }
-
-#[cfg(test)]
-#[path = "memory_search_tests.rs"]
-mod tests;

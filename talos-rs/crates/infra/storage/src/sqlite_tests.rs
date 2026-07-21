@@ -73,6 +73,13 @@ async fn test_init_schema_adds_title_column_to_legacy_sessions_table() {
         )
         .await
         .unwrap();
+    storage
+        .execute(
+            "INSERT INTO sessions (session_key, user_id, channel, scope, peer_id, agent_id, created_at, last_activity, message_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            &["session-1", "user-1", "http", "api", "user-1", "talos", "1", "1", "6"],
+        )
+        .await
+        .unwrap();
 
     storage.init_schema().await.unwrap();
 
@@ -83,5 +90,19 @@ async fn test_init_schema_adds_title_column_to_legacy_sessions_table() {
     let has_title = session_columns
         .iter()
         .any(|row| row.get_string("name").as_deref() == Some("title"));
-    assert!(has_title, "sessions table should contain title column");
+    let rows = storage
+        .query(
+            "SELECT latest_turn_seq, memory_processed_until_seq FROM sessions WHERE session_key = ?",
+            &["session-1"],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            has_title,
+            rows[0].get_i64("latest_turn_seq"),
+            rows[0].get_i64("memory_processed_until_seq")
+        ),
+        (true, Some(3), Some(0))
+    );
 }

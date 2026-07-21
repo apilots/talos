@@ -128,7 +128,7 @@ impl AgentHarness for MockAgent {
                 let _ = tx.send(completed).await;
             }
             let _ = tx
-                .send(timeline.complete_turn(execution.stop_reason, execution.usage, None))
+                .send(timeline.complete_turn(execution.stop_reason, execution.usage, None, None))
                 .await;
         });
         Ok(rx)
@@ -140,25 +140,13 @@ impl AgentHarness for MockAgent {
 
     async fn compact_session(
         &self,
-        _session: talos_types::TalosSession,
+        _params: crate::AgentSessionCompactionParams,
     ) -> TalosResult<TokenUsage> {
         Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
         Ok(())
-    }
-
-    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        0
-    }
-
-    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
-        false
     }
 
     fn has_active_turn(&self, _session_id: &str) -> bool {

@@ -14,7 +14,7 @@ async fn test_prepare_general_turn_injects_selected_skill_prompt_context() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let skill_root = workspace_dir.join("skills").join("review");
     std::fs::create_dir_all(&skill_root).expect("skill root should exist");
     std::fs::write(
@@ -75,7 +75,7 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let skills_root = workspace_dir.join("skills");
     for name in ["review", "docs", "design", "testing"] {
         let skill_root = skills_root.join(name);
@@ -124,17 +124,16 @@ async fn test_prepare_general_turn_uses_configured_skill_prompt_budget() {
 #[tokio::test]
 async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_budget() {
     let provider = Arc::new(SummaryProvider {
+        requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
             "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
-            "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
-                .to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..24 {
         let timestamp = Utc::now();
         memory_store
@@ -207,10 +206,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         .expect("compaction state should be staged during prepare");
     let compaction_state: SessionCompactionState =
         serde_json::from_value(compaction_state_value).expect("compaction state should parse");
-    assert_eq!(
-        compaction_state.status,
-        SessionCompactionStatus::Compressing
-    );
+    assert_eq!(compaction_state.status, SessionCompactionStatus::Recovery);
 
     assert!(
         prepared.prompt_diagnostics.dropped_sections.is_empty(),
@@ -231,18 +227,18 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     );
     assert_eq!(compaction.outcome, SessionHistoryCompactionOutcome::Applied);
     assert!(compaction.summary_sections_after > 0);
-    assert_eq!(compaction.compaction_request_count, 2);
-    assert_eq!(compaction.compaction_input_tokens, 26);
-    assert_eq!(compaction.compaction_output_tokens, 14);
-    assert_eq!(compaction.compaction_total_tokens, 40);
+    assert_eq!(compaction.compaction_request_count, 1);
+    assert_eq!(compaction.compaction_input_tokens, 13);
+    assert_eq!(compaction.compaction_output_tokens, 7);
+    assert_eq!(compaction.compaction_total_tokens, 20);
     assert!(compaction.trimmed_context_unit_count > 0);
     assert_eq!(
         compaction.trimmed_context_unit_kind,
         Some(CompactionTrimUnitKind::HistoryTurn)
     );
     assert!(!compaction.fallback_section_drop_applied);
-    assert_eq!(compaction.compaction_cache_creation_input_tokens, Some(6));
-    assert_eq!(compaction.compaction_cache_read_input_tokens, Some(22));
+    assert_eq!(compaction.compaction_cache_creation_input_tokens, Some(3));
+    assert_eq!(compaction.compaction_cache_read_input_tokens, Some(11));
     let mut stream_stages = Vec::new();
     let mut stream_outcomes = Vec::new();
     let mut stream_metrics = Vec::new();
@@ -301,17 +297,16 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 #[tokio::test]
 async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_trigger_ratio() {
     let provider = Arc::new(SummaryProvider {
+        requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
             "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
-            "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
-                .to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..4 {
         let timestamp = Utc::now();
         memory_store
@@ -391,16 +386,13 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
 async fn test_run_general_turn_updates_compaction_state_to_recovery_after_success() {
     let provider = Arc::new(SummaryProvider::new(vec![
         "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
-        "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
-            .to_string(),
-        "ok".to_string(),
         "ok".to_string(),
     ]));
     let tool_registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(tool_registry.as_ref());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..24 {
         let timestamp = Utc::now();
         memory_store
@@ -459,11 +451,11 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
     .expect("general turn should succeed");
 
     assert_eq!(result.output_text, "ok");
-    assert_eq!(result.usage.input_tokens, 39);
-    assert_eq!(result.usage.output_tokens, 21);
-    assert_eq!(result.usage.total_tokens, 60);
-    assert_eq!(result.usage.cache_creation_input_tokens, Some(9));
-    assert_eq!(result.usage.cache_read_input_tokens, Some(33));
+    assert_eq!(result.usage.input_tokens, 26);
+    assert_eq!(result.usage.output_tokens, 14);
+    assert_eq!(result.usage.total_tokens, 40);
+    assert_eq!(result.usage.cache_creation_input_tokens, Some(6));
+    assert_eq!(result.usage.cache_read_input_tokens, Some(22));
     assert_eq!(result.metrics.usage, result.usage);
     let compaction_state_value = ctx
         .session
@@ -479,10 +471,9 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
 #[tokio::test]
 async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhausted() {
     let provider = Arc::new(SummaryProvider {
+        requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
             "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
-            "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
-                .to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -490,7 +481,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..12 {
         let timestamp = Utc::now();
         memory_store
@@ -570,6 +561,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
 #[tokio::test]
 async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_missing() {
     let provider = Arc::new(SummaryProvider {
+        requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
             "{\"title\":\"   \",\"facts\":[\"history condensed\"]}".to_string(),
             "{\"title\":\"   \",\"facts\":[\"history condensed\"]}".to_string(),
@@ -581,7 +573,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
 
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..12 {
         let timestamp = Utc::now();
         memory_store
@@ -653,6 +645,15 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
     );
     assert_eq!(compaction.summary_sections_after, 0);
     assert!(compaction.fallback_section_drop_applied);
+    let compaction_state_value = ctx
+        .session
+        .state
+        .get(StateNamespace::Session, SESSION_COMPACTION_STATE_KEY)
+        .cloned()
+        .expect("rejected compaction should leave a terminal state");
+    let compaction_state: SessionCompactionState =
+        serde_json::from_value(compaction_state_value).expect("compaction state should parse");
+    assert_eq!(compaction_state.status, SessionCompactionStatus::Normal);
 }
 
 #[tokio::test]
@@ -661,7 +662,7 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -695,10 +696,9 @@ async fn test_prepare_general_turn_rejects_blocked_session_state() {
 #[tokio::test]
 async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     let provider = Arc::new(SummaryProvider {
+        requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
             "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
-            "{\"decision\":\"session_only\",\"rationale\":\"near-term continuity only\"}"
-                .to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -710,7 +710,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
             .repeat(64),
     )
     .expect("soul file should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     seed_recent_user_message(memory_store.as_ref()).await;
 
     let mut config = AgentKernelConfig::default();
@@ -757,7 +757,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     for idx in 0..4 {
         let timestamp = Utc::now();
         memory_store

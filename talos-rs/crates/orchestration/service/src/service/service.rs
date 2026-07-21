@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use talos_auth::{AuthService, UserService};
 use talos_config::LlmConfigService;
-use talos_coordinator::SessionRuntime;
-use talos_llm_provider::LlmProvider;
+use talos_coordinator::{AgentSessionCompactionIdentity, SessionRuntime};
+use talos_error::TalosError;
 use talos_store::profile::ProfileStore;
 use talos_store::project::ProjectStore;
 use talos_store::session::{
     ActiveTurnStatus, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
-    SessionPatchAck, SessionStore, TimelineEventId,
+    SessionArtifactStore, SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, ModelInfo, OptionalCurrentDirectoryPatch,
@@ -37,6 +37,7 @@ pub struct TalosService {
     pub account: AccountService,
     pub profile: ProfileService,
     turns: TurnService,
+    event_log: Arc<TimelineEventService>,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
     pub config: ConfigService,
@@ -52,12 +53,13 @@ impl TalosService {
         turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
-        llm_provider: Arc<dyn LlmProvider>,
+        memory: MemoryService,
         llm_config_service: Arc<dyn LlmConfigService>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
@@ -67,12 +69,13 @@ impl TalosService {
             turn_executor,
             session_runtime,
             session_store,
+            session_artifact_store,
             project_store,
             profile_store,
             event_service,
             idempotency_store,
             base_config,
-            llm_provider,
+            memory,
             llm_config_service,
             models,
             auth_service,
@@ -85,12 +88,13 @@ impl TalosService {
         turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
-        llm_provider: Arc<dyn LlmProvider>,
+        memory: MemoryService,
         llm_config_service: Arc<dyn LlmConfigService>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
@@ -146,6 +150,7 @@ impl TalosService {
                 session_runtime,
                 base_config.clone(),
             ),
+            event_log: event_service.clone(),
             profile: ProfileService::new(
                 session_store,
                 project_store,
@@ -153,10 +158,10 @@ impl TalosService {
                 base_config.agent.kernel.timezone.clone(),
             ),
             events: TimelineSubscriptionService::new(event_service.clone()),
-            history: SessionHistoryService::new(base_config.clone(), event_service.clone()),
+            history: SessionHistoryService::new(session_artifact_store, event_service.clone()),
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             fs: FsService::new(base_config.fs.directory_picker.clone()),
-            memory: MemoryService::new(base_config.clone(), llm_provider),
+            memory,
             plugins,
             skills,
             workspace_docs: WorkspaceDocService::new(base_config),
@@ -167,12 +172,13 @@ impl TalosService {
         turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,
         session_store: Arc<dyn SessionStore>,
+        session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
-        llm_provider: Arc<dyn LlmProvider>,
+        memory: MemoryService,
         llm_config_service: Arc<dyn LlmConfigService>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
@@ -182,12 +188,13 @@ impl TalosService {
             turn_executor,
             session_runtime,
             session_store,
+            session_artifact_store,
             project_store,
             profile_store,
             event_service,
             idempotency_store,
             base_config,
-            llm_provider,
+            memory,
             llm_config_service,
             models,
             auth_service,
@@ -205,6 +212,8 @@ impl TalosService {
         if let Some(selection) = patch.model_selection()? {
             self.config.validate_model_selection_supported(&selection)?;
         }
+        let _session = self.access.get_session(actor, session_id).await?;
+        self.ensure_session_write_allowed(session_id).await?;
         self.access.patch_session(actor, session_id, patch).await
     }
 
@@ -248,8 +257,8 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
     ) -> ServiceResult<talos_types::talos::SessionHistorySnapshot> {
-        let _session = self.access.get_session(actor, session_id).await?;
-        self.history.snapshot(session_id).await
+        let session = self.access.get_session(actor, session_id).await?;
+        self.history.snapshot(&session).await
     }
 
     pub async fn get_active_turn(
@@ -422,7 +431,39 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
     ) -> ServiceResult<TalosSession> {
-        self.access.compact_session(actor, session_id).await
+        let _session = self.access.get_session(actor, session_id).await?;
+        self.ensure_session_write_allowed(session_id).await?;
+        let operation_id = uuid::Uuid::new_v4().simple().to_string();
+        let identity = AgentSessionCompactionIdentity {
+            request_id: format!("req_{operation_id}"),
+            turn_id: format!("turn_{operation_id}"),
+            message_id: format!("msg_{operation_id}"),
+        };
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(16);
+        let event_log = self.event_log.clone();
+        let event_task = tokio::spawn(async move {
+            let mut first_error = None;
+            while let Some(event) = event_rx.recv().await {
+                if let Err(error) = event_log.record_talos_event(event).await {
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            if let Some(error) = first_error {
+                return Err(error);
+            }
+            Ok::<(), TalosError>(())
+        });
+        let result = self
+            .access
+            .compact_session(actor, session_id, identity, event_tx)
+            .await;
+        let event_result = event_task.await.map_err(|error| {
+            TalosError::InternalError(format!("session compaction event task failed: {error}"))
+        })?;
+        event_result?;
+        result
     }
 
     pub async fn clear_session(
@@ -430,10 +471,14 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
     ) -> ServiceResult<TalosSession> {
+        let _session = self.access.get_session(actor, session_id).await?;
+        self.ensure_session_write_allowed(session_id).await?;
         self.access.clear_session(actor, session_id).await
     }
 
     pub async fn close_session(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
+        let _session = self.access.get_session(actor, session_id).await?;
+        self.ensure_session_write_allowed(session_id).await?;
         self.access.close_session(actor, session_id).await
     }
 
@@ -442,7 +487,28 @@ impl TalosService {
         actor: &Actor,
         session_id: &str,
     ) -> ServiceResult<SessionPatchAck> {
+        let _session = self.access.get_session(actor, session_id).await?;
+        self.ensure_session_write_allowed(session_id).await?;
         self.access.delete_session(actor, session_id).await
+    }
+
+    async fn ensure_session_write_allowed(&self, session_id: &str) -> ServiceResult<()> {
+        if matches!(
+            self.events
+                .get_active_turn(session_id)
+                .await?
+                .map(|turn| turn.status),
+            Some(
+                ActiveTurnStatus::Running
+                    | ActiveTurnStatus::WaitingUserAction
+                    | ActiveTurnStatus::Cancelling
+            )
+        ) {
+            return Err(TalosError::ActiveTurnRunning(format!(
+                "session `{session_id}` already has an active turn"
+            )));
+        }
+        Ok(())
     }
 
     pub async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {

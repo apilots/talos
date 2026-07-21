@@ -1,8 +1,12 @@
+use std::time::Instant;
+
 use talos_sdk::{
     AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage, SessionHistorySnapshot,
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
     TalosTimelineItemStatus, TalosTimelinePhase, TimelineEventEnvelope, TimelineRecoveryResponse,
 };
+use tokio::sync::mpsc;
+use tracing::error;
 
 use crate::render_runtime::render::history::timeline_item_to_blocks;
 use crate::render_runtime::transcript::block::TranscriptBlockKind;
@@ -109,10 +113,32 @@ impl TuiApp {
             }
             self.handle_stream_event(envelope);
         }
-        self.active_stream_message_id = None;
-        self.last_stream_sequence = None;
-        self.last_stream_event_id = None;
-        self.timeline_items.clear();
+        if self.active_context_compaction_stage().is_some() {
+            self.in_flight = true;
+            self.stream_started_at = Some(Instant::now());
+            self.last_stream_event_at = Some(Instant::now());
+            if let (Some(client), Some(session_id)) =
+                (self.gateway_client.clone(), self.session_id.clone())
+            {
+                let since_event_id = self.last_stream_event_id.clone();
+                let (tx, rx) = mpsc::channel(1);
+                self.pending_stream_connect = Some(rx);
+                let handle = tokio::spawn(async move {
+                    let result = client
+                        .reconnect_active_turn_stream(&session_id, since_event_id)
+                        .await;
+                    if tx.send(result).await.is_err() {
+                        error!("failed to deliver recovered stream to TUI task");
+                    }
+                });
+                self.pending_stream_task = Some(handle);
+            }
+        } else {
+            self.active_stream_message_id = None;
+            self.last_stream_sequence = None;
+            self.last_stream_event_id = None;
+            self.timeline_items.clear();
+        }
         count
     }
 
@@ -481,7 +507,7 @@ fn context_compaction_text(content: &TalosTimelineContent) -> String {
     )
 }
 
-fn context_compaction_stage_label(stage: ContextCompactionStage) -> &'static str {
+pub(crate) fn context_compaction_stage_label(stage: ContextCompactionStage) -> &'static str {
     match stage {
         ContextCompactionStage::Preparing => "preparing",
         ContextCompactionStage::Summarizing => "summarizing",
@@ -495,6 +521,7 @@ fn context_compaction_stage_label(stage: ContextCompactionStage) -> &'static str
 fn context_compaction_outcome_label(outcome: ContextCompactionOutcome) -> &'static str {
     match outcome {
         ContextCompactionOutcome::Applied => "applied",
+        ContextCompactionOutcome::NoChanges => "no changes",
         ContextCompactionOutcome::RejectedMissingSummary => "missing summary",
         ContextCompactionOutcome::TrimmedFallbackApplied => "trimmed fallback applied",
         ContextCompactionOutcome::FailedContextStillTooLarge => "context still too large",

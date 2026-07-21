@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -22,12 +21,11 @@ import {
 import { useAppStore } from "@/shared/store/app-store";
 import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
-import { MessageList } from "@/widgets/message-list/MessageList";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
-import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
-import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
+import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
+import { useSessionCommands } from "./useSessionCommands";
 import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 
 function selectedSkillsOption(skills?: SkillSuggestion[]) {
@@ -35,7 +33,6 @@ function selectedSkillsOption(skills?: SkillSuggestion[]) {
 }
 
 export function ChatSessionPage() {
-  const { t } = useTranslation(["chat"]);
   const navigate = useNavigate();
   const location = useLocation();
   const sessionId = useParams().sessionId ?? "";
@@ -63,6 +60,7 @@ export function ChatSessionPage() {
     sendText,
     isStreaming,
     isCancelling,
+    contextCompactionStage,
     canRetryResponse,
     retryResponse,
     retryStream,
@@ -93,6 +91,12 @@ export function ChatSessionPage() {
     : draftReasoningLevel ?? (draftModel
         ? reasoningLevelForModel(models, draftModel)
         : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
+  const sessionCommands = useSessionCommands({
+    contextCompactionStage,
+    currentModel,
+    isStreaming,
+    sessionId,
+  });
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
@@ -141,11 +145,13 @@ export function ChatSessionPage() {
       project: initialProject,
       skills: selectedSkillsOption(locationState?.initialSkills),
     })
-      .catch(() => undefined)
-      .finally(() => {
-        if (mountedRef.current && activeSessionIdRef.current === sessionId) {
+      .then(() => {
+        if (mountedRef.current && activeSessionIdRef.current === sessionId)
           navigate(location.pathname, { replace: true, state: null });
-        }
+      })
+      .catch(() => {
+        if (mountedRef.current && activeSessionIdRef.current === sessionId)
+          setDraft(initialPrompt);
       });
   }, [
     autoScroll.scrollToBottom,
@@ -186,43 +192,22 @@ export function ChatSessionPage() {
           sessionTitle={session?.title}
         />
       ) : null}
-      <div
-        className="min-h-0 flex-1 overflow-y-auto"
-        onScroll={(event) => autoScroll.handleScroll(event.currentTarget)}
-        ref={autoScroll.viewportRef}
-      >
-        <div className="mx-auto w-full max-w-[920px] space-y-4 px-7 pb-2 pt-5" ref={autoScroll.contentRef}>
-          {shouldShowMessageList ? (
-            <MessageList
-              actions={<ChatSessionMessageActions />}
-              blocks={blocks}
-              emptyDetail={t("chat:emptyReadyDetail")}
-              emptyTitle={t("chat:emptyReadyTitle")}
-            />
-          ) : null}
-          {streamError ? (
-            <ChatSessionErrorPanel title={streamError} />
-          ) : null}
-          {session && sessionHistoryError ? (
-            <ChatSessionErrorPanel
-              detail={sessionHistoryError instanceof Error
-                ? sessionHistoryError.message
-                : t("chat:unknownSessionHistoryError")}
-              title={t("chat:sessionHistoryFailed")}
-            />
-          ) : null}
-          {showReconnectControls ? (
-            <ChatSessionReconnectPanel
-              canRetryResponse={canRetryResponse}
-              isCancelling={isCancelling}
-              onRetryResponse={() => void retryResponse()}
-              onRetryStream={() => void retryStream()}
-              onStopResponse={() => void stopResponse()}
-            />
-          ) : null}
-          <div aria-hidden="true" ref={autoScroll.endRef} />
-        </div>
-      </div>
+      <ChatSessionTimeline
+        blocks={blocks}
+        canRetryResponse={canRetryResponse}
+        contentRef={autoScroll.contentRef}
+        endRef={autoScroll.endRef}
+        isCancelling={isCancelling}
+        onRetryResponse={retryResponse}
+        onRetryStream={retryStream}
+        onScroll={autoScroll.handleScroll}
+        onStopResponse={stopResponse}
+        sessionHistoryError={session ? sessionHistoryError : undefined}
+        showMessageList={shouldShowMessageList}
+        showReconnectControls={showReconnectControls}
+        streamError={streamError}
+        viewportRef={autoScroll.viewportRef}
+      />
       <div className="mt-4 shrink-0">
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
           <ChatComposer
@@ -231,11 +216,17 @@ export function ChatSessionPage() {
             draft={draft}
             inputHistory={inputHistory}
             isCancelling={isCancelling}
+            commandNotice={sessionCommands.notice}
+            contextCompactionStage={sessionCommands.compactionStage}
             isStreaming={isStreaming}
             models={modelPickerOptions(models)}
             onCancel={() => void stopResponse()}
+            onCommand={sessionCommands.execute}
             onDraftChange={setDraft}
             onModelChange={(model) => {
+              if (sessionCommands.compactionStage) {
+                return;
+              }
               const modelRef = modelRefForKey(model);
               if (!modelRef) {
                 return;
@@ -251,6 +242,9 @@ export function ChatSessionPage() {
               }
             }}
             onProjectChange={(projectId) => {
+              if (sessionCommands.compactionStage) {
+                return;
+              }
               setActiveProjectId(projectId);
               if (!session) {
                 setDraftProjectId(projectId);
@@ -262,11 +256,17 @@ export function ChatSessionPage() {
               }
             }}
             onRuntimeModeChange={(mode) => {
+              if (sessionCommands.compactionStage) {
+                return;
+              }
               if (mode === "local") {
                 setConnection({ runtimeMode: mode });
               }
             }}
             onReasoningLevelChange={(level) => {
+              if (sessionCommands.compactionStage) {
+                return;
+              }
               if (!session) {
                 setDraftReasoningLevel(level);
                 return;

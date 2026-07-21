@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
-use talos_memory::MemoryStore;
+use talos_memory::MemoryScope;
 use talos_tools::{
     ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolProgressEmitter,
     ToolProgressEvent,
@@ -22,7 +22,6 @@ pub struct ToolExecutionContext {
     pub user_id: String,
     pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
-    pub memory_store: Arc<MemoryStore>,
     pub dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
 }
 
@@ -75,7 +74,10 @@ fn build_tool_context(
     } else {
         ctx
     };
-    let ctx = ctx.with_memory_store(execution_context.memory_store.clone());
+    let ctx = ctx.with_memory_scope(MemoryScope {
+        user_id: execution_context.user_id.clone(),
+        workspace_root: execution_context.kernel_config.workspace_dir.clone().into(),
+    });
     if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
         ctx.set_dynamic_tool_result(
             call_id.to_string(),

@@ -10,7 +10,6 @@ use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use talos_service::{TalosService, TurnExecutor};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_store::profile::{
@@ -130,6 +129,10 @@ fn test_model_info() -> ModelInfo {
 
 fn test_config() -> talos_types::TalosConfig {
     let mut config = talos_types::TalosConfig::default();
+    config.agent.kernel.workspace_dir = std::env::temp_dir()
+        .join(format!("talos-http-test-{}", uuid::Uuid::new_v4()))
+        .to_string_lossy()
+        .to_string();
     config.llm.provider = "bailian".to_string();
     config.llm.model = "qwen-plus".to_string();
     config.llm.bailian.models = vec![test_model_info().model];
@@ -137,15 +140,13 @@ fn test_config() -> talos_types::TalosConfig {
 }
 
 fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
-    let workspace_dir =
-        std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
+    let config = test_config();
+    let workspace_dir = std::path::PathBuf::from(&config.agent.kernel.workspace_dir);
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
-    let mut config = test_config();
-    config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
     (config, workspace_dir)
 }
 
-fn test_state_with_lifecycle(
+async fn test_state_with_lifecycle(
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
@@ -159,6 +160,7 @@ fn test_state_with_lifecycle(
         lifecycle,
         llm_config_service: None,
     })
+    .await
 }
 
 struct TestStateConfig {
@@ -171,7 +173,7 @@ struct TestStateConfig {
     llm_config_service: Option<Arc<dyn LlmConfigService>>,
 }
 
-fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
+async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
     let llm_config_service = config.llm_config_service.unwrap_or_else(|| {
@@ -179,18 +181,25 @@ fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
             InMemoryLlmConfigStore::new(config.base_config.llm.clone()),
         )))
     });
+    let memory = talos_service::MemoryService::new(
+        config.base_config.clone(),
+        Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
+    )
+    .unwrap();
+    memory.rebuild_known_scopes().await.unwrap();
     let app = Arc::new(TalosService::new_with_session_store(
         config.turn_executor,
         Arc::new(SessionServiceRuntimeAdapter::new(
             config.session_service.clone(),
         )),
         Arc::new(SessionStoreAdapter::new(config.session_service)),
+        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         Arc::new(MockProjectStore::new()),
         Arc::new(EmptyProfileStore),
         event_service.clone(),
         config.event_store,
         config.base_config.clone(),
-        Arc::new(MockLlmProvider),
+        memory,
         llm_config_service,
         vec![test_model_info()],
         auth_service.clone(),
@@ -206,11 +215,11 @@ fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     ))
 }
 
-fn test_state(auth_disabled: bool) -> Arc<HttpApiState> {
-    test_state_with_lifecycle(auth_disabled, Arc::new(ServerLifecycle::new()))
+async fn test_state(auth_disabled: bool) -> Arc<HttpApiState> {
+    test_state_with_lifecycle(auth_disabled, Arc::new(ServerLifecycle::new())).await
 }
 
-fn test_state_with_config(
+async fn test_state_with_config(
     config: talos_types::TalosConfig,
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
@@ -224,6 +233,7 @@ fn test_state_with_config(
         lifecycle: Arc::new(ServerLifecycle::new()),
         llm_config_service: None,
     })
+    .await
 }
 
 fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEventService> {
@@ -236,7 +246,7 @@ fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEven
     ))
 }
 
-fn test_state_with_event_store(
+async fn test_state_with_event_store(
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
 ) -> Arc<HttpApiState> {
@@ -246,9 +256,10 @@ fn test_state_with_event_store(
         store,
         test_config(),
     )
+    .await
 }
 
-fn test_state_with_gateway_event_store_config(
+async fn test_state_with_gateway_event_store_config(
     turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
@@ -265,6 +276,7 @@ fn test_state_with_gateway_event_store_config(
         Arc::new(ServerLifecycle::new()),
         llm_config_service,
     )
+    .await
 }
 
 struct SessionServiceRuntimeAdapter {
@@ -288,7 +300,7 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
 
     async fn compact_session(
         &self,
-        _session: TalosSession,
+        _params: talos_coordinator::AgentSessionCompactionParams,
     ) -> talos_error::TalosResult<talos_types::TokenUsage> {
         Ok(talos_types::TokenUsage::default())
     }
@@ -395,12 +407,21 @@ impl SessionStore for SessionStoreAdapter {
         Ok(true)
     }
 
+    async fn advance_memory_processed_until_seq(
+        &self,
+        _session_id: &str,
+        _expected_until_seq: u64,
+        _next_until_seq: u64,
+    ) -> talos_error::TalosResult<()> {
+        Ok(())
+    }
+
     async fn delete_session_record(&self, session_id: &str) -> talos_error::TalosResult<bool> {
         Ok(self.service.delete_session(session_id).await?.success)
     }
 }
 
-fn test_state_with_gateway_event_store_config_and_lifecycle(
+async fn test_state_with_gateway_event_store_config_and_lifecycle(
     turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
     store: Arc<RecordingEventStore>,
@@ -417,6 +438,7 @@ fn test_state_with_gateway_event_store_config_and_lifecycle(
         lifecycle,
         llm_config_service: Some(llm_config_service),
     })
+    .await
 }
 
 #[derive(Default)]

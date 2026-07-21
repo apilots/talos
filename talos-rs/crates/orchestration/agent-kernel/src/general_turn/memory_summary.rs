@@ -1,68 +1,27 @@
 use super::*;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use talos_error::TalosMemoryErrorKind;
 use talos_llm_provider::Usage;
 
-const MEMORY_PERSISTENCE_DECISION_PROMPT: &str = r#"Decide whether this sanitized session summary should be persisted.
-Return ONLY valid JSON, no markdown fences, no explanation.
-
-Schema:
-{
-  "decision": "skip" | "session_only" | "durable",
-  "rationale": "short reason"
-}
-
-Decision rules:
-- durable: stable user preferences, long-lived constraints, durable project facts, or ongoing goals worth keeping in durable memory
-- session_only: useful session recap or pending work that helps near-term continuity but is not stable enough for durable memory
-- skip: transient execution logs, flush noise, raw tool traces, unstable details, malformed or content-free summaries
-
-Prefer skip over storing low-value or noisy information."#;
-
-const MEMORY_JSON_RETRY_LIMIT: usize = 3;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum MemoryPersistenceKind {
-    Skip,
-    SessionOnly,
-    Durable,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct MemoryPersistenceDecision {
-    decision: MemoryPersistenceKind,
-    rationale: String,
-}
-
-trait MemoryJsonValidator {
-    fn validate(&self) -> TalosResult<()>;
-}
-
-impl MemoryJsonValidator for SessionMemorySummary {
-    fn validate(&self) -> TalosResult<()> {
-        if self.title.trim().is_empty() {
-            return Err(talos_error::TalosError::ToolError(
-                "memory summary title must not be blank".to_string(),
-            ));
-        }
-        Ok(())
+pub(super) fn validate_memory_candidates(
+    candidates: &[talos_memory::MemoryCandidate],
+) -> TalosResult<()> {
+    if candidates.len() > 8
+        || candidates.iter().any(|candidate| {
+            candidate.title.trim().is_empty()
+                || candidate.body.trim().is_empty()
+                || candidate.title.chars().count() > 160
+                || candidate.body.chars().count() > 1_000
+        })
+    {
+        return Err(talos_error::TalosError::ValidationError(
+            "memory candidates are invalid".to_string(),
+        ));
     }
-}
-
-impl MemoryJsonValidator for MemoryPersistenceDecision {
-    fn validate(&self) -> TalosResult<()> {
-        if self.rationale.trim().is_empty() {
-            return Err(talos_error::TalosError::ToolError(
-                "memory persistence rationale must not be blank".to_string(),
-            ));
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct MemoryFlushUsageReport {
+pub struct MemoryFormationReport {
     pub request_count: u32,
     pub input_tokens: u32,
     pub output_tokens: u32,
@@ -75,8 +34,8 @@ pub struct MemoryFlushUsageReport {
     pub cache_read_input_tokens: Option<u32>,
 }
 
-impl MemoryFlushUsageReport {
-    fn record_usage(&mut self, usage: &Usage) {
+impl MemoryFormationReport {
+    pub(super) fn record_usage(&mut self, usage: &Usage) {
         self.request_count = self.request_count.saturating_add(1);
         self.input_tokens = self.input_tokens.saturating_add(usage.prompt_tokens);
         self.output_tokens = self.output_tokens.saturating_add(usage.completion_tokens);
@@ -90,52 +49,42 @@ impl MemoryFlushUsageReport {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct SanitizedMemoryDecisionInput {
-    pub(crate) user_intent: Option<String>,
-    pub(crate) verified_outcomes: Vec<String>,
-    pub(crate) stable_facts_discovered: Vec<String>,
-    pub(crate) candidate_preferences_or_durable_rules: Vec<String>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemoryFlushPolicy {
-    pub enforce_threshold: bool,
-    pub persist_session_summary: bool,
-    pub flush_workspace_memory: bool,
+pub struct MemoryCompactionPolicy {
     pub compact_input_budget_tokens: Option<usize>,
 }
 
-impl MemoryFlushPolicy {
-    pub const fn new(
-        enforce_threshold: bool,
-        persist_session_summary: bool,
-        flush_workspace_memory: bool,
-    ) -> Self {
+impl MemoryCompactionPolicy {
+    pub const fn for_compaction() -> Self {
         Self {
-            enforce_threshold,
-            persist_session_summary,
-            flush_workspace_memory,
             compact_input_budget_tokens: None,
         }
-    }
-
-    pub const fn for_compaction(flush_workspace_memory: bool) -> Self {
-        Self::new(true, true, flush_workspace_memory)
-    }
-
-    pub const fn for_session_close(flush_workspace_memory: bool) -> Self {
-        Self::new(false, false, flush_workspace_memory)
-    }
-
-    pub const fn has_persistence_target(self) -> bool {
-        self.persist_session_summary || self.flush_workspace_memory
     }
 
     pub const fn with_compaction_input_budget_tokens(mut self, budget: Option<usize>) -> Self {
         self.compact_input_budget_tokens = budget;
         self
     }
+}
+
+/// Stable inputs shared by compaction and daily long-term memory formation.
+pub struct MemoryFormationParams<'a> {
+    /// Session whose persisted transcript is processed.
+    pub session_id: &'a str,
+    /// Session-selected model used when no compaction override exists.
+    pub selected_model: &'a str,
+    /// Provider used for the single structured extraction request.
+    pub llm_provider: Arc<dyn LlmProvider>,
+    /// Long-term memory write boundary.
+    pub memory_writer: &'a dyn MemoryWriter,
+    /// User-scoped long-term memory destination.
+    pub memory_scope: &'a MemoryScope,
+    /// Persisted transcript and summary boundary.
+    pub session_artifact_store: &'a dyn talos_store::session::SessionArtifactStore,
+    /// Persisted memory cursor boundary.
+    pub session_store: &'a dyn talos_store::session::SessionStore,
+    /// Resolved per-user Kernel configuration.
+    pub kernel_config: &'a AgentKernelConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,7 +95,7 @@ enum CompactableTranscriptUnitKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct CompactableTranscriptUnit {
+pub(super) struct CompactableTranscriptUnit {
     kind: CompactableTranscriptUnitKind,
     record_id: String,
     turn_id: Option<String>,
@@ -155,13 +104,13 @@ struct CompactableTranscriptUnit {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct CompactSummaryCoverage {
-    covers_from_seq: u64,
-    covers_until_seq: u64,
-    source_turn_count: usize,
+pub(super) struct CompactSummaryCoverage {
+    pub(super) covers_from_seq: u64,
+    pub(super) covers_until_seq: u64,
+    pub(super) source_turn_count: usize,
 }
 
-fn render_summary_body(summary: &SessionMemorySummary) -> String {
+fn render_summary_body(summary: &CompactionMemoryOutput) -> String {
     let mut out = String::new();
     let sections = [
         ("**Facts:**", &summary.facts),
@@ -185,7 +134,7 @@ fn render_summary_body(summary: &SessionMemorySummary) -> String {
     out.trim().to_string()
 }
 
-fn render_session_summary_content(summary: &SessionMemorySummary) -> String {
+fn render_session_summary_content(summary: &CompactionMemoryOutput) -> String {
     let mut out = String::new();
     out.push_str("Title: ");
     out.push_str(summary.title.trim());
@@ -195,56 +144,7 @@ fn render_session_summary_content(summary: &SessionMemorySummary) -> String {
     out.trim().to_string()
 }
 
-fn render_workspace_summary_body(summary: &SessionMemorySummary) -> String {
-    let body = render_summary_body(summary);
-    if !body.is_empty() {
-        return body;
-    }
-
-    let title = summary.title.trim();
-    if title.is_empty() {
-        String::new()
-    } else {
-        format!("**Facts:**\n- {}\n", title)
-    }
-}
-
-fn sanitize_memory_line(text: &str) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let lower = trimmed.to_ascii_lowercase();
-    let forbidden_markers = [
-        "session_id",
-        "invocation_id",
-        "message_id",
-        "trace_id",
-        "tool_call_id",
-        "skip memory flush",
-        "flush workspace memory",
-        "prompt diagnostics",
-        "status: execution started",
-        "status: waiting for execution slot",
-    ];
-    if forbidden_markers
-        .iter()
-        .any(|marker| lower.contains(marker))
-    {
-        return None;
-    }
-
-    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
-    {
-        return None;
-    }
-
-    Some(trimmed.to_string())
-}
-
-fn render_transcript_line(message: &talos_memory::TalosMessage) -> Option<String> {
+fn render_transcript_line(message: &crate::TalosMessage) -> Option<String> {
     let text = message.text.trim();
     if text.is_empty() {
         return None;
@@ -256,7 +156,7 @@ fn render_transcript_line(message: &talos_memory::TalosMessage) -> Option<String
     })
 }
 
-fn render_tool_result_line(result: &talos_memory::SessionToolResultContext) -> Option<String> {
+fn render_tool_result_line(result: &crate::SessionToolResultContext) -> Option<String> {
     let content = result.content.trim();
     if content.is_empty() {
         return None;
@@ -270,9 +170,7 @@ fn render_tool_result_line(result: &talos_memory::SessionToolResultContext) -> O
     ))
 }
 
-fn render_tool_exchange_line(
-    exchange: &talos_memory::SessionToolExchangeContext,
-) -> Option<String> {
+fn render_tool_exchange_line(exchange: &crate::SessionToolExchangeContext) -> Option<String> {
     let arguments = exchange.arguments_preview.trim();
     let output_preview = exchange
         .output_preview
@@ -284,9 +182,9 @@ fn render_tool_exchange_line(
     }
 
     let outcome = match exchange.outcome {
-        talos_memory::SessionToolExchangeOutcome::Succeeded => "ok",
-        talos_memory::SessionToolExchangeOutcome::Failed => "error",
-        talos_memory::SessionToolExchangeOutcome::Pending => "pending",
+        SessionToolExchangeOutcome::Succeeded => "ok",
+        SessionToolExchangeOutcome::Failed => "error",
+        SessionToolExchangeOutcome::Pending => "pending",
     };
     let mut rendered = format!(
         "Tool exchange {} ({outcome}) args: {}",
@@ -312,7 +210,7 @@ fn estimate_transcript_tokens(text: &str) -> usize {
     }
 }
 
-fn render_transcript(units: &[CompactableTranscriptUnit]) -> String {
+pub(super) fn render_transcript(units: &[CompactableTranscriptUnit]) -> String {
     units
         .iter()
         .map(|unit| unit.rendered.trim())
@@ -321,8 +219,8 @@ fn render_transcript(units: &[CompactableTranscriptUnit]) -> String {
         .join("\n")
 }
 
-fn build_compactable_transcript_units(
-    context: &talos_memory::SessionPromptContext,
+pub(super) fn build_compactable_transcript_units(
+    context: &crate::SessionPromptContext,
 ) -> Vec<CompactableTranscriptUnit> {
     let mut units = Vec::new();
     for message in &context.recent_messages {
@@ -408,8 +306,8 @@ fn build_compactable_transcript_units(
     units
 }
 
-fn trim_transcript_units_to_budget(
-    context: &talos_memory::SessionPromptContext,
+pub(super) fn trim_transcript_units_to_budget(
+    context: &crate::SessionPromptContext,
     transcript_budget_tokens: usize,
     tool_output_keep_last: usize,
     tool_exchange_keep_last: usize,
@@ -477,7 +375,7 @@ fn trim_transcript_units_to_budget(
     }
 }
 
-fn compact_summary_coverage(
+pub(super) fn compact_summary_coverage(
     previous_covers_until_seq: u64,
     units: &[CompactableTranscriptUnit],
     turn_seq_by_id: &std::collections::HashMap<String, u64>,
@@ -508,298 +406,113 @@ fn compact_summary_coverage(
     })
 }
 
-pub(crate) fn build_sanitized_memory_decision_input(
-    context: &talos_memory::SessionPromptContext,
-    summary: &SessionMemorySummary,
-) -> SanitizedMemoryDecisionInput {
-    let user_intent = context
-        .recent_messages
-        .iter()
-        .rev()
-        .find(|message| message.role == TalosMessageRole::User)
-        .and_then(|message| sanitize_memory_line(&message.text));
-
-    // Verified tool outcomes are not tracked separately in SessionMemorySummary yet.
-    // Keep facts in the stable-facts section and only surface pending work here.
-    let verified_outcomes = summary
-        .open_tasks
-        .iter()
-        .filter_map(|item| sanitize_memory_line(item))
-        .map(|item| format!("Pending task: {}", item))
-        .collect::<Vec<_>>();
-
-    let stable_facts_discovered = summary
-        .facts
-        .iter()
-        .filter_map(|item| sanitize_memory_line(item))
-        .collect::<Vec<_>>();
-
-    let candidate_preferences_or_durable_rules = summary
-        .preferences
-        .iter()
-        .filter_map(|item| sanitize_memory_line(item))
-        .chain(
-            summary
-                .risks
-                .iter()
-                .filter_map(|item| sanitize_memory_line(item))
-                .map(|item| format!("Constraint or risk: {}", item)),
-        )
-        .collect::<Vec<_>>();
-
-    SanitizedMemoryDecisionInput {
-        user_intent,
-        verified_outcomes,
-        stable_facts_discovered,
-        candidate_preferences_or_durable_rules,
-    }
-}
-
-fn render_sanitized_memory_decision_input(input: &SanitizedMemoryDecisionInput) -> Option<String> {
-    let mut sections = Vec::new();
-    if let Some(user_intent) = input.user_intent.as_ref() {
-        sections.push(format!("User intent:\n- {}", user_intent));
-    }
-    if !input.verified_outcomes.is_empty() {
-        sections.push(format!(
-            "Verified outcomes:\n{}",
-            input
-                .verified_outcomes
-                .iter()
-                .map(|item| format!("- {}", item))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-    }
-    if !input.stable_facts_discovered.is_empty() {
-        sections.push(format!(
-            "Stable facts discovered:\n{}",
-            input
-                .stable_facts_discovered
-                .iter()
-                .map(|item| format!("- {}", item))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-    }
-    if !input.candidate_preferences_or_durable_rules.is_empty() {
-        sections.push(format!(
-            "Candidate preferences or durable rules:\n{}",
-            input
-                .candidate_preferences_or_durable_rules
-                .iter()
-                .map(|item| format!("- {}", item))
-                .collect::<Vec<_>>()
-                .join("\n")
-        ));
-    }
-
-    if sections.is_empty() {
-        None
-    } else {
-        Some(sections.join("\n\n"))
-    }
-}
-
-async fn request_json_with_retries<T>(
+async fn request_compaction_output(
     session_id: &str,
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
-    system_prompt: &str,
     user_prompt: String,
-    label: &str,
-    parse_error_kind: TalosMemoryErrorKind,
-) -> TalosResult<(T, Usage)>
-where
-    T: DeserializeOwned + MemoryJsonValidator,
-{
-    let mut accumulated_usage = Usage::default();
-    let retry_suffix = "\n\nPrevious response was not valid JSON for the required schema. Retry and return ONLY valid JSON with all required fields. Do not add explanation, markdown, or extra text.";
-    let mut current_user_prompt = user_prompt.clone();
-    let mut last_error = None;
-
-    for attempt in 1..=MEMORY_JSON_RETRY_LIMIT {
-        let response = llm_provider
-            .chat(
-                ChatRequest::builder()
-                    .model(selected_model.to_string())
-                    .messages(vec![
-                        ChatMessage::system(system_prompt),
-                        ChatMessage::user(current_user_prompt.clone()),
-                    ])
-                    .build(),
-            )
-            .await?;
-        accumulated_usage.prompt_tokens = accumulated_usage
-            .prompt_tokens
-            .saturating_add(response.usage.prompt_tokens);
-        accumulated_usage.completion_tokens = accumulated_usage
-            .completion_tokens
-            .saturating_add(response.usage.completion_tokens);
-        accumulated_usage.total_tokens = accumulated_usage
-            .total_tokens
-            .saturating_add(response.usage.total_tokens);
-        accumulated_usage.cache_creation_input_tokens = sum_optional_tokens(
-            accumulated_usage.cache_creation_input_tokens,
-            response.usage.cache_creation_input_tokens,
-        );
-        accumulated_usage.cache_read_input_tokens = sum_optional_tokens(
-            accumulated_usage.cache_read_input_tokens,
-            response.usage.cache_read_input_tokens,
-        );
-
-        match serde_json::from_str::<T>(strip_json_fences(&response.content)) {
-            Ok(parsed) => match parsed.validate() {
-                Ok(()) => return Ok((parsed, accumulated_usage)),
-                Err(err) => {
-                    tracing::warn!(
-                        session_id = %session_id,
-                        attempt,
-                        error = %err,
-                        response_chars = response.content.chars().count(),
-                        label,
-                        "received invalid structured content from memory helper model response"
-                    );
-                    last_error = Some(err.to_string());
-                    if attempt == MEMORY_JSON_RETRY_LIMIT {
-                        break;
-                    }
-                    current_user_prompt = format!("{user_prompt}{retry_suffix}");
-                }
-            },
-            Err(err) => {
-                tracing::warn!(
-                    session_id = %session_id,
-                    attempt,
-                    error = %err,
-                    response_chars = response.content.chars().count(),
-                    label,
-                    "received invalid json from memory helper model response"
-                );
-                last_error = Some(format!("{err}"));
-                if attempt == MEMORY_JSON_RETRY_LIMIT {
-                    break;
-                }
-                current_user_prompt = format!("{user_prompt}{retry_suffix}");
-            }
-        }
+) -> TalosResult<(CompactionMemoryOutput, Usage)> {
+    let response = llm_provider
+        .chat(
+            ChatRequest::builder()
+                .model(selected_model.to_string())
+                .messages(vec![
+                    ChatMessage::system(MEMORY_COMPACTION_PROMPT),
+                    ChatMessage::user(user_prompt),
+                ])
+                .build(),
+        )
+        .await?;
+    let parsed = serde_json::from_str::<CompactionMemoryOutput>(response.content.trim()).map_err(
+        |error| talos_error::TalosError::MemoryError {
+            kind: TalosMemoryErrorKind::SummaryParseFailed,
+            message: format!("parse compaction json for session '{session_id}': {error}"),
+        },
+    )?;
+    if parsed.title.trim().is_empty() {
+        return Err(talos_error::TalosError::MemoryError {
+            kind: TalosMemoryErrorKind::SummaryParseFailed,
+            message: format!("compaction title is blank for session '{session_id}'"),
+        });
     }
-
-    Err(talos_error::TalosError::MemoryError {
-        kind: parse_error_kind,
-        message: format!(
-            "parse {label} json after {MEMORY_JSON_RETRY_LIMIT} attempts: {}",
-            last_error.unwrap_or_else(|| "unknown parse error".to_string())
-        ),
-    })
-}
-
-async fn decide_memory_persistence(
-    session_id: &str,
-    selected_model: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    sanitized_input: &str,
-) -> TalosResult<(MemoryPersistenceDecision, Usage)> {
-    request_json_with_retries::<MemoryPersistenceDecision>(
-        session_id,
-        selected_model,
-        llm_provider,
-        MEMORY_PERSISTENCE_DECISION_PROMPT,
-        sanitized_input.to_string(),
-        "memory persistence decision",
-        TalosMemoryErrorKind::PersistenceDecisionParseFailed,
-    )
-    .await
+    validate_memory_candidates(&parsed.memory_candidates).map_err(|error| {
+        talos_error::TalosError::MemoryError {
+            kind: TalosMemoryErrorKind::SummaryParseFailed,
+            message: format!("validate compaction for session '{session_id}': {error}"),
+        }
+    })?;
+    Ok((parsed, response.usage))
 }
 
 async fn latest_summary_compact_cursor(
-    memory_store: &MemoryStore,
+    session_artifact_store: &dyn talos_store::session::SessionArtifactStore,
+    workspace_root: &std::path::Path,
     session_id: &str,
-    enabled: bool,
-) -> TalosResult<Option<talos_memory::CompactPromptCursor>> {
-    if !enabled {
-        return Ok(None);
-    }
-
-    Ok(memory_store
-        .load_summaries(session_id, 1)
+) -> TalosResult<Option<talos_prompt::CompactPromptCursor>> {
+    Ok(session_artifact_store
+        .load_summaries(workspace_root, session_id, 1)
         .await?
         .into_iter()
         .last()
-        .map(|summary| talos_memory::CompactPromptCursor {
+        .map(|summary| talos_prompt::CompactPromptCursor {
             covers_until_seq: summary.covers_until_seq,
         }))
 }
 
-pub async fn flush_session_memory_with_report(
-    session_id: &str,
-    selected_model: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    memory_store: &MemoryStore,
-    kernel_config: &AgentKernelConfig,
-    policy: MemoryFlushPolicy,
-) -> TalosResult<MemoryFlushUsageReport> {
-    let mut usage_report = MemoryFlushUsageReport::default();
-    if policy.has_persistence_target() {
-        if policy.enforce_threshold {
-            let threshold = kernel_config.memory.compaction_threshold_bytes as u64;
-            if threshold == 0 {
-                tracing::debug!(session_id = %session_id, "skip memory flush because threshold is zero");
-                return Ok(usage_report);
-            }
-            let session_bytes = memory_store.session_size_bytes(session_id).await?;
-            if session_bytes < threshold {
-                tracing::debug!(
-                    session_id = %session_id,
-                    session_bytes,
-                    threshold,
-                    "skip memory flush because session size is below threshold"
-                );
-                return Ok(usage_report);
-            }
-        }
-    } else {
-        tracing::debug!(
-            session_id = %session_id,
-            persist_session_summary = policy.persist_session_summary,
-            flush_workspace_memory = policy.flush_workspace_memory,
-            "skip memory flush because all persistence targets are disabled"
-        );
-        return Ok(usage_report);
-    }
-
-    let compact_cursor =
-        latest_summary_compact_cursor(memory_store, session_id, policy.persist_session_summary)
-            .await?;
+pub async fn compact_session_memory(
+    params: MemoryFormationParams<'_>,
+    policy: MemoryCompactionPolicy,
+) -> TalosResult<MemoryFormationReport> {
+    let MemoryFormationParams {
+        session_id,
+        selected_model,
+        llm_provider,
+        memory_writer,
+        memory_scope,
+        session_artifact_store,
+        session_store,
+        kernel_config,
+    } = params;
+    let mut usage_report = MemoryFormationReport::default();
+    let compact_cursor = latest_summary_compact_cursor(
+        session_artifact_store,
+        std::path::Path::new(&kernel_config.workspace_dir),
+        session_id,
+    )
+    .await?;
     let previous_covers_until_seq = compact_cursor
         .map(|cursor| cursor.covers_until_seq)
         .unwrap_or_default();
-    let context = memory_store
-        .build_session_prompt_context(
-            session_id,
-            &SessionPromptContextConfig {
-                compact_cursor,
-                recent_window: SessionPromptRecentWindow::OldestUncovered,
-                recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
-                recent_tool_results_limit: kernel_config
-                    .compaction
-                    .source_recent_tool_results_limit,
-                tool_output_max_chars: kernel_config.compaction.tool_output_max_chars,
-                recent_tool_exchanges_limit: kernel_config
-                    .compaction
-                    .source_recent_tool_exchanges_limit,
-                tool_exchange_max_chars: kernel_config.compaction.tool_exchange_max_chars,
-                include_summary: false,
-                summary_recent_count: 0,
-                summary_max_chars: 0,
-            },
-        )
-        .await?;
+    let memory_processed_until_seq = session_store
+        .get_session_record(session_id)
+        .await?
+        .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?
+        .memory_processed_until_seq;
+    let context = crate::build_session_prompt_context(
+        session_artifact_store,
+        std::path::Path::new(&kernel_config.workspace_dir),
+        session_id,
+        &SessionPromptContextConfig {
+            compact_cursor,
+            recent_window: SessionPromptRecentWindow::OldestUncovered,
+            recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
+            recent_tool_results_limit: kernel_config.compaction.source_recent_tool_results_limit,
+            tool_output_max_chars: kernel_config.compaction.tool_output_max_chars,
+            recent_tool_exchanges_limit: kernel_config
+                .compaction
+                .source_recent_tool_exchanges_limit,
+            tool_exchange_max_chars: kernel_config.compaction.tool_exchange_max_chars,
+            include_summary: false,
+            summary_recent_count: 0,
+            summary_max_chars: 0,
+        },
+    )
+    .await?;
     if context.recent_messages.is_empty()
         && context.recent_tool_results.is_empty()
         && context.recent_tool_exchanges.is_empty()
     {
-        tracing::debug!(session_id = %session_id, "skip memory flush because session prompt context is empty");
+        tracing::debug!(session_id = %session_id, "skip compaction because session prompt context is empty");
         return Ok(usage_report);
     }
     let mut compaction_context = context.clone();
@@ -861,7 +574,7 @@ pub async fn flush_session_memory_with_report(
     let compacted_units = build_compactable_transcript_units(&compaction_context);
     let transcript = render_transcript(&compacted_units);
     if transcript.trim().is_empty() {
-        tracing::debug!(session_id = %session_id, "skip memory flush because transcript is empty");
+        tracing::debug!(session_id = %session_id, "skip compaction because transcript is empty");
         return Ok(usage_report);
     }
 
@@ -872,145 +585,108 @@ pub async fn flush_session_memory_with_report(
         .unwrap_or_else(|| selected_model.to_string());
     let llm_provider_for_summary = llm_provider.clone();
     let transcript_prompt = format!("Conversation transcript:\n{}", transcript);
-    let (summary, summary_usage) = request_json_with_retries::<SessionMemorySummary>(
+    let (summary, summary_usage) = request_compaction_output(
         session_id,
         &selected_model,
         llm_provider_for_summary,
-        MEMORY_SUMMARY_PROMPT,
         transcript_prompt,
-        "memory summary",
-        TalosMemoryErrorKind::SummaryParseFailed,
     )
     .await?;
     usage_report.record_usage(&summary_usage);
-    if summary.title.trim().is_empty() {
-        tracing::debug!(session_id = %session_id, "skip memory flush because summary title is empty");
-        return Ok(usage_report);
-    }
-    let workspace_body = render_workspace_summary_body(&summary);
     let session_summary_content = render_session_summary_content(&summary);
-    if session_summary_content.is_empty() {
-        return Ok(usage_report);
-    }
-    if !policy.persist_session_summary && policy.flush_workspace_memory {
-        if !workspace_body.is_empty() {
-            memory_store
-                .append_workspace_memory(&talos_memory::WorkspaceMemoryRecord {
-                    timestamp: Utc::now(),
-                    session_id: session_id.to_string(),
-                    title: summary.title.clone(),
-                    content: workspace_body,
-                })
-                .await?;
-        }
-        return Ok(usage_report);
-    }
-    let sanitized_input = build_sanitized_memory_decision_input(&compaction_context, &summary);
-    let Some(judge_input) = render_sanitized_memory_decision_input(&sanitized_input) else {
-        tracing::debug!(session_id = %session_id, "skip memory flush because sanitized judge input is empty");
+    let turns = session_artifact_store
+        .load_turn_window(
+            std::path::Path::new(&kernel_config.workspace_dir),
+            session_id,
+            talos_store::session::SessionTurnWindow::OldestAfter {
+                seq: previous_covers_until_seq,
+            },
+            kernel_config
+                .compaction
+                .source_recent_messages_limit
+                .max(kernel_config.compaction.source_recent_tool_results_limit)
+                .max(kernel_config.compaction.source_recent_tool_exchanges_limit),
+        )
+        .await?;
+    let turn_seq_by_id = turns
+        .iter()
+        .map(|turn| (turn.turn_id.clone(), turn.seq))
+        .collect::<std::collections::HashMap<_, _>>();
+    let occurred_at_by_seq = turns
+        .into_iter()
+        .map(|turn| (turn.seq, turn.timestamp.timestamp()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let Some(coverage) =
+        compact_summary_coverage(previous_covers_until_seq, &compacted_units, &turn_seq_by_id)
+    else {
+        tracing::debug!(
+            session_id = %session_id,
+            previous_covers_until_seq,
+            "skip session summary persistence because compact input has no contiguous uncovered history"
+        );
         return Ok(usage_report);
     };
-    let (persistence, persistence_usage) = decide_memory_persistence(
-        session_id,
-        &selected_model,
-        llm_provider.clone(),
-        &judge_input,
-    )
-    .await?;
-    usage_report.record_usage(&persistence_usage);
-    tracing::debug!(
-        session_id = %session_id,
-        decision = ?persistence.decision,
-        rationale = %persistence.rationale,
-        "memory persistence decision"
-    );
-    if persistence.decision == MemoryPersistenceKind::Skip {
-        return Ok(usage_report);
-    }
-    let turn_seq_by_id = memory_store
-        .load_session_turns(session_id)
-        .await?
-        .into_iter()
-        .map(|turn| (turn.turn_id, turn.seq))
-        .collect::<std::collections::HashMap<_, _>>();
-    let coverage =
-        compact_summary_coverage(previous_covers_until_seq, &compacted_units, &turn_seq_by_id);
-    if policy.persist_session_summary {
-        if let Some(coverage) = coverage {
-            tracing::debug!(
-                session_id = %session_id,
-                previous_covers_until_seq,
-                covers_from_seq = coverage.covers_from_seq,
-                covers_until_seq = coverage.covers_until_seq,
-                source_turn_count = coverage.source_turn_count,
-                compacted_unit_count = compacted_units.len(),
-                "compact summary coverage advanced"
-            );
-            usage_report.covers_from_seq = Some(coverage.covers_from_seq);
-            usage_report.covers_until_seq = Some(coverage.covers_until_seq);
-            memory_store
-                .save_summary(&SummaryRecord {
-                    version: 2,
-                    header: RecordHeader {
-                        id: Uuid::new_v4().to_string(),
-                        session_id: session_id.to_string(),
-                        turn_id: None,
-                        timestamp: Utc::now(),
-                    },
-                    covers_until_seq: coverage.covers_until_seq,
-                    source_turn_count: coverage.source_turn_count,
-                    content: session_summary_content,
-                })
-                .await?;
-        } else {
-            tracing::debug!(
-                session_id = %session_id,
-                previous_covers_until_seq,
-                "skip session summary persistence because compact input has no contiguous uncovered history"
-            );
-        }
-    }
-
-    let should_append_workspace_memory = policy.flush_workspace_memory
-        && !workspace_body.is_empty()
-        && match persistence.decision {
-            MemoryPersistenceKind::Skip => false,
-            MemoryPersistenceKind::Durable => true,
-            MemoryPersistenceKind::SessionOnly => !policy.persist_session_summary,
-        };
-
-    if should_append_workspace_memory {
-        memory_store
-            .append_workspace_memory(&talos_memory::WorkspaceMemoryRecord {
-                timestamp: Utc::now(),
-                session_id: session_id.to_string(),
-                title: summary.title.clone(),
-                content: workspace_body,
-            })
+    let occurred_at = occurred_at_by_seq
+        .get(&coverage.covers_until_seq)
+        .copied()
+        .ok_or_else(|| {
+            talos_error::TalosError::ValidationError(format!(
+                "missing persisted timestamp for compacted session seq {}",
+                coverage.covers_until_seq
+            ))
+        })?;
+    if memory_processed_until_seq == previous_covers_until_seq {
+        memory_writer
+            .write(
+                memory_scope,
+                MemoryWriteBatch {
+                    session_id: session_id.to_string(),
+                    occurred_at,
+                    source_from_seq: coverage.covers_from_seq,
+                    source_until_seq: coverage.covers_until_seq,
+                    candidates: summary.memory_candidates,
+                },
+            )
+            .await?;
+        session_store
+            .advance_memory_processed_until_seq(
+                session_id,
+                memory_processed_until_seq,
+                coverage.covers_until_seq,
+            )
             .await?;
     }
 
-    Ok(usage_report)
-}
+    tracing::debug!(
+        session_id = %session_id,
+        previous_covers_until_seq,
+        covers_from_seq = coverage.covers_from_seq,
+        covers_until_seq = coverage.covers_until_seq,
+        source_turn_count = coverage.source_turn_count,
+        compacted_unit_count = compacted_units.len(),
+        "compact summary coverage advanced"
+    );
+    usage_report.covers_from_seq = Some(coverage.covers_from_seq);
+    usage_report.covers_until_seq = Some(coverage.covers_until_seq);
+    session_artifact_store
+        .save_summary(
+            std::path::Path::new(&kernel_config.workspace_dir),
+            &SummaryRecord {
+                version: 2,
+                header: RecordHeader {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: session_id.to_string(),
+                    turn_id: None,
+                    timestamp: Utc::now(),
+                },
+                covers_until_seq: coverage.covers_until_seq,
+                source_turn_count: coverage.source_turn_count,
+                content: session_summary_content,
+            },
+        )
+        .await?;
 
-pub async fn flush_session_memory(
-    session_id: &str,
-    selected_model: &str,
-    llm_provider: Arc<dyn LlmProvider>,
-    memory_store: &MemoryStore,
-    kernel_config: &AgentKernelConfig,
-    policy: MemoryFlushPolicy,
-) -> TalosResult<()> {
-    let _ = flush_session_memory_with_report(
-        session_id,
-        selected_model,
-        llm_provider,
-        memory_store,
-        kernel_config,
-        policy,
-    )
-    .await?;
-    Ok(())
+    Ok(usage_report)
 }
 
 fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {

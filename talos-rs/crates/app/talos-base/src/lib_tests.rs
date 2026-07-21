@@ -136,6 +136,12 @@ fn canonical(path: PathBuf) -> PathBuf {
     path.canonicalize().unwrap_or(path)
 }
 
+fn isolate_runtime_workspace(config: &mut Config, label: &str) -> PathBuf {
+    let workspace = temp_test_dir(label);
+    config.agent.kernel.workspace_dir = workspace.to_string_lossy().to_string();
+    workspace
+}
+
 fn provider_model(id: &str) -> ProviderModelConfig {
     ProviderModelConfig {
         id: id.to_string(),
@@ -185,6 +191,7 @@ async fn spawn_json_server(body: impl Into<String>) -> (String, oneshot::Receive
 #[tokio::test]
 async fn application_runtime_builds_when_model_key_is_missing() {
     let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "runtime-missing-key");
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
     config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
@@ -196,6 +203,7 @@ async fn application_runtime_builds_when_model_key_is_missing() {
 
     assert_eq!(runtime.config.llm.provider, "anthropic");
     runtime.shutdown().await.unwrap();
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]
@@ -216,6 +224,7 @@ async fn application_runtime_rejects_invalid_profile_usage_retention() {
 #[tokio::test]
 async fn application_runtime_registers_configured_default_agent() {
     let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "runtime-agent");
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
     config.llm.model = "global-model".to_string();
@@ -245,11 +254,13 @@ async fn application_runtime_registers_configured_default_agent() {
     assert_eq!(registration.descriptor.name, "Reviewer");
     assert_eq!(runtime.coordinator.registry().len().await, 1);
     runtime.shutdown().await.unwrap();
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]
 async fn application_runtime_skips_disabled_agent_definitions() {
     let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "runtime-disabled-agent");
     config.gateway.auth = false;
     config.storage.connection_string = ":memory:".to_string();
     config.llm.model = "global-model".to_string();
@@ -290,6 +301,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
     assert!(runtime.coordinator.registry().get("enabled").await.is_ok());
     assert_eq!(runtime.coordinator.registry().len().await, 1);
     runtime.shutdown().await.unwrap();
+    let _ = fs::remove_dir_all(workspace);
 }
 
 #[tokio::test]

@@ -274,6 +274,27 @@ impl Storage for SqliteStorage {
                 )
                 .await?;
             }
+            if !existing.contains("memory_processed_until_seq") {
+                info!("Adding memory_processed_until_seq column to sessions schema");
+                self.execute(
+                    "ALTER TABLE sessions ADD COLUMN memory_processed_until_seq INTEGER NOT NULL DEFAULT 0",
+                    &[],
+                )
+                .await?;
+            }
+            if !existing.contains("latest_turn_seq") {
+                info!("Adding latest_turn_seq column to sessions schema");
+                self.execute(
+                    "ALTER TABLE sessions ADD COLUMN latest_turn_seq INTEGER NOT NULL DEFAULT 0",
+                    &[],
+                )
+                .await?;
+                self.execute(
+                    "UPDATE sessions SET latest_turn_seq = MAX(memory_processed_until_seq, (message_count + 1) / 2)",
+                    &[],
+                )
+                .await?;
+            }
         }
 
         // Sessions table
@@ -294,6 +315,8 @@ impl Storage for SqliteStorage {
                 context_json TEXT,
                 model TEXT,
                 message_count INTEGER NOT NULL DEFAULT 0,
+                latest_turn_seq INTEGER NOT NULL DEFAULT 0,
+                memory_processed_until_seq INTEGER NOT NULL DEFAULT 0,
                 usage_json TEXT,
                 conf_json TEXT,
                 workspace_id TEXT,

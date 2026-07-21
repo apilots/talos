@@ -28,7 +28,6 @@ fi
 echo "CASE workspace_info PASS user_workspace_dir=${WORKSPACE_DIR}"
 MEMORY_DATE="$(date '+%Y-%m-%d')"
 MEMORY_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.md"
-MEMORY_INDEX_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.index.json"
 SOUL_FILE="${WORKSPACE_DIR}/SOUL.md"
 MEMORY_MARKER="memory-api-marker-$(date '+%Y%m%d%H%M%S')-$$"
 DOC_MARKER="workspace-doc-marker-$(date '+%Y%m%d%H%M%S')-$$"
@@ -159,7 +158,7 @@ create_memory_payload="$(python3 - <<PY
 import json
 print(json.dumps({
     "date": "${MEMORY_DATE}",
-    "content": "# Memory\\n${MEMORY_MARKER}\\n",
+    "content": "## [09:30] API memory\\n\\n${MEMORY_MARKER}\\n",
 }))
 PY
 )"
@@ -181,18 +180,6 @@ if ! grep -Fq "${MEMORY_MARKER}" "${MEMORY_FILE}"; then
   exit 1
 fi
 echo "CASE create_memory_file PASS version=${memory_version_token}"
-
-if [[ ! -f "${MEMORY_INDEX_FILE}" ]]; then
-  echo "CASE rebuild_memory_index FAIL missing_index=${MEMORY_INDEX_FILE}"
-  exit 1
-fi
-index_source_hash="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("source_content_hash", ""))' < "${MEMORY_INDEX_FILE}")"
-index_path="$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("path", ""))' < "${MEMORY_INDEX_FILE}")"
-if [[ -z "${index_source_hash}" || "${index_path}" != "memory/${MEMORY_DATE}.md" ]]; then
-  echo "CASE rebuild_memory_index FAIL source_content_hash=${index_source_hash} path=${index_path}"
-  exit 1
-fi
-echo "CASE rebuild_memory_index PASS path=${index_path}"
 
 parse_response "$(request_json GET "${GATEWAY_URL}/v1/memory/files?limit=5&date_from=${MEMORY_DATE}&date_to=${MEMORY_DATE}")"
 status="${RESPONSE_STATUS}"
@@ -232,7 +219,11 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE search_memory_files FAIL status=${status} body=${body}"
   exit 1
 fi
-search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("results", [])))' <<< "${body}")"
+search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+if [[ "${search_hit_count}" -lt "1" ]]; then
+  echo "CASE search_memory_files FAIL expected_at_least=1 actual=${search_hit_count}"
+  exit 1
+fi
 echo "CASE search_memory_files PASS hits=${search_hit_count}"
 
 stale_memory_payload="$(python3 - <<PY

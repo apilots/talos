@@ -2,18 +2,14 @@ use super::*;
 
 pub async fn execute_general_turn_loop(
     prepared: PreparedGeneralTurn,
-    agent_name: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     execute_general_turn_loop_with_resume(
         prepared,
-        agent_name,
         llm_provider,
         tool_executor_port,
-        memory_store,
         kernel_config,
         None,
     )
@@ -22,19 +18,15 @@ pub async fn execute_general_turn_loop(
 
 pub async fn execute_general_turn_loop_with_resume(
     prepared: PreparedGeneralTurn,
-    agent_name: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     execute_general_turn_loop_with_policy(
         prepared,
-        agent_name,
         llm_provider,
         tool_executor_port,
-        memory_store,
         kernel_config,
         resume,
         general_turn_policy_for_config(kernel_config),
@@ -51,10 +43,8 @@ fn general_turn_policy_for_config(kernel_config: &AgentKernelConfig) -> Arc<dyn 
 #[allow(clippy::too_many_arguments)]
 pub async fn execute_general_turn_loop_with_policy(
     prepared: PreparedGeneralTurn,
-    agent_name: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
     policy: Arc<dyn GeneralTurnPolicy>,
@@ -71,9 +61,7 @@ pub async fn execute_general_turn_loop_with_policy(
             &prepared,
             tool_executor.clone(),
             tool_executor_port.clone(),
-            memory_store.clone(),
             kernel_config.clone(),
-            agent_name,
             &mut state,
             resume,
             policy.clone(),
@@ -90,16 +78,17 @@ pub async fn execute_general_turn_loop_with_policy(
             &state,
             tool_definitions,
             execution_settings.tool_execution_mode == crate::ToolExecutionMode::Parallel,
+            kernel_config.compaction.retrieved_memories_keep,
+            kernel_config.compaction.retrieved_memory_max_chars,
         );
         if prepared.stream_tx.is_some() {
             step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                 execution_mode: execution_settings.tool_execution_mode,
                 execution_context: ToolExecutionContext {
                     session_id: prepared.session_id.clone(),
-                    user_id: agent_name.to_string(),
+                    user_id: prepared.user_id.clone(),
                     project_root: prepared.project_root.clone(),
                     kernel_config: kernel_config.clone(),
-                    memory_store: memory_store.clone(),
                     dynamic_tool_results: std::collections::HashMap::new(),
                 },
                 tool_registry: tool_executor_port.clone(),
@@ -174,9 +163,8 @@ pub async fn execute_general_turn_loop_with_policy(
                 &prepared,
                 tool_executor.clone(),
                 tool_executor_port.clone(),
-                memory_store.clone(),
                 kernel_config.clone(),
-                agent_name,
+                &prepared.user_id,
                 &step.tool_calls,
                 std::collections::HashMap::new(),
                 prepared.stream_tx.as_ref(),
@@ -230,9 +218,7 @@ async fn apply_general_turn_resume(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
     kernel_config: Arc<AgentKernelConfig>,
-    agent_name: &str,
     state: &mut GeneralTurnLoopState,
     resume: GeneralTurnResume,
     policy: Arc<dyn GeneralTurnPolicy>,
@@ -269,9 +255,8 @@ async fn apply_general_turn_resume(
         prepared,
         tool_executor,
         tool_executor_port,
-        memory_store,
         kernel_config.clone(),
-        agent_name,
+        &prepared.user_id,
         &tool_calls,
         replay_dynamic_tool_results,
         prepared.stream_tx.as_ref(),

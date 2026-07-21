@@ -1,12 +1,13 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
     MockSessionStore, SessionQuery, SessionRecord, SessionStore, SessionSummary,
 };
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{ModelRef, ModelSelection, SessionConf};
 
 use super::{CreateSessionParams, SessionService};
@@ -14,6 +15,7 @@ use super::{CreateSessionParams, SessionService};
 #[derive(Default)]
 struct RecordingSessionStore {
     records: Mutex<Vec<SessionRecord>>,
+    failing_updates: AtomicUsize,
 }
 
 #[async_trait]
@@ -61,12 +63,41 @@ impl SessionStore for RecordingSessionStore {
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
+        if self
+            .failing_updates
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                remaining.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(TalosError::StorageError(
+                "injected update failure".to_string(),
+            ));
+        }
         let mut records = self.records.lock().unwrap();
         let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
             return Ok(false);
         };
         *stored = record.clone();
         Ok(true)
+    }
+
+    async fn advance_memory_processed_until_seq(
+        &self,
+        session_id: &str,
+        _expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        if let Some(record) = self
+            .records
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|record| record.id == session_id)
+        {
+            record.memory_processed_until_seq = next_until_seq;
+        }
+        Ok(())
     }
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
@@ -358,4 +389,70 @@ async fn create_session_preserves_workspace_routing_key() {
         session.context.workspace_id,
         Some("workspace-alpha".to_string())
     );
+}
+
+#[tokio::test]
+async fn reset_keeps_monotonic_turn_seq_for_the_next_completed_turn() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "current-model"),
+    );
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .expect("create session");
+    let session_id = &session.context.session_id;
+    service
+        .record_persisted_turn_progress(session_id, 1, "current-model", &TokenUsage::default())
+        .await
+        .expect("record first turn");
+    service
+        .reset_session(session_id)
+        .await
+        .expect("reset session");
+    service
+        .record_persisted_turn_progress(session_id, 2, "current-model", &TokenUsage::default())
+        .await
+        .expect("record turn after reset");
+
+    let record = store
+        .get_session_record(session_id)
+        .await
+        .expect("read session")
+        .expect("session exists");
+    assert_eq!((record.message_count, record.latest_turn_seq), (2, 2));
+}
+
+#[tokio::test]
+async fn persisted_turn_progress_recovers_after_a_failed_session_update() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "current-model"),
+    );
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .expect("create session");
+    let session_id = &session.context.session_id;
+    store.failing_updates.store(1, Ordering::SeqCst);
+
+    service
+        .record_persisted_turn_progress(session_id, 1, "current-model", &TokenUsage::default())
+        .await
+        .expect_err("first progress update should fail");
+    service
+        .record_persisted_turn_progress(session_id, 2, "current-model", &TokenUsage::default())
+        .await
+        .expect("next persisted sequence should recover progress");
+
+    let record = store
+        .get_session_record(session_id)
+        .await
+        .expect("read session")
+        .expect("session exists");
+    assert_eq!((record.message_count, record.latest_turn_seq), (4, 2));
 }

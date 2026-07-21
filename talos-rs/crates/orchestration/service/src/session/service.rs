@@ -264,10 +264,9 @@ impl SessionService {
         Ok(SessionPatchAck { success })
     }
 
-    pub async fn record_turn_progress(
+    pub(crate) async fn record_usage(
         &self,
         session_id: &str,
-        message_delta: u64,
         assistant_model: &str,
         usage: &talos_types::talos::TokenUsage,
     ) -> TalosResult<()> {
@@ -282,7 +281,38 @@ impl SessionService {
             .timestamp_millis()
             .try_into()
             .unwrap_or_default();
-        record.message_count = record.message_count.saturating_add(message_delta);
+        record.usage.accumulate(usage);
+        record.model = assistant_model.to_string();
+        self.session_store.update_session_record(&record).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn record_persisted_turn_progress(
+        &self,
+        session_id: &str,
+        artifact_seq: u64,
+        assistant_model: &str,
+        usage: &talos_types::talos::TokenUsage,
+    ) -> TalosResult<()> {
+        let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
+            return Err(TalosError::ResourceNotFound(format!(
+                "session {}",
+                session_id
+            )));
+        };
+        self.validate_persisted_model_selection(&record)?;
+        if artifact_seq <= record.latest_turn_seq {
+            return Ok(());
+        }
+        let persisted_turn_delta = artifact_seq - record.latest_turn_seq;
+        record.last_activity = chrono::Utc::now()
+            .timestamp_millis()
+            .try_into()
+            .unwrap_or_default();
+        record.message_count = record
+            .message_count
+            .saturating_add(persisted_turn_delta.saturating_mul(2));
+        record.latest_turn_seq = artifact_seq;
         record.usage.accumulate(usage);
         record.model = assistant_model.to_string();
         self.session_store.update_session_record(&record).await?;
@@ -372,6 +402,8 @@ impl SessionService {
             created_at: now.try_into().unwrap_or_default(),
             last_activity: now.try_into().unwrap_or_default(),
             message_count: 0,
+            latest_turn_seq: 0,
+            memory_processed_until_seq: 0,
             usage: Default::default(),
             conf,
             project_id: params.project_id,

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use talos_error::TalosResult;
 
-/// Abstraction for draining background tasks (e.g. memory flush) during shutdown.
+/// Abstraction for draining application-owned background tasks during shutdown.
 #[async_trait::async_trait]
 pub trait BackgroundTaskDrain: Send + Sync {
     async fn drain(&self, timeout: Duration) -> TalosResult<()>;
@@ -480,6 +480,12 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::MemorySearch(params) => to_value(
                 self.gateway
                     .search_memory(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::MemoryGet(params) => to_value(
+                self.gateway
+                    .get_memory(actor, params)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),

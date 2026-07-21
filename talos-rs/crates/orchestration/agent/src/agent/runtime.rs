@@ -10,6 +10,8 @@ use uuid::Uuid;
 
 use super::kernel;
 use super::request::{agent_run_params_to_kernel_params, AgentKernelParams};
+use super::runtime_compaction::emit_context_compaction_timeline_events;
+use crate::session_artifacts::SessionStoreKernelTranscriptService;
 use crate::{
     AgentCapabilities, AgentError, AgentEvent, AgentKind, AgentResult, AgentResumeParams,
     AgentRunConfig, AgentRunContext, AgentRunParams, AgentRunResult, SkillRootsResolver,
@@ -17,25 +19,26 @@ use crate::{
 use talos_agent_kernel::{
     run_general_turn_with_resume, ContextStateBags, DynamicToolResultResume, GeneralTurnOutcome,
     GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions, InvocationContext,
-    InvocationExecutionState, InvocationLimits, InvocationSession, KernelAssistantTextPhase,
-    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, ResumeToolCall,
-    StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind, ToolStreamKey,
-    UserInputEventData,
+    InvocationExecutionState, InvocationLimits, KernelAssistantTextPhase, KernelEvent,
+    KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent, KernelStreamEventData,
+    KernelStreamEventType, KernelStreamItemKey, ResumeToolCall, StopReason as KernelStopReason,
+    TimelineBuilder, ToolProgressKind, ToolStreamKey, UserInputEventData,
 };
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
-use talos_memory::{Memory, MemoryStore, SessionTranscriptBranch, SessionTranscriptPayload};
+use talos_memory::MemoryWriter;
+use talos_store::session::{
+    SessionArtifactStore, SessionStore, SessionTranscriptBranch, SessionTranscriptPayload,
+};
 use talos_tools::ToolRegistry;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
-    AgentEventPayload, ContextCompactionStage, RunItem, StopReason as TalosStopReason,
-    TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
-    TokenUsage, TurnExecutionMetrics,
+    AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
+    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TalosToolProgressKind, TokenUsage, TurnExecutionMetrics,
 };
 use talos_types::ModelInfo;
 
@@ -144,6 +147,9 @@ pub(crate) struct KernelAgent {
     tool_registry: Arc<ToolRegistry>,
     kernel_config: AgentKernelConfig,
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    session_artifact_store: Arc<dyn SessionArtifactStore>,
+    session_store: Arc<dyn SessionStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
 }
 
 impl KernelAgent {
@@ -157,6 +163,9 @@ impl KernelAgent {
             tool_registry: params.tool_registry,
             kernel_config: params.kernel_config,
             skill_roots_resolver: params.skill_roots_resolver,
+            session_artifact_store: params.session_artifact_store,
+            session_store: params.session_store,
+            memory_writer: params.memory_writer,
         }
     }
 
@@ -186,19 +195,6 @@ impl KernelAgent {
     fn llm_provider_for_run(&self, config: &AgentRunConfig) -> TalosResult<Arc<dyn LlmProvider>> {
         self.llm_provider_router
             .provider_for(&config.model_selection.model_ref)
-    }
-
-    async fn memory_store_for_run(
-        &self,
-        context: &AgentRunContext,
-        llm_provider: Arc<dyn LlmProvider>,
-    ) -> TalosResult<(AgentKernelConfig, Arc<MemoryStore>)> {
-        let kernel_config = self.kernel_config_for_run(context)?;
-        let memory_store = Arc::new(MemoryStore::from_config_with_llm(
-            &kernel_config,
-            llm_provider,
-        ));
-        Ok((kernel_config, memory_store))
     }
 
     fn resolve_selected_model_info(&self, config: &AgentRunConfig) -> TalosResult<ModelInfo> {
@@ -238,7 +234,7 @@ impl KernelAgent {
             .join("\n\n")
     }
 
-    fn build_invocation_context(
+    async fn build_invocation_context(
         &self,
         agent_request: &AgentKernelParams,
         input: String,
@@ -254,8 +250,22 @@ impl KernelAgent {
             .clone()
             .unwrap_or_default();
 
+        let transcript_service: Arc<dyn talos_agent_kernel::KernelTranscriptService> =
+            Arc::new(SessionStoreKernelTranscriptService::new(
+                self.session_artifact_store.clone(),
+                std::path::PathBuf::from(&kernel_config.workspace_dir),
+            ));
+        let session = transcript_service
+            .load_session(&session_id, None, None)
+            .await?;
+
         Ok(InvocationContext {
             session_id: session_id.clone(),
+            user_id: agent_request
+                .context
+                .user_id
+                .clone()
+                .unwrap_or_else(|| agent_request.context.owner_user_id.clone()),
             message_id,
             invocation_id,
             agent_id: self.id.clone(),
@@ -268,10 +278,7 @@ impl KernelAgent {
             planning_instruction: agent_request.planning_instruction.clone(),
             transfer_to: agent_request.transfer_to.clone(),
             execution_state: InvocationExecutionState::default(),
-            session: InvocationSession {
-                session_id: session_id.clone(),
-                ..InvocationSession::default()
-            },
+            session,
             session_environment: agent_request.context.environment.clone(),
             state: HashMap::new(),
             state_bags: ContextStateBags::default(),
@@ -284,13 +291,16 @@ impl KernelAgent {
                     agent_id: self.id.clone(),
                 }),
             )],
-            transcript_service: None,
+            transcript_service: Some(transcript_service),
+            session_artifact_store: Some(self.session_artifact_store.clone()),
+            session_store: Some(self.session_store.clone()),
             stream_tx,
         })
     }
 
     async fn build_general_turn_resume(
-        memory_store: &MemoryStore,
+        session_artifact_store: &dyn SessionArtifactStore,
+        workspace_root: &std::path::Path,
         session_id: &str,
         turn_id: &str,
         resume_context: Option<AgentDispatchResumeContext>,
@@ -304,8 +314,13 @@ impl KernelAgent {
             )));
         };
 
-        let records = memory_store
-            .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
+        let records = session_artifact_store
+            .load_transcript_records(
+                workspace_root,
+                session_id,
+                None,
+                Some(SessionTranscriptBranch::ReactiveLoop),
+            )
             .await?;
         let mut request = None;
         let mut response = None;
@@ -407,24 +422,25 @@ impl KernelAgent {
         let input = Self::extract_text_input(&agent_request.input);
         let invocation_id = turn_id.clone();
         let session_id = agent_request.context.session_id.clone();
-        let (kernel_config, memory_store) = self
-            .memory_store_for_run(&agent_request.context, llm_provider.clone())
-            .await?;
+        let kernel_config = self.kernel_config_for_run(&agent_request.context)?;
         let skill_options = self.build_skill_options(&agent_request.input, &kernel_config)?;
         let resume = Self::build_general_turn_resume(
-            memory_store.as_ref(),
+            self.session_artifact_store.as_ref(),
+            std::path::Path::new(&kernel_config.workspace_dir),
             &session_id,
             &turn_id,
             resume_context,
         )
         .await?;
-        let mut context = self.build_invocation_context(
-            &agent_request,
-            input.clone(),
-            invocation_id,
-            None,
-            &kernel_config,
-        )?;
+        let mut context = self
+            .build_invocation_context(
+                &agent_request,
+                input.clone(),
+                invocation_id,
+                None,
+                &kernel_config,
+            )
+            .await?;
 
         let result = run_general_turn_with_resume(
             &mut context,
@@ -434,7 +450,7 @@ impl KernelAgent {
             llm_provider,
             self.tool_registry.clone(),
             self.tool_registry.clone(),
-            memory_store,
+            self.memory_writer.clone(),
             &kernel_config,
             resume,
             Some(skill_options),
@@ -478,10 +494,7 @@ impl KernelAgent {
                     return Err(err.into());
                 }
             };
-            let (kernel_config, memory_store) = match this
-                .memory_store_for_run(&agent_request.context, llm_provider.clone())
-                .await
-            {
+            let kernel_config = match this.kernel_config_for_run(&agent_request.context) {
                 Ok(value) => value,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(&err)).await;
@@ -489,13 +502,16 @@ impl KernelAgent {
                 }
             };
             let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
-            let kernel_ctx = match this.build_invocation_context(
-                &agent_request,
-                input.clone(),
-                invocation_id,
-                Some(kernel_tx),
-                &kernel_config,
-            ) {
+            let kernel_ctx = match this
+                .build_invocation_context(
+                    &agent_request,
+                    input.clone(),
+                    invocation_id,
+                    Some(kernel_tx),
+                    &kernel_config,
+                )
+                .await
+            {
                 Ok(context) => context,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(&err)).await;
@@ -503,7 +519,8 @@ impl KernelAgent {
                 }
             };
             let resume = match Self::build_general_turn_resume(
-                memory_store.as_ref(),
+                this.session_artifact_store.as_ref(),
+                std::path::Path::new(&kernel_config.workspace_dir),
                 &session_id,
                 &turn_id,
                 resume_context.clone(),
@@ -557,7 +574,7 @@ impl KernelAgent {
                         llm_provider,
                         this.tool_registry.clone(),
                         this.tool_registry.clone(),
-                        memory_store,
+                        this.memory_writer.clone(),
                         &kernel_config,
                         resume,
                         Some(skill_options),
@@ -639,6 +656,7 @@ impl KernelAgent {
                             kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
                             outcome_usage(&result.outcome),
                             Some(outcome_metrics(&result.outcome)),
+                            Some(result.artifact_seq),
                         ))
                         .await;
                     Ok(Self::agent_run_result_from_general_turn_result(
@@ -656,6 +674,7 @@ impl KernelAgent {
                         .send(timeline.complete_turn(
                             TalosStopReason::Cancelled,
                             TokenUsage::default(),
+                            None,
                             None,
                         ))
                         .await;
@@ -1188,7 +1207,10 @@ pub(crate) fn emit_kernel_timeline_events(
     }
 }
 
-fn reject_after_final_answer(state: &KernelTimelineState, event_name: &str) -> TalosResult<()> {
+pub(super) fn reject_after_final_answer(
+    state: &KernelTimelineState,
+    event_name: &str,
+) -> TalosResult<()> {
     if state.final_answer_item_id.is_some() {
         return Err(TalosError::ValidationError(format!(
             "timeline event after final answer is not allowed: {event_name}"
@@ -1197,7 +1219,7 @@ fn reject_after_final_answer(state: &KernelTimelineState, event_name: &str) -> T
     Ok(())
 }
 
-fn close_active_reasoning_item(
+pub(super) fn close_active_reasoning_item(
     timeline: &mut TimelineBuilder,
     state: &mut KernelTimelineState,
 ) -> TalosResult<Vec<AgentEvent>> {
@@ -1207,49 +1229,6 @@ fn close_active_reasoning_item(
     let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
     state.reasoning_item_id = None;
     Ok(vec![completed])
-}
-
-fn emit_context_compaction_timeline_events(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    data: talos_agent_kernel::ContextCompactionStreamData,
-) -> TalosResult<Vec<AgentEvent>> {
-    reject_after_final_answer(state, "context compaction")?;
-    let mut events = close_active_reasoning_item(timeline, state)?;
-    let item_id = match state.context_compaction_item_id.clone() {
-        Some(item_id) => item_id,
-        None => {
-            let started =
-                timeline.start_context_compaction(data.trigger, data.stage, data.message.clone());
-            let item_id = item_id_from_started(&started)?;
-            state.context_compaction_item_id = Some(item_id.clone());
-            events.push(started);
-            item_id
-        }
-    };
-    events.push(timeline.append_delta(
-        &item_id,
-        TalosTimelineDelta::ContextCompaction {
-            stage: Some(data.stage),
-            outcome: data.outcome,
-            metrics: data.metrics.clone(),
-            message: data.message.clone(),
-        },
-    )?);
-    let status = match data.stage {
-        ContextCompactionStage::Completed => Some(TalosTimelineItemStatus::Completed),
-        ContextCompactionStage::Failed => Some(TalosTimelineItemStatus::Failed),
-        ContextCompactionStage::Preparing
-        | ContextCompactionStage::Summarizing
-        | ContextCompactionStage::RebuildingPrompt
-        | ContextCompactionStage::Trimming => None,
-    };
-    if let Some(status) = status {
-        let final_content = timeline.item(&item_id).map(|item| item.content.clone());
-        events.push(timeline.complete_item(&item_id, status, final_content)?);
-        state.context_compaction_item_id = None;
-    }
-    Ok(events)
 }
 
 fn append_text_item_delta(
@@ -1341,7 +1320,7 @@ fn emit_missing_tool_items_from_result(
     Ok(events)
 }
 
-fn item_id_from_started(event: &AgentEvent) -> TalosResult<String> {
+pub(super) fn item_id_from_started(event: &AgentEvent) -> TalosResult<String> {
     match &event.payload {
         AgentEventPayload::ItemStarted(payload) => Ok(payload.item.item_id.clone()),
         _ => Err(TalosError::InternalError(
@@ -1456,6 +1435,9 @@ pub(crate) struct KernelAgentParams {
     pub(crate) tool_registry: Arc<ToolRegistry>,
     pub(crate) kernel_config: AgentKernelConfig,
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    pub(crate) session_artifact_store: Arc<dyn SessionArtifactStore>,
+    pub(crate) session_store: Arc<dyn SessionStore>,
+    pub(crate) memory_writer: Arc<dyn MemoryWriter>,
 }
 
 impl AgentRuntime for KernelAgent {

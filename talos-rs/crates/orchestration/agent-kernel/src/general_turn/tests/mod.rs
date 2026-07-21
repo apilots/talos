@@ -1,4 +1,94 @@
 use super::*;
+use talos_store::session::{SessionArtifactStore, SessionStore, TalosTurn};
+
+struct TestMemoryStore {
+    workspace_dir: PathBuf,
+    writes: Mutex<Vec<MemoryWriteBatch>>,
+}
+
+impl TestMemoryStore {
+    fn new(workspace_dir: PathBuf) -> Self {
+        Self {
+            workspace_dir,
+            writes: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn workspace_dir(&self) -> &Path {
+        &self.workspace_dir
+    }
+
+    fn writes(&self) -> Vec<MemoryWriteBatch> {
+        self.writes
+            .lock()
+            .expect("test memory writes mutex should lock")
+            .clone()
+    }
+}
+
+impl MemoryWriter for TestMemoryStore {
+    fn write<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        batch: MemoryWriteBatch,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
+        Box::pin(async move {
+            self.writes
+                .lock()
+                .expect("test memory writes mutex should lock")
+                .push(batch);
+            Ok(())
+        })
+    }
+}
+
+struct FailingMemoryWriter;
+
+impl MemoryWriter for FailingMemoryWriter {
+    fn write<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _batch: MemoryWriteBatch,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
+        Box::pin(async { Err(TalosError::StorageError("memory write failed".to_string())) })
+    }
+}
+
+#[async_trait]
+trait TestSessionArtifacts {
+    async fn next_turn_seq(&self, session_id: &str) -> TalosResult<u64>;
+    async fn append_turn(&self, turn: &TalosTurn) -> TalosResult<()>;
+    async fn load_summaries(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<SummaryRecord>>;
+}
+
+#[async_trait]
+impl TestSessionArtifacts for TestMemoryStore {
+    async fn next_turn_seq(&self, session_id: &str) -> TalosResult<u64> {
+        talos_store::session::FileSessionArtifactStore::default()
+            .next_turn_seq(self.workspace_dir(), session_id)
+            .await
+    }
+
+    async fn append_turn(&self, turn: &TalosTurn) -> TalosResult<()> {
+        talos_store::session::FileSessionArtifactStore::default()
+            .append_turn(self.workspace_dir(), turn)
+            .await
+    }
+
+    async fn load_summaries(
+        &self,
+        session_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<SummaryRecord>> {
+        talos_store::session::FileSessionArtifactStore::default()
+            .load_summaries(self.workspace_dir(), session_id, limit)
+            .await
+    }
+}
 use crate::{
     ContextStateBags, InvocationExecutionState, InvocationLimits, KernelEventData,
     KernelStreamEventData, KernelStreamEventType, ToolExecutionMode, ToolProgressKind, TurnPhase,
@@ -22,9 +112,12 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 mod compaction_loop_tests;
+mod daily_memory_tests;
 mod final_response_tests;
 mod memory_summary_tests;
+mod memory_tool_loop_tests;
 mod parsing_tests;
+mod persist_tests;
 mod prompt_warning_tests;
 mod step_request_tests;
 mod stream_tests;
@@ -60,11 +153,7 @@ struct SalvageAfterEmptyFinalProvider {
 
 struct SummaryProvider {
     responses: Mutex<VecDeque<String>>,
-}
-
-struct RecordingSummaryProvider {
-    responses: Mutex<VecDeque<String>>,
-    user_prompts: Mutex<Vec<String>>,
+    requests: Mutex<Vec<ChatRequest>>,
 }
 
 fn configure_test_skill_root(config: &mut AgentKernelConfig, workspace_dir: &Path) -> PathBuf {
@@ -116,23 +205,8 @@ impl SummaryProvider {
     fn new(responses: Vec<String>) -> Self {
         Self {
             responses: Mutex::new(VecDeque::from(responses)),
+            requests: Mutex::new(Vec::new()),
         }
-    }
-}
-
-impl RecordingSummaryProvider {
-    fn new(responses: Vec<String>) -> Self {
-        Self {
-            responses: Mutex::new(VecDeque::from(responses)),
-            user_prompts: Mutex::new(Vec::new()),
-        }
-    }
-
-    fn recorded_user_prompts(&self) -> Vec<String> {
-        self.user_prompts
-            .lock()
-            .expect("recording summary provider mutex should lock")
-            .clone()
     }
 }
 
@@ -591,65 +665,17 @@ impl LlmProvider for SummaryProvider {
         "summary-provider"
     }
 
-    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.requests
+            .lock()
+            .expect("summary provider requests mutex should lock")
+            .push(request);
         let response = self
             .responses
             .lock()
             .expect("summary provider mutex should lock")
             .pop_front()
             .expect("summary provider should have a queued response");
-        Ok(ChatResponse {
-            content: response,
-            reasoning: ReasoningOutput::default(),
-            model: "summary-model".to_string(),
-            usage: Usage {
-                prompt_tokens: 13,
-                completion_tokens: 7,
-                total_tokens: 20,
-                cache_creation_input_tokens: Some(3),
-                cache_read_input_tokens: Some(11),
-            },
-            finish_reason: Some("stop".to_string()),
-            tool_calls: None,
-        })
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
-        Ok(ChatStream::new(rx))
-    }
-
-    fn default_model(&self) -> String {
-        "summary-model".to_string()
-    }
-}
-
-#[async_trait]
-impl LlmProvider for RecordingSummaryProvider {
-    fn name(&self) -> &str {
-        "recording-summary-provider"
-    }
-
-    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        if let Some(user_prompt) = request
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role == talos_llm_provider::Role::User)
-            .map(|message| message.content.clone())
-        {
-            self.user_prompts
-                .lock()
-                .expect("recording summary provider prompt mutex should lock")
-                .push(user_prompt);
-        }
-
-        let response = self
-            .responses
-            .lock()
-            .expect("recording summary provider mutex should lock")
-            .pop_front()
-            .expect("recording summary provider should have a queued response");
         Ok(ChatResponse {
             content: response,
             reasoning: ReasoningOutput::default(),
@@ -689,6 +715,7 @@ fn build_ctx_with_stream_for_session(
     let session_id = session_id.into();
     InvocationContext {
         session_id: session_id.clone(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -726,11 +753,15 @@ fn build_ctx_with_stream_for_session(
         limits: InvocationLimits::default(),
         events: Vec::new(),
         transcript_service: None,
+        session_artifact_store: Some(Arc::new(
+            talos_store::session::FileSessionArtifactStore::default(),
+        )),
+        session_store: Some(Arc::new(talos_store::session::MockSessionStore::new())),
         stream_tx,
     }
 }
 
-async fn seed_recent_user_message(memory_store: &MemoryStore) {
+async fn seed_recent_user_message(memory_store: &TestMemoryStore) {
     let timestamp = Utc::now();
     memory_store
         .append_turn(&TalosTurn {

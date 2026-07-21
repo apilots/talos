@@ -1,3 +1,4 @@
+use super::types::ToolCallRecord;
 use super::*;
 use crate::{
     AssistantTextCommittedStreamData, ToolArgsDeltaStreamData, ToolExecutionOutput,

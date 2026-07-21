@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, MemoryGetResult};
+use talos_types::MemoryGetRequest;
 
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
@@ -23,7 +23,7 @@ impl Tool for MemoryGetTool {
     }
 
     fn description(&self) -> &str {
-        "Read a precise snippet from memory/*.md after MemorySearch returns a path."
+        "Get one complete long-term memory by the ID returned from MemorySearch."
     }
 
     fn behavior_flags(&self) -> ToolBehaviorFlags {
@@ -46,23 +46,23 @@ impl Tool for MemoryGetTool {
     fn parameters_schema(&self) -> Option<Value> {
         Some(serde_json::json!({
             "type": "object",
-            "required": ["path"],
+            "required": ["memoryId"],
             "properties": {
-                "path": {"type": "string"},
-                "from": {"type": "integer", "minimum": 1},
-                "lines": {"type": "integer", "minimum": 1}
+                "memoryId": {"type": "string"}
             }
         }))
     }
 
     fn validate_input(&self, input: &Value) -> TalosResult<()> {
-        let path = input
-            .get("path")
+        let memory_id = input
+            .get("memoryId")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .trim();
-        if path.is_empty() {
-            return Err(TalosError::ValidationError("path is required".to_string()));
+        if memory_id.is_empty() {
+            return Err(TalosError::ValidationError(
+                "memoryId is required".to_string(),
+            ));
         }
         Ok(())
     }
@@ -72,31 +72,15 @@ impl Tool for MemoryGetTool {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let Some(memory) = context.memory_store() else {
-            return Err(TalosError::ToolError(
-                "memory_get requires an injected memory store in tool context".to_string(),
-            ));
-        };
-        let path = input
-            .get("path")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        let from = input
-            .get("from")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-        let lines = input
-            .get("lines")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-
-        let result: MemoryGetResult = memory.get_memory(&path, from, lines).await?;
-        ToolOutputPayload::success_json(&result, "serialize memory_get result")
+        let reader = context.memory_reader().ok_or_else(|| {
+            TalosError::ToolError("memory_get requires memory access".to_string())
+        })?;
+        let scope = context.memory_scope().ok_or_else(|| {
+            TalosError::ToolError("memory_get requires a memory scope".to_string())
+        })?;
+        let request = serde_json::from_value::<MemoryGetRequest>(input)
+            .map_err(|err| TalosError::ValidationError(err.to_string()))?;
+        let response = reader.get(scope, request).await?;
+        ToolOutputPayload::success_json(&response, "serialize memory_get result")
     }
 }
-
-#[cfg(test)]
-#[path = "memory_get_tests.rs"]
-mod tests;

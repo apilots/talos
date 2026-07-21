@@ -1,5 +1,4 @@
 use super::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_agent::{
@@ -17,7 +16,8 @@ use talos_types::talos::{
     TokenUsage,
 };
 use talos_types::{
-    SessionConf, SessionContext, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    ModelRef, ModelSelection, SessionConf, SessionContext, SessionState, TalosConfig, TalosSession,
+    DEFAULT_SESSION_TITLE,
 };
 use tokio::sync::mpsc;
 
@@ -76,23 +76,8 @@ impl RecordingStreamAgent {
     }
 }
 
-struct TrackingFlushAgent {
-    id: String,
-    pending: usize,
-    drained: Arc<AtomicUsize>,
-}
-
-impl TrackingFlushAgent {
-    fn new(id: &str, pending: usize, drained: Arc<AtomicUsize>) -> Self {
-        Self {
-            id: id.to_string(),
-            pending,
-            drained,
-        }
-    }
-}
-
 fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
+    let config = TalosConfig::default();
     TalosSession {
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: context.user_id.clone(),
@@ -111,10 +96,15 @@ fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
             project_root: context.project_root,
             environment: context.environment,
         },
-        conf: SessionConf::default(),
+        conf: SessionConf {
+            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                provider: config.llm.provider.clone(),
+                id: config.llm.model.clone(),
+            })),
+        },
         project_id: None,
         current_directory: None,
-        config: TalosConfig::default(),
+        config,
         state: SessionState {
             created_at: 0,
             last_activity: 0,
@@ -238,24 +228,15 @@ impl AgentHarness for RecordingStreamAgent {
         Ok(())
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+    async fn compact_session(
+        &self,
+        _params: talos_agent::AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage> {
         Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
         Ok(())
-    }
-
-    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        0
-    }
-
-    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
-        false
     }
 
     fn has_active_turn(&self, _session_id: &str) -> bool {
@@ -273,75 +254,6 @@ impl AgentHarness for RecordingStreamAgent {
 
     async fn submit_input(&self, params: AgentInputParams) -> AgentResult<AgentInputResult> {
         self.input_requests.lock().unwrap().push(params);
-        Ok(AgentInputResult { accepted: true })
-    }
-}
-
-#[async_trait::async_trait]
-impl AgentHarness for TrackingFlushAgent {
-    fn id(&self) -> &str {
-        &self.id
-    }
-
-    async fn run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
-        Ok(AgentRunResult {
-            output_text: String::new(),
-            output_items: Vec::new(),
-            reasoning: Default::default(),
-            stop_reason: StopReason::EndTurn,
-            usage: TokenUsage::default(),
-            task_count: 0,
-            session_id: request.context.session_id,
-            generated_session_title: None,
-        })
-    }
-
-    async fn run_streamed(
-        &self,
-        _request: AgentRunParams,
-    ) -> AgentResult<mpsc::Receiver<AgentEvent>> {
-        let (_tx, rx) = mpsc::channel(1);
-        Ok(rx)
-    }
-
-    async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
-        Ok(TokenUsage::default())
-    }
-
-    async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn drain_memory_flushes(&self, _timeout: Duration) -> TalosResult<()> {
-        self.drained.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn pending_memory_flushes(&self) -> usize {
-        self.pending
-    }
-
-    async fn has_pending_memory_flush(&self, _session_id: &str) -> bool {
-        self.pending > 0
-    }
-
-    fn has_active_turn(&self, _session_id: &str) -> bool {
-        false
-    }
-
-    async fn interrupt(&self, _params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
-        Ok(AgentInterruptResult { interrupted: false })
-    }
-
-    async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn submit_input(&self, _params: AgentInputParams) -> AgentResult<AgentInputResult> {
         Ok(AgentInputResult { accepted: true })
     }
 }

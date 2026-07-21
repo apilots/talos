@@ -1,11 +1,14 @@
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicU64, Ordering};
 use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
 use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
 
-pub struct MockSessionStore;
+pub struct MockSessionStore {
+    memory_processed_until_seq: AtomicU64,
+}
 
 impl Default for MockSessionStore {
     fn default() -> Self {
@@ -15,7 +18,9 @@ impl Default for MockSessionStore {
 
 impl MockSessionStore {
     pub fn new() -> Self {
-        Self
+        Self {
+            memory_processed_until_seq: AtomicU64::new(0),
+        }
     }
 }
 
@@ -50,6 +55,8 @@ impl SessionStore for MockSessionStore {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
+            latest_turn_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
+            memory_processed_until_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
             usage: TokenUsage::default(),
             conf: SessionConf::default(),
             workspace_id: None,
@@ -72,6 +79,26 @@ impl SessionStore for MockSessionStore {
 
     async fn update_session_record(&self, _record: &SessionRecord) -> TalosResult<bool> {
         Ok(true)
+    }
+
+    async fn advance_memory_processed_until_seq(
+        &self,
+        _session_id: &str,
+        expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        match self.memory_processed_until_seq.compare_exchange(
+            expected_until_seq,
+            next_until_seq,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => Ok(()),
+            Err(current) if current >= next_until_seq => Ok(()),
+            Err(current) => Err(talos_error::TalosError::Conflict(format!(
+                "memory cursor conflict: expected {expected_until_seq}, current {current}"
+            ))),
+        }
     }
 
     async fn delete_session_record(&self, _session_id: &str) -> TalosResult<bool> {

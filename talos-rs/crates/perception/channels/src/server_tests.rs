@@ -18,25 +18,25 @@ use talos_types::{
     FsDirectoryCreateResponse, FsDirectoryReadRequest, FsDirectoryReadResponse,
     InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest, MemoryFileListResponse,
     MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse,
-    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
-    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
-    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
-    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
-    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
-    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
-    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
-    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
-    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
-    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse, StartTurnResponse, SubmitDynamicToolResultRequest,
+    MemoryGetRequest, MemoryGetResponse, MemorySearchRequest, MemorySearchResponse,
+    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
+    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
+    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
+    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
+    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
+    SkillsSuggestRequest, SkillsSuggestResponse, StartTurnResponse, SubmitDynamicToolResultRequest,
     SubmitDynamicToolResultResponse, SubscribeTimelineResponse, TimelineRecoveryResponse,
     TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
     WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
@@ -545,6 +545,14 @@ impl Gateway for MockGateway {
         unused_gateway("search_memory")
     }
 
+    async fn get_memory(
+        &self,
+        _actor: &Actor,
+        _request: MemoryGetRequest,
+    ) -> TalosResult<MemoryGetResponse> {
+        unused_gateway("get_memory")
+    }
+
     async fn list_workspace_docs(
         &self,
         _actor: &Actor,
@@ -700,6 +708,7 @@ impl ChannelTimelineSubscriptionService for MockTimelineSubscriptions {
                         stop_reason: StopReason::EndTurn,
                         usage: Default::default(),
                         metrics: None,
+                        artifact_seq: None,
                     }),
                 )))
                 .await;

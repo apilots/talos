@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+pub use talos_agent::{AgentSessionCompactionIdentity, AgentSessionCompactionParams};
 use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TokenUsage};
 use talos_types::{CancelActiveTurnParams, TalosSession};
@@ -20,7 +21,10 @@ pub trait SessionRuntime: Send + Sync {
     }
 
     /// Compact Agent-maintained session context for the selected Harness.
-    async fn compact_session(&self, session: TalosSession) -> TalosResult<TokenUsage>;
+    async fn compact_session(
+        &self,
+        params: AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage>;
 
     /// Clear Agent-maintained session state without deleting product records.
     async fn clear_session(&self, session: TalosSession) -> TalosResult<()>;

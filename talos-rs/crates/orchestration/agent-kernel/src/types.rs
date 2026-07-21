@@ -409,6 +409,7 @@ pub enum StopReason {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct InvocationContext {
     pub session_id: String,
+    pub user_id: String,
     pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
@@ -436,6 +437,11 @@ pub struct InvocationContext {
     pub events: Vec<KernelEvent>,
     #[serde(skip, default)]
     pub transcript_service: Option<std::sync::Arc<dyn KernelTranscriptService>>,
+    #[serde(skip, default)]
+    pub session_artifact_store:
+        Option<std::sync::Arc<dyn talos_store::session::SessionArtifactStore>>,
+    #[serde(skip, default)]
+    pub session_store: Option<std::sync::Arc<dyn talos_store::session::SessionStore>>,
     #[serde(skip)]
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
 }
@@ -497,6 +503,26 @@ impl InvocationContext {
         self.transcript_service.clone().ok_or_else(|| {
             TalosError::ValidationError(
                 "transcript_service is not configured in InvocationContext".to_string(),
+            )
+        })
+    }
+
+    pub fn session_artifact_store(
+        &self,
+    ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionArtifactStore>> {
+        self.session_artifact_store.clone().ok_or_else(|| {
+            TalosError::ValidationError(
+                "session_artifact_store is not configured in InvocationContext".to_string(),
+            )
+        })
+    }
+
+    pub fn session_store(
+        &self,
+    ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionStore>> {
+        self.session_store.clone().ok_or_else(|| {
+            TalosError::ValidationError(
+                "session_store is not configured in InvocationContext".to_string(),
             )
         })
     }

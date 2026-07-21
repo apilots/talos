@@ -42,14 +42,16 @@ pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
     AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, PlannerMode,
 };
-pub use domains::automation::{AutomationConfig, ProfileUsageRetentionConfig};
+pub use domains::automation::{
+    AutomationConfig, MemoryDailyMaintenanceConfig, ProfileUsageRetentionConfig,
+};
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
     AgentKernelTimelineEventsConfig,
 };
-pub use domains::memory::AgentKernelMemoryConfig;
+pub use domains::memory::MemoryConfig;
 pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, provider_protocol_capabilities, ChannelConfig, ChannelsConfig,
@@ -99,6 +101,10 @@ pub struct Config {
     /// Scheduled maintenance configuration.
     #[serde(default)]
     pub automation: AutomationConfig,
+
+    /// Long-term memory file layout and file-list limits.
+    #[serde(default)]
+    pub memory: MemoryConfig,
 
     /// Agent 配置
     #[serde(default)]
@@ -159,6 +165,7 @@ impl Default for Config {
             source_path: None,
             timezone: default_timezone(),
             automation: AutomationConfig::default(),
+            memory: MemoryConfig::default(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),

@@ -1,3 +1,4 @@
+use super::prepare_compaction::*;
 use super::*;
 use crate::{
     EventAuthor, ExecutionBranch, KernelTranscriptEvent, KernelTranscriptEventKind,
@@ -8,15 +9,13 @@ use talos_config::SkillsRuntimeConfig;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_skills::{LocalSkillProvider, SkillPromptBudget, SkillPromptRequest};
 use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
-use talos_types::talos::{
-    ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger,
-};
+use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
-pub(crate) const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
+/// Session transcript state key controlling the next prompt's compaction policy.
+pub const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
 
 fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
     let Some(last_message) = messages.last() else {
@@ -35,7 +34,6 @@ fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPoli
         include_recent_messages: true,
         include_recent_tool_history: true,
         include_recent_tool_outputs: true,
-        include_retrieved_memories: true,
         session_recent_limit: kernel_config.compaction.recent_messages_keep,
         session_recent_max_chars: kernel_config.compaction.recent_messages_max_chars,
         recent_tool_history_limit: kernel_config.compaction.source_recent_tool_exchanges_limit,
@@ -44,8 +42,6 @@ fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPoli
         recent_tool_outputs_max_chars: kernel_config.compaction.tool_output_max_chars,
         session_summary_recent_count: kernel_config.compaction.recent_summaries_keep,
         session_summary_max_chars: kernel_config.compaction.summary_max_chars,
-        retrieved_memory_max_items: kernel_config.compaction.retrieved_memories_keep,
-        retrieved_memory_max_chars: kernel_config.compaction.retrieved_memory_max_chars,
         unified_recent_limit: 10,
     }
 }
@@ -85,7 +81,7 @@ fn build_tool_selection_request(
 
 fn build_compacted_prompt_load_policy(
     kernel_config: &AgentKernelConfig,
-    compact_cursor: Option<talos_memory::CompactPromptCursor>,
+    compact_cursor: Option<talos_prompt::CompactPromptCursor>,
 ) -> PromptLoadPolicy {
     PromptLoadPolicy {
         compact_cursor,
@@ -93,7 +89,6 @@ fn build_compacted_prompt_load_policy(
         include_recent_messages: true,
         include_recent_tool_history: true,
         include_recent_tool_outputs: true,
-        include_retrieved_memories: true,
         session_recent_limit: kernel_config
             .compaction
             .compacted_recent_messages_keep
@@ -105,10 +100,6 @@ fn build_compacted_prompt_load_policy(
         recent_tool_outputs_max_chars: kernel_config.compaction.compacted_tool_output_max_chars,
         session_summary_recent_count: kernel_config.compaction.recent_summaries_keep.max(1),
         session_summary_max_chars: kernel_config.compaction.compacted_summary_max_chars,
-        retrieved_memory_max_items: kernel_config.compaction.retrieved_memories_keep,
-        retrieved_memory_max_chars: kernel_config
-            .compaction
-            .compacted_retrieved_memory_max_chars,
         unified_recent_limit: 10,
     }
 }
@@ -128,7 +119,7 @@ fn build_prompt_builder<'a>(
     agent_description: &str,
     input: &str,
     tool_definition_provider: &'a dyn ToolDefinitionProvider,
-    memory_store: &'a MemoryStore,
+    session_prompt_context: talos_prompt::SessionPromptContext,
     kernel_config: &AgentKernelConfig,
     session_id: &'a str,
     phase: PromptPhase,
@@ -150,12 +141,11 @@ fn build_prompt_builder<'a>(
             load_policy,
             workspace_dir: kernel_config.workspace_dir.clone(),
             prompt: kernel_config.prompt.clone(),
-            memory: kernel_config.memory.clone(),
             tools: kernel_config.tools.clone(),
             timezone: kernel_config.timezone.clone(),
         })
         .tools(tool_definition_provider)
-        .memory_store(session_id, memory_store)
+        .session_prompt_context(session_id, session_prompt_context)
         .model_info(selected_model_info)
         .session_environment(session_environment)
         .project_root(project_root)
@@ -193,85 +183,13 @@ fn build_skill_prompt_budget(config: &SkillsRuntimeConfig) -> SkillPromptBudget 
     }
 }
 
-fn count_section_kind(sections: &[talos_prompt::PromptSection], kind: PromptSectionKind) -> usize {
-    sections
-        .iter()
-        .filter(|section| section.kind == kind)
-        .count()
-}
-
-fn history_sections_were_dropped(prompt_assembly: &talos_prompt::PromptAssembly) -> bool {
-    prompt_assembly
-        .diagnostics
-        .dropped_sections
-        .iter()
-        .any(|kind| {
-            matches!(
-                kind,
-                PromptSectionKind::RecentMessages | PromptSectionKind::SessionSummary
-            )
-        })
-}
-
-fn prompt_budget_usage_percent(window_usage: &talos_prompt::PromptWindowUsage) -> Option<u8> {
-    if !window_usage.window_resolved {
-        return None;
-    }
-
-    if window_usage.effective_prompt_budget == 0 {
-        return Some(100);
-    }
-
-    let usage_percent =
-        (window_usage.total_tokens.saturating_mul(100)) / window_usage.effective_prompt_budget;
-    Some(usage_percent.min(100) as u8)
-}
-
-fn determine_history_compaction_trigger(
-    prompt_assembly: &talos_prompt::PromptAssembly,
-    kernel_config: &AgentKernelConfig,
-) -> Option<SessionHistoryCompactionTrigger> {
-    let history_reduction_needed = history_sections_were_dropped(prompt_assembly);
-    let window_usage = &prompt_assembly.diagnostics.window_usage;
-    if !window_usage.window_resolved {
-        return None;
-    }
-
-    if !window_usage.within_effective_budget {
-        Some(SessionHistoryCompactionTrigger::BudgetExceeded)
-    } else if prompt_budget_usage_percent(window_usage)
-        .is_some_and(|usage| usage >= kernel_config.compaction.hard_ratio_percent)
-    {
-        Some(SessionHistoryCompactionTrigger::HardThresholdExceeded)
-    } else if prompt_budget_usage_percent(window_usage)
-        .is_some_and(|usage| usage >= kernel_config.compaction.trigger_ratio_percent)
-    {
-        Some(SessionHistoryCompactionTrigger::ThresholdExceeded)
-    } else if history_reduction_needed {
-        Some(SessionHistoryCompactionTrigger::HistorySectionsDropped)
-    } else {
-        None
-    }
-}
-
-fn is_recoverable_compaction_parse_error(error: &talos_error::TalosError) -> bool {
-    matches!(
-        error,
-        talos_error::TalosError::MemoryError {
-            kind: talos_error::TalosMemoryErrorKind::SummaryParseFailed
-                | talos_error::TalosMemoryErrorKind::PersistenceDecisionParseFailed,
-            ..
-        }
-    )
-}
-
 #[allow(clippy::too_many_arguments)]
 async fn rebuild_prompt_assembly(
     agent_name: &str,
     agent_description: &str,
     input: &str,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_store: Arc<MemoryStore>,
+    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
     kernel_config: &AgentKernelConfig,
     session_id: &str,
     phase: PromptPhase,
@@ -284,12 +202,96 @@ async fn rebuild_prompt_assembly(
     dynamic_trim_policy: DynamicTrimPolicy,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<talos_prompt::PromptAssembly> {
+    let context = crate::build_session_prompt_context(
+        session_artifact_store.as_ref(),
+        std::path::Path::new(&kernel_config.workspace_dir),
+        session_id,
+        &SessionPromptContextConfig {
+            compact_cursor: load_policy.compact_cursor,
+            recent_window: SessionPromptRecentWindow::Latest,
+            recent_messages_limit: if load_policy.include_recent_messages {
+                load_policy.session_recent_limit
+            } else {
+                0
+            },
+            recent_tool_results_limit: if load_policy.include_recent_tool_outputs {
+                load_policy.recent_tool_outputs_limit
+            } else {
+                0
+            },
+            tool_output_max_chars: load_policy.recent_tool_outputs_max_chars,
+            recent_tool_exchanges_limit: if load_policy.include_recent_tool_history {
+                load_policy.recent_tool_history_limit
+            } else {
+                0
+            },
+            tool_exchange_max_chars: load_policy.recent_tool_history_max_chars,
+            include_summary: load_policy.include_session_summary,
+            summary_recent_count: load_policy.session_summary_recent_count,
+            summary_max_chars: load_policy.session_summary_max_chars,
+        },
+    )
+    .await?;
+    let session_prompt_context = talos_prompt::SessionPromptContext {
+        summaries: context
+            .summaries
+            .into_iter()
+            .map(|summary| talos_prompt::SessionPromptSummary {
+                id: summary.header.id,
+                content: summary.content,
+            })
+            .collect(),
+        recent_messages: context
+            .recent_messages
+            .into_iter()
+            .map(|message| talos_prompt::SessionPromptMessage {
+                id: message.header.id,
+                role: match message.role {
+                    TalosMessageRole::User => talos_prompt::TalosMessageRole::User,
+                    TalosMessageRole::Assistant => talos_prompt::TalosMessageRole::Assistant,
+                    TalosMessageRole::System => talos_prompt::TalosMessageRole::System,
+                },
+                text: message.text,
+            })
+            .collect(),
+        recent_tool_results: context
+            .recent_tool_results
+            .into_iter()
+            .map(|result| talos_prompt::SessionToolResultContext {
+                tool_name: result.tool_name,
+                content: result.content,
+                is_error: result.is_error,
+                truncated: result.truncated,
+            })
+            .collect(),
+        recent_tool_exchanges: context
+            .recent_tool_exchanges
+            .into_iter()
+            .map(|exchange| talos_prompt::SessionToolExchangeContext {
+                tool_name: exchange.tool_name,
+                arguments_preview: exchange.arguments_preview,
+                outcome: match exchange.outcome {
+                    SessionToolExchangeOutcome::Succeeded => {
+                        talos_prompt::SessionToolExchangeOutcome::Succeeded
+                    }
+                    SessionToolExchangeOutcome::Failed => {
+                        talos_prompt::SessionToolExchangeOutcome::Failed
+                    }
+                    SessionToolExchangeOutcome::Pending => {
+                        talos_prompt::SessionToolExchangeOutcome::Pending
+                    }
+                },
+                output_preview: exchange.output_preview,
+                output_truncated: exchange.output_truncated,
+            })
+            .collect(),
+    };
     build_prompt_builder(
         agent_name,
         agent_description,
         input,
         tool_definition_provider.as_ref(),
-        memory_store.as_ref(),
+        session_prompt_context,
         kernel_config,
         session_id,
         phase,
@@ -314,7 +316,10 @@ async fn compact_session_history_if_needed(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_store: Arc<MemoryStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
+    memory_scope: &MemoryScope,
+    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
+    session_store: Arc<dyn talos_store::session::SessionStore>,
     kernel_config: &AgentKernelConfig,
     session_id: &str,
     selected_model: &str,
@@ -339,18 +344,20 @@ async fn compact_session_history_if_needed(
         &prompt_assembly.dynamic_suffix_sections,
         PromptSectionKind::RecentMessages,
     );
-    let flush_workspace_memory = kernel_config.memory.workspace_memory_flush_enabled
-        && kernel_config.memory.workspace_memory_flush_on_compaction;
-    let compaction_usage = match flush_session_memory_with_report(
-        session_id,
-        selected_model,
-        llm_provider,
-        memory_store.as_ref(),
-        kernel_config,
-        MemoryFlushPolicy::new(false, true, flush_workspace_memory)
-            .with_compaction_input_budget_tokens(resolve_compaction_input_budget_tokens(
-                &selected_model_info,
-            )),
+    let compaction_usage = match compact_session_memory(
+        MemoryFormationParams {
+            session_id,
+            selected_model,
+            llm_provider,
+            memory_writer: memory_writer.as_ref(),
+            memory_scope,
+            session_artifact_store: session_artifact_store.as_ref(),
+            session_store: session_store.as_ref(),
+            kernel_config,
+        },
+        MemoryCompactionPolicy::for_compaction().with_compaction_input_budget_tokens(
+            resolve_compaction_input_budget_tokens(&selected_model_info),
+        ),
     )
     .await
     {
@@ -385,13 +392,15 @@ async fn compact_session_history_if_needed(
         Err(error) => return Err(error),
     };
 
-    let compact_cursor = latest_compact_prompt_cursor(memory_store.as_ref(), session_id).await?;
+    let compact_cursor =
+        latest_compact_prompt_cursor(session_artifact_store.as_ref(), kernel_config, session_id)
+            .await?;
     let compacted_assembly = rebuild_prompt_assembly(
         agent_name,
         agent_description,
         input,
         tool_definition_provider,
-        memory_store,
+        session_artifact_store,
         kernel_config,
         session_id,
         phase,
@@ -466,115 +475,6 @@ async fn emit_prompt_warning_events(ctx: &mut InvocationContext, warnings: &[Ker
     }
 }
 
-async fn emit_context_compaction_stream_event(
-    stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
-    trigger: ContextCompactionTrigger,
-    stage: ContextCompactionStage,
-    outcome: Option<ContextCompactionOutcome>,
-    metrics: Option<ContextCompactionMetrics>,
-    message: Option<String>,
-) {
-    emit_stream_event(
-        stream_tx,
-        KernelStreamEventType::ContextCompaction,
-        KernelStreamEventData::ContextCompaction(crate::ContextCompactionStreamData {
-            trigger,
-            stage,
-            outcome,
-            metrics,
-            message,
-        }),
-    )
-    .await;
-}
-
-fn map_context_compaction_trigger(
-    trigger: SessionHistoryCompactionTrigger,
-) -> ContextCompactionTrigger {
-    match trigger {
-        SessionHistoryCompactionTrigger::ThresholdExceeded => {
-            ContextCompactionTrigger::ThresholdExceeded
-        }
-        SessionHistoryCompactionTrigger::HardThresholdExceeded => {
-            ContextCompactionTrigger::HardThresholdExceeded
-        }
-        SessionHistoryCompactionTrigger::BudgetExceeded => ContextCompactionTrigger::BudgetExceeded,
-        SessionHistoryCompactionTrigger::HistorySectionsDropped => {
-            ContextCompactionTrigger::HistorySectionsDropped
-        }
-    }
-}
-
-fn map_context_compaction_outcome(
-    outcome: SessionHistoryCompactionOutcome,
-) -> ContextCompactionOutcome {
-    match outcome {
-        SessionHistoryCompactionOutcome::Applied => ContextCompactionOutcome::Applied,
-        SessionHistoryCompactionOutcome::RejectedMissingSummary => {
-            ContextCompactionOutcome::RejectedMissingSummary
-        }
-    }
-}
-
-pub(super) fn context_compaction_failure_outcome(error: &TalosError) -> ContextCompactionOutcome {
-    match error {
-        TalosError::NetworkError(_)
-        | TalosError::RuntimeUnavailable(_)
-        | TalosError::TransportUnavailable(_)
-        | TalosError::UnsupportedModel(_)
-        | TalosError::Timeout(_)
-        | TalosError::ToolError(_) => ContextCompactionOutcome::FailedProviderError,
-        _ => ContextCompactionOutcome::FailedInternalError,
-    }
-}
-
-fn build_context_compaction_metrics(
-    compaction: &SessionHistoryCompaction,
-) -> ContextCompactionMetrics {
-    ContextCompactionMetrics {
-        covers_from_seq: compaction.covers_from_seq,
-        covers_until_seq: compaction.covers_until_seq,
-        pre_compaction_total_tokens: saturating_u32(compaction.pre_compaction_total_tokens),
-        post_compaction_total_tokens: saturating_u32(compaction.post_compaction_total_tokens),
-        compaction_input_tokens: compaction.compaction_input_tokens,
-        compaction_output_tokens: compaction.compaction_output_tokens,
-        trimmed_context_unit_count: compaction.trimmed_context_unit_count,
-        raw_tail_preferred_count: Some(saturating_u32(compaction.recent_messages_after)),
-        ..Default::default()
-    }
-}
-
-fn token_usage_from_session_history_compaction(
-    compaction: Option<&SessionHistoryCompaction>,
-) -> TokenUsage {
-    let Some(compaction) = compaction else {
-        return TokenUsage::default();
-    };
-    TokenUsage {
-        input_tokens: compaction.compaction_input_tokens,
-        output_tokens: compaction.compaction_output_tokens,
-        total_tokens: compaction.compaction_total_tokens,
-        cache_creation_input_tokens: compaction.compaction_cache_creation_input_tokens,
-        cache_read_input_tokens: compaction.compaction_cache_read_input_tokens,
-    }
-}
-
-async fn latest_compact_prompt_cursor(
-    memory_store: &MemoryStore,
-    session_id: &str,
-) -> TalosResult<Option<talos_memory::CompactPromptCursor>> {
-    let summaries = memory_store.load_summaries(session_id, 1).await?;
-    Ok(summaries
-        .last()
-        .map(|summary| talos_memory::CompactPromptCursor {
-            covers_until_seq: summary.covers_until_seq,
-        }))
-}
-
-fn saturating_u32(value: usize) -> u32 {
-    value.min(u32::MAX as usize) as u32
-}
-
 fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &str) -> Option<T> {
     ctx.session
         .state
@@ -590,10 +490,6 @@ pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosEr
 
 pub(crate) fn build_blocked_compaction_state() -> SessionCompactionState {
     SessionCompactionState::blocked_prompt_budget_exhausted()
-}
-
-fn build_compressing_compaction_state() -> SessionCompactionState {
-    SessionCompactionState::compressing()
 }
 
 pub(crate) fn next_session_compaction_state(
@@ -671,14 +567,14 @@ fn filter_prompt_warnings(
     (filtered, changed.then_some(warning_state))
 }
 
-pub(crate) fn stage_session_state_update(
+pub(crate) async fn stage_session_state_update(
     ctx: &mut InvocationContext,
     session_id: &str,
     invocation_id: &str,
     branch: ExecutionBranch,
     key: &str,
     value: serde_json::Value,
-) {
+) -> TalosResult<()> {
     let mut event = KernelTranscriptEvent::new(
         session_id.to_string(),
         invocation_id.to_string(),
@@ -692,7 +588,14 @@ pub(crate) fn stage_session_state_update(
         key: key.to_string(),
         value,
     });
-    stage_kernel_transcript_event(ctx, event);
+    if let Some(transcript_service) = ctx.transcript_service.clone() {
+        transcript_service
+            .append_event(&mut ctx.session, event)
+            .await?;
+    } else {
+        stage_kernel_transcript_event(ctx, event);
+    }
+    Ok(())
 }
 
 fn stage_kernel_transcript_event(ctx: &mut InvocationContext, event: KernelTranscriptEvent) {
@@ -709,7 +612,7 @@ pub async fn prepare_general_turn(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_store: Arc<MemoryStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<PreparedGeneralTurn> {
@@ -718,6 +621,8 @@ pub async fn prepare_general_turn(
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
+    let session_artifact_store = ctx.session_artifact_store()?;
+    let session_store = ctx.session_store()?;
     let stream_tx = ctx.stream_tx.clone();
     let session_compaction_state =
         load_session_state_value::<SessionCompactionState>(ctx, SESSION_COMPACTION_STATE_KEY);
@@ -742,7 +647,7 @@ pub async fn prepare_general_turn(
         agent_description,
         input,
         tool_definition_provider.clone(),
-        memory_store.clone(),
+        session_artifact_store.clone(),
         kernel_config,
         &session_id,
         phase,
@@ -763,16 +668,6 @@ pub async fn prepare_general_turn(
         .clone()
         .map(map_context_compaction_trigger);
     if let Some(trigger) = context_compaction_trigger {
-        if let Ok(value) = serde_json::to_value(build_compressing_compaction_state()) {
-            stage_session_state_update(
-                ctx,
-                &session_id,
-                &invocation_id,
-                ExecutionBranch::ModelThinking,
-                SESSION_COMPACTION_STATE_KEY,
-                value,
-            );
-        }
         emit_context_compaction_stream_event(
             stream_tx.as_ref(),
             trigger,
@@ -799,7 +694,13 @@ pub async fn prepare_general_turn(
         input,
         llm_provider,
         tool_definition_provider.clone(),
-        memory_store.clone(),
+        memory_writer,
+        &MemoryScope {
+            user_id: ctx.user_id.clone(),
+            workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
+        },
+        session_artifact_store.clone(),
+        session_store,
         kernel_config,
         &session_id,
         &selected_model,
@@ -826,6 +727,19 @@ pub async fn prepare_general_turn(
                 )
                 .await;
             }
+            stage_session_state_update(
+                ctx,
+                &session_id,
+                &invocation_id,
+                ExecutionBranch::ModelThinking,
+                SESSION_COMPACTION_STATE_KEY,
+                serde_json::to_value(SessionCompactionState::normal()).map_err(|error| {
+                    TalosError::SerializationError(format!(
+                        "serialize session compaction state: {error}"
+                    ))
+                })?,
+            )
+            .await?;
             return Err(error);
         }
     };
@@ -859,6 +773,24 @@ pub async fn prepare_general_turn(
                 .await;
             }
         }
+        let state = if compaction.outcome == SessionHistoryCompactionOutcome::Applied {
+            SessionCompactionState::recovery()
+        } else {
+            SessionCompactionState::normal()
+        };
+        stage_session_state_update(
+            ctx,
+            &session_id,
+            &invocation_id,
+            ExecutionBranch::ModelThinking,
+            SESSION_COMPACTION_STATE_KEY,
+            serde_json::to_value(state).map_err(|error| {
+                TalosError::SerializationError(format!(
+                    "serialize session compaction state: {error}"
+                ))
+            })?,
+        )
+        .await?;
         session_history_compaction = Some(compaction);
     }
 
@@ -883,7 +815,12 @@ pub async fn prepare_general_turn(
         {
             build_compacted_prompt_load_policy(
                 kernel_config,
-                latest_compact_prompt_cursor(memory_store.as_ref(), &session_id).await?,
+                latest_compact_prompt_cursor(
+                    session_artifact_store.as_ref(),
+                    kernel_config,
+                    &session_id,
+                )
+                .await?,
             )
         } else {
             initial_load_policy
@@ -893,7 +830,7 @@ pub async fn prepare_general_turn(
             agent_description,
             input,
             tool_definition_provider.clone(),
-            memory_store.clone(),
+            session_artifact_store,
             kernel_config,
             &session_id,
             phase,
@@ -935,6 +872,27 @@ pub async fn prepare_general_turn(
         } else {
             map_context_compaction_outcome(compaction.outcome.clone())
         };
+        let terminal_message = match terminal_outcome {
+            ContextCompactionOutcome::Applied => "Session history compaction finished.",
+            ContextCompactionOutcome::NoChanges => {
+                "Session history compaction found no new content."
+            }
+            ContextCompactionOutcome::RejectedMissingSummary => {
+                "Session history summary was not applied."
+            }
+            ContextCompactionOutcome::TrimmedFallbackApplied => {
+                "Session history summary was unavailable; context was trimmed."
+            }
+            ContextCompactionOutcome::FailedContextStillTooLarge => {
+                "Context compaction failed; context is still too large."
+            }
+            ContextCompactionOutcome::FailedProviderError => {
+                "Context compaction failed because the provider was unavailable."
+            }
+            ContextCompactionOutcome::FailedInternalError => {
+                "Context compaction failed because of an internal error."
+            }
+        };
         prompt_assembly.diagnostics.session_history_compaction = Some(compaction.clone());
         if let Some(trigger) = context_compaction_trigger {
             emit_context_compaction_stream_event(
@@ -943,7 +901,7 @@ pub async fn prepare_general_turn(
                 terminal_stage,
                 Some(terminal_outcome),
                 Some(build_context_compaction_metrics(&compaction)),
-                Some("Session history compaction finished.".to_string()),
+                Some(terminal_message.to_string()),
             )
             .await;
         }
@@ -1000,6 +958,7 @@ pub async fn prepare_general_turn(
 
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
+        user_id: ctx.user_id.clone(),
         message_id,
         invocation_id,
         agent_id,

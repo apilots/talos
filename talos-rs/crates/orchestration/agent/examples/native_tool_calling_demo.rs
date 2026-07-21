@@ -1,9 +1,12 @@
+mod support;
+
 use std::sync::Arc;
 
 use serde_json::json;
+use support::NoopMemoryWriter;
 use talos_agent::{
-    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
-    AgentRunParams, AgentRunSessionState,
+    empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
+    AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
 };
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -97,23 +100,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
     registry.register(Arc::new(WebSearchTool));
 
-    let agent = AgentHarnessImpl::new(
-        "demo-native-tool-agent".to_string(),
-        "NativeToolAgent".to_string(),
-        "Demonstrates native tool calling flow".to_string(),
-        Arc::new(StaticLlmProviderRouter { provider }),
-        ModelSelection::without_reasoning(ModelRef {
-            provider: "mock".to_string(),
+    let agent = AgentHarnessImpl::new(AgentHarnessParams {
+        id: "demo-native-tool-agent".to_string(),
+        name: "NativeToolAgent".to_string(),
+        description: "Demonstrates native tool calling flow".to_string(),
+        llm_provider_router: Arc::new(StaticLlmProviderRouter { provider }),
+        model_selection: ModelSelection::without_reasoning(ModelRef {
+            provider: "openai".to_string(),
             id: "mock-model".to_string(),
         }),
-        registry,
-        Default::default(),
-    )?;
+        tool_registry: registry,
+        kernel_config: Default::default(),
+        skill_roots_resolver: empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(NoopMemoryWriter),
+    })?;
 
+    let mut config = talos_config::Config::default();
+    config.llm.openai.models = vec![talos_config::ProviderModelConfig {
+        id: "mock-model".to_string(),
+        name: "mock-model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
     let session = TalosSession {
         title: "Untitled Session".to_string(),
         user_id: "demo-user".to_string(),
-        conf: talos_types::SessionConf::default(),
+        conf: talos_types::SessionConf {
+            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                provider: "openai".to_string(),
+                id: "mock-model".to_string(),
+            })),
+        },
         project_id: None,
         current_directory: None,
         context: SessionContext {
@@ -131,7 +154,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             thread_id: None,
             environment: None,
         },
-        config: talos_config::Config::default(),
+        config,
         state: SessionState::default(),
     };
     let response = agent

@@ -5,6 +5,7 @@ use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocInfo, WorkspaceDocKind,
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    MEMORY_FILE_MAX_CHARS,
 };
 
 use crate::access::Actor;
@@ -125,6 +126,13 @@ impl WorkspaceDocService {
         kind: WorkspaceDocKind,
         request: DocUpdateRequest,
     ) -> TalosResult<WorkspaceDocInfo> {
+        if kind == WorkspaceDocKind::Memory
+            && request.content.chars().count() > MEMORY_FILE_MAX_CHARS
+        {
+            return Err(TalosError::ValidationError(format!(
+                "MEMORY.md exceeds the {MEMORY_FILE_MAX_CHARS} character limit"
+            )));
+        }
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;
         let path = self.doc_path(&workspace.config, kind);

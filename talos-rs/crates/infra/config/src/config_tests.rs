@@ -23,6 +23,18 @@ fn test_default_config() {
 }
 
 #[test]
+fn memory_directory_must_not_escape_the_workspace() {
+    let mut config = Config::default();
+    config.memory.memory_dirname = "../../shared".to_string();
+
+    let error = config
+        .validate_runtime()
+        .expect_err("parent memory path must be rejected");
+
+    assert!(error.to_string().contains("memory.memory_dirname"));
+}
+
+#[test]
 fn test_agent_definition_config_parses_kernel_runtime() {
     let yaml = r#"
 agent:
@@ -216,6 +228,11 @@ fn test_kernel_defaults() {
         config.automation.profile_usage_retention.retention_days,
         366
     );
+    assert_eq!(
+        config.automation.memory_daily_maintenance.cron,
+        "0 30 3 * * *"
+    );
+    assert_eq!(config.automation.memory_daily_maintenance.batch_size, 50);
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
         config.agent.kernel.workspace_dir,
@@ -225,15 +242,9 @@ fn test_kernel_defaults() {
             .to_string_lossy()
             .to_string()
     );
-    assert_eq!(config.agent.kernel.memory.hot_recent_messages, 64);
-    assert_eq!(
-        config.agent.kernel.memory.compaction_threshold_bytes,
-        256 * 1024
-    );
-    assert_eq!(config.agent.kernel.memory.root_memory_filename, "MEMORY.md");
-    assert_eq!(config.agent.kernel.memory.file_list_default_limit, 20);
-    assert_eq!(config.agent.kernel.memory.file_list_max_limit, 90);
-    assert!(config.agent.kernel.memory.workspace_memory_flush_enabled);
+    assert_eq!(config.memory.root_memory_filename, "MEMORY.md");
+    assert_eq!(config.memory.file_list_default_limit, 20);
+    assert_eq!(config.memory.file_list_max_limit, 90);
     assert_eq!(config.logging.level, "info");
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
 }
@@ -247,8 +258,6 @@ agent:
     prompt:
       bootstrap:
         include_tools: true
-    memory:
-      workspace_dir: /tmp/custom
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -726,8 +735,6 @@ agent:
     compaction:
       recent_messages_max_chars: 100
       compacted_recent_messages_max_chars: 120
-    memory:
-      workspace_dir: /tmp/talos-config-invalid-compaction
 gateway:
   host: 127.0.0.1
   port: 18789
@@ -835,8 +842,7 @@ agent:
       compacted_recent_messages_keep: 2
       recent_summaries_keep: 2
       summary_max_chars: 1000
-    memory:
-      workspace_dir: /tmp/custom
+    workspace_dir: /tmp/custom
 gateway:
   host: 127.0.0.1
   port: 18789

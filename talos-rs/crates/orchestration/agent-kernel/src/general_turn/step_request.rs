@@ -5,9 +5,18 @@ pub fn build_general_turn_step_request(
     state: &GeneralTurnLoopState,
     tool_definitions: Vec<ToolDefinition>,
     parallel_tool_calls: bool,
+    retrieved_memory_max_items: usize,
+    retrieved_memory_max_chars: usize,
 ) -> GeneralTurnStepRequest {
     let mut messages = prepared.messages.clone();
     messages.extend(state.messages.clone());
+    if let Some(retrieved) = talos_prompt::render_retrieved_memories(
+        &state.retrieved_memories,
+        retrieved_memory_max_items,
+        retrieved_memory_max_chars,
+    ) {
+        messages.push(retrieved);
+    }
 
     GeneralTurnStepRequest {
         round: state.round,

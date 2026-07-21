@@ -120,10 +120,69 @@ fn reduce_tool_execution_output_uses_canonical_success_payload() {
             text: "plain text result".to_string()
         }]
     );
-    assert_eq!(
-        reduced.memory_payload,
-        serde_json::json!({"result": "plain text result"})
-    );
+}
+
+#[test]
+fn memory_get_keeps_the_full_tool_result() {
+    let mut state = GeneralTurnLoopState {
+        started_at: Instant::now(),
+        messages: Vec::new(),
+        round: 0,
+        output_items: Vec::new(),
+        usage: TokenUsage::default(),
+        reasoning_log: Vec::new(),
+        tool_call_log: Vec::new(),
+        tool_result_log: Vec::new(),
+        retrieved_memories: Vec::new(),
+        tool_call_count: 0,
+        tool_error_count: 0,
+        pending_dynamic_requests: Vec::new(),
+        final_answer_streamed: false,
+        execution_summary_streamed: false,
+    };
+    let body = "x".repeat(1_500);
+    let output = ToolExecutionOutput {
+        call_id: "call-memory".to_string(),
+        tool_name: "MemoryGet".to_string(),
+        outcome: ToolDispatchOutcome::executed(
+            ToolOutputPayload::success_json(
+                &MemoryGetResponse {
+                    memory: talos_types::MemoryInfo {
+                        memory_id: "mem-1".to_string(),
+                        title: "Preference".to_string(),
+                        body: body.clone(),
+                        kind: talos_types::MemoryKind::Preference,
+                        importance: talos_types::MemoryImportance::High,
+                        occurred_at: 1,
+                        source: talos_types::MemorySourceInfo {
+                            date: "2026-07-17".to_string(),
+                            session_id: None,
+                            from_seq: None,
+                            until_seq: None,
+                        },
+                    },
+                },
+                "serialize test memory",
+            )
+            .expect("memory payload"),
+        ),
+        is_error: false,
+    };
+    let batch = collect_general_turn_tool_batch(vec![output]);
+    let mut config = AgentKernelConfig::default();
+    config.compaction.retrieved_memory_max_chars = 2_000;
+
+    apply_general_turn_tool_batch(&mut state, &batch, &config);
+    apply_general_turn_tool_batch(&mut state, &batch, &config);
+
+    assert!(state.retrieved_memories.is_empty());
+    assert!(state.messages.iter().any(|message| {
+        message.role == talos_llm_provider::Role::Tool && message.content.contains(&body)
+    }));
+    assert!(state
+        .messages
+        .iter()
+        .all(|message| !message.content.contains("Retrieved memories:")));
 }
 
 #[test]

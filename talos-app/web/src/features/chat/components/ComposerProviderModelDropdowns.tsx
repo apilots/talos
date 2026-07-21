@@ -1,3 +1,4 @@
+import type React from "react";
 import { Waypoints, Zap } from "lucide-react";
 
 import { ComposerDropdown } from "./ComposerDropdown";
@@ -12,6 +13,7 @@ interface ComposerProviderModelDropdownsProps {
   onChange?: (model: string) => void;
   providerLabel: string;
   selectedModel?: string;
+  modelTriggerRef?: React.Ref<HTMLButtonElement>;
 }
 
 export function ComposerProviderModelDropdowns({
@@ -20,6 +22,7 @@ export function ComposerProviderModelDropdowns({
   onChange,
   providerLabel,
   selectedModel,
+  modelTriggerRef,
 }: ComposerProviderModelDropdownsProps) {
   const { activeModel, activeProvider, changeProvider, providerModels, providers } =
     useComposerModelOptions(models, selectedModel, onChange);
@@ -41,6 +44,7 @@ export function ComposerProviderModelDropdowns({
         header={modelLabel}
         items={providerModels.map((model) => ({ value: model.id, label: model.name }))}
         onChange={(model) => onChange?.(model)}
+        triggerRef={modelTriggerRef}
         triggerIcon={<Zap size={12} className="text-brand" />}
         value={activeModel}
       />

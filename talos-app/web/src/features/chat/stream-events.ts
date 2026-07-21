@@ -219,6 +219,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       }
       markPendingInputCompleted(sessionId, event.message_id);
       timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
+      state.setTimelineLive(sessionId, false);
       state.setSessionStatus(
         sessionId,
         stream?.pendingUserAction ? "running" : undefined,
@@ -231,6 +232,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       return;
     case "turn_error":
       timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
+      state.setTimelineLive(sessionId, false);
       state.setPendingUserAction(sessionId, undefined);
       state.setSessionStatus(sessionId, "error");
       state.setStreamError(sessionId, event.payload.error || "Unknown stream error.");
@@ -463,6 +465,20 @@ function appendToolProgressSnapshot(
 function toChatTimelineItem(item: TalosTimelineItem | TalosHistoryTimelineItem): ChatTimelineItem {
   const startedAtMs = Number(item.started_at_ms);
   const completedAtMs = item.completed_at_ms == null ? null : Number(item.completed_at_ms);
+  if (item.kind === "context_compaction" && item.content.type === "context_compaction") {
+    return {
+      itemId: item.item_id,
+      sourceItemId: item.item_id,
+      kind: "context_compaction",
+      phase: item.phase,
+      status: item.status,
+      title: item.title,
+      text: contextCompactionText(item.content),
+      stage: item.content.stage,
+      startedAtMs,
+      completedAtMs,
+    };
+  }
   if (item.kind === "tool_call" && item.content.type === "tool_call") {
     return {
       itemId: item.item_id,
@@ -488,7 +504,10 @@ function toChatTimelineItem(item: TalosTimelineItem | TalosHistoryTimelineItem):
   return {
     itemId: item.item_id,
     sourceItemId: item.item_id,
-    kind: item.kind === "tool_call" ? "system_notice" : item.kind,
+    kind:
+      item.kind === "tool_call" || item.kind === "context_compaction"
+        ? "system_notice"
+        : item.kind,
     phase: item.phase,
     status: item.status,
     title: item.title,

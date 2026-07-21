@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn test_models_require_bearer_when_auth_enabled() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -29,7 +29,7 @@ async fn test_models_require_bearer_even_when_local_cache_exists() {
         .store(&test_cloud_session_entry("token", now_ms))
         .expect("cache should be stored");
     let state = Arc::new(
-        Arc::try_unwrap(test_state(false))
+        Arc::try_unwrap(test_state(false).await)
             .ok()
             .expect("test state should have a single owner")
             .with_cloud_session_cache(cache),
@@ -53,7 +53,7 @@ async fn test_models_require_bearer_even_when_local_cache_exists() {
 
 #[tokio::test]
 async fn test_models_allow_no_token_when_auth_disabled() {
-    let state = test_state(true);
+    let state = test_state(true).await;
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -73,7 +73,7 @@ async fn test_models_allow_no_token_when_auth_disabled() {
 
 #[tokio::test]
 async fn test_unknown_auth_route_is_not_exposed() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let app = Router::new()
         .with_state(state.clone())
         .layer(middleware::from_fn_with_state(state, auth_middleware));
@@ -122,7 +122,7 @@ fn test_cloud_session_entry(
 
 #[tokio::test]
 async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
-    let state = test_state(true);
+    let state = test_state(true).await;
     let app = Router::new()
         .route("/v1/sessions", get(list_sessions_handler))
         .with_state(state.clone())
@@ -147,7 +147,7 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
 
 #[tokio::test]
 async fn test_get_llm_allows_auth_disabled_actor() {
-    let state = test_state(true);
+    let state = test_state(true).await;
     let response = get_llm_handler(State(state), None)
         .await
         .expect("auth disabled actor should access llm config");
@@ -169,7 +169,8 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
         test_config(),
         lifecycle,
         llm_svc,
-    );
+    )
+    .await;
     let app = Router::new()
         .route("/v1/models", get(list_models_handler))
         .with_state(state.clone())
@@ -206,7 +207,8 @@ async fn test_lifecycle_gate_allows_health_when_quiescing() {
         test_config(),
         lifecycle,
         llm_svc,
-    );
+    )
+    .await;
     let app = Router::new()
         .route("/health", get(health_handler))
         .with_state(state.clone())

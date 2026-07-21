@@ -79,10 +79,6 @@ fn test_boundary_validation() {
     );
 
     assert!(
-        config.memory.hot_recent_messages > 0,
-        "memory.hot_recent_messages must be > 0"
-    );
-    assert!(
         config.compaction.recent_messages_keep > 0,
         "compaction.recent_messages_keep must be > 0"
     );
@@ -93,10 +89,6 @@ fn test_boundary_validation() {
     assert!(
         config.compaction.compacted_recent_messages_max_chars > 0,
         "compaction.compacted_recent_messages_max_chars must be > 0"
-    );
-    assert_eq!(
-        config.memory.root_memory_filename, "MEMORY.md",
-        "memory.root_memory_filename should be fixed to MEMORY.md"
     );
 }
 
@@ -120,8 +112,6 @@ fn test_nested_config_defaults() {
     assert!(config.compaction.retrieved_memories_keep > 0);
     assert!(config.compaction.compacted_retrieved_memory_max_chars > 0);
     assert!(config.prompt.bootstrap.include_memory);
-
-    assert!(config.memory.workspace_memory_flush_enabled);
 }
 
 /// Tests that config can be cloned and remains independent.

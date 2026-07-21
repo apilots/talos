@@ -10,11 +10,12 @@ use talos_app_protocol::events::{
     SubscriptionTerminatedEnvelope, TimelineSubscriptionNotification,
 };
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
+#[cfg(test)]
+use talos_app_protocol::requests::ActorCredential;
 use talos_app_protocol::requests::{
-    ActorCredential, ActorCredentials, ClientCapabilities, ClientInfo, InitializeParams,
-    InitializeResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
-    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
-    SkillsSuggestResponse,
+    ActorCredentials, ClientCapabilities, ClientInfo, InitializeParams, InitializeResponse,
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
+    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{
@@ -30,28 +31,29 @@ use talos_types::{
     EventUnsubscribeResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemorySearchRequest, MemorySearchResponse,
-    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
-    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
-    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
-    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
-    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
-    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
-    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
-    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
+    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
+    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
+    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
+    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
+    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
+    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
+    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
+    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
+    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
+    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+    SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -61,6 +63,13 @@ use crate::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
 use talos_types::talos::TimelineEventEnvelope;
 
 mod response;
+
+#[path = "app_server/credentials.rs"]
+mod credentials;
+
+#[cfg(test)]
+use credentials::is_business_method;
+use credentials::{actor_credentials_for_method, existing_session_credentials};
 
 #[derive(Debug, Clone)]
 pub struct AppServerClientConfig {
@@ -771,7 +780,11 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: MemorySearchRequest,
     ) -> TalosResult<MemorySearchResponse> {
-        self.request_typed("memory.search", request).await
+        self.request_typed("memory/search", request).await
+    }
+
+    async fn get_memory(&mut self, request: MemoryGetRequest) -> TalosResult<MemoryGetResponse> {
+        self.request_typed("memory/get", request).await
     }
 
     async fn list_workspace_docs(
@@ -980,44 +993,6 @@ fn map_app_server_error(error: talos_app_protocol::errors::AppServerErrorBody) -
         CANCELLED => TalosError::Cancelled(error.message),
         _ => TalosError::ClientError(error.message),
     }
-}
-
-fn actor_credentials_for_method(
-    method: &str,
-    credentials: &Option<ActorCredentials>,
-) -> Option<ActorCredentials> {
-    if matches!(
-        method,
-        "initialize"
-            | "auth.login.start"
-            | "auth.login.status"
-            | "auth.login.cancel"
-            | "auth.session.read"
-            | "auth.session.clear"
-    ) {
-        None
-    } else {
-        credentials.clone()
-    }
-}
-
-fn existing_session_credentials(token: String) -> ActorCredentials {
-    ActorCredentials {
-        credential: ActorCredential::ExistingSessionToken { token },
-    }
-}
-
-#[cfg(test)]
-fn is_business_method(method: &str) -> bool {
-    !matches!(
-        method,
-        "initialize"
-            | "auth.login.start"
-            | "auth.login.status"
-            | "auth.login.cancel"
-            | "auth.session.read"
-            | "auth.session.clear"
-    )
 }
 
 #[cfg(test)]

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 fn mock_ctx(input: &str) -> InvocationContext {
     InvocationContext {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -42,6 +43,8 @@ fn mock_ctx(input: &str) -> InvocationContext {
         limits: InvocationLimits::default(),
         events: Vec::new(),
         transcript_service: None,
+        session_artifact_store: None,
+        session_store: None,
         stream_tx: None,
     }
 }

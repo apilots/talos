@@ -6,71 +6,46 @@ use talos_tools::ToolResultEnvelope;
 pub(crate) fn parse_retrieved_memory_items(
     tool_name: &str,
     payload: &Value,
-) -> Vec<RetrievedMemoryItem> {
+) -> TalosResult<Vec<talos_types::MemoryInfo>> {
     match tool_name {
-        "MemorySearch" | "memory_search" => {
-            match serde_json::from_value::<MemorySearchResponse>(payload.clone()) {
-                Ok(response) => memory_search_response_into_retrieved_items(response),
-                Err(err) => {
-                    warn!(
-                        tool_name = %tool_name,
-                        error = %err,
-                        payload = %payload,
-                        "failed to parse MemorySearch payload"
-                    );
-                    Vec::new()
-                }
-            }
-        }
+        "MemorySearch" | "memory_search" => Ok(Vec::new()),
         "MemoryGet" | "memory_get" => {
-            match serde_json::from_value::<MemoryGetResult>(payload.clone()) {
-                Ok(result) if !result.text.trim().is_empty() => vec![RetrievedMemoryItem {
-                    path: result.path,
-                    snippet: result.text.trim().to_string(),
-                }],
-                Ok(_) => Vec::new(),
-                Err(err) => {
-                    warn!(
-                        tool_name = %tool_name,
-                        error = %err,
-                        payload = %payload,
-                        "failed to parse MemoryGet payload"
-                    );
-                    Vec::new()
+            match serde_json::from_value::<MemoryGetResponse>(payload.clone()) {
+                Ok(response) if !response.memory.body.trim().is_empty() => {
+                    Ok(vec![response.memory])
                 }
+                Ok(_) => Ok(Vec::new()),
+                Err(error) => Err(TalosError::SerializationError(format!(
+                    "parse MemoryGet result during context rebuild: {error}"
+                ))),
             }
         }
-        _ => Vec::new(),
+        _ => Ok(Vec::new()),
     }
 }
 
-fn build_retrieved_memories_message(
-    items: &[RetrievedMemoryItem],
+pub(super) fn take_new_retrieved_memories(
+    existing: &[talos_types::MemoryInfo],
+    candidates: &[talos_types::MemoryInfo],
     max_items: usize,
-    max_chars: usize,
-) -> Option<ChatMessage> {
-    if items.is_empty() || max_items == 0 || max_chars == 0 {
-        return None;
+) -> Vec<talos_types::MemoryInfo> {
+    if candidates.is_empty() || existing.len() >= max_items || max_items == 0 {
+        return Vec::new();
     }
-    let mut content = String::new();
-    for item in items.iter().take(max_items) {
-        let line = format!("- {}: {}", item.path, item.snippet.trim());
-        if content.len() + line.len() + 1 > max_chars {
-            break;
+
+    let mut accepted = Vec::new();
+    for candidate in candidates {
+        if existing.len() + accepted.len() >= max_items
+            || existing
+                .iter()
+                .chain(accepted.iter())
+                .any(|item| item.memory_id == candidate.memory_id)
+        {
+            continue;
         }
-        if !content.is_empty() {
-            content.push('\n');
-        }
-        content.push_str(&line);
+        accepted.push(candidate.clone());
     }
-    if content.is_empty() {
-        None
-    } else {
-        Some(ChatMessage::system(format!(
-            "Retrieved memories:\n{}",
-            content
-        )))
-    }
+    accepted
 }
 
 fn build_tool_result_payload(
@@ -217,7 +192,6 @@ struct ReducedToolExecutionOutput {
     content_items: Vec<TalosContentItem>,
     is_error: bool,
     pending_arguments: Option<Value>,
-    memory_payload: Value,
     envelope: ToolResultEnvelope,
     semantic_events: Vec<String>,
     next_turn_failure: Option<Value>,
@@ -227,12 +201,6 @@ fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExec
     let envelope = output.outcome.envelope();
     let (payload, content_items, is_error, pending_arguments) =
         build_tool_result_payload(&output.tool_name, &output.outcome);
-    let memory_payload = output
-        .outcome
-        .payload()
-        .map(|payload| payload.envelope())
-        .and_then(|envelope| envelope.structured_content)
-        .unwrap_or(serde_json::Value::Null);
     let semantic_events = envelope
         .semantic_events()
         .into_iter()
@@ -246,7 +214,6 @@ fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExec
         content_items,
         is_error,
         pending_arguments,
-        memory_payload,
         envelope,
         semantic_events,
         next_turn_failure,
@@ -284,7 +251,6 @@ pub(crate) fn collect_general_turn_tool_batch(
     let mut output_items = Vec::new();
     let mut tool_messages = Vec::new();
     let mut pending_dynamic_requests = Vec::new();
-    let mut retrieved_memories = Vec::new();
     let mut logs = Vec::new();
     let mut error_count = 0_usize;
 
@@ -317,26 +283,11 @@ pub(crate) fn collect_general_turn_tool_batch(
             call_id: output.call_id.clone(),
             tool: output.tool_name.clone(),
             payload: reduced.payload.clone(),
-            envelope: serde_json::to_value(&reduced.envelope).unwrap_or(Value::Null),
             is_error: reduced.is_error,
-            truncated: reduced
-                .payload
-                .get("truncated")
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-            size_bytes: serde_json::to_vec(&reduced.payload)
-                .map(|buf| buf.len())
-                .unwrap_or(0),
-            semantic_events: reduced.semantic_events.clone(),
-            next_turn_failure: reduced.next_turn_failure.clone(),
         });
-        retrieved_memories.extend(parse_retrieved_memory_items(
-            &output.tool_name,
-            &reduced.memory_payload,
-        ));
         tool_messages.push(ChatMessage::tool(
             output.call_id,
-            output.tool_name,
+            output.tool_name.clone(),
             build_model_tool_result_text(&reduced),
         ));
     }
@@ -345,7 +296,6 @@ pub(crate) fn collect_general_turn_tool_batch(
         output_items,
         tool_messages,
         pending_dynamic_requests,
-        retrieved_memories,
         logs,
         error_count,
     }
@@ -384,7 +334,6 @@ pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
     tool_registry: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
     kernel_config: Arc<AgentKernelConfig>,
     user_id: &str,
     tool_calls: &[FunctionCall],
@@ -396,7 +345,6 @@ pub async fn execute_general_turn_tool_batch(
         user_id: user_id.to_string(),
         project_root: prepared.project_root.clone(),
         kernel_config,
-        memory_store,
         dynamic_tool_results: replay_dynamic_tool_results,
     };
     let inputs = tool_calls
@@ -421,29 +369,13 @@ pub async fn execute_general_turn_tool_batch(
 pub fn apply_general_turn_tool_batch(
     state: &mut GeneralTurnLoopState,
     batch: &GeneralTurnToolBatch,
-    kernel_config: &AgentKernelConfig,
+    _kernel_config: &AgentKernelConfig,
 ) {
     state.messages.extend(batch.tool_messages.clone());
     state.output_items.extend(batch.output_items.clone());
     state.tool_result_log.extend(batch.logs.clone());
     state.tool_error_count += batch.error_count;
     state.pending_dynamic_requests = batch.pending_dynamic_requests.clone();
-    state
-        .retrieved_memories
-        .extend(batch.retrieved_memories.clone());
-
-    if let Some(message) = build_retrieved_memories_message(
-        &state.retrieved_memories,
-        kernel_config.compaction.retrieved_memories_keep,
-        kernel_config.compaction.retrieved_memory_max_chars,
-    ) {
-        if !state.messages.iter().rev().take(4).any(|item| {
-            item.role == talos_llm_provider::Role::System && item.content == message.content
-        }) {
-            state.messages.push(message);
-        }
-    }
-
     state.round += 1;
 }
 

@@ -1,15 +1,22 @@
+use super::runtime::AgentRuntimeAbortHandle;
 use super::AgentHarnessImpl;
+use crate::AgentSessionCompactionParams;
 use chrono::Utc;
-use std::time::Duration;
+use talos_agent_kernel::{SessionCompactionState, TimelineBuilder, SESSION_COMPACTION_STATE_KEY};
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, MemoryStore};
-use talos_memory::{
+use talos_store::session::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
     SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
+    SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
 };
-use talos_types::{talos::TokenUsage, TalosSession};
+use talos_types::talos::{
+    AgentEvent, AgentEventPayload, ContextCompactionMetrics, ContextCompactionOutcome,
+    ContextCompactionStage, ContextCompactionTrigger, StopReason, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItemStatus, TokenUsage,
+};
+use talos_types::TalosSession;
 use uuid::Uuid;
 
 impl AgentHarnessImpl {
@@ -23,29 +30,22 @@ impl AgentHarnessImpl {
         Ok(model.to_string())
     }
 
-    pub(crate) async fn drain_pending_memory_flushes(&self, timeout: Duration) -> TalosResult<()> {
-        self.memory_flush_manager.drain(timeout).await
-    }
-
-    pub(crate) fn pending_memory_flush_count(&self) -> usize {
-        self.memory_flush_manager.pending_count()
-    }
-
-    pub(crate) async fn has_pending_memory_flush(&self, session_id: &str) -> bool {
-        self.memory_flush_manager.contains_session(session_id).await
-    }
-
     pub(crate) async fn validate_dynamic_tool_submission(
         &self,
-        memory_store: &MemoryStore,
         kernel_config: &AgentKernelConfig,
         session_id: &str,
         turn_id: &str,
         call_id: &str,
         tool_name: &str,
     ) -> TalosResult<()> {
-        let records = memory_store
-            .load_transcript_records(session_id, None, SessionTranscriptBranch::ReactiveLoop)
+        let records = self
+            .session_artifact_store
+            .load_transcript_records(
+                std::path::Path::new(&kernel_config.workspace_dir),
+                session_id,
+                None,
+                Some(SessionTranscriptBranch::ReactiveLoop),
+            )
             .await?;
 
         let mut latest_request_timestamp = None;
@@ -114,9 +114,8 @@ impl AgentHarnessImpl {
         success: bool,
     ) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
-        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
+        let kernel_config = Self::kernel_config_for_session(&session)?;
         self.validate_dynamic_tool_submission(
-            memory_store.as_ref(),
             &kernel_config,
             &session_id,
             turn_id,
@@ -145,71 +144,342 @@ impl AgentHarnessImpl {
             actions: SessionTranscriptActions::default(),
             partial: false,
         };
-        memory_store.append_transcript_record(&record).await
+        self.session_artifact_store
+            .append_transcript_record(std::path::Path::new(&kernel_config.workspace_dir), &record)
+            .await
     }
 
     pub(crate) async fn compact_session_impl(
         &self,
-        session: TalosSession,
+        params: AgentSessionCompactionParams,
     ) -> TalosResult<TokenUsage> {
+        let AgentSessionCompactionParams {
+            session,
+            identity,
+            event_tx,
+        } = params;
         let session_id = session.context.session_id.clone();
-        self.ensure_session_is_idle(&session_id, "compact").await?;
-        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
-        let selected_model = Self::session_model(&session)?;
-        let llm_provider = self.llm_provider_for_session(&session)?;
-        let report = talos_agent_kernel::flush_session_memory_with_report(
-            &session_id,
-            &selected_model,
-            llm_provider,
-            memory_store.as_ref(),
-            &kernel_config,
-            talos_agent_kernel::MemoryFlushPolicy::for_compaction(
-                kernel_config.memory.workspace_memory_flush_enabled
-                    && kernel_config.memory.workspace_memory_flush_on_compaction,
-            ),
-        )
-        .await?;
-        Ok(TokenUsage {
-            input_tokens: report.input_tokens,
-            output_tokens: report.output_tokens,
-            total_tokens: report.total_tokens,
-            cache_creation_input_tokens: report.cache_creation_input_tokens,
-            cache_read_input_tokens: report.cache_read_input_tokens,
-        })
+        self.try_reserve_active_turn(&session_id)?;
+        let result = async {
+            let kernel_config = Self::kernel_config_for_session(&session)?;
+            let selected_model = Self::session_model(&session)?;
+            let llm_provider = self.llm_provider_for_session(&session)?;
+            let memory_scope = talos_memory::MemoryScope {
+                user_id: session.user_id.clone(),
+                workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
+            };
+            let this = self.clone();
+            let task_session_id = session_id.clone();
+            let task_turn_id = identity.turn_id.clone();
+            let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+            let (start_tx, start_rx) = tokio::sync::oneshot::channel();
+            let task = tokio::spawn(async move {
+                start_rx.await.map_err(|_| {
+                    TalosError::Cancelled(
+                        "session context compaction was cancelled before start".to_string(),
+                    )
+                })?;
+                let report = talos_agent_kernel::compact_session_memory(
+                    talos_agent_kernel::MemoryFormationParams {
+                        session_id: &task_session_id,
+                        selected_model: &selected_model,
+                        llm_provider,
+                        memory_writer: this.memory_writer.as_ref(),
+                        memory_scope: &memory_scope,
+                        session_artifact_store: this.session_artifact_store.as_ref(),
+                        session_store: this.session_store.as_ref(),
+                        kernel_config: &kernel_config,
+                    },
+                    talos_agent_kernel::MemoryCompactionPolicy::for_compaction(),
+                )
+                .await?;
+                if report.covers_until_seq.is_some() {
+                    let mut actions = SessionTranscriptActions::default();
+                    actions.state_delta.push(SessionTranscriptStateDelta {
+                        namespace: SessionTranscriptStateNamespace::Session,
+                        key: SESSION_COMPACTION_STATE_KEY.to_string(),
+                        value: serde_json::to_value(SessionCompactionState::recovery())
+                            .map_err(|error| {
+                                TalosError::SerializationError(format!(
+                                    "serialize session compaction recovery state: {error}"
+                                ))
+                            })?
+                            .into(),
+                    });
+                    this.session_artifact_store
+                        .append_transcript_record(
+                            &workspace_root,
+                            &SessionTranscriptRecord {
+                                header: SessionTranscriptHeader {
+                                    id: Uuid::new_v4().to_string(),
+                                    session_id: task_session_id.clone(),
+                                    invocation_id: task_turn_id,
+                                    branch: SessionTranscriptBranch::ModelThinking,
+                                    timestamp: Utc::now(),
+                                },
+                                author: SessionTranscriptAuthor::System,
+                                kind: SessionTranscriptEventKind::Planning,
+                                payload: SessionTranscriptPayload::StateOnly,
+                                actions,
+                                partial: false,
+                            },
+                        )
+                        .await?;
+                }
+                Ok(report)
+            });
+            let abort_handle = AgentRuntimeAbortHandle::new(task.abort_handle());
+            if let Err(error) =
+                self.activate_reserved_turn(&session_id, identity.turn_id.clone(), abort_handle)
+            {
+                task.abort();
+                return Err(error);
+            }
+
+            let mut timeline = TimelineBuilder::new(
+                identity.request_id,
+                identity.turn_id,
+                identity.message_id,
+                session_id.clone(),
+            );
+            let item_id = match async {
+                send_compaction_event(&event_tx, timeline.start_turn()).await?;
+                let started = timeline.start_context_compaction(
+                    ContextCompactionTrigger::UserRequested,
+                    ContextCompactionStage::Preparing,
+                    Some("User-requested context compaction started.".to_string()),
+                );
+                let item_id = match &started.payload {
+                    AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
+                    _ => {
+                        return Err(TalosError::InternalError(
+                            "context compaction did not create a timeline item".to_string(),
+                        ));
+                    }
+                };
+                send_compaction_event(&event_tx, started).await?;
+                send_compaction_event(
+                    &event_tx,
+                    timeline.append_delta(
+                        &item_id,
+                        TalosTimelineDelta::ContextCompaction {
+                            stage: Some(ContextCompactionStage::Summarizing),
+                            outcome: None,
+                            metrics: None,
+                            message: Some("Summarizing session context.".to_string()),
+                        },
+                    )?,
+                )
+                .await?;
+                Ok(item_id)
+            }
+            .await
+            {
+                Ok(item_id) => item_id,
+                Err(error) => {
+                    drop(start_tx);
+                    task.abort();
+                    let _ = task.await;
+                    return Err(error);
+                }
+            };
+            let _ = start_tx.send(());
+            let report = match task.await {
+                Ok(report) => report,
+                Err(error) if error.is_cancelled() => {
+                    let cancelled_content = TalosTimelineContent::ContextCompaction {
+                        trigger: ContextCompactionTrigger::UserRequested,
+                        stage: ContextCompactionStage::Failed,
+                        outcome: None,
+                        metrics: None,
+                        message: Some("Session context compaction was cancelled.".to_string()),
+                    };
+                    send_compaction_event(
+                        &event_tx,
+                        timeline.complete_item(
+                            &item_id,
+                            TalosTimelineItemStatus::Cancelled,
+                            Some(cancelled_content),
+                        )?,
+                    )
+                    .await?;
+                    send_compaction_event(
+                        &event_tx,
+                        timeline.complete_turn(
+                            StopReason::Cancelled,
+                            TokenUsage::default(),
+                            None,
+                            None,
+                        ),
+                    )
+                    .await?;
+                    return Err(TalosError::Cancelled(
+                        "session context compaction was cancelled".to_string(),
+                    ));
+                }
+                Err(error) => Err(TalosError::InternalError(format!(
+                    "session context compaction task failed: {error}"
+                ))),
+            };
+            let report = match report {
+                Ok(report) => report,
+                Err(error) => {
+                    let outcome = match &error {
+                        TalosError::NetworkError(_)
+                        | TalosError::RuntimeUnavailable(_)
+                        | TalosError::TransportUnavailable(_)
+                        | TalosError::UnsupportedModel(_)
+                        | TalosError::Timeout(_)
+                        | TalosError::ToolError(_) => ContextCompactionOutcome::FailedProviderError,
+                        _ => ContextCompactionOutcome::FailedInternalError,
+                    };
+                    let message = error.to_string();
+                    let failed_content = TalosTimelineContent::ContextCompaction {
+                        trigger: ContextCompactionTrigger::UserRequested,
+                        stage: ContextCompactionStage::Failed,
+                        outcome: Some(outcome),
+                        metrics: None,
+                        message: Some(message.clone()),
+                    };
+                    send_compaction_event(
+                        &event_tx,
+                        timeline.append_delta(
+                            &item_id,
+                            TalosTimelineDelta::ContextCompaction {
+                                stage: Some(ContextCompactionStage::Failed),
+                                outcome: Some(outcome),
+                                metrics: None,
+                                message: Some(message),
+                            },
+                        )?,
+                    )
+                    .await?;
+                    send_compaction_event(
+                        &event_tx,
+                        timeline.complete_item(
+                            &item_id,
+                            TalosTimelineItemStatus::Failed,
+                            Some(failed_content),
+                        )?,
+                    )
+                    .await?;
+                    send_compaction_event(&event_tx, timeline.fail_turn(&error)).await?;
+                    return Err(error);
+                }
+            };
+            let usage = TokenUsage {
+                input_tokens: report.input_tokens,
+                output_tokens: report.output_tokens,
+                total_tokens: report.total_tokens,
+                cache_creation_input_tokens: report.cache_creation_input_tokens,
+                cache_read_input_tokens: report.cache_read_input_tokens,
+            };
+            let (outcome, message) = if report.covers_until_seq.is_some() {
+                (
+                    ContextCompactionOutcome::Applied,
+                    "Session context compaction completed.",
+                )
+            } else {
+                (
+                    ContextCompactionOutcome::NoChanges,
+                    "Session context compaction found no new content.",
+                )
+            };
+            let metrics = ContextCompactionMetrics {
+                covers_from_seq: report.covers_from_seq,
+                covers_until_seq: report.covers_until_seq,
+                compaction_input_tokens: report.input_tokens,
+                compaction_output_tokens: report.output_tokens,
+                trimmed_context_unit_count: report.trimmed_context_unit_count,
+                ..ContextCompactionMetrics::default()
+            };
+            let completed_content = TalosTimelineContent::ContextCompaction {
+                trigger: ContextCompactionTrigger::UserRequested,
+                stage: ContextCompactionStage::Completed,
+                outcome: Some(outcome),
+                metrics: Some(metrics.clone()),
+                message: Some(message.to_string()),
+            };
+            send_compaction_event(
+                &event_tx,
+                timeline.append_delta(
+                    &item_id,
+                    TalosTimelineDelta::ContextCompaction {
+                        stage: Some(ContextCompactionStage::Completed),
+                        outcome: Some(outcome),
+                        metrics: Some(metrics),
+                        message: Some(message.to_string()),
+                    },
+                )?,
+            )
+            .await?;
+            send_compaction_event(
+                &event_tx,
+                timeline.complete_item(
+                    &item_id,
+                    TalosTimelineItemStatus::Completed,
+                    Some(completed_content),
+                )?,
+            )
+            .await?;
+            send_compaction_event(
+                &event_tx,
+                timeline.complete_turn(StopReason::EndTurn, usage.clone(), None, None),
+            )
+            .await?;
+            Ok(usage)
+        }
+        .await;
+        self.finish_active_turn_and_dispatch_next(&session_id).await;
+        result
     }
 
     pub(crate) async fn clear_session_impl(&self, session: TalosSession) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
-        self.ensure_session_is_idle(&session_id, "clear").await?;
-        let (_kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
-        memory_store.reset_session(&session_id).await
+        self.try_reserve_active_turn(&session_id)?;
+        let result = async {
+            let kernel_config = Self::kernel_config_for_session(&session)?;
+            let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
+            let latest_seq = self
+                .session_artifact_store
+                .latest_seq(workspace_root, &session_id)
+                .await?;
+            let session_record = self
+                .session_store
+                .get_session_record(&session_id)
+                .await?
+                .ok_or_else(|| TalosError::ResourceNotFound(session_id.clone()))?;
+            if latest_seq > session_record.memory_processed_until_seq {
+                self.session_store
+                    .advance_memory_processed_until_seq(
+                        &session_id,
+                        session_record.memory_processed_until_seq,
+                        latest_seq,
+                    )
+                    .await?;
+            }
+            self.session_artifact_store
+                .reset_session(workspace_root, &session_id)
+                .await
+        }
+        .await;
+        self.finish_active_turn_and_dispatch_next(&session_id).await;
+        result
     }
 
     pub(crate) async fn close_session_impl(&self, session: TalosSession) -> TalosResult<()> {
-        let selected_model = Self::session_model(&session)?;
-        let session_id = session.context.session_id.clone();
-        let task_session_id = session_id.clone();
-        let llm_provider = self.llm_provider_for_session(&session)?;
-        let (kernel_config, memory_store) = self.memory_store_for_session(&session).await?;
-        let accepted = self
-            .memory_flush_manager
-            .spawn_flush(&session_id, async move {
-                talos_agent_kernel::flush_session_memory(
-                    &task_session_id,
-                    &selected_model,
-                    llm_provider,
-                    memory_store.as_ref(),
-                    &kernel_config,
-                    talos_agent_kernel::MemoryFlushPolicy::for_session_close(
-                        kernel_config.memory.workspace_memory_flush_enabled,
-                    ),
-                )
-                .await
-            })
-            .await;
-        if !accepted {
-            tracing::info!(session_id = %session_id, "memory flush deduplicated for session");
-        }
+        let session_id = session.context.session_id;
+        self.try_reserve_active_turn(&session_id)?;
+        self.finish_active_turn_and_dispatch_next(&session_id).await;
         Ok(())
     }
+}
+
+async fn send_compaction_event(
+    event_tx: &tokio::sync::mpsc::Sender<AgentEvent>,
+    event: AgentEvent,
+) -> TalosResult<()> {
+    event_tx.send(event).await.map_err(|_| {
+        TalosError::InternalError("session compaction event receiver was closed".to_string())
+    })
 }

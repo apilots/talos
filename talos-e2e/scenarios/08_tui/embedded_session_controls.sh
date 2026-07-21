@@ -14,7 +14,7 @@ build_binaries
 
 TEST_TALOS_HOME="$(make_e2e_temp_dir "talos-tui-session-controls-home")"
 export TALOS_HOME="${TEST_TALOS_HOME}"
-export TALOS_TEST_COMPACTION_THRESHOLD_BYTES=1024
+export TALOS_TEST_CONTEXT_COMPACTION_MAX_BYTES=1024
 prepare_talos_home
 
 WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
@@ -181,6 +181,25 @@ raise SystemExit(0 if valid else 1)
 PY
 }
 
+assert_cleared_artifacts() {
+  local session_dir="$1"
+  python3 - "${session_dir}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+session_dir = Path(sys.argv[1])
+sequence_path = session_dir / "sequence.json"
+if not session_dir.is_dir() or not sequence_path.is_file():
+    raise SystemExit(1)
+if any(session_dir.glob("*.jsonl")):
+    raise SystemExit(1)
+state = json.loads(sequence_path.read_text(encoding="utf-8"))
+valid = state.get("version") == 1 and state.get("next_turn_seq", 0) > 1
+raise SystemExit(0 if valid else 1)
+PY
+}
+
 mkdir -p "${WORKSPACE_DIR}"
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
   "cd '${WORKSPACE_DIR}' && TALOS_HOME='${TALOS_HOME}' '${TALOS_RS_DIR}/target/debug/talos'"
@@ -256,7 +275,7 @@ if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Session context cleared" 120 0.25 
   exit 1
 fi
 clear_model_selection="$(session_model_selection "${session_id}")"
-if [[ -e "${session_dir}" ]] || ! assert_cleared_database_state "${session_id}" || ! json_equal "${clear_model_selection}" "${initial_model_selection}"; then
+if ! assert_cleared_artifacts "${session_dir}" || ! assert_cleared_database_state "${session_id}" || ! json_equal "${clear_model_selection}" "${initial_model_selection}"; then
   dump_failure_context
   echo "CASE embedded_tui_session_controls_clear FAIL session_id=${session_id} session_dir=${session_dir} selection_before=${initial_model_selection} selection_after=${clear_model_selection}"
   exit 1
@@ -280,12 +299,12 @@ echo "CASE embedded_tui_session_controls_post_clear_turn PASS session_id=${sessi
 
 tui_send_command "${TUI_SESSION_NAME}" "/clear"
 for _ in $(seq 1 120); do
-  if [[ ! -e "${session_dir}" ]] && assert_cleared_database_state "${session_id}"; then
+  if assert_cleared_artifacts "${session_dir}" && assert_cleared_database_state "${session_id}"; then
     break
   fi
   sleep 0.25
 done
-if [[ -e "${session_dir}" ]] || ! assert_cleared_database_state "${session_id}"; then
+if ! assert_cleared_artifacts "${session_dir}" || ! assert_cleared_database_state "${session_id}"; then
   dump_failure_context
   echo "CASE embedded_tui_session_controls_cleanup_clear FAIL session_id=${session_id}"
   exit 1

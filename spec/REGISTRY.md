@@ -8,13 +8,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 032 |
 | `fix` | 005 |
-| `refactor` | 039 |
+| `refactor` | 040 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| refactor-039 | `refactor-039-memory-storage-retrieval` | draft |
 | refactor-038 | `refactor-038-llm-model-selection` | active |
 | feat-031 | `feat-031-profile-usage-statistics` | active |
 

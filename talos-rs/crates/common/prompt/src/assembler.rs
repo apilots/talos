@@ -9,7 +9,6 @@ use std::path::Path;
 use std::process::Command;
 use talos_config::parse_timezone;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::{Memory, SessionPromptContextConfig};
 use talos_skills::{SkillPromptContext, SkillPromptInjection};
 
 fn section(kind: PromptSectionKind, payload: impl Into<String>) -> PromptSection {
@@ -287,15 +286,15 @@ fn build_session_summary_payload(summary_id: &str, content: &str) -> String {
     )
 }
 
-fn role_label(role: &talos_memory::TalosMessageRole) -> &'static str {
+fn role_label(role: &crate::TalosMessageRole) -> &'static str {
     match role {
-        talos_memory::TalosMessageRole::User => "user",
-        talos_memory::TalosMessageRole::Assistant => "assistant",
-        talos_memory::TalosMessageRole::System => "system",
+        crate::TalosMessageRole::User => "user",
+        crate::TalosMessageRole::Assistant => "assistant",
+        crate::TalosMessageRole::System => "system",
     }
 }
 
-fn build_recent_message_payload(role: &talos_memory::TalosMessageRole, text: &str) -> String {
+fn build_recent_message_payload(role: &crate::TalosMessageRole, text: &str) -> String {
     format!("- {}: {}", role_label(role), text.trim())
 }
 
@@ -353,7 +352,7 @@ fn build_capped_list_payload(lines: Vec<String>, max_chars: usize) -> Option<Str
 }
 
 fn build_recent_messages_payload(
-    messages: &[talos_memory::TalosMessage],
+    messages: &[crate::SessionPromptMessage],
     max_chars: usize,
 ) -> Option<String> {
     let lines = messages
@@ -364,16 +363,16 @@ fn build_recent_messages_payload(
 }
 
 fn build_recent_tool_history_payload(
-    exchanges: &[talos_memory::SessionToolExchangeContext],
+    exchanges: &[crate::SessionToolExchangeContext],
     max_chars: usize,
 ) -> Option<String> {
     let lines = exchanges
         .iter()
         .map(|exchange| {
             let outcome = match exchange.outcome {
-                talos_memory::SessionToolExchangeOutcome::Succeeded => "succeeded",
-                talos_memory::SessionToolExchangeOutcome::Failed => "failed",
-                talos_memory::SessionToolExchangeOutcome::Pending => "pending",
+                crate::SessionToolExchangeOutcome::Succeeded => "succeeded",
+                crate::SessionToolExchangeOutcome::Failed => "failed",
+                crate::SessionToolExchangeOutcome::Pending => "pending",
             };
             let mut line = format!(
                 "- tool: {} | outcome: {} | args: {}",
@@ -401,7 +400,7 @@ fn build_recent_tool_history_payload(
 }
 
 fn build_recent_tool_outputs_payload(
-    results: &[talos_memory::SessionToolResultContext],
+    results: &[crate::SessionToolResultContext],
     max_chars: usize,
 ) -> Option<String> {
     let lines = results
@@ -421,26 +420,25 @@ fn build_recent_tool_outputs_payload(
     build_capped_list_payload(lines, max_chars)
 }
 
-fn build_retrieved_memories_payload(builder: &PromptBuilder<'_>) -> Option<String> {
-    let include_retrieved_memories = builder.config.load_policy.include_retrieved_memories;
-    if !include_retrieved_memories || builder.retrieved_memories.is_empty() {
-        return None;
-    }
-
-    let max_items = builder.config.load_policy.retrieved_memory_max_items.max(1);
-    let max_chars = builder.config.load_policy.retrieved_memory_max_chars.max(1);
-    let mut combined = String::new();
-    for item in builder.retrieved_memories.iter().take(max_items) {
-        let line = format!("- memory: {} => {}", item.path, item.snippet.trim());
-        if combined.len() + line.len() + 1 > max_chars {
-            break;
-        }
-        if !combined.is_empty() {
-            combined.push('\n');
-        }
-        combined.push_str(&line);
-    }
-    (!combined.is_empty()).then_some(combined)
+pub(crate) fn build_retrieved_memories_section(
+    memories: &[talos_types::MemoryInfo],
+    max_items: usize,
+    max_chars: usize,
+) -> Option<PromptSection> {
+    let lines = memories
+        .iter()
+        .take(max_items)
+        .map(|memory| {
+            format!(
+                "- {}: {}\n  {}",
+                memory.memory_id,
+                memory.title.trim(),
+                memory.body.trim()
+            )
+        })
+        .collect::<Vec<_>>();
+    build_capped_list_payload(lines, max_chars)
+        .map(|payload| section(PromptSectionKind::RetrievedMemories, payload))
 }
 
 fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> {
@@ -583,7 +581,7 @@ fn build_prepended_user_context_message(builder: &PromptBuilder<'_>) -> TalosRes
 fn build_static_prefix_sections(
     builder: &PromptBuilder<'_>,
     bootstrap_files: &[WorkspaceBootstrapFile],
-) -> (Vec<PromptSection>, Vec<BootstrapFileDiagnostic>) {
+) -> TalosResult<(Vec<PromptSection>, Vec<BootstrapFileDiagnostic>)> {
     let mut sections = vec![
         section(
             PromptSectionKind::IdentityCore,
@@ -619,7 +617,23 @@ fn build_static_prefix_sections(
     if builder.mode != PromptMode::None && builder.config.prompt.bootstrap.enabled {
         let per_file_limit = builder.config.prompt.bootstrap.max_chars_per_file.max(1);
         for file in bootstrap_files {
-            let (payload, diagnostic) = build_bootstrap_payload(file, per_file_limit);
+            let file_limit = if file.kind == crate::WorkspaceBootstrapFileKind::Memory {
+                let raw_chars = file
+                    .content
+                    .as_deref()
+                    .map(|content| content.chars().count())
+                    .unwrap_or(0);
+                if raw_chars > talos_types::MEMORY_FILE_MAX_CHARS {
+                    return Err(TalosError::ValidationError(format!(
+                        "MEMORY.md exceeds the {} character limit",
+                        talos_types::MEMORY_FILE_MAX_CHARS
+                    )));
+                }
+                talos_types::MEMORY_FILE_MAX_CHARS
+            } else {
+                per_file_limit
+            };
+            let (payload, diagnostic) = build_bootstrap_payload(file, file_limit);
             diagnostics.push(diagnostic);
             sections.push(section(regions::bootstrap_section_kind(file.kind), payload));
         }
@@ -632,7 +646,7 @@ fn build_static_prefix_sections(
             .unwrap_or(usize::MAX)
     });
 
-    (sections, diagnostics)
+    Ok((sections, diagnostics))
 }
 
 fn build_bootstrap_payload(
@@ -740,56 +754,18 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
         }
     }
 
-    if let (Some(memory_store), Some(session_id)) = (builder.memory_store, builder.session_id) {
+    if let Some(context) = builder.session_prompt_context.as_ref() {
         let include_summary = builder.config.load_policy.include_session_summary;
         let include_recent = builder.config.load_policy.include_recent_messages;
         let include_recent_tool_history = builder.config.load_policy.include_recent_tool_history;
         let include_recent_tool_outputs = builder.config.load_policy.include_recent_tool_outputs;
-        let context = memory_store
-            .build_session_prompt_context(
-                session_id,
-                &SessionPromptContextConfig {
-                    compact_cursor: builder.config.load_policy.compact_cursor,
-                    recent_window: Default::default(),
-                    recent_messages_limit: if include_recent {
-                        builder.config.load_policy.session_recent_limit
-                    } else {
-                        0
-                    },
-                    recent_tool_results_limit: if include_recent_tool_outputs {
-                        builder.config.load_policy.recent_tool_outputs_limit
-                    } else {
-                        0
-                    },
-                    tool_output_max_chars: if include_recent_tool_outputs {
-                        builder.config.load_policy.recent_tool_outputs_max_chars
-                    } else {
-                        0
-                    },
-                    recent_tool_exchanges_limit: if include_recent_tool_history {
-                        builder.config.load_policy.recent_tool_history_limit
-                    } else {
-                        0
-                    },
-                    tool_exchange_max_chars: if include_recent_tool_history {
-                        builder.config.load_policy.recent_tool_history_max_chars
-                    } else {
-                        0
-                    },
-                    include_summary,
-                    summary_recent_count: builder.config.load_policy.session_summary_recent_count,
-                    summary_max_chars: builder.config.load_policy.session_summary_max_chars,
-                },
-            )
-            .await?;
-
         if include_summary {
-            for summary in context.summaries {
+            for summary in &context.summaries {
                 let content = summary.content.trim();
                 if !content.is_empty() {
                     sections.push(section(
                         PromptSectionKind::SessionSummary,
-                        build_session_summary_payload(&summary.header.id, content),
+                        build_session_summary_payload(&summary.id, content),
                     ));
                 }
             }
@@ -821,10 +797,6 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
                 sections.push(section(PromptSectionKind::RecentToolOutputs, payload));
             }
         }
-    }
-
-    if let Some(payload) = build_retrieved_memories_payload(builder) {
-        sections.push(section(PromptSectionKind::RetrievedMemories, payload));
     }
 
     sections.sort_by_key(|section| {
@@ -920,7 +892,7 @@ pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptA
     bootstrap_files.extend(builder.load_project_bootstrap_files().await?);
 
     let (mut static_prefix_sections, bootstrap_diagnostics) =
-        build_static_prefix_sections(builder, &bootstrap_files);
+        build_static_prefix_sections(builder, &bootstrap_files)?;
     let mut dynamic_suffix_sections = load_dynamic_sections(builder).await?;
     budget::enrich_sections(&mut static_prefix_sections);
     budget::enrich_sections(&mut dynamic_suffix_sections);

@@ -7,6 +7,8 @@ use talos_config::{
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ReasoningOutput, Usage,
 };
+use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_store::session::FileSessionArtifactStore;
 use talos_tools::ToolRegistry;
 use talos_types::{ModelRef, ModelSelection};
 
@@ -14,6 +16,20 @@ use super::*;
 use crate::{empty_skill_roots_resolver, AgentHarness};
 
 struct TestLlmProvider;
+
+struct TestMemoryWriter;
+
+impl MemoryWriter for TestMemoryWriter {
+    fn write<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _batch: MemoryWriteBatch,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+}
 
 #[async_trait::async_trait]
 impl LlmProvider for TestLlmProvider {
@@ -195,6 +211,9 @@ fn factory_rejects_disabled_definition() {
         Arc::new(TestLlmProviderRouter),
         Arc::new(ToolRegistry::new()),
         empty_skill_roots_resolver(),
+        Arc::new(FileSessionArtifactStore::default()),
+        Arc::new(talos_store::session::MockSessionStore::new()),
+        Arc::new(TestMemoryWriter),
     );
 
     let error = match factory.build(&definition) {
@@ -215,6 +234,9 @@ fn factory_builds_kernel_agent_with_descriptor() {
         Arc::new(TestLlmProviderRouter),
         Arc::new(ToolRegistry::new()),
         empty_skill_roots_resolver(),
+        Arc::new(FileSessionArtifactStore::default()),
+        Arc::new(talos_store::session::MockSessionStore::new()),
+        Arc::new(TestMemoryWriter),
     );
 
     let agent = factory.build(&definition).expect("agent should build");

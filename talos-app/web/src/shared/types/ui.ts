@@ -1,4 +1,5 @@
 import type {
+  ContextCompactionStage,
   TalosContentItem,
   TalosPendingUserAction,
   TalosTimelineItemKind,
@@ -107,11 +108,23 @@ export type ChatTimelineItem =
   | {
       itemId: string;
       sourceItemId?: string;
-      kind: Exclude<TalosTimelineItemKind, "tool_call">;
+      kind: Exclude<TalosTimelineItemKind, "tool_call" | "context_compaction">;
       phase: TalosTimelinePhase;
       status: TalosTimelineItemStatus;
       title?: string | null;
       text: string;
+      startedAtMs: number;
+      completedAtMs?: number | null;
+    }
+  | {
+      itemId: string;
+      sourceItemId?: string;
+      kind: "context_compaction";
+      phase: TalosTimelinePhase;
+      status: TalosTimelineItemStatus;
+      title?: string | null;
+      text: string;
+      stage: ContextCompactionStage;
       startedAtMs: number;
       completedAtMs?: number | null;
     }

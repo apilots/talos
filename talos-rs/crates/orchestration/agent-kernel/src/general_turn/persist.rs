@@ -2,28 +2,20 @@ use super::*;
 use crate::{
     EventAuthor, ExecutionBranch, InvocationSession, KernelTranscriptEvent,
     KernelTranscriptEventKind, KernelTranscriptPayload, KernelTranscriptService,
-    MemoryBackedKernelTranscriptService,
 };
 
 pub async fn persist_general_turn_artifacts(
     prepared: &PreparedGeneralTurn,
     input: &str,
     executed: &ExecutedTurnArtifacts,
-    _llm_provider: Arc<dyn LlmProvider>,
-    memory_store: Arc<MemoryStore>,
-    _kernel_config: &AgentKernelConfig,
-) {
-    let seq = match memory_store.next_turn_seq(&prepared.session_id).await {
-        Ok(seq) => seq,
-        Err(err) => {
-            warn!(
-                session_id = %prepared.session_id,
-                error = %err,
-                "failed to allocate next turn seq"
-            );
-            return;
-        }
-    };
+    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
+    transcript_service: Option<Arc<dyn KernelTranscriptService>>,
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<u64> {
+    let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
+    let seq = session_artifact_store
+        .next_turn_seq(workspace_root, &prepared.session_id)
+        .await?;
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
     let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
@@ -33,7 +25,7 @@ pub async fn persist_general_turn_artifacts(
         });
     }
     items.extend(executed.output_items.clone());
-    let talos_turn = TalosTurn {
+    let talos_turn = talos_store::session::TalosTurn {
         turn_id: turn_id.clone(),
         message_id: prepared.message_id.clone(),
         session_id: prepared.session_id.to_string(),
@@ -43,15 +35,19 @@ pub async fn persist_general_turn_artifacts(
         usage: executed.usage.clone(),
         stop_reason: to_api_stop_reason(executed.stop_reason),
     };
-    if let Err(err) = memory_store.append_turn(&talos_turn).await {
-        warn!(
-            session_id = %prepared.session_id,
-            error = %err,
-            "failed to append memory store turn"
-        );
-    }
+    session_artifact_store
+        .append_turn(workspace_root, &talos_turn)
+        .await?;
 
-    let transcript_service = MemoryBackedKernelTranscriptService::new(memory_store);
+    let Some(transcript_service) = transcript_service else {
+        if !executed.pending_dynamic_requests.is_empty() {
+            warn!(
+                session_id = %prepared.session_id,
+                "pending dynamic transcript was not persisted because no session port is configured"
+            );
+        }
+        return Ok(seq);
+    };
     let mut session = InvocationSession {
         session_id: prepared.session_id.clone(),
         ..InvocationSession::default()
@@ -81,4 +77,5 @@ pub async fn persist_general_turn_artifacts(
             );
         }
     }
+    Ok(seq)
 }

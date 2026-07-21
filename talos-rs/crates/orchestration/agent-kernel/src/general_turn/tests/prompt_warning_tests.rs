@@ -8,9 +8,9 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir));
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -42,10 +42,8 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
 
     let result = execute_general_turn_loop(
         prepared,
-        "talos",
         provider,
         tool_registry.clone(),
-        memory_store,
         &AgentKernelConfig::default(),
     )
     .await
@@ -66,7 +64,7 @@ async fn test_run_general_turn_emits_prompt_warning_event() {
         "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
     )
     .expect("soul file should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
@@ -108,7 +106,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
         "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
     )
     .expect("soul file should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { cancelActiveTurn } from "../api";
+import { cancelActiveTurn, isActiveTurnRunningError } from "../api";
 import { useSessionMessageStream } from "./useSessionMessageStream";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
@@ -16,8 +16,7 @@ export function useSessionStreaming(
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const resetStream = useAppStore((state) => state.resetStream);
   const setPendingInput = useAppStore((state) => state.setPendingInput);
-  const { eventMessage, cancelStream, reconnectMessage, retryMessage, hasActiveConnection } =
-    useSessionMessageStream(sessionId);
+  const { eventMessage, cancelStream, retryMessage } = useSessionMessageStream(sessionId);
   const { invalidateSessionQueries, refreshSessionTitleAfterTurn } =
     useSessionQueryInvalidation(sessionId);
 
@@ -110,6 +109,17 @@ export function useSessionStreaming(
     },
     onError: async (error) => {
       const currentStream = useAppStore.getState().streams[sessionId];
+      if (isActiveTurnRunningError(error)) {
+        useAppStore.getState().setPendingInput(sessionId, undefined);
+        useAppStore.getState().setStreamError(sessionId, "Context compacting... Please wait.");
+        useAppStore.getState().setStreamMeta(sessionId, {
+          isStreaming: false,
+          connectionState: "idle",
+          activeMessageId: undefined,
+          awaitingFinalResponse: false,
+        });
+        return;
+      }
       const errorName = error instanceof Error ? error.name : "";
       const isAbort = errorName === "AbortError";
       const isCancelling = currentStream?.connectionState === "cancelling";
@@ -207,8 +217,6 @@ export function useSessionStreaming(
   });
 
   return {
-    hasActiveConnection,
-    reconnectMessage,
     sendMutation,
     stopMutation,
     streamState,

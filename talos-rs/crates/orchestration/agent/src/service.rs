@@ -20,6 +20,27 @@ use crate::{
 
 pub use talos_types::talos::AgentEvent;
 
+/// Correlation identity for one explicit session compaction execution.
+///
+/// Service creates the identity once. Harness uses it only for the existing
+/// timeline event stream and must not persist it as conversation content.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSessionCompactionIdentity {
+    pub request_id: String,
+    pub turn_id: String,
+    pub message_id: String,
+}
+
+/// Inputs required by Harness to run and stream an explicit session compaction.
+///
+/// This boundary carries the product session and the existing Agent event sink.
+/// It must not grow transport, Gateway, or UI concerns.
+pub struct AgentSessionCompactionParams {
+    pub session: TalosSession,
+    pub identity: AgentSessionCompactionIdentity,
+    pub event_tx: mpsc::Sender<AgentEvent>,
+}
+
 /// Minimal execution context prepared for an Agent run.
 ///
 /// This context gives Harness and Runtime a stable Agent-domain view of the
@@ -451,18 +472,15 @@ pub trait AgentHarness: Send + Sync {
     fn take_generated_session_title(&self, _session_id: &str, _turn_id: &str) -> Option<String> {
         None
     }
-    /// Compact Agent-maintained session context and return token usage.
-    async fn compact_session(&self, session: TalosSession) -> TalosResult<TokenUsage>;
+    /// Compact Agent-maintained session context and stream existing timeline events.
+    async fn compact_session(
+        &self,
+        params: AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage>;
     /// Clear Agent-maintained session state without deleting product records.
     async fn clear_session(&self, session: TalosSession) -> TalosResult<()>;
     /// Close Agent-maintained session resources.
     async fn close_session(&self, session: TalosSession) -> TalosResult<()>;
-    /// Wait for pending Harness-owned memory flushes to finish.
-    async fn drain_memory_flushes(&self, timeout: Duration) -> TalosResult<()>;
-    /// Return the number of Harness-owned memory flushes still pending.
-    fn pending_memory_flushes(&self) -> usize;
-    /// Check whether a session has pending Harness-owned memory flushes.
-    async fn has_pending_memory_flush(&self, session_id: &str) -> bool;
     /// Check whether Harness currently owns an in-memory active run.
     fn has_active_turn(&self, session_id: &str) -> bool;
     /// Interrupt an active Agent run by product session and turn identity.

@@ -6,6 +6,8 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
+use talos_memory::MemoryWriter;
+use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
 use talos_types::ModelSelection;
 
@@ -167,6 +169,9 @@ pub struct AgentHarnessFactory {
     llm_provider_router: Arc<dyn LlmProviderRouter>,
     tool_registry: Arc<ToolRegistry>,
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    session_artifact_store: Arc<dyn SessionArtifactStore>,
+    session_store: Arc<dyn SessionStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
 }
 
 impl AgentHarnessFactory {
@@ -175,11 +180,17 @@ impl AgentHarnessFactory {
         llm_provider_router: Arc<dyn LlmProviderRouter>,
         tool_registry: Arc<ToolRegistry>,
         skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+        session_artifact_store: Arc<dyn SessionArtifactStore>,
+        session_store: Arc<dyn SessionStore>,
+        memory_writer: Arc<dyn MemoryWriter>,
     ) -> Self {
         Self {
             llm_provider_router,
             tool_registry,
             skill_roots_resolver,
+            session_artifact_store,
+            session_store,
+            memory_writer,
         }
     }
 
@@ -196,7 +207,7 @@ impl AgentHarnessFactory {
         }
         match (&definition.kind, &definition.runtime_config) {
             (AgentKind::Kernel, AgentRuntimeConfig::Kernel { kernel }) => {
-                AgentHarnessImpl::new_with_skill_roots_resolver(AgentHarnessParams {
+                AgentHarnessImpl::new(AgentHarnessParams {
                     id: definition.id.clone(),
                     name: definition.name.clone(),
                     description: definition.description.clone(),
@@ -205,6 +216,9 @@ impl AgentHarnessFactory {
                     tool_registry: self.tool_registry.clone(),
                     kernel_config: kernel.clone(),
                     skill_roots_resolver: self.skill_roots_resolver.clone(),
+                    session_artifact_store: self.session_artifact_store.clone(),
+                    session_store: self.session_store.clone(),
+                    memory_writer: self.memory_writer.clone(),
                 })
             }
             (kind, _) => Err(TalosError::UnsupportedModel(format!(

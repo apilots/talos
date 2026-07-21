@@ -207,34 +207,31 @@ async fn test_prompt_builder_keeps_active_skill_instructions_when_trimming_dynam
 
 #[tokio::test]
 async fn test_prompt_builder_keeps_history_without_legacy_budget_caps() {
-    let memory = MemoryStore::new(std::env::temp_dir().join(Uuid::new_v4().to_string()));
-    for idx in 0..6 {
-        let turn_id = format!("turn-{idx}");
-        let timestamp = Utc::now();
-        memory
-            .append_turn(&TalosTurn {
-                turn_id: turn_id.clone(),
-                message_id: "msg-1".to_string(),
-                session_id: "s1".to_string(),
-                seq: memory.next_turn_seq("s1").await.expect("seq should load"),
-                timestamp,
-                items: vec![
-                    RunItem::UserInput {
-                        text: format!("historical user {}", idx),
-                    },
-                    RunItem::OutputText {
-                        text: format!("historical message {}", idx),
-                    },
-                ],
-                usage: TokenUsage::default(),
-                stop_reason: StopReason::EndTurn,
-            })
-            .await
-            .expect("append should succeed");
-    }
+    let recent_messages = (0..6)
+        .flat_map(|index| {
+            [
+                SessionPromptMessage {
+                    id: format!("user-{index}"),
+                    role: TalosMessageRole::User,
+                    text: format!("historical user {index}"),
+                },
+                SessionPromptMessage {
+                    id: format!("assistant-{index}"),
+                    role: TalosMessageRole::Assistant,
+                    text: format!("historical message {index}"),
+                },
+            ]
+        })
+        .collect();
 
     let assembly = PromptBuilder::new()
-        .memory_store("s1", &memory)
+        .session_prompt_context(
+            "s1",
+            SessionPromptContext {
+                recent_messages,
+                ..Default::default()
+            },
+        )
         .user_input("latest")
         .assemble()
         .await

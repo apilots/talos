@@ -15,7 +15,7 @@ async fn test_get_active_turn_handler_returns_active_state() {
             updated_at: 123,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route(
             "/v1/sessions/:session_id/active-turn",
@@ -68,7 +68,7 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
             updated_at: 125,
         },
     );
-    let state = test_state_with_event_store(false, event_store);
+    let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route(
             "/v1/sessions/:session_id/active-turn",
@@ -109,7 +109,7 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
 
 #[tokio::test]
 async fn test_interrupt_turn_handler_returns_success() {
-    let state = test_state(false);
+    let state = test_state(false).await;
 
     let result = interrupt_turn_handler(
         State(state),

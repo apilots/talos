@@ -38,8 +38,8 @@ use self::events::{
 use self::fs::{create_directory_handler, read_directory_handler};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
-    get_memory_file_handler, list_memory_files_handler, put_memory_file_handler,
-    search_memory_files_handler,
+    get_memory_file_handler, get_memory_handler, list_memory_files_handler,
+    put_memory_file_handler, search_memory_files_handler,
 };
 use self::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
@@ -197,6 +197,7 @@ impl HttpServer {
                 get(get_memory_file_handler).put(put_memory_file_handler),
             )
             .route("/v1/memory/search", get(search_memory_files_handler))
+            .route("/v1/memory/entries/:memory_id", get(get_memory_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
             .route("/v1/workspace/info", get(get_workspace_info_handler))
             .route(

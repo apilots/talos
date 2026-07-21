@@ -138,3 +138,25 @@ async fn test_prompt_builder_uses_absent_placeholder_for_missing_bootstrap_slot(
         .expect("heartbeat bootstrap slot should exist");
     assert!(heartbeat.payload.contains("file_state: absent"));
 }
+
+#[tokio::test]
+async fn test_prompt_builder_rejects_oversized_memory() {
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
+    std::fs::write(
+        workspace_dir.join("MEMORY.md"),
+        "x".repeat(talos_types::MEMORY_FILE_MAX_CHARS + 1),
+    )
+    .expect("memory file should write");
+    let mut config = PromptBuildConfig::default();
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+
+    let error = PromptBuilder::new()
+        .config(config)
+        .user_input("bootstrap")
+        .assemble()
+        .await
+        .expect_err("oversized memory should fail prompt build");
+
+    assert!(matches!(error, talos_error::TalosError::ValidationError(_)));
+}

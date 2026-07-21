@@ -64,13 +64,14 @@ fn turn_completed(turn_id: &str, message_id: &str, sequence: u64) -> AgentEvent 
             stop_reason: StopReason::EndTurn,
             usage: TokenUsage::default(),
             metrics: None,
+            artifact_seq: None,
         }),
     )
 }
 
 #[tokio::test]
 async fn test_subscribe_timeline_events_replays_after_cursor() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let first = state
         .event_service
         .record_talos_event(turn_started("turn-1", "msg-1", 0))
@@ -93,7 +94,7 @@ async fn test_subscribe_timeline_events_replays_after_cursor() {
         .oneshot(
             Request::builder()
                 .uri(format!(
-                    "/v1/sessions/mock-session/events?after_event_id={}",
+                    "/v1/sessions/mock-session/events?after_event_id={}&close_when_idle=true",
                     first.event_id
                 ))
                 .body(Body::empty())
@@ -115,7 +116,7 @@ async fn test_subscribe_timeline_events_replays_after_cursor() {
 
 #[tokio::test]
 async fn test_subscribe_timeline_events_replay_continues_after_historical_terminal() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     state
         .event_service
         .record_talos_event(turn_completed("turn-1", "msg-1", 0))
@@ -143,7 +144,7 @@ async fn test_subscribe_timeline_events_replay_continues_after_historical_termin
     let resp = app
         .oneshot(
             Request::builder()
-                .uri("/v1/sessions/mock-session/events")
+                .uri("/v1/sessions/mock-session/events?close_when_idle=true")
                 .body(Body::empty())
                 .expect("request should build"),
         )
@@ -162,7 +163,7 @@ async fn test_subscribe_timeline_events_replay_continues_after_historical_termin
 
 #[tokio::test]
 async fn test_subscribe_timeline_events_filters_replay_by_turn() {
-    let state = test_state(false);
+    let state = test_state(false).await;
     let first_terminal = state
         .event_service
         .record_talos_event(turn_completed("turn-1", "msg-1", 0))
@@ -190,7 +191,7 @@ async fn test_subscribe_timeline_events_filters_replay_by_turn() {
     let resp = app
         .oneshot(
             Request::builder()
-                .uri("/v1/sessions/mock-session/events?turn_id=turn-2")
+                .uri("/v1/sessions/mock-session/events?turn_id=turn-2&close_when_idle=true")
                 .body(Body::empty())
                 .expect("request should build"),
         )

@@ -22,35 +22,6 @@ async fn test_register_agent() {
 }
 
 #[tokio::test]
-async fn test_drain_memory_flushes_delegates_to_registered_agents() {
-    let mock_router = Arc::new(MockRouter::new());
-    let coordinator = CoordinatorImpl::new(mock_router);
-
-    let drained = Arc::new(AtomicUsize::new(0));
-    coordinator
-        .register_agent(
-            "agent-a",
-            Arc::new(TrackingFlushAgent::new("agent-a", 1, drained.clone())),
-        )
-        .await
-        .expect("first agent should register");
-    coordinator
-        .register_agent(
-            "agent-b",
-            Arc::new(TrackingFlushAgent::new("agent-b", 2, drained.clone())),
-        )
-        .await
-        .expect("second agent should register");
-
-    assert_eq!(coordinator.pending_memory_flushes().await, 3);
-    coordinator
-        .drain_memory_flushes(Duration::from_secs(1))
-        .await
-        .expect("coordinator should drain all agents");
-    assert_eq!(drained.load(Ordering::SeqCst), 2);
-}
-
-#[tokio::test]
 async fn test_handle_stream_returns_agent_events() {
     let mock_router = Arc::new(MockRouter::with_target(Some("mock")));
     let coordinator = CoordinatorImpl::new(mock_router);

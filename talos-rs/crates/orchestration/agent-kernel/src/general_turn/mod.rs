@@ -5,7 +5,8 @@ use crate::{
     InvocationContext, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
     KernelEventType, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
     KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
-    KernelWarning, PromptWarningEventData, StopReason, ThinkingDeltaStreamData,
+    KernelWarning, PromptWarningEventData, SessionPromptContextConfig, SessionPromptRecentWindow,
+    SessionToolExchangeOutcome, StopReason, TalosMessageRole, ThinkingDeltaStreamData,
     ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
 };
 use chrono::Utc;
@@ -20,18 +21,14 @@ use talos_llm_provider::{
     ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningContinuation, ReasoningEffort,
     ReasoningOutput, ToolChoice, ToolDefinition,
 };
-use talos_memory::{
-    memory_search_response_into_retrieved_items, strip_json_fences, Memory, MemoryGetResult,
-    MemorySearchResponse, MemoryStore, RecordHeader, RetrievedMemoryItem, SessionMemorySummary,
-    SessionPromptContextConfig, SessionPromptRecentWindow, SummaryRecord, TalosMessageRole,
-    TalosTurn, ToolCallRecord,
-};
+use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_prompt::{
     render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
     PromptBuilder, PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState,
     SessionContinuity, SessionHistoryCompaction, SessionHistoryCompactionOutcome,
     SessionHistoryCompactionTrigger,
 };
+use talos_store::session::{RecordHeader, SummaryRecord};
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
@@ -39,11 +36,13 @@ use talos_types::talos::{
     DynamicToolArguments, RunItem, StopReason as TalosApiStopReason, TalosContentItem, TokenUsage,
     TurnExecutionMetrics,
 };
+use talos_types::MemoryGetResponse;
 use tokio::sync::mpsc;
 use tracing::warn;
+use types::CompactionMemoryOutput;
 use uuid::Uuid;
 
-const MEMORY_SUMMARY_PROMPT: &str = r#"Extract durable memory from this conversation as JSON.
+const MEMORY_COMPACTION_PROMPT: &str = r#"Extract durable memory from this conversation as JSON.
 Return ONLY valid JSON, no markdown fences, no explanation.
 
 Schema:
@@ -52,18 +51,29 @@ Schema:
   "facts": ["..."],
   "preferences": ["..."],
   "open_tasks": ["..."],
-  "risks": ["..."]
+  "risks": ["..."],
+  "memory_candidates": [
+    {
+      "title": "durable memory title",
+      "body": "durable fact, preference, decision, task, or episode",
+      "kind": "preference" | "fact" | "decision" | "task" | "episode",
+      "importance": "low" | "normal" | "high"
+    }
+  ]
 }
 
 Omit any field whose array would be empty. Keep total under 200 words.
+Return at most 8 memory_candidates. Exclude transient logs and unstable details.
 Use the same language as the conversation transcript for all field values."#;
 
+mod daily_memory;
 mod finalize;
 mod guard;
 mod loop_run;
 mod memory_summary;
 mod persist;
 mod prepare;
+mod prepare_compaction;
 mod prepare_continuity;
 #[cfg(test)]
 mod prepare_tests;
@@ -78,6 +88,7 @@ mod working_context;
 #[cfg(test)]
 mod working_context_tests;
 
+pub use daily_memory::form_daily_session_memory;
 pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
@@ -91,15 +102,14 @@ pub use loop_run::{
     execute_general_turn_loop_with_resume,
 };
 pub use memory_summary::{
-    flush_session_memory, flush_session_memory_with_report, MemoryFlushPolicy,
-    MemoryFlushUsageReport,
+    compact_session_memory, MemoryCompactionPolicy, MemoryFormationParams, MemoryFormationReport,
 };
 pub use persist::persist_general_turn_artifacts;
 pub use prepare::prepare_general_turn;
+pub use prepare::SESSION_COMPACTION_STATE_KEY;
 pub(crate) use prepare::{next_session_compaction_state, stage_session_state_update};
 pub(crate) use prepare::{
-    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_COMPACTION_STATE_KEY,
-    SESSION_CONTINUITY_STATE_KEY,
+    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
 };
 pub(crate) use prepare_continuity::build_session_continuity;
 pub use run::{run_general_turn, run_general_turn_with_resume};

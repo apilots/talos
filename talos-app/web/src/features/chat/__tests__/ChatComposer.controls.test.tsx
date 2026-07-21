@@ -2,7 +2,7 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
@@ -97,6 +97,67 @@ describe("ChatComposer controls", () => {
     fireEvent.click(stopButton);
 
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the draft and blocks submission during context compaction", () => {
+    const onCancel = vi.fn();
+    const onSend = vi.fn();
+    renderControlledComposer({ contextCompactionStage: "summarizing", initialDraft: "keep this draft", onCancel, onSend });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Context compacting... summarizing");
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(getComposerInput()).toHaveValue("keep this draft");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters and executes slash commands from the composer", () => {
+    const onCommand = vi.fn();
+    renderControlledComposer({ initialDraft: "/c", onCommand });
+
+    expect(screen.getByTestId("command-suggestions")).toBeInTheDocument();
+    expect(screen.getByText("/compact")).toBeInTheDocument();
+    expect(screen.getByText("/clear")).toBeInTheDocument();
+    expect(screen.queryByText("/status")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(getComposerInput(), { key: "ArrowDown" });
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
+
+    expect(onCommand).toHaveBeenCalledWith("clear");
+    expect(getComposerInput()).toHaveValue("");
+  });
+
+  it("preserves a slash command when the session command is rejected", async () => {
+    const onCommand = vi.fn().mockRejectedValue(new Error("session is busy"));
+    renderControlledComposer({ initialDraft: "/clear", onCommand });
+
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
+
+    await waitFor(() => expect(onCommand).toHaveBeenCalledWith("clear"));
+    expect(getComposerInput()).toHaveValue("/clear");
+  });
+
+  it("preserves a new draft when an async command completes", async () => {
+    let resolveCommand: (() => void) | undefined;
+    const onCommand = vi.fn(() => new Promise<void>((resolve) => { resolveCommand = resolve; }));
+    renderControlledComposer({ initialDraft: "/compact", onCommand });
+
+    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
+    fireEvent.change(getComposerInput(), { target: { value: "keep this draft" } });
+    await act(async () => resolveCommand?.());
+
+    expect(getComposerInput()).toHaveValue("keep this draft");
+  });
+
+  it("dismisses slash command suggestions with Escape", () => {
+    renderControlledComposer({ initialDraft: "/", onCommand: vi.fn() });
+
+    expect(screen.getByTestId("command-suggestions")).toBeInTheDocument();
+    fireEvent.keyDown(getComposerInput(), { key: "Escape" });
+
+    expect(screen.queryByTestId("command-suggestions")).not.toBeInTheDocument();
   });
 
   it("shows full access as the current agent access mode with its description", () => {

@@ -1,3 +1,4 @@
+pub mod memory;
 pub mod migration;
 pub mod profile;
 pub mod project;

@@ -17,6 +17,8 @@ class FakeBridge implements AppServerBridge {
   private subscriptionTerminatedHandler?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
   private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
 
+  constructor(private readonly subscriptionPrefix = "sub") {}
+
   connect(): Promise<AppProtocol.InitializeResponse> {
     this.connected = true;
     return Promise.resolve({
@@ -40,7 +42,7 @@ class FakeBridge implements AppServerBridge {
     if (method === "event.subscribe") {
       const request = params as AppProtocol.SubscribeTimelineRequest;
       return Promise.resolve({
-        subscription_id: `sub-${this.requests.length}`,
+        subscription_id: `${this.subscriptionPrefix}-${this.requests.length}`,
         session_id: request.session_id,
         high_water_mark_event_id: request.since_event_id,
       } satisfies AppProtocol.SubscribeTimelineResponse as T);
@@ -101,7 +103,7 @@ describe("DesktopAppServerController", () => {
     const controller = new DesktopAppServerController({
       restartDelayMs: 10,
       bridgeFactory: () => {
-        const bridge = new FakeBridge();
+        const bridge = new FakeBridge(`bridge-${bridges.length}`);
         bridges.push(bridge);
         return bridge;
       },

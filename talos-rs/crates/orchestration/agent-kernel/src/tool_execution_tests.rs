@@ -83,9 +83,6 @@ async fn test_parallel_tool_executor_preserves_input_order() {
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
-        memory_store: Arc::new(MemoryStore::new(
-            std::env::temp_dir().join("tool-executor-1"),
-        )),
         dynamic_tool_results: HashMap::new(),
     };
     let calls = vec![
@@ -142,9 +139,6 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
-        memory_store: Arc::new(MemoryStore::new(
-            std::env::temp_dir().join("tool-executor-2"),
-        )),
         dynamic_tool_results: HashMap::new(),
     };
     let calls = vec![
@@ -187,9 +181,6 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
-        memory_store: Arc::new(MemoryStore::new(
-            std::env::temp_dir().join("tool-executor-progress"),
-        )),
         dynamic_tool_results: HashMap::new(),
     };
     let mut scheduler = StreamingToolScheduler::new(

@@ -1087,7 +1087,7 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
     let tool_registry = Arc::new(ToolRegistry::new());
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -1150,13 +1150,11 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     let request = ChatRequest::new_user("Read the sample file", "streaming-tool-execution");
     let registry = Arc::new(ToolRegistry::new());
     register_core_local_tools(registry.as_ref());
-    let memory_store = Arc::new(MemoryStore::new(workspace_dir.clone()));
     let execution_context = ToolExecutionContext {
         session_id: "agent-a1".to_string(),
         user_id: "talos".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
-        memory_store,
         dynamic_tool_results: std::collections::HashMap::new(),
     };
     let (tx, mut rx) = mpsc::channel(16);

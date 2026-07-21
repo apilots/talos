@@ -18,6 +18,20 @@ import { getTalosClient } from "@/shared/api/client";
 import { isUnboundProject } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
 
+const APP_SERVER_ACTIVE_TURN_RUNNING = -32013;
+
+export function isActiveTurnRunningError(error: unknown) {
+  if (error instanceof TalosHttpError) {
+    return error.status === 409;
+  }
+  return Boolean(
+    error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === APP_SERVER_ACTIVE_TURN_RUNNING,
+  );
+}
+
 function createContext(userId: string): TalosContext {
   const randomPart = Math.random().toString(36).slice(2, 10);
   return {
@@ -225,49 +239,44 @@ export async function recoverTimelineLiveTail(sessionId: string, afterEventId?: 
   return response.snapshot;
 }
 
-export async function sendTimelineEvents(
+export async function startTimelineTurn(
   request: StartTurnRequest,
-  onEvent: (event: TimelineEventEnvelope) => void,
-  signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
-) {
+): Promise<string> {
   const client = getTalosClient();
   const ack = await client.turns.start(request);
   if (!ack.message_id) {
     throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
+  return ack.message_id;
 }
 
-export async function retryTimelineEvents(
+export async function retryTimelineTurn(
   request: RetryTurnRequest,
-  onEvent: (event: TimelineEventEnvelope) => void,
-  signal?: AbortSignal,
   onAcceptedMessageId?: (messageId: string) => void,
-) {
+): Promise<string> {
   const client = getTalosClient();
   const ack = await client.turns.retry(request);
   if (!ack.message_id) {
     throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
   }
   onAcceptedMessageId?.(ack.message_id);
-  return client.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
+  return ack.message_id;
 }
 
-export async function subscribeTimelineEventsForMessage(
+export async function subscribeTimelineEvents(
   sessionId: string,
-  messageId: string,
   onEvent: (event: TimelineEventEnvelope) => void,
   signal?: AbortSignal,
   afterEventId?: string,
 ) {
-  return getTalosClient().turns.eventsForMessage(
+  return getTalosClient().turns.events(
     sessionId,
-    messageId,
+    afterEventId,
     onEvent,
     signal,
-    afterEventId,
+    { persistent: true },
   );
 }
 

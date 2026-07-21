@@ -20,7 +20,7 @@ pub use access::{Actor, CreateSessionRequest};
 pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook};
 pub use history::SessionHistoryService;
-pub use memory::{MemoryDate, MemoryListCommand, MemorySearchCommand, MemoryService};
+pub use memory::{MemoryDailyMaintenance, MemoryDailyMaintenanceReport, MemoryService};
 pub use plugin::PluginManagerService;
 pub use profile::{ProfileService, ProfileUsageRetention};
 pub use service::{ServiceResult, TalosService};

@@ -30,14 +30,15 @@ use talos_llm_provider::{
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    Actor, AgentDispatchTurnExecutor, CreateSessionRequest, PluginManagerService, TalosService,
-    TimelineSubscribeCommand, TimelineSubscriptionMessage,
+    Actor, AgentDispatchTurnExecutor, CreateSessionRequest, MemoryService, PluginManagerService,
+    TalosService, TimelineSubscribeCommand, TimelineSubscriptionMessage,
 };
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_store::memory::MemoryStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_store::session::{
-    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
-    TimelineEventStore,
+    ActiveTurnStore, DatabaseSessionStore, FileSessionArtifactStore, MessageIdempotencyStore,
+    SessionArtifactStore, SessionStore, TimelineEventStore,
 };
 use talos_tools::{
     register_collaboration_tools, register_core_local_tools, register_network_tools,
@@ -51,7 +52,6 @@ use talos_types::{
     AgentDispatchRuntime, McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource,
     McpTransportDefinition, StartTurnRequest, TalosContext, TalosSession,
 };
-use tokio::signal;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -335,7 +335,6 @@ impl CollaborationAgentHost for ApplicationCollaborationHost {
     }
 }
 
-const MEMORY_FLUSH_DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 const SERVER_SHUTDOWN_WAIT_TIMEOUT: Duration = Duration::from_secs(180);
 
 pub async fn run_app_server() -> TalosResult<()> {
@@ -568,7 +567,7 @@ impl TalosServerRuntime {
 
         let signal_shutdown = shutdown_token.clone();
         let signal_task = tokio::spawn(async move {
-            shutdown_signal().await;
+            application_automation::shutdown_signal().await;
             signal_shutdown.cancel();
         });
 
@@ -728,7 +727,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
     let event_service = Arc::new(TimelineEventService::new(
         event_store,
-        active_turn_store,
+        active_turn_store.clone(),
         TimelineEventRetentionConfig {
             retention_hours: config.agent.kernel.timeline_events.retention_hours,
             max_events_per_session: config.agent.kernel.timeline_events.max_events_per_session,
@@ -758,7 +757,6 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
 
     let initial_llm_provider = create_llm_provider(&config)?;
     let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
-    let llm_provider: Arc<dyn LlmProvider> = reloadable_llm_provider.clone();
     let llm_router_config = Arc::new(RwLock::new(config.clone()));
     let llm_router_config_for_factory = llm_router_config.clone();
     let reloadable_llm_provider_router = Arc::new(ReloadableLlmProviderRouter::new(Arc::new(
@@ -790,11 +788,21 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
         plugins: plugin_manager_service.clone(),
     });
+    let session_artifact_store: Arc<dyn SessionArtifactStore> =
+        Arc::new(FileSessionArtifactStore::default());
+    let memory_database = config.talos_paths().data_dir.join("memory-index.sqlite");
+    let memory_store = Arc::new(MemoryStore::open(&memory_database).await?);
+    let memory_service = MemoryService::new(config.clone(), memory_store)?;
+    memory_service.rebuild_known_scopes().await?;
+    tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
 
     let agent_factory = AgentHarnessFactory::new(
-        llm_provider_router,
+        llm_provider_router.clone(),
         tool_registry.clone(),
         skill_roots_resolver,
+        session_artifact_store.clone(),
+        session_store_impl.clone(),
+        Arc::new(memory_service.clone()),
     );
 
     let coordinator = Arc::new(CoordinatorImpl::new(router));
@@ -846,12 +854,13 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         turn_executor,
         session_runtime,
         session_store,
+        session_artifact_store.clone(),
         project_store,
         profile_store.clone(),
         event_service.clone(),
         idempotency_store,
         config.clone(),
-        llm_provider.clone(),
+        memory_service.clone(),
         llm_config_service,
         model_catalog,
         auth_service.clone(),
@@ -867,9 +876,20 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
     }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
-    let automation = application_automation::start_profile_usage(
+    let memory_maintenance = talos_service::MemoryDailyMaintenance::new(
+        session_store_impl,
+        active_turn_store,
+        session_artifact_store,
+        memory_service,
+        llm_provider_router,
+        config.clone(),
+        config.automation.memory_daily_maintenance.clone(),
+    );
+    let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
+        memory_maintenance,
+        config.automation.memory_daily_maintenance.clone(),
         talos_config::parse_timezone(&config.timezone)?,
     )
     .await?;
@@ -903,30 +923,6 @@ fn apply_runtime_options(mut config: Config, options: Option<&TalosServerOptions
     }
 
     config
-}
-
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("Failed to install Ctrl+C handler");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("Failed to install signal handler")
-            .recv()
-            .await;
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }
 
 fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {

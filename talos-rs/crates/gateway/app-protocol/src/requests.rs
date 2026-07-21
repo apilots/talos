@@ -10,17 +10,18 @@ use talos_types::{
     AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, ConfigDeleteRequest,
     ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest, EventUnsubscribeRequest,
     FsDirectoryCreateRequest, FsDirectoryReadRequest, InterruptTurnRequest, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, MemorySearchRequest, ModelListRequest,
-    PluginDisableRequest, PluginEnableRequest, PluginInstallRequest, PluginListRequest,
-    PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest, PluginSourceListRequest,
-    PluginSourceRefreshRequest, PluginSourceRemoveRequest, PluginUninstallRequest,
-    PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest, ProjectDeleteRequest,
-    ProjectListRequest, ProjectPatchRequest, ProjectReadRequest, RecoverTimelineRequest,
-    RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
-    SessionCompactRequest, SessionDeleteRequest, SessionGetRequest, SessionHistoryRequest,
-    SessionListRequest, SessionPatchRequest, StartTurnRequest, SubmitDynamicToolResultRequest,
-    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+    MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest,
+    ModelListRequest, PluginDisableRequest, PluginEnableRequest, PluginInstallRequest,
+    PluginListRequest, PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest,
+    PluginSourceListRequest, PluginSourceRefreshRequest, PluginSourceRemoveRequest,
+    PluginUninstallRequest, PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest,
+    ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest, ProjectReadRequest,
+    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest, SessionGetRequest,
+    SessionHistoryRequest, SessionListRequest, SessionPatchRequest, StartTurnRequest,
+    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, UserCurrentRequest,
+    WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
+    WorkspaceInfoRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -163,8 +164,10 @@ pub enum ClientMethod {
     AuthSessionClear,
     #[serde(rename = "user.current")]
     UserCurrent,
-    #[serde(rename = "memory.search")]
+    #[serde(rename = "memory/search")]
     MemorySearch,
+    #[serde(rename = "memory/get")]
+    MemoryGet,
 }
 
 impl ClientMethod {
@@ -231,7 +234,8 @@ impl ClientMethod {
             Self::AuthSessionRead => "auth.session.read",
             Self::AuthSessionClear => "auth.session.clear",
             Self::UserCurrent => "user.current",
-            Self::MemorySearch => "memory.search",
+            Self::MemorySearch => "memory/search",
+            Self::MemoryGet => "memory/get",
         }
     }
 }
@@ -308,7 +312,8 @@ impl FromStr for ClientMethod {
             "auth.session.read" => Ok(Self::AuthSessionRead),
             "auth.session.clear" => Ok(Self::AuthSessionClear),
             "user.current" => Ok(Self::UserCurrent),
-            "memory.search" => Ok(Self::MemorySearch),
+            "memory/search" => Ok(Self::MemorySearch),
+            "memory/get" => Ok(Self::MemoryGet),
             _ => Err(AppServerErrorBody::method_not_found(value)),
         }
     }
@@ -439,8 +444,10 @@ pub enum ClientRequestParams {
     AuthSessionClear(AuthSessionClearRequest),
     #[serde(rename = "user.current")]
     UserCurrent(UserCurrentRequest),
-    #[serde(rename = "memory.search")]
+    #[serde(rename = "memory/search")]
     MemorySearch(MemorySearchRequest),
+    #[serde(rename = "memory/get")]
+    MemoryGet(MemoryGetRequest),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -589,6 +596,7 @@ impl ClientRequest {
             }
             ClientMethod::UserCurrent => ClientRequestParams::UserCurrent(decode(params_value)?),
             ClientMethod::MemorySearch => ClientRequestParams::MemorySearch(decode(params_value)?),
+            ClientMethod::MemoryGet => ClientRequestParams::MemoryGet(decode(params_value)?),
         };
         Ok(Self {
             method: method_kind,

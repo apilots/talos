@@ -1320,41 +1320,6 @@ async fn test_execution_summary_stays_in_right_panel_not_transcript() {
         .iter()
         .any(|line| line.contains("execution summary: Kernel summary: executed 1 tool call(s).")));
 }
-
-#[tokio::test]
-async fn test_context_compaction_stream_renders_right_panel_status() {
-    let mut app = create_app_server_app();
-    app.initialize_session().await;
-    app.in_flight = true;
-    app.session_id = Some("sess-test".to_string());
-
-    app.handle_stream_event(context_compaction_started_event(
-        "msg-compact",
-        "sess-test",
-        1,
-        ContextCompactionStage::Preparing,
-        "Preparing session history compaction.",
-    ));
-    app.handle_stream_event(context_compaction_delta_event(
-        "msg-compact",
-        "sess-test",
-        2,
-        ContextCompactionStage::Completed,
-        Some(ContextCompactionOutcome::Applied),
-        "Session history compaction finished.",
-    ));
-
-    assert!(app
-        .right_panel_events
-        .iter()
-        .any(|line| line.contains("Preparing session history compaction.")));
-    assert!(app
-        .right_panel_events
-        .iter()
-        .any(|line| line.contains("Session history compaction finished.")));
-    assert!(!interactive_transcript_text(&app).contains("compaction"));
-}
-
 #[tokio::test]
 async fn test_commentary_stream_does_not_update_final_answer_block() {
     let mut app = create_app_server_app();

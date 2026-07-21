@@ -1,13 +1,12 @@
 use super::AgentHarnessImpl;
 use std::sync::Arc;
-use talos_agent_kernel::{StopReason, TaskKind, TaskResult, TaskStatus};
+use talos_agent_kernel::StopReason;
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
 };
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
-use talos_memory::MemoryStore;
-use talos_types::talos::{RunItem, StopReason as TalosStopReason, TokenUsage};
+use talos_types::talos::StopReason as TalosStopReason;
 use talos_types::TalosSession;
 
 impl AgentHarnessImpl {
@@ -23,19 +22,6 @@ impl AgentHarnessImpl {
         Ok(resolve_effective_kernel_workspace(&kernel_config, &session.user_id)?.kernel_config)
     }
 
-    pub(crate) async fn memory_store_for_session(
-        &self,
-        session: &TalosSession,
-    ) -> TalosResult<(AgentKernelConfig, Arc<MemoryStore>)> {
-        let kernel_config = Self::kernel_config_for_session(session)?;
-        let llm_provider = self.llm_provider_for_session(session)?;
-        let memory_store = Arc::new(Self::build_memory_store_from_kernel_config(
-            &kernel_config,
-            llm_provider,
-        ));
-        Ok((kernel_config, memory_store))
-    }
-
     pub(crate) fn llm_provider_for_session(
         &self,
         session: &TalosSession,
@@ -45,13 +31,6 @@ impl AgentHarnessImpl {
                 provider: session.config.llm.provider.clone(),
                 id: session.config.llm.model.clone(),
             })
-    }
-
-    pub(crate) fn build_memory_store_from_kernel_config(
-        kernel_config: &AgentKernelConfig,
-        llm_provider: Arc<dyn LlmProvider>,
-    ) -> MemoryStore {
-        MemoryStore::from_config_with_llm(kernel_config, llm_provider)
     }
 }
 
@@ -64,7 +43,6 @@ pub(crate) fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> 
     kernel_config.tool_result_max_bytes = kernel_config.tool_result_max_bytes.max(1024);
     kernel_config.context_compaction_max_bytes =
         kernel_config.context_compaction_max_bytes.max(8 * 1024);
-    kernel_config.memory.hot_recent_messages = kernel_config.memory.hot_recent_messages.max(1);
     kernel_config.compaction.recent_messages_keep =
         kernel_config.compaction.recent_messages_keep.max(1);
     kernel_config.compaction.recent_messages_max_chars =
@@ -122,9 +100,6 @@ pub(crate) fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> 
         .compacted_retrieved_memory_max_chars
         .max(128)
         .min(kernel_config.compaction.retrieved_memory_max_chars);
-    kernel_config.memory.compaction_threshold_bytes =
-        kernel_config.memory.compaction_threshold_bytes.max(1024);
-    kernel_config.memory.search_max_results = kernel_config.memory.search_max_results.max(1);
     kernel_config
 }
 
@@ -134,24 +109,5 @@ pub(crate) fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
         StopReason::ModelOutputLimit => TalosStopReason::ModelOutputLimit,
         StopReason::WaitingDynamicInput => TalosStopReason::WaitingDynamicInput,
         StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
-    }
-}
-
-#[allow(dead_code)]
-pub(super) fn build_mock_task_result() -> TaskResult {
-    TaskResult {
-        task_id: "mock-task".to_string(),
-        kind: TaskKind::General,
-        goal: "mock".to_string(),
-        status: TaskStatus::Success,
-        output: "Mock response".to_string(),
-        output_items: vec![RunItem::OutputText {
-            text: "Mock response".to_string(),
-        }],
-        usage: TokenUsage::default(),
-        warnings: Vec::new(),
-        tool_traces: Vec::new(),
-        state_delta: std::collections::HashMap::new(),
-        error: None,
     }
 }

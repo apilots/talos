@@ -41,6 +41,8 @@ fn record(
         created_at: 1,
         last_activity: 1,
         message_count: 0,
+        latest_turn_seq: 0,
+        memory_processed_until_seq: 0,
         usage: TokenUsage::default(),
         conf: SessionConf::default(),
         workspace_id: Some("workspace-alpha".to_string()),
@@ -148,6 +150,10 @@ async fn test_update_session_record_persists_fields() {
         .insert_session_record(&record, "agent-a", "api")
         .await
         .unwrap();
+    store
+        .advance_memory_processed_until_seq("session-1", 0, 3)
+        .await
+        .unwrap();
 
     record.title = "Custom Title".to_string();
     record.message_count = 2;
@@ -167,8 +173,54 @@ async fn test_update_session_record_persists_fields() {
         .unwrap();
     assert_eq!(loaded.title, "Custom Title");
     assert_eq!(loaded.message_count, 2);
+    assert_eq!(loaded.memory_processed_until_seq, 3);
+    assert_eq!(loaded.latest_turn_seq, 3);
     assert_eq!(loaded.usage.total_tokens, 15);
     assert_eq!(loaded.model, "gpt-5.4");
+}
+
+#[tokio::test]
+async fn memory_cursor_advance_is_idempotent() {
+    let store = store().await;
+    store
+        .insert_session_record(&record("session-1", "user-1", None, None), "agent-a", "api")
+        .await
+        .unwrap();
+
+    store
+        .advance_memory_processed_until_seq("session-1", 0, 4)
+        .await
+        .unwrap();
+    store
+        .advance_memory_processed_until_seq("session-1", 0, 4)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store
+            .get_session_record("session-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .memory_processed_until_seq,
+        4
+    );
+}
+
+#[tokio::test]
+async fn memory_cursor_rejects_non_contiguous_advance() {
+    let store = store().await;
+    store
+        .insert_session_record(&record("session-1", "user-1", None, None), "agent-a", "api")
+        .await
+        .unwrap();
+
+    let error = store
+        .advance_memory_processed_until_seq("session-1", 1, 4)
+        .await
+        .expect_err("stale cursor should fail");
+
+    assert!(matches!(error, talos_error::TalosError::Conflict(_)));
 }
 
 #[tokio::test]
@@ -246,6 +298,84 @@ async fn test_list_session_records_respects_limit_and_offset() {
         .unwrap();
 
     assert_eq!(records.len(), 1);
+}
+
+#[tokio::test]
+async fn memory_pending_session_pages_use_a_stable_cursor() {
+    let store = store().await;
+    let mut processed = record("session-1", "user-1", None, None);
+    processed.last_activity = 3;
+    processed.message_count = 2;
+    processed.latest_turn_seq = 1;
+    processed.memory_processed_until_seq = 1;
+    let mut first_pending = record("session-2", "user-1", None, None);
+    first_pending.last_activity = 2;
+    first_pending.message_count = 4;
+    first_pending.latest_turn_seq = 2;
+    first_pending.memory_processed_until_seq = 1;
+    let mut second_pending = record("session-3", "user-1", None, None);
+    second_pending.last_activity = 1;
+    second_pending.message_count = 2;
+    second_pending.latest_turn_seq = 1;
+    for session in [&processed, &first_pending, &second_pending] {
+        store
+            .insert_session_record(session, "agent-a", "api")
+            .await
+            .expect("insert session");
+    }
+
+    let first_page = store
+        .list_session_records(&SessionQuery {
+            limit: Some(1),
+            memory_pending_only: true,
+            ..SessionQuery::default()
+        })
+        .await
+        .expect("first pending page");
+    let second_page = store
+        .list_session_records(&SessionQuery {
+            limit: Some(1),
+            memory_pending_only: true,
+            after: Some(SessionPageCursor {
+                last_activity: first_page[0].last_activity,
+                session_id: first_page[0].id.clone(),
+            }),
+            ..SessionQuery::default()
+        })
+        .await
+        .expect("second pending page");
+
+    assert_eq!(first_page[0].id, "session-2");
+    assert_eq!(second_page[0].id, "session-3");
+}
+
+#[tokio::test]
+async fn memory_pending_uses_monotonic_turn_seq_after_message_count_reset() {
+    let store = store().await;
+    let mut cleared = record("session-1", "user-1", None, None);
+    cleared.message_count = 0;
+    cleared.latest_turn_seq = 101;
+    cleared.memory_processed_until_seq = 100;
+    store
+        .insert_session_record(&cleared, "agent-a", "api")
+        .await
+        .expect("insert cleared session");
+
+    let records = store
+        .list_session_records(&SessionQuery {
+            memory_pending_only: true,
+            ..SessionQuery::default()
+        })
+        .await
+        .expect("list pending sessions");
+
+    assert_eq!(
+        records
+            .into_iter()
+            .map(|record| (record.id, record.latest_turn_seq))
+            .collect::<Vec<_>>(),
+        vec![("session-1".to_string(), 101)]
+    );
 }
 
 #[tokio::test]

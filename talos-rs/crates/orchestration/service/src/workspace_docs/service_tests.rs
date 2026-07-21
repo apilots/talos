@@ -101,3 +101,23 @@ async fn put_doc_allows_regular_actor() {
     assert_eq!(detail.content, "# Shared doc");
     let _ = talos_fs::remove_directory(&workspace_dir).await;
 }
+
+#[tokio::test]
+async fn put_doc_rejects_oversized_memory() {
+    let (service, workspace_dir) = test_service();
+
+    let error = service
+        .put_doc(
+            &Actor::regular("member"),
+            WorkspaceDocKind::Memory,
+            DocUpdateRequest {
+                content: "x".repeat(talos_types::MEMORY_FILE_MAX_CHARS + 1),
+                base_version: ExpectedFileVersion::MustNotExist,
+            },
+        )
+        .await
+        .expect_err("oversized memory should be rejected");
+
+    assert!(matches!(error, TalosError::ValidationError(_)));
+    let _ = talos_fs::remove_directory(&workspace_dir).await;
+}

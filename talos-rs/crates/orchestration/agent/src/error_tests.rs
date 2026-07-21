@@ -48,3 +48,17 @@ fn talos_error_maps_to_agent_error_kind_by_boundary_context() {
         AgentErrorKind::Interrupted
     );
 }
+
+#[test]
+fn active_turn_running_round_trips_without_losing_busy_semantics() {
+    let error = AgentError::from(TalosError::ActiveTurnRunning(
+        "session `session-1` already has an active turn".to_string(),
+    ));
+
+    assert_eq!(error.kind, AgentErrorKind::ActiveTurnRunning);
+    assert!(matches!(
+        error.into_talos_error(),
+        TalosError::ActiveTurnRunning(message)
+            if message == "session `session-1` already has an active turn"
+    ));
+}

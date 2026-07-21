@@ -4,6 +4,7 @@ mod general_turn;
 mod planner;
 mod processor;
 mod session;
+mod session_context;
 mod timeline;
 mod tool_execution;
 mod traits;
@@ -13,26 +14,27 @@ mod warnings;
 pub use contents_builder::ContentsBuilder;
 pub use execution::ReplayToolInvocation;
 pub use execution::{
-    AuthRequestPayload, CompactionSummaryPayload, EventActions, EventAuthor, EventPayload,
-    EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer, ExecutionEventHandler,
-    ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope, PlanningRequestEffect,
-    PlanningResponseEffect, PlanningResponseSegment, PlanningResponseSegmentKind,
-    RequestCacheContext, RequestInteractionContext, RequestOutputContract, StateDelta,
-    StateNamespace, VecEventSink,
+    AuthRequestPayload, CompactionSummaryPayload, EventActions, EventAuthor, EventCompaction,
+    EventPayload, EventSink, ExecutionBranch, ExecutionEvent, ExecutionEventBuffer,
+    ExecutionEventHandler, ExecutionEventKind, LlmRequestEnvelope, LlmResponseEnvelope,
+    PlanningRequestEffect, PlanningResponseEffect, PlanningResponseSegment,
+    PlanningResponseSegmentKind, RequestCacheContext, RequestInteractionContext,
+    RequestOutputContract, StateDelta, StateNamespace, VecEventSink,
 };
 pub use general_turn::{
     apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
-    emit_general_turn_finalization_stream, execute_general_turn_loop,
+    compact_session_memory, emit_general_turn_finalization_stream, execute_general_turn_loop,
     execute_general_turn_loop_with_policy, execute_general_turn_loop_with_resume,
     execute_general_turn_step, execute_general_turn_tool_batch, finalize_general_turn_artifacts,
-    flush_session_memory, flush_session_memory_with_report, persist_general_turn_artifacts,
-    prepare_general_turn, run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
+    form_daily_session_memory, persist_general_turn_artifacts, prepare_general_turn,
+    run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
     DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
     GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
     GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, MemoryFlushPolicy, MemoryFlushUsageReport,
-    ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn, ResumeToolCall,
-    StreamingToolExecutionConfig,
+    GeneralTurnStepResult, GeneralTurnToolBatch, MemoryCompactionPolicy, MemoryFormationParams,
+    MemoryFormationReport, ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn,
+    ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    SESSION_COMPACTION_STATE_KEY,
 };
 pub use planner::BuiltInPlanner;
 pub use processor::{
@@ -43,9 +45,16 @@ pub use processor::{
     StateDeltaResponseProcessor, ToolContextRequestProcessor,
 };
 pub use session::{
-    InvocationSession, KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
-    KernelTranscriptPayload, KernelTranscriptService, MemoryBackedKernelTranscriptService,
+    InvocationSession, KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
+    KernelTranscriptDynamicToolRequestPayload, KernelTranscriptDynamicToolResponsePayload,
+    KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
+    KernelTranscriptPayload, KernelTranscriptService, KernelTranscriptTransferPayload,
     SessionState,
+};
+pub use session_context::{
+    build_session_prompt_context, SessionPromptContext, SessionPromptContextConfig,
+    SessionPromptRecentWindow, SessionToolExchangeContext, SessionToolExchangeOutcome,
+    SessionToolResultContext, TalosMessage, TalosMessageRole,
 };
 pub use timeline::TimelineBuilder;
 pub use tool_execution::{

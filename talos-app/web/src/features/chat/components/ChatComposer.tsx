@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
-  ArrowUp,
   ChevronDown,
   FolderOpen,
   FolderPlus,
-  LoaderCircle,
   Plus,
   Search,
   Shield,
-  Square,
   TriangleAlert,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -22,23 +19,33 @@ import { Panel } from "@/shared/ui/Panel";
 import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
+import { ComposerCommandSuggestions } from "./ComposerCommandSuggestions";
+import { ComposerNotice } from "./ComposerNotice";
+import { ComposerSubmitButton } from "./ComposerSubmitButton";
+import { buildInputHistoryNavigationItems } from "./composerInputHistory";
+import type { ComposerCommand } from "./composer-commands";
 import { ComposerModelSelect } from "./ComposerModelSelect";
 import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
+import { useComposerCommands } from "./useComposerCommands";
 import type { ProjectView, ReasoningLevel, RuntimeMode, SessionInputHistory } from "@/shared/types/ui";
+import type { ContextCompactionStage } from "@/shared/types/protocol";
 
 interface ChatComposerProps {
   draft: string;
   onDraftChange: (value: string) => void;
   onSend: (skills: SkillSuggestion[]) => Promise<void> | void;
+  onCommand?: (command: ComposerCommand) => Promise<void> | void;
+  commandNotice?: string;
   initialSelectedSkills?: SkillSuggestion[];
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
   isStreaming?: boolean;
   isCancelling?: boolean;
+  contextCompactionStage?: ContextCompactionStage;
   models: Array<{ id: string; name: string; provider: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
@@ -56,13 +63,7 @@ interface ChatComposerProps {
   compact?: boolean;
 }
 
-const EMPTY_INPUT_HISTORY_ITEMS: InputHistoryNavigationItem[] = [];
 const EMPTY_SELECTED_SKILLS: SkillSuggestion[] = [];
-
-interface InputHistoryNavigationItem {
-  key: string;
-  text: string;
-}
 
 type ProjectPickerMode = "list" | "add_menu" | "existing" | "create";
 type ProjectMenuMode = Exclude<ProjectPickerMode, "existing" | "create">;
@@ -77,12 +78,15 @@ export function ChatComposer({
   draft,
   onDraftChange,
   onSend,
+  onCommand,
+  commandNotice,
   initialSelectedSkills = EMPTY_SELECTED_SKILLS,
   onCancel,
   inputHistory,
   disabled,
   isStreaming,
   isCancelling = false,
+  contextCompactionStage,
   models,
   selectedModel,
   onModelChange,
@@ -100,7 +104,7 @@ export function ChatComposer({
   compact = false,
 }: ChatComposerProps) {
   const { t } = useTranslation(["chat", "common", "settings"]);
-  const isBusy = Boolean(isStreaming || isCancelling);
+  const isBusy = Boolean(isStreaming || isCancelling || contextCompactionStage);
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectMode, setProjectMode] = useState<ProjectMenuMode>("list");
@@ -112,6 +116,7 @@ export function ChatComposer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const projectTriggerRef = useRef<HTMLButtonElement>(null);
   const projectPickerRef = useRef<HTMLDivElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const historyIndexRef = useRef<number | null>(null);
   const historyDraftRef = useRef("");
   const activeInputHistoryItems = useMemo(
@@ -133,6 +138,14 @@ export function ChatComposer({
     historyIndexRef.current = null;
     historyDraftRef.current = "";
   };
+  const composerCommands = useComposerCommands({
+    draft,
+    enabled: Boolean(onCommand) && !isBusy,
+    onCommand,
+    onDraftChange,
+    onExecute: resetInputHistoryNavigation,
+    openModelPicker: () => modelTriggerRef.current?.click(),
+  });
 
   useEffect(() => {
     if (!projectOpen) {
@@ -223,8 +236,6 @@ export function ChatComposer({
   const showCollapsibleProject = showProjectSelector && !compact;
   const showInlineProject = showProjectSelector && compact;
   const effectiveRuntimeMode: RuntimeMode = runtimeMode === "local" ? "local" : "local";
-  const sendButtonDisabled = isBusy ? false : Boolean(disabled || draft.trim().length === 0);
-  const sendButtonLabel = isBusy ? t("common:stopResponse") : t("chat:send");
 
   const moveCursorToPosition = (textarea: HTMLTextAreaElement, cursorIndex: number) => {
     const applySelection = () => {
@@ -341,41 +352,9 @@ export function ChatComposer({
       ]
     : [{ value: "none", label: t("chat:reasoningNone") }];
 
-  const sendButton = (
-    <button
-      aria-label={sendButtonLabel}
-      className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none",
-        isBusy
-          ? "bg-danger text-white hover:bg-danger/90"
-          : draft.trim().length === 0 || disabled
-            ? "bg-muted/20 text-muted/60"
-            : "bg-ink text-background hover:bg-ink/85",
-      )}
-      data-smoke="chat-composer-send"
-      disabled={sendButtonDisabled}
-      onClick={() => {
-        if (isBusy) {
-          onCancel?.();
-          return;
-        }
-        void handleSend();
-      }}
-      title={sendButtonLabel}
-      type="button"
-    >
-      {isCancelling ? (
-        <LoaderCircle className="animate-spin" size={14} />
-      ) : isBusy ? (
-        <Square size={14} />
-      ) : (
-        <ArrowUp size={15} strokeWidth={2.5} />
-      )}
-    </button>
-  );
-
   return (
     <div className="relative">
+      <ComposerNotice commandNotice={commandNotice} contextCompactionStage={contextCompactionStage} />
       <Panel className="overflow-visible rounded-[1.5rem] border-border/70 bg-card p-0 shadow-[0_16px_34px_rgba(104,94,78,0.07)] backdrop-blur-none">
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
@@ -418,11 +397,15 @@ export function ChatComposer({
             disabled={disabled}
             onChange={(event) => {
               resetInputHistoryNavigation();
+              composerCommands.reset();
               setSkillCursorIndex(event.currentTarget.selectionStart);
               onDraftChange(event.target.value);
             }}
             onClick={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
             onKeyDown={(event) => {
+              if (composerCommands.handleKeyDown(event)) {
+                return;
+              }
               if (skillSuggestions.length > 0) {
                 if (event.key === "ArrowDown") {
                   event.preventDefault();
@@ -466,6 +449,12 @@ export function ChatComposer({
             selectedIndex={skillSuggestionIndex}
             suggestions={skillSuggestions}
           />
+          <ComposerCommandSuggestions
+            commands={composerCommands.commands}
+            onHover={composerCommands.setSelectedIndex}
+            onSelect={(command) => void composerCommands.execute(command)}
+            selectedIndex={composerCommands.selectedIndex}
+          />
         </div>
 
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
@@ -498,6 +487,7 @@ export function ChatComposer({
                 modelLabel={t("chat:modelLabel")}
                 models={models}
                 onChange={onModelChange}
+                modelTriggerRef={modelTriggerRef}
                 providerLabel={t("settings:modelsPanel.activeProvider")}
                 selectedModel={selectedModel}
               />
@@ -511,7 +501,14 @@ export function ChatComposer({
             </>
           )}
 
-          {sendButton}
+          <ComposerSubmitButton
+            disabled={disabled}
+            draft={draft}
+            isBusy={isBusy}
+            isCancelling={isCancelling}
+            onCancel={onCancel}
+            onSend={handleSend}
+          />
         </div>
 
         <div className="mx-3 border-t border-border/50">
@@ -683,38 +680,4 @@ export function ChatComposer({
       ) : null}
     </div>
   );
-}
-
-function buildInputHistoryNavigationItems(inputHistory: SessionInputHistory | undefined) {
-  if (!inputHistory) {
-    return EMPTY_INPUT_HISTORY_ITEMS;
-  }
-
-  const items = inputHistory.committed.map((item) => ({
-    key: `${item.messageId}:${item.itemIndex}`,
-    text: item.text,
-  }));
-  const pendingInput = inputHistory.pendingInput;
-  const pendingCommitted =
-    Boolean(pendingInput?.serverMessageId) &&
-    inputHistory.committed.some((item) => item.messageId === pendingInput?.serverMessageId);
-
-  if (isNavigablePendingInput(inputHistory) && pendingInput && !pendingCommitted) {
-    items.push({
-      key: [
-        "pending",
-        pendingInput.clientMessageId,
-        pendingInput.serverMessageId ?? "",
-        pendingInput.phase,
-      ].join(":"),
-      text: pendingInput.text,
-    });
-  }
-
-  return items;
-}
-
-function isNavigablePendingInput(inputHistory: SessionInputHistory) {
-  const pendingInput = inputHistory.pendingInput;
-  return pendingInput?.phase === "local" || pendingInput?.phase === "accepted";
 }

@@ -10,8 +10,11 @@ import { ChatSessionPage } from "./ChatSessionPage";
 const mocks = vi.hoisted(() => ({
   sendText: vi.fn(),
   sendTurn: vi.fn(),
+  setDraft: vi.fn(),
   mutateModel: vi.fn(),
   mutateProject: vi.fn(),
+  compactSession: vi.fn(),
+  clearSession: vi.fn(),
   session: undefined as unknown,
   sessionHistoryError: undefined as Error | undefined,
   sessionHistoryIsSuccess: true,
@@ -25,8 +28,10 @@ vi.mock("@/features/chat", async (importOriginal) => {
   return {
     ...actual,
     ChatComposer: (props: {
+      commandNotice?: string;
       disabled?: boolean;
       onModelChange?: (model: string) => void;
+      onCommand?: (command: "compact" | "clear" | "status" | "model") => Promise<void> | void;
       onProjectChange: (projectId: string) => void;
       onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
       onSend: () => Promise<void>;
@@ -35,6 +40,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
       mocks.composerProps = props;
       return (
         <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
+          {props.commandNotice ? <div>{props.commandNotice}</div> : null}
           <button onClick={() => props.onModelChange?.("model-2")} type="button">
             Model
           </button>
@@ -43,6 +49,9 @@ vi.mock("@/features/chat", async (importOriginal) => {
           </button>
           <button onClick={() => props.onReasoningLevelChange?.("high")} type="button">
             Reasoning
+          </button>
+          <button onClick={() => void Promise.resolve(props.onCommand?.("compact")).catch(() => undefined)} type="button">
+            Compact
           </button>
           <button onClick={() => void props.onSend()} type="button">
             Send
@@ -53,7 +62,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
     useChatSession: () => ({
       blocks: [],
       draft: "",
-      setDraft: vi.fn(),
+      setDraft: mocks.setDraft,
       sendTurn: mocks.sendTurn,
       sendText: mocks.sendText,
       isStreaming: true,
@@ -105,6 +114,10 @@ vi.mock("@/features/chat", async (importOriginal) => {
     },
     useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
     useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
+    useSessionActions: () => ({
+      compact: { isPending: false, mutateAsync: mocks.compactSession },
+      clear: { isPending: false, mutateAsync: mocks.clearSession },
+    }),
   };
 });
 
@@ -155,6 +168,7 @@ describe("ChatSessionPage", () => {
           rejectSend = reject;
         }),
     );
+    mocks.setDraft.mockReset();
   });
 
   afterEach(() => {
@@ -238,9 +252,9 @@ describe("ChatSessionPage", () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => {
-      expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
-    });
+    await waitFor(() => expect(mocks.setDraft).toHaveBeenCalledWith("hello"));
+    expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
+    expect(mocks.sessionQueryEnabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     expect(mocks.sendTurn).toHaveBeenCalledWith({

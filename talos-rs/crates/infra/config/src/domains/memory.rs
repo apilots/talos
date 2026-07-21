@@ -1,124 +1,49 @@
 use serde::{Deserialize, Serialize};
 
-/// Memory defaults under agent.kernel
+/// Global long-term memory file layout and file-list limits.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AgentKernelMemoryConfig {
-    /// In-memory hot recent message capacity.
-    #[serde(default = "default_kernel_memory_hot_recent_messages")]
-    pub hot_recent_messages: usize,
-
-    /// Trigger summary compaction when session memory exceeds this threshold.
-    #[serde(default = "default_kernel_memory_compaction_threshold_bytes")]
-    pub compaction_threshold_bytes: usize,
-
+pub struct MemoryConfig {
     /// Root memory file name.
-    #[serde(default = "default_kernel_memory_root_memory_filename")]
+    #[serde(default = "default_memory_root_filename")]
     pub root_memory_filename: String,
 
     /// Workspace memory directory name.
-    #[serde(default = "default_kernel_memory_memory_dirname")]
+    #[serde(default = "default_memory_dirname")]
     pub memory_dirname: String,
 
-    /// Enable workspace memory flush.
-    #[serde(default = "default_true")]
-    pub workspace_memory_flush_enabled: bool,
-
-    /// Enable workspace memory flush before compaction.
-    #[serde(default = "default_true")]
-    pub workspace_memory_flush_on_compaction: bool,
-
-    /// Daily workspace memory file pattern.
-    #[serde(default = "default_kernel_memory_flush_file_pattern")]
-    pub flush_file_pattern: String,
-
-    /// Enable memory search tool.
-    #[serde(default = "default_true")]
-    pub tool_search_enabled: bool,
-
-    /// Enable memory get tool.
-    #[serde(default = "default_true")]
-    pub tool_get_enabled: bool,
-
-    /// Default max results for workspace memory search.
-    #[serde(default = "default_kernel_memory_search_max_results")]
-    pub search_max_results: usize,
-
     /// Default page size for memory file listing.
-    #[serde(default = "default_kernel_memory_file_list_default_limit")]
+    #[serde(default = "default_memory_file_list_default_limit")]
     pub file_list_default_limit: usize,
 
     /// Max page size for memory file listing.
-    #[serde(default = "default_kernel_memory_file_list_max_limit")]
+    #[serde(default = "default_memory_file_list_max_limit")]
     pub file_list_max_limit: usize,
-
-    /// Include root memory in workspace memory search.
-    #[serde(default = "default_true")]
-    pub search_include_root_memory: bool,
-
-    /// Include daily memory files in workspace memory search.
-    #[serde(default = "default_true")]
-    pub search_include_daily_memory: bool,
-
-    /// Include session transcripts in workspace memory search.
-    #[serde(default)]
-    pub search_include_sessions: bool,
 }
 
-fn default_kernel_memory_hot_recent_messages() -> usize {
-    64
-}
-
-fn default_kernel_memory_compaction_threshold_bytes() -> usize {
-    256 * 1024
-}
-
-fn default_kernel_memory_root_memory_filename() -> String {
+fn default_memory_root_filename() -> String {
     "MEMORY.md".to_string()
 }
 
-fn default_kernel_memory_memory_dirname() -> String {
+fn default_memory_dirname() -> String {
     "memory".to_string()
 }
 
-fn default_kernel_memory_flush_file_pattern() -> String {
-    "YYYY-MM-DD.md".to_string()
-}
-
-fn default_kernel_memory_search_max_results() -> usize {
-    6
-}
-
-fn default_kernel_memory_file_list_default_limit() -> usize {
+fn default_memory_file_list_default_limit() -> usize {
     20
 }
 
-fn default_kernel_memory_file_list_max_limit() -> usize {
+fn default_memory_file_list_max_limit() -> usize {
     90
 }
 
-impl Default for AgentKernelMemoryConfig {
+impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            hot_recent_messages: default_kernel_memory_hot_recent_messages(),
-            compaction_threshold_bytes: default_kernel_memory_compaction_threshold_bytes(),
-            root_memory_filename: default_kernel_memory_root_memory_filename(),
-            memory_dirname: default_kernel_memory_memory_dirname(),
-            workspace_memory_flush_enabled: true,
-            workspace_memory_flush_on_compaction: true,
-            flush_file_pattern: default_kernel_memory_flush_file_pattern(),
-            tool_search_enabled: true,
-            tool_get_enabled: true,
-            search_max_results: default_kernel_memory_search_max_results(),
-            file_list_default_limit: default_kernel_memory_file_list_default_limit(),
-            file_list_max_limit: default_kernel_memory_file_list_max_limit(),
-            search_include_root_memory: true,
-            search_include_daily_memory: true,
-            search_include_sessions: false,
+            root_memory_filename: default_memory_root_filename(),
+            memory_dirname: default_memory_dirname(),
+            file_list_default_limit: default_memory_file_list_default_limit(),
+            file_list_max_limit: default_memory_file_list_max_limit(),
         }
     }
-}
-
-fn default_true() -> bool {
-    true
 }

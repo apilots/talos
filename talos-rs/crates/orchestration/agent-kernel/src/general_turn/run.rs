@@ -14,7 +14,7 @@ pub async fn run_general_turn(
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
     kernel_config: &AgentKernelConfig,
     skill_options: GeneralTurnSkillOptions,
 ) -> TalosResult<GeneralTurnResult> {
@@ -26,7 +26,7 @@ pub async fn run_general_turn(
         llm_provider,
         tool_definition_provider,
         tool_executor_port,
-        memory_store,
+        memory_writer,
         kernel_config,
         None,
         Some(skill_options),
@@ -43,7 +43,7 @@ pub async fn run_general_turn_with_resume(
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_store: Arc<MemoryStore>,
+    memory_writer: Arc<dyn MemoryWriter>,
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
     skill_options: Option<GeneralTurnSkillOptions>,
@@ -55,7 +55,7 @@ pub async fn run_general_turn_with_resume(
         input,
         llm_provider.clone(),
         tool_definition_provider,
-        memory_store.clone(),
+        memory_writer,
         kernel_config,
         skill_options.clone(),
     )
@@ -71,7 +71,8 @@ pub async fn run_general_turn_with_resume(
                 ExecutionBranch::ModelThinking,
                 PROMPT_WARNING_STATE_KEY,
                 value,
-            );
+            )
+            .await?;
         }
     }
     if prompt_budget_still_exhausted_from_diagnostics(&prepared.prompt_diagnostics) {
@@ -83,16 +84,15 @@ pub async fn run_general_turn_with_resume(
                 ExecutionBranch::ModelThinking,
                 SESSION_COMPACTION_STATE_KEY,
                 value,
-            );
+            )
+            .await?;
         }
         return Err(blocked_compaction_error(&prepared.session_id));
     }
     let executed = execute_general_turn_loop_with_resume(
         prepared.clone(),
-        agent_name,
         llm_provider.clone(),
         tool_executor_port,
-        memory_store.clone(),
         kernel_config,
         resume,
     )
@@ -117,15 +117,6 @@ pub async fn run_general_turn_with_resume(
         session_history_compaction = ?prompt_diagnostics.session_history_compaction,
         "prompt governance metrics"
     );
-    persist_general_turn_artifacts(
-        &prepared,
-        input,
-        &executed,
-        llm_provider.clone(),
-        memory_store,
-        kernel_config,
-    )
-    .await;
     if let Ok(value) = serde_json::to_value(next_session_compaction_state(&prompt_diagnostics)) {
         stage_session_state_update(
             ctx,
@@ -134,7 +125,8 @@ pub async fn run_general_turn_with_resume(
             ExecutionBranch::ModelThinking,
             SESSION_COMPACTION_STATE_KEY,
             value,
-        );
+        )
+        .await?;
     }
     if let Some(session_continuity) = build_session_continuity(input, &executed) {
         if let Ok(value) = serde_json::to_value(session_continuity) {
@@ -145,9 +137,19 @@ pub async fn run_general_turn_with_resume(
                 ExecutionBranch::ModelThinking,
                 SESSION_CONTINUITY_STATE_KEY,
                 value,
-            );
+            )
+            .await?;
         }
     }
+    let artifact_seq = persist_general_turn_artifacts(
+        &prepared,
+        input,
+        &executed,
+        ctx.session_artifact_store()?,
+        ctx.transcript_service.clone(),
+        kernel_config,
+    )
+    .await?;
     let outcome = general_turn_outcome_from_artifacts(&executed);
 
     Ok(GeneralTurnResult {
@@ -159,6 +161,7 @@ pub async fn run_general_turn_with_resume(
         prompt_diagnostics,
         warnings,
         outcome,
+        artifact_seq,
     })
 }
 

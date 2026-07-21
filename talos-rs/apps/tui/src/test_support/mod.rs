@@ -57,10 +57,15 @@ pub(crate) struct MockGatewayState {
     pub(crate) cancelled_sessions: Vec<String>,
     pub(crate) session_usage: talos_types::talos::TokenUsage,
     pub(crate) compact_calls: usize,
+    pub(crate) compact_failures_remaining: u8,
     pub(crate) clear_calls: usize,
     pub(crate) reconnect_calls: usize,
     pub(crate) reconnect_since_event_ids: Vec<Option<String>>,
     pub(crate) reconnect_events: Vec<TimelineEventEnvelope>,
+    pub(crate) session_subscription_calls: usize,
+    pub(crate) session_subscription_since_event_ids: Vec<Option<String>>,
+    pub(crate) session_subscription_events: Vec<TimelineEventEnvelope>,
+    pub(crate) timeline_high_water_mark_event_id: Option<String>,
     pub(crate) sent_requests: Vec<StartTurnRequest>,
 }
 
@@ -416,6 +421,7 @@ pub(crate) fn completed_event(
             stop_reason: StopReason::EndTurn,
             usage,
             metrics: None,
+            artifact_seq: None,
         }),
     )
 }
@@ -439,6 +445,7 @@ pub(crate) fn completed_event_with_metrics(
             stop_reason: StopReason::EndTurn,
             usage,
             metrics: Some(metrics),
+            artifact_seq: None,
         }),
     )
 }
@@ -698,10 +705,15 @@ impl MockGatewayClient {
                 cancelled_sessions: Vec::new(),
                 session_usage: talos_types::talos::TokenUsage::default(),
                 compact_calls: 0,
+                compact_failures_remaining: 0,
                 clear_calls: 0,
                 reconnect_calls: 0,
                 reconnect_since_event_ids: Vec::new(),
                 reconnect_events: Vec::new(),
+                session_subscription_calls: 0,
+                session_subscription_since_event_ids: Vec::new(),
+                session_subscription_events: Vec::new(),
+                timeline_high_water_mark_event_id: None,
                 sent_requests: Vec::new(),
             })),
         }
@@ -862,8 +874,34 @@ impl GatewayClient for MockGatewayClient {
     async fn compact_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
         let mut state = self.state.lock().unwrap();
         state.compact_calls = state.compact_calls.saturating_add(1);
+        if state.compact_failures_remaining > 0 {
+            state.compact_failures_remaining -= 1;
+            return Err(TalosError::ClientError(
+                "mock session compaction failure".to_string(),
+            ));
+        }
         state.session_usage.total_tokens = state.session_usage.total_tokens.saturating_add(42);
         Ok(state.session_info(3))
+    }
+
+    async fn subscribe_session_timeline(
+        &self,
+        _session_id: &str,
+        since_event_id: Option<String>,
+    ) -> TalosResult<mpsc::Receiver<TimelineEventEnvelope>> {
+        let events = {
+            let mut state = self.state.lock().unwrap();
+            state.session_subscription_calls = state.session_subscription_calls.saturating_add(1);
+            state
+                .session_subscription_since_event_ids
+                .push(since_event_id);
+            std::mem::take(&mut state.session_subscription_events)
+        };
+        let (tx, rx) = mpsc::channel(32);
+        for event in events {
+            tx.send(event).await.unwrap();
+        }
+        Ok(rx)
     }
 
     async fn clear_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {
@@ -1023,11 +1061,17 @@ impl GatewayClient for MockGatewayClient {
         _session_id: &str,
         _after_event_id: Option<String>,
     ) -> TalosResult<TimelineRecoveryResponse> {
+        let high_water_mark_event_id = self
+            .state
+            .lock()
+            .unwrap()
+            .timeline_high_water_mark_event_id
+            .clone();
         Ok(TimelineRecoveryResponse {
             snapshot: TimelineRecoverySnapshot {
                 replay: TimelineReplay {
                     events: Vec::new(),
-                    high_water_mark_event_id: None,
+                    high_water_mark_event_id,
                     last_replay_seq: 0,
                     cursor_status: TimelineCursorStatus::FromBeginning,
                 },

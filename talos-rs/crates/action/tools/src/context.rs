@@ -3,7 +3,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_memory::MemoryStore;
+use talos_memory::{MemoryReader, MemoryScope};
 
 use crate::collaboration::CollaborationRuntime;
 use crate::handlers::dynamic::StoredDynamicToolResult;
@@ -53,7 +53,7 @@ impl fmt::Debug for ToolProgressEmitter {
 }
 
 /// Execution context passed to tools.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ToolContext {
     session_id: String,
     user_id: String,
@@ -61,7 +61,8 @@ pub struct ToolContext {
     dynamic_tool_results: Arc<DashMap<String, StoredDynamicToolResult>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
     collaboration_runtime: Option<Arc<CollaborationRuntime>>,
-    memory_store: Option<Arc<MemoryStore>>,
+    memory_reader: Option<Arc<dyn MemoryReader>>,
+    memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
     progress_emitter: Option<ToolProgressEmitter>,
 }
@@ -84,7 +85,8 @@ impl ToolContext {
             dynamic_tool_results: Arc::new(DashMap::new()),
             kernel_config,
             collaboration_runtime: None,
-            memory_store: None,
+            memory_reader: None,
+            memory_scope: None,
             session_state: get_session_tool_state(&session_id),
             progress_emitter: None,
         }
@@ -95,8 +97,13 @@ impl ToolContext {
         self
     }
 
-    pub fn with_memory_store(mut self, store: Arc<MemoryStore>) -> Self {
-        self.memory_store = Some(store);
+    pub fn with_memory_reader(mut self, reader: Arc<dyn MemoryReader>) -> Self {
+        self.memory_reader = Some(reader);
+        self
+    }
+
+    pub fn with_memory_scope(mut self, scope: MemoryScope) -> Self {
+        self.memory_scope = Some(scope);
         self
     }
 
@@ -135,8 +142,12 @@ impl ToolContext {
         self.collaboration_runtime.clone()
     }
 
-    pub fn memory_store(&self) -> Option<Arc<MemoryStore>> {
-        self.memory_store.clone()
+    pub fn memory_reader(&self) -> Option<Arc<dyn MemoryReader>> {
+        self.memory_reader.clone()
+    }
+
+    pub fn memory_scope(&self) -> Option<&MemoryScope> {
+        self.memory_scope.as_ref()
     }
 
     pub fn project_root(&self) -> Option<PathBuf> {

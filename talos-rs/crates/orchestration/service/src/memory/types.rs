@@ -15,19 +15,3 @@ impl MemoryDate {
         self.0.format("%Y-%m-%d").to_string()
     }
 }
-
-#[derive(Debug, Clone, Default)]
-pub struct MemoryListCommand {
-    pub limit: Option<usize>,
-    pub before_date: Option<MemoryDate>,
-    pub date_from: Option<MemoryDate>,
-    pub date_to: Option<MemoryDate>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MemorySearchCommand {
-    pub query: String,
-    pub limit: Option<usize>,
-    pub date_from: Option<MemoryDate>,
-    pub date_to: Option<MemoryDate>,
-}

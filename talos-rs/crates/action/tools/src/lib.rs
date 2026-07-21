@@ -57,6 +57,10 @@ pub mod tools {
     pub mod write;
 }
 
+#[cfg(test)]
+#[path = "tools/memory_tools_tests.rs"]
+mod memory_tools_tests;
+
 // Re-export the built-in tools
 pub use tools::{
     agent::AgentTool, apply_patch::ApplyPatchTool, ask_user_question::AskUserQuestionTool,

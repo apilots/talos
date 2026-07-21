@@ -26,6 +26,32 @@ export function MemorySearchDetail({ memory }: { memory: MemoryPageState }) {
         {busy ? t("memory:detail") : t("memory:searchResultsCount", { count: memory.searchResults.length })}
       </p>
       <div className="mt-5 space-y-3">
+        {memory.isLoadingMemory ? (
+          <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/38 px-3.5 py-4 text-sm text-muted">
+            {t("common:loading")}
+          </div>
+        ) : null}
+        {memory.memoryError ? (
+          <div className="rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
+            {memory.memoryError}
+          </div>
+        ) : null}
+        {memory.selectedMemory ? (
+          <div className="rounded-[var(--radius-control)] border border-brand/25 bg-background/70 px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-xs uppercase tracking-[0.18em] text-muted">
+                  {memory.selectedMemory.kind} · {memory.selectedMemory.importance}
+                </div>
+                <div className="mt-2 text-base font-medium text-ink">{memory.selectedMemory.title}</div>
+              </div>
+              <Button onClick={() => memory.selectDate(memory.selectedMemory!.source.date)}>
+                {t("memory:openDailyMemory")}
+              </Button>
+            </div>
+            <div className="mt-3 whitespace-pre-wrap text-sm leading-6 text-ink">{memory.selectedMemory.body}</div>
+          </div>
+        ) : null}
         {memory.searchError ? (
           <div className="rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3.5 py-3 text-sm text-danger">
             {memory.searchError}
@@ -39,17 +65,17 @@ export function MemorySearchDetail({ memory }: { memory: MemoryPageState }) {
           memory.searchResults.map((result) => (
             <button
               className="w-full rounded-[var(--radius-control)] border border-border/65 bg-background/50 px-4 py-4 text-left transition hover:border-brand/30 hover:bg-background/74"
-              key={`${result.date}:${result.start_line}:${result.end_line}`}
-              onClick={() => memory.selectDate(result.date)}
+              key={result.memoryId}
+              onClick={() => memory.selectMemory(result.memoryId)}
               type="button"
             >
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-muted">{result.date}</div>
-                <div className="rounded-[var(--radius-control)] border border-border/65 bg-background/68 px-2.5 py-1 text-[11px] text-muted">
-                  {t("memory:lineRange", { start: result.start_line, end: result.end_line })}
+                <div className="text-xs uppercase tracking-[0.18em] text-muted">
+                  {result.source.date}
                 </div>
+                <div className="text-sm font-medium text-ink">{result.title}</div>
               </div>
-              <div className="mt-3 text-sm leading-6 text-ink">{result.snippet}</div>
+              <div className="mt-3 text-sm leading-6 text-ink">{result.preview}</div>
             </button>
           ))
         )}

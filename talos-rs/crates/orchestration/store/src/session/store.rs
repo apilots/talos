@@ -28,6 +28,14 @@ pub trait SessionStore: Send + Sync {
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool>;
 
+    /// Advances the contiguous session range already processed into long-term memory.
+    async fn advance_memory_processed_until_seq(
+        &self,
+        session_id: &str,
+        expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()>;
+
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool>;
 }
 
@@ -42,7 +50,7 @@ impl DatabaseSessionStore {
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -100,6 +108,16 @@ impl DatabaseSessionStore {
                 .try_into()
                 .unwrap_or_default(),
             message_count,
+            latest_turn_seq: row
+                .get_i64("latest_turn_seq")
+                .unwrap_or_default()
+                .try_into()
+                .unwrap_or_default(),
+            memory_processed_until_seq: row
+                .get_i64("memory_processed_until_seq")
+                .unwrap_or_default()
+                .try_into()
+                .unwrap_or_default(),
             usage,
             conf,
             project_id: Self::normalized_optional_string(row.get_string("project_id")),
@@ -155,6 +173,7 @@ impl DatabaseSessionStore {
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
+                "latest_turn_seq".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
                 "workspace_id".to_string(),
@@ -167,6 +186,7 @@ impl DatabaseSessionStore {
                 Value::String(Self::build_context_json(&record.context)?),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
+                Value::Number(serde_json::Number::from(record.latest_turn_seq)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
                 record
@@ -213,6 +233,8 @@ impl SessionStore for DatabaseSessionStore {
                 "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
+                "latest_turn_seq".to_string(),
+                "memory_processed_until_seq".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
                 "workspace_id".to_string(),
@@ -244,6 +266,8 @@ impl SessionStore for DatabaseSessionStore {
                 Value::String(Self::build_context_json(&record.context)?),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
+                Value::Number(serde_json::Number::from(record.latest_turn_seq)),
+                Value::Number(serde_json::Number::from(record.memory_processed_until_seq)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
                 record
@@ -273,7 +297,7 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
         if let Some(user_id) = query.user_id.as_deref() {
@@ -288,11 +312,20 @@ impl SessionStore for DatabaseSessionStore {
             clauses.push("project_id = ?");
             params.push(project_id.to_string());
         }
+        if query.memory_pending_only {
+            clauses.push("latest_turn_seq > memory_processed_until_seq");
+        }
+        if let Some(after) = &query.after {
+            clauses.push("(last_activity < ? OR (last_activity = ? AND session_key > ?))");
+            params.push(after.last_activity.to_string());
+            params.push(after.last_activity.to_string());
+            params.push(after.session_id.clone());
+        }
         if !clauses.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&clauses.join(" AND "));
         }
-        sql.push_str(" ORDER BY last_activity DESC");
+        sql.push_str(" ORDER BY last_activity DESC, session_key ASC");
         if let Some(limit) = query.limit {
             sql.push_str(" LIMIT ?");
             params.push(limit.to_string());
@@ -344,6 +377,15 @@ impl SessionStore for DatabaseSessionStore {
             clauses.push("project_id = ?");
             params.push(project_id.to_string());
         }
+        if query.memory_pending_only {
+            clauses.push("latest_turn_seq > memory_processed_until_seq");
+        }
+        if let Some(after) = &query.after {
+            clauses.push("(last_activity < ? OR (last_activity = ? AND session_key > ?))");
+            params.push(after.last_activity.to_string());
+            params.push(after.last_activity.to_string());
+            params.push(after.session_id.clone());
+        }
         if !clauses.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&clauses.join(" AND "));
@@ -393,12 +435,69 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
-        let row = Self::record_update_row(record)?;
+        let mut record = record.clone();
+        if let Some(current) = self.get_session_record(&record.id).await? {
+            record.latest_turn_seq = record.latest_turn_seq.max(current.latest_turn_seq);
+        }
+        let row = Self::record_update_row(&record)?;
         let affected = self
             .storage
             .update("sessions", &row, "session_key = ?", &[record.id.as_str()])
             .await?;
         Ok(affected > 0)
+    }
+
+    async fn advance_memory_processed_until_seq(
+        &self,
+        session_id: &str,
+        expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        if next_until_seq < expected_until_seq {
+            return Err(TalosError::ValidationError(
+                "memory cursor cannot move backwards".to_string(),
+            ));
+        }
+        let record = self
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(session_id.to_string()))?;
+        let row = Row::new(
+            vec![
+                "memory_processed_until_seq".to_string(),
+                "latest_turn_seq".to_string(),
+            ],
+            vec![
+                Value::Number(serde_json::Number::from(next_until_seq)),
+                Value::Number(serde_json::Number::from(
+                    record.latest_turn_seq.max(next_until_seq),
+                )),
+            ],
+        );
+        let expected = expected_until_seq.to_string();
+        let affected = self
+            .storage
+            .update(
+                "sessions",
+                &row,
+                "session_key = ? AND memory_processed_until_seq = ?",
+                &[session_id, expected.as_str()],
+            )
+            .await?;
+        if affected > 0 {
+            return Ok(());
+        }
+        let current = self
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(session_id.to_string()))?
+            .memory_processed_until_seq;
+        if current >= next_until_seq {
+            return Ok(());
+        }
+        Err(TalosError::Conflict(format!(
+            "memory cursor conflict for session '{session_id}': expected {expected_until_seq}, current {current}"
+        )))
     }
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {

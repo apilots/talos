@@ -31,7 +31,7 @@ pub(crate) async fn enforce_working_context_budget(
         return Ok(());
     }
 
-    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state));
+    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
     if pre_tokens <= window_usage.effective_prompt_budget {
         return Ok(());
     }
@@ -56,7 +56,8 @@ pub(crate) async fn enforce_working_context_budget(
         state,
         window_usage.effective_prompt_budget,
         kernel_config.compaction.tool_output_keep_last.max(1),
-    );
+        kernel_config,
+    )?;
     let outcome = if report.post_tokens <= window_usage.effective_prompt_budget {
         talos_types::talos::ContextCompactionOutcome::TrimmedFallbackApplied
     } else {
@@ -95,9 +96,17 @@ pub(crate) async fn enforce_working_context_budget(
 fn combined_messages(
     prepared: &PreparedGeneralTurn,
     state: &GeneralTurnLoopState,
+    kernel_config: &AgentKernelConfig,
 ) -> Vec<ChatMessage> {
     let mut messages = prepared.messages.clone();
     messages.extend(state.messages.clone());
+    if let Some(retrieved) = talos_prompt::render_retrieved_memories(
+        &state.retrieved_memories,
+        kernel_config.compaction.retrieved_memories_keep,
+        kernel_config.compaction.retrieved_memory_max_chars,
+    ) {
+        messages.push(retrieved);
+    }
     messages
 }
 
@@ -106,37 +115,75 @@ pub(super) fn trim_working_context_to_budget(
     state: &mut GeneralTurnLoopState,
     effective_prompt_budget: usize,
     preserve_recent_exchanges: usize,
-) -> WorkingContextTrimReport {
+    kernel_config: &AgentKernelConfig,
+) -> TalosResult<WorkingContextTrimReport> {
     let input_messages = state.messages.len();
-    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state));
+    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
     let mut preserved_recent_exchanges = 0;
 
     loop {
-        let current_tokens = estimate_messages_tokens(&combined_messages(prepared, state));
+        let current_tokens =
+            estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
         if current_tokens <= effective_prompt_budget {
-            return WorkingContextTrimReport {
+            return Ok(WorkingContextTrimReport {
                 pre_tokens,
                 post_tokens: current_tokens,
                 input_messages,
                 trimmed_messages: input_messages.saturating_sub(state.messages.len()),
                 preserved_recent_exchanges,
-            };
+            });
         }
 
         let groups = group_working_messages(&state.messages);
         let Some(group_index) = find_removable_group(&groups, preserve_recent_exchanges) else {
-            return WorkingContextTrimReport {
+            return Ok(WorkingContextTrimReport {
                 pre_tokens,
                 post_tokens: current_tokens,
                 input_messages,
                 trimmed_messages: input_messages.saturating_sub(state.messages.len()),
                 preserved_recent_exchanges,
-            };
+            });
         };
         preserved_recent_exchanges =
             count_preserved_recent_exchanges(&groups, preserve_recent_exchanges);
         let group = groups[group_index];
+        let mut candidates = Vec::new();
+        for message in state.messages[group.start..group.end]
+            .iter()
+            .filter(|message| matches!(message.name.as_deref(), Some("MemoryGet" | "memory_get")))
+        {
+            let value =
+                serde_json::from_str::<serde_json::Value>(&message.content).map_err(|error| {
+                    TalosError::SerializationError(format!(
+                        "parse trimmed MemoryGet tool result: {error}"
+                    ))
+                })?;
+            if value.get("ok").and_then(serde_json::Value::as_bool) == Some(false) {
+                continue;
+            }
+            let item = serde_json::from_value::<talos_types::talos::TalosContentItem>(value)
+                .map_err(|error| {
+                    TalosError::SerializationError(format!(
+                        "parse trimmed MemoryGet tool result: {error}"
+                    ))
+                })?;
+            let talos_types::talos::TalosContentItem::Json { value } = item else {
+                return Err(TalosError::SerializationError(
+                    "trimmed MemoryGet tool result is not structured JSON".to_string(),
+                ));
+            };
+            candidates.extend(super::tool_batch::parse_retrieved_memory_items(
+                "memory_get",
+                value.as_inner(),
+            )?);
+        }
         state.messages.drain(group.start..group.end);
+        let retrieved = super::tool_batch::take_new_retrieved_memories(
+            &state.retrieved_memories,
+            &candidates,
+            kernel_config.compaction.retrieved_memories_keep,
+        );
+        state.retrieved_memories.extend(retrieved);
     }
 }
 

@@ -3,9 +3,10 @@ use talos_llm_provider::{ChatMessage, ModelSpeed, ReasoningEffort};
 use talos_prompt::{PromptMode, PromptWindowUsage};
 
 #[test]
-fn test_build_general_turn_step_request_respects_parallel_flag() {
+fn test_build_general_turn_step_request() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
+        user_id: "u1".to_string(),
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
@@ -34,9 +35,10 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
         prompt_warning_state: None,
         stream_tx: None,
     };
-    let state = GeneralTurnLoopState::new(&prepared);
+    let mut state = GeneralTurnLoopState::new(&prepared);
 
-    let sequential_request = build_general_turn_step_request(&prepared, &state, Vec::new(), false);
+    let sequential_request =
+        build_general_turn_step_request(&prepared, &state, Vec::new(), false, 4, 2_000);
     assert!(!sequential_request.parallel_tool_calls);
     assert_eq!(sequential_request.messages.len(), 1);
     assert_eq!(sequential_request.messages[0].content, "current user input");
@@ -48,7 +50,29 @@ fn test_build_general_turn_step_request_respects_parallel_flag() {
     );
     assert_eq!(sequential_chat_request.speed, Some(ModelSpeed::Fast));
 
-    let parallel_request = build_general_turn_step_request(&prepared, &state, Vec::new(), true);
+    let parallel_request =
+        build_general_turn_step_request(&prepared, &state, Vec::new(), true, 4, 2_000);
     assert!(parallel_request.parallel_tool_calls);
     assert_eq!(parallel_request.speed, ModelSpeed::Fast);
+    state.retrieved_memories.push(talos_types::MemoryInfo {
+        memory_id: "mem-1".to_string(),
+        title: "Tea preference".to_string(),
+        body: "The user prefers tea.".to_string(),
+        kind: talos_types::MemoryKind::Preference,
+        importance: talos_types::MemoryImportance::High,
+        occurred_at: 1,
+        source: talos_types::MemorySourceInfo {
+            date: "2026-07-20".to_string(),
+            session_id: None,
+            from_seq: None,
+            until_seq: None,
+        },
+    });
+
+    let request = build_general_turn_step_request(&prepared, &state, Vec::new(), false, 4, 2_000);
+
+    assert!(request.messages.iter().any(|message| {
+        message.content.contains("retrieved_memories")
+            && message.content.contains("The user prefers tea.")
+    }));
 }

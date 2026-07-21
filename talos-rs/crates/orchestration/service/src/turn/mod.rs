@@ -101,8 +101,24 @@ async fn record_completed_turn_progress(
     let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
         return;
     };
+    if completed.stop_reason == talos_types::talos::StopReason::Cancelled {
+        return;
+    }
+    let Some(artifact_seq) = completed.artifact_seq else {
+        error!(
+            session_id = %event.session_id,
+            turn_id = %event.turn_id,
+            "completed turn is missing its persisted artifact sequence"
+        );
+        return;
+    };
     if let Err(err) = sessions
-        .record_turn_progress(&event.session_id, 2, assistant_model, &completed.usage)
+        .record_persisted_turn_progress(
+            &event.session_id,
+            artifact_seq,
+            assistant_model,
+            &completed.usage,
+        )
         .await
     {
         error!(

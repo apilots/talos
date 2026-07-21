@@ -9,7 +9,6 @@ pub(crate) struct SilentGateway;
 pub(crate) struct MockSessionService {
     session_cleared: Mutex<bool>,
 }
-pub(crate) struct MockLlmProvider;
 
 fn test_timeline_event(
     sequence: u64,
@@ -26,49 +25,6 @@ fn test_timeline_event(
         session_id: "mock-session".to_string(),
         sequence,
         payload,
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for MockLlmProvider {
-    fn name(&self) -> &str {
-        "mock"
-    }
-
-    fn default_model(&self) -> String {
-        "mock-model".to_string()
-    }
-
-    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
-        let content = if _request.messages.iter().any(|message| {
-            message
-                .content
-                .contains("Respond ONLY with a valid JSON array of file paths.")
-        }) {
-            "[\"memory/2026-04-04.md\"]".to_string()
-        } else if _request.messages.iter().any(|message| {
-            message
-                .content
-                .contains("Respond ONLY with a valid JSON array.")
-        }) {
-            "[{\"path\":\"memory/2026-04-04.md\",\"from\":1,\"to\":5}]".to_string()
-        } else {
-            String::new()
-        };
-        Ok(ChatResponse {
-            content,
-            reasoning: Default::default(),
-            model: "mock-model".to_string(),
-            usage: Usage::default(),
-            finish_reason: None,
-            tool_calls: None,
-        })
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        drop(tx);
-        Ok(ChatStream { rx })
     }
 }
 
@@ -182,6 +138,7 @@ impl TurnExecutor for MockGateway {
                     stop_reason: StopReason::EndTurn,
                     usage: TokenUsage::default(),
                     metrics: None,
+                    artifact_seq: None,
                 }),
             );
             let _ = tx.send(completed).await;
@@ -255,7 +212,14 @@ impl SessionService for MockSessionService {
                 project_root: None,
                 environment: None,
             },
-            conf: talos_types::SessionConf::default(),
+            conf: talos_types::SessionConf {
+                model_selection: Some(talos_types::ModelSelection::without_reasoning(
+                    talos_types::ModelRef {
+                        provider: "bailian".to_string(),
+                        id: "qwen-plus".to_string(),
+                    },
+                )),
+            },
             project_id: None,
             current_directory: None,
             config: {

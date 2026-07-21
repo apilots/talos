@@ -4,12 +4,35 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::PathBuf;
 use talos_skills::{SkillRoots, SkillSelector};
+use talos_types::talos::ToolArguments;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub call_id: String,
+    pub name: String,
+    #[serde(default)]
+    pub arguments: ToolArguments,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactionMemoryOutput {
+    pub title: String,
+    #[serde(default)]
+    pub facts: Vec<String>,
+    #[serde(default)]
+    pub preferences: Vec<String>,
+    #[serde(default)]
+    pub open_tasks: Vec<String>,
+    #[serde(default)]
+    pub risks: Vec<String>,
+    #[serde(default)]
+    pub memory_candidates: Vec<talos_memory::MemoryCandidate>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionCompactionStatus {
     Normal,
-    Compressing,
     Recovery,
     Blocked,
 }
@@ -42,13 +65,6 @@ impl SessionCompactionState {
         }
     }
 
-    pub fn compressing() -> Self {
-        Self {
-            status: SessionCompactionStatus::Compressing,
-            blocked_reason: None,
-        }
-    }
-
     pub fn blocked_prompt_budget_exhausted() -> Self {
         Self {
             status: SessionCompactionStatus::Blocked,
@@ -77,11 +93,13 @@ pub struct GeneralTurnResult {
     pub prompt_diagnostics: PromptDiagnostics,
     pub warnings: Vec<KernelWarning>,
     pub outcome: GeneralTurnOutcome,
+    pub artifact_seq: u64,
 }
 
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
     pub session_id: String,
+    pub user_id: String,
     pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
@@ -247,7 +265,7 @@ pub struct GeneralTurnLoopState {
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
-    pub retrieved_memories: Vec<RetrievedMemoryItem>,
+    pub(crate) retrieved_memories: Vec<talos_types::MemoryInfo>,
     pub tool_call_count: usize,
     pub tool_error_count: usize,
     pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
@@ -382,7 +400,6 @@ pub struct GeneralTurnToolBatch {
     pub output_items: Vec<RunItem>,
     pub tool_messages: Vec<ChatMessage>,
     pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
-    pub retrieved_memories: Vec<RetrievedMemoryItem>,
     pub logs: Vec<ToolResultLog>,
     pub error_count: usize,
 }
@@ -395,16 +412,10 @@ pub struct PendingDynamicToolRequest {
     pub reasoning_continuation: Option<ReasoningContinuation>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ToolResultLog {
     pub(crate) call_id: String,
     pub(crate) tool: String,
     pub(crate) payload: Value,
-    pub(crate) envelope: Value,
     pub(crate) is_error: bool,
-    pub(crate) truncated: bool,
-    pub(crate) size_bytes: usize,
-    pub(crate) semantic_events: Vec<String>,
-    pub(crate) next_turn_failure: Option<Value>,
 }

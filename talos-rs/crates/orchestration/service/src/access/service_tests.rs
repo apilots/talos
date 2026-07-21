@@ -128,6 +128,24 @@ impl SessionStore for RecordingSessionStore {
         Ok(true)
     }
 
+    async fn advance_memory_processed_until_seq(
+        &self,
+        session_id: &str,
+        _expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        if let Some(record) = self
+            .records
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|record| record.id == session_id)
+        {
+            record.memory_processed_until_seq = next_until_seq;
+        }
+        Ok(())
+    }
+
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
         self.deleted_sessions
             .lock()
@@ -206,7 +224,7 @@ impl SessionRuntime for NoopSessionRuntime {
 
     async fn compact_session(
         &self,
-        _session: talos_types::TalosSession,
+        _params: talos_coordinator::AgentSessionCompactionParams,
     ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in this test")
     }
@@ -244,7 +262,7 @@ impl SessionRuntime for RecordingSessionRuntime {
 
     async fn compact_session(
         &self,
-        _session: talos_types::TalosSession,
+        _params: talos_coordinator::AgentSessionCompactionParams,
     ) -> TalosResult<talos_types::TokenUsage> {
         unreachable!("not used in this test")
     }
@@ -304,6 +322,8 @@ fn record_for(
         created_at: 0,
         last_activity: 0,
         message_count: 0,
+        latest_turn_seq: 0,
+        memory_processed_until_seq: 0,
         usage: TokenUsage::default(),
         conf,
         workspace_id: None,

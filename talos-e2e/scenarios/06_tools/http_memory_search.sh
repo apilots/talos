@@ -83,7 +83,7 @@ memory_stream_tool_completed_count="$(grep -c '"type":"tool_result"' "${memory_s
 memory_stream_completed_count="$(grep -c '^event: timeline.turn.completed' "${memory_stream_log}" || true)"
 memory_stream_tool_started_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
 memory_stream_tool_completed_name_count="$(grep -c '"name":"MemorySearch"' "${memory_stream_log}" || true)"
-memory_stream_results_count="$(grep -c '"results"' "${memory_stream_log}" || true)"
+memory_stream_results_count="$(grep -c '"data":\[' "${memory_stream_log}" || true)"
 if [[ "${memory_stream_tool_started_count}" -lt 1 || "${memory_stream_tool_completed_count}" -lt 1 || "${memory_stream_completed_count}" -lt 1 ]]; then
   echo "CASE messages_memory_search_stream FAIL tool_started=${memory_stream_tool_started_count} tool_completed=${memory_stream_tool_completed_count} completed=${memory_stream_completed_count}"
   exit 1

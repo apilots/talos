@@ -1,4 +1,6 @@
 use super::prepare::*;
+use super::prepare_compaction::context_compaction_failure_outcome;
+use super::types::ToolCallRecord;
 use super::*;
 
 use crate::{KernelWarning, PromptDynamicSectionDroppedWarning};
@@ -38,12 +40,7 @@ fn test_build_session_continuity_records_recent_goal_failure_and_retry_guidance(
             call_id: "call-1".to_string(),
             tool: "Bash".to_string(),
             payload: json!({"error": "permission denied"}),
-            envelope: json!({}),
             is_error: true,
-            truncated: false,
-            size_bytes: 0,
-            semantic_events: Vec::new(),
-            next_turn_failure: None,
         }],
     );
 
@@ -80,12 +77,7 @@ fn test_build_session_continuity_prefers_verified_evidence_guidance_without_fail
             call_id: "call-1".to_string(),
             tool: "Read".to_string(),
             payload: json!({"content": "[package]"}),
-            envelope: json!({}),
             is_error: false,
-            truncated: false,
-            size_bytes: 0,
-            semantic_events: Vec::new(),
-            next_turn_failure: None,
         }],
     );
 

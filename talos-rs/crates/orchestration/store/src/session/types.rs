@@ -17,6 +17,10 @@ pub struct SessionRecord {
     pub last_activity: u64,
     pub message_count: u64,
     #[serde(default)]
+    pub latest_turn_seq: u64,
+    #[serde(default)]
+    pub memory_processed_until_seq: u64,
+    #[serde(default)]
     pub usage: TokenUsage,
     #[serde(default)]
     pub conf: SessionConf,
@@ -50,6 +54,8 @@ impl SessionRecord {
             created_at: session.state.created_at,
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,
+            latest_turn_seq: 0,
+            memory_processed_until_seq: 0,
             usage: session.state.usage.clone(),
             conf: session.conf.clone(),
             project_id: session.project_id.clone(),
@@ -71,6 +77,15 @@ pub struct SessionQuery {
     pub project_id: Option<String>,
     pub limit: Option<usize>,
     pub offset: Option<usize>,
+    pub memory_pending_only: bool,
+    pub after: Option<SessionPageCursor>,
+}
+
+/// Stable keyset cursor for the session list order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SessionPageCursor {
+    pub last_activity: u64,
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

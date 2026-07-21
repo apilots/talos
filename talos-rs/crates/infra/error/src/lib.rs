@@ -74,7 +74,6 @@ pub enum TalosToolErrorKind {
 #[serde(rename_all = "snake_case")]
 pub enum TalosMemoryErrorKind {
     SummaryParseFailed,
-    PersistenceDecisionParseFailed,
 }
 
 #[derive(Error, Debug, Serialize, Deserialize)]

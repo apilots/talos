@@ -97,6 +97,7 @@ fn render_event_finishes_exec_on_turn_completed() {
                 stop_reason: StopReason::EndTurn,
                 usage: TokenUsage::default(),
                 metrics: None,
+                artifact_seq: None,
                 completed_at_ms: 1,
             }),
         },

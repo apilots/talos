@@ -2,8 +2,8 @@ use talos_error::TalosResult;
 use talos_service::Actor;
 use talos_types::{
     ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectInfo, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
-    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
+    ProjectReadRequest, ProjectReadResponse,
 };
 
 use crate::gateway_service::{require_non_empty, ServiceGateway};
@@ -16,7 +16,7 @@ impl ServiceGateway {
     ) -> TalosResult<ProjectListResponse> {
         let projects = self.service.list_projects(actor).await?;
         Ok(ProjectListResponse {
-            projects: projects.into_iter().map(ProjectInfo::from).collect(),
+            projects: projects.into_iter().collect(),
         })
     }
 
@@ -27,9 +27,7 @@ impl ServiceGateway {
     ) -> TalosResult<ProjectReadResponse> {
         require_non_empty(&request.project_id, "project_id")?;
         let project = self.service.get_project(actor, &request.project_id).await?;
-        Ok(ProjectReadResponse {
-            project: ProjectInfo::from(project),
-        })
+        Ok(ProjectReadResponse { project })
     }
 
     pub(crate) async fn create_project(
@@ -41,9 +39,7 @@ impl ServiceGateway {
             .service
             .create_project(actor, request.name, request.directory)
             .await?;
-        Ok(ProjectCreateResponse {
-            project: ProjectInfo::from(project),
-        })
+        Ok(ProjectCreateResponse { project })
     }
 
     pub(crate) async fn patch_project(
@@ -57,9 +53,7 @@ impl ServiceGateway {
             .service
             .patch_project(actor, &project_id, request.into_patch())
             .await?;
-        Ok(ProjectPatchResponse {
-            project: ProjectInfo::from(project),
-        })
+        Ok(ProjectPatchResponse { project })
     }
 
     pub(crate) async fn delete_project(

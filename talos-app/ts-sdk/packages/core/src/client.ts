@@ -10,6 +10,8 @@ import type {
   MemoryFileReadResponse,
   MemoryFileWriteRequest,
   MemoryFileWriteResponse,
+  MemoryGetRequest,
+  MemoryGetResponse,
   MemorySearchRequest,
   MemorySearchResponse,
   ModelListResponse,
@@ -406,6 +408,10 @@ export class TalosClient {
         ? await this.http.request<MemorySearchResponse>(url, requestOptions)
         : await this.http.request<MemorySearchResponse>(url);
     },
+    getEntry: (request: MemoryGetRequest): Promise<MemoryGetResponse> =>
+      this.http.request<MemoryGetResponse>(
+        this.url(`/v1/memory/entries/${encodeURIComponent(request.memoryId)}`),
+      ),
   };
 
   workspaceDocs = {
@@ -460,12 +466,18 @@ export class TalosClient {
       afterEventId: string | undefined,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
+      options?: { persistent?: boolean },
     ) => {
-      const query = afterEventId
-        ? `?after_event_id=${encodeURIComponent(afterEventId)}`
-        : "";
+      const query = new URLSearchParams();
+      if (afterEventId) {
+        query.set("after_event_id", afterEventId);
+      }
+      if (options?.persistent) {
+        query.set("close_when_idle", "false");
+      }
+      const serializedQuery = query.toString();
       return this.streamAdapter.stream(
-        this.url(`/v1/sessions/${sessionId}/events${query}`),
+        this.url(`/v1/sessions/${sessionId}/events${serializedQuery ? `?${serializedQuery}` : ""}`),
         {
           method: "GET",
           headers: {

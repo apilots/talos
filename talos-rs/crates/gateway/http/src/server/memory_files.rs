@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
 use talos_types::{
-    MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest, MemorySearchRequest,
+    MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest,
+    MemoryKind, MemorySearchRequest,
 };
 
 use super::access::shared_actor;
@@ -29,14 +30,17 @@ pub(super) struct MemoryFilesQuery {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct MemorySearchHttpQuery {
     query: String,
     #[serde(default)]
-    limit: Option<usize>,
+    limit: Option<u32>,
     #[serde(default)]
-    date_from: Option<String>,
+    kinds: Option<String>,
     #[serde(default)]
-    date_to: Option<String>,
+    since_at: Option<i64>,
+    #[serde(default)]
+    until_at: Option<i64>,
 }
 
 pub(super) async fn list_memory_files_handler(
@@ -104,12 +108,46 @@ pub(super) async fn search_memory_files_handler(
     let request = MemorySearchRequest {
         query: query.query,
         limit: query.limit,
-        date_from: query.date_from,
-        date_to: query.date_to,
+        kinds: query
+            .kinds
+            .map(|value| parse_memory_kinds(&value))
+            .transpose()?,
+        since_at: query.since_at,
+        until_at: query.until_at,
     };
     let response = state
         .gateway
         .search_memory(&actor, request)
+        .await
+        .map_err(map_memory_error)?;
+    Ok(Json(json!(response)))
+}
+
+fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
+    value
+        .split(',')
+        .map(|kind| match kind {
+            "preference" => Ok(MemoryKind::Preference),
+            "fact" => Ok(MemoryKind::Fact),
+            "decision" => Ok(MemoryKind::Decision),
+            "task" => Ok(MemoryKind::Task),
+            "episode" => Ok(MemoryKind::Episode),
+            _ => Err(map_memory_error(TalosError::ValidationError(format!(
+                "unknown memory kind: {kind}"
+            )))),
+        })
+        .collect()
+}
+
+pub(super) async fn get_memory_handler(
+    State(state): State<Arc<HttpApiState>>,
+    auth: axum::extract::Extension<RequestIdentity>,
+    Path(memory_id): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    let actor = shared_actor(&auth.0);
+    let response = state
+        .gateway
+        .get_memory(&actor, MemoryGetRequest { memory_id })
         .await
         .map_err(map_memory_error)?;
     Ok(Json(json!(response)))

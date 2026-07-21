@@ -14,13 +14,14 @@ use talos_agent_kernel::{
     KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData,
     ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
 };
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, ProviderModelConfig};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
     ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
     ReasoningContinuation, ReasoningOutput, Role, ToolDefinition, Usage,
 };
-use talos_memory::{Memory, TalosTurn};
+use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_store::session::{self as session_artifacts, FileSessionArtifactStore};
 use talos_tools::{
     default_governance_for_source, ReadTool, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
     ToolRegistry, ToolSource, WebSearchTool,
@@ -28,10 +29,11 @@ use talos_tools::{
 use talos_tools_policy::ToolPolicy;
 use talos_types::agent_dispatch::{AgentDispatchResumeContext, AgentDispatchResumeToolCall};
 use talos_types::talos::{
-    AgentEventPayload, ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger, RunItem, StopReason as TalosStopReason, TalosContentItem,
-    TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TokenUsage,
+    AgentEventPayload, AgentEventType, ContextCompactionMetrics, ContextCompactionOutcome,
+    ContextCompactionStage, ContextCompactionTrigger, StopReason as TalosStopReason,
+    TalosContentItem, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
+    TokenUsage,
 };
 use talos_types::{
     ModelRef, ModelSelection, SessionConf, SessionContext, SessionState, TalosSession,
@@ -39,10 +41,119 @@ use talos_types::{
 };
 use tempfile::TempDir;
 use tokio::sync::Notify;
-use tokio::time::{timeout, Duration};
+
+#[path = "compaction_tests.rs"]
+mod compaction_tests;
+
+struct TestMemoryWriter;
+
+impl MemoryWriter for TestMemoryWriter {
+    fn write<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _batch: MemoryWriteBatch,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+}
+
+fn test_agent_harness(
+    id: String,
+    name: String,
+    description: String,
+    llm_provider_router: Arc<dyn LlmProviderRouter>,
+    model_selection: ModelSelection,
+    tool_registry: Arc<ToolRegistry>,
+    kernel_config: AgentKernelConfig,
+) -> talos_error::TalosResult<AgentHarnessImpl> {
+    AgentHarnessImpl::new(AgentHarnessParams {
+        id,
+        name,
+        description,
+        llm_provider_router,
+        model_selection,
+        tool_registry,
+        kernel_config,
+        skill_roots_resolver: crate::empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(TestMemoryWriter),
+    })
+}
+
+async fn append_transcript_record(
+    workspace_root: &std::path::Path,
+    record: &session_artifacts::SessionTranscriptRecord,
+) -> talos_error::TalosResult<()> {
+    FileSessionArtifactStore::default()
+        .append_transcript_record(workspace_root, record)
+        .await
+}
+
+async fn load_transcript_records(
+    workspace_root: &std::path::Path,
+    session_id: &str,
+    invocation_id: Option<&str>,
+    branch: session_artifacts::SessionTranscriptBranch,
+) -> talos_error::TalosResult<Vec<session_artifacts::SessionTranscriptRecord>> {
+    FileSessionArtifactStore::default()
+        .load_transcript_records(workspace_root, session_id, invocation_id, Some(branch))
+        .await
+}
+
+#[tokio::test]
+async fn transcript_service_restores_session_state_without_a_filter() {
+    let workspace = TempDir::new().expect("workspace");
+    let service = crate::session_artifacts::SessionStoreKernelTranscriptService::new(
+        Arc::new(FileSessionArtifactStore::default()),
+        workspace.path().to_path_buf(),
+    );
+    let mut session = talos_agent_kernel::InvocationSession {
+        session_id: "session-state".to_string(),
+        ..talos_agent_kernel::InvocationSession::default()
+    };
+    let mut event = talos_agent_kernel::KernelTranscriptEvent::new(
+        "session-state".to_string(),
+        "turn-state".to_string(),
+        talos_agent_kernel::ExecutionBranch::ModelThinking,
+        talos_agent_kernel::EventAuthor::System,
+        talos_agent_kernel::KernelTranscriptEventKind::Planning,
+        talos_agent_kernel::KernelTranscriptPayload::StateOnly,
+    );
+    event
+        .actions
+        .state_delta
+        .push(talos_agent_kernel::StateDelta {
+            namespace: talos_agent_kernel::StateNamespace::Session,
+            key: "context_compaction".to_string(),
+            value: json!({"mode": "recovery"}),
+        });
+    talos_agent_kernel::KernelTranscriptService::append_event(&service, &mut session, event)
+        .await
+        .expect("state event should append");
+
+    let restored = talos_agent_kernel::KernelTranscriptService::load_session(
+        &service,
+        "session-state",
+        None,
+        None,
+    )
+    .await
+    .expect("session state should load");
+
+    assert_eq!(
+        restored.state.get(
+            talos_agent_kernel::StateNamespace::Session,
+            "context_compaction"
+        ),
+        Some(&json!({"mode": "recovery"}))
+    );
+}
 
 fn build_test_agent() -> AgentHarnessImpl {
-    AgentHarnessImpl::new(
+    test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -73,9 +184,22 @@ fn static_router(provider: Arc<dyn LlmProvider>) -> Arc<dyn LlmProviderRouter> {
 
 fn model_selection(id: &str) -> ModelSelection {
     ModelSelection::without_reasoning(ModelRef {
-        provider: "test".to_string(),
+        provider: "openai".to_string(),
         id: id.to_string(),
     })
+}
+
+fn provider_model(id: &str) -> ProviderModelConfig {
+    ProviderModelConfig {
+        id: id.to_string(),
+        name: id.to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }
 }
 
 async fn submit_dynamic_tool_result(
@@ -124,10 +248,6 @@ struct CapturingMaxTokensProvider {
 
 struct DynamicResumeAgentProvider {
     calls: AtomicUsize,
-}
-
-struct BlockingPostTurnFlushProvider {
-    chat_calls: Arc<AtomicUsize>,
 }
 
 struct NamedRecordingProvider {
@@ -212,7 +332,7 @@ struct RecordingLlmProviderRouter {
 
 impl LlmProviderRouter for RecordingLlmProviderRouter {
     fn provider_for(&self, model_ref: &ModelRef) -> talos_error::TalosResult<Arc<dyn LlmProvider>> {
-        if model_ref.provider == "secondary" {
+        if model_ref.provider == "deepseek" {
             Ok(self.secondary.clone())
         } else {
             Ok(self.primary.clone())
@@ -240,7 +360,7 @@ impl LlmProvider for SequencedProvider {
     ) -> talos_error::TalosResult<ChatResponse> {
         let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
         if call_index == 0 {
-            self.started.notify_waiters();
+            self.started.notify_one();
             pending::<talos_error::TalosResult<ChatResponse>>().await?;
             unreachable!("pending future should not resolve");
         }
@@ -266,40 +386,12 @@ impl LlmProvider for SequencedProvider {
     ) -> talos_error::TalosResult<ModelBlockStream> {
         let call_index = self.calls.fetch_add(1, Ordering::SeqCst);
         if call_index == 0 {
-            self.started.notify_waiters();
+            self.started.notify_one();
             pending::<talos_error::TalosResult<ModelBlockStream>>().await?;
             unreachable!("pending future should not resolve");
         }
 
         Ok(single_text_block_stream("provider ok"))
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for BlockingPostTurnFlushProvider {
-    fn name(&self) -> &str {
-        "blocking-post-turn-flush"
-    }
-
-    fn default_model(&self) -> String {
-        "mock-model".to_string()
-    }
-
-    async fn chat(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
-        self.chat_calls.fetch_add(1, Ordering::SeqCst);
-        pending::<talos_error::TalosResult<ChatResponse>>().await
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        Ok(ChatStream { rx })
-    }
-
-    async fn stream_model_blocks(
-        &self,
-        _request: ChatRequest,
-    ) -> talos_error::TalosResult<ModelBlockStream> {
-        Ok(single_text_block_stream("final answer"))
     }
 }
 
@@ -470,13 +562,9 @@ fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
     let temp_dir = tempfile::tempdir().expect("temp dir should be created");
     let kernel_config = AgentKernelConfig {
         workspace_dir: temp_dir.path().display().to_string(),
-        memory: talos_config::AgentKernelMemoryConfig {
-            compaction_threshold_bytes: usize::MAX,
-            ..Default::default()
-        },
         ..Default::default()
     };
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -490,10 +578,24 @@ fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
 }
 
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
+    let mut config = talos_config::Config::default();
+    config.llm.openai.models = [
+        "gpt-4o",
+        "agent-model",
+        "session-model",
+        "mock-model",
+        "primary-model",
+    ]
+    .into_iter()
+    .map(provider_model)
+    .collect();
+    config.llm.deepseek.models = vec![provider_model("secondary-model")];
     TalosSession {
         title: "Untitled Session".to_string(),
         user_id: "talos-test-local-user".to_string(),
-        conf: SessionConf::default(),
+        conf: SessionConf {
+            model_selection: Some(model_selection("gpt-4o")),
+        },
         project_id: None,
         current_directory: None,
         context: SessionContext {
@@ -511,7 +613,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             thread_id: None,
             environment: None,
         },
-        config: talos_config::Config::default(),
+        config,
         state: SessionState {
             created_at: 1,
             last_activity: 1,
@@ -819,109 +921,6 @@ fn test_execution_summary_item_does_not_gate_final_answer_merge() {
 
     assert!(summary_events[1].sequence < final_events[0].sequence);
 }
-
-#[test]
-fn test_context_compaction_stream_events_map_to_single_timeline_item() {
-    let mut timeline = TimelineBuilder::new(
-        "request-compaction",
-        "turn-compaction",
-        "message-1",
-        "session-1",
-    );
-    let mut state = KernelTimelineState::default();
-
-    let started_events = emit_kernel_timeline_events(
-        &mut timeline,
-        &mut state,
-        KernelStreamEvent::new(
-            KernelStreamEventType::ContextCompaction,
-            KernelStreamEventData::ContextCompaction(ContextCompactionStreamData {
-                trigger: ContextCompactionTrigger::ThresholdExceeded,
-                stage: ContextCompactionStage::Preparing,
-                outcome: None,
-                metrics: None,
-                message: Some("Preparing context compaction.".to_string()),
-            }),
-        ),
-    )
-    .expect("context compaction start should map");
-
-    let compaction_id = match &started_events[0].payload {
-        AgentEventPayload::ItemStarted(payload) => {
-            assert_eq!(payload.item.kind, TalosTimelineItemKind::ContextCompaction);
-            assert_eq!(payload.item.phase, TalosTimelinePhase::System);
-            assert!(matches!(
-                payload.item.content,
-                TalosTimelineContent::ContextCompaction {
-                    trigger: ContextCompactionTrigger::ThresholdExceeded,
-                    stage: ContextCompactionStage::Preparing,
-                    ..
-                }
-            ));
-            payload.item.item_id.clone()
-        }
-        _ => panic!("expected context compaction item start"),
-    };
-
-    let completed_events = emit_kernel_timeline_events(
-        &mut timeline,
-        &mut state,
-        KernelStreamEvent::new(
-            KernelStreamEventType::ContextCompaction,
-            KernelStreamEventData::ContextCompaction(ContextCompactionStreamData {
-                trigger: ContextCompactionTrigger::ThresholdExceeded,
-                stage: ContextCompactionStage::Completed,
-                outcome: Some(ContextCompactionOutcome::Applied),
-                metrics: Some(ContextCompactionMetrics {
-                    covers_until_seq: Some(12),
-                    pre_compaction_total_tokens: 9000,
-                    post_compaction_total_tokens: 3000,
-                    compaction_input_tokens: 6000,
-                    compaction_output_tokens: 500,
-                    ..Default::default()
-                }),
-                message: Some("Context compaction complete.".to_string()),
-            }),
-        ),
-    )
-    .expect("context compaction completion should map");
-
-    assert!(completed_events.iter().any(|event| matches!(
-        &event.payload,
-        AgentEventPayload::ItemDelta(payload)
-            if payload.item_id == compaction_id
-                && matches!(
-                    payload.delta,
-                    TalosTimelineDelta::ContextCompaction {
-                        stage: Some(ContextCompactionStage::Completed),
-                        outcome: Some(ContextCompactionOutcome::Applied),
-                        ..
-                    }
-                )
-    )));
-    assert!(completed_events.iter().any(|event| matches!(
-        &event.payload,
-        AgentEventPayload::ItemCompleted(payload)
-            if payload.item_id == compaction_id
-                && payload.status == TalosTimelineItemStatus::Completed
-    )));
-    assert!(matches!(
-        timeline
-            .item(&compaction_id)
-            .expect("compaction item should exist")
-            .content,
-        TalosTimelineContent::ContextCompaction {
-            stage: ContextCompactionStage::Completed,
-            outcome: Some(ContextCompactionOutcome::Applied),
-            metrics: Some(ContextCompactionMetrics {
-                covers_until_seq: Some(12),
-                ..
-            }),
-            ..
-        }
-    ));
-}
-
 #[test]
 fn test_timeline_rejects_main_events_after_final_answer_started() {
     let mut timeline = TimelineBuilder::new(
@@ -1184,7 +1183,7 @@ fn test_reasoning_item_closes_before_tool_boundary_and_restarts_after_tool() {
 #[tokio::test]
 async fn test_generate_system_prompt() {
     let mock_provider = MockLlmProvider {};
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1209,7 +1208,7 @@ async fn test_generate_system_prompt() {
 #[tokio::test]
 async fn test_add_tool() {
     let mock_provider = MockLlmProvider {};
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1238,7 +1237,7 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
     });
     let mut agent_kernel_config = AgentKernelConfig::default();
     agent_kernel_config.output.max_tokens = 321;
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1251,7 +1250,7 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
 
     let mut session = build_test_session("session-kernel-override", "workspace-1");
     session.config.agent.kernel.output.max_tokens = 123;
-    session.config.llm.model = "session-model".to_string();
+    session.conf.model_selection = Some(model_selection("session-model"));
 
     let result = agent
         .run(agent_run_params(
@@ -1292,13 +1291,13 @@ async fn test_run_uses_session_provider_for_llm_routing() {
         seen_provider: seen_provider.clone(),
         seen_model: seen_model.clone(),
     });
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
         Arc::new(RecordingLlmProviderRouter { primary, secondary }),
         ModelSelection::without_reasoning(ModelRef {
-            provider: "primary".to_string(),
+            provider: "openai".to_string(),
             id: "primary-model".to_string(),
         }),
         Arc::new(ToolRegistry::new()),
@@ -1307,8 +1306,10 @@ async fn test_run_uses_session_provider_for_llm_routing() {
     .expect("agent harness should build");
 
     let mut session = build_test_session("session-provider-routing", "workspace-1");
-    session.config.llm.provider = "secondary".to_string();
-    session.config.llm.model = "secondary-model".to_string();
+    session.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
+        provider: "deepseek".to_string(),
+        id: "secondary-model".to_string(),
+    }));
 
     let result = agent
         .run(agent_run_params(
@@ -1388,7 +1389,7 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1403,22 +1404,21 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
     session.config.agent.kernel.output.max_tokens = 256;
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let request_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+    let request_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-original".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
-            payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
+            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_dynamic".to_string(),
                 arguments: json!({ "message": "ping" }).into(),
@@ -1427,36 +1427,34 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
                 )),
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    let response_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let response_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-original".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolResponse {
-            payload: talos_memory::SessionTranscriptDynamicToolResponsePayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
+            payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_dynamic".to_string(),
                 output: "dynamic pong".to_string(),
                 success: true,
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    memory_store
-        .append_transcript_record(&request_record)
+    append_transcript_record(&workspace_root, &request_record)
         .await
         .expect("dynamic request record should append");
-    memory_store
-        .append_transcript_record(&response_record)
+    append_transcript_record(&workspace_root, &response_record)
         .await
         .expect("dynamic response record should append");
 
@@ -1521,8 +1519,8 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
 }
 
 #[tokio::test]
-async fn test_session_memory_store_does_not_write_profile_snapshot() {
-    let (guard, agent) = build_temp_agent();
+async fn test_session_workspace_resolution_does_not_write_profile_snapshot() {
+    let guard = tempfile::tempdir().expect("temp dir should be created");
     let mut session = build_test_session("session-profile-snapshot", "workspace-profile");
     session.config.agent.kernel.workspace_dir = guard.path().display().to_string();
     let profile_path = guard
@@ -1538,10 +1536,8 @@ async fn test_session_memory_store_does_not_write_profile_snapshot() {
     )
     .expect("profile snapshot should be seeded");
 
-    let (kernel_config, _memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
 
     let profile_content =
         std::fs::read_to_string(&profile_path).expect("profile snapshot should remain readable");
@@ -1562,72 +1558,6 @@ async fn test_session_memory_store_does_not_write_profile_snapshot() {
     assert_eq!(profile["updated_at_ms"], 1);
 }
 
-#[tokio::test]
-async fn test_close_session_flushes_workspace_memory() {
-    let (_guard, agent) = build_temp_agent();
-    let session_id = "session-close-flush";
-    let mut session = build_test_session(session_id, "workspace-a");
-    session.config.agent.kernel.workspace_dir = _guard.path().display().to_string();
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let timestamp = Utc::now();
-    let turn = TalosTurn {
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: session_id.to_string(),
-        seq: 1,
-        timestamp,
-        items: vec![
-            RunItem::UserInput {
-                text: "Remember that I prefer tea over coffee.".to_string(),
-            },
-            RunItem::OutputText {
-                text: "Noted. You prefer tea over coffee.".to_string(),
-            },
-        ],
-        usage: TokenUsage::default(),
-        stop_reason: TalosStopReason::EndTurn,
-    };
-
-    memory_store
-        .append_turn(&turn)
-        .await
-        .expect("session turn should be persisted");
-
-    agent
-        .close_session(session)
-        .await
-        .expect("session close should enqueue workspace memory flush");
-    agent
-        .drain_pending_memory_flushes(Duration::from_secs(5))
-        .await
-        .expect("memory flush should complete during drain");
-
-    let file_path = _guard
-        .path()
-        .join("users")
-        .join("talos-test-local-user")
-        .join("memory")
-        .join(format!("{}.md", Utc::now().format("%Y-%m-%d")));
-    let mut content = None;
-    for _ in 0..20 {
-        match tokio::fs::read_to_string(&file_path).await {
-            Ok(value) => {
-                content = Some(value);
-                break;
-            }
-            Err(_) => tokio::time::sleep(std::time::Duration::from_millis(25)).await,
-        }
-    }
-    let content = content.expect("workspace daily memory file should exist");
-    assert!(content.contains("## ["));
-    assert!(content.contains("session:"));
-    assert!(content.contains("Durable Memory"));
-    assert!(!content.trim().is_empty());
-}
-
 #[test]
 fn test_planner_mode_comes_from_kernel_config() {
     let mut agent = build_test_agent();
@@ -1646,33 +1576,31 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
     let session_id = "session-dynamic-replay";
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let request_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+    let request_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-input".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
-            payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
+            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-1".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({ "name": "Talos" }).into(),
                 reasoning_continuation: None,
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    memory_store
-        .append_transcript_record(&request_record)
+    append_transcript_record(&workspace_root, &request_record)
         .await
         .expect("request record should append");
 
@@ -1715,33 +1643,31 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
         .tools
         .dynamic
         .response_timeout_ms = 1;
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let request_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+    let request_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-input".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now() - chrono::Duration::milliseconds(10),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
-            payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
+            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-timeout".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
                 reasoning_continuation: None,
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    memory_store
-        .append_transcript_record(&request_record)
+    append_transcript_record(&workspace_root, &request_record)
         .await
         .expect("request record should append");
 
@@ -1759,33 +1685,31 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
     let session_id = "session-dynamic-wrong-turn";
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let request_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+    let request_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-pending".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
-            payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
+            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
                 call_id: "call-wrong-turn".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
                 reasoning_continuation: None,
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    memory_store
-        .append_transcript_record(&request_record)
+    append_transcript_record(&workspace_root, &request_record)
         .await
         .expect("request record should append");
 
@@ -1806,18 +1730,18 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
     assert_eq!(error.kind, crate::AgentErrorKind::InputRejected);
     assert!(error.to_string().contains("turn-other"));
 
-    let records = memory_store
-        .load_transcript_records(
-            session_id,
-            None,
-            talos_memory::SessionTranscriptBranch::ReactiveLoop,
-        )
-        .await
-        .expect("records should load");
+    let records = load_transcript_records(
+        &workspace_root,
+        session_id,
+        None,
+        session_artifacts::SessionTranscriptBranch::ReactiveLoop,
+    )
+    .await
+    .expect("records should load");
     assert!(records.iter().all(|record| {
         !matches!(
             record.payload,
-            talos_memory::SessionTranscriptPayload::DynamicToolResponse { .. }
+            session_artifacts::SessionTranscriptPayload::DynamicToolResponse { .. }
         )
     }));
 }
@@ -1831,7 +1755,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -1845,57 +1769,55 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
 
     for record in [
-        talos_memory::SessionTranscriptRecord {
-            header: talos_memory::SessionTranscriptHeader {
+        session_artifacts::SessionTranscriptRecord {
+            header: session_artifacts::SessionTranscriptHeader {
                 id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
                 invocation_id: "turn-original".to_string(),
-                branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+                branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
                 timestamp: Utc::now(),
             },
-            author: talos_memory::SessionTranscriptAuthor::System,
-            kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-            payload: talos_memory::SessionTranscriptPayload::DynamicToolRequest {
-                payload: talos_memory::SessionTranscriptDynamicToolRequestPayload {
+            author: session_artifacts::SessionTranscriptAuthor::System,
+            kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+            payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
+                payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
                     arguments: json!({ "message": "ping" }).into(),
                     reasoning_continuation: None,
                 },
             },
-            actions: talos_memory::SessionTranscriptActions::default(),
+            actions: session_artifacts::SessionTranscriptActions::default(),
             partial: false,
         },
-        talos_memory::SessionTranscriptRecord {
-            header: talos_memory::SessionTranscriptHeader {
+        session_artifacts::SessionTranscriptRecord {
+            header: session_artifacts::SessionTranscriptHeader {
                 id: uuid::Uuid::new_v4().to_string(),
                 session_id: session_id.to_string(),
                 invocation_id: "turn-original".to_string(),
-                branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+                branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
                 timestamp: Utc::now(),
             },
-            author: talos_memory::SessionTranscriptAuthor::System,
-            kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-            payload: talos_memory::SessionTranscriptPayload::DynamicToolResponse {
-                payload: talos_memory::SessionTranscriptDynamicToolResponsePayload {
+            author: session_artifacts::SessionTranscriptAuthor::System,
+            kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+            payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
+                payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
                     output: "dynamic pong".to_string(),
                     success: true,
                 },
             },
-            actions: talos_memory::SessionTranscriptActions::default(),
+            actions: session_artifacts::SessionTranscriptActions::default(),
             partial: false,
         },
     ] {
-        memory_store
-            .append_transcript_record(&record)
+        append_transcript_record(&workspace_root, &record)
             .await
             .expect("dynamic record should append");
     }
@@ -1935,7 +1857,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -2039,7 +1961,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.prompt.bootstrap.enabled = false;
     kernel_config.workspace_dir = temp_dir.path().display().to_string();
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -2053,33 +1975,31 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
     let mut session = build_test_session(session_id, "workspace-1");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
-    let (_kernel_config, memory_store) = agent
-        .memory_store_for_session(&session)
-        .await
-        .expect("session memory store should build");
-    let response_record = talos_memory::SessionTranscriptRecord {
-        header: talos_memory::SessionTranscriptHeader {
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
+    let response_record = session_artifacts::SessionTranscriptRecord {
+        header: session_artifacts::SessionTranscriptHeader {
             id: uuid::Uuid::new_v4().to_string(),
             session_id: session_id.to_string(),
             invocation_id: "turn-original".to_string(),
-            branch: talos_memory::SessionTranscriptBranch::ReactiveLoop,
+            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
             timestamp: Utc::now(),
         },
-        author: talos_memory::SessionTranscriptAuthor::System,
-        kind: talos_memory::SessionTranscriptEventKind::SystemMessage,
-        payload: talos_memory::SessionTranscriptPayload::DynamicToolResponse {
-            payload: talos_memory::SessionTranscriptDynamicToolResponsePayload {
+        author: session_artifacts::SessionTranscriptAuthor::System,
+        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
+        payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
+            payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_dynamic".to_string(),
                 output: "dynamic pong".to_string(),
                 success: true,
             },
         },
-        actions: talos_memory::SessionTranscriptActions::default(),
+        actions: session_artifacts::SessionTranscriptActions::default(),
         partial: false,
     };
-    memory_store
-        .append_transcript_record(&response_record)
+    append_transcript_record(&workspace_root, &response_record)
         .await
         .expect("dynamic response record should append");
 
@@ -2112,7 +2032,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
 #[tokio::test]
 async fn test_interrupt_aborts_only_current_session_turn() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -2207,11 +2127,67 @@ async fn test_interrupt_rejects_reserved_turn_without_runtime_handle() {
 
     assert_eq!(error.kind, crate::AgentErrorKind::RunNotFound);
 }
-
 #[tokio::test]
-async fn test_run_streamed_queues_second_active_turn_for_same_session() {
+async fn clear_session_advances_memory_cursor_and_preserves_turn_sequence() {
+    let (workspace, agent) = build_temp_agent();
+    let session_id = "clear-session";
+    let mut session = build_test_session(session_id, "workspace-a");
+    session.config.agent.kernel.workspace_dir = workspace.path().display().to_string();
+    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
+        .expect("session workspace should resolve");
+    let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
+    let artifact_store = FileSessionArtifactStore::default();
+    artifact_store
+        .append_turn(
+            workspace_root,
+            &session_artifacts::TalosTurn {
+                turn_id: "turn-1".to_string(),
+                message_id: "message-1".to_string(),
+                session_id: session_id.to_string(),
+                seq: 1,
+                timestamp: Utc::now(),
+                items: vec![talos_types::talos::RunItem::UserInput {
+                    text: "discarded by clear".to_string(),
+                }],
+                usage: TokenUsage::default(),
+                stop_reason: TalosStopReason::EndTurn,
+            },
+        )
+        .await
+        .expect("append turn");
+
+    agent.clear_session(session).await.expect("clear session");
+
+    assert_eq!(
+        agent
+            .session_store
+            .get_session_record(session_id)
+            .await
+            .expect("load session record")
+            .expect("session record")
+            .memory_processed_until_seq,
+        1
+    );
+    let restarted_store = FileSessionArtifactStore::default();
+    assert_eq!(
+        restarted_store
+            .load_turns(workspace_root, session_id)
+            .await
+            .expect("load turns after clear"),
+        Vec::new()
+    );
+    assert_eq!(
+        restarted_store
+            .next_turn_seq(workspace_root, session_id)
+            .await
+            .expect("next turn sequence"),
+        2
+    );
+}
+#[tokio::test]
+async fn test_run_streamed_rejects_second_active_turn_for_same_session() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -2238,23 +2214,17 @@ async fn test_run_streamed_queues_second_active_turn_for_same_session() {
         .expect("first stream should start");
     started.notified().await;
 
-    let mut second_stream = agent
+    let second_error = agent
         .run_streamed(agent_run_params(
             session.clone(),
-            "turn-queued",
+            "turn-rejected",
             vec![TalosInputItem::Text {
                 text: "second".to_string(),
             }],
         ))
         .await
-        .expect("second stream should still return a receiver");
-
-    assert!(
-        timeout(Duration::from_millis(100), second_stream.recv())
-            .await
-            .is_err(),
-        "queued stream should wait until the active turn finishes"
-    );
+        .expect_err("second stream should be rejected");
+    assert_eq!(second_error.kind, crate::AgentErrorKind::ActiveTurnRunning);
 
     interrupt_session(&agent, &session.context.session_id)
         .await
@@ -2268,7 +2238,49 @@ async fn test_run_streamed_queues_second_active_turn_for_same_session() {
         }
     }
     assert_eq!(first_stop_reason, Some(TalosStopReason::Cancelled));
+}
 
+#[tokio::test]
+async fn test_run_streamed_allows_different_sessions_concurrently() {
+    let started = Arc::new(Notify::new());
+    let agent = test_agent_harness(
+        "test_agent".to_string(),
+        "Test Agent".to_string(),
+        "An agent for testing".to_string(),
+        static_router(Arc::new(SequencedProvider {
+            started: started.clone(),
+            calls: AtomicUsize::new(0),
+        })),
+        model_selection("gpt-4o"),
+        Arc::new(ToolRegistry::new()),
+        Default::default(),
+    )
+    .expect("agent harness should build");
+    let first_session = build_test_session("session-active", "workspace-a");
+    let second_session = build_test_session("session-independent", "workspace-a");
+
+    let mut first_stream = agent
+        .run_streamed(agent_run_params(
+            first_session.clone(),
+            "turn-active",
+            vec![TalosInputItem::Text {
+                text: "first".to_string(),
+            }],
+        ))
+        .await
+        .expect("first stream should start");
+    started.notified().await;
+
+    let mut second_stream = agent
+        .run_streamed(agent_run_params(
+            second_session,
+            "turn-independent",
+            vec![TalosInputItem::Text {
+                text: "second".to_string(),
+            }],
+        ))
+        .await
+        .expect("different session should start");
     let mut second_stop_reason = None;
     while let Some(event) = second_stream.recv().await {
         if let AgentEventPayload::TurnCompleted(payload) = event.payload {
@@ -2277,6 +2289,15 @@ async fn test_run_streamed_queues_second_active_turn_for_same_session() {
         }
     }
     assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
+
+    interrupt_session(&agent, &first_session.context.session_id)
+        .await
+        .expect("first session interrupt should succeed");
+    while let Some(event) = first_stream.recv().await {
+        if matches!(event.payload, AgentEventPayload::TurnCompleted(_)) {
+            break;
+        }
+    }
 }
 
 #[tokio::test]
@@ -2371,62 +2392,9 @@ async fn test_run_streamed_emits_user_input_and_single_final_answer() {
 }
 
 #[tokio::test]
-async fn test_run_streamed_completes_before_post_turn_memory_flush() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let chat_calls = Arc::new(AtomicUsize::new(0));
-    let agent = AgentHarnessImpl::new(
-        "test_agent".to_string(),
-        "Test Agent".to_string(),
-        "An agent for testing".to_string(),
-        static_router(Arc::new(BlockingPostTurnFlushProvider {
-            chat_calls: chat_calls.clone(),
-        })),
-        model_selection("gpt-4o"),
-        Arc::new(ToolRegistry::new()),
-        AgentKernelConfig {
-            workspace_dir: temp_dir.path().display().to_string(),
-            memory: talos_config::AgentKernelMemoryConfig {
-                compaction_threshold_bytes: 1,
-                workspace_memory_flush_enabled: true,
-                workspace_memory_flush_on_compaction: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    )
-    .expect("agent harness should build");
-    let session = build_test_session("session-post-turn-flush", "workspace-a");
-
-    let mut stream = agent
-        .run_streamed(agent_run_params(
-            session,
-            "turn-post-flush",
-            vec![TalosInputItem::Text {
-                text: "complete even if post-turn flush blocks".to_string(),
-            }],
-        ))
-        .await
-        .expect("stream should start");
-
-    let stop_reason = timeout(Duration::from_millis(500), async {
-        while let Some(event) = stream.recv().await {
-            if let AgentEventPayload::TurnCompleted(payload) = event.payload {
-                return payload.stop_reason;
-            }
-        }
-        panic!("stream ended before TurnCompleted");
-    })
-    .await
-    .expect("TurnCompleted should not wait for post-turn memory flush");
-
-    assert_eq!(stop_reason, TalosStopReason::EndTurn);
-    assert_eq!(chat_calls.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn test_run_queues_second_active_turn_for_same_session() {
+async fn test_run_rejects_second_active_turn_for_same_session() {
     let started = Arc::new(Notify::new());
-    let agent = AgentHarnessImpl::new(
+    let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
@@ -2457,26 +2425,17 @@ async fn test_run_queues_second_active_turn_for_same_session() {
     });
     started.notified().await;
 
-    let second_agent = agent.clone();
-    let second_session = session.clone();
-    let mut second_run = Box::pin(tokio::spawn(async move {
-        second_agent
-            .run(agent_run_params(
-                second_session,
-                "turn-run-queued",
-                vec![TalosInputItem::Text {
-                    text: "second".to_string(),
-                }],
-            ))
-            .await
-    }));
-
-    assert!(
-        timeout(Duration::from_millis(100), &mut second_run)
-            .await
-            .is_err(),
-        "queued unary turn should not finish while the active turn is still running"
-    );
+    let second_error = agent
+        .run(agent_run_params(
+            session.clone(),
+            "turn-run-rejected",
+            vec![TalosInputItem::Text {
+                text: "second".to_string(),
+            }],
+        ))
+        .await
+        .expect_err("second unary turn should be rejected");
+    assert_eq!(second_error.kind, crate::AgentErrorKind::ActiveTurnRunning);
 
     interrupt_session(&agent, &session.context.session_id)
         .await
@@ -2487,12 +2446,6 @@ async fn test_run_queues_second_active_turn_for_same_session() {
         .expect("first join should succeed")
         .expect("first execution should complete");
     assert_eq!(first_result.stop_reason, TalosStopReason::Cancelled);
-
-    let second_result = second_run
-        .await
-        .expect("second join should succeed")
-        .expect("queued execution should complete");
-    assert_eq!(second_result.stop_reason, TalosStopReason::EndTurn);
 }
 
 struct MockLlmProvider;

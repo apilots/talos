@@ -7,6 +7,30 @@ use serde::{Deserialize, Serialize};
 pub struct AutomationConfig {
     #[serde(default)]
     pub profile_usage_retention: ProfileUsageRetentionConfig,
+    #[serde(default)]
+    pub memory_daily_maintenance: MemoryDailyMaintenanceConfig,
+}
+
+/// Bounded global schedule for daily memory formation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MemoryDailyMaintenanceConfig {
+    #[serde(default = "default_memory_daily_maintenance_cron")]
+    pub cron: String,
+    #[serde(default = "default_memory_daily_maintenance_batch_size")]
+    pub batch_size: usize,
+    #[serde(default = "default_memory_daily_maintenance_max_batches")]
+    pub max_batches: usize,
+}
+
+impl Default for MemoryDailyMaintenanceConfig {
+    fn default() -> Self {
+        Self {
+            cron: default_memory_daily_maintenance_cron(),
+            batch_size: default_memory_daily_maintenance_batch_size(),
+            max_batches: default_memory_daily_maintenance_max_batches(),
+        }
+    }
 }
 
 /// Retention policy for finalized rows in `profile_turn_usage`.
@@ -39,6 +63,18 @@ impl Default for ProfileUsageRetentionConfig {
 
 fn default_profile_usage_retention_cron() -> String {
     "0 15 3 * * 1".to_string()
+}
+
+fn default_memory_daily_maintenance_cron() -> String {
+    "0 30 3 * * *".to_string()
+}
+
+fn default_memory_daily_maintenance_batch_size() -> usize {
+    50
+}
+
+fn default_memory_daily_maintenance_max_batches() -> usize {
+    10
 }
 
 fn default_profile_usage_retention_days() -> u32 {

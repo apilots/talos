@@ -7,10 +7,10 @@ use talos_config::{
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
-use talos_service::{Actor, AgentDispatchTurnExecutor, TalosService};
+use talos_service::{Actor, AgentDispatchTurnExecutor, MemoryService, TalosService};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
+use talos_store::memory::MemoryStore;
 use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -30,7 +30,6 @@ use talos_types::{
 use tokio::sync::mpsc;
 
 struct RecordingHandler;
-struct TestLlmProvider;
 struct TestAuthService;
 
 #[async_trait]
@@ -81,7 +80,10 @@ impl SessionRuntime for RecordingHandler {
         Ok("default".to_string())
     }
 
-    async fn compact_session(&self, _session: TalosSession) -> TalosResult<TokenUsage> {
+    async fn compact_session(
+        &self,
+        _params: talos_coordinator::AgentSessionCompactionParams,
+    ) -> TalosResult<TokenUsage> {
         Ok(TokenUsage::default())
     }
 
@@ -102,33 +104,6 @@ impl SessionRuntime for RecordingHandler {
         _params: talos_types::CancelActiveTurnParams,
     ) -> TalosResult<()> {
         Ok(())
-    }
-}
-
-#[async_trait]
-impl LlmProvider for TestLlmProvider {
-    fn name(&self) -> &str {
-        "test"
-    }
-
-    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
-        Ok(ChatResponse {
-            content: String::new(),
-            reasoning: Default::default(),
-            model: "default".to_string(),
-            usage: Usage::default(),
-            finish_reason: None,
-            tool_calls: None,
-        })
-    }
-
-    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        let (_tx, rx) = mpsc::channel(1);
-        Ok(ChatStream { rx })
-    }
-
-    fn default_model(&self) -> String {
-        "default".to_string()
     }
 }
 
@@ -197,16 +172,22 @@ async fn test_gateway() -> ServiceGateway {
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
+    let memory = MemoryService::new(
+        config.clone(),
+        Arc::new(MemoryStore::in_memory().await.unwrap()),
+    )
+    .unwrap();
     let service = Arc::new(TalosService::new_with_session_store(
         turn_executor,
         session_runtime,
         session_store,
+        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         project_store,
         profile_store,
         event_service,
         idempotency_store,
         config,
-        Arc::new(TestLlmProvider),
+        memory,
         llm_config_service,
         Vec::new(),
         auth_service,

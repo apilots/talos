@@ -28,6 +28,9 @@ describe("desktop IPC guard", () => {
         name: "project",
       }),
     ).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke("memory/get", { memoryId: "memory-1" }),
+    ).not.toThrow();
   });
 
   it("allows llm config methods", () => {

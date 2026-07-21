@@ -3,8 +3,8 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent::{
-    AgentHarness, AgentHarnessImpl, AgentRunConfig, AgentRunContext, AgentRunOptions,
-    AgentRunParams, AgentRunSessionState,
+    empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
+    AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
 };
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -12,6 +12,7 @@ use talos_llm_provider::{
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
     ModelBlockStreamEvent, ReasoningContinuation, ReasoningOutput, Role, Usage,
 };
+use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
@@ -22,6 +23,20 @@ use talos_types::{ModelRef, ModelSelection, SessionContext, SessionState, TalosS
 use tokio::sync::mpsc;
 
 static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+struct TestMemoryWriter;
+
+impl MemoryWriter for TestMemoryWriter {
+    fn write<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _batch: MemoryWriteBatch,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(()) })
+    }
+}
 
 fn extract_tool_result_text(payload: &Value) -> Option<String> {
     if payload.get("type").and_then(Value::as_str) == Some("text") {
@@ -399,18 +414,22 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
     registry.register(Arc::new(EchoTool {
         state: state.clone(),
     }));
-    AgentHarnessImpl::new(
-        "integration_agent".to_string(),
-        "Integration Agent".to_string(),
-        "Agent for integration tests".to_string(),
-        Arc::new(StaticLlmProviderRouter { provider }),
-        ModelSelection::without_reasoning(ModelRef {
-            provider: "mock".to_string(),
+    AgentHarnessImpl::new(AgentHarnessParams {
+        id: "integration_agent".to_string(),
+        name: "Integration Agent".to_string(),
+        description: "Agent for integration tests".to_string(),
+        llm_provider_router: Arc::new(StaticLlmProviderRouter { provider }),
+        model_selection: ModelSelection::without_reasoning(ModelRef {
+            provider: "openai".to_string(),
             id: "mock-model".to_string(),
         }),
-        registry,
-        Default::default(),
-    )
+        tool_registry: registry,
+        kernel_config: Default::default(),
+        skill_roots_resolver: empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(TestMemoryWriter),
+    })
     .expect("agent harness should build")
 }
 
@@ -420,10 +439,26 @@ fn build_request(input: &str) -> AgentRunParams {
         SESSION_COUNTER.fetch_add(1, Ordering::SeqCst)
     );
     let turn_id = format!("turn-{session_id}");
+    let mut config = talos_config::Config::default();
+    config.llm.openai.models = vec![talos_config::ProviderModelConfig {
+        id: "mock-model".to_string(),
+        name: "mock-model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
     let session = TalosSession {
         title: "Untitled Session".to_string(),
         user_id: "talos-test-integration-user".to_string(),
-        conf: talos_types::SessionConf::default(),
+        conf: talos_types::SessionConf {
+            model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                provider: "openai".to_string(),
+                id: "mock-model".to_string(),
+            })),
+        },
         project_id: None,
         current_directory: None,
         context: SessionContext {
@@ -441,7 +476,7 @@ fn build_request(input: &str) -> AgentRunParams {
             thread_id: None,
             environment: None,
         },
-        config: talos_config::Config::default(),
+        config,
         state: SessionState::default(),
     };
     let context = AgentRunContext::from_session(&session, turn_id);

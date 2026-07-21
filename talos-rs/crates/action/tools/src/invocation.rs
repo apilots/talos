@@ -53,7 +53,7 @@ impl ToolCallPayload {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ToolDispatchContext {
     tool_context: ToolContext,
 }

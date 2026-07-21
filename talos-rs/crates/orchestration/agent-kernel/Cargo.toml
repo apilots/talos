@@ -18,6 +18,7 @@ talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-prompt = { workspace = true }
 talos-skills = { workspace = true }
+talos-store = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

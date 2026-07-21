@@ -249,14 +249,14 @@ def replace_nested_section_value(
             continue
         if in_parent and stripped and indent == 0:
             break
-        if in_parent and indent == 4 and stripped == f"{section}:":
+        if in_parent and indent == 2 and stripped == f"{section}:":
             in_section = True
             continue
-        if in_section and stripped and indent <= 4:
+        if in_section and stripped and indent <= 2:
             break
-        if in_section and line.startswith(f"      {key}:"):
+        if in_section and line.startswith(f"    {key}:"):
             newline = "\n" if line.endswith("\n") else ""
-            lines[index] = f"      {key}: {value}{newline}"
+            lines[index] = f"    {key}: {value}{newline}"
             return "".join(lines)
     raise SystemExit(f"missing config key: {parent}.{section}.{key}")
 
@@ -351,14 +351,14 @@ gateway_port = os.environ.get("TALOS_TEST_PORT")
 if gateway_port:
     text = replace_section_value(text, "gateway", "port", gateway_port)
 
-compaction_threshold_bytes = os.environ.get("TALOS_TEST_COMPACTION_THRESHOLD_BYTES")
-if compaction_threshold_bytes:
+context_compaction_max_bytes = os.environ.get("TALOS_TEST_CONTEXT_COMPACTION_MAX_BYTES")
+if context_compaction_max_bytes:
     text = replace_nested_section_value(
         text,
         "agent",
-        "memory",
-        "compaction_threshold_bytes",
-        compaction_threshold_bytes,
+        "kernel",
+        "context_compaction_max_bytes",
+        context_compaction_max_bytes,
     )
 
 text = add_e2e_skill_root(text, talos_home)

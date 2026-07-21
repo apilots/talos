@@ -160,6 +160,18 @@ describe("TalosClient", () => {
     }));
   });
 
+  it("keeps timeline streams persistent only when explicitly requested", async () => {
+    const http: HttpAdapter = { request: vi.fn() };
+    const stream = vi.fn().mockResolvedValue(undefined);
+    const client = new TalosClient(http, { stream }, "http://localhost:8080");
+
+    await client.turns.events("session-1", undefined, vi.fn(), undefined, { persistent: true });
+
+    expect(stream.mock.calls[0]?.[0]).toBe(
+      "http://localhost:8080/v1/sessions/session-1/events?close_when_idle=false",
+    );
+  });
+
   it("uses shared turn retry request for business retry execution", async () => {
     const request = vi.fn().mockResolvedValue({
       request_id: "req-1",
@@ -332,43 +344,6 @@ describe("TalosClient", () => {
     await client.sessions.list({ project_id: "project-1", limit: null, offset: null });
 
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?project_id=project-1");
-  });
-
-  it("serializes memory search query parameters on the request url", async () => {
-    const request = vi.fn().mockResolvedValue({ data: [] });
-    const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
-
-    await client.memory.search({
-      query: "hello",
-      limit: 5,
-      date_from: "2026-04-01",
-      date_to: "2026-04-30",
-    });
-
-    expect(request).toHaveBeenCalledWith(
-      "http://localhost:8080/v1/memory/search?query=hello&limit=5&date_from=2026-04-01&date_to=2026-04-30",
-    );
-  });
-
-  it("forwards abort signals to memory search requests", async () => {
-    const request = vi.fn().mockResolvedValue({ data: [] });
-    const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
-    const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
-    const controller = new AbortController();
-
-    await client.memory.search({ query: "hello" }, { signal: controller.signal });
-
-    expect(request).toHaveBeenCalledWith(
-      "http://localhost:8080/v1/memory/search?query=hello",
-      { signal: controller.signal },
-    );
   });
 
   it("reads and writes memory files through request objects", async () => {
