@@ -127,10 +127,16 @@ impl TuiApp {
         } else {
             String::new()
         };
-        let pasted_indicator = if self.pasted_blocks.is_empty() {
-            String::new()
-        } else {
-            format!("  [{} pasted]", self.pasted_blocks.len())
+        let pasted_indicator = match (
+            self.pasted_blocks.len(),
+            self.pasted_image_attachments.len(),
+        ) {
+            (0, 0) => String::new(),
+            (text_count, 0) => format!("  [{text_count} pasted]"),
+            (0, image_count) => format!("  [{image_count} image(s)]"),
+            (text_count, image_count) => {
+                format!("  [{text_count} pasted · {image_count} image(s)]")
+            }
         };
         let base = if self.close_in_progress {
             let session_id = self

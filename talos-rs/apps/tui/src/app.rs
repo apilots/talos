@@ -32,8 +32,11 @@ impl TuiApp {
             cursor_index: 0,
             pasted_blocks: Vec::new(),
             selected_pasted_block: None,
+            pasted_image_attachments: Vec::new(),
+            pasted_image_sequence: 0,
             startup_directory: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             current_project_root: None,
+            current_project_id: None,
             current_model: String::new(),
             current_model_provider: String::new(),
             reasoning_effort_override: None,
@@ -56,6 +59,7 @@ impl TuiApp {
             active_message: None,
             active_message_raw: None,
             active_message_skills: Vec::new(),
+            active_message_file_ids: Vec::new(),
             active_retry_count: 0,
             pending_session_connect: None,
             pending_session_task: None,
@@ -294,6 +298,7 @@ impl TuiApp {
             .current_directory
             .clone()
             .or_else(|| Some(self.startup_directory.clone()));
+        self.current_project_id = session.project_id.clone();
         self.sync_session_header();
         self.rebuild_chat_render_state_if_rect();
     }
@@ -307,6 +312,7 @@ impl TuiApp {
         self.active_message = None;
         self.active_message_raw = None;
         self.active_message_skills.clear();
+        self.active_message_file_ids.clear();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         self.terminal_footer_synced_for = None;

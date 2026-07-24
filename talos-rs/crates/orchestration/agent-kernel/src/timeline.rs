@@ -148,12 +148,20 @@ impl TimelineBuilder {
         )
     }
 
-    pub fn start_user_input(&mut self, text: impl Into<String>) -> AgentEvent {
+    /// Start the structured user input item emitted to timeline consumers.
+    pub fn start_user_input(
+        &mut self,
+        text: impl Into<String>,
+        file_ids: Vec<String>,
+    ) -> AgentEvent {
         self.start_item(
             TalosTimelineItemKind::UserInput,
             TalosTimelinePhase::Input,
             None,
-            TalosTimelineContent::Text { text: text.into() },
+            TalosTimelineContent::UserInput {
+                text: text.into(),
+                file_ids,
+            },
         )
     }
 

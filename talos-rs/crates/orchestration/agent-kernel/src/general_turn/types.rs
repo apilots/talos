@@ -108,6 +108,7 @@ pub struct PreparedGeneralTurn {
     pub max_output_tokens: Option<u32>,
     pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
+    pub attachment_tokens: usize,
     pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub maintenance_usage: TokenUsage,

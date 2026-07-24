@@ -4,10 +4,12 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
 pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
+
+use crate::{validate_attachment_usage, Attachment, AttachmentUsage};
 
 /// Unified function call type used across providers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -141,7 +143,11 @@ pub enum ToolCallingError {
     ProviderError { error: String },
 }
 
-/// LLM provider trait.
+/// Executes provider requests and validates inputs before wire encoding.
+///
+/// Implementations own provider-specific capability and protocol differences.
+/// Callers provide provider-neutral requests and must not infer support from a
+/// provider name or silently drop unsupported fields.
 #[async_trait]
 pub trait LlmProvider: Send + Sync {
     fn name(&self) -> &str;
@@ -150,6 +156,43 @@ pub trait LlmProvider: Send + Sync {
     fn default_model(&self) -> String;
     fn prompt_cache_support(&self) -> PromptCacheSupport {
         PromptCacheSupport::Unsupported
+    }
+
+    /// Validates binary inputs for one model and returns conservative token bounds.
+    ///
+    /// Providers must override this method only when their selected wire protocol
+    /// supports every accepted attachment. The default rejects all non-empty input.
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        if attachments.is_empty() {
+            return Ok(AttachmentUsage {
+                item_tokens: Vec::new(),
+            });
+        }
+        Err(TalosError::FileError {
+            kind: TalosFileErrorKind::UnsupportedAttachment,
+            message: "model attachments are unsupported".to_string(),
+        })
+    }
+
+    /// Validates every attached message before a provider constructs a request.
+    ///
+    /// Provider adapters call this shared entry point and normally override
+    /// [`LlmProvider::validate_attachments`] rather than this method.
+    fn validate_request_attachments(&self, request: &ChatRequest) -> TalosResult<AttachmentUsage> {
+        let mut attachments = Vec::new();
+        for message in &request.messages {
+            message.validate_attachments()?;
+            if let Some(items) = message.attachments.as_ref() {
+                attachments.extend(items.iter().cloned());
+            }
+        }
+        let usage = self.validate_attachments(&request.model, &attachments)?;
+        let _total_tokens = validate_attachment_usage(attachments.len(), &usage)?;
+        Ok(usage)
     }
 
     /// Native tool-calling request. Default implementation falls back to plain chat.
@@ -213,11 +256,22 @@ impl ChatRequest {
     }
 }
 
-/// Chat message.
+/// Provider-neutral chat message.
+///
+/// Construct messages with [`ChatMessage::system`], [`ChatMessage::user`],
+/// [`ChatMessage::user_with_attachments`], [`ChatMessage::assistant`], or
+/// [`ChatMessage::tool`]. This keeps role-specific invariants explicit and is
+/// the supported construction path for downstream crates.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChatMessage {
     pub role: Role,
     pub content: String,
+    /// Ordered binary inputs for a user message.
+    ///
+    /// `None` is the only no-attachment state. Generic message serialization
+    /// skips this field; shared protocol encoders are its only wire owners.
+    #[serde(skip, default)]
+    pub attachments: Option<Vec<Attachment>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -249,6 +303,7 @@ impl ChatMessage {
         Self {
             role: Role::System,
             content: content.into(),
+            attachments: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -261,6 +316,7 @@ impl ChatMessage {
         Self {
             role: Role::User,
             content: content.into(),
+            attachments: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -269,10 +325,27 @@ impl ChatMessage {
         }
     }
 
+    /// Creates a user message with one or more ordered attachments.
+    pub fn user_with_attachments(
+        content: impl Into<String>,
+        attachments: Vec<Attachment>,
+    ) -> TalosResult<Self> {
+        if attachments.is_empty() {
+            return Err(TalosError::ValidationError(
+                "attached user message must include at least one attachment".to_string(),
+            ));
+        }
+        Ok(Self {
+            attachments: Some(attachments),
+            ..Self::user(content)
+        })
+    }
+
     pub fn assistant(content: impl Into<String>) -> Self {
         Self {
             role: Role::Assistant,
             content: content.into(),
+            attachments: None,
             name: None,
             tool_call_id: None,
             tool_calls: None,
@@ -288,6 +361,7 @@ impl ChatMessage {
         Self {
             role: Role::Assistant,
             content: content.into(),
+            attachments: None,
             name: None,
             tool_call_id: None,
             tool_calls: Some(tool_calls),
@@ -304,6 +378,7 @@ impl ChatMessage {
         Self {
             role: Role::Tool,
             content: content.into(),
+            attachments: None,
             name: Some(name.into()),
             tool_call_id: Some(tool_call_id.into()),
             tool_calls: None,
@@ -316,6 +391,24 @@ impl ChatMessage {
     pub fn with_reasoning_continuation(mut self, continuation: ReasoningContinuation) -> Self {
         self.reasoning_continuation = Some(continuation);
         self
+    }
+
+    /// Rejects ambiguous empty attachment state and attachments on non-user roles.
+    pub fn validate_attachments(&self) -> TalosResult<()> {
+        let Some(attachments) = self.attachments.as_ref() else {
+            return Ok(());
+        };
+        if attachments.is_empty() {
+            return Err(TalosError::ValidationError(
+                "attachments must be omitted instead of empty".to_string(),
+            ));
+        }
+        if self.role != Role::User {
+            return Err(TalosError::ValidationError(
+                "only user messages may contain attachments".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 

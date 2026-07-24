@@ -27,6 +27,8 @@ vi.mock("../api", () => apiMocks);
 describe("useSessionMessageStream", () => {
   beforeEach(() => {
     apiMocks.startTimelineTurn.mockClear();
+    apiMocks.retryTimelineTurn.mockReset();
+    apiMocks.retryTimelineTurn.mockResolvedValue("message-2");
     useAppStore.getState().resetStream("session-1");
   });
 
@@ -44,6 +46,38 @@ describe("useSessionMessageStream", () => {
       });
     });
     await waitFor(() => expect(apiMocks.startTimelineTurn).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useAppStore.getState().setStreamMeta("session-1", { isStreaming: false });
+    });
+    await expect(completion).resolves.toBeUndefined();
+  });
+
+  it("retries attachment-only input with the same ordered file ids", async () => {
+    useAppStore.getState().setStreamMeta("session-1", {
+      activeMessageId: "message-2",
+      isStreaming: true,
+    });
+    const { result } = renderHook(() => useSessionMessageStream("session-1"));
+    let completion: Promise<void> | undefined;
+    act(() => {
+      completion = result.current.retryMessage({
+        clientMessageId: "client-1",
+        retryOfMessageId: "message-1",
+        input: { text: "", fileIds: ["file-2", "file-1"] },
+      });
+    });
+    await waitFor(() => expect(apiMocks.retryTimelineTurn).toHaveBeenCalledTimes(1));
+
+    expect(apiMocks.retryTimelineTurn).toHaveBeenCalledWith(
+      {
+        session_id: "session-1",
+        client_message_id: "client-1",
+        retry_of_message_id: "message-1",
+        input: [{ type: "files", fileIds: ["file-2", "file-1"] }],
+      },
+      undefined,
+    );
 
     act(() => {
       useAppStore.getState().setStreamMeta("session-1", { isStreaming: false });

@@ -15,6 +15,7 @@ fn test_build_general_turn_step_request() {
         max_output_tokens: Some(2_048),
         reasoning_effort: Some(ReasoningEffort::Medium),
         speed: ModelSpeed::Fast,
+        attachment_tokens: 0,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current user input")],
         maintenance_usage: TokenUsage::default(),

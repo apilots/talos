@@ -13,6 +13,8 @@ tokio = { workspace = true }
 async-trait = { workspace = true }
 
 # Serialization
+base64 = { workspace = true }
+bytes = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 derive_builder = "0.20"

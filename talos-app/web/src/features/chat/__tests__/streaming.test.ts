@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
-import {
-  applyActiveTurnSnapshot,
-  applyStreamEvent,
-} from "../stream-events";
+import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   activeTurn,
@@ -207,6 +204,7 @@ describe("timeline stream events", () => {
   it("renders server user input without duplicating completed pending input", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "hello from local",
+      fileIds: [],
       clientMessageId: "client-1",
       phase: "local",
     });

@@ -1,7 +1,7 @@
 //! TUI event loop and top-level entry points.
 
-use std::collections::hash_map::DefaultHasher;
 use std::{
+    collections::hash_map::DefaultHasher,
     error::Error,
     fmt::Debug,
     hash::{Hash, Hasher},
@@ -505,7 +505,7 @@ fn tui_frame_fingerprint(app: &TuiApp) -> u64 {
     let mut hasher = DefaultHasher::new();
     app.input_buffer.hash(&mut hasher);
     app.cursor_index.hash(&mut hasher);
-    hash_debug(&app.pasted_blocks, &mut hasher);
+    (&app.pasted_blocks, &app.pasted_image_attachments).hash(&mut hasher);
     app.selected_pasted_block.hash(&mut hasher);
     (&app.current_model_provider, &app.current_model).hash(&mut hasher);
     hash_debug(&app.reasoning_effort_override, &mut hasher);

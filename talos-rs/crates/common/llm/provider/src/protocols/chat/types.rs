@@ -133,12 +133,29 @@ pub enum ChatCompletionMessageContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ChatCompletionContentBlock {
-    #[serde(rename = "type")]
-    pub block_type: String,
-    pub text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_control: Option<CacheControl>,
+#[serde(tag = "type")]
+pub enum ChatCompletionContentBlock {
+    #[serde(rename = "text")]
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ChatCompletionImageUrl },
+    #[serde(rename = "file")]
+    File { file: ChatCompletionFile },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatCompletionImageUrl {
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ChatCompletionFile {
+    pub filename: String,
+    pub file_data: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

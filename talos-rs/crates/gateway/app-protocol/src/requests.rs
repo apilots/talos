@@ -9,6 +9,7 @@ use crate::version::ProtocolVersion;
 use talos_types::{
     AuthLogoutRequest, AuthSessionClearRequest, AuthSessionReadRequest, ConfigDeleteRequest,
     ConfigGetRequest, ConfigReloadRequest, ConfigUpdateRequest, EventUnsubscribeRequest,
+    FileDeleteRequest, FileListRequest, FileReadRequest, FileUpdateRequest, FileUploadRequest,
     FsDirectoryCreateRequest, FsDirectoryReadRequest, InterruptTurnRequest, MemoryFileListRequest,
     MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest,
     ModelListRequest, PluginDisableRequest, PluginEnableRequest, PluginInstallRequest,
@@ -102,6 +103,16 @@ pub enum ClientMethod {
     ConfigDelete,
     #[serde(rename = "config.reload")]
     ConfigReload,
+    #[serde(rename = "file/upload")]
+    FileUpload,
+    #[serde(rename = "file/list")]
+    FileList,
+    #[serde(rename = "file/read")]
+    FileRead,
+    #[serde(rename = "file/update")]
+    FileUpdate,
+    #[serde(rename = "file/delete")]
+    FileDelete,
     #[serde(rename = "memory.file.list")]
     MemoryFileList,
     #[serde(rename = "memory.file.read")]
@@ -203,6 +214,11 @@ impl ClientMethod {
             Self::ConfigUpdate => "config.update",
             Self::ConfigDelete => "config.delete",
             Self::ConfigReload => "config.reload",
+            Self::FileUpload => "file/upload",
+            Self::FileList => "file/list",
+            Self::FileRead => "file/read",
+            Self::FileUpdate => "file/update",
+            Self::FileDelete => "file/delete",
             Self::MemoryFileList => "memory.file.list",
             Self::MemoryFileRead => "memory.file.read",
             Self::MemoryFileWrite => "memory.file.write",
@@ -281,6 +297,11 @@ impl FromStr for ClientMethod {
             "config.update" => Ok(Self::ConfigUpdate),
             "config.delete" => Ok(Self::ConfigDelete),
             "config.reload" => Ok(Self::ConfigReload),
+            "file/upload" => Ok(Self::FileUpload),
+            "file/list" => Ok(Self::FileList),
+            "file/read" => Ok(Self::FileRead),
+            "file/update" => Ok(Self::FileUpdate),
+            "file/delete" => Ok(Self::FileDelete),
             "memory.file.list" => Ok(Self::MemoryFileList),
             "memory.file.read" => Ok(Self::MemoryFileRead),
             "memory.file.write" => Ok(Self::MemoryFileWrite),
@@ -382,6 +403,16 @@ pub enum ClientRequestParams {
     ConfigDelete(ConfigDeleteRequest),
     #[serde(rename = "config.reload")]
     ConfigReload(ConfigReloadRequest),
+    #[serde(rename = "file/upload")]
+    FileUpload(FileUploadParams),
+    #[serde(rename = "file/list")]
+    FileList(FileListRequest),
+    #[serde(rename = "file/read")]
+    FileRead(FileReadRequest),
+    #[serde(rename = "file/update")]
+    FileUpdate(FileUpdateRequest),
+    #[serde(rename = "file/delete")]
+    FileDelete(FileDeleteRequest),
     #[serde(rename = "memory.file.list")]
     MemoryFileList(MemoryFileListRequest),
     #[serde(rename = "memory.file.read")]
@@ -448,6 +479,15 @@ pub enum ClientRequestParams {
     MemorySearch(MemorySearchRequest),
     #[serde(rename = "memory/get")]
     MemoryGet(MemoryGetRequest),
+}
+
+/// App Server upload envelope; other file methods use shared request objects directly.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileUploadParams {
+    pub request: FileUploadRequest,
+    pub data_base64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
@@ -520,6 +560,11 @@ impl ClientRequest {
             ClientMethod::ConfigUpdate => ClientRequestParams::ConfigUpdate(decode(params_value)?),
             ClientMethod::ConfigDelete => ClientRequestParams::ConfigDelete(decode(params_value)?),
             ClientMethod::ConfigReload => ClientRequestParams::ConfigReload(decode(params_value)?),
+            ClientMethod::FileUpload => ClientRequestParams::FileUpload(decode(params_value)?),
+            ClientMethod::FileList => ClientRequestParams::FileList(decode(params_value)?),
+            ClientMethod::FileRead => ClientRequestParams::FileRead(decode(params_value)?),
+            ClientMethod::FileUpdate => ClientRequestParams::FileUpdate(decode(params_value)?),
+            ClientMethod::FileDelete => ClientRequestParams::FileDelete(decode(params_value)?),
             ClientMethod::MemoryFileList => {
                 ClientRequestParams::MemoryFileList(decode(params_value)?)
             }

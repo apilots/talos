@@ -5,8 +5,9 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::chat as chat_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
-    ModelBlockStream, PromptCacheSupport, ReasoningEffort,
+    protocols::chat as chat_protocol, validate_inline_attachments, Attachment, AttachmentKind,
+    AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream,
+    PromptCacheSupport, ReasoningEffort,
 };
 use tracing::{error, info};
 
@@ -116,6 +117,7 @@ impl BailianProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.validate_request_attachments(&request)?;
         let bailian_req = Self::build_request(request, false)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
@@ -151,6 +153,7 @@ impl BailianProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
+        self.validate_request_attachments(&request)?;
         let bailian_req = Self::build_request(request, true)?;
         let url = format!("{}/chat/completions", self.config.base_url);
         let headers = self.build_headers();
@@ -188,6 +191,29 @@ impl LlmProvider for BailianProvider {
 
     fn default_model(&self) -> String {
         "qwen3.7-plus".to_string()
+    }
+
+    /// Uses the shared inline Base64 upper bound for image inputs only.
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        if attachments
+            .iter()
+            .any(|attachment| attachment.kind == AttachmentKind::File)
+        {
+            return Err(TalosError::FileError {
+                kind: talos_error::TalosFileErrorKind::UnsupportedAttachment,
+                message: "Bailian Chat Completions does not support file attachments".to_string(),
+            });
+        }
+        validate_inline_attachments(attachments, |attachment| {
+            matches!(
+                attachment.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp"
+            )
+        })
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

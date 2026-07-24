@@ -440,7 +440,7 @@ fn test_compose_user_input_text_expands_pasted_blocks_without_markers() {
     app.pasted_blocks
         .push(PastedTextBlock::new(marker, "line1\nline2".to_string()));
 
-    let composed = app.compose_user_input_text();
+    let composed = app.compose_user_input_text().expect("compose input");
 
     assert_eq!(composed, "Explain this log\n\nline1\nline2");
 }

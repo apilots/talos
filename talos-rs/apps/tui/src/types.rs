@@ -106,7 +106,7 @@ pub(crate) struct ChatRenderCacheKey {
 
 // ── Input types ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PastedTextBlock {
     pub(crate) marker: String,
     pub(crate) text: String,
@@ -118,20 +118,35 @@ impl PastedTextBlock {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct PastedImageAttachment {
+    pub(crate) marker: String,
+    pub(crate) filename: String,
+    pub(crate) state: PastedImageState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum PastedImageState {
+    Pending { png_bytes: bytes::Bytes },
+    Uploaded { file_id: String },
+}
+
 // ── Queue types ───────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
 pub(crate) struct QueuedMessage {
     pub(crate) text: String,
     pub(crate) skills: Vec<SkillSuggestion>,
+    pub(crate) file_ids: Vec<String>,
     pub(crate) dispatch_attempts: u8,
 }
 
 impl QueuedMessage {
-    pub(crate) fn with_skills(text: String, skills: Vec<SkillSuggestion>) -> Self {
+    pub(crate) fn new(text: String, skills: Vec<SkillSuggestion>, file_ids: Vec<String>) -> Self {
         Self {
             text,
             skills,
+            file_ids,
             dispatch_attempts: 0,
         }
     }

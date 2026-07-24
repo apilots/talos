@@ -160,6 +160,9 @@ impl AgentError {
             AgentErrorKind::RunFailure(TalosRunErrorCode::ToolFailure) => {
                 TalosError::ToolError(self.message)
             }
+            AgentErrorKind::RunFailure(TalosRunErrorCode::FileInputRejected) => {
+                TalosError::ValidationError(self.message)
+            }
             AgentErrorKind::RunFailure(TalosRunErrorCode::InternalError)
             | AgentErrorKind::RunFailure(TalosRunErrorCode::UsageLimitExceeded)
             | AgentErrorKind::RunFailure(TalosRunErrorCode::SessionBudgetExceeded) => {
@@ -206,6 +209,10 @@ impl From<TalosError> for AgentError {
             | TalosError::ToolFailure { message, .. }
             | TalosError::ToolNotFound(message) => Self::new(
                 AgentErrorKind::RunFailure(TalosRunErrorCode::ToolFailure),
+                message,
+            ),
+            TalosError::FileError { message, .. } => Self::new(
+                AgentErrorKind::RunFailure(TalosRunErrorCode::FileInputRejected),
                 message,
             ),
             TalosError::Timeout(message) => Self::new(AgentErrorKind::Timeout, message),

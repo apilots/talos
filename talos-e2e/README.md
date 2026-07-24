@@ -63,10 +63,21 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `skills_e2e.sh`
   - `mcp_e2e.sh`
 
-11. `scenarios/10_talos_app/`
+10. `scenarios/10_talos_app/`
 - Scope: `talos-app` mock e2e and component/API regression tests
 - Files:
   - `mock_e2e.sh`
+
+11. `scenarios/11_auth/`
+- Scope: Talos Cloud authentication integration
+- Files:
+  - `cloud_gateway.sh`
+
+12. `scenarios/12_files/`
+- Scope: user file lifecycle, full-size attachment wire encoding against a mock provider, and S3 object lifecycle
+- Files:
+  - `local_model_input.sh`
+  - `s3_lifecycle.sh`
 
 ## Runner
 
@@ -81,6 +92,7 @@ talos-e2e/run_e2e.sh --case 09_app_server/protocol_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/skills_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/mcp_e2e
 talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
+talos-e2e/run_e2e.sh --group 12_files
 ```
 
 From the repository root, the same runner is also exposed through `just`:

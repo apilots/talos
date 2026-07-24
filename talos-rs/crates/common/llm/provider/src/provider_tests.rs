@@ -1,11 +1,163 @@
 use super::*;
-use talos_error::TalosResult;
+use bytes::Bytes;
+use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+
+struct DefaultAttachmentProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for DefaultAttachmentProvider {
+    fn name(&self) -> &str {
+        "default"
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
+        unreachable!("chat is not used")
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        unreachable!("stream is not used")
+    }
+
+    fn default_model(&self) -> String {
+        "default".to_string()
+    }
+}
+
+fn png_attachment() -> Attachment {
+    Attachment {
+        kind: AttachmentKind::Image,
+        filename: "pixel.png".to_string(),
+        media_type: "image/png".to_string(),
+        bytes: Bytes::from_static(&[1, 2, 3]),
+    }
+}
 
 #[test]
 fn test_chat_message() {
     let msg = ChatMessage::user("hello");
     assert_eq!(msg.role, Role::User);
     assert_eq!(msg.content, "hello");
+    assert_eq!(msg.attachments, None);
+}
+
+#[test]
+fn user_message_accepts_only_non_empty_attachments() {
+    let message = ChatMessage::user_with_attachments("", vec![png_attachment()])
+        .expect("user attachment should be accepted");
+    assert_eq!(message.attachments, Some(vec![png_attachment()]));
+
+    assert!(ChatMessage::user_with_attachments("hello", Vec::new()).is_err());
+
+    let mut ambiguous = ChatMessage::user("hello");
+    ambiguous.attachments = Some(Vec::new());
+    assert!(ambiguous.validate_attachments().is_err());
+}
+
+#[test]
+fn message_validation_rejects_attachments_on_non_user_roles() {
+    let mut message = ChatMessage::assistant("answer");
+    message.attachments = Some(vec![png_attachment()]);
+
+    assert!(message.validate_attachments().is_err());
+}
+
+#[test]
+fn generic_message_serde_never_persists_attachment_bytes() {
+    let message = ChatMessage::user_with_attachments("look", vec![png_attachment()])
+        .expect("user attachment should be accepted");
+    let value = serde_json::to_value(&message).expect("message should serialize");
+    assert_eq!(value.get("attachments"), None);
+
+    let decoded: ChatMessage =
+        serde_json::from_value(value).expect("message should deserialize without attachments");
+    assert_eq!(decoded.attachments, None);
+}
+
+#[test]
+fn provider_default_rejects_non_empty_attachments() {
+    let error = DefaultAttachmentProvider
+        .validate_attachments("default", &[png_attachment()])
+        .expect_err("default provider must reject attachments");
+
+    assert!(matches!(
+        error,
+        TalosError::FileError {
+            kind: TalosFileErrorKind::UnsupportedAttachment,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn inline_validation_reserves_the_per_item_context_allowance() {
+    let usage = validate_inline_attachments(&[png_attachment()], |_| true)
+        .expect("standard PNG should be accepted");
+
+    assert_eq!(
+        usage,
+        AttachmentUsage {
+            item_tokens: vec![10_000]
+        }
+    );
+    assert_eq!(validate_attachment_usage(1, &usage).unwrap(), 10_000);
+    assert!(validate_attachment_usage(
+        1,
+        &AttachmentUsage {
+            item_tokens: vec![10_001]
+        }
+    )
+    .is_err());
+    assert!(matches!(
+        validate_attachment_usage(
+            1,
+            &AttachmentUsage {
+                item_tokens: Vec::new(),
+            },
+        ),
+        Err(TalosError::InternalError(_))
+    ));
+}
+
+#[test]
+fn inline_validation_applies_provider_media_and_common_byte_limits() {
+    let mut wrong_kind = png_attachment();
+    wrong_kind.kind = AttachmentKind::File;
+    assert!(matches!(
+        validate_inline_attachments(&[wrong_kind], |attachment| {
+            attachment.kind == AttachmentKind::Image
+        }),
+        Err(TalosError::FileError {
+            kind: TalosFileErrorKind::UnsupportedMediaType,
+            ..
+        })
+    ));
+
+    assert!(matches!(
+        validate_inline_attachments(&vec![png_attachment(); 6], |_| true),
+        Err(TalosError::FileError {
+            kind: TalosFileErrorKind::AttachmentLimitExceeded,
+            ..
+        })
+    ));
+
+    let shared = Bytes::from(vec![0_u8; 11 * 1024 * 1024]);
+    let oversized_total = [
+        Attachment {
+            bytes: shared.clone(),
+            ..png_attachment()
+        },
+        Attachment {
+            bytes: shared,
+            ..png_attachment()
+        },
+    ];
+    assert!(matches!(
+        validate_inline_attachments(&oversized_total, |_| true),
+        Err(TalosError::FileError {
+            kind: TalosFileErrorKind::AttachmentLimitExceeded,
+            ..
+        })
+    ));
 }
 
 #[test]

@@ -1,6 +1,7 @@
 mod access;
 mod account;
 mod config;
+pub mod file;
 mod fs;
 mod history;
 mod memory;
@@ -19,6 +20,7 @@ mod workspace_docs;
 pub use access::{Actor, CreateSessionRequest};
 pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook};
+pub use file::{FileByteStream, FileService};
 pub use history::SessionHistoryService;
 pub use memory::{MemoryDailyMaintenance, MemoryDailyMaintenanceReport, MemoryService};
 pub use plugin::PluginManagerService;

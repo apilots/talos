@@ -127,6 +127,7 @@ async fn daily_memory_bounds_long_messages_and_still_advances() {
             timestamp: Utc::now(),
             items: vec![RunItem::UserInput {
                 text: "x".repeat(100_000),
+                file_ids: Vec::new(),
             }],
             usage: TokenUsage::default(),
             stop_reason: TalosApiStopReason::EndTurn,

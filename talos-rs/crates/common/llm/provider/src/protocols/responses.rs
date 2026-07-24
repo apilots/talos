@@ -12,6 +12,9 @@ use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 
+mod attachments;
+mod reasoning;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ResponsesRequest {
     pub model: String,
@@ -152,18 +155,28 @@ pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
     let mut items = Vec::new();
 
     for message in messages {
+        message.validate_attachments()?;
         match message.role {
-            Role::System | Role::User => {
+            Role::System => {
                 items.push(serde_json::json!({
-                    "role": role_name(message.role),
+                    "role": "system",
                     "content": [{
                         "type": "input_text",
                         "text": message.content,
                     }],
                 }));
             }
+            Role::User => {
+                items.push(serde_json::json!({
+                    "role": "user",
+                    "content": attachments::user_content(
+                        message.content,
+                        message.attachments,
+                    ),
+                }));
+            }
             Role::Assistant => {
-                items.extend(reasoning_items(message.reasoning_continuation)?);
+                items.extend(reasoning::items(message.reasoning_continuation)?);
                 if !message.content.is_empty() {
                     items.push(serde_json::json!({
                         "role": "assistant",
@@ -195,104 +208,6 @@ pub fn input(messages: Vec<ChatMessage>) -> TalosResult<Vec<Value>> {
     }
 
     Ok(items)
-}
-
-#[derive(Debug)]
-struct ResponsesReasoningItem {
-    id: String,
-    summary: Vec<Value>,
-    content: Vec<Value>,
-    encrypted_content: Option<String>,
-}
-
-impl ResponsesReasoningItem {
-    fn new(id: String) -> Self {
-        Self {
-            id,
-            summary: Vec::new(),
-            content: Vec::new(),
-            encrypted_content: None,
-        }
-    }
-
-    fn into_value(self) -> Value {
-        let mut value = serde_json::json!({
-            "type": "reasoning",
-            "id": self.id,
-        });
-        let object = value
-            .as_object_mut()
-            .expect("reasoning item should serialize as object");
-        if !self.summary.is_empty() {
-            object.insert("summary".to_string(), Value::Array(self.summary));
-        }
-        if !self.content.is_empty() {
-            object.insert("content".to_string(), Value::Array(self.content));
-        }
-        if let Some(encrypted_content) = self.encrypted_content {
-            object.insert(
-                "encrypted_content".to_string(),
-                Value::String(encrypted_content),
-            );
-        }
-        value
-    }
-}
-
-fn reasoning_items(continuation: Option<ReasoningContinuation>) -> TalosResult<Vec<Value>> {
-    let Some(continuation) = continuation else {
-        return Ok(Vec::new());
-    };
-    let ReasoningContinuation::Blocks(blocks) = continuation else {
-        return Err(TalosError::ValidationError(
-            "Responses protocol requires structured reasoning continuation".to_string(),
-        ));
-    };
-
-    let mut items: Vec<ResponsesReasoningItem> = Vec::new();
-    for block in blocks {
-        let provider_item_id = match &block {
-            ReasoningBlock::Text(block) => block.provider_item_id.as_ref(),
-            ReasoningBlock::Summary(block) => block.provider_item_id.as_ref(),
-            ReasoningBlock::Encrypted(block) => block.provider_item_id.as_ref(),
-        }
-        .cloned()
-        .ok_or_else(|| {
-            TalosError::ValidationError(
-                "Responses reasoning continuation requires a provider item id".to_string(),
-            )
-        })?;
-
-        if items.last().is_none_or(|item| item.id != provider_item_id) {
-            items.push(ResponsesReasoningItem::new(provider_item_id));
-        }
-        let item = items
-            .last_mut()
-            .expect("reasoning item should exist after insertion");
-        match block {
-            ReasoningBlock::Text(block) => item.content.push(serde_json::json!({
-                "type": "reasoning_text",
-                "text": block.text,
-            })),
-            ReasoningBlock::Summary(block) => item.summary.push(serde_json::json!({
-                "type": "summary_text",
-                "text": block.text,
-            })),
-            ReasoningBlock::Encrypted(block) => {
-                if item.encrypted_content.replace(block.data).is_some() {
-                    return Err(TalosError::ValidationError(format!(
-                        "Responses reasoning item '{}' contains multiple encrypted blocks",
-                        item.id
-                    )));
-                }
-            }
-        }
-    }
-
-    Ok(items
-        .into_iter()
-        .map(ResponsesReasoningItem::into_value)
-        .collect())
 }
 
 pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ResponsesTool>> {
@@ -670,15 +585,6 @@ pub fn model_blocks(
     });
 
     ModelBlockStream::new(rx)
-}
-
-fn role_name(role: Role) -> &'static str {
-    match role {
-        Role::System => "system",
-        Role::User => "user",
-        Role::Assistant => "assistant",
-        Role::Tool => "tool",
-    }
 }
 
 fn item_type(item: &Value) -> &str {

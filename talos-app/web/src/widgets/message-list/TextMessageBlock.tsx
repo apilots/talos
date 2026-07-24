@@ -1,4 +1,4 @@
-import { Bot, Sparkles, User, Wrench } from "lucide-react";
+import { Bot, Paperclip, Sparkles, User, Wrench } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -8,9 +8,11 @@ const MarkdownRenderer = lazy(() =>
 );
 
 export function TextMessageBlock({
+  fileIds = [],
   kind,
   text,
 }: {
+  fileIds?: string[];
   kind: "user" | "assistant" | "thinking" | "system";
   text: string;
 }) {
@@ -50,7 +52,25 @@ export function TextMessageBlock({
       >
         <div>
           {isUser ? (
-            <div className="whitespace-pre-wrap break-words text-sm leading-[1.7]">{text}</div>
+            <div className="space-y-2.5">
+              {fileIds.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {fileIds.map((fileId, index) => (
+                    <span
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-brand/15 bg-background/55 px-2.5 py-1.5 text-xs text-muted"
+                      key={fileId}
+                      title={fileId}
+                    >
+                      <Paperclip aria-hidden="true" size={13} />
+                      <span>Attachment {index + 1}</span>
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {text ? (
+                <div className="whitespace-pre-wrap break-words text-sm leading-[1.7]">{text}</div>
+              ) : null}
+            </div>
           ) : (
             <Suspense fallback={<div className="text-sm text-muted">{t("renderingMessage")}</div>}>
               <MarkdownRenderer

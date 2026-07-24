@@ -19,6 +19,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         max_output_tokens: Some(16),
         reasoning_effort: None,
         speed: Default::default(),
+        attachment_tokens: 0,
         prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
         maintenance_usage: TokenUsage::default(),

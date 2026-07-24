@@ -187,6 +187,12 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     )
     .unwrap();
     memory.rebuild_known_scopes().await.unwrap();
+    let project_store = Arc::new(MockProjectStore::new());
+    let files = test_file_service(
+        project_store.clone(),
+        config.base_config.storage.files.clone(),
+    )
+    .await;
     let app = Arc::new(TalosService::new_with_session_store(
         config.turn_executor,
         Arc::new(SessionServiceRuntimeAdapter::new(
@@ -194,8 +200,9 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
         )),
         Arc::new(SessionStoreAdapter::new(config.session_service)),
         Arc::new(talos_store::session::FileSessionArtifactStore::default()),
-        Arc::new(MockProjectStore::new()),
+        project_store,
         Arc::new(EmptyProfileStore),
+        files,
         event_service.clone(),
         config.event_store,
         config.base_config.clone(),
@@ -715,6 +722,8 @@ mod active_turn;
 mod auth_lifecycle;
 #[path = "tests/events.rs"]
 mod events;
+#[path = "tests/files.rs"]
+mod files;
 #[path = "tests/handlers.rs"]
 mod handlers;
 #[path = "tests/messages.rs"]

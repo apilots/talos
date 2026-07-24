@@ -214,6 +214,7 @@ fn factory_rejects_disabled_definition() {
         Arc::new(FileSessionArtifactStore::default()),
         Arc::new(talos_store::session::MockSessionStore::new()),
         Arc::new(TestMemoryWriter),
+        Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     );
 
     let error = match factory.build(&definition) {
@@ -237,6 +238,7 @@ fn factory_builds_kernel_agent_with_descriptor() {
         Arc::new(FileSessionArtifactStore::default()),
         Arc::new(talos_store::session::MockSessionStore::new()),
         Arc::new(TestMemoryWriter),
+        Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     );
 
     let agent = factory.build(&definition).expect("agent should build");

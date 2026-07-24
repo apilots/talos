@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ContextStateBags, InvocationExecutionState, InvocationLimits, TurnPhase};
+use crate::{ContextStateBags, InvocationExecutionState, InvocationLimits, TurnPhase, UserInput};
 use std::collections::HashMap;
 
 fn mock_ctx() -> InvocationContext {
@@ -11,7 +11,11 @@ fn mock_ctx() -> InvocationContext {
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
         project_root: None,
-        input: "hello".to_string(),
+        input: UserInput {
+            text: "hello".to_string(),
+            file_ids: Vec::new(),
+        },
+        resolved_attachments: Vec::new(),
         model_selection: talos_types::ModelSelection::without_reasoning(talos_types::ModelRef {
             provider: "p1".to_string(),
             id: "m1".to_string(),

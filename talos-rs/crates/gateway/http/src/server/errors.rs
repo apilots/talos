@@ -1,7 +1,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json, Response};
 use serde::Serialize;
-use talos_error::TalosFsErrorKind;
+use talos_error::{TalosFileErrorKind, TalosFsErrorKind};
 
 /// Stable REST API error codes owned by the HTTP gateway.
 ///
@@ -43,6 +43,7 @@ pub(super) enum HttpApiErrorCode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ApiErrorCode {
     Http(HttpApiErrorCode),
+    File(TalosFileErrorKind),
     Fs(TalosFsErrorKind),
 }
 
@@ -53,6 +54,7 @@ impl Serialize for ApiErrorCode {
     {
         match self {
             Self::Http(code) => code.serialize(serializer),
+            Self::File(kind) => kind.serialize(serializer),
             Self::Fs(kind) => kind.serialize(serializer),
         }
     }
@@ -67,6 +69,12 @@ impl From<HttpApiErrorCode> for ApiErrorCode {
 impl From<TalosFsErrorKind> for ApiErrorCode {
     fn from(kind: TalosFsErrorKind) -> Self {
         Self::Fs(kind)
+    }
+}
+
+impl From<TalosFileErrorKind> for ApiErrorCode {
+    fn from(kind: TalosFileErrorKind) -> Self {
+        Self::File(kind)
     }
 }
 
@@ -128,11 +136,25 @@ impl ApiError {
             talos_error::TalosError::FsError { kind, message } => {
                 Self::new(fs_status(kind), kind, message)
             }
+            talos_error::TalosError::FileError { kind, message } => {
+                Self::new(file_status(kind), kind, message)
+            }
             other => Self::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 HttpApiErrorCode::InternalError,
                 other.to_string(),
             ),
+        }
+    }
+}
+
+fn file_status(kind: TalosFileErrorKind) -> StatusCode {
+    match kind {
+        TalosFileErrorKind::UploadTooLarge | TalosFileErrorKind::AttachmentLimitExceeded => {
+            StatusCode::PAYLOAD_TOO_LARGE
+        }
+        TalosFileErrorKind::UnsupportedMediaType | TalosFileErrorKind::UnsupportedAttachment => {
+            StatusCode::BAD_REQUEST
         }
     }
 }

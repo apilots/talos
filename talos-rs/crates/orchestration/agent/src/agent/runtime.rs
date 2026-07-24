@@ -17,12 +17,13 @@ use crate::{
     AgentRunConfig, AgentRunContext, AgentRunParams, AgentRunResult, SkillRootsResolver,
 };
 use talos_agent_kernel::{
-    run_general_turn_with_resume, ContextStateBags, DynamicToolResultResume, GeneralTurnOutcome,
-    GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions, InvocationContext,
-    InvocationExecutionState, InvocationLimits, KernelAssistantTextPhase, KernelEvent,
-    KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, KernelStreamItemKey, ResumeToolCall, StopReason as KernelStopReason,
-    TimelineBuilder, ToolProgressKind, ToolStreamKey, UserInputEventData,
+    run_general_turn_with_resume, AttachmentReader, ContextStateBags, DynamicToolResultResume,
+    GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions,
+    InvocationContext, InvocationExecutionState, InvocationLimits, KernelAssistantTextPhase,
+    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, ResumeToolCall,
+    StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind, ToolStreamKey,
+    TurnFileScope, UserInput, UserInputEventData,
 };
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
@@ -150,6 +151,7 @@ pub(crate) struct KernelAgent {
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     session_store: Arc<dyn SessionStore>,
     memory_writer: Arc<dyn MemoryWriter>,
+    attachment_reader: Arc<dyn AttachmentReader>,
 }
 
 impl KernelAgent {
@@ -166,6 +168,7 @@ impl KernelAgent {
             session_artifact_store: params.session_artifact_store,
             session_store: params.session_store,
             memory_writer: params.memory_writer,
+            attachment_reader: params.attachment_reader,
         }
     }
 
@@ -216,28 +219,10 @@ impl KernelAgent {
         Ok(ModelInfo::from_provider_model(provider_name, model.clone()))
     }
 
-    fn extract_text_input(input: &[TalosInputItem]) -> String {
-        input
-            .iter()
-            .filter_map(|item| match item {
-                TalosInputItem::Text { text } => {
-                    let normalized = text.trim();
-                    if normalized.is_empty() {
-                        None
-                    } else {
-                        Some(normalized.to_string())
-                    }
-                }
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    }
-
     async fn build_invocation_context(
         &self,
         agent_request: &AgentKernelParams,
-        input: String,
+        input: UserInput,
         invocation_id: String,
         stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
         kernel_config: &AgentKernelConfig,
@@ -249,6 +234,16 @@ impl KernelAgent {
             .workspace_id
             .clone()
             .unwrap_or_default();
+        let resolved_attachments = self
+            .attachment_reader
+            .read(
+                &TurnFileScope {
+                    owner_user_id: agent_request.context.owner_user_id.clone(),
+                    project_id: agent_request.context.project_id.clone(),
+                },
+                &input.file_ids,
+            )
+            .await?;
 
         let transcript_service: Arc<dyn talos_agent_kernel::KernelTranscriptService> =
             Arc::new(SessionStoreKernelTranscriptService::new(
@@ -272,6 +267,7 @@ impl KernelAgent {
             workspace_id,
             project_root: agent_request.context.project_root.clone(),
             input,
+            resolved_attachments,
             model_selection: agent_request.config.model_selection.clone(),
             selected_model_info: self.resolve_selected_model_info(&agent_request.config)?,
             phase: agent_request.phase.clone(),
@@ -419,7 +415,7 @@ impl KernelAgent {
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
         let llm_provider = self.llm_provider_for_run(&agent_request.config)?;
-        let input = Self::extract_text_input(&agent_request.input);
+        let input = AgentKernelParams::extract_user_input(&agent_request.input)?;
         let invocation_id = turn_id.clone();
         let session_id = agent_request.context.session_id.clone();
         let kernel_config = self.kernel_config_for_run(&agent_request.context)?;
@@ -446,7 +442,7 @@ impl KernelAgent {
             &mut context,
             &self.name,
             &self.description,
-            &input,
+            &input.text,
             llm_provider,
             self.tool_registry.clone(),
             self.tool_registry.clone(),
@@ -466,7 +462,7 @@ impl KernelAgent {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
-        let input = Self::extract_text_input(&agent_request.input);
+        let input = AgentKernelParams::extract_user_input(&agent_request.input)?;
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let invocation_id = turn_id.clone();
         let session_id = agent_request.context.session_id.clone();
@@ -538,7 +534,7 @@ impl KernelAgent {
             let _ = tx
                 .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
                 .await;
-            if !input.trim().is_empty() {
+            if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
                 match emit_user_input_item(&mut timeline, &input) {
                     Ok(events) => {
                         for event in events {
@@ -570,7 +566,7 @@ impl KernelAgent {
                         &mut context,
                         &this.name,
                         &this.description,
-                        &input,
+                        &input.text,
                         llm_provider,
                         this.tool_registry.clone(),
                         this.tool_registry.clone(),
@@ -727,9 +723,9 @@ impl KernelAgent {
 
 fn emit_user_input_item(
     timeline: &mut TimelineBuilder,
-    input: &str,
+    input: &UserInput,
 ) -> TalosResult<Vec<AgentEvent>> {
-    let started = timeline.start_user_input(input.to_string());
+    let started = timeline.start_user_input(input.text.clone(), input.file_ids.clone());
     let item_id = item_id_from_started(&started)?;
     let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
     Ok(vec![started, completed])
@@ -1438,6 +1434,7 @@ pub(crate) struct KernelAgentParams {
     pub(crate) session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub(crate) session_store: Arc<dyn SessionStore>,
     pub(crate) memory_writer: Arc<dyn MemoryWriter>,
+    pub(crate) attachment_reader: Arc<dyn AttachmentReader>,
 }
 
 impl AgentRuntime for KernelAgent {

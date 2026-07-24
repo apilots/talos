@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import {
   ChatComposer,
   generateSessionId,
+  supportedAttachmentKinds,
   modelInfoForRef,
   modelPickerOptions,
   modelRefForKey,
@@ -17,7 +18,7 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
-import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
+import type { FileInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
 import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface HomeLocationState {
@@ -75,18 +76,23 @@ export function ChatHomePage() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, locationState?.initialDraft, locationState?.initialSkills, navigate]);
 
-  async function handleStartDraft(initialPrompt?: string, skills: SkillSuggestion[] = []) {
+  async function handleStartDraft(
+    initialPrompt?: string,
+    skills: SkillSuggestion[] = [],
+    attachments: FileInfo[] = [],
+  ) {
     const trimmed = initialPrompt?.trim();
     const sessionId = generateSessionId();
     navigate(`/sessions/${sessionId}`, {
-      state: trimmed
+      state: trimmed || attachments.length > 0
         ? {
-            initialPrompt: trimmed,
+            initialPrompt: trimmed ?? "",
             initialModel: selectedModel,
             initialReasoningLevel: selectedReasoningLevel,
             initialProjectId: activeProject?.id,
             initialProject: activeProject,
             initialSkills: initialSkillsState(skills),
+            initialAttachments: attachments.length > 0 ? attachments : undefined,
           }
         : undefined,
     });
@@ -127,12 +133,13 @@ export function ChatHomePage() {
             }
           }}
           onReasoningLevelChange={setSelectedReasoningLevel}
-          onSend={(skills) => handleStartDraft(draft, skills)}
+          onSend={(skills, attachments) => handleStartDraft(draft, skills, attachments)}
           projects={projects}
           runtimeMode={connection.runtimeMode}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}
           reasoningLevel={selectedReasoningLevel}
           reasoningEnabled={selectedModelInfo?.reasoning ?? false}
+          supportedAttachmentKinds={supportedAttachmentKinds(selectedModelInfo)}
           showProjectSelector
         />
       </div>

@@ -13,13 +13,19 @@ import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
 import { activeContextCompactionStage } from "../timeline-state";
 import { useAppStore } from "@/shared/store/app-store";
-import type { PendingInput, ProjectView, SessionInputHistory, SessionInputHistoryItem } from "@/shared/types/ui";
+import type {
+  PendingInput,
+  ProjectView,
+  SessionInputHistory,
+  SessionInputHistoryItem,
+} from "@/shared/types/ui";
 import type { ModelSelection, SkillSuggestion } from "@talos/sdk-browser";
 
-interface SendTextOptions {
+export interface SendTextOptions {
   modelSelection?: ModelSelection;
   project?: ProjectView;
   skills?: SkillSuggestion[];
+  fileIds?: string[];
 }
 
 export function useChatSession(
@@ -127,7 +133,7 @@ export function useChatSession(
     }
     state.setStreamMeta(sessionId, {
       activeMessageId: undefined,
-      activeInputText: undefined,
+      activeInput: undefined,
       activeClientMessageId: undefined,
       lastEventSeq: undefined,
       lastSequence: undefined,
@@ -146,7 +152,8 @@ export function useChatSession(
 
   const sendText = (text: string, options?: SendTextOptions) => {
     const content = text.trim();
-    if (!content) {
+    const fileIds = options?.fileIds ?? [];
+    if (!content && fileIds.length === 0) {
       return Promise.resolve();
     }
     if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
@@ -159,7 +166,8 @@ export function useChatSession(
           content,
           options.modelSelection,
           options.project,
-          options.skills,
+          options.skills ?? [],
+          fileIds,
         )
       : undefined;
     return streamText(content, request);
@@ -173,7 +181,8 @@ export function useChatSession(
     sendText,
     sendTurn: (options?: SendTextOptions) => {
       const text = draft.trim();
-      if (!text) {
+      const fileIds = options?.fileIds ?? [];
+      if (!text && fileIds.length === 0) {
         return Promise.resolve();
       }
       if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
@@ -187,7 +196,8 @@ export function useChatSession(
             text,
             options.modelSelection,
             options.project,
-            options.skills,
+            options.skills ?? [],
+            fileIds,
           )
         : undefined;
       return sendMutation.mutateAsync({ text, appendUserInput: true, request }).catch((error: unknown) => {
@@ -221,13 +231,17 @@ export function buildSessionInputHistory(
   let itemIndex = 0;
   (history?.messages ?? []).forEach((message) => {
     message.items.forEach((item) => {
-      if (item.phase !== "input" || item.content.type !== "text") {
+      if (
+        item.phase !== "input" ||
+        (item.content.type !== "text" && item.content.type !== "user_input")
+      ) {
         return;
       }
       committed.push({
         messageId: message.message_id,
         itemIndex,
         text: item.content.text,
+        fileIds: item.content.type === "user_input" ? item.content.fileIds : [],
       });
       itemIndex += 1;
     });

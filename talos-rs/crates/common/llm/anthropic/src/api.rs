@@ -5,7 +5,8 @@ use reqwest::{header, Client};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    protocols::messages as messages_protocol, ChatRequest, ChatResponse, ChatStream, LlmProvider,
+    protocols::messages as messages_protocol, validate_inline_attachments, Attachment,
+    AttachmentKind, AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider,
     ModelBlockStream, PromptCacheSupport, ReasoningEffort,
 };
 use tracing::{debug, error, info};
@@ -167,6 +168,7 @@ impl AnthropicProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.validate_request_attachments(&request)?;
         let anthropic_req = Self::build_request(request, None)?;
         let url = format!("{}/messages", self.config.base_url);
         let headers = self.build_headers();
@@ -205,6 +207,7 @@ impl AnthropicProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
+        self.validate_request_attachments(&request)?;
         let anthropic_req = Self::build_request(request, Some(true))?;
 
         let url = format!("{}/messages", self.config.base_url);
@@ -247,6 +250,21 @@ impl LlmProvider for AnthropicProvider {
             .as_deref()
             .unwrap_or("claude-sonnet-4-6")
             .to_string()
+    }
+
+    /// Accepts image inputs and PDF document blocks supported by Messages.
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        validate_inline_attachments(attachments, |attachment| match attachment.kind {
+            AttachmentKind::Image => matches!(
+                attachment.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp"
+            ),
+            AttachmentKind::File => attachment.media_type == "application/pdf",
+        })
     }
 
     fn prompt_cache_support(&self) -> PromptCacheSupport {

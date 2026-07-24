@@ -37,6 +37,58 @@ class RecordingTransport implements AppServerTransport {
 }
 
 describe("AppServerClient", () => {
+  it("maps the files API to canonical App Server methods", async () => {
+    const transport = new RecordingTransport();
+    const client = new AppServerClient(transport);
+    const request = {
+      filename: "note.txt",
+      scope: { type: "personal" as const },
+      tags: [],
+      metadata: {},
+    };
+
+    await client.files.upload(request, new Uint8Array([97, 98]));
+    await client.files.list({ limit: 10 });
+    await client.files.read({ fileId: "file-1" });
+    await client.files.update({ fileId: "file-1", tags: [] });
+    await client.files.delete({ fileId: "file-1" });
+
+    expect(transport.requests).toEqual([
+      {
+        method: "file/upload",
+        params: { request, dataBase64: "YWI=" },
+      },
+      { method: "file/list", params: { limit: 10 } },
+      { method: "file/read", params: { fileId: "file-1" } },
+      { method: "file/update", params: { fileId: "file-1", tags: [] } },
+      { method: "file/delete", params: { fileId: "file-1" } },
+    ]);
+  });
+
+  it("removes a completed desktop upload when cancellation wins the response race", async () => {
+    const controller = new AbortController();
+    const transport = new CancellingUploadTransport(controller);
+    const client = new AppServerClient(transport);
+
+    const upload = client.files.upload(
+      {
+        filename: "note.txt",
+        scope: { type: "personal" },
+        tags: [],
+        metadata: {},
+      },
+      new Uint8Array([97, 98]),
+      { signal: controller.signal },
+    );
+
+    await expect(upload).rejects.toMatchObject({ name: "AbortError" });
+    expect(transport.requests.map(({ method }) => method)).toEqual([
+      "file/upload",
+      "file/delete",
+    ]);
+    expect(transport.requests[1]?.params).toEqual({ fileId: "file-1" });
+  });
+
   it("maps shared application methods to typed JSON-RPC methods", async () => {
     const transport = new RecordingTransport();
     const client = new AppServerClient(transport);
@@ -149,6 +201,23 @@ describe("AppServerClient", () => {
     ]);
   });
 });
+
+class CancellingUploadTransport extends RecordingTransport {
+  constructor(private readonly controller: AbortController) {
+    super();
+  }
+
+  override request<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
+    this.requests.push({ method, params });
+    if (method === "file/upload") {
+      this.controller.abort();
+      return Promise.resolve({
+        file: { fileId: "file-1" },
+      } as T);
+    }
+    return Promise.resolve({ fileId: "file-1" } as T);
+  }
+}
 
 const emptyProvider = {
   models: [],

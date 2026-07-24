@@ -158,7 +158,7 @@ async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
     let payload: Value = serde_json::from_slice(&response_body).expect("body should be json");
     assert!(payload
         .to_string()
-        .contains("input must include at least one non-empty text item"));
+        .contains("input must include non-empty text or files"));
 }
 
 #[tokio::test]

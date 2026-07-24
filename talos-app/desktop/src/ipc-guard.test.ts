@@ -4,6 +4,27 @@ import type { AppProtocol } from "@talos/sdk-core";
 import { assertDesktopRendererInvoke, isDesktopRendererMethod } from "./ipc-guard";
 
 describe("desktop IPC guard", () => {
+  it("allows typed file methods without duplicating file business validation", () => {
+    expect(() =>
+      assertDesktopRendererInvoke("file/upload", {
+        request: {
+          filename: "diagram.png",
+          scope: { type: "personal" },
+          tags: [],
+          metadata: {},
+        },
+        dataBase64: "iVBORw==",
+      }),
+    ).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("file/list", {})).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("file/read", { fileId: "file-1" })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("file/update", { fileId: "file-1", tags: [] })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("file/delete", { fileId: "file-1" })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("file/read", {})).toThrow(
+      "Invalid desktop renderer params for method: file/read",
+    );
+  });
+
   it("allows ordinary desktop renderer methods with valid params", () => {
     expect(() =>
       assertDesktopRendererInvoke("session.get", { session_id: "session-1" }),

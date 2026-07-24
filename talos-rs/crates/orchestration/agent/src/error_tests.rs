@@ -62,3 +62,17 @@ fn active_turn_running_round_trips_without_losing_busy_semantics() {
             if message == "session `session-1` already has an active turn"
     ));
 }
+
+#[test]
+fn file_input_error_is_non_retryable_and_keeps_the_public_run_code() {
+    let error = AgentError::from(TalosError::FileError {
+        kind: talos_error::TalosFileErrorKind::UnsupportedAttachment,
+        message: "attachments are unsupported".to_string(),
+    });
+
+    assert_eq!(
+        error.kind,
+        AgentErrorKind::RunFailure(talos_error::TalosRunErrorCode::FileInputRejected)
+    );
+    assert!(!error.retryable);
+}

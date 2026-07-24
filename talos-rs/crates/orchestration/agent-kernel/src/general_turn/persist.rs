@@ -6,7 +6,7 @@ use crate::{
 
 pub async fn persist_general_turn_artifacts(
     prepared: &PreparedGeneralTurn,
-    input: &str,
+    input: &UserInput,
     executed: &ExecutedTurnArtifacts,
     session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
     transcript_service: Option<Arc<dyn KernelTranscriptService>>,
@@ -19,9 +19,10 @@ pub async fn persist_general_turn_artifacts(
     let turn_id = Uuid::new_v4().to_string();
     let now = Utc::now();
     let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
-    if !input.trim().is_empty() {
+    if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
         items.push(RunItem::UserInput {
-            text: input.to_string(),
+            text: input.text.clone(),
+            file_ids: input.file_ids.clone(),
         });
     }
     items.extend(executed.output_items.clone());

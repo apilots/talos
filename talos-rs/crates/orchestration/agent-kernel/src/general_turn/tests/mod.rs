@@ -111,6 +111,7 @@ use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+mod attachment_tests;
 mod compaction_loop_tests;
 mod daily_memory_tests;
 mod final_response_tests;
@@ -721,7 +722,11 @@ fn build_ctx_with_stream_for_session(
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
         project_root: None,
-        input: "hello".to_string(),
+        input: UserInput {
+            text: "hello".to_string(),
+            file_ids: Vec::new(),
+        },
+        resolved_attachments: Vec::new(),
         model_selection: talos_types::ModelSelection::without_reasoning(talos_types::ModelRef {
             provider: "p1".to_string(),
             id: "m1".to_string(),
@@ -775,6 +780,7 @@ async fn seed_recent_user_message(memory_store: &TestMemoryStore) {
             timestamp,
             items: vec![RunItem::UserInput {
                 text: "history that should be dropped".to_string(),
+                file_ids: Vec::new(),
             }],
             usage: TokenUsage::default(),
             stop_reason: TalosApiStopReason::EndTurn,

@@ -40,6 +40,17 @@ fn prompt_budget_usage_percent(window_usage: &talos_prompt::PromptWindowUsage) -
     Some(usage_percent.min(100) as u8)
 }
 
+pub(super) fn resolve_compaction_input_budget_tokens(
+    model_info: &talos_types::ModelInfo,
+) -> Option<usize> {
+    let context_window = model_info.model.context_window as usize;
+    if context_window == 0 {
+        return None;
+    }
+
+    Some((context_window / 2).clamp(256, 16_384).min(context_window))
+}
+
 pub(super) fn determine_history_compaction_trigger(
     prompt_assembly: &talos_prompt::PromptAssembly,
     kernel_config: &AgentKernelConfig,

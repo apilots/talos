@@ -6,7 +6,8 @@ use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
     protocols::{chat as chat_protocol, responses as responses_protocol},
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
+    validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage, ChatRequest,
+    ChatResponse, ChatStream, LlmProvider, ModelBlockStream, ReasoningEffort,
 };
 use tracing::{debug, error, info};
 
@@ -167,6 +168,7 @@ impl OpenAIProvider {
     }
 
     async fn send_chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.validate_request_attachments(&request)?;
         match self.config.protocol {
             OpenAIProtocol::Chat => self.send_chat_completion(request).await,
             OpenAIProtocol::Responses => self.send_responses(request).await,
@@ -250,6 +252,7 @@ impl OpenAIProvider {
     }
 
     async fn send_stream(&self, request: ChatRequest) -> TalosResult<reqwest::Response> {
+        self.validate_request_attachments(&request)?;
         let (url, body) = match self.config.protocol {
             OpenAIProtocol::Chat => (
                 self.endpoint_url("chat/completions"),
@@ -298,6 +301,30 @@ impl LlmProvider for OpenAIProvider {
 
     fn default_model(&self) -> String {
         self.config.default_model.clone()
+    }
+
+    /// Accepts the media types supported by OpenAI's inline file protocols.
+    fn validate_attachments(
+        &self,
+        _model: &str,
+        attachments: &[Attachment],
+    ) -> TalosResult<AttachmentUsage> {
+        validate_inline_attachments(attachments, |attachment| match attachment.kind {
+            AttachmentKind::Image => matches!(
+                attachment.media_type.as_str(),
+                "image/png" | "image/jpeg" | "image/webp"
+            ),
+            AttachmentKind::File => matches!(
+                attachment.media_type.as_str(),
+                "application/msword"
+                    | "application/pdf"
+                    | "application/vnd.ms-excel"
+                    | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                    | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    | "text/csv"
+            ),
+        })
     }
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {

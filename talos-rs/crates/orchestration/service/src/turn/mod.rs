@@ -1,4 +1,5 @@
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{IdempotencyRecord, MessageCommandResult};
@@ -13,17 +14,46 @@ mod types;
 pub use service::TurnService;
 pub use types::{AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams};
 
-fn validate_text_input(input: &[TalosInputItem]) -> TalosResult<()> {
+fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
     let has_text = input.iter().any(|item| match item {
         TalosInputItem::Text { text } => !text.trim().is_empty(),
         _ => false,
     });
-    if has_text {
-        return Ok(());
+    let files = input
+        .iter()
+        .filter_map(|item| match item {
+            TalosInputItem::Files { file_ids } => Some(file_ids),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if files.len() > 1 {
+        return Err(TalosError::ValidationError(
+            "input must include at most one files item".to_string(),
+        ));
     }
-    Err(TalosError::ValidationError(
-        "input must include at least one non-empty text item".to_string(),
-    ))
+    if let Some(file_ids) = files.first() {
+        if file_ids.is_empty() {
+            return Err(TalosError::ValidationError(
+                "files input must include at least one file id".to_string(),
+            ));
+        }
+        let mut unique_ids = HashSet::with_capacity(file_ids.len());
+        if file_ids
+            .iter()
+            .any(|file_id| file_id.trim().is_empty() || !unique_ids.insert(file_id))
+        {
+            return Err(TalosError::ValidationError(
+                "file ids must be non-empty and unique".to_string(),
+            ));
+        }
+    }
+    if has_text || !files.is_empty() {
+        Ok(())
+    } else {
+        Err(TalosError::ValidationError(
+            "input must include non-empty text or files".to_string(),
+        ))
+    }
 }
 
 fn validate_retry_request(request: &TurnRetryParams) -> TalosResult<()> {

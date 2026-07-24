@@ -1,8 +1,10 @@
 use async_trait::async_trait;
+use base64::Engine;
+use bytes::Bytes;
 use serde::Serialize;
 use serde_json::Value;
 use talos_app_protocol::errors::AppServerErrorBody;
-use talos_app_protocol::requests::{ClientRequest, ClientRequestParams};
+use talos_app_protocol::requests::{ClientRequest, ClientRequestParams, FileUploadParams};
 use talos_auth::CloudSessionCache;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_service::{Actor, TalosService, TimelineSubscriptionSource};
@@ -224,16 +226,16 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
             ClientRequestParams::TurnStart(params) => {
-                to_value(self.start_turn(actor, params.into()).await?)
+                to_value(self.start_turn(actor, params).await?)
             }
             ClientRequestParams::TurnInterrupt(params) => to_value(
                 self.gateway
-                    .interrupt_turn(actor, params.into())
+                    .interrupt_turn(actor, params)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
             ClientRequestParams::TurnRetry(params) => {
-                let request: SharedRetryTurnRequest = params.into();
+                let request: SharedRetryTurnRequest = params;
                 to_value(
                     self.gateway
                         .retry_turn(actor, request)
@@ -249,7 +251,7 @@ impl AppServerApplication for TalosApplicationAdapter {
             )),
             ClientRequestParams::ToolDynamicResultSubmit(params) => to_value(
                 self.gateway
-                    .submit_dynamic_tool_result(actor, params.into())
+                    .submit_dynamic_tool_result(actor, params)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
@@ -264,6 +266,47 @@ impl AppServerApplication for TalosApplicationAdapter {
             ClientRequestParams::ConfigGet(params) => to_value(
                 self.gateway
                     .get_config(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::FileUpload(params) => {
+                let FileUploadParams {
+                    request,
+                    data_base64,
+                } = params;
+                let data = decode_file_upload_data(
+                    &data_base64,
+                    self.app.files.limits().max_upload_bytes,
+                )?;
+                let body = Box::pin(futures_util::stream::iter([Ok(data)]));
+                to_value(
+                    self.gateway
+                        .upload_file(actor, request, body)
+                        .await
+                        .map_err(AppServerErrorBody::from_talos_error)?,
+                )
+            }
+            ClientRequestParams::FileList(params) => to_value(
+                self.gateway
+                    .list_files(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::FileRead(params) => to_value(
+                self.gateway
+                    .read_file(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::FileUpdate(params) => to_value(
+                self.gateway
+                    .update_file(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
+            ClientRequestParams::FileDelete(params) => to_value(
+                self.gateway
+                    .delete_file(actor, params)
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
@@ -566,3 +609,31 @@ fn to_value<T: Serialize>(value: T) -> ProtocolResult<Value> {
     serde_json::to_value(value)
         .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))
 }
+
+fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> ProtocolResult<Bytes> {
+    let max_encoded_len = max_upload_bytes
+        .saturating_add(2)
+        .saturating_div(3)
+        .saturating_mul(4);
+    let encoded_len = u64::try_from(data_base64.len())
+        .map_err(|_| AppServerErrorBody::invalid_params("file upload Base64 is too large"))?;
+    if encoded_len > max_encoded_len {
+        return Err(AppServerErrorBody::invalid_params(
+            "file upload Base64 exceeds the encoded size limit",
+        ));
+    }
+
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|_| AppServerErrorBody::invalid_params("file upload Base64 is invalid"))?;
+    if decoded.len() as u64 > max_upload_bytes {
+        return Err(AppServerErrorBody::invalid_params(
+            "decoded file upload exceeds the size limit",
+        ));
+    }
+    Ok(Bytes::from(decoded))
+}
+
+#[cfg(test)]
+#[path = "application_tests.rs"]
+mod tests;

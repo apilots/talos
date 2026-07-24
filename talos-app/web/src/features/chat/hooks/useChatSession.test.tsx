@@ -18,12 +18,16 @@ vi.hoisted(() => {
 });
 
 const mocks = vi.hoisted(() => ({
+  createInitialTurnRequest: vi.fn(() => ({
+    session_id: "session-1",
+    input: [{ type: "files", fileIds: ["file-1"] }],
+  })),
   send: vi.fn().mockRejectedValue({ code: -32013 }),
   timeline: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
-  createInitialTurnRequest: vi.fn(),
+  createInitialTurnRequest: mocks.createInitialTurnRequest,
   isActiveTurnRunningError: (error: unknown) =>
     Boolean(error && typeof error === "object" && "code" in error && error.code === -32013),
 }));
@@ -64,6 +68,7 @@ vi.mock("./useSessionStreaming", () => ({
 describe("useChatSession", () => {
   beforeEach(() => {
     mocks.send.mockClear();
+    mocks.createInitialTurnRequest.mockClear();
     mocks.timeline.mockClear();
     useAppStore.getState().resetStream("session-1");
   });
@@ -91,5 +96,22 @@ describe("useChatSession", () => {
     rerender();
 
     expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, true);
+  });
+
+  it("allows an attachment-only turn and forwards ordered file ids", async () => {
+    const { result } = renderHook(() => useChatSession("session-1", 0));
+
+    await act(() => result.current.sendTurn({ fileIds: ["file-2", "file-1"] }));
+
+    expect(mocks.createInitialTurnRequest).toHaveBeenCalledWith(
+      "session-1",
+      expect.any(String),
+      "",
+      undefined,
+      undefined,
+      [],
+      ["file-2", "file-1"],
+    );
+    expect(mocks.send).toHaveBeenCalledTimes(1);
   });
 });

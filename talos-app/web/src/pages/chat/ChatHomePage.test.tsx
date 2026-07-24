@@ -44,6 +44,7 @@ vi.mock("@/features/chat", () => ({
           (model) => model.provider === modelRef.provider && model.id === modelRef.id,
         )
       : undefined,
+  supportedAttachmentKinds: () => [],
   modelRefForKey: (key: string) => {
     const separator = key.indexOf(":");
     return { provider: key.slice(0, separator), id: key.slice(separator + 1) };

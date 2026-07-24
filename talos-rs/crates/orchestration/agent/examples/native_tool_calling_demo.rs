@@ -115,6 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(NoopMemoryWriter),
+        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })?;
 
     let mut config = talos_config::Config::default();

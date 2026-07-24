@@ -1,4 +1,4 @@
-import type { HttpAdapter, StreamAdapter } from "./adapters";
+import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import type {
   DocUpdateRequest,
   ConfigGetResponse,
@@ -45,6 +45,17 @@ import type {
   FsDirectoryCreateResponse,
   FsDirectoryReadRequest,
   FsDirectoryReadResponse,
+  FileDeleteRequest,
+  FileDeleteResponse,
+  FileListRequest,
+  FileListResponse,
+  FileReadRequest,
+  FileReadResponse,
+  FileUpdateRequest,
+  FileUpdateResponse,
+  FileUploadData,
+  FileUploadRequest,
+  FileUploadResponse,
   ProjectCreateRequest,
   ProjectCreateResponse,
   ProjectDeleteRequest,
@@ -368,6 +379,76 @@ export class TalosClient {
       }),
     deleteById: (projectId: string): Promise<ProjectDeleteResponse> =>
       this.projects.delete({ project_id: projectId }),
+  };
+
+  files = {
+    upload: (
+      request: FileUploadRequest,
+      data: FileUploadData,
+      options: FileUploadOptions = {},
+    ): Promise<FileUploadResponse> => {
+      const form = new FormData();
+      form.append(
+        "metadata",
+        new Blob([JSON.stringify(request)], { type: "application/json" }),
+      );
+      let file: Blob;
+      if (data instanceof Blob) {
+        file = data;
+      } else {
+        const bytes = new Uint8Array(data.byteLength);
+        bytes.set(data);
+        file = new Blob([bytes.buffer]);
+      }
+      form.append("file", file, request.filename);
+      return this.http.request<FileUploadResponse>(this.url("/v1/files"), {
+        method: "POST",
+        body: form,
+        signal: options.signal,
+        onUploadProgress: options.onProgress,
+      });
+    },
+    list: (request: FileListRequest = {}): Promise<FileListResponse> => {
+      const query = new URLSearchParams();
+      if (request.cursor !== undefined) {
+        query.set("cursor", request.cursor);
+      }
+      if (request.limit !== undefined) {
+        query.set("limit", String(request.limit));
+      }
+      if (request.scope?.type === "personal") {
+        query.set("scope", "personal");
+      } else if (request.scope?.type === "project") {
+        query.set("scope", "project");
+        query.set("projectId", request.scope.projectId);
+      }
+      for (const tag of request.tags ?? []) {
+        query.append("tag", tag);
+      }
+      const serialized = query.toString();
+      return this.http.request<FileListResponse>(
+        this.url(`/v1/files${serialized ? `?${serialized}` : ""}`),
+      );
+    },
+    read: (request: FileReadRequest): Promise<FileReadResponse> =>
+      this.http.request<FileReadResponse>(
+        this.url(`/v1/files/${encodeURIComponent(request.fileId)}`),
+      ),
+    update: (request: FileUpdateRequest): Promise<FileUpdateResponse> => {
+      const { fileId, ...body } = request;
+      return this.http.request<FileUpdateResponse>(
+        this.url(`/v1/files/${encodeURIComponent(fileId)}`),
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      );
+    },
+    delete: (request: FileDeleteRequest): Promise<FileDeleteResponse> =>
+      this.http.request<FileDeleteResponse>(
+        this.url(`/v1/files/${encodeURIComponent(request.fileId)}`),
+        { method: "DELETE" },
+      ),
   };
 
   fs = {

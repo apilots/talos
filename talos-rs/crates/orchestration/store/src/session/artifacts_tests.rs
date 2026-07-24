@@ -20,6 +20,7 @@ async fn turn_roundtrip_preserves_sequence_and_content() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 17, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "hello".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -222,6 +223,7 @@ async fn reset_preserves_the_next_turn_sequence_after_restart() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 17, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "discarded by clear".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -269,6 +271,7 @@ async fn turn_windows_return_only_the_requested_sequence_range() {
                 .unwrap(),
             items: vec![RunItem::UserInput {
                 text: format!("message {seq}"),
+                file_ids: Vec::new(),
             }],
             usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,
@@ -313,6 +316,7 @@ async fn bounded_artifact_reads_stop_after_the_requested_window() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 18, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "bounded".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -372,6 +376,7 @@ async fn oldest_turn_window_stops_reading_at_the_limit() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 18, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "bounded".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -413,6 +418,7 @@ async fn oldest_turn_window_skips_daily_files_before_the_cursor() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 17, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "old".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -425,6 +431,7 @@ async fn oldest_turn_window_skips_daily_files_before_the_cursor() {
         timestamp: Utc.with_ymd_and_hms(2026, 7, 18, 10, 0, 0).unwrap(),
         items: vec![RunItem::UserInput {
             text: "new".to_string(),
+            file_ids: Vec::new(),
         }],
         usage: TokenUsage::default(),
         stop_reason: StopReason::EndTurn,
@@ -479,6 +486,7 @@ async fn oldest_turn_window_locates_the_first_uncovered_daily_file() {
                 .unwrap(),
             items: vec![RunItem::UserInput {
                 text: format!("message {seq}"),
+                file_ids: Vec::new(),
             }],
             usage: TokenUsage::default(),
             stop_reason: StopReason::EndTurn,

@@ -26,11 +26,6 @@ impl TuiApp {
             return Ok(false);
         }
 
-        let original_input = self.input_buffer.clone();
-        let original_pasted_blocks = self.pasted_blocks.clone();
-        let original_selected_skills = self.selected_skills.clone();
-        let user_input = self.compose_user_input_text();
-
         let result = if self.is_command_input() {
             let command_line = self.input_buffer.trim().to_string();
             if command_should_enter_transcript(&command_line) {
@@ -41,14 +36,48 @@ impl TuiApp {
             self.reset_input();
             self.execute_command(&command_line).await
         } else {
+            let user_input = match self.compose_user_input_text() {
+                Ok(user_input) => user_input,
+                Err(error) => {
+                    self.push_system_notice(format!("Invalid image attachment marker: {error}"));
+                    self.push_right_event("image attachment marker is invalid".to_string());
+                    return Ok(false);
+                }
+            };
+            let file_ids = match self.upload_pending_image_attachments().await {
+                Ok(file_ids) => file_ids,
+                Err(error) => {
+                    self.push_system_notice(format!("Failed to upload image attachment: {error}"));
+                    self.push_right_event("image attachment upload failed".to_string());
+                    return Ok(false);
+                }
+            };
+            let original_input = self.input_buffer.clone();
+            let original_pasted_blocks = self.pasted_blocks.clone();
+            let original_pasted_images = self.pasted_image_attachments.clone();
+            let original_pasted_image_sequence = self.pasted_image_sequence;
+            let original_selected_skills = self.selected_skills.clone();
             self.reset_input();
             match self
-                .send_user_message_with_skills(user_input.clone(), original_selected_skills.clone())
+                .send_user_message_with_skills(
+                    user_input.clone(),
+                    original_selected_skills.clone(),
+                    file_ids,
+                )
                 .await
             {
                 Ok(true) => Ok(false),
                 Ok(false) => {
-                    self.restore_input_state(original_input, original_pasted_blocks);
+                    self.input_buffer = original_input;
+                    self.cursor_index = self.input_buffer.chars().count();
+                    self.pasted_blocks = original_pasted_blocks;
+                    self.selected_pasted_block = if self.pasted_blocks.is_empty() {
+                        None
+                    } else {
+                        Some(self.pasted_blocks.len().saturating_sub(1))
+                    };
+                    self.pasted_image_attachments = original_pasted_images;
+                    self.pasted_image_sequence = original_pasted_image_sequence;
                     self.selected_skills = original_selected_skills;
                     Ok(false)
                 }
@@ -83,7 +112,7 @@ impl TuiApp {
         match cmd {
             "help" => {
                 self.push_system_notice(
-                    "Commands: /help /model /models /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+O expand tool, Ctrl+U clear input"
+                    "Commands: /help /model /models /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+V paste image, Ctrl+O expand tool, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -197,6 +226,7 @@ impl TuiApp {
         &mut self,
         user_message: String,
         skills: Vec<SkillSuggestion>,
+        file_ids: Vec<String>,
     ) -> TalosResult<bool> {
         if self.reject_input_while_context_compacting() {
             return Ok(false);
@@ -235,14 +265,21 @@ impl TuiApp {
             return Ok(false);
         }
 
+        let queue_summary = if user_message.is_empty() {
+            format!("{} attachment(s)", file_ids.len())
+        } else {
+            summarize_for_queue(&user_message)
+        };
         self.message_queue
-            .push_back(QueuedMessage::with_skills(user_message.clone(), skills));
-        self.add_message_to_history(user_message.clone());
+            .push_back(QueuedMessage::new(user_message.clone(), skills, file_ids));
+        if !user_message.is_empty() {
+            self.add_message_to_history(user_message);
+        }
         self.push_right_event(format!(
             "queued ({}/{}): {}",
             self.message_queue.len(),
             MAX_QUEUE_LEN,
-            summarize_for_queue(&user_message)
+            queue_summary
         ));
         self.dispatch_next_queued_message().await;
         Ok(true)
@@ -260,6 +297,7 @@ impl TuiApp {
             .start_stream_for_message_with_skills(
                 next_message.text.clone(),
                 next_message.skills.clone(),
+                next_message.file_ids.clone(),
             )
             .await
         {

@@ -34,7 +34,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
       onCommand?: (command: "compact" | "clear" | "status" | "model") => Promise<void> | void;
       onProjectChange: (projectId: string) => void;
       onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
-      onSend: () => Promise<void>;
+      onSend: (skills: [], attachments: []) => Promise<void>;
       showRuntimeModeSelector?: boolean;
     }) => {
       mocks.composerProps = props;
@@ -53,7 +53,7 @@ vi.mock("@/features/chat", async (importOriginal) => {
           <button onClick={() => void Promise.resolve(props.onCommand?.("compact")).catch(() => undefined)} type="button">
             Compact
           </button>
-          <button onClick={() => void props.onSend()} type="button">
+          <button onClick={() => void props.onSend([], [])} type="button">
             Send
           </button>
         </div>

@@ -32,6 +32,14 @@ impl TuiApp {
     }
 
     pub async fn handle_input(&mut self, key_event: KeyEvent) -> Result<bool, Box<dyn Error>> {
+        if key_event.code == KeyCode::Char('v')
+            && key_event
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::SUPER)
+        {
+            self.paste_clipboard_image();
+            return Ok(false);
+        }
         if key_event.modifiers.intersects(KeyModifiers::CONTROL) {
             match key_event.code {
                 KeyCode::Char('c') => return Ok(true),
@@ -201,15 +209,12 @@ impl TuiApp {
                 Ok(false)
             }
             KeyCode::Left => {
-                self.cursor_index = self.cursor_index.saturating_sub(1);
+                self.move_cursor_left_across_pasted_image();
                 self.refresh_skill_suggestions().await;
                 Ok(false)
             }
             KeyCode::Right => {
-                let count = self.input_buffer.chars().count();
-                if self.cursor_index < count {
-                    self.cursor_index += 1;
-                }
+                self.move_cursor_right_across_pasted_image();
                 self.refresh_skill_suggestions().await;
                 Ok(false)
             }
@@ -275,12 +280,14 @@ impl TuiApp {
             return;
         }
 
+        self.move_cursor_out_of_pasted_image_marker();
         let idx = byte_index_at_char(&self.input_buffer, self.cursor_index);
         self.input_buffer.insert(idx, c);
         self.cursor_index += 1;
     }
 
     pub(crate) fn insert_text(&mut self, text: &str) {
+        self.move_cursor_out_of_pasted_image_marker();
         let idx = byte_index_at_char(&self.input_buffer, self.cursor_index);
         self.input_buffer.insert_str(idx, text);
         self.cursor_index += text.chars().count();
@@ -296,6 +303,9 @@ impl TuiApp {
             return;
         }
 
+        if self.remove_pasted_image_before_cursor() {
+            return;
+        }
         let current = byte_index_at_char(&self.input_buffer, self.cursor_index);
         let previous = byte_index_at_char(&self.input_buffer, self.cursor_index - 1);
         self.input_buffer.drain(previous..current);
@@ -307,25 +317,12 @@ impl TuiApp {
         self.cursor_index = 0;
         self.pasted_blocks.clear();
         self.selected_pasted_block = None;
+        self.pasted_image_attachments.clear();
+        self.pasted_image_sequence = 0;
         self.show_skill_autocomplete = false;
         self.skill_suggestions.clear();
         self.skill_autocomplete_selected = 0;
         self.selected_skills.clear();
-    }
-
-    pub(crate) fn restore_input_state(
-        &mut self,
-        input_buffer: String,
-        pasted_blocks: Vec<PastedTextBlock>,
-    ) {
-        self.input_buffer = input_buffer;
-        self.cursor_index = self.input_buffer.chars().count();
-        self.pasted_blocks = pasted_blocks;
-        self.selected_pasted_block = if self.pasted_blocks.is_empty() {
-            None
-        } else {
-            Some(self.pasted_blocks.len().saturating_sub(1))
-        };
     }
 
     pub(crate) fn should_store_as_pasted_block(text: &str) -> bool {
@@ -337,15 +334,9 @@ impl TuiApp {
     }
 
     pub(crate) fn is_command_input(&self) -> bool {
-        self.pasted_blocks.is_empty() && self.input_buffer.trim().starts_with('/')
-    }
-
-    pub(crate) fn compose_user_input_text(&self) -> String {
-        let mut composed = self.input_buffer.clone();
-        for block in &self.pasted_blocks {
-            composed = composed.replacen(&block.marker, &block.text, 1);
-        }
-        composed
+        self.pasted_blocks.is_empty()
+            && self.pasted_image_attachments.is_empty()
+            && self.input_buffer.trim().starts_with('/')
     }
 
     pub(crate) async fn refresh_skill_suggestions(&mut self) {

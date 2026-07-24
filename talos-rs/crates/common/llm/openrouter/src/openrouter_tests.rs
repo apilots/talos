@@ -1,7 +1,8 @@
 use super::*;
 use talos_llm_provider::{
-    ChatMessage, FunctionCall, LlmProvider, ModelBlockStream, ModelBlockStreamEvent,
-    ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningTextBlock,
+    Attachment, AttachmentKind, ChatMessage, FunctionCall, LlmProvider, ModelBlockStream,
+    ModelBlockStreamEvent, ReasoningBlock, ReasoningContinuation, ReasoningEffort,
+    ReasoningTextBlock,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -96,6 +97,32 @@ fn messages_maps_reasoning_effort_to_output_config() {
     let actual = serde_json::to_value(request).expect("messages request should serialize");
 
     assert_eq!(actual["output_config"]["effort"], "low");
+}
+
+#[test]
+fn openrouter_applies_file_media_policy_for_the_selected_protocol() {
+    let docx = Attachment {
+        kind: AttachmentKind::File,
+        filename: "report.docx".to_string(),
+        media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            .to_string(),
+        bytes: vec![0_u8; 16 * 1024].into(),
+    };
+    let responses = OpenRouterProvider::new(
+        OpenRouterConfig::new("test-api-key").with_protocol(OpenRouterProtocol::Responses),
+    );
+    let messages = OpenRouterProvider::new(
+        OpenRouterConfig::new("test-api-key").with_protocol(OpenRouterProtocol::Messages),
+    );
+
+    let usage = responses
+        .validate_attachments("provider/model", std::slice::from_ref(&docx))
+        .expect("Responses inline files should accept DOCX");
+
+    assert_eq!(usage.item_tokens, vec![10_000]);
+    assert!(messages
+        .validate_attachments("provider/model", &[docx])
+        .is_err());
 }
 
 #[test]

@@ -22,6 +22,7 @@ use talos_types::{
 use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
 use super::types::ServiceResult;
 use crate::access::{CreateSessionRequest, ResourceAccessService};
+use crate::file::FileService;
 use crate::fs::FsService;
 use crate::project::ProjectService;
 use crate::{
@@ -41,6 +42,7 @@ pub struct TalosService {
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
     pub config: ConfigService,
+    pub files: Arc<FileService>,
     fs: FsService,
     pub memory: MemoryService,
     pub plugins: PluginManagerService,
@@ -56,6 +58,7 @@ impl TalosService {
         session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
+        files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -72,6 +75,7 @@ impl TalosService {
             session_artifact_store,
             project_store,
             profile_store,
+            files,
             event_service,
             idempotency_store,
             base_config,
@@ -91,6 +95,7 @@ impl TalosService {
         session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
+        files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -160,6 +165,7 @@ impl TalosService {
             events: TimelineSubscriptionService::new(event_service.clone()),
             history: SessionHistoryService::new(session_artifact_store, event_service.clone()),
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
+            files,
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory,
             plugins,
@@ -175,6 +181,7 @@ impl TalosService {
         session_artifact_store: Arc<dyn SessionArtifactStore>,
         project_store: Arc<dyn ProjectStore>,
         profile_store: Arc<dyn ProfileStore>,
+        files: Arc<FileService>,
         event_service: Arc<TimelineEventService>,
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
@@ -191,6 +198,7 @@ impl TalosService {
             session_artifact_store,
             project_store,
             profile_store,
+            files,
             event_service,
             idempotency_store,
             base_config,
@@ -675,6 +683,8 @@ impl TalosService {
     }
 
     pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<()> {
+        let _project = self.access.get_project(actor, project_id).await?;
+        self.files.ensure_project_has_no_files(project_id).await?;
         self.access.delete_project(actor, project_id).await
     }
 

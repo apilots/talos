@@ -1,9 +1,15 @@
 export {
   classifyFile,
   formatFileMeta,
+  formatFileSize,
   getFileExtension,
   type FileCategory,
   type FileView,
   useFilesPage,
 } from "./hooks/useFilesPage";
-export { createFilesSlice, type FilesSlice } from "./store";
+export {
+  fileListQueryKey,
+  uploadFile,
+  type UploadFileRequest,
+} from "./api";
+export { FileDetailsPanel } from "./components/FileDetailsPanel";

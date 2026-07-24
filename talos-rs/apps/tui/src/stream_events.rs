@@ -194,6 +194,16 @@ impl TuiApp {
                 rendered_to_transcript
             }
             (
+                TalosTimelineItemKind::UserInput,
+                TalosTimelinePhase::Input,
+                TalosTimelineContent::UserInput { text, .. },
+            ) => {
+                if !text.trim().is_empty() {
+                    self.add_message_to_history(text.clone());
+                }
+                rendered_to_transcript
+            }
+            (
                 TalosTimelineItemKind::ExecutionSummary,
                 TalosTimelinePhase::System,
                 TalosTimelineContent::ExecutionSummary { summary },
@@ -237,6 +247,11 @@ impl TuiApp {
             ) => {
                 let _ = text;
             }
+            (
+                TalosTimelineItemKind::UserInput,
+                TalosTimelinePhase::Input,
+                TalosTimelineContent::UserInput { .. },
+            ) => {}
             (
                 TalosTimelineItemKind::Reasoning,
                 TalosTimelinePhase::Thinking,

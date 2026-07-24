@@ -1,13 +1,15 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{
-    AuthSessionReadRequest, AuthSessionReadResponse, GatewayClient as SdkGatewayClient,
-    InterruptTurnRequest, ModelListRequest, ModelListResponse, ModelSelection,
-    RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest, SessionCloseRequest,
-    SessionCompactRequest, SessionConf, SessionGetRequest, SessionHistoryRequest,
-    SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
-    SkillsSuggestRequest, StartTurnRequest, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
-    TimelineEventEnvelope, TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    AuthSessionReadRequest, AuthSessionReadResponse, FileUploadRequest, FileUploadResponse,
+    GatewayClient as SdkGatewayClient, InterruptTurnRequest, ModelListRequest, ModelListResponse,
+    ModelSelection, RecoverTimelineRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionCloseRequest, SessionCompactRequest, SessionConf, SessionGetRequest,
+    SessionHistoryRequest, SessionHistorySnapshot, SessionInfo, SessionListRequest,
+    SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest, StartTurnRequest,
+    SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
+    TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -18,6 +20,12 @@ pub trait GatewayClient: Send + Sync {
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse>;
     async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse>;
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
+    /// Uploads one composer attachment and returns its stable file metadata.
+    async fn upload_file(
+        &self,
+        request: FileUploadRequest,
+        data: Bytes,
+    ) -> TalosResult<FileUploadResponse>;
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>>;
     async fn get_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn close_session(&self, session_id: &str) -> TalosResult<()>;
@@ -85,6 +93,15 @@ where
         )
         .await
         .map(|response| response.data)
+    }
+
+    async fn upload_file(
+        &self,
+        request: FileUploadRequest,
+        data: Bytes,
+    ) -> TalosResult<FileUploadResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::upload_file(&mut *client, request, data).await
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {

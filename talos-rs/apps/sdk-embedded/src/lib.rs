@@ -1,6 +1,7 @@
 use std::{collections::HashMap, env};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginStartRequest,
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, RequestIdentity,
@@ -16,7 +17,9 @@ use talos_types::{
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
     ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
     ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, EventUnsubscribeRequest,
-    EventUnsubscribeResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
+    EventUnsubscribeResponse, FileDeleteRequest, FileDeleteResponse, FileListRequest,
+    FileListResponse, FileReadRequest, FileReadResponse, FileUpdateRequest, FileUpdateResponse,
+    FileUploadRequest, FileUploadResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
@@ -697,6 +700,37 @@ impl GatewayClient for EmbeddedServerClient {
             .gateway
             .disable_plugin(&self.actor, request)
             .await
+    }
+
+    async fn upload_file(
+        &mut self,
+        request: FileUploadRequest,
+        data: Bytes,
+    ) -> TalosResult<FileUploadResponse> {
+        self.runtime
+            .gateway
+            .upload_file(
+                &self.actor,
+                request,
+                Box::pin(futures_util::stream::iter([Ok(data)])),
+            )
+            .await
+    }
+
+    async fn list_files(&mut self, request: FileListRequest) -> TalosResult<FileListResponse> {
+        self.runtime.gateway.list_files(&self.actor, request).await
+    }
+
+    async fn read_file(&mut self, request: FileReadRequest) -> TalosResult<FileReadResponse> {
+        self.runtime.gateway.read_file(&self.actor, request).await
+    }
+
+    async fn update_file(&mut self, request: FileUpdateRequest) -> TalosResult<FileUpdateResponse> {
+        self.runtime.gateway.update_file(&self.actor, request).await
+    }
+
+    async fn delete_file(&mut self, request: FileDeleteRequest) -> TalosResult<FileDeleteResponse> {
+        self.runtime.gateway.delete_file(&self.actor, request).await
     }
 
     async fn list_memory_files(

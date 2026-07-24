@@ -5,7 +5,7 @@ import { cn } from "@/shared/lib/cn";
 
 interface ComposerSubmitButtonProps {
   disabled?: boolean;
-  draft: string;
+  canSubmit: boolean;
   isBusy: boolean;
   isCancelling: boolean;
   onCancel?: () => void;
@@ -14,7 +14,7 @@ interface ComposerSubmitButtonProps {
 
 export function ComposerSubmitButton({
   disabled,
-  draft,
+  canSubmit,
   isBusy,
   isCancelling,
   onCancel,
@@ -30,12 +30,12 @@ export function ComposerSubmitButton({
         "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none",
         isBusy
           ? "bg-danger text-white hover:bg-danger/90"
-          : draft.trim().length === 0 || disabled
+          : !canSubmit || disabled
             ? "bg-muted/20 text-muted/60"
             : "bg-ink text-background hover:bg-ink/85",
       )}
       data-smoke="chat-composer-send"
-      disabled={isBusy ? false : Boolean(disabled || draft.trim().length === 0)}
+      disabled={isBusy ? false : Boolean(disabled || !canSubmit)}
       onClick={() => {
         if (isBusy) {
           onCancel?.();

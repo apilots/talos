@@ -82,11 +82,12 @@ describe("ChatComposer input history", () => {
     renderControlledComposer({
       inputHistory: {
         committed: [
-          { messageId: "msg-1", itemIndex: 0, text: "older input" },
-          { messageId: "msg-2", itemIndex: 0, text: "latest input" },
+          { messageId: "msg-1", itemIndex: 0, text: "older input", fileIds: [] },
+          { messageId: "msg-2", itemIndex: 0, text: "latest input", fileIds: [] },
         ],
         pendingInput: {
           text: "latest input",
+          fileIds: [],
           clientMessageId: "client-1",
           serverMessageId: "msg-2",
           phase: "completed",
@@ -106,11 +107,17 @@ describe("ChatComposer input history", () => {
     renderControlledComposer({
       inputHistory: {
         committed: [
-          { messageId: "msg-1", itemIndex: 0, text: "older input" },
-          { messageId: "msg-2", itemIndex: 0, text: "latest committed input" },
+          { messageId: "msg-1", itemIndex: 0, text: "older input", fileIds: [] },
+          {
+            messageId: "msg-2",
+            itemIndex: 0,
+            text: "latest committed input",
+            fileIds: [],
+          },
         ],
         pendingInput: {
           text: "completed pending input",
+          fileIds: [],
           clientMessageId: "client-1",
           serverMessageId: "msg-pending",
           phase: "completed",

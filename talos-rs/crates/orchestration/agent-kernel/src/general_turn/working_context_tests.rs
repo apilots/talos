@@ -12,6 +12,7 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
         max_output_tokens: None,
         reasoning_effort: None,
         speed: Default::default(),
+        attachment_tokens: 0,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current task")],
         maintenance_usage: TokenUsage::default(),
@@ -187,6 +188,25 @@ fn test_working_context_trim_fails_when_latest_group_is_too_large() {
 
     assert!(report.post_tokens > 16);
     assert_eq!(state.messages.len(), 1);
+}
+
+#[test]
+fn test_working_context_budget_includes_untrimmed_attachment_tokens() {
+    let mut prepared = prepared_with_budget(16);
+    prepared.attachment_tokens = 16;
+    let mut state = GeneralTurnLoopState::new(&prepared);
+
+    let report = working_context::trim_working_context_to_budget(
+        &prepared,
+        &mut state,
+        16,
+        1,
+        &AgentKernelConfig::default(),
+    )
+    .expect("attachment budget should be reported without trimming the current input");
+
+    assert!(report.post_tokens > 16);
+    assert_eq!(state.messages.len(), 0);
 }
 
 #[test]

@@ -2,6 +2,7 @@ pub(crate) use super::*;
 mod render_runtime;
 
 use async_trait::async_trait;
+pub(crate) use bytes::Bytes;
 pub(crate) use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub(crate) use render_runtime::{
     append_live_text, append_live_tool_progress, finalize_live_text, start_live_text,
@@ -13,12 +14,13 @@ use talos_error::TalosError;
 pub(crate) use talos_sdk::{
     AgentEvent, AgentEventPayload, AgentEventType, AuthSessionReadResponse, AuthSessionSnapshot,
     AuthSessionUserSnapshot, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger, SessionHistorySnapshot, SessionInfo, SkillSuggestion,
-    StartTurnRequest, StopReason, TalosContentItem, TalosInputItem, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
-    UserRole, WorkspaceInfoResponse,
+    ContextCompactionTrigger, FileInfo, FileUploadRequest, FileUploadResponse,
+    SessionHistorySnapshot, SessionInfo, SkillSuggestion, StartTurnRequest, StopReason,
+    TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
+    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
+    TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics, UserRole,
+    WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
 
@@ -32,7 +34,7 @@ pub(crate) trait TestTuiAppExt {
 
 impl TestTuiAppExt for TuiApp {
     async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
-        self.send_user_message_with_skills(user_message, Vec::new())
+        self.send_user_message_with_skills(user_message, Vec::new(), Vec::new())
             .await
     }
 }
@@ -67,6 +69,8 @@ pub(crate) struct MockGatewayState {
     pub(crate) session_subscription_events: Vec<TimelineEventEnvelope>,
     pub(crate) timeline_high_water_mark_event_id: Option<String>,
     pub(crate) sent_requests: Vec<StartTurnRequest>,
+    pub(crate) upload_requests: Vec<(FileUploadRequest, Bytes)>,
+    pub(crate) upload_failure_calls: Vec<usize>,
 }
 
 pub(crate) struct MockGatewayClient {
@@ -715,6 +719,8 @@ impl MockGatewayClient {
                 session_subscription_events: Vec::new(),
                 timeline_high_water_mark_event_id: None,
                 sent_requests: Vec::new(),
+                upload_requests: Vec::new(),
+                upload_failure_calls: Vec::new(),
             })),
         }
     }
@@ -817,6 +823,34 @@ impl GatewayClient for MockGatewayClient {
 
     async fn suggest_skills(&self, _query: &str) -> TalosResult<Vec<SkillSuggestion>> {
         Ok(Vec::new())
+    }
+
+    async fn upload_file(
+        &self,
+        request: FileUploadRequest,
+        data: Bytes,
+    ) -> TalosResult<FileUploadResponse> {
+        let mut state = self.state.lock().unwrap();
+        state.upload_requests.push((request.clone(), data.clone()));
+        let call = state.upload_requests.len();
+        if state.upload_failure_calls.contains(&call) {
+            return Err(TalosError::ClientError(format!(
+                "mock upload failure on call {call}"
+            )));
+        }
+        Ok(FileUploadResponse {
+            file: FileInfo {
+                file_id: format!("uploaded-file-{call}"),
+                scope: request.scope,
+                original_filename: request.filename,
+                mime_type: "image/png".to_string(),
+                size_bytes: data.len() as u64,
+                tags: request.tags,
+                metadata: request.metadata,
+                created_at: call as i64,
+                updated_at: call as i64,
+            },
+        })
     }
 
     async fn list_sessions(&self) -> TalosResult<Vec<SessionInfo>> {

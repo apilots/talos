@@ -1,4 +1,5 @@
 import type * as AppProtocol from "./generated/app-protocol";
+import type { FileUploadOptions } from "./adapters";
 import type {
   MemoryFileListResponse,
   MemoryFileReadRequest,
@@ -12,6 +13,17 @@ import type {
   MemorySearchResponse,
   FsDirectoryCreateResponse,
   FsDirectoryReadResponse,
+  FileDeleteRequest,
+  FileDeleteResponse,
+  FileListRequest,
+  FileListResponse,
+  FileReadRequest,
+  FileReadResponse,
+  FileUpdateRequest,
+  FileUpdateResponse,
+  FileUploadData,
+  FileUploadRequest,
+  FileUploadResponse,
   ConfigGetResponse,
   ConfigReloadResponse,
   ConfigUpdateResponse,
@@ -85,6 +97,44 @@ export class AppServerClient {
   onError(handler: AppServerErrorHandler): () => void {
     return this.transport.onError?.(handler) ?? (() => undefined);
   }
+
+  files = {
+    upload: async (
+      request: FileUploadRequest,
+      data: FileUploadData,
+      options: FileUploadOptions = {},
+    ): Promise<FileUploadResponse> => {
+      throwIfUploadAborted(options.signal);
+      const totalBytes = data instanceof Blob ? data.size : data.byteLength;
+      options.onProgress?.({ loadedBytes: 0, totalBytes });
+      const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data;
+      throwIfUploadAborted(options.signal);
+      const response = await this.transport.request<FileUploadResponse>("file/upload", {
+        request,
+        dataBase64: encodeBase64(bytes),
+      } satisfies AppProtocol.FileUploadParams);
+      if (options.signal?.aborted) {
+        try {
+          await this.transport.request<FileDeleteResponse>("file/delete", {
+            fileId: response.file.fileId,
+          } satisfies FileDeleteRequest);
+        } catch (cleanupError) {
+          throw new Error("Cancelled file upload cleanup failed.", { cause: cleanupError });
+        }
+      }
+      throwIfUploadAborted(options.signal);
+      options.onProgress?.({ loadedBytes: totalBytes, totalBytes });
+      return response;
+    },
+    list: (request: FileListRequest = {}): Promise<FileListResponse> =>
+      this.transport.request("file/list", request),
+    read: (request: FileReadRequest): Promise<FileReadResponse> =>
+      this.transport.request("file/read", request),
+    update: (request: FileUpdateRequest): Promise<FileUpdateResponse> =>
+      this.transport.request("file/update", request),
+    delete: (request: FileDeleteRequest): Promise<FileDeleteResponse> =>
+      this.transport.request("file/delete", request),
+  };
 
   listModels(): Promise<ModelListResponse> {
     return this.transport.request("model.list", {} satisfies AppProtocol.ModelListRequest);
@@ -421,4 +471,22 @@ export class AppServerClient {
       expected_version: expectedVersion,
     });
   }
+}
+
+function throwIfUploadAborted(signal: AbortSignal | undefined): void {
+  if (!signal?.aborted) {
+    return;
+  }
+  throw signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
+}
+
+function encodeBase64(data: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < data.length; offset += chunkSize) {
+    binary += String.fromCharCode(...data.subarray(offset, offset + chunkSize));
+  }
+  return globalThis.btoa(binary);
 }

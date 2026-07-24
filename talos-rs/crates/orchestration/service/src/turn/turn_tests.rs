@@ -22,6 +22,31 @@ use talos_types::{
 };
 use tokio::sync::mpsc;
 
+#[test]
+fn turn_input_accepts_files_without_text() {
+    assert!(validate_user_input(&[TalosInputItem::Files {
+        file_ids: vec!["file-1".to_string()],
+    }])
+    .is_ok());
+}
+
+#[test]
+fn turn_input_rejects_ambiguous_or_duplicate_file_references() {
+    assert!(validate_user_input(&[
+        TalosInputItem::Files {
+            file_ids: vec!["file-1".to_string()],
+        },
+        TalosInputItem::Files {
+            file_ids: vec!["file-2".to_string()],
+        },
+    ])
+    .is_err());
+    assert!(validate_user_input(&[TalosInputItem::Files {
+        file_ids: vec!["file-1".to_string(), "file-1".to_string()],
+    }])
+    .is_err());
+}
+
 #[derive(Default)]
 struct RecordingTurnExecutor {
     stream_request: Mutex<Option<AgentDispatchParams>>,

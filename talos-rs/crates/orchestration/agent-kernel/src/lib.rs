@@ -1,6 +1,7 @@
 mod contents_builder;
 mod execution;
 mod general_turn;
+mod input;
 mod planner;
 mod processor;
 mod session;
@@ -35,6 +36,9 @@ pub use general_turn::{
     MemoryFormationReport, ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn,
     ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
     SESSION_COMPACTION_STATE_KEY,
+};
+pub use input::{
+    AttachmentReader, RejectingAttachmentReader, ResolvedAttachment, TurnFileScope, UserInput,
 };
 pub use planner::BuiltInPlanner;
 pub use processor::{

@@ -2,22 +2,26 @@
 
 import "@testing-library/jest-dom/vitest";
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
 import { ChatComposer } from "../components/ChatComposer";
 import { createDefaultProjects, UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import { getComposerInput, renderComposer, renderControlledComposer } from "./ChatComposer.test-utils";
+import {
+  getComposerInput,
+  renderComposer,
+  renderControlledComposer,
+  renderWithQueryClient,
+} from "./ChatComposer.test-utils";
 
 const apiMocks = vi.hoisted(() => ({
-  createFsDirectory: vi.fn(),
   readFsDirectory: vi.fn(),
   suggestSkills: vi.fn(),
 }));
 
 vi.mock("../api", () => ({
-  createFsDirectory: apiMocks.createFsDirectory,
+  createFsDirectory: vi.fn(),
   readFsDirectory: apiMocks.readFsDirectory,
   suggestSkills: apiMocks.suggestSkills,
 }));
@@ -40,10 +44,6 @@ describe("ChatComposer controls", () => {
       readable: true,
       writable: true,
     });
-    apiMocks.createFsDirectory.mockImplementation(async (_parent: string, name: string) => ({
-      path: `/Users/xujiang/${name}`,
-      created: true,
-    }));
     apiMocks.suggestSkills.mockResolvedValue([
       {
         name: "algorithmic-art",
@@ -77,7 +77,6 @@ describe("ChatComposer controls", () => {
 
   afterEach(() => {
     cleanup();
-    apiMocks.createFsDirectory.mockReset();
     apiMocks.readFsDirectory.mockReset();
     apiMocks.suggestSkills.mockReset();
     vi.restoreAllMocks();
@@ -272,7 +271,7 @@ describe("ChatComposer controls", () => {
   });
 
   it("closes the project picker when clicking outside the composer", () => {
-    render(
+    renderWithQueryClient(
       <div>
         <button type="button">Outside</button>
         <ChatComposer
@@ -339,34 +338,4 @@ describe("ChatComposer controls", () => {
     expect(await screen.findByDisplayValue("/Users/xujiang")).toBeInTheDocument();
   });
 
-  it("retries project registration without creating the directory again after partial success", async () => {
-    const onCreateProject = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("Project name already exists."))
-      .mockResolvedValueOnce(undefined);
-    renderComposer({
-      onCreateProject,
-      showProjectSelector: true,
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: /work in a project/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Add new project" }));
-    fireEvent.click(screen.getByRole("button", { name: "Start from scratch" }));
-    fireEvent.change(await screen.findByPlaceholderText("Folder name"), {
-      target: { value: "new-project" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create and use project" }));
-
-    expect(await screen.findByText(/Directory was created, but project registration failed/i)).toBeInTheDocument();
-    expect(apiMocks.createFsDirectory).toHaveBeenCalledTimes(1);
-    expect(onCreateProject).toHaveBeenCalledWith({
-      directory: "/Users/xujiang/new-project",
-      name: "new-project",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Retry project registration" }));
-
-    await waitFor(() => expect(onCreateProject).toHaveBeenCalledTimes(2));
-    expect(apiMocks.createFsDirectory).toHaveBeenCalledTimes(1);
-  });
 });

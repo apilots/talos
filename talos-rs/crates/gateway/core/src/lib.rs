@@ -1,4 +1,5 @@
 mod config;
+mod file;
 mod fs;
 pub mod gateway;
 pub mod gateway_service;

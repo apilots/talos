@@ -592,6 +592,11 @@
         "config.update",
         "config.delete",
         "config.reload",
+        "file/upload",
+        "file/list",
+        "file/read",
+        "file/update",
+        "file/delete",
         "memory.file.list",
         "memory.file.read",
         "memory.file.write",
@@ -1177,6 +1182,96 @@
             },
             "params": {
               "$ref": "#/definitions/ConfigReloadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/upload"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileUploadParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/read"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileReadRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/update"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileUpdateRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "file/delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/FileDeleteRequest"
             }
           },
           "required": [
@@ -2181,6 +2276,311 @@
       "required": [
         "subscription_id",
         "unsubscribed"
+      ],
+      "type": "object"
+    },
+    "FileDeleteRequest": {
+      "description": "Selects one file to delete for the authenticated user.",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fileId"
+      ],
+      "type": "object"
+    },
+    "FileDeleteResponse": {
+      "description": "Confirms the identifier of a deleted file.",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fileId"
+      ],
+      "type": "object"
+    },
+    "FileInfo": {
+      "description": "Public metadata for one authenticated user's ready file.",
+      "properties": {
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "fileId": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "originalFilename": {
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/definitions/FileScope"
+        },
+        "sizeBytes": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "updatedAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "createdAt",
+        "fileId",
+        "metadata",
+        "mimeType",
+        "originalFilename",
+        "scope",
+        "sizeBytes",
+        "tags",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "FileListRequest": {
+      "description": "Filters one authenticated user's files with opaque cursor pagination.",
+      "properties": {
+        "cursor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "limit": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/FileScope"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "FileListResponse": {
+      "description": "Returns one page of ready files and the next opaque cursor.",
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/FileInfo"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "FileReadRequest": {
+      "description": "Selects one file owned by the authenticated user.",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fileId"
+      ],
+      "type": "object"
+    },
+    "FileReadResponse": {
+      "description": "Returns public metadata for one ready file.",
+      "properties": {
+        "file": {
+          "$ref": "#/definitions/FileInfo"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "FileScope": {
+      "description": "Selects whether a file is personal or restricted to one project context.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "personal"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "project"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "projectId",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "FileUpdateRequest": {
+      "description": "Replaces selected mutable metadata on one ready file.",
+      "properties": {
+        "fileId": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": null,
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "tags": {
+          "default": null,
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "fileId"
+      ],
+      "type": "object"
+    },
+    "FileUpdateResponse": {
+      "description": "Returns public metadata after a successful file update.",
+      "properties": {
+        "file": {
+          "$ref": "#/definitions/FileInfo"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "type": "object"
+    },
+    "FileUploadParams": {
+      "description": "App Server upload envelope; other file methods use shared request objects directly.",
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "request": {
+          "$ref": "#/definitions/FileUploadRequest"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "request"
+      ],
+      "type": "object"
+    },
+    "FileUploadRequest": {
+      "description": "Describes metadata supplied alongside one streamed file upload.",
+      "properties": {
+        "filename": {
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "scope": {
+          "$ref": "#/definitions/FileScope"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "filename",
+        "metadata",
+        "scope",
+        "tags"
+      ],
+      "type": "object"
+    },
+    "FileUploadResponse": {
+      "description": "Returns the ready file created by an upload.",
+      "properties": {
+        "file": {
+          "$ref": "#/definitions/FileInfo"
+        }
+      },
+      "required": [
+        "file"
       ],
       "type": "object"
     },
@@ -4879,60 +5279,21 @@
         },
         {
           "properties": {
-            "mime_type": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+            "fileIds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
             },
             "type": {
               "enum": [
-                "image"
+                "files"
               ],
-              "type": "string"
-            },
-            "url": {
               "type": "string"
             }
           },
           "required": [
-            "type",
-            "url"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "file_id": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "mime_type": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "file"
-              ],
-              "type": "string"
-            },
-            "url": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
+            "fileIds",
             "type"
           ],
           "type": "object"
@@ -5024,6 +5385,7 @@
         "provider_unavailable",
         "permission_denied",
         "tool_failure",
+        "file_input_rejected",
         "internal_error"
       ],
       "type": "string"
@@ -5100,6 +5462,31 @@
             "type": {
               "enum": [
                 "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "fileIds": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "user_input"
               ],
               "type": "string"
             }
@@ -6240,6 +6627,21 @@
     "event_unsubscribe_response": {
       "$ref": "#/definitions/EventUnsubscribeResponse"
     },
+    "file_delete_response": {
+      "$ref": "#/definitions/FileDeleteResponse"
+    },
+    "file_list_response": {
+      "$ref": "#/definitions/FileListResponse"
+    },
+    "file_read_response": {
+      "$ref": "#/definitions/FileReadResponse"
+    },
+    "file_update_response": {
+      "$ref": "#/definitions/FileUpdateResponse"
+    },
+    "file_upload_response": {
+      "$ref": "#/definitions/FileUploadResponse"
+    },
     "initialize_response": {
       "$ref": "#/definitions/InitializeResponse"
     },
@@ -6318,6 +6720,11 @@
     "cloud_login_status_response",
     "error",
     "event_unsubscribe_response",
+    "file_delete_response",
+    "file_list_response",
+    "file_read_response",
+    "file_update_response",
+    "file_upload_response",
     "initialize_response",
     "interrupt_turn_request",
     "interrupt_turn_response",

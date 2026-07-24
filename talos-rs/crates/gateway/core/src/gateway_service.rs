@@ -6,39 +6,42 @@ use talos_auth::{
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_error::TalosResult;
-use talos_service::{Actor, TalosService};
+use talos_service::{Actor, FileByteStream, TalosService};
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
     ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
-    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, FsDirectoryCreateRequest,
-    FsDirectoryCreateResponse, FsDirectoryReadRequest, FsDirectoryReadResponse,
-    InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest, MemoryFileListResponse,
-    MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse,
-    MemoryGetRequest, MemoryGetResponse, MemorySearchRequest, MemorySearchResponse,
-    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
-    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
-    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
-    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
-    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
-    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
-    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
-    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
-    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
-    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
-    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
-    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
-    SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
-    SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubscribeTimelineRequest,
-    SubscribeTimelineResponse, TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse,
-    WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
+    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, FileDeleteRequest,
+    FileDeleteResponse, FileListRequest, FileListResponse, FileReadRequest, FileReadResponse,
+    FileUpdateRequest, FileUpdateResponse, FileUploadRequest, FileUploadResponse,
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest,
+    MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest,
+    MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse, MemorySearchRequest,
+    MemorySearchResponse, ModelListRequest, ModelListResponse, PluginDisableRequest,
+    PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstallRequest,
+    PluginInstallResponse, PluginListRequest, PluginListResponse, PluginReadRequest,
+    PluginReadResponse, PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest,
+    PluginSourceAddResponse, PluginSourceListRequest, PluginSourceListResponse,
+    PluginSourceRefreshRequest, PluginSourceRefreshResponse, PluginSourceRemoveRequest,
+    PluginSourceRemoveResponse, PluginUninstallRequest, PluginUninstallResponse,
+    PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest, ProfileReadResponse,
+    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
+    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
+    ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
+    RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest,
+    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
+    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
+    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
+    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsListRequest,
+    SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
+    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
+    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tracing::info;
 
@@ -429,6 +432,47 @@ impl Gateway for ServiceGateway {
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
         ServiceGateway::disable_plugin(self, actor, request).await
+    }
+
+    async fn upload_file(
+        &self,
+        actor: &Actor,
+        request: FileUploadRequest,
+        body: FileByteStream,
+    ) -> TalosResult<FileUploadResponse> {
+        ServiceGateway::upload_file(self, actor, request, body).await
+    }
+
+    async fn list_files(
+        &self,
+        actor: &Actor,
+        request: FileListRequest,
+    ) -> TalosResult<FileListResponse> {
+        ServiceGateway::list_files(self, actor, request).await
+    }
+
+    async fn read_file(
+        &self,
+        actor: &Actor,
+        request: FileReadRequest,
+    ) -> TalosResult<FileReadResponse> {
+        ServiceGateway::read_file(self, actor, request).await
+    }
+
+    async fn update_file(
+        &self,
+        actor: &Actor,
+        request: FileUpdateRequest,
+    ) -> TalosResult<FileUpdateResponse> {
+        ServiceGateway::update_file(self, actor, request).await
+    }
+
+    async fn delete_file(
+        &self,
+        actor: &Actor,
+        request: FileDeleteRequest,
+    ) -> TalosResult<FileDeleteResponse> {
+        ServiceGateway::delete_file(self, actor, request).await
     }
 
     async fn list_memory_files(

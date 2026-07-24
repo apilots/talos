@@ -165,6 +165,7 @@ else
   append_lines_to_array < <(collect_group_cases "09_app_server")
   append_lines_to_array < <(collect_group_cases "10_talos_app")
   append_lines_to_array < <(collect_group_cases "11_auth")
+  append_lines_to_array < <(collect_group_cases "12_files")
 fi
 
 load_env

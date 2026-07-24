@@ -7,10 +7,12 @@ export function buildInputHistoryNavigationItems(inputHistory: SessionInputHisto
     return EMPTY_INPUT_HISTORY_ITEMS;
   }
 
-  const items = inputHistory.committed.map((item) => ({
-    key: `${item.messageId}:${item.itemIndex}`,
-    text: item.text,
-  }));
+  const items = inputHistory.committed
+    .filter((item) => item.text.trim())
+    .map((item) => ({
+      key: `${item.messageId}:${item.itemIndex}`,
+      text: item.text,
+    }));
   const pendingInput = inputHistory.pendingInput;
   const pendingCommitted =
     Boolean(pendingInput?.serverMessageId) &&
@@ -18,6 +20,7 @@ export function buildInputHistoryNavigationItems(inputHistory: SessionInputHisto
 
   if (
     pendingInput &&
+    pendingInput.text.trim() &&
     (pendingInput.phase === "local" || pendingInput.phase === "accepted") &&
     !pendingCommitted
   ) {

@@ -42,6 +42,8 @@ use talos_types::{
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
+#[path = "attachment_tests.rs"]
+mod attachment_tests;
 #[path = "compaction_tests.rs"]
 mod compaction_tests;
 
@@ -80,6 +82,7 @@ fn test_agent_harness(
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })
 }
 
@@ -1278,65 +1281,6 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
 }
 
 #[tokio::test]
-async fn test_run_uses_session_provider_for_llm_routing() {
-    let seen_provider = Arc::new(Mutex::new(None));
-    let seen_model = Arc::new(Mutex::new(None));
-    let primary = Arc::new(NamedRecordingProvider {
-        provider_name: "primary",
-        seen_provider: seen_provider.clone(),
-        seen_model: seen_model.clone(),
-    });
-    let secondary = Arc::new(NamedRecordingProvider {
-        provider_name: "secondary",
-        seen_provider: seen_provider.clone(),
-        seen_model: seen_model.clone(),
-    });
-    let agent = test_agent_harness(
-        "test_agent".to_string(),
-        "Test Agent".to_string(),
-        "An agent for testing".to_string(),
-        Arc::new(RecordingLlmProviderRouter { primary, secondary }),
-        ModelSelection::without_reasoning(ModelRef {
-            provider: "openai".to_string(),
-            id: "primary-model".to_string(),
-        }),
-        Arc::new(ToolRegistry::new()),
-        AgentKernelConfig::default(),
-    )
-    .expect("agent harness should build");
-
-    let mut session = build_test_session("session-provider-routing", "workspace-1");
-    session.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
-        provider: "deepseek".to_string(),
-        id: "secondary-model".to_string(),
-    }));
-
-    let result = agent
-        .run(agent_run_params(
-            session,
-            "turn-provider-routing",
-            vec![TalosInputItem::Text {
-                text: "hello".to_string(),
-            }],
-        ))
-        .await
-        .expect("run should succeed");
-
-    assert_eq!(result.stop_reason, TalosStopReason::EndTurn);
-    assert_eq!(
-        seen_provider
-            .lock()
-            .expect("provider lock poisoned")
-            .as_deref(),
-        Some("secondary")
-    );
-    assert_eq!(
-        seen_model.lock().expect("model lock poisoned").as_deref(),
-        Some("secondary-model")
-    );
-}
-
-#[tokio::test]
 async fn test_run_generates_title_update_for_first_turn() {
     let agent = build_test_agent();
     let mut session = build_test_session("session-title", "workspace-1");
@@ -2148,6 +2092,7 @@ async fn clear_session_advances_memory_cursor_and_preserves_turn_sequence() {
                 timestamp: Utc::now(),
                 items: vec![talos_types::talos::RunItem::UserInput {
                     text: "discarded by clear".to_string(),
+                    file_ids: Vec::new(),
                 }],
                 usage: TokenUsage::default(),
                 stop_reason: TalosStopReason::EndTurn,

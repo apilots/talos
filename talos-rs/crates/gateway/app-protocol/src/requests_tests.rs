@@ -109,3 +109,59 @@ fn client_method_parser_accepts_current_methods() {
     );
     assert!(ClientMethod::from_str("unknown.method").is_err());
 }
+
+#[test]
+fn file_methods_decode_shared_requests_and_upload_envelope() {
+    assert_eq!(
+        ClientMethod::from_str("file/upload").unwrap(),
+        ClientMethod::FileUpload
+    );
+    assert_eq!(
+        ClientMethod::from_str("file/list").unwrap(),
+        ClientMethod::FileList
+    );
+    assert_eq!(
+        ClientMethod::from_str("file/read").unwrap(),
+        ClientMethod::FileRead
+    );
+    assert_eq!(
+        ClientMethod::from_str("file/update").unwrap(),
+        ClientMethod::FileUpdate
+    );
+    assert_eq!(
+        ClientMethod::from_str("file/delete").unwrap(),
+        ClientMethod::FileDelete
+    );
+
+    let upload = ClientRequest::decode(
+        "file/upload",
+        Some(json!({
+            "request": {
+                "filename": "diagram.png",
+                "scope": { "type": "personal" },
+                "tags": ["diagram"],
+                "metadata": {}
+            },
+            "dataBase64": "iVBORw=="
+        })),
+    )
+    .expect("file upload should decode");
+    assert!(matches!(
+        upload.params,
+        ClientRequestParams::FileUpload(FileUploadParams { .. })
+    ));
+
+    let list = ClientRequest::decode(
+        "file/list",
+        Some(json!({
+            "limit": 20,
+            "scope": { "type": "project", "projectId": "project-1" },
+            "tags": ["diagram"]
+        })),
+    )
+    .expect("file list should decode");
+    assert!(matches!(
+        list.params,
+        ClientRequestParams::FileList(talos_types::FileListRequest { .. })
+    ));
+}

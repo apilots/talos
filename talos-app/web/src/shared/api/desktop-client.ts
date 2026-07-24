@@ -180,6 +180,7 @@ export function createDesktopTalosClient(
       delete: (request: Parameters<TalosWebClient["projects"]["delete"]>[0]) =>
         client.deleteProject(request),
     },
+    files: client.files,
     fs: {
       directory: {
         read: (query?: { path?: string | null }) =>

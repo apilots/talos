@@ -429,6 +429,7 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })
     .expect("agent harness should build")
 }

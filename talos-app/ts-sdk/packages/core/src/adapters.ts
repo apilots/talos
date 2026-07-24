@@ -1,10 +1,21 @@
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
 
+export interface FileUploadProgress {
+  loadedBytes: number;
+  totalBytes: number | null;
+}
+
+export interface FileUploadOptions {
+  signal?: AbortSignal;
+  onProgress?: (progress: FileUploadProgress) => void;
+}
+
 export interface HttpRequestOptions {
   method?: HttpMethod;
-  body?: string;
+  body?: string | FormData;
   headers?: Record<string, string>;
   signal?: AbortSignal;
+  onUploadProgress?: (progress: FileUploadProgress) => void;
 }
 
 export interface StreamRequestOptions extends HttpRequestOptions {

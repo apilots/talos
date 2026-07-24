@@ -7,6 +7,16 @@ import type {
 
 import type { ReasoningLevel } from "@/shared/types/ui";
 
+export type SupportedAttachmentKind = "image" | "file";
+
+export function supportedAttachmentKinds(
+  model: ModelInfo | undefined,
+): SupportedAttachmentKind[] {
+  return (model?.input ?? []).filter(
+    (kind): kind is SupportedAttachmentKind => kind === "image" || kind === "file",
+  );
+}
+
 export function reasoningLevelToEffort(level: ReasoningLevel): ReasoningEffort | null {
   if (level === "none") {
     return null;

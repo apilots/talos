@@ -511,6 +511,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "storage.max_connections must be > 0".to_string(),
         ));
     }
+    config.storage.files.validate()?;
 
     Ok(())
 }

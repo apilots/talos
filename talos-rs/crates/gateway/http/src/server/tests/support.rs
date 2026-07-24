@@ -1,5 +1,11 @@
 use super::*;
+use opendal::{services::Memory, Operator};
+use std::collections::BTreeMap;
 use std::sync::Mutex;
+use talos_service::FileService;
+use talos_store::file::DatabaseFileStore;
+use talos_store::migration::run_migrations;
+use talos_store::project::ProjectStore;
 use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{TalosProvider, TalosSourceType};
 
@@ -8,6 +14,28 @@ pub(crate) struct SilentGateway;
 #[derive(Default)]
 pub(crate) struct MockSessionService {
     session_cleared: Mutex<bool>,
+}
+
+pub(crate) async fn test_file_service(
+    projects: std::sync::Arc<dyn ProjectStore>,
+    config: talos_config::FileStorageConfig,
+) -> std::sync::Arc<FileService> {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    run_migrations(&pool).await.unwrap();
+    let operator = Operator::new(Memory::default()).unwrap().finish();
+    std::sync::Arc::new(
+        FileService::new(
+            std::sync::Arc::new(DatabaseFileStore::new(pool)),
+            projects,
+            BTreeMap::from([("local".to_string(), operator)]),
+            config,
+        )
+        .unwrap(),
+    )
 }
 
 fn test_timeline_event(

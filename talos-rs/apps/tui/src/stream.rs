@@ -71,6 +71,7 @@ impl TuiApp {
                 }
                 let retry_message = self.active_message_raw.clone();
                 let retry_skills = self.active_message_skills.clone();
+                let retry_file_ids = self.active_message_file_ids.clone();
                 let can_retry_once = self.active_retry_count == 0 && retry_message.is_some();
                 self.finish_active_stream("stream connect failed", true, true);
 
@@ -82,10 +83,17 @@ impl TuiApp {
                             Duration::from_secs(3),
                         );
                         if let Err(retry_err) = self
-                            .start_stream_for_message_internal(message, retry_skills, false)
+                            .start_stream_for_message_internal(
+                                message,
+                                retry_skills,
+                                retry_file_ids,
+                                false,
+                            )
                             .await
                         {
                             self.active_message_raw = None;
+                            self.active_message_skills.clear();
+                            self.active_message_file_ids.clear();
                             self.active_retry_count = 0;
                             self.push_system_notice(format!(
                                 "Failed to start stream: {}",
@@ -96,6 +104,8 @@ impl TuiApp {
                     }
                 } else {
                     self.active_message_raw = None;
+                    self.active_message_skills.clear();
+                    self.active_message_file_ids.clear();
                     self.active_retry_count = 0;
                     self.push_system_notice(format!("Failed to start stream: {}", err));
                     self.push_right_event("queued dispatch dropped".to_string());

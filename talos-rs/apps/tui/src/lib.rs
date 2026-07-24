@@ -3,8 +3,10 @@
 //! Gateway mode supports real session APIs and SSE streaming.
 
 mod app;
+mod attachments;
 mod chat;
 mod client;
+mod clipboard;
 mod commands;
 mod input;
 mod input_history;
@@ -58,7 +60,7 @@ pub(crate) const SESSION_CLOSE_FORCE_TIMEOUT: Duration = Duration::from_secs(65)
 pub(crate) const SPINNER_FRAMES: &[char] = &['✻', '✢', '✳', '✶'];
 pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 0;
 pub(crate) const WELCOME_TIP_LINE: &str =
-    " Tip: Type a message or use /help /model /sessions /status /compact /clear /quit";
+    " Tip: Type a message, Ctrl+V an image, or use /help /model /sessions /status /compact /clear /quit";
 pub(crate) const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
 
 /// Main TUI app.
@@ -67,8 +69,11 @@ pub struct TuiApp {
     pub(crate) cursor_index: usize,
     pub(crate) pasted_blocks: Vec<PastedTextBlock>,
     pub(crate) selected_pasted_block: Option<usize>,
+    pub(crate) pasted_image_attachments: Vec<PastedImageAttachment>,
+    pub(crate) pasted_image_sequence: u64,
     pub(crate) startup_directory: PathBuf,
     pub(crate) current_project_root: Option<PathBuf>,
+    pub(crate) current_project_id: Option<String>,
     pub(crate) current_model: String,
     pub(crate) current_model_provider: String,
     pub(crate) reasoning_effort_override: Option<ReasoningEffort>,
@@ -91,6 +96,7 @@ pub struct TuiApp {
     pub(crate) active_message: Option<String>,
     pub(crate) active_message_raw: Option<String>,
     pub(crate) active_message_skills: Vec<SkillSuggestion>,
+    pub(crate) active_message_file_ids: Vec<String>,
     pub(crate) active_retry_count: u8,
     pub(crate) pending_session_connect: Option<mpsc::Receiver<TalosResult<String>>>,
     pub(crate) pending_session_task: Option<tokio::task::JoinHandle<()>>,

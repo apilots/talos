@@ -14,6 +14,8 @@ impl TuiApp {
         self.cursor_index = 0;
         self.pasted_blocks.clear();
         self.selected_pasted_block = None;
+        self.pasted_image_attachments.clear();
+        self.pasted_image_sequence = 0;
         self.reset_chat_surface();
     }
 

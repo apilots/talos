@@ -197,7 +197,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 0
           output: 0
@@ -209,7 +209,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 0
           output: 0
@@ -221,7 +221,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 0
           output: 0
@@ -238,7 +238,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 5
           output: 30
@@ -250,7 +250,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 2.5
           output: 15
@@ -262,7 +262,7 @@ llm:
         reasoning: true
         reasoning_effort: "medium"
         speed: "standard"
-        input: ["text", "image"]
+        input: ["text", "image", "file"]
         cost:
           input: 0.75
           output: 4.5
@@ -452,3 +452,43 @@ logging:
 storage:
   database_type: "sqlite"
   max_connections: 5
+  files:
+    default: "local"
+    backends:
+      local:
+        type: "fs"
+        # Relative FS roots resolve under $TALOS_HOME/data.
+        root: "files"
+      # S3-compatible backend example. Credentials resolve from $TALOS_HOME/.env.
+      # Uncomment this block and set `default: "s3"` to route new uploads to S3.
+      # s3:
+      #   type: "s3"
+      #   # S3 root is a bucket prefix, not a local path; the leading slash is optional.
+      #   root: "/talos-files"
+      #   bucket: "talos-files"
+      #   region: "us-east-1"
+      #   endpoint: "https://s3.example.com"
+      #   access_key_id: "${TALOS_FILE_S3_ACCESS_KEY_ID}"
+      #   secret_access_key: "${TALOS_FILE_S3_SECRET_ACCESS_KEY}"
+    limits:
+      max_upload_bytes: 52428800
+      max_files_per_turn: 5
+      max_turn_file_bytes: 20971520
+      max_filename_bytes: 255
+      max_tags: 20
+      max_tag_bytes: 64
+      max_metadata_entries: 32
+      max_metadata_key_bytes: 64
+      max_metadata_value_bytes: 2048
+      max_metadata_bytes: 8192
+    allowed_mime_types:
+      - "application/msword"
+      - "application/pdf"
+      - "application/vnd.ms-excel"
+      - "image/png"
+      - "image/jpeg"
+      - "image/webp"
+      - "text/csv"
+      - "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      - "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      - "application/vnd.openxmlformats-officedocument.presentationml.presentation"

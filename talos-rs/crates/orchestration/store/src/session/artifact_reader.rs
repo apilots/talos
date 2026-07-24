@@ -190,7 +190,7 @@ pub(super) fn synthesized_cancelled_turns(
         .iter()
         .flat_map(|turn| {
             turn.items.iter().filter_map(move |item| match item {
-                RunItem::UserInput { text } => Some((text.as_str(), turn.timestamp)),
+                RunItem::UserInput { text, .. } => Some((text.as_str(), turn.timestamp)),
                 _ => None,
             })
         })
@@ -248,7 +248,10 @@ pub(super) fn synthesized_cancelled_turns(
             session_id: session_id.to_string(),
             seq: first_seq.saturating_add(index as u64),
             timestamp,
-            items: vec![RunItem::UserInput { text }],
+            items: vec![RunItem::UserInput {
+                text,
+                file_ids: Vec::new(),
+            }],
             usage: TokenUsage::default(),
             stop_reason: StopReason::Cancelled,
         })

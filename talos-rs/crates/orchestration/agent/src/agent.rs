@@ -29,7 +29,7 @@ use crate::{
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
 use runtime::{AgentRuntime, AgentRuntimeAbortHandle, KernelAgent, KernelAgentParams};
-use talos_agent_kernel::TimelineBuilder;
+use talos_agent_kernel::{AttachmentReader, TimelineBuilder};
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
@@ -110,6 +110,8 @@ pub struct AgentHarnessParams {
     pub session_store: Arc<dyn SessionStore>,
     /// Long-term memory persistence.
     pub memory_writer: Arc<dyn MemoryWriter>,
+    /// Authorized file content reader used only for the active model turn.
+    pub attachment_reader: Arc<dyn AttachmentReader>,
 }
 
 impl AgentHarnessImpl {
@@ -127,6 +129,7 @@ impl AgentHarnessImpl {
             session_artifact_store,
             session_store,
             memory_writer,
+            attachment_reader,
         } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
         llm_provider_router.provider_for(&model_selection.model_ref)?;
@@ -156,6 +159,7 @@ impl AgentHarnessImpl {
                 session_artifact_store,
                 session_store,
                 memory_writer,
+                attachment_reader,
             }),
         })
     }

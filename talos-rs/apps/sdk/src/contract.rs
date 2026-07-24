@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use bytes::Bytes;
 use talos_app_protocol::requests::{
     SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
     SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
@@ -14,7 +15,9 @@ use talos_types::{
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
     ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
     ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, EventUnsubscribeRequest,
-    EventUnsubscribeResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
+    EventUnsubscribeResponse, FileDeleteRequest, FileDeleteResponse, FileListRequest,
+    FileListResponse, FileReadRequest, FileReadResponse, FileUpdateRequest, FileUpdateResponse,
+    FileUploadRequest, FileUploadResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
@@ -313,6 +316,41 @@ pub trait GatewayClient: Send {
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse>;
 
+    /// Uploads bytes through the App Server file transport envelope.
+    async fn upload_file(
+        &mut self,
+        _request: FileUploadRequest,
+        _data: Bytes,
+    ) -> TalosResult<FileUploadResponse> {
+        Err(file_client_unavailable())
+    }
+
+    /// Lists files available through this client transport.
+    async fn list_files(&mut self, _request: FileListRequest) -> TalosResult<FileListResponse> {
+        Err(file_client_unavailable())
+    }
+
+    /// Reads one file metadata record through this client transport.
+    async fn read_file(&mut self, _request: FileReadRequest) -> TalosResult<FileReadResponse> {
+        Err(file_client_unavailable())
+    }
+
+    /// Updates mutable metadata through this client transport.
+    async fn update_file(
+        &mut self,
+        _request: FileUpdateRequest,
+    ) -> TalosResult<FileUpdateResponse> {
+        Err(file_client_unavailable())
+    }
+
+    /// Deletes one file through this client transport.
+    async fn delete_file(
+        &mut self,
+        _request: FileDeleteRequest,
+    ) -> TalosResult<FileDeleteResponse> {
+        Err(file_client_unavailable())
+    }
+
     async fn list_memory_files(
         &mut self,
         request: MemoryFileListRequest,
@@ -356,4 +394,8 @@ pub trait GatewayClient: Send {
     ) -> TalosResult<WorkspaceInfoResponse>;
 
     async fn shutdown(&mut self) -> TalosResult<()>;
+}
+
+fn file_client_unavailable() -> TalosError {
+    TalosError::ClientError("file API is not implemented by this gateway client".to_string())
 }

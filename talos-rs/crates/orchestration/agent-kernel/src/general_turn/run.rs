@@ -141,9 +141,13 @@ pub async fn run_general_turn_with_resume(
             .await?;
         }
     }
+    let persisted_input = UserInput {
+        text: input.to_string(),
+        file_ids: ctx.input.file_ids.clone(),
+    };
     let artifact_seq = persist_general_turn_artifacts(
         &prepared,
-        input,
+        &persisted_input,
         &executed,
         ctx.session_artifact_store()?,
         ctx.transcript_service.clone(),

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { retryTimelineTurn, startTimelineTurn } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
+import type { ChatUserInput } from "@/shared/types/ui";
 import type { RetryTurnRequest, StartTurnRequest } from "@talos/sdk-browser";
 
 export function useSessionMessageStream(sessionId: string) {
@@ -43,12 +44,12 @@ export function useSessionMessageStream(sessionId: string) {
     async ({
       clientMessageId,
       retryOfMessageId,
-      text,
+      input,
       onAcceptedMessageId,
     }: {
       clientMessageId: string;
       retryOfMessageId: string;
-      text: string;
+      input: ChatUserInput;
       onAcceptedMessageId?: (messageId: string) => void;
     }) => {
       abortRef.current?.abort();
@@ -61,7 +62,12 @@ export function useSessionMessageStream(sessionId: string) {
             session_id: sessionId,
             client_message_id: clientMessageId,
             retry_of_message_id: retryOfMessageId,
-            input: [{ type: "text", text }],
+            input: [
+              ...(input.text.trim() ? [{ type: "text" as const, text: input.text }] : []),
+              ...(input.fileIds.length > 0
+                ? [{ type: "files" as const, fileIds: input.fileIds }]
+                : []),
+            ],
           } satisfies RetryTurnRequest,
           onAcceptedMessageId,
         );

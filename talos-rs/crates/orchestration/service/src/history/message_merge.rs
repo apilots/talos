@@ -47,6 +47,7 @@ fn first_input_text(message: &SessionHistoryMessage) -> Option<&str> {
         }
         match &item.content {
             TalosTimelineContent::Text { text } => Some(text.as_str()),
+            TalosTimelineContent::UserInput { text, .. } => Some(text.as_str()),
             TalosTimelineContent::Empty
             | TalosTimelineContent::ToolCall { .. }
             | TalosTimelineContent::ExecutionSummary { .. }
@@ -168,6 +169,7 @@ fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) 
                 item.content = TalosTimelineContent::Text { text };
             }
             TalosTimelineContent::ToolCall { .. }
+            | TalosTimelineContent::UserInput { .. }
             | TalosTimelineContent::ExecutionSummary { .. }
             | TalosTimelineContent::ContextCompaction { .. }
             | TalosTimelineContent::SystemNotice { .. } => {}
@@ -254,16 +256,21 @@ fn map_turn_items(turn: &TalosTurn) -> Vec<TalosTimelineItem> {
 
     for (index, output) in turn.items.iter().enumerate() {
         match output {
-            RunItem::UserInput { text } => {
-                items.push(history_text_item(
-                    turn,
-                    index,
-                    TalosTimelineItemKind::UserInput,
-                    TalosTimelinePhase::Input,
-                    None,
-                    text.clone(),
-                    timestamp_ms,
-                ));
+            RunItem::UserInput { text, file_ids } => {
+                items.push(TalosTimelineItem {
+                    item_id: history_item_id(turn, index, "input"),
+                    parent_item_id: None,
+                    kind: TalosTimelineItemKind::UserInput,
+                    phase: TalosTimelinePhase::Input,
+                    status: TalosTimelineItemStatus::Completed,
+                    title: None,
+                    started_at_ms: timestamp_ms,
+                    completed_at_ms: Some(timestamp_ms),
+                    content: TalosTimelineContent::UserInput {
+                        text: text.clone(),
+                        file_ids: file_ids.clone(),
+                    },
+                });
             }
             RunItem::Reasoning { text } => {
                 items.push(history_text_item(

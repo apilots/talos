@@ -1,9 +1,9 @@
 use super::*;
-use talos_error::TalosError;
+use talos_error::{TalosError, TalosFileErrorKind};
 use talos_llm_provider::{
-    protocols::chat as chat_protocol, CacheControl, CacheControlKind, ChatMessage, ChatRequest,
-    LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream, ModelBlockStreamEvent,
-    PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
+    protocols::chat as chat_protocol, Attachment, AttachmentKind, CacheControl, CacheControlKind,
+    ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
+    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -73,6 +73,36 @@ fn test_bailian_config_builder() {
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://example.com/compatible-mode/v1");
     assert_eq!(config.timeout_secs, 120);
+}
+
+#[test]
+fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
+    let provider = BailianProvider::new(BailianConfig::new("test-key"));
+    let image = Attachment {
+        kind: AttachmentKind::Image,
+        filename: "pixel.png".to_string(),
+        media_type: "image/png".to_string(),
+        bytes: vec![1, 2, 3].into(),
+    };
+
+    assert!(provider
+        .validate_attachments("qwen3.7-plus", std::slice::from_ref(&image))
+        .is_ok());
+    assert!(matches!(
+        provider.validate_attachments(
+            "qwen3.7-plus",
+            &[Attachment {
+                kind: AttachmentKind::File,
+                filename: "note.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                bytes: vec![1, 2, 3].into(),
+            }]
+        ),
+        Err(TalosError::FileError {
+            kind: TalosFileErrorKind::UnsupportedAttachment,
+            ..
+        })
+    ));
 }
 
 #[tokio::test]

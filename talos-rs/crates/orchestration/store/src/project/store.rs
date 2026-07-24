@@ -185,9 +185,27 @@ impl ProjectStore for StorageProjectStore {
                 project_id
             )));
         }
-        self.storage
-            .execute("DELETE FROM projects WHERE project_id = ?", &[project_id])
+        let deleted = self
+            .storage
+            .execute(
+                r#"
+                DELETE FROM projects
+                WHERE project_id = ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sessions WHERE sessions.project_id = projects.project_id
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM files WHERE files.project_id = projects.project_id
+                  )
+                "#,
+                &[project_id],
+            )
             .await?;
+        if deleted == 0 && self.get_project(project_id).await?.is_some() {
+            return Err(TalosError::Conflict(format!(
+                "project {project_id} still has bound sessions or files"
+            )));
+        }
         Ok(())
     }
 }

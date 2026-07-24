@@ -7,7 +7,7 @@ use crate::{
     KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
     KernelWarning, PromptWarningEventData, SessionPromptContextConfig, SessionPromptRecentWindow,
     SessionToolExchangeOutcome, StopReason, TalosMessageRole, ThinkingDeltaStreamData,
-    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
+    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData, UserInput,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -23,10 +23,9 @@ use talos_llm_provider::{
 };
 use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_prompt::{
-    render_prompt_assembly, CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig,
-    PromptBuilder, PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState,
-    SessionContinuity, SessionHistoryCompaction, SessionHistoryCompactionOutcome,
-    SessionHistoryCompactionTrigger,
+    CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig, PromptBuilder,
+    PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
+    SessionHistoryCompaction, SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger,
 };
 use talos_store::session::{RecordHeader, SummaryRecord};
 use talos_tools::{
@@ -66,6 +65,7 @@ Omit any field whose array would be empty. Keep total under 200 words.
 Return at most 8 memory_candidates. Exclude transient logs and unstable details.
 Use the same language as the conversation transcript for all field values."#;
 
+mod attachments;
 mod daily_memory;
 mod finalize;
 mod guard;

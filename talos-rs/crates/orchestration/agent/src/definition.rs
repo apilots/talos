@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use talos_agent_kernel::AttachmentReader;
 use talos_config::{
     AgentConfig, AgentDefinitionConfig, AgentKind as ConfigAgentKind, AgentRuntimeConfig,
 };
@@ -172,6 +173,7 @@ pub struct AgentHarnessFactory {
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     session_store: Arc<dyn SessionStore>,
     memory_writer: Arc<dyn MemoryWriter>,
+    attachment_reader: Arc<dyn AttachmentReader>,
 }
 
 impl AgentHarnessFactory {
@@ -183,6 +185,7 @@ impl AgentHarnessFactory {
         session_artifact_store: Arc<dyn SessionArtifactStore>,
         session_store: Arc<dyn SessionStore>,
         memory_writer: Arc<dyn MemoryWriter>,
+        attachment_reader: Arc<dyn AttachmentReader>,
     ) -> Self {
         Self {
             llm_provider_router,
@@ -191,6 +194,7 @@ impl AgentHarnessFactory {
             session_artifact_store,
             session_store,
             memory_writer,
+            attachment_reader,
         }
     }
 
@@ -219,6 +223,7 @@ impl AgentHarnessFactory {
                     session_artifact_store: self.session_artifact_store.clone(),
                     session_store: self.session_store.clone(),
                     memory_writer: self.memory_writer.clone(),
+                    attachment_reader: self.attachment_reader.clone(),
                 })
             }
             (kind, _) => Err(TalosError::UnsupportedModel(format!(

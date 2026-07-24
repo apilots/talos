@@ -5,6 +5,7 @@ import { cancelActiveTurn, isActiveTurnRunningError } from "../api";
 import { useSessionMessageStream } from "./useSessionMessageStream";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { useAppStore } from "@/shared/store/app-store";
+import type { ChatUserInput } from "@/shared/types/ui";
 import type { StartTurnRequest } from "@talos/sdk-browser";
 
 export function useSessionStreaming(
@@ -72,15 +73,16 @@ export function useSessionStreaming(
       request?: StartTurnRequest;
     }) => {
       const clientMessageId = createClientMessageId();
+      const input = turnUserInput(text, request);
       resetStream(sessionId);
-      if (appendUserInput && text.trim().length > 0) {
-        setPendingInput(sessionId, { text, clientMessageId, phase: "local" });
+      if (appendUserInput && hasUserInput(input)) {
+        setPendingInput(sessionId, { ...input, clientMessageId, phase: "local" });
       }
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
-        activeInputText: appendUserInput ? text : undefined,
+        activeInput: appendUserInput ? input : undefined,
         activeClientMessageId: appendUserInput ? clientMessageId : undefined,
         awaitingFinalResponse: false,
       });
@@ -156,20 +158,20 @@ export function useSessionStreaming(
   const retryMutation = useMutation({
     mutationFn: async () => {
       const currentStream = useAppStore.getState().streams[sessionId];
-      const text = currentStream?.activeInputText?.trim();
+      const input = currentStream?.activeInput;
       const retryOfMessageId = currentStream?.activeMessageId;
       const clientMessageId = currentStream?.activeClientMessageId ?? createClientMessageId();
-      if (!text || !retryOfMessageId) {
+      if (!input || !hasUserInput(input) || !retryOfMessageId) {
         throw new Error("No retryable message attempt.");
       }
 
       resetStream(sessionId);
-      setPendingInput(sessionId, { text, clientMessageId, phase: "local" });
+      setPendingInput(sessionId, { ...input, clientMessageId, phase: "local" });
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
-        activeInputText: text,
+        activeInput: input,
         activeClientMessageId: clientMessageId,
         awaitingFinalResponse: false,
       });
@@ -177,7 +179,7 @@ export function useSessionStreaming(
       await retryMessage({
         clientMessageId,
         retryOfMessageId,
-        text,
+        input,
         onAcceptedMessageId: (messageId) => {
           markPendingInputAccepted(sessionId, clientMessageId, messageId);
         },
@@ -227,10 +229,17 @@ export function useSessionStreaming(
       return stopMutation.mutateAsync();
     },
     retryResponse: () => retryMutation.mutateAsync(),
-    canRetryResponse: Boolean(streamState?.activeInputText && streamState.activeMessageId),
+    canRetryResponse: Boolean(
+      streamState?.activeInput &&
+        hasUserInput(streamState.activeInput) &&
+        streamState.activeMessageId,
+    ),
     sendText: (text: string, request?: StartTurnRequest) => {
       const content = text.trim();
-      if (!content) {
+      const hasFiles = request?.input.some(
+        (item) => item.type === "files" && item.fileIds.length > 0,
+      );
+      if (!content && !hasFiles) {
         return Promise.resolve();
       }
       return sendMutation.mutateAsync({ text: content, appendUserInput: true, request });
@@ -241,6 +250,16 @@ export function useSessionStreaming(
       retryMutation.isPending ||
       streamState?.connectionState === "cancelling",
   };
+}
+
+function turnUserInput(text: string, request?: StartTurnRequest): ChatUserInput {
+  const fileIds =
+    request?.input.flatMap((item) => (item.type === "files" ? item.fileIds : [])) ?? [];
+  return { text, fileIds };
+}
+
+function hasUserInput(input: ChatUserInput) {
+  return Boolean(input.text.trim() || input.fileIds.length > 0);
 }
 
 function createClientMessageId() {

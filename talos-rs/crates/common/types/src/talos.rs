@@ -1,7 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::path::PathBuf;
+use std::{fmt, path::PathBuf};
 use ts_rs::TS;
 use uuid::Uuid;
 
@@ -359,18 +358,10 @@ pub enum TalosInputItem {
         name: String,
         path: String,
     },
-    Image {
-        url: String,
-        #[serde(default)]
-        mime_type: Option<String>,
-    },
-    File {
-        #[serde(default)]
-        url: Option<String>,
-        #[serde(default)]
-        file_id: Option<String>,
-        #[serde(default)]
-        mime_type: Option<String>,
+    Files {
+        #[serde(rename = "fileIds")]
+        #[ts(rename = "fileIds")]
+        file_ids: Vec<String>,
     },
     Voice {
         #[serde(default)]
@@ -622,6 +613,9 @@ impl TalosContentItem {
 pub enum RunItem {
     UserInput {
         text: String,
+        #[serde(default, rename = "fileIds")]
+        #[ts(rename = "fileIds")]
+        file_ids: Vec<String>,
     },
     Reasoning {
         text: String,
@@ -785,6 +779,12 @@ pub enum TalosTimelineContent {
     Empty,
     Text {
         text: String,
+    },
+    UserInput {
+        text: String,
+        #[serde(default, rename = "fileIds")]
+        #[ts(rename = "fileIds")]
+        file_ids: Vec<String>,
     },
     ToolCall {
         call_id: String,

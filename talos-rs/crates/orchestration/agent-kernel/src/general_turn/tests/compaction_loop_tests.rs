@@ -152,6 +152,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
                             "historical user message {} requesting additional repository evidence and continuity details",
                             idx
                         ),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!(
@@ -322,6 +323,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
                 items: vec![
                     RunItem::UserInput {
                         text: format!("historical user message {idx} with continuity"),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!(
@@ -408,6 +410,7 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
                 items: vec![
                     RunItem::UserInput {
                         text: format!("historical user message {}", idx),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!(
@@ -497,6 +500,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
                 items: vec![
                     RunItem::UserInput {
                         text: format!("historical user message {}", idx),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!(
@@ -589,6 +593,7 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
                 items: vec![
                     RunItem::UserInput {
                         text: format!("historical user message {}", idx),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!(
@@ -773,6 +778,7 @@ async fn test_prepare_general_turn_uses_compacted_load_policy_during_recovery() 
                 items: vec![
                     RunItem::UserInput {
                         text: format!("historical user message {} {}", idx, "x".repeat(48)),
+                        file_ids: Vec::new(),
                     },
                     RunItem::OutputText {
                         text: format!("historical assistant message {} {}", idx, "y".repeat(48)),

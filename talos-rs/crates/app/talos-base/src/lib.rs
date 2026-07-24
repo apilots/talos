@@ -25,13 +25,13 @@ use talos_llm_openai::{OpenAIProtocol, OpenAIProvider};
 use talos_llm_openrouter::{OpenRouterConfig, OpenRouterProtocol, OpenRouterProvider};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelRef,
-    PromptCacheSupport, ReloadableLlmProviderRouter,
+    ReloadableLlmProviderRouter,
 };
 use talos_logging::LogGuard;
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    Actor, AgentDispatchTurnExecutor, CreateSessionRequest, MemoryService, PluginManagerService,
-    TalosService, TimelineSubscribeCommand, TimelineSubscriptionMessage,
+    Actor, AgentDispatchTurnExecutor, CreateSessionRequest, FileService, MemoryService,
+    PluginManagerService, TalosService, TimelineSubscribeCommand, TimelineSubscriptionMessage,
 };
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_store::memory::MemoryStore;
@@ -60,6 +60,9 @@ const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 
 mod application_automation;
 mod application_storage;
+mod reloadable_llm_provider;
+
+use reloadable_llm_provider::ReloadableLlmProvider;
 
 #[derive(Clone)]
 struct AgentSkillRootsResolver {
@@ -684,6 +687,17 @@ pub async fn start_server(
 }
 
 pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
+    let max_incoming_frame_bytes = usize::try_from(
+        config
+            .storage
+            .files
+            .limits
+            .max_upload_bytes
+            .div_ceil(3)
+            .saturating_mul(4)
+            .saturating_add(1024 * 1024),
+    )
+    .unwrap_or(usize::MAX);
     let runtime = build_application_runtime(config.clone()).await?;
     let automation = runtime.automation.clone();
     let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
@@ -699,7 +713,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
         runtime.auth_service,
         service.account.clone(),
     ));
-    let result = talos_app_server::run_stdio(
+    let result = talos_app_server::run_stdio_with_max_frame_bytes(
         app,
         validator,
         talos_app_server::AppServerConfig {
@@ -707,6 +721,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
             cloud_auth_url: Some(config.cloud.web_base_url.clone()),
             ..talos_app_server::AppServerConfig::default()
         },
+        max_incoming_frame_bytes,
     )
     .await
     .map_err(|error| TalosError::InternalError(error.message));
@@ -715,13 +730,20 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
 
 pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
     config.validate_runtime()?;
-    let (storage_impl, profile_store) =
+    let (storage_impl, profile_store, file_store) =
         application_storage::build_application_storage(&config).await?;
     let storage: Arc<dyn talos_storage::Storage> = storage_impl;
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
     let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
     let session_store: Arc<dyn SessionStore> = session_store_impl.clone();
     let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
+    let file_service = Arc::new(FileService::new(
+        file_store,
+        project_store.clone(),
+        application_storage::build_file_operators(&config.storage.files)?,
+        config.storage.files.clone(),
+    )?);
+    file_service.reconcile_incomplete().await?;
     let event_store: Arc<dyn TimelineEventStore> = session_store_impl.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
@@ -803,6 +825,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         session_artifact_store.clone(),
         session_store_impl.clone(),
         Arc::new(memory_service.clone()),
+        file_service.clone(),
     );
 
     let coordinator = Arc::new(CoordinatorImpl::new(router));
@@ -857,6 +880,7 @@ pub async fn build_application_runtime(config: Config) -> TalosResult<TalosAppli
         session_artifact_store.clone(),
         project_store,
         profile_store.clone(),
+        file_service,
         event_service.clone(),
         idempotency_store,
         config.clone(),
@@ -1062,60 +1086,6 @@ fn deepseek_protocol(provider_config: &ProviderConfig) -> TalosResult<DeepSeekPr
         LlmProtocol::Responses => Err(TalosError::InvalidConfiguration(
             "llm.deepseek.protocol does not support responses".to_string(),
         )),
-    }
-}
-
-struct ReloadableLlmProvider {
-    current: RwLock<Arc<dyn LlmProvider>>,
-}
-
-impl ReloadableLlmProvider {
-    fn new(provider: Arc<dyn LlmProvider>) -> Self {
-        Self {
-            current: RwLock::new(provider),
-        }
-    }
-
-    fn reload(&self, provider: Arc<dyn LlmProvider>) {
-        *self.current.write().expect("llm provider write lock") = provider;
-    }
-
-    fn current(&self) -> Arc<dyn LlmProvider> {
-        self.current.read().expect("llm provider read lock").clone()
-    }
-}
-
-#[async_trait::async_trait]
-impl LlmProvider for ReloadableLlmProvider {
-    fn name(&self) -> &str {
-        "reloadable"
-    }
-
-    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        self.current().chat(request).await
-    }
-
-    async fn stream(&self, request: ChatRequest) -> TalosResult<ChatStream> {
-        self.current().stream(request).await
-    }
-
-    fn default_model(&self) -> String {
-        self.current().default_model()
-    }
-
-    fn prompt_cache_support(&self) -> PromptCacheSupport {
-        self.current().prompt_cache_support()
-    }
-
-    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
-        self.current().chat_with_tools(request).await
-    }
-
-    async fn stream_model_blocks(
-        &self,
-        request: ChatRequest,
-    ) -> TalosResult<talos_llm_provider::ModelBlockStream> {
-        self.current().stream_model_blocks(request).await
     }
 }
 

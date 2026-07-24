@@ -108,6 +108,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     };
 
     app.in_flight = true;
+    app.active_message = Some("Inspect live metrics".to_string());
     app.handle_stream_event(turn_metrics_event_with_metrics(
         "msg-usage",
         "sess-test",
@@ -218,6 +219,7 @@ fn test_metrics_line_renders_above_input_without_border() {
     });
     app.turn_metrics_live = true;
     app.in_flight = true;
+    app.active_message = Some("Ask Talos".to_string());
     app.input_buffer = "Ask Talos".to_string();
     app.cursor_index = app.input_buffer.chars().count();
 
@@ -433,7 +435,7 @@ fn test_session_header_enters_terminal_projection() {
         .join("\n");
     assert!(text.contains("Talos TUI"));
     assert!(text.contains("qwen-test"));
-    assert!(text.contains(" Tip: Type a message or use /help /model /sessions"));
+    assert!(text.contains(" Tip: Type a message, Ctrl+V an image, or use /help /model /sessions"));
 }
 
 #[test]

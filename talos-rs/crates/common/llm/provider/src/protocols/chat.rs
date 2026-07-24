@@ -10,12 +10,14 @@ use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
 
+mod content;
 mod types;
 
 #[cfg(test)]
 #[path = "chat/chat_tests.rs"]
 mod tests;
 
+pub use content::content_text;
 pub use types::*;
 
 #[derive(Debug, Clone)]
@@ -164,6 +166,7 @@ pub fn messages(
     chat_messages
         .into_iter()
         .map(|message| {
+            message.validate_attachments()?;
             let role = match message.role {
                 Role::System => "system",
                 Role::User => "user",
@@ -186,20 +189,12 @@ pub fn messages(
                     .collect()
             });
 
-            let content = if cache_control {
-                match message.cache_control {
-                    Some(cache_control) => Some(ChatCompletionMessageContent::Blocks(vec![
-                        ChatCompletionContentBlock {
-                            block_type: "text".to_string(),
-                            text: message.content,
-                            cache_control: Some(cache_control),
-                        },
-                    ])),
-                    None => Some(ChatCompletionMessageContent::Text(message.content)),
-                }
-            } else {
-                Some(ChatCompletionMessageContent::Text(message.content))
-            };
+            let content = content::message_content(
+                message.content,
+                message.cache_control,
+                message.attachments,
+                cache_control,
+            );
 
             let (reasoning, reasoning_content, reasoning_details) =
                 reasoning_fields(message.reasoning_continuation, reasoning_continuation)?;
@@ -336,29 +331,6 @@ pub fn tool_calls(tool_calls: Option<Vec<ChatCompletionToolCall>>) -> Option<Vec
             })
             .collect()
     })
-}
-
-pub fn content_text(
-    content: Option<ChatCompletionMessageContent>,
-    provider_name: &str,
-) -> TalosResult<String> {
-    match content {
-        Some(ChatCompletionMessageContent::Text(text)) => Ok(text),
-        Some(ChatCompletionMessageContent::Blocks(blocks)) => {
-            let mut text = String::new();
-            for block in blocks {
-                if block.block_type != "text" {
-                    return Err(TalosError::ValidationError(format!(
-                        "{provider_name} response contains unsupported content block type: {}",
-                        block.block_type
-                    )));
-                }
-                text.push_str(&block.text);
-            }
-            Ok(text)
-        }
-        None => Ok(String::new()),
-    }
 }
 
 pub fn usage(usage: ChatCompletionUsage) -> TalosResult<Usage> {

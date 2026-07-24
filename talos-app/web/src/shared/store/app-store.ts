@@ -8,10 +8,6 @@ import {
   type ConnectionSlice,
 } from "@/features/connection/store";
 import {
-  createFilesSlice,
-  type FilesSlice,
-} from "@/features/files/store";
-import {
   createMemorySlice,
   type MemorySlice,
 } from "@/features/memory/store";
@@ -28,8 +24,7 @@ export interface AppState
   extends ChatSlice,
     ConnectionSlice,
     UiSlice,
-    MemorySlice,
-    FilesSlice {}
+    MemorySlice {}
 
 export const useAppStore = create<AppState>()(
   persist(
@@ -37,7 +32,6 @@ export const useAppStore = create<AppState>()(
       ...createConnectionSlice(set as unknown as (updater: (state: ConnectionSlice) => Partial<ConnectionSlice>) => void),
       ...createUiSlice(set as unknown as (updater: (state: UiSlice) => Partial<UiSlice>) => void),
       ...createMemorySlice(set as unknown as (updater: (state: MemorySlice) => Partial<MemorySlice>) => void),
-      ...createFilesSlice(set as unknown as (updater: (state: FilesSlice) => Partial<FilesSlice>) => void),
       ...createChatSlice(set as unknown as ChatSliceSetter),
     }),
     {
@@ -59,7 +53,6 @@ export const useAppStore = create<AppState>()(
           transientStatuses: {},
           streams: {},
           memoryItems: mergeById(currentState.memoryItems, typedState?.memoryItems),
-          fileItems: mergeById(currentState.fileItems, typedState?.fileItems),
           connection: {
             ...currentState.connection,
             runtimeMode: normalizeRuntimeMode(typedState?.connection?.runtimeMode),
@@ -77,7 +70,6 @@ export const useAppStore = create<AppState>()(
         projects: state.projects,
         sessionAliases: state.sessionAliases,
         memoryItems: state.memoryItems,
-        fileItems: state.fileItems,
       }),
     },
   ),

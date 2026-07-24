@@ -19,11 +19,13 @@ use talos_service::{
     Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
 use talos_types::EventUnsubscribeResponse;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
 use crate::application::{AppServerApplication, ProtocolResult};
 use crate::auth::ActorCredentialValidator;
+
+const DEFAULT_MAX_INCOMING_FRAME_BYTES: usize = 68 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct AppServerConfig {
@@ -59,12 +61,23 @@ pub async fn run_stdio(
     validator: Arc<dyn ActorCredentialValidator>,
     config: AppServerConfig,
 ) -> ProtocolResult<()> {
-    run_jsonl(
+    run_stdio_with_max_frame_bytes(app, validator, config, DEFAULT_MAX_INCOMING_FRAME_BYTES).await
+}
+
+/// Runs the stdio transport with an explicit JSONL frame limit.
+pub async fn run_stdio_with_max_frame_bytes(
+    app: Arc<dyn AppServerApplication>,
+    validator: Arc<dyn ActorCredentialValidator>,
+    config: AppServerConfig,
+    max_incoming_frame_bytes: usize,
+) -> ProtocolResult<()> {
+    run_jsonl_with_max_frame_bytes(
         tokio::io::stdin(),
         tokio::io::stdout(),
         app,
         validator,
         config,
+        max_incoming_frame_bytes,
     )
     .await
 }
@@ -80,19 +93,61 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    run_jsonl_with_max_frame_bytes(
+        reader,
+        writer,
+        app,
+        validator,
+        config,
+        DEFAULT_MAX_INCOMING_FRAME_BYTES,
+    )
+    .await
+}
+
+/// Runs one JSONL transport with an explicit maximum request-frame size.
+pub async fn run_jsonl_with_max_frame_bytes<R, W>(
+    reader: R,
+    writer: W,
+    app: Arc<dyn AppServerApplication>,
+    validator: Arc<dyn ActorCredentialValidator>,
+    config: AppServerConfig,
+    max_incoming_frame_bytes: usize,
+) -> ProtocolResult<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin + Send + 'static,
+{
+    let max_incoming_frame_bytes = max_incoming_frame_bytes.max(1);
     let (outgoing_tx, outgoing_rx) = mpsc::channel(config.outgoing_capacity.max(1));
     let mut writer_task = tokio::spawn(write_loop(writer, outgoing_rx));
     let mut state = RuntimeState::default();
-    let mut lines = BufReader::new(reader).lines();
+    let mut reader = BufReader::new(reader);
+    let mut line = Vec::new();
     let mut writer_finished = false;
 
     loop {
         tokio::select! {
-            line = lines.next_line() => {
-                match line {
-                    Ok(Some(line)) => {
+            line_result = read_bounded_line(
+                &mut reader,
+                &mut line,
+                max_incoming_frame_bytes,
+            ) => {
+                match line_result {
+                    Ok(BoundedLineRead::Line) => {
+                        let line = match std::str::from_utf8(&line) {
+                            Ok(line) => line,
+                            Err(error) => {
+                                let _ = outgoing_tx
+                                    .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
+                                        None,
+                                        AppServerErrorBody::parse_error(error.to_string()),
+                                    )))
+                                    .await;
+                                break;
+                            }
+                        };
                         if handle_line(
-                            &line,
+                            line,
                             &mut state,
                             app.clone(),
                             validator.clone(),
@@ -105,7 +160,19 @@ where
                             break;
                         }
                     }
-                    Ok(None) => break,
+                    Ok(BoundedLineRead::Eof) => break,
+                    Ok(BoundedLineRead::LimitExceeded) => {
+                        let _ = outgoing_tx
+                            .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
+                                None,
+                                AppServerErrorBody::parse_error(format!(
+                                    "incoming JSONL frame exceeds {} bytes",
+                                    max_incoming_frame_bytes
+                                )),
+                            )))
+                            .await;
+                        break;
+                    }
                     Err(err) => {
                         let _ = outgoing_tx
                             .send(OutgoingMessage::Error(JsonRpcErrorResponse::new(
@@ -155,6 +222,47 @@ where
         }
     }
     Ok(())
+}
+
+enum BoundedLineRead {
+    Eof,
+    Line,
+    LimitExceeded,
+}
+
+async fn read_bounded_line<R>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+    max_bytes: usize,
+) -> std::io::Result<BoundedLineRead>
+where
+    R: AsyncBufRead + Unpin,
+{
+    line.clear();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return Ok(if line.is_empty() {
+                BoundedLineRead::Eof
+            } else {
+                BoundedLineRead::Line
+            });
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let consumed = newline.map_or(available.len(), |position| position + 1);
+        if line.len().saturating_add(consumed) > max_bytes {
+            return Ok(BoundedLineRead::LimitExceeded);
+        }
+        line.extend_from_slice(&available[..consumed]);
+        reader.consume(consumed);
+        if newline.is_some() {
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            return Ok(BoundedLineRead::Line);
+        }
+    }
 }
 
 #[derive(Default)]

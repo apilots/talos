@@ -67,6 +67,7 @@ description = "Talos - AI Agent Framework"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"
+bytes = "1"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -85,9 +86,13 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Config
 config = "0.14"
 toml = "0.8"
+infer = "0.22"
+csv = "1"
+calamine = "0.36"
 
 # Storage
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "migrate"] }
+opendal = { version = "0.57", default-features = false, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
 croner = "2.2"
 redis = "0.24"
 

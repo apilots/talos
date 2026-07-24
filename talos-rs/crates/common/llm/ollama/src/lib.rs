@@ -105,6 +105,7 @@ impl OllamaProvider {
     }
 
     async fn send(&self, request: ChatRequest, stream: bool) -> TalosResult<Response> {
+        self.validate_request_attachments(&request)?;
         let body = Self::build_request(request, stream)?;
         let response = self
             .client

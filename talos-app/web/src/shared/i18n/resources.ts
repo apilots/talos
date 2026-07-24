@@ -1,5 +1,6 @@
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
+import { filesResources } from "./filesResources";
 
 export const resources = {
   en: {
@@ -155,37 +156,7 @@ export const resources = {
         other: "Other",
       },
     },
-    files: {
-      pageLabel: "Files",
-      title: "Reference uploaded material in chat with @",
-      detail:
-        "Keep working documents, code snippets, and notes close at hand so the composer can reference them instantly.",
-      upload: "Upload",
-      searchPlaceholder: "Search files...",
-      noFilesTitle: "No files yet",
-      noFilesDetail:
-        "Drop source files, PDFs, or notes here. Once uploaded, mention them directly in chat with the @ trigger.",
-      dragHint: "Drag files here, or use the upload button to add a new reference.",
-      ready: "@ ready",
-      table: {
-        name: "Name",
-        path: "Path",
-        type: "Type",
-        actions: "Actions",
-      },
-      placeholders: {
-        newFileLabel: "reference-{{index}}.md",
-        newFilePath: "notes/reference-{{index}}.md",
-        newFileSummary: "Placeholder record for the Web UI until the upload API is wired.",
-      },
-      categories: {
-        all: "All",
-        document: "Documents",
-        code: "Code",
-        image: "Images",
-        data: "Data",
-      },
-    },
+    files: filesResources.en,
     settings: {
       pageLabel: "Settings",
       backToApp: "Back to app",
@@ -659,35 +630,7 @@ export const resources = {
         other: "其他",
       },
     },
-    files: {
-      pageLabel: "文件",
-      title: "在聊天中用 @ 引用上传资料",
-      detail: "把工作文档、代码片段和笔记保留在身边，方便在输入框里即时引用。",
-      upload: "上传",
-      searchPlaceholder: "搜索文件...",
-      noFilesTitle: "还没有文件",
-      noFilesDetail: "把源码、PDF 或笔记拖进这里。上传后，就可以在聊天里用 @ 直接引用。",
-      dragHint: "将文件拖到这里，或使用上传按钮新增引用。",
-      ready: "@ 可引用",
-      table: {
-        name: "名称",
-        path: "路径",
-        type: "类型",
-        actions: "操作",
-      },
-      placeholders: {
-        newFileLabel: "reference-{{index}}.md",
-        newFilePath: "notes/reference-{{index}}.md",
-        newFileSummary: "在上传 API 接通前，这里保留一个 Web UI 占位记录。",
-      },
-      categories: {
-        all: "全部",
-        document: "文档",
-        code: "代码",
-        image: "图片",
-        data: "数据",
-      },
-    },
+    files: filesResources.zh,
     settings: {
       pageLabel: "设置",
       backToApp: "返回应用",

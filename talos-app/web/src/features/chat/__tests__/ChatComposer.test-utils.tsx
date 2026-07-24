@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 
@@ -8,7 +9,7 @@ import { createDefaultProjects, UNBOUND_PROJECT_ID } from "@/shared/types/domain
 import type { SessionInputHistory } from "@/shared/types/ui";
 
 export function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}) {
-  return render(
+  return renderWithQueryClient(
     <ChatComposer
       activeProjectId={UNBOUND_PROJECT_ID}
       draft=""
@@ -58,7 +59,7 @@ export function renderControlledComposer({
     );
   }
 
-  return render(<ControlledComposer />);
+  return renderWithQueryClient(<ControlledComposer />);
 }
 
 export function renderControlledComposerWithRebuiltHistory(texts: string[]) {
@@ -87,7 +88,21 @@ export function renderControlledComposerWithRebuiltHistory(texts: string[]) {
     );
   }
 
-  return render(<ControlledComposer />);
+  return renderWithQueryClient(<ControlledComposer />);
+}
+
+export function renderWithQueryClient(element: React.ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      {element}
+    </QueryClientProvider>,
+  );
 }
 
 export function getComposerInput() {
@@ -104,6 +119,7 @@ export function committedHistory(...texts: string[]): SessionInputHistory {
       messageId: `msg-${index + 1}`,
       itemIndex: 0,
       text,
+      fileIds: [],
     })),
   };
 }

@@ -7,6 +7,7 @@ use talos_sdk::{
 
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::live::{LiveReducer, LiveTextKind};
+use crate::render_runtime::render::user_input_display;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
 
 /// Applies an item-started event to render runtime live state.
@@ -20,6 +21,14 @@ pub(crate) fn apply_item_started(
             TalosTimelinePhase::Input,
             TalosTimelineContent::Text { text },
         ) => text_finalized_block(TranscriptBlockKind::UserInput, text),
+        (
+            TalosTimelineItemKind::UserInput,
+            TalosTimelinePhase::Input,
+            TalosTimelineContent::UserInput { text, file_ids },
+        ) => text_finalized_block(
+            TranscriptBlockKind::UserInput,
+            &user_input_display(text, file_ids),
+        ),
         (_, _, TalosTimelineContent::Text { text }) => {
             if let Some((kind, phase_resolved)) = live_text_state(item) {
                 if phase_resolved {
@@ -127,6 +136,7 @@ pub(crate) fn apply_item_completed(
                 return text_finalized_block(TranscriptBlockKind::SystemNotice, message);
             }
             TalosTimelineContent::ExecutionSummary { .. }
+            | TalosTimelineContent::UserInput { .. }
             | TalosTimelineContent::ContextCompaction { .. }
             | TalosTimelineContent::Empty => {}
         }

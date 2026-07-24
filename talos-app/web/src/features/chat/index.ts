@@ -19,6 +19,7 @@ export {
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
 export {
+  supportedAttachmentKinds,
   modelInfoForRef,
   modelPickerOptions,
   modelRefForKey,
@@ -26,9 +27,10 @@ export {
   modelSelectionForRef,
   reasoningLevelForEffort,
   reasoningLevelForModel,
+  type SupportedAttachmentKind,
 } from "./model-selection";
 export { SidebarContainer } from "./components/SidebarContainer";
-export { useChatSession } from "./hooks/useChatSession";
+export { useChatSession, type SendTextOptions } from "./hooks/useChatSession";
 export { useConfiguredSessionModelSelection } from "./hooks/useConfiguredSessionModelSelection";
 export {
   chatKeys,

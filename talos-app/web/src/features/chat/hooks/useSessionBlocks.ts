@@ -157,7 +157,11 @@ function createPendingInputBlock(
   streamState: StreamSessionState | undefined,
 ): ChatRenderBlock | undefined {
   const pendingInput = streamState?.pendingInput;
-  if (!pendingInput?.text.trim() || pendingInput.phase === "completed") {
+  if (
+    !pendingInput ||
+    (!pendingInput.text.trim() && pendingInput.fileIds.length === 0) ||
+    pendingInput.phase === "completed"
+  ) {
     return undefined;
   }
 
@@ -165,6 +169,7 @@ function createPendingInputBlock(
     id: `pending-user-${pendingInput.clientMessageId}`,
     kind: "user",
     text: pendingInput.text,
+    fileIds: pendingInput.fileIds,
     live: true,
   };
 }

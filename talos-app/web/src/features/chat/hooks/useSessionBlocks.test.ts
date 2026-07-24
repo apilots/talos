@@ -19,6 +19,7 @@ describe("buildSessionBlocks", () => {
   it("renders one user block when history and the live stream own the same message", () => {
     useAppStore.getState().setPendingInput("sess-1", {
       text: "single input",
+      fileIds: [],
       clientMessageId: "client-1",
       phase: "local",
     });
@@ -41,5 +42,31 @@ describe("buildSessionBlocks", () => {
     expect(blocks.filter((block) => block.kind === "user")).toEqual([
       expect.objectContaining({ id: "user-msg-1", text: "single input" }),
     ]);
+  });
+
+  it("renders an attachment-only pending input", () => {
+    useAppStore.getState().setPendingInput("sess-1", {
+      text: "",
+      fileIds: ["file-1"],
+      clientMessageId: "client-1",
+      phase: "local",
+    });
+
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: useAppStore.getState().streams["sess-1"],
+      waitingResponseDetail: "waiting detail",
+      waitingResponseTitle: "waiting title",
+      stoppingResponseDetail: "stopping detail",
+      stoppingResponseTitle: "stopping title",
+    });
+
+    expect(blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "user",
+        text: "",
+        fileIds: ["file-1"],
+      }),
+    );
   });
 });

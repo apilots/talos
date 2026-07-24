@@ -40,14 +40,6 @@ export interface MemoryItemView {
   updatedAt: number;
 }
 
-export interface FileItemView {
-  id: string;
-  label: string;
-  path: string;
-  summary: string;
-  updatedAt: number;
-}
-
 export type ChatToolStatus =
   | "queued"
   | "running"
@@ -63,10 +55,22 @@ export type StreamConnectionState =
   | "reconnecting"
   | "cancelling";
 
+export interface ChatUserInput {
+  text: string;
+  fileIds: string[];
+}
+
 export type ChatRenderBlock =
   | {
       id: string;
-      kind: "user" | "assistant" | "thinking" | "system";
+      kind: "user";
+      text: string;
+      fileIds: string[];
+      live?: boolean;
+    }
+  | {
+      id: string;
+      kind: "assistant" | "thinking" | "system";
       text: string;
       live?: boolean;
     }
@@ -149,8 +153,7 @@ export type ChatTimelineItem =
 
 export type PendingInputPhase = "local" | "accepted" | "completed";
 
-export interface PendingInput {
-  text: string;
+export interface PendingInput extends ChatUserInput {
   clientMessageId: string;
   serverMessageId?: string;
   phase: PendingInputPhase;
@@ -160,6 +163,7 @@ export interface SessionInputHistoryItem {
   messageId: string;
   itemIndex: number;
   text: string;
+  fileIds: string[];
 }
 
 export interface SessionInputHistory {
@@ -176,7 +180,7 @@ export interface StreamSessionState {
   activeMessageId?: string;
   reconnectAttempt?: number;
   showReconnectControls?: boolean;
-  activeInputText?: string;
+  activeInput?: ChatUserInput;
   activeClientMessageId?: string;
   awaitingFinalResponse?: boolean;
   blocks: ChatRenderBlock[];

@@ -1,6 +1,18 @@
 import type {
   DocUpdateRequest as ProtocolDocUpdateRequest,
   ExpectedFileVersion as ProtocolExpectedFileVersion,
+  FileDeleteRequest as ProtocolFileDeleteRequest,
+  FileDeleteResponse as ProtocolFileDeleteResponse,
+  FileInfo as ProtocolFileInfo,
+  FileListRequest as ProtocolFileListRequest,
+  FileListResponse as ProtocolFileListResponse,
+  FileReadRequest as ProtocolFileReadRequest,
+  FileReadResponse as ProtocolFileReadResponse,
+  FileScope as ProtocolFileScope,
+  FileUpdateRequest as ProtocolFileUpdateRequest,
+  FileUpdateResponse as ProtocolFileUpdateResponse,
+  FileUploadRequest as ProtocolFileUploadRequest,
+  FileUploadResponse as ProtocolFileUploadResponse,
   MemoryFileDetail as ProtocolMemoryFileDetail,
   MemoryFileSummary as ProtocolMemoryFileSummary,
   ConfigGetResponse as ProtocolConfigGetResponse,
@@ -359,6 +371,20 @@ export type ExpectedFileVersion = ProtocolExpectedFileVersion;
 export type DocUpdateRequest = ProtocolDocUpdateRequest;
 export type MemoryFileSummary = ProtocolMemoryFileSummary;
 export type MemoryFileDetail = ProtocolMemoryFileDetail;
+
+export type FileScope = ProtocolFileScope;
+export type FileInfo = ProtocolFileInfo;
+export type FileUploadRequest = ProtocolFileUploadRequest;
+export type FileUploadResponse = ProtocolFileUploadResponse;
+export type FileListRequest = ProtocolFileListRequest;
+export type FileListResponse = ProtocolFileListResponse;
+export type FileReadRequest = ProtocolFileReadRequest;
+export type FileReadResponse = ProtocolFileReadResponse;
+export type FileUpdateRequest = ProtocolFileUpdateRequest;
+export type FileUpdateResponse = ProtocolFileUpdateResponse;
+export type FileDeleteRequest = ProtocolFileDeleteRequest;
+export type FileDeleteResponse = ProtocolFileDeleteResponse;
+export type FileUploadData = Blob | Uint8Array;
 
 export type WorkspaceDocKind = ProtocolWorkspaceDocKind;
 export type WorkspaceDocSummary = ProtocolWorkspaceDocSummary;

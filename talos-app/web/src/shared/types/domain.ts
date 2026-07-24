@@ -2,7 +2,6 @@ import { i18n } from "@/shared/i18n/setup";
 import { jsonContentValue } from "@talos/sdk-browser";
 import type { SessionInfo, TalosContentItem } from "./protocol";
 import type {
-  FileItemView,
   MemoryItemView,
   ProjectView,
   SessionUiStatus,
@@ -106,40 +105,6 @@ export function createDefaultMemory(): MemoryItemView[] {
       title: "Communication preference",
       detail: "Prefer direct explanations in Chinese during collaboration and English in code artifacts.",
       tags: ["communication", "style"],
-      updatedAt: now - 180_000,
-    },
-  ];
-}
-
-export function createDefaultFiles(): FileItemView[] {
-  const now = Date.now();
-  return [
-    {
-      id: "file-1",
-      label: "web-ui-design.md",
-      path: "spec/web-ui-design.md",
-      summary: "Primary product and interaction design.",
-      updatedAt: now,
-    },
-    {
-      id: "file-2",
-      label: "app-shell.tsx",
-      path: "talos-app/web/src/widgets/app-layout/AppLayout.tsx",
-      summary: "Shared application shell and fixed sidebar layout.",
-      updatedAt: now - 60_000,
-    },
-    {
-      id: "file-3",
-      label: "web-ui-frontend-arch.md",
-      path: "spec/web-ui-frontend-arch.md",
-      summary: "Frontend layering and engineering rules.",
-      updatedAt: now - 120_000,
-    },
-    {
-      id: "file-4",
-      label: "metrics.csv",
-      path: "exports/metrics.csv",
-      summary: "Sample operational export for dashboard review.",
       updatedAt: now - 180_000,
     },
   ];

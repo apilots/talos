@@ -2,6 +2,7 @@
 
 use crate::render_runtime::common::style::StyledLine;
 use crate::render_runtime::render::tool_projection;
+use crate::render_runtime::render::user_input_display;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
 use talos_sdk::{
     TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind, TalosTimelinePhase,
@@ -15,6 +16,14 @@ pub(crate) fn timeline_item_to_blocks(item: &TalosTimelineItem) -> Vec<Finalized
             TalosTimelinePhase::Input,
             TalosTimelineContent::Text { text },
         ) => text_block(TranscriptBlockKind::UserInput, text),
+        (
+            TalosTimelineItemKind::UserInput,
+            TalosTimelinePhase::Input,
+            TalosTimelineContent::UserInput { text, file_ids },
+        ) => text_block(
+            TranscriptBlockKind::UserInput,
+            &user_input_display(text, file_ids),
+        ),
         (
             TalosTimelineItemKind::Reasoning,
             TalosTimelinePhase::Thinking,

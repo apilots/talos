@@ -2,6 +2,10 @@ use super::*;
 use crate::access::CreateSessionRequest;
 use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures_util::stream;
+use opendal::{services::Memory, Operator};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,6 +15,7 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
+use talos_store::file::DatabaseFileStore;
 use talos_store::memory::MemoryStore;
 use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
@@ -307,7 +312,18 @@ async fn test_application_with_runtime_and_event_failure(
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
+    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
     let project_store = Arc::new(StorageProjectStore::new(storage).await.unwrap());
+    let file_operator = Operator::new(Memory::default()).unwrap().finish();
+    let files = Arc::new(
+        crate::FileService::new(
+            file_store,
+            project_store.clone(),
+            BTreeMap::from([("local".to_string(), file_operator)]),
+            talos_config::FileStorageConfig::default(),
+        )
+        .unwrap(),
+    );
     let event_store: Arc<dyn TimelineEventStore> = match fail_on_event_call {
         Some(fail_on_call) => Arc::new(FailOnceTimelineEventStore {
             inner: store.clone(),
@@ -341,6 +357,7 @@ async fn test_application_with_runtime_and_event_failure(
         Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         project_store,
         profile_store,
+        files,
         event_service,
         idempotency_store,
         config,
@@ -432,6 +449,7 @@ async fn session_history_reads_artifacts_from_the_session_user_workspace() {
                 timestamp: chrono::Utc::now(),
                 items: vec![RunItem::UserInput {
                     text: "remember this".to_string(),
+                    file_ids: Vec::new(),
                 }],
                 usage: TokenUsage::default(),
                 stop_reason: StopReason::EndTurn,
@@ -941,4 +959,64 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
         *cancelled_turn_ids.lock().unwrap(),
         vec!["turn-existing".to_string()]
     );
+}
+
+#[tokio::test]
+async fn project_delete_is_blocked_until_owned_files_are_removed() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    let directory = tempfile::tempdir().unwrap();
+    let project = service
+        .create_project(
+            &actor,
+            "Project with file".to_string(),
+            directory.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
+    let uploaded = service
+        .files
+        .upload(
+            &actor,
+            talos_types::FileUploadRequest {
+                filename: "image.png".to_string(),
+                scope: talos_types::FileScope::Project {
+                    project_id: project.project_id.clone(),
+                },
+                tags: Vec::new(),
+                metadata: BTreeMap::new(),
+            },
+            Box::pin(stream::iter([Ok(Bytes::from_static(
+                b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR",
+            ))])),
+        )
+        .await
+        .unwrap();
+
+    let conflict = service
+        .delete_project(&actor, &project.project_id)
+        .await
+        .unwrap_err();
+    assert!(matches!(conflict, TalosError::Conflict(_)));
+
+    service
+        .files
+        .delete(
+            &actor,
+            talos_types::FileDeleteRequest {
+                file_id: uploaded.file.file_id,
+            },
+        )
+        .await
+        .unwrap();
+    service
+        .delete_project(&actor, &project.project_id)
+        .await
+        .unwrap();
 }

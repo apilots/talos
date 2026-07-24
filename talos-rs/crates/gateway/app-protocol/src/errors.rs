@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_error::{TalosError, TalosFsErrorKind};
+use talos_error::{TalosError, TalosFileErrorKind, TalosFsErrorKind};
 use ts_rs::TS;
 
 pub type AppServerErrorCode = i32;
@@ -83,6 +83,9 @@ impl AppServerErrorBody {
             TalosError::FsError { kind, message } => {
                 Self::new(app_server_code_for_fs(kind), message)
             }
+            TalosError::FileError { kind, message } => {
+                Self::new(app_server_code_for_file(kind), message)
+            }
             TalosError::ResourceExpired(message) => Self::new(RESOURCE_EXPIRED, message),
             TalosError::Timeout(message) => Self::new(REQUEST_TIMEOUT, message),
             TalosError::RuntimeUnavailable(message) => Self::new(RUNTIME_UNAVAILABLE, message),
@@ -94,6 +97,15 @@ impl AppServerErrorBody {
             TalosError::Cancelled(message) => Self::new(CANCELLED, message),
             other => Self::new(INTERNAL_ERROR, other.to_string()),
         }
+    }
+}
+
+fn app_server_code_for_file(kind: TalosFileErrorKind) -> AppServerErrorCode {
+    match kind {
+        TalosFileErrorKind::UploadTooLarge
+        | TalosFileErrorKind::UnsupportedMediaType
+        | TalosFileErrorKind::AttachmentLimitExceeded
+        | TalosFileErrorKind::UnsupportedAttachment => VALIDATION_FAILED,
     }
 }
 

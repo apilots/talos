@@ -20,57 +20,20 @@ import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
 import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
 import { ComposerCommandSuggestions } from "./ComposerCommandSuggestions";
+import { ComposerAttachmentTray } from "./ComposerAttachmentTray";
+import { ComposerAttachments } from "./ComposerAttachments";
 import { ComposerNotice } from "./ComposerNotice";
 import { ComposerSubmitButton } from "./ComposerSubmitButton";
 import { buildInputHistoryNavigationItems } from "./composerInputHistory";
-import type { ComposerCommand } from "./composer-commands";
 import { ComposerModelSelect } from "./ComposerModelSelect";
 import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
 import { useComposerCommands } from "./useComposerCommands";
-import type { ProjectView, ReasoningLevel, RuntimeMode, SessionInputHistory } from "@/shared/types/ui";
-import type { ContextCompactionStage } from "@/shared/types/protocol";
-
-interface ChatComposerProps {
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onSend: (skills: SkillSuggestion[]) => Promise<void> | void;
-  onCommand?: (command: ComposerCommand) => Promise<void> | void;
-  commandNotice?: string;
-  initialSelectedSkills?: SkillSuggestion[];
-  onCancel?: () => void;
-  inputHistory?: SessionInputHistory;
-  disabled?: boolean;
-  isStreaming?: boolean;
-  isCancelling?: boolean;
-  contextCompactionStage?: ContextCompactionStage;
-  models: Array<{ id: string; name: string; provider: string }>;
-  selectedModel?: string;
-  onModelChange?: (model: string) => void;
-  projects: ProjectView[];
-  activeProjectId: string;
-  onProjectChange: (projectId: string) => void;
-  onCreateProject?: (input: string | { directory: string; name?: string }) => Promise<void>;
-  runtimeMode: RuntimeMode;
-  onRuntimeModeChange: (mode: RuntimeMode) => void;
-  reasoningLevel?: ReasoningLevel;
-  onReasoningLevelChange?: (level: ReasoningLevel) => void;
-  reasoningEnabled?: boolean;
-  showProjectSelector?: boolean;
-  showRuntimeModeSelector?: boolean;
-  compact?: boolean;
-}
-
-const EMPTY_SELECTED_SKILLS: SkillSuggestion[] = [];
-
-type ProjectPickerMode = "list" | "add_menu" | "existing" | "create";
-type ProjectMenuMode = Exclude<ProjectPickerMode, "existing" | "create">;
-
-function projectStatusUnavailable(project: ProjectView) {
-  return Boolean(project.status && project.status.state !== "available");
-}
+import { EMPTY_ATTACHMENT_KINDS, EMPTY_ATTACHMENTS, EMPTY_SELECTED_SKILLS } from "./ChatComposer.defaults";
+import type * as Composer from "./ChatComposer.types";
+import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft";
 
 // ─── main component ──────────────────────────────────────────────────────────
 
@@ -102,12 +65,14 @@ export function ChatComposer({
   showProjectSelector = true,
   showRuntimeModeSelector = true,
   compact = false,
-}: ChatComposerProps) {
+  initialAttachments = EMPTY_ATTACHMENTS,
+  supportedAttachmentKinds = EMPTY_ATTACHMENT_KINDS,
+}: Composer.ChatComposerProps) {
   const { t } = useTranslation(["chat", "common", "settings"]);
   const isBusy = Boolean(isStreaming || isCancelling || contextCompactionStage);
   const [projectOpen, setProjectOpen] = useState(false);
   const [projectSearch, setProjectSearch] = useState("");
-  const [projectMode, setProjectMode] = useState<ProjectMenuMode>("list");
+  const [projectMode, setProjectMode] = useState<Composer.ProjectMenuMode>("list");
   const [skillSuggestions, setSkillSuggestions] = useState<SkillSuggestion[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<SkillSuggestion[]>(initialSelectedSkills);
   const [skillSuggestionIndex, setSkillSuggestionIndex] = useState(0);
@@ -119,6 +84,11 @@ export function ChatComposer({
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const historyIndexRef = useRef<number | null>(null);
   const historyDraftRef = useRef("");
+  const attachmentDraft = useChatComposerAttachmentDraft({
+    activeProjectId,
+    supportedKinds: supportedAttachmentKinds,
+    initialAttachments,
+  });
   const activeInputHistoryItems = useMemo(
     () => buildInputHistoryNavigationItems(inputHistory),
     [inputHistory],
@@ -235,7 +205,7 @@ export function ChatComposer({
 
   const showCollapsibleProject = showProjectSelector && !compact;
   const showInlineProject = showProjectSelector && compact;
-  const effectiveRuntimeMode: RuntimeMode = runtimeMode === "local" ? "local" : "local";
+  const effectiveRuntimeMode: Composer.RuntimeMode = runtimeMode === "local" ? "local" : "local";
 
   const moveCursorToPosition = (textarea: HTMLTextAreaElement, cursorIndex: number) => {
     const applySelection = () => {
@@ -314,12 +284,19 @@ export function ChatComposer({
     return false;
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
+    if (!attachmentDraft.canSubmit(draft)) {
+      return;
+    }
     resetInputHistoryNavigation();
     const skills = selectedSkills;
     setSelectedSkills([]);
     setSkillSuggestions([]);
-    return onSend(skills);
+    try {
+      await attachmentDraft.submit(draft, skills, onSend);
+    } catch {
+      setSelectedSkills(skills);
+    }
   };
 
   const selectSkill = (skill: SkillSuggestion, textarea?: HTMLTextAreaElement | null) => {
@@ -388,6 +365,16 @@ export function ChatComposer({
             onSkillsChange={setSelectedSkills}
             skills={selectedSkills}
           />
+          <ComposerAttachmentTray
+            disabled={Boolean(disabled || isBusy)}
+            error={
+              attachmentDraft.hasInvalidAttachments
+                ? t("chat:invalidAttachments")
+                : attachmentDraft.error
+            }
+            items={attachmentDraft.items}
+            onRemove={attachmentDraft.remove}
+          />
           <Textarea
             className={cn(
               "resize-none border-0 bg-transparent px-5 text-[14px] leading-[1.6] focus:border-0 focus:shadow-none",
@@ -438,6 +425,7 @@ export function ChatComposer({
               }
               handleInputHistoryKeyDown(event);
             }}
+            onPaste={attachmentDraft.handlePaste}
             onKeyUp={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
             placeholder={t("chat:askTalos")}
             ref={textareaRef}
@@ -458,12 +446,18 @@ export function ChatComposer({
         </div>
 
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
-          <button
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 text-muted outline-none transition hover:border-brand/40 hover:text-brand focus:outline-none"
-            type="button"
-          >
-            <Plus size={13} />
-          </button>
+          <ComposerAttachments
+            availableFiles={attachmentDraft.availableFiles}
+            disabled={Boolean(disabled || isBusy)}
+            hasMoreAvailable={attachmentDraft.hasMoreAvailable}
+            isLoading={attachmentDraft.isLoading}
+            isLoadingMore={attachmentDraft.isLoadingMore}
+            onLoadAvailable={attachmentDraft.loadAvailable}
+            onLoadMoreAvailable={attachmentDraft.loadMoreAvailable}
+            onSelect={attachmentDraft.select}
+            onUpload={attachmentDraft.upload}
+            supportedKinds={supportedAttachmentKinds}
+          />
 
           <ComposerDropdown
             header={t("chat:agentAccessMode")}
@@ -495,15 +489,15 @@ export function ChatComposer({
                 disabled={!reasoningEnabled}
                 header={t("chat:reasoningLabel")}
                 items={reasoningItems}
-                onChange={(v) => onReasoningLevelChange?.(v as ReasoningLevel)}
+                onChange={(v) => onReasoningLevelChange?.(v as Composer.ReasoningLevel)}
                 value={reasoningLevel}
               />
             </>
           )}
 
           <ComposerSubmitButton
+            canSubmit={attachmentDraft.canSubmit(draft)}
             disabled={disabled}
-            draft={draft}
             isBusy={isBusy}
             isCancelling={isCancelling}
             onCancel={onCancel}
@@ -545,7 +539,7 @@ export function ChatComposer({
                           disabled: true,
                         },
                       ]}
-                      onChange={(v) => onRuntimeModeChange(v as RuntimeMode)}
+                      onChange={(v) => onRuntimeModeChange(v as Composer.RuntimeMode)}
                       value={effectiveRuntimeMode}
                     />
                   </div>
@@ -565,7 +559,7 @@ export function ChatComposer({
                     disabled: true,
                   },
                 ]}
-                onChange={(v) => onRuntimeModeChange(v as RuntimeMode)}
+                onChange={(v) => onRuntimeModeChange(v as Composer.RuntimeMode)}
                 value={effectiveRuntimeMode}
               />
             )}
@@ -595,7 +589,9 @@ export function ChatComposer({
               </div>
               <div className="max-h-44 overflow-y-auto">
                 {filteredProjects.map((project) => {
-                  const unavailable = projectStatusUnavailable(project);
+                  const unavailable = Boolean(
+                    project.status && project.status.state !== "available",
+                  );
                   return (
                     <button
                       className={cn(

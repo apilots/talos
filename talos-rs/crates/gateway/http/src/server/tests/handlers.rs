@@ -17,13 +17,16 @@ async fn test_state_with_config_and_plugin_manager(
         Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
     )
     .unwrap();
+    let project_store = Arc::new(talos_store::project::MockProjectStore::new());
+    let files = test_file_service(project_store.clone(), config.storage.files.clone()).await;
     let app = TalosService::new_with_session_store(
         Arc::new(MockGateway),
         Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
         Arc::new(SessionStoreAdapter::new(session_service)),
         Arc::new(talos_store::session::FileSessionArtifactStore::default()),
-        Arc::new(talos_store::project::MockProjectStore::new()),
+        project_store,
         Arc::new(EmptyProfileStore),
+        files,
         event_service.clone(),
         event_store,
         config.clone(),

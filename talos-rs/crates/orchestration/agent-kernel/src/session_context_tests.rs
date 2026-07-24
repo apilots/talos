@@ -30,6 +30,7 @@ async fn prompt_context_uses_the_requested_latest_window() {
                     items: vec![
                         RunItem::UserInput {
                             text: format!("user {seq}"),
+                            file_ids: Vec::new(),
                         },
                         RunItem::OutputText {
                             text: format!("assistant {seq}"),

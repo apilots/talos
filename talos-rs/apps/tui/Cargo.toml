@@ -15,6 +15,9 @@ path = "src/main.rs"
 ratatui = "0.28"
 crossterm = "0.28"
 tokio = { version = "1.0", features = ["full"] }
+bytes = { workspace = true }
+arboard = "3.6.1"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 talos-error = { workspace = true }
 talos-types = { workspace = true }
 talos-tools-policy = { workspace = true }

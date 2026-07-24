@@ -17,6 +17,7 @@ ts-rs = "10.1"
 
 # Config loading
 config = "0.14"
+infer = { workspace = true }
 
 # Error handling
 talos-error = { path = "../error" }

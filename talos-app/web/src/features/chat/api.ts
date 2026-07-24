@@ -103,9 +103,11 @@ export function createInitialTurnRequest(
   modelSelection: ModelSelection | undefined,
   project: ProjectView | undefined,
   skills: SkillSuggestion[] = [],
+  fileIds: string[] = [],
 ): StartTurnRequest {
   const input: TalosInputItem[] = [
-    { type: "text", text },
+    ...(text ? [{ type: "text" as const, text }] : []),
+    ...(fileIds.length > 0 ? [{ type: "files" as const, fileIds }] : []),
     ...skills.map((skill) => ({
       type: "skill_selection" as const,
       name: skill.name,

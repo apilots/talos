@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 /// Maximum canonical size of one workspace MEMORY.md file.
@@ -263,3 +264,140 @@ pub struct WorkspaceDocInfo {
     pub updated_at: Option<i64>,
     pub version_token: Option<String>,
 }
+
+/// Selects whether a file is personal or restricted to one project context.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(tag = "type", rename_all = "camelCase")]
+pub enum FileScope {
+    Personal,
+    Project {
+        #[serde(rename = "projectId")]
+        #[ts(rename = "projectId")]
+        project_id: String,
+    },
+}
+
+/// Public metadata for one authenticated user's ready file.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileInfo {
+    pub file_id: String,
+    pub scope: FileScope,
+    pub original_filename: String,
+    pub mime_type: String,
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    pub tags: Vec<String>,
+    pub metadata: BTreeMap<String, String>,
+    #[ts(type = "number")]
+    pub created_at: i64,
+    #[ts(type = "number")]
+    pub updated_at: i64,
+}
+
+/// Describes metadata supplied alongside one streamed file upload.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileUploadRequest {
+    pub filename: String,
+    pub scope: FileScope,
+    pub tags: Vec<String>,
+    pub metadata: BTreeMap<String, String>,
+}
+
+/// Returns the ready file created by an upload.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileUploadResponse {
+    pub file: FileInfo,
+}
+
+/// Filters one authenticated user's files with opaque cursor pagination.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileListRequest {
+    #[serde(default)]
+    #[ts(optional)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub scope: Option<FileScope>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub tags: Option<Vec<String>>,
+}
+
+/// Returns one page of ready files and the next opaque cursor.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileListResponse {
+    pub data: Vec<FileInfo>,
+    pub next_cursor: Option<String>,
+}
+
+/// Selects one file owned by the authenticated user.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileReadRequest {
+    pub file_id: String,
+}
+
+/// Returns public metadata for one ready file.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileReadResponse {
+    pub file: FileInfo,
+}
+
+/// Replaces selected mutable metadata on one ready file.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileUpdateRequest {
+    pub file_id: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub metadata: Option<BTreeMap<String, String>>,
+}
+
+/// Returns public metadata after a successful file update.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileUpdateResponse {
+    pub file: FileInfo,
+}
+
+/// Selects one file to delete for the authenticated user.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileDeleteRequest {
+    pub file_id: String,
+}
+
+/// Confirms the identifier of a deleted file.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub struct FileDeleteResponse {
+    pub file_id: String,
+}
+
+#[cfg(test)]
+#[path = "file_api_tests.rs"]
+mod tests;

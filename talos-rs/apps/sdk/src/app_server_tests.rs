@@ -1,4 +1,6 @@
 use super::*;
+use bytes::Bytes;
+use std::collections::BTreeMap;
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, TalosTurnStartedEvent, TimelineEventEnvelope,
 };
@@ -52,6 +54,22 @@ fn touches_cached_session_only_for_business_methods() {
     assert!(is_business_method("user.current"));
     assert!(is_business_method("profile/read"));
     assert!(is_business_method("session.list"));
+}
+
+#[test]
+fn file_upload_params_use_canonical_padded_base64() {
+    let params = files::file_upload_params(
+        talos_types::FileUploadRequest {
+            filename: "note.txt".to_string(),
+            scope: talos_types::FileScope::Personal,
+            tags: Vec::new(),
+            metadata: BTreeMap::new(),
+        },
+        Bytes::from_static(b"ab"),
+    );
+
+    assert_eq!(params.data_base64, "YWI=");
+    assert_eq!(params.request.filename, "note.txt");
 }
 
 #[tokio::test]

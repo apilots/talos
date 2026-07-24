@@ -88,10 +88,15 @@ export function assistantTextCommitted(
   }, sequence);
 }
 
-export function userInputStarted(itemId: string, text: string, sequence: number): TimelineEventEnvelope {
+export function userInputStarted(
+  itemId: string,
+  text: string,
+  sequence: number,
+  fileIds: string[] = [],
+): TimelineEventEnvelope {
   const event = itemStarted(itemId, "user_input", "input", sequence);
   if (event.event.payload.type === "item_started") {
-    event.event.payload.item.content = { type: "text", text };
+    event.event.payload.item.content = { type: "user_input", text, fileIds };
   }
   return event;
 }
@@ -277,6 +282,17 @@ export function historyTextItem(
     started_at_ms: 1,
     completed_at_ms: 2,
     content: { type: "text", text },
+  };
+}
+
+export function historyUserInputItem(
+  itemId: string,
+  text: string,
+  fileIds: string[],
+): TalosSessionHistorySnapshot["messages"][number]["items"][number] {
+  return {
+    ...historyTextItem(itemId, "user_input", "input", text),
+    content: { type: "user_input", text, fileIds },
   };
 }
 

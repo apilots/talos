@@ -164,6 +164,24 @@ async fn malformed_line_returns_parse_error_and_keeps_running() {
 }
 
 #[tokio::test]
+async fn incoming_jsonl_frame_respects_the_configured_byte_limit() {
+    let initialize = initialize_request("secret");
+    let max_incoming_frame_bytes = initialize.len();
+    let output = run_with_app_validator_and_frame_limit(
+        format!("{initialize}{}\n", "x".repeat(max_incoming_frame_bytes + 1)),
+        Arc::new(MockApp::default()),
+        Arc::new(ExistingTokenValidator),
+        AppServerConfig::default(),
+        max_incoming_frame_bytes,
+    )
+    .await;
+    let messages = parse_output(&output);
+
+    assert_eq!(messages[0]["result"]["protocol_version"]["major"], 0);
+    assert_eq!(messages[1]["error"]["code"], PARSE_ERROR);
+}
+
+#[tokio::test]
 async fn invalid_credentials_return_unauthorized() {
     let output = run_with_app_validator_and_config(
         format!(
@@ -617,9 +635,33 @@ async fn run_with_app_validator_and_config(
     validator: Arc<dyn ActorCredentialValidator>,
     config: AppServerConfig,
 ) -> String {
+    run_with_app_validator_and_frame_limit(
+        input,
+        app,
+        validator,
+        config,
+        DEFAULT_MAX_INCOMING_FRAME_BYTES,
+    )
+    .await
+}
+
+async fn run_with_app_validator_and_frame_limit(
+    input: String,
+    app: Arc<MockApp>,
+    validator: Arc<dyn ActorCredentialValidator>,
+    config: AppServerConfig,
+    max_incoming_frame_bytes: usize,
+) -> String {
     let (mut client, server) = duplex(16 * 1024);
     let (server_read, server_write) = split(server);
-    let server_task = tokio::spawn(run_jsonl(server_read, server_write, app, validator, config));
+    let server_task = tokio::spawn(run_jsonl_with_max_frame_bytes(
+        server_read,
+        server_write,
+        app,
+        validator,
+        config,
+        max_incoming_frame_bytes,
+    ));
     client
         .write_all(input.as_bytes())
         .await

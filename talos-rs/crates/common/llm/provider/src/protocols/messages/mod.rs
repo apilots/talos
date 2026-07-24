@@ -11,8 +11,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use talos_error::{TalosError, TalosResult};
 use tokio::sync::mpsc;
+mod attachments;
 mod usage;
 
+pub use attachments::text_block;
 pub use usage::{chat_response, MessagesUsage};
 use usage::{stream_input_usage, usage_from_messages};
 
@@ -125,15 +127,6 @@ pub struct MessagesTextBlock {
     pub cache_control: Option<CacheControl>,
 }
 
-pub fn text_block(text: String, cache_control: Option<CacheControl>) -> Value {
-    serde_json::to_value(MessagesTextBlock {
-        block_type: "text".to_string(),
-        text,
-        cache_control,
-    })
-    .expect("messages text block should serialize")
-}
-
 pub fn tool_choice(choice: Option<ToolChoice>) -> Option<MessagesToolChoice> {
     match choice {
         Some(ToolChoice::Auto) => Some(MessagesToolChoice::Auto),
@@ -164,6 +157,7 @@ pub fn messages(
     let mut protocol_messages = Vec::new();
 
     for msg in messages {
+        msg.validate_attachments()?;
         match msg.role {
             Role::System => {
                 system_blocks
@@ -177,7 +171,11 @@ pub fn messages(
             Role::User => {
                 protocol_messages.push(MessagesMessage {
                     role: "user".to_string(),
-                    content: Value::Array(vec![text_block(msg.content, msg.cache_control)]),
+                    content: Value::Array(attachments::user_content(
+                        msg.content,
+                        msg.cache_control,
+                        msg.attachments,
+                    )),
                 });
             }
             Role::Assistant => {

@@ -47,6 +47,11 @@ pub struct AppProtocolSchemaRoot {
     pub auth_session_read_response: talos_types::AuthSessionReadResponse,
     pub auth_session_clear_response: talos_types::AuthSessionClearResponse,
     pub user_current_response: talos_types::UserCurrentResponse,
+    pub file_upload_response: talos_types::FileUploadResponse,
+    pub file_list_response: talos_types::FileListResponse,
+    pub file_read_response: talos_types::FileReadResponse,
+    pub file_update_response: talos_types::FileUpdateResponse,
+    pub file_delete_response: talos_types::FileDeleteResponse,
 }
 
 pub fn generate_json_schema() -> String {
@@ -71,6 +76,7 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<crate::requests::ClientCapabilities>());
     output.push_str(&export::<crate::requests::ActorCredentials>());
     output.push_str(&export::<crate::requests::ActorCredential>());
+    output.push_str(&export::<crate::requests::FileUploadParams>());
     output.push_str(&export::<talos_types::ProfileReadRequest>());
     output.push_str(&export::<talos_types::ProfileReadResponse>());
     output.push_str(&export::<talos_types::ProfileDailyUsage>());
@@ -173,6 +179,18 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ModelReadiness>());
     output.push_str(&export::<talos_types::ProviderKeyStatus>());
     output.push_str(&export::<talos_types::ProviderProtocolCapabilities>());
+    output.push_str(&export::<talos_types::FileScope>());
+    output.push_str(&export::<talos_types::FileInfo>());
+    output.push_str(&export::<talos_types::FileUploadRequest>());
+    output.push_str(&export::<talos_types::FileUploadResponse>());
+    output.push_str(&export::<talos_types::FileListRequest>());
+    output.push_str(&export::<talos_types::FileListResponse>());
+    output.push_str(&export::<talos_types::FileReadRequest>());
+    output.push_str(&export::<talos_types::FileReadResponse>());
+    output.push_str(&export::<talos_types::FileUpdateRequest>());
+    output.push_str(&export::<talos_types::FileUpdateResponse>());
+    output.push_str(&export::<talos_types::FileDeleteRequest>());
+    output.push_str(&export::<talos_types::FileDeleteResponse>());
     output.push_str(&export::<talos_types::ExpectedFileVersion>());
     output.push_str(&export::<talos_types::DocUpdateRequest>());
     output.push_str(&export::<talos_types::MemoryFileListRequest>());

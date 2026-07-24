@@ -20,11 +20,15 @@ class BrowserHttpAdapter implements HttpAdapter {
 
   async request<T>(url: string, options?: HttpRequestOptions): Promise<T> {
     const token = this.getToken?.();
+    const isMultipart = options?.body instanceof FormData;
+    if (isMultipart && options?.onUploadProgress) {
+      return xhrRequest(url, options, token);
+    }
     const response = await fetch(url, {
       method: options?.method ?? "GET",
       signal: options?.signal,
       headers: {
-        "Content-Type": "application/json",
+        ...(!isMultipart ? { "Content-Type": "application/json" } : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options?.headers ?? {}),
       },
@@ -48,6 +52,77 @@ class BrowserHttpAdapter implements HttpAdapter {
 
     return (await response.json()) as T;
   }
+}
+
+function xhrRequest<T>(
+  url: string,
+  options: HttpRequestOptions,
+  token: string | null | undefined,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const method = options.method ?? "GET";
+    const xhr = new XMLHttpRequest();
+    const signal = options.signal;
+    const abort = () => xhr.abort();
+    const finish = (result: () => void) => {
+      signal?.removeEventListener("abort", abort);
+      result();
+    };
+
+    xhr.open(method, url);
+    if (token) {
+      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    }
+    for (const [name, value] of Object.entries(options.headers ?? {})) {
+      xhr.setRequestHeader(name, value);
+    }
+    xhr.upload.onprogress = (event) => {
+      options.onUploadProgress?.({
+        loadedBytes: event.loaded,
+        totalBytes: event.lengthComputable ? event.total : null,
+      });
+    };
+    xhr.onload = () => {
+      finish(() => {
+        if (xhr.status < 200 || xhr.status >= 300) {
+          reject(
+            new TalosHttpError({
+              method,
+              status: xhr.status,
+              statusText: xhr.statusText,
+              body: xhr.responseText,
+              url,
+            }),
+          );
+          return;
+        }
+        if (xhr.status === 204) {
+          resolve(undefined as T);
+          return;
+        }
+        try {
+          resolve(JSON.parse(xhr.responseText) as T);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    };
+    xhr.onerror = () => finish(() => reject(new TypeError("Network request failed.")));
+    xhr.onabort = () =>
+      finish(() => reject(new DOMException("The operation was aborted.", "AbortError")));
+    if (signal?.aborted) {
+      finish(() => reject(abortError(signal)));
+      return;
+    }
+    signal?.addEventListener("abort", abort, { once: true });
+    xhr.send(options.body ?? null);
+  });
+}
+
+function abortError(signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new DOMException("The operation was aborted.", "AbortError");
 }
 
 class BrowserStreamAdapter implements StreamAdapter {

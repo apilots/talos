@@ -96,6 +96,24 @@ fn timeline_builder_orders_reasoning_tool_progress_and_final_answer() {
 }
 
 #[test]
+fn timeline_builder_preserves_structured_user_input() {
+    let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
+
+    let started = builder.start_user_input(String::new(), vec!["file-1".to_string()]);
+
+    let AgentEventPayload::ItemStarted(payload) = started.payload else {
+        panic!("expected item started event");
+    };
+    assert_eq!(
+        payload.item.content,
+        TalosTimelineContent::UserInput {
+            text: String::new(),
+            file_ids: vec!["file-1".to_string()],
+        }
+    );
+}
+
+#[test]
 fn timeline_builder_rejects_delta_without_active_item() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
     let err = builder

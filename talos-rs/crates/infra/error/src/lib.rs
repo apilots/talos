@@ -18,6 +18,7 @@ pub enum TalosRunErrorCode {
     ProviderUnavailable,
     PermissionDenied,
     ToolFailure,
+    FileInputRejected,
     InternalError,
 }
 
@@ -48,6 +49,20 @@ pub enum TalosFsErrorKind {
     NotDirectory,
     InvalidName,
     AlreadyExists,
+}
+
+/// Stable internal kind for uploaded file and model attachment failures.
+///
+/// File services, providers, and transports branch on this kind. Generic
+/// not-found, validation, conflict, configuration, and storage failures keep
+/// using the existing `TalosError` variants instead of being duplicated here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosFileErrorKind {
+    UploadTooLarge,
+    UnsupportedMediaType,
+    AttachmentLimitExceeded,
+    UnsupportedAttachment,
 }
 
 /// Stable internal kind for tool execution failures.
@@ -156,6 +171,12 @@ pub enum TalosError {
         message: String,
     },
 
+    #[error("File error ({kind:?}): {message}")]
+    FileError {
+        kind: TalosFileErrorKind,
+        message: String,
+    },
+
     #[error("Memory error ({kind:?}): {message}")]
     MemoryError {
         kind: TalosMemoryErrorKind,
@@ -216,6 +237,7 @@ impl TalosError {
             TalosError::ToolError(_)
             | TalosError::ToolFailure { .. }
             | TalosError::ToolNotFound(_) => TalosRunErrorCode::ToolFailure,
+            TalosError::FileError { .. } => TalosRunErrorCode::FileInputRejected,
             TalosError::InternalError(_) => TalosRunErrorCode::InternalError,
             _ => return None,
         };
@@ -228,7 +250,7 @@ impl TalosError {
 
 #[cfg(test)]
 mod tests {
-    use super::{TalosError, TalosRunErrorCode};
+    use super::{TalosError, TalosFileErrorKind, TalosRunErrorCode};
 
     #[test]
     fn run_error_info_maps_only_explicit_run_errors() {
@@ -274,6 +296,16 @@ mod tests {
                 .code,
             TalosRunErrorCode::InternalError
         );
+        assert_eq!(
+            TalosError::FileError {
+                kind: TalosFileErrorKind::UnsupportedAttachment,
+                message: "attachments are unsupported".to_string(),
+            }
+            .to_run_error_info()
+            .expect("file input should map")
+            .code,
+            TalosRunErrorCode::FileInputRejected
+        );
     }
 
     #[test]
@@ -286,5 +318,23 @@ mod tests {
         assert!(TalosError::ConfigError("usage limit exceeded".to_string())
             .to_run_error_info()
             .is_none());
+    }
+
+    #[test]
+    fn file_error_serializes_a_machine_readable_kind() {
+        let error = TalosError::FileError {
+            kind: TalosFileErrorKind::UnsupportedMediaType,
+            message: "application/octet-stream is not supported".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(error).unwrap(),
+            serde_json::json!({
+                "FileError": {
+                    "kind": "unsupported_media_type",
+                    "message": "application/octet-stream is not supported"
+                }
+            })
+        );
     }
 }

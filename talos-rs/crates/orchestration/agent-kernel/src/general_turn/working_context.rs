@@ -31,7 +31,7 @@ pub(crate) async fn enforce_working_context_budget(
         return Ok(());
     }
 
-    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
+    let pre_tokens = estimate_working_context_tokens(prepared, state, kernel_config);
     if pre_tokens <= window_usage.effective_prompt_budget {
         return Ok(());
     }
@@ -118,12 +118,11 @@ pub(super) fn trim_working_context_to_budget(
     kernel_config: &AgentKernelConfig,
 ) -> TalosResult<WorkingContextTrimReport> {
     let input_messages = state.messages.len();
-    let pre_tokens = estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
+    let pre_tokens = estimate_working_context_tokens(prepared, state, kernel_config);
     let mut preserved_recent_exchanges = 0;
 
     loop {
-        let current_tokens =
-            estimate_messages_tokens(&combined_messages(prepared, state, kernel_config));
+        let current_tokens = estimate_working_context_tokens(prepared, state, kernel_config);
         if current_tokens <= effective_prompt_budget {
             return Ok(WorkingContextTrimReport {
                 pre_tokens,
@@ -280,6 +279,20 @@ fn count_preserved_recent_exchanges(
 
 fn estimate_messages_tokens(messages: &[ChatMessage]) -> usize {
     messages.iter().map(estimate_message_tokens).sum()
+}
+
+fn estimate_working_context_tokens(
+    prepared: &PreparedGeneralTurn,
+    state: &GeneralTurnLoopState,
+    kernel_config: &AgentKernelConfig,
+) -> usize {
+    prepared
+        .attachment_tokens
+        .saturating_add(estimate_messages_tokens(&combined_messages(
+            prepared,
+            state,
+            kernel_config,
+        )))
 }
 
 fn estimate_message_tokens(message: &ChatMessage) -> usize {

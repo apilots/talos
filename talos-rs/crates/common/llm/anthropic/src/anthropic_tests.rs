@@ -1,10 +1,10 @@
 use super::*;
 use talos_error::TalosError;
 use talos_llm_provider::{
-    protocols::messages as messages_protocol, CacheControl, CacheControlKind, ChatMessage,
-    ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind, ModelBlockStream,
-    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
-    ToolDefinition,
+    protocols::messages as messages_protocol, Attachment, AttachmentKind, CacheControl,
+    CacheControlKind, ChatMessage, ChatRequest, LlmProvider, ModelBlockDelta, ModelBlockKind,
+    ModelBlockStream, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
+    ReasoningEffort, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -74,6 +74,31 @@ fn test_anthropic_config_builder() {
     assert_eq!(config.api_key, "test-api-key");
     assert_eq!(config.base_url, "https://custom.anthropic.com/v1");
     assert_eq!(config.timeout_secs, 120);
+}
+
+#[test]
+fn anthropic_accepts_normal_sized_image_and_pdf_inputs() {
+    let provider = AnthropicProvider::new(AnthropicConfig::new("test-api-key"));
+    let attachments = [
+        Attachment {
+            kind: AttachmentKind::Image,
+            filename: "fire.png".to_string(),
+            media_type: "image/png".to_string(),
+            bytes: vec![0_u8; 218 * 1024].into(),
+        },
+        Attachment {
+            kind: AttachmentKind::File,
+            filename: "paper.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            bytes: b"%PDF-1.7".to_vec().into(),
+        },
+    ];
+
+    let usage = provider
+        .validate_attachments("claude-sonnet-4-6", &attachments)
+        .expect("Messages image and PDF attachments should validate");
+
+    assert_eq!(usage.item_tokens, vec![10_000, 10_000]);
 }
 
 #[tokio::test]

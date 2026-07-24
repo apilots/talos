@@ -17,16 +17,6 @@ pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnost
 /// Session transcript state key controlling the next prompt's compaction policy.
 pub const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
 
-fn split_prompt_prefix_messages(messages: &[ChatMessage], input: &str) -> Vec<ChatMessage> {
-    let Some(last_message) = messages.last() else {
-        return Vec::new();
-    };
-    if last_message.role == talos_llm_provider::Role::User && last_message.content == input {
-        return messages[..messages.len().saturating_sub(1)].to_vec();
-    }
-    messages.to_vec()
-}
-
 fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
     PromptLoadPolicy {
         compact_cursor: None,
@@ -102,15 +92,6 @@ fn build_compacted_prompt_load_policy(
         session_summary_max_chars: kernel_config.compaction.compacted_summary_max_chars,
         unified_recent_limit: 10,
     }
-}
-
-fn resolve_compaction_input_budget_tokens(model_info: &talos_types::ModelInfo) -> Option<usize> {
-    let context_window = model_info.model.context_window as usize;
-    if context_window == 0 {
-        return None;
-    }
-
-    Some((context_window / 2).clamp(256, 16_384).min(context_window))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -621,6 +602,8 @@ pub async fn prepare_general_turn(
     let invocation_id = ctx.invocation_id.clone();
     let agent_id = ctx.agent_id.clone();
     let selected_model = ctx.selected_model_id().to_string();
+    let (attachments, attachment_tokens) =
+        super::attachments::prepare_model_attachments(ctx, llm_provider.as_ref())?;
     let session_artifact_store = ctx.session_artifact_store()?;
     let session_store = ctx.session_store()?;
     let stream_tx = ctx.stream_tx.clone();
@@ -661,6 +644,7 @@ pub async fn prepare_general_turn(
         skill_options.clone(),
     )
     .await?;
+    super::attachments::reserve_prompt_attachment_tokens(&mut prompt_assembly, attachment_tokens)?;
     let mut session_history_compaction = None;
     let history_compaction_trigger =
         determine_history_compaction_trigger(&prompt_assembly, kernel_config);
@@ -692,7 +676,7 @@ pub async fn prepare_general_turn(
         agent_name,
         agent_description,
         input,
-        llm_provider,
+        llm_provider.clone(),
         tool_definition_provider.clone(),
         memory_writer,
         &MemoryScope {
@@ -743,7 +727,10 @@ pub async fn prepare_general_turn(
             return Err(error);
         }
     };
-    if let Some((compacted_assembly, compaction)) = maybe_compaction {
+    if let Some((mut compacted_assembly, compaction)) = maybe_compaction {
+        if let Some(assembly) = compacted_assembly.as_mut() {
+            super::attachments::reserve_prompt_attachment_tokens(assembly, attachment_tokens)?;
+        }
         tracing::debug!(
             session_id = %session_id,
             agent_id = %agent_id,
@@ -844,6 +831,10 @@ pub async fn prepare_general_turn(
             skill_options,
         )
         .await?;
+        super::attachments::reserve_prompt_attachment_tokens(
+            &mut prompt_assembly,
+            attachment_tokens,
+        )?;
     }
 
     let final_prompt_budget_exhausted = prompt_budget_still_exhausted(&prompt_assembly);
@@ -956,6 +947,9 @@ pub async fn prepare_general_turn(
         prompt_diagnostics.session_history_compaction.as_ref(),
     );
 
+    let (messages, prompt_prefix_messages) =
+        super::attachments::render_prompt_messages(&prompt_assembly, input, attachments)?;
+
     Ok(PreparedGeneralTurn {
         session_id: session_id.clone(),
         user_id: ctx.user_id.clone(),
@@ -967,11 +961,9 @@ pub async fn prepare_general_turn(
         max_output_tokens,
         reasoning_effort,
         speed,
-        prompt_prefix_messages: split_prompt_prefix_messages(
-            &render_prompt_assembly(&prompt_assembly),
-            input,
-        ),
-        messages: render_prompt_assembly(&prompt_assembly),
+        attachment_tokens,
+        prompt_prefix_messages,
+        messages,
         maintenance_usage,
         tool_definitions,
         tool_selection_request,

@@ -111,7 +111,11 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
             responseActionInset={block.kind === "assistant"}
             variant={block.kind === "assistant" ? "response" : "hover"}
           >
-            <TextMessageBlock kind={block.kind} text={block.text} />
+            <TextMessageBlock
+              fileIds={block.kind === "user" ? block.fileIds : undefined}
+              kind={block.kind}
+              text={block.text}
+            />
           </CopyableBlock>
         );
       })}
@@ -122,6 +126,14 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
 function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" }>) {
   switch (block.kind) {
     case "user":
+      return [
+        block.text,
+        block.fileIds.length > 0
+          ? `Attachments:\n${block.fileIds.map((fileId) => `- ${fileId}`).join("\n")}`
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
     case "assistant":
     case "thinking":
     case "system":

@@ -24,7 +24,7 @@ use crate::timeline::TimelineEventService;
 use super::{
     completed_turn_from_event, record_completed_turn_progress, record_session_title,
     result_from_idempotency_record, retry_idempotency_key, turn_submission_hash,
-    validate_retry_request, validate_text_input, TurnExecutor, TurnRetryParams,
+    validate_retry_request, validate_user_input, TurnExecutor, TurnRetryParams,
 };
 
 #[derive(Clone)]
@@ -250,7 +250,7 @@ impl TurnService {
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
-        validate_text_input(&request.input)
+        validate_user_input(&request.input)
     }
 
     pub async fn submit_start_turn(
@@ -277,7 +277,7 @@ impl TurnService {
         submission: TurnSubmission,
         idempotency_key: Option<String>,
     ) -> TalosResult<MessageCommandResult> {
-        validate_text_input(&submission.input)?;
+        validate_user_input(&submission.input)?;
         let session_id = session.context.session_id.clone();
         let request_hash =
             turn_submission_hash(&session_id, &submission.input, &submission.workspace_id)?;
@@ -468,7 +468,7 @@ impl TurnService {
         request: TurnRetryParams,
     ) -> TalosResult<MessageCommandResult> {
         validate_retry_request(&request)?;
-        validate_text_input(&request.input)?;
+        validate_user_input(&request.input)?;
         let session_id = session.context.session_id.clone();
         let request_hash =
             turn_submission_hash(&session_id, &request.input, &request.workspace_id)?;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ModelInfo } from "@talos/sdk-browser";
 
 import {
+  supportedAttachmentKinds,
   modelRefForKey,
   modelRefKey,
   modelSelectionForRef,
@@ -49,5 +50,12 @@ describe("model selection", () => {
     expect(
       reasoningLevelForModel(models, { provider: "ollama", id: "shared-model" }),
     ).toBe("none");
+  });
+
+  it("returns only attachment inputs declared by the model", () => {
+    expect(
+      supportedAttachmentKinds({ input: ["text", "image", "audio", "file"] } as ModelInfo),
+    ).toEqual(["image", "file"]);
+    expect(supportedAttachmentKinds(undefined)).toEqual([]);
   });
 });

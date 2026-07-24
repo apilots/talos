@@ -5,6 +5,7 @@ use talos_sdk::SkillSuggestion;
 use tokio::sync::mpsc;
 use tracing::error;
 
+use crate::render_runtime::render::user_input_display;
 use crate::utils::summarize_for_queue;
 use crate::{TerminalTurnRequest, TuiApp};
 
@@ -13,8 +14,9 @@ impl TuiApp {
         &mut self,
         user_message: String,
         skills: Vec<SkillSuggestion>,
+        file_ids: Vec<String>,
     ) -> TalosResult<()> {
-        self.start_stream_for_message_internal(user_message, skills, true)
+        self.start_stream_for_message_internal(user_message, skills, file_ids, true)
             .await
     }
 
@@ -22,6 +24,7 @@ impl TuiApp {
         &mut self,
         user_message: String,
         skills: Vec<SkillSuggestion>,
+        file_ids: Vec<String>,
         reset_retry_state: bool,
     ) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
@@ -37,14 +40,20 @@ impl TuiApp {
                 session_id
             }
         };
-        let active_summary = summarize_for_queue(&user_message);
+        let active_summary = if user_message.is_empty() {
+            format!("{} attachment(s)", file_ids.len())
+        } else {
+            summarize_for_queue(&user_message)
+        };
         let request = TerminalTurnRequest {
             session_id: session_id.clone(),
             message: user_message.clone(),
             skills: skills.clone(),
+            file_ids: file_ids.clone(),
             context: Some(self.build_talos_context()),
             model_selection: self.current_model_selection(),
             current_directory: Some(self.startup_directory.clone()),
+            project_id: self.current_project_id.clone(),
             client_request_id: None,
         }
         .build();
@@ -57,6 +66,7 @@ impl TuiApp {
             self.active_retry_count = 0;
             self.active_message_raw = Some(user_message.clone());
             self.active_message_skills = skills.clone();
+            self.active_message_file_ids = file_ids.clone();
         }
         self.stream_started_at = Some(Instant::now());
         self.last_stream_event_at = Some(Instant::now());
@@ -68,7 +78,8 @@ impl TuiApp {
         self.timeline_items.clear();
 
         if reset_retry_state {
-            self.render_runtime.append_user_input(user_message.clone());
+            let display_message = user_input_display(&user_message, &file_ids);
+            self.render_runtime.append_user_input(display_message);
             self.request_chat_activity();
         }
 
@@ -117,6 +128,7 @@ impl TuiApp {
         if !keep_active_payload {
             self.active_message_raw = None;
             self.active_message_skills.clear();
+            self.active_message_file_ids.clear();
             self.active_retry_count = 0;
         }
         self.push_right_event(if is_error {

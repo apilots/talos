@@ -10,6 +10,9 @@ const fsDirectoryReadParams = (params: unknown) =>
   isRecord(params) && (params.path === undefined || params.path === null || typeof params.path === "string");
 const fsDirectoryCreateParams = (params: unknown) =>
   hasString(params, "parent") && hasString(params, "name");
+const fileUploadParams = (params: unknown) =>
+  isRecord(params) && isRecord(params.request) && typeof params.dataBase64 === "string";
+const fileIdParams = (params: unknown) => hasString(params, "fileId");
 const llmConfigWriteParams = (params: unknown) =>
   hasString(params, "path") &&
   isRecord(params) &&
@@ -97,6 +100,11 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "config.reload": emptyParams,
   "event.subscribe": sessionParams,
   "event.unsubscribe": (params) => hasString(params, "subscription_id"),
+  "file/upload": fileUploadParams,
+  "file/list": emptyParams,
+  "file/read": fileIdParams,
+  "file/update": fileIdParams,
+  "file/delete": fileIdParams,
   "fs.directory.create": fsDirectoryCreateParams,
   "fs.directory.read": fsDirectoryReadParams,
   "memory.file.list": emptyParams,

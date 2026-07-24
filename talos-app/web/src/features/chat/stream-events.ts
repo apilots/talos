@@ -12,7 +12,12 @@ import {
 
 import { useAppStore } from "@/shared/store/app-store";
 import { outputContentToText } from "@/shared/types/domain";
-import type { ChatRenderBlock, ChatTimelineItem, ChatTurnMetrics } from "@/shared/types/ui";
+import type {
+  ChatRenderBlock,
+  ChatTimelineItem,
+  ChatTurnMetrics,
+  ChatUserInput,
+} from "@/shared/types/ui";
 
 type TimelineItemSnapshot = {
   item: TalosTimelineItem;
@@ -66,15 +71,15 @@ export function buildBlocksFromHistorySnapshot(
       : undefined;
     for (const item of message.items) {
       if (item.phase === "input") {
-        const text = timelineText(item.content);
-        if (text.trim()) {
+        const input = timelineUserInput(item.content);
+        if (hasUserInput(input)) {
           blocks.push({
             id: `user-${message.message_id}`,
             kind: "user",
-            text,
+            ...input,
             live: false,
           });
-          inputItems.push({ messageId: message.message_id, itemIndex: inputIndex, text });
+          inputItems.push({ messageId: message.message_id, itemIndex: inputIndex, ...input });
           inputIndex += 1;
         }
         continue;
@@ -101,7 +106,12 @@ export function buildBlocksFromHistorySnapshot(
 
 export interface ChatTimelineBuildResult {
   blocks: ChatRenderBlock[];
-  inputItems: Array<{ messageId: string; itemIndex: number; text: string }>;
+  inputItems: Array<{
+    messageId: string;
+    itemIndex: number;
+    text: string;
+    fileIds: string[];
+  }>;
   messageIds: Set<string>;
 }
 
@@ -276,9 +286,9 @@ function toChatTurnMetrics(
 function applyItemStarted(sessionId: string, messageId: string, item: TalosTimelineItem) {
   rememberTimelineItem(sessionId, messageId, item);
   if (item.phase === "input") {
-    const text = timelineText(item.content);
-    if (text.trim()) {
-      useAppStore.getState().upsertUserInputBlock(sessionId, messageId, text);
+    const input = timelineUserInput(item.content);
+    if (hasUserInput(input)) {
+      useAppStore.getState().upsertUserInputBlock(sessionId, messageId, input);
     }
     return;
   }
@@ -520,6 +530,7 @@ function toChatTimelineItem(item: TalosTimelineItem | TalosHistoryTimelineItem):
 function timelineText(content: TalosTimelineContent) {
   switch (content.type) {
     case "text":
+    case "user_input":
       return content.text;
     case "execution_summary":
       return content.summary;
@@ -531,6 +542,17 @@ function timelineText(content: TalosTimelineContent) {
     case "tool_call":
       return "";
   }
+}
+
+function timelineUserInput(content: TalosTimelineContent): ChatUserInput {
+  if (content.type === "user_input") {
+    return { text: content.text, fileIds: content.fileIds };
+  }
+  return { text: timelineText(content), fileIds: [] };
+}
+
+function hasUserInput(input: ChatUserInput) {
+  return Boolean(input.text.trim() || input.fileIds.length > 0);
 }
 
 function contextCompactionText(content: Extract<TalosTimelineContent, { type: "context_compaction" }>) {

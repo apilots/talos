@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use opendal::{services::Memory, Operator};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{
@@ -7,9 +9,10 @@ use talos_config::{
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_service::{Actor, AgentDispatchTurnExecutor, MemoryService, TalosService};
+use talos_service::{Actor, AgentDispatchTurnExecutor, FileService, MemoryService, TalosService};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_storage::SqliteStorage;
+use talos_store::file::DatabaseFileStore;
 use talos_store::memory::MemoryStore;
 use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
@@ -150,9 +153,22 @@ async fn test_gateway() -> ServiceGateway {
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
+    let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
     let project_store_impl = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let session_store: Arc<dyn SessionStore> = store.clone();
     let project_store: Arc<dyn ProjectStore> = project_store_impl.clone();
+    let files = Arc::new(
+        FileService::new(
+            file_store,
+            project_store.clone(),
+            BTreeMap::from([(
+                "local".to_string(),
+                Operator::new(Memory::default()).unwrap().finish(),
+            )]),
+            talos_config::FileStorageConfig::default(),
+        )
+        .unwrap(),
+    );
     let event_store: Arc<dyn TimelineEventStore> = store.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
@@ -184,6 +200,7 @@ async fn test_gateway() -> ServiceGateway {
         Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         project_store,
         profile_store,
+        files,
         event_service,
         idempotency_store,
         config,

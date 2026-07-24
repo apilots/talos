@@ -15,7 +15,7 @@ talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-skills = { workspace = true }
-axum = { version = "0.7", features = ["macros"] }
+axum = { version = "0.7", features = ["macros", "multipart"] }
 tokio = { version = "1.0", features = ["full"] }
 tokio-util = { workspace = true }
 tokio-stream = "0.1"
@@ -23,12 +23,16 @@ tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "fs"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_html_form = "0.2"
 uuid = { version = "1.0", features = ["v4", "fast-rng"] }
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+bytes = { workspace = true }
 
 [dev-dependencies]
+opendal = { workspace = true, features = ["services-memory"] }
+sqlx = { workspace = true }
 talos-app-server = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }

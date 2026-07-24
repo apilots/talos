@@ -110,6 +110,14 @@ impl LlmProvider for SelectedModelLlmProvider {
         self.inner.prompt_cache_support()
     }
 
+    fn validate_attachments(
+        &self,
+        model: &str,
+        attachments: &[crate::Attachment],
+    ) -> TalosResult<crate::AttachmentUsage> {
+        self.inner.validate_attachments(model, attachments)
+    }
+
     async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         self.inner.chat_with_tools(request).await
     }

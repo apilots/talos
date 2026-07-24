@@ -115,6 +115,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
                         .expect("timestamp"),
                     items: vec![RunItem::UserInput {
                         text: format!("remember {user_id}"),
+                        file_ids: Vec::new(),
                     }],
                     usage: TokenUsage::default(),
                     stop_reason: StopReason::EndTurn,

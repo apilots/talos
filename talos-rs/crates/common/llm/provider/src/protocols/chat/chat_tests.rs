@@ -1,8 +1,49 @@
 use super::*;
 use crate::{
-    ReasoningBlock, ReasoningContinuation, ReasoningEncryptedBlock, ReasoningSummaryBlock,
-    ReasoningTextBlock,
+    Attachment, AttachmentKind, ReasoningBlock, ReasoningContinuation, ReasoningEncryptedBlock,
+    ReasoningSummaryBlock, ReasoningTextBlock,
 };
+use bytes::Bytes;
+
+#[test]
+fn request_encodes_ordered_text_image_and_file_blocks() {
+    let message = ChatMessage::user_with_attachments(
+        "inspect",
+        vec![
+            Attachment {
+                kind: AttachmentKind::Image,
+                filename: "pixel.png".to_string(),
+                media_type: "image/png".to_string(),
+                bytes: Bytes::from_static(&[1, 2, 3]),
+            },
+            Attachment {
+                kind: AttachmentKind::File,
+                filename: "note.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                bytes: Bytes::from_static(&[4, 5, 6]),
+            },
+        ],
+    )
+    .expect("attachments should be valid");
+    let encoded = request(
+        ChatRequest::builder()
+            .model("gpt-test")
+            .messages(vec![message])
+            .build(),
+        false,
+        ChatCompletionRequestOptions::default(),
+    )
+    .expect("request should encode");
+
+    assert_eq!(
+        serde_json::to_value(encoded).expect("request should serialize")["messages"][0]["content"],
+        serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,AQID"}},
+            {"type": "file", "file": {"filename": "note.pdf", "file_data": "data:application/pdf;base64,BAUG"}}
+        ])
+    );
+}
 
 #[test]
 fn request_replays_text_reasoning_before_tool_call() {

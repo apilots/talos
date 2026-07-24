@@ -71,6 +71,22 @@ describe("chat api initial turn request", () => {
       },
     ]);
   });
+
+  it("keeps ordered file ids as one structured input item", () => {
+    const request = createInitialTurnRequest(
+      "sess-1",
+      "user-1",
+      "",
+      undefined,
+      undefined,
+      [],
+      ["file-2", "file-1"],
+    );
+
+    expect(request.input).toEqual([
+      { type: "files", fileIds: ["file-2", "file-1"] },
+    ]);
+  });
 });
 
 describe("chat message api", () => {

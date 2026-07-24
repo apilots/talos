@@ -1,4 +1,7 @@
-use crate::{ExecutionBranch, InvocationSession, KernelTranscriptService, KernelWarning};
+use crate::{
+    ExecutionBranch, InvocationSession, KernelTranscriptService, KernelWarning, ResolvedAttachment,
+    UserInput,
+};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -416,7 +419,9 @@ pub struct InvocationContext {
     pub workspace_id: String,
     #[serde(default)]
     pub project_root: Option<PathBuf>,
-    pub input: String,
+    pub input: UserInput,
+    #[serde(skip, default)]
+    pub resolved_attachments: Vec<ResolvedAttachment>,
     pub model_selection: ModelSelection,
     pub selected_model_info: ModelInfo,
     #[serde(default)]

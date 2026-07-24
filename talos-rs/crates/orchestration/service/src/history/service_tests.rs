@@ -18,6 +18,7 @@ fn history_messages_reuse_timeline_items() {
         items: vec![
             RunItem::UserInput {
                 text: "question".to_string(),
+                file_ids: vec!["file-1".to_string()],
             },
             RunItem::Reasoning {
                 text: "thinking".to_string(),
@@ -48,6 +49,13 @@ fn history_messages_reuse_timeline_items() {
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].items.len(), 4);
     assert_eq!(messages[0].items[0].phase, TalosTimelinePhase::Input);
+    assert_eq!(
+        messages[0].items[0].content,
+        TalosTimelineContent::UserInput {
+            text: "question".to_string(),
+            file_ids: vec!["file-1".to_string()],
+        }
+    );
     assert_eq!(messages[0].items[1].phase, TalosTimelinePhase::Thinking);
     assert_eq!(messages[0].items[2].phase, TalosTimelinePhase::Acting);
     assert_eq!(messages[0].items[3].phase, TalosTimelinePhase::FinalAnswer);

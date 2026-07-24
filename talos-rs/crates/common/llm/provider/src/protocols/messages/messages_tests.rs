@@ -1,4 +1,46 @@
 use super::*;
+use crate::{Attachment, AttachmentKind};
+use bytes::Bytes;
+
+#[test]
+fn request_encodes_ordered_text_image_and_document_blocks() {
+    let message = ChatMessage::user_with_attachments(
+        "inspect",
+        vec![
+            Attachment {
+                kind: AttachmentKind::Image,
+                filename: "pixel.png".to_string(),
+                media_type: "image/png".to_string(),
+                bytes: Bytes::from_static(&[1, 2, 3]),
+            },
+            Attachment {
+                kind: AttachmentKind::File,
+                filename: "note.pdf".to_string(),
+                media_type: "application/pdf".to_string(),
+                bytes: Bytes::from_static(&[4, 5, 6]),
+            },
+        ],
+    )
+    .expect("attachments should be valid");
+    let encoded = request(
+        ChatRequest::builder()
+            .model("claude-test")
+            .messages(vec![message])
+            .build(),
+        None,
+        MessagesRequestOptions::default(),
+    )
+    .expect("request should encode");
+
+    assert_eq!(
+        serde_json::to_value(encoded).expect("request should serialize")["messages"][0]["content"],
+        serde_json::json!([
+            {"type": "text", "text": "inspect"},
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "AQID"}},
+            {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": "BAUG"}}
+        ])
+    );
+}
 use crate::{
     ReasoningBlock, ReasoningContinuation, ReasoningEffort, ReasoningEncryptedBlock,
     ReasoningTextBlock,

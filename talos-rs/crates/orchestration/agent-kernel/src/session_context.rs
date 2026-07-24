@@ -108,7 +108,7 @@ fn messages_from_turn(turn: &TalosTurn) -> Vec<TalosMessage> {
         .iter()
         .enumerate()
         .filter_map(|(index, item)| match item {
-            RunItem::UserInput { text } => Some((index, TalosMessageRole::User, text)),
+            RunItem::UserInput { text, .. } => Some((index, TalosMessageRole::User, text)),
             RunItem::OutputText { text } => Some((index, TalosMessageRole::Assistant, text)),
             _ => None,
         })

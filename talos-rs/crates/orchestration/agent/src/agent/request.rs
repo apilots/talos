@@ -1,5 +1,6 @@
 use crate::service::{AgentRunConfig, AgentRunContext, AgentRunParams};
-use talos_agent_kernel::TurnPhase;
+use talos_agent_kernel::{TurnPhase, UserInput};
+use talos_error::{TalosError, TalosResult};
 use talos_skills::SkillSelector;
 use talos_types::talos::{RunItem, TalosInputItem, TalosReasoning};
 
@@ -18,6 +19,26 @@ pub(crate) struct AgentKernelParams {
 }
 
 impl AgentKernelParams {
+    /// Normalize text and ordered file references into one Agent input object.
+    pub(crate) fn extract_user_input(input: &[TalosInputItem]) -> TalosResult<UserInput> {
+        let files = input
+            .iter()
+            .filter_map(|item| match item {
+                TalosInputItem::Files { file_ids } => Some(file_ids),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if files.len() > 1 {
+            return Err(TalosError::ValidationError(
+                "input must include at most one files item".to_string(),
+            ));
+        }
+        Ok(UserInput {
+            text: Self::extract_text_input(input),
+            file_ids: files.first().map(|ids| (*ids).clone()).unwrap_or_default(),
+        })
+    }
+
     /// Extract normalized user text from shared Agent input items.
     pub(crate) fn extract_text_input(input: &[TalosInputItem]) -> String {
         input

@@ -233,6 +233,7 @@ async fn explicit_compaction_can_be_interrupted_through_the_existing_turn_lifecy
                 items: vec![
                     talos_types::talos::RunItem::UserInput {
                         text: "remember this".to_string(),
+                        file_ids: Vec::new(),
                     },
                     talos_types::talos::RunItem::OutputText {
                         text: "I will remember this".to_string(),
@@ -315,6 +316,7 @@ async fn explicit_compaction_persists_recovery_for_the_next_prompt() {
                 items: vec![
                     talos_types::talos::RunItem::UserInput {
                         text: "User prefers tea over coffee".to_string(),
+                        file_ids: Vec::new(),
                     },
                     talos_types::talos::RunItem::OutputText {
                         text: "Preference noted".to_string(),

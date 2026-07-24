@@ -606,6 +606,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         max_output_tokens: None,
         reasoning_effort: None,
         speed: Default::default(),
+        attachment_tokens: 0,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("Stop from policy.")],
         maintenance_usage: TokenUsage::default(),
@@ -686,6 +687,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         max_output_tokens: None,
         reasoning_effort: None,
         speed: Default::default(),
+        attachment_tokens: 0,
         prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user(
             "Continue after external dynamic tool result.",

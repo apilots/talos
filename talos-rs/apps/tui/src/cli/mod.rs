@@ -69,11 +69,13 @@ async fn execute_exec_command(
         session_id,
         message,
         skills: Vec::new(),
+        file_ids: Vec::new(),
         context: Some(default_terminal_context(
             cmd.user.as_deref().unwrap_or("cli-user"),
         )),
         model_selection,
         current_directory: current_terminal_directory(),
+        project_id: None,
         client_request_id: Some(format!("cli-{}", uuid::Uuid::new_v4().simple())),
     }
     .build();

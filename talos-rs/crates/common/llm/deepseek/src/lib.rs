@@ -181,6 +181,7 @@ impl DeepSeekProvider {
         request: ChatRequest,
         stream: bool,
     ) -> TalosResult<(&'static str, Value)> {
+        self.validate_request_attachments(&request)?;
         let (endpoint, body) = match self.config.protocol {
             DeepSeekProtocol::Chat => (
                 "chat/completions",

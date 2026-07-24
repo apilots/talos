@@ -65,6 +65,9 @@ pub struct AgentRunContext {
     /// Optional resolved project root for the run.
     #[serde(default)]
     pub project_root: Option<PathBuf>,
+    /// Optional product project bound to this session.
+    #[serde(default)]
+    pub project_id: Option<String>,
     /// Optional execution environment prepared for the run.
     #[serde(default)]
     pub environment: Option<TalosSessionEnvironment>,
@@ -81,6 +84,7 @@ impl AgentRunContext {
             user_id: Some(session.context.user_id.clone()),
             workspace_id: session.context.workspace_id.clone(),
             project_root: session.context.project_root.clone(),
+            project_id: session.project_id.clone(),
             environment: session.context.environment.clone(),
         }
     }

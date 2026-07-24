@@ -8,6 +8,8 @@ description = "Talos embedded SDK client for in-process runtime access"
 
 [dependencies]
 async-trait = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
 talos-auth = { workspace = true }
 talos-base = { workspace = true }
 talos-config = { workspace = true }

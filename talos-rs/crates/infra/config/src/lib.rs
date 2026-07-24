@@ -69,7 +69,10 @@ pub use domains::prompt::{
     PromptWindowPolicy, ReservedOutputPolicy,
 };
 pub use domains::skills::SkillsRuntimeConfig;
-pub use domains::storage::{DatabaseType, StorageBackendConfig};
+pub use domains::storage::{
+    DatabaseType, FileStorageBackendConfig, FileStorageConfig, FileStorageLimits,
+    FsFileStorageConfig, S3FileStorageConfig, StorageBackendConfig,
+};
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
@@ -203,6 +206,21 @@ impl Config {
         let paths = self.talos_paths();
         self.logging.file = Some(paths.log_file.to_string_lossy().to_string());
         self.storage.connection_string = paths.sqlite_db.to_string_lossy().to_string();
+        for backend in self.storage.files.backends.values_mut() {
+            let FileStorageBackendConfig::Fs(config) = backend else {
+                continue;
+            };
+            let root_text = config.root.to_string_lossy();
+            if root_text.trim().is_empty() || root_text.contains("${") {
+                continue;
+            }
+            let root = resolve_runtime_path(root_text.as_ref());
+            config.root = if root.is_absolute() {
+                root
+            } else {
+                paths.data_dir.join(root)
+            };
+        }
         self.agent.kernel.timezone = self.timezone.clone();
         self.agent.kernel.workspace_dir = paths
             .workspace_dir_for_agent(&self.agent.name)

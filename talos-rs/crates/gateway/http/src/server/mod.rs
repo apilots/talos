@@ -3,6 +3,7 @@ mod auth;
 mod auth_session;
 mod errors;
 mod events;
+mod files;
 mod fs;
 mod lifecycle;
 mod memory_files;
@@ -20,6 +21,7 @@ mod workspace_docs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware::{self};
 use axum::routing::{get, post};
 use axum::Router;
@@ -34,6 +36,10 @@ use self::auth_session::{
 };
 use self::events::{
     get_active_turn_handler, recover_timeline_handler, subscribe_timeline_events_handler,
+};
+use self::files::{
+    delete_file_handler, list_files_handler, read_file_handler, update_file_handler,
+    upload_file_handler,
 };
 use self::fs::{create_directory_handler, read_directory_handler};
 pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
@@ -190,6 +196,18 @@ impl HttpServer {
                 get(get_project_handler)
                     .patch(patch_project_handler)
                     .delete(delete_project_handler),
+            )
+            .route(
+                "/v1/files",
+                get(list_files_handler)
+                    .post(upload_file_handler)
+                    .layer(DefaultBodyLimit::disable()),
+            )
+            .route(
+                "/v1/files/:file_id",
+                get(read_file_handler)
+                    .patch(update_file_handler)
+                    .delete(delete_file_handler),
             )
             .route("/v1/memory/files", get(list_memory_files_handler))
             .route(

@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
+  supportedAttachmentKinds,
   modelInfoForRef,
   modelPickerOptions,
   modelRefForKey,
@@ -24,6 +25,10 @@ import type { ReasoningLevel } from "@/shared/types/ui";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
+import {
+  hasInitialSessionInput,
+  useInitialSessionInput,
+} from "./useInitialSessionInput";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useSessionCommands } from "./useSessionCommands";
 import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
@@ -36,9 +41,6 @@ export function ChatSessionPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const sessionId = useParams().sessionId ?? "";
-  const initialPromptHandledRef = useRef(false);
-  const mountedRef = useRef(false);
-  const activeSessionIdRef = useRef(sessionId);
   const locationState = location.state as SessionLocationState | null;
   const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
   const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
@@ -47,7 +49,10 @@ export function ChatSessionPage() {
   const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
     locationState?.initialProjectId,
   );
-  const { data: session } = useSessionQuery(sessionId, !locationState?.initialPrompt);
+  const { data: session } = useSessionQuery(
+    sessionId,
+    !hasInitialSessionInput(locationState),
+  );
   const { data: modelCatalog } = useModelsQuery();
   const models = modelCatalog?.models;
   const projectsView = useProjectsView();
@@ -102,17 +107,6 @@ export function ChatSessionPage() {
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
   const autoScroll = useChatSessionAutoScroll({ blocks, sessionId, streamError });
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    activeSessionIdRef.current = sessionId;
-  }, [sessionId]);
-
   const selectedProjectId = useMemo(() => {
     if (!session) {
       return draftProjectId ?? activeProjectId;
@@ -125,50 +119,18 @@ export function ChatSessionPage() {
     }
     return projects.find((entry) => entry.id === session.project_id);
   }, [projects, session?.project_id]);
-  useEffect(() => {
-    const initialPrompt = locationState?.initialPrompt?.trim();
-    if (!initialPrompt || initialPromptHandledRef.current) {
-      return;
-    }
-    initialPromptHandledRef.current = true;
-    autoScroll.stickToBottomRef.current = true;
-    window.requestAnimationFrame(autoScroll.scrollToBottom);
-    const initialProject =
-      locationState?.initialProject ??
-      projects.find((entry) => entry.id === locationState?.initialProjectId);
-    void sendText(initialPrompt, {
-      modelSelection: modelSelectionForRef(
-        models,
-        locationState?.initialModel,
-        locationState?.initialReasoningLevel,
-      ),
-      project: initialProject,
-      skills: selectedSkillsOption(locationState?.initialSkills),
-    })
-      .then(() => {
-        if (mountedRef.current && activeSessionIdRef.current === sessionId)
-          navigate(location.pathname, { replace: true, state: null });
-      })
-      .catch(() => {
-        if (mountedRef.current && activeSessionIdRef.current === sessionId)
-          setDraft(initialPrompt);
-      });
-  }, [
-    autoScroll.scrollToBottom,
-    autoScroll.stickToBottomRef,
-    location.pathname,
-    locationState?.initialModel,
-    locationState?.initialProject,
-    locationState?.initialProjectId,
-    locationState?.initialPrompt,
-    locationState?.initialReasoningLevel,
-    locationState?.initialSkills,
+  useInitialSessionInput({
+    locationPathname: location.pathname,
+    locationState,
     models,
     navigate,
     projects,
+    scrollToBottom: autoScroll.scrollToBottom,
     sendText,
     sessionId,
-  ]);
+    setDraft,
+    stickToBottomRef: autoScroll.stickToBottomRef,
+  });
 
   if (!sessionId) {
     navigate("/");
@@ -220,6 +182,7 @@ export function ChatSessionPage() {
             contextCompactionStage={sessionCommands.compactionStage}
             isStreaming={isStreaming}
             models={modelPickerOptions(models)}
+            initialAttachments={locationState?.initialAttachments}
             onCancel={() => void stopResponse()}
             onCommand={sessionCommands.execute}
             onDraftChange={setDraft}
@@ -276,9 +239,11 @@ export function ChatSessionPage() {
                 updateSessionModel(modelSelection);
               }
             }}
-            onSend={(skills) => {
+            onSend={(skills, attachments) => {
               autoScroll.stickToBottomRef.current = true;
               window.requestAnimationFrame(autoScroll.scrollToBottom);
+              const fileIds = attachments.map((file) => file.fileId);
+              const fileOptions = fileIds.length > 0 ? { fileIds } : {};
               if (!session) {
                 const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
                 return sendTurn({
@@ -289,14 +254,19 @@ export function ChatSessionPage() {
                   ),
                   project: selectedProject,
                   skills: selectedSkillsOption(skills),
+                  ...fileOptions,
                 });
               }
-              return sendTurn({ skills: selectedSkillsOption(skills) });
+              return sendTurn({
+                skills: selectedSkillsOption(skills),
+                ...fileOptions,
+              });
             }}
             projects={projects}
             runtimeMode={connection.runtimeMode}
             reasoningLevel={currentReasoningLevel}
             reasoningEnabled={currentModelInfo?.reasoning ?? false}
+            supportedAttachmentKinds={supportedAttachmentKinds(currentModelInfo)}
             selectedModel={currentModel}
             showProjectSelector={false}
             showRuntimeModeSelector={false}

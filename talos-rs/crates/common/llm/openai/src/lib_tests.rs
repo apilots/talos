@@ -1,8 +1,8 @@
 use super::*;
 use talos_llm_provider::{
-    CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta, ModelBlockKind,
-    ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation, ReasoningEffort,
-    ToolDefinition,
+    Attachment, AttachmentKind, CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta,
+    ModelBlockKind, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
+    ReasoningEffort, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -87,6 +87,51 @@ fn test_openai_config_can_set_default_model() {
     let config = OpenAIConfig::new("test-api-key").with_default_model("gpt-5.5-mini");
 
     assert_eq!(config.default_model, "gpt-5.5-mini");
+}
+
+#[test]
+fn openai_accepts_normal_sized_images_and_configured_file_types() {
+    let provider = OpenAIProvider::new(OpenAIConfig::new("test-api-key"));
+    let attachments = vec![
+        Attachment {
+            kind: AttachmentKind::Image,
+            filename: "fire.png".to_string(),
+            media_type: "image/png".to_string(),
+            bytes: vec![0_u8; 218 * 1024].into(),
+        },
+        Attachment {
+            kind: AttachmentKind::File,
+            filename: "report.docx".to_string(),
+            media_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                .to_string(),
+            bytes: vec![1_u8; 16 * 1024].into(),
+        },
+        Attachment {
+            kind: AttachmentKind::File,
+            filename: "data.csv".to_string(),
+            media_type: "text/csv".to_string(),
+            bytes: b"a,b\n1,2\n".to_vec().into(),
+        },
+        Attachment {
+            kind: AttachmentKind::File,
+            filename: "sheet.xlsx".to_string(),
+            media_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                .to_string(),
+            bytes: vec![2_u8; 16 * 1024].into(),
+        },
+        Attachment {
+            kind: AttachmentKind::File,
+            filename: "paper.pdf".to_string(),
+            media_type: "application/pdf".to_string(),
+            bytes: b"%PDF-1.7".to_vec().into(),
+        },
+    ];
+
+    let usage = provider
+        .validate_attachments("gpt-5.5", &attachments)
+        .expect("OpenAI inline attachments should validate");
+
+    assert_eq!(usage.item_tokens, vec![10_000; attachments.len()]);
 }
 
 #[test]
