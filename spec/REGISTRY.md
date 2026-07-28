@@ -16,6 +16,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | ID | Directory | Status |
 | --- | --- | --- |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |
+| feat-032 | `feat-032-session-subagent` | active |
 | refactor-039 | `refactor-039-memory-storage-retrieval` | draft |
 | refactor-038 | `refactor-038-llm-model-selection` | active |
 | feat-031 | `feat-031-profile-usage-statistics` | active |
