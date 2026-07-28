@@ -8,16 +8,16 @@ use std::future::pending;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::{
-    AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextStartedStreamData,
-    ContextCompactionStreamData, DynamicToolRequestStreamData, ExecutionSummaryStreamData,
-    KernelAssistantTextPhase, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextPhase,
+    AssistantTextStartedStreamData, ContextCompactionStreamData, DynamicToolRequestStreamData,
+    ExecutionSummaryStreamData, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
     KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData,
     ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
 };
 use talos_config::{AgentKernelConfig, ProviderModelConfig};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
-    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
+    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelOutputPhase,
     ReasoningContinuation, ReasoningOutput, Role, ToolDefinition, Usage,
 };
 use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
@@ -304,7 +304,7 @@ impl LlmProvider for NamedRecordingProvider {
         tokio::spawn(async move {
             let _ = tx
                 .send(Ok(ModelBlockStreamEvent::BlockStarted(
-                    ModelBlockStarted::assistant_text(None, None),
+                    ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
                 )))
                 .await;
             let _ = tx
@@ -540,7 +540,7 @@ fn single_text_block_stream(text: &str) -> ModelBlockStream {
     tokio::spawn(async move {
         let _ = tx
             .send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
             )))
             .await;
         let _ = tx
@@ -752,7 +752,7 @@ fn test_assistant_text_commentary_maps_without_final_answer() {
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
                 item_key: item_key.clone(),
-                phase: KernelAssistantTextPhase::Commentary,
+                phase: AssistantTextPhase::Commentary,
                 round: Some(1),
             }),
         ),
@@ -921,7 +921,7 @@ fn test_execution_summary_item_does_not_gate_final_answer_merge() {
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
                 item_key,
-                phase: KernelAssistantTextPhase::FinalAnswer,
+                phase: AssistantTextPhase::FinalAnswer,
                 round: None,
             }),
         ),
@@ -961,7 +961,7 @@ fn test_timeline_rejects_main_events_after_final_answer_started() {
                     round: None,
                     local_id: "final".to_string(),
                 },
-                phase: KernelAssistantTextPhase::FinalAnswer,
+                phase: AssistantTextPhase::FinalAnswer,
                 round: None,
             }),
         ),
@@ -1030,7 +1030,7 @@ fn test_assistant_text_completed_item_key_can_restart() {
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
                 item_key: item_key.clone(),
-                phase: KernelAssistantTextPhase::Commentary,
+                phase: AssistantTextPhase::Commentary,
                 round: Some(0),
             }),
         ),
@@ -1055,7 +1055,7 @@ fn test_assistant_text_completed_item_key_can_restart() {
             KernelStreamEventType::AssistantTextStarted,
             KernelStreamEventData::AssistantTextStarted(AssistantTextStartedStreamData {
                 item_key,
-                phase: KernelAssistantTextPhase::Commentary,
+                phase: AssistantTextPhase::Commentary,
                 round: Some(0),
             }),
         ),

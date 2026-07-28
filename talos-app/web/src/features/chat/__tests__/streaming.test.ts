@@ -58,7 +58,7 @@ describe("timeline stream events", () => {
           expect.objectContaining({
             itemId: "answer-1",
             sourceItemId: "answer-1",
-            phase: "final_answer",
+            phase: "final_answer", replayFinalAnswer: true,
             text: "final text",
           }),
         ],

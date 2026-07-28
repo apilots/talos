@@ -639,7 +639,7 @@ pub enum TalosTimelineItemKind {
     SystemNotice,
 }
 
-/// Server-owned phase for a timeline item.
+/// Server-normalized timeline phase; assistant output is normalized by the kernel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelinePhase {

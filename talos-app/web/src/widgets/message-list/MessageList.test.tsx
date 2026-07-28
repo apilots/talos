@@ -314,7 +314,7 @@ describe("MessageList", () => {
       kind: "assistant_text" as const,
       phase: "unknown" as const,
       status: "running" as const,
-      text: "Streaming **answer**.",
+      text: "Streaming **answer** renders in visible chunks.",
       startedAtMs: 10,
     };
     const { container, getByText, rerender } = render(
@@ -342,7 +342,10 @@ describe("MessageList", () => {
             id: "timeline-session-1-message-1",
             kind: "timeline",
             live: true,
-            items: [processItem, { ...responseItem, phase: "final_answer", status: "running" }],
+            items: [
+              processItem,
+              { ...responseItem, phase: "final_answer", replayFinalAnswer: true, status: "running" },
+            ],
           },
         ]}
         emptyDetail=""
@@ -352,11 +355,8 @@ describe("MessageList", () => {
 
     const committedResponse = container.querySelector('[data-timeline-item-key="timeline-session-1-message-1:answer-1"]');
     expect(committedResponse?.getAttribute("data-timeline-response")).toBe("true");
-    expect(committedResponse?.getAttribute("data-response-surface")).toBe("plain");
     expect(getByText("Final answer")).not.toBeNull();
-    expect(container.querySelector('[data-response-actions="true"]')).not.toBeNull();
-    expect(screen.getByLabelText("Helpful")).not.toBeNull();
-    expect(screen.getByLabelText("Not helpful")).not.toBeNull();
+    expect(container.querySelector(".markdown-body")).toBeNull();
     await waitFor(() => {
       expect(container.querySelector(".markdown-body strong")?.textContent).toBe("answer");
     });
@@ -393,7 +393,7 @@ describe("MessageList", () => {
     fireEvent.click(responseCopyButton as HTMLButtonElement);
 
     await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith("Streaming **answer**.");
+      expect(writeText).toHaveBeenCalledWith("Streaming **answer** renders in visible chunks.");
     });
   });
 

@@ -1,13 +1,14 @@
 use crate::tool_execution::ToolExecutionContext;
 use crate::{
     warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
-    AssistantTextDeltaStreamData, AssistantTextStartedStreamData, DynamicToolRequestStreamData,
-    InvocationContext, KernelAssistantTextPhase, KernelEvent, KernelEventData, KernelEventLabel,
-    KernelEventType, KernelModelCallMode, KernelStreamEvent, KernelStreamEventData,
-    KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage,
-    KernelWarning, PromptWarningEventData, SessionPromptContextConfig, SessionPromptRecentWindow,
-    SessionToolExchangeOutcome, StopReason, TalosMessageRole, ThinkingDeltaStreamData,
-    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData, UserInput,
+    AssistantTextDeltaStreamData, AssistantTextPhase, AssistantTextStartedStreamData,
+    DynamicToolRequestStreamData, InvocationContext, KernelEvent, KernelEventData,
+    KernelEventLabel, KernelEventType, KernelModelCallMode, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource,
+    KernelThinkingStage, KernelWarning, PromptWarningEventData, SessionPromptContextConfig,
+    SessionPromptRecentWindow, SessionToolExchangeOutcome, StopReason, TalosMessageRole,
+    ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput, ToolExecutor,
+    ToolResultStreamData, UserInput,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -17,8 +18,8 @@ use std::time::Instant;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{
-    AssistantTextPhaseHint, ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, ModelSpeed, ReasoningContinuation, ReasoningEffort,
+    ChatMessage, ChatRequest, FunctionCall, LlmProvider, ModelBlockDelta, ModelBlockKind,
+    ModelBlockStreamEvent, ModelOutputPhase, ModelSpeed, ReasoningContinuation, ReasoningEffort,
     ReasoningOutput, ToolChoice, ToolDefinition,
 };
 use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};

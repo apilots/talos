@@ -1,7 +1,7 @@
 use super::*;
 use talos_llm_provider::{
-    AssistantTextPhaseHint, AssistantTextPhaseHintSource, ModelBlockCompleted, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelOutputPhase,
 };
 
 struct DirectStreamingAnswerProvider;
@@ -54,17 +54,12 @@ impl LlmProvider for ScriptedModelBlockProvider {
     }
 }
 
-fn assistant_started(
-    model_item_id: &str,
-    phase_hint: Option<AssistantTextPhaseHint>,
-) -> ModelBlockStreamEvent {
+fn assistant_started(model_item_id: &str, output_phase: ModelOutputPhase) -> ModelBlockStreamEvent {
     ModelBlockStreamEvent::BlockStarted(ModelBlockStarted {
         model_item_id: model_item_id.to_string(),
         provider_item_id: None,
         kind: ModelBlockKind::AssistantText,
-        assistant_text_phase_hint: phase_hint,
-        assistant_text_phase_hint_source: phase_hint
-            .map(|_| AssistantTextPhaseHintSource::ExplicitProviderPhase),
+        output_phase,
         tool_call: None,
     })
 }
@@ -74,8 +69,7 @@ fn reasoning_started(model_item_id: &str) -> ModelBlockStreamEvent {
         model_item_id: model_item_id.to_string(),
         provider_item_id: None,
         kind: ModelBlockKind::Reasoning,
-        assistant_text_phase_hint: None,
-        assistant_text_phase_hint_source: None,
+        output_phase: ModelOutputPhase::Unknown,
         tool_call: None,
     })
 }
@@ -121,7 +115,7 @@ impl LlmProvider for DirectStreamingAnswerProvider {
         let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(4);
         tokio::spawn(async move {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
             )))
             .await
             .expect("started event should send");
@@ -176,7 +170,7 @@ impl LlmProvider for ExplicitFinalModelBlockProvider {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
                 ModelBlockStarted::assistant_text(
                     Some("provider-final-1".to_string()),
-                    Some(AssistantTextPhaseHint::FinalAnswer),
+                    ModelOutputPhase::FinalAnswer,
                 ),
             )))
             .await
@@ -236,7 +230,7 @@ impl LlmProvider for DirectTerminalStreamingProvider {
         let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(4);
         tokio::spawn(async move {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
             )))
             .await
             .expect("started event should send");
@@ -362,7 +356,7 @@ async fn assistant_delta_with_wrong_model_item_id_fails() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "assistant-wrong-id",
         vec![
-            assistant_started("assistant-1", None),
+            assistant_started("assistant-1", ModelOutputPhase::Unknown),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "assistant-2".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -394,7 +388,7 @@ async fn multiple_assistant_blocks_keep_separate_lifecycle() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "multiple-assistant-blocks",
         vec![
-            assistant_started("assistant-1", None),
+            assistant_started("assistant-1", ModelOutputPhase::Unknown),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "assistant-1".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -402,7 +396,7 @@ async fn multiple_assistant_blocks_keep_separate_lifecycle() {
                 },
             },
             block_completed("assistant-1"),
-            assistant_started("assistant-2", None),
+            assistant_started("assistant-2", ModelOutputPhase::Unknown),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "assistant-2".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -434,7 +428,7 @@ async fn final_answer_then_tool_call_fails_in_kernel() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "final-then-tool",
         vec![
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -472,7 +466,7 @@ async fn final_answer_then_commentary_fails_in_kernel() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "final-then-commentary",
         vec![
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -480,7 +474,7 @@ async fn final_answer_then_commentary_fails_in_kernel() {
                 },
             },
             block_completed("final"),
-            assistant_started("commentary", None),
+            assistant_started("commentary", ModelOutputPhase::Unknown),
         ],
     ));
 
@@ -506,7 +500,7 @@ async fn final_answer_then_tool_args_fails_in_kernel() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "final-then-tool-args",
         vec![
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -545,7 +539,7 @@ async fn final_answer_then_reasoning_fails_in_kernel() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "final-then-reasoning",
         vec![
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -586,7 +580,7 @@ async fn explicit_final_after_reasoning_closes_reasoning_before_summary() {
                     delta: "thinking".to_string(),
                 },
             },
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -662,7 +656,7 @@ async fn repeated_completion_for_known_closed_reasoning_is_ignored() {
                     delta: "thinking live".to_string(),
                 },
             },
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             block_completed("reasoning-1"),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
@@ -725,7 +719,7 @@ async fn explicit_final_with_pending_tool_args_fails_by_policy() {
                     delta: "{\"path\":\"/tmp/a\"}".to_string(),
                 },
             },
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
         ],
     ));
 
@@ -751,14 +745,14 @@ async fn explicit_final_closes_active_commentary_before_summary() {
     let provider = Arc::new(ScriptedModelBlockProvider::new(
         "commentary-then-final",
         vec![
-            assistant_started("commentary", None),
+            assistant_started("commentary", ModelOutputPhase::Unknown),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "commentary".to_string(),
                 delta: ModelBlockDelta::AssistantText {
                     delta: "Working note.".to_string(),
                 },
             },
-            assistant_started("final", Some(AssistantTextPhaseHint::FinalAnswer)),
+            assistant_started("final", ModelOutputPhase::FinalAnswer),
             ModelBlockStreamEvent::BlockDelta {
                 model_item_id: "final".to_string(),
                 delta: ModelBlockDelta::AssistantText {
@@ -969,8 +963,8 @@ async fn test_execute_step_streams_tool_preface_as_commentary() {
         }
     }
 
-    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Unknown));
-    assert_eq!(committed_phase, Some(KernelAssistantTextPhase::Commentary));
+    assert_eq!(started_phase, Some(AssistantTextPhase::Unknown));
+    assert_eq!(committed_phase, Some(AssistantTextPhase::Commentary));
     assert_eq!(text_delta, "Inspecting a file.");
 }
 
@@ -1024,8 +1018,8 @@ async fn test_execute_step_streams_direct_answer_as_final_answer_after_round_don
         }
     }
 
-    assert_eq!(started_phase, Some(KernelAssistantTextPhase::Unknown));
-    assert_eq!(committed_phase, Some(KernelAssistantTextPhase::FinalAnswer));
+    assert_eq!(started_phase, Some(AssistantTextPhase::Unknown));
+    assert_eq!(committed_phase, Some(AssistantTextPhase::FinalAnswer));
     assert_eq!(text_delta, "Direct answer.");
     assert!(completed);
 }
@@ -1076,7 +1070,7 @@ async fn test_execute_step_maps_provider_explicit_final_phase_to_final_answer() 
         }
     }
 
-    assert_eq!(started_phase, Some(KernelAssistantTextPhase::FinalAnswer));
+    assert_eq!(started_phase, Some(AssistantTextPhase::FinalAnswer));
     assert_eq!(text_delta, "Explicit final.");
     assert!(final_answer_started);
 }
@@ -1129,11 +1123,8 @@ async fn test_run_general_turn_ends_loop_terminal_without_extra_finalization() {
         }
     }
 
-    assert_eq!(phases, vec![KernelAssistantTextPhase::Unknown]);
-    assert_eq!(
-        committed_phases,
-        vec![KernelAssistantTextPhase::FinalAnswer]
-    );
+    assert_eq!(phases, vec![AssistantTextPhase::Unknown]);
+    assert_eq!(committed_phases, vec![AssistantTextPhase::FinalAnswer]);
     assert_eq!(deltas, vec!["Working answer."]);
 }
 

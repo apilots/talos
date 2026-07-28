@@ -32,6 +32,9 @@ interface MessageListProps {
 type TimelineItem = Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number];
 type TimelineTextItem = Exclude<TimelineItem, { kind: "tool_call" }>;
 
+const FINAL_ANSWER_REPLAY_CHUNK_SIZE = 24;
+const FINAL_ANSWER_REPLAY_INTERVAL_MS = 16;
+
 export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: MessageListProps) {
   const { t } = useTranslation("chat");
   const copyBlockLabel = t("copyBlock");
@@ -367,7 +370,7 @@ function MessageTimelineBlock({
                       />
                     ) : null}
                   </header>
-                  <TimelineTextContent item={item} markdown role="final-answer" />
+                  <FinalAnswerTextContent item={item} />
                   {processItems.length === 0 ? <TurnMetricsBlock metrics={metrics ?? null} /> : null}
                 </section>
               </CopyableBlock>
@@ -498,6 +501,30 @@ function TimelineTextContent({
       {item.text}
     </p>
   );
+}
+
+function FinalAnswerTextContent({ item }: { item: TimelineTextItem }) {
+  const [visibleText, setVisibleText] = useState(() =>
+    item.replayFinalAnswer ? "" : item.text,
+  );
+
+  useEffect(() => {
+    if (!item.replayFinalAnswer) {
+      setVisibleText(item.text);
+      return;
+    }
+    if (visibleText.length >= item.text.length) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setVisibleText((current) =>
+        item.text.slice(0, Math.min(current.length + FINAL_ANSWER_REPLAY_CHUNK_SIZE, item.text.length)),
+      );
+    }, FINAL_ANSWER_REPLAY_INTERVAL_MS);
+    return () => window.clearTimeout(timer);
+  }, [item.replayFinalAnswer, item.text, visibleText]);
+
+  return <TimelineTextContent item={{ ...item, text: visibleText }} markdown role="final-answer" />;
 }
 
 function timelineItemTitle(item: Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number]) {

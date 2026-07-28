@@ -44,7 +44,10 @@ impl LlmProvider for RecordingAttachmentProvider {
         let (tx, rx) = mpsc::channel(4);
         tokio::spawn(async move {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(
+                    None,
+                    talos_llm_provider::ModelOutputPhase::Unknown,
+                ),
             )))
             .await
             .expect("assistant start should send");

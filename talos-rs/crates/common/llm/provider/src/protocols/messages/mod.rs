@@ -1,9 +1,9 @@
 use crate::{
     CacheControl, ChatChunk, ChatMessage, ChatRequest, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
-    ReasoningEncryptedBlock, ReasoningOutput, ReasoningTextBlock, Role, SseLineDecoder, ToolChoice,
-    ToolDefinition,
+    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
+    ReasoningContinuation, ReasoningEncryptedBlock, ReasoningOutput, ReasoningTextBlock, Role,
+    SseLineDecoder, ToolChoice, ToolDefinition,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -716,8 +716,7 @@ async fn start_content_block(
                     model_item_id,
                     provider_item_id,
                     kind: ModelBlockKind::Reasoning,
-                    assistant_text_phase_hint: None,
-                    assistant_text_phase_hint_source: None,
+                    output_phase: ModelOutputPhase::Unknown,
                     tool_call: None,
                 },
             )
@@ -746,8 +745,7 @@ async fn start_content_block(
                     model_item_id,
                     provider_item_id,
                     kind: ModelBlockKind::AssistantText,
-                    assistant_text_phase_hint: None,
-                    assistant_text_phase_hint_source: None,
+                    output_phase: ModelOutputPhase::Unknown,
                     tool_call: None,
                 },
             )
@@ -770,8 +768,7 @@ async fn start_content_block(
                     model_item_id,
                     provider_item_id: call_id.clone(),
                     kind: ModelBlockKind::ToolCall,
-                    assistant_text_phase_hint: None,
-                    assistant_text_phase_hint_source: None,
+                    output_phase: ModelOutputPhase::Unknown,
                     tool_call: Some(ModelToolCallStart {
                         index,
                         call_id,

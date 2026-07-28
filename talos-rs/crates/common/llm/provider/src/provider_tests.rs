@@ -290,21 +290,14 @@ fn model_block_stream_can_emit_completed_reasoning_output() {
 }
 
 #[tokio::test]
-async fn model_block_started_can_carry_explicit_assistant_phase_hint() {
+async fn model_block_started_carries_output_phase() {
     let started = ModelBlockStarted::assistant_text(
         Some("provider_msg_1".to_string()),
-        Some(AssistantTextPhaseHint::FinalAnswer),
+        ModelOutputPhase::FinalAnswer,
     );
 
     assert_eq!(started.kind, ModelBlockKind::AssistantText);
-    assert_eq!(
-        started.assistant_text_phase_hint,
-        Some(AssistantTextPhaseHint::FinalAnswer)
-    );
-    assert_eq!(
-        started.assistant_text_phase_hint_source,
-        Some(AssistantTextPhaseHintSource::ExplicitProviderPhase)
-    );
+    assert_eq!(started.output_phase, ModelOutputPhase::FinalAnswer);
 }
 
 #[test]

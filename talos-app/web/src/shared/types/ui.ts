@@ -117,6 +117,7 @@ export type ChatTimelineItem =
       status: TalosTimelineItemStatus;
       title?: string | null;
       text: string;
+      replayFinalAnswer?: boolean;
       startedAtMs: number;
       completedAtMs?: number | null;
     }
@@ -128,6 +129,7 @@ export type ChatTimelineItem =
       status: TalosTimelineItemStatus;
       title?: string | null;
       text: string;
+      replayFinalAnswer?: boolean;
       stage: ContextCompactionStage;
       startedAtMs: number;
       completedAtMs?: number | null;

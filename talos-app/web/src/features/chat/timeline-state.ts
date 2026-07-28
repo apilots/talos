@@ -205,7 +205,15 @@ export function commitTimelineAssistantTextInStream(
       ...block,
       items: block.items.map((item) => {
         const sameSource = item.itemId === itemId || item.sourceItemId === itemId;
-        return sameSource && item.kind !== "tool_call" ? { ...item, phase } : item;
+        if (!sameSource || item.kind === "tool_call") {
+          return item;
+        }
+        return {
+          ...item,
+          phase,
+          replayFinalAnswer:
+            phase === "final_answer" && item.phase === "unknown" ? true : item.replayFinalAnswer,
+        };
       }),
     };
   });

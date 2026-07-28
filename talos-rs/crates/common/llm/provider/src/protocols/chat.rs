@@ -1,8 +1,9 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
-    ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
+    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
+    ReasoningContinuation, ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice,
+    ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -1110,8 +1111,7 @@ async fn ensure_reasoning_model_block(
             model_item_id: current_reasoning_model_item_id(state, choice_index, options),
             provider_item_id: Some(format!("choice:{choice_index}:reasoning")),
             kind: ModelBlockKind::Reasoning,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: None,
         }),
     )
@@ -1134,8 +1134,7 @@ async fn ensure_assistant_model_block(
             model_item_id: current_assistant_model_item_id(state, choice_index, options),
             provider_item_id: Some(format!("choice:{choice_index}:message")),
             kind: ModelBlockKind::AssistantText,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: None,
         }),
     )
@@ -1159,8 +1158,7 @@ async fn ensure_tool_model_block(
             model_item_id: tool_model_item_id(index, options),
             provider_item_id: acc.id.clone(),
             kind: ModelBlockKind::ToolCall,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: Some(ModelToolCallStart {
                 index,
                 call_id: acc.id.clone(),

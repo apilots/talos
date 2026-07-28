@@ -6345,7 +6345,7 @@
       "type": "string"
     },
     "TalosTimelinePhase": {
-      "description": "Server-owned phase for a timeline item.",
+      "description": "Server-normalized execution phase for a timeline item.\n\nThis is the protocol-level union of execution phases exposed to timeline clients. Non-assistant timeline items use phases such as `Input`, `Thinking`, `Acting`, and `System`; assistant text items use phases normalized from kernel assistant text output, including `Unknown`, `Commentary`, and `FinalAnswer`.\n\nProvider-level model output phases must be normalized by the kernel before they are projected into this enum.",
       "enum": [
         "input",
         "thinking",

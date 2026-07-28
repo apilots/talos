@@ -1,8 +1,8 @@
 use super::*;
 use talos_llm_provider::{
     Attachment, AttachmentKind, CacheControl, CacheControlKind, ChatMessage, ModelBlockDelta,
-    ModelBlockKind, ModelBlockStreamEvent, PromptCacheSupport, ReasoningContinuation,
-    ReasoningEffort, ToolDefinition,
+    ModelBlockKind, ModelBlockStreamEvent, ModelOutputPhase, PromptCacheSupport,
+    ReasoningContinuation, ReasoningEffort, ToolDefinition,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -178,6 +178,12 @@ async fn test_stream_model_blocks_maps_chat_completion_chunks() {
                 && started.kind == ModelBlockKind::Reasoning
     )));
     assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "openai-choice-0-assistant"
+                && started.output_phase == ModelOutputPhase::Unknown
+    )));
+    assert!(events.iter().any(|event| matches!(
             event,
             ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
                 if model_item_id == "openai-choice-0-assistant" && delta == "hello"
@@ -235,11 +241,14 @@ async fn test_stream_model_blocks_maps_responses_events() {
             "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\"}}\n\n",
             "data: {\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"delta\":\"think\"}\n\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"think\"}],\"encrypted_content\":\"encrypted\"}}\n\n",
-            "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"hello\"}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\",\"id\":\"msg_1\",\"phase\":\"commentary\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"working\"}\n\n",
             "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\"{\\\"path\\\"\"}\n\n",
             "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"delta\":\":\\\"/tmp/a\\\"}\"}\n\n",
             "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_1\",\"call_id\":\"call_1\",\"name\":\"read\"}}\n\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":3,\"item\":{\"type\":\"message\",\"id\":\"msg_2\",\"phase\":\"final_answer\"}}\n\n",
+            "data: {\"type\":\"response.output_text.delta\",\"output_index\":3,\"delta\":\"hello\"}\n\n",
             "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":2,\"total_tokens\":3}}}\n\n"
         )
         .to_string();
@@ -269,9 +278,17 @@ async fn test_stream_model_blocks_maps_responses_events() {
                 if model_item_id == "openai-response-0-reasoning" && delta == "think"
         )));
     assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "openai-response-1-text"
+                && started.provider_item_id.as_deref() == Some("msg_1")
+                && started.kind == ModelBlockKind::AssistantText
+                && started.output_phase == ModelOutputPhase::Commentary
+    )));
+    assert!(events.iter().any(|event| matches!(
             event,
             ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
-                if model_item_id == "openai-response-1-text" && delta == "hello"
+                if model_item_id == "openai-response-1-text" && delta == "working"
         )));
     assert!(events.iter().any(|event| matches!(
             event,
@@ -280,6 +297,19 @@ async fn test_stream_model_blocks_maps_responses_events() {
                     && started.provider_item_id.as_deref() == Some("fc_1")
                     && started.tool_call.as_ref().and_then(|call| call.call_id.as_deref()) == Some("call_1")
                     && started.tool_call.as_ref().and_then(|call| call.tool_name.as_deref()) == Some("read")
+        )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ModelBlockStreamEvent::BlockStarted(started)
+            if started.model_item_id == "openai-response-3-text"
+                && started.provider_item_id.as_deref() == Some("msg_2")
+                && started.kind == ModelBlockKind::AssistantText
+                && started.output_phase == ModelOutputPhase::FinalAnswer
+    )));
+    assert!(events.iter().any(|event| matches!(
+            event,
+            ModelBlockStreamEvent::BlockDelta { model_item_id, delta: ModelBlockDelta::AssistantText { delta } }
+                if model_item_id == "openai-response-3-text" && delta == "hello"
         )));
     assert!(events.iter().any(|event| matches!(
             event,

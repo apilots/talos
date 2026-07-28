@@ -249,7 +249,10 @@ impl LlmProvider for NoopLlmProvider {
         let (tx, rx) = mpsc::channel::<TalosResult<ModelBlockStreamEvent>>(4);
         tokio::spawn(async move {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(
+                    None,
+                    talos_llm_provider::ModelOutputPhase::Unknown,
+                ),
             )))
             .await
             .expect("assistant start should send");
@@ -475,7 +478,10 @@ impl LlmProvider for StreamingToolExecutionProvider {
         let path = self.path.clone();
         tokio::spawn(async move {
             tx.send(Ok(ModelBlockStreamEvent::BlockStarted(
-                ModelBlockStarted::assistant_text(None, None),
+                ModelBlockStarted::assistant_text(
+                    None,
+                    talos_llm_provider::ModelOutputPhase::Unknown,
+                ),
             )))
             .await
             .expect("assistant start should send");

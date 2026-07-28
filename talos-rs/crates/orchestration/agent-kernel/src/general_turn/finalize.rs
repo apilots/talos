@@ -85,7 +85,7 @@ pub async fn emit_general_turn_finalization_stream(
                 round: None,
                 local_id: "finalization_output".to_string(),
             },
-            KernelAssistantTextPhase::FinalAnswer,
+            AssistantTextPhase::FinalAnswer,
             None,
             &executed.output_text,
         )

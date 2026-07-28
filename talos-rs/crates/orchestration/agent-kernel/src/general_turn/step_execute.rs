@@ -29,7 +29,7 @@ enum ActiveModelBlock {
     Reasoning,
     AssistantText {
         item_key: KernelStreamItemKey,
-        phase: KernelAssistantTextPhase,
+        phase: AssistantTextPhase,
     },
     ToolCall {
         index: usize,
@@ -91,16 +91,16 @@ fn talos_usage_from_provider_usage(usage: &talos_llm_provider::Usage) -> TokenUs
     }
 }
 
-fn map_assistant_text_phase(
+fn resolve_assistant_text_phase(
     call_mode: KernelModelCallMode,
-    phase_hint: Option<AssistantTextPhaseHint>,
-) -> KernelAssistantTextPhase {
+    output_phase: ModelOutputPhase,
+) -> AssistantTextPhase {
     match call_mode {
-        KernelModelCallMode::Finalization => KernelAssistantTextPhase::FinalAnswer,
-        KernelModelCallMode::WorkingLoop => match phase_hint {
-            Some(AssistantTextPhaseHint::FinalAnswer) => KernelAssistantTextPhase::FinalAnswer,
-            Some(AssistantTextPhaseHint::Commentary) => KernelAssistantTextPhase::Commentary,
-            None => KernelAssistantTextPhase::Unknown,
+        KernelModelCallMode::Finalization => AssistantTextPhase::FinalAnswer,
+        KernelModelCallMode::WorkingLoop => match output_phase {
+            ModelOutputPhase::Unknown => AssistantTextPhase::Unknown,
+            ModelOutputPhase::Commentary => AssistantTextPhase::Commentary,
+            ModelOutputPhase::FinalAnswer => AssistantTextPhase::FinalAnswer,
         },
     }
 }
@@ -140,7 +140,7 @@ async fn close_active_non_final_blocks_before_final(
         completed_blocks.insert(model_item_id);
         if let ActiveModelBlock::AssistantText {
             item_key,
-            phase: KernelAssistantTextPhase::Commentary | KernelAssistantTextPhase::Unknown,
+            phase: AssistantTextPhase::Commentary | AssistantTextPhase::Unknown,
         } = block
         {
             emit_stream_event(
@@ -209,8 +209,7 @@ pub(crate) async fn stream_round(
                     active_blocks.insert(started.model_item_id, ActiveModelBlock::Reasoning);
                 }
                 ModelBlockKind::AssistantText => {
-                    let phase =
-                        map_assistant_text_phase(call_mode, started.assistant_text_phase_hint);
+                    let phase = resolve_assistant_text_phase(call_mode, started.output_phase);
                     let model_item_id = started.model_item_id;
                     if active_blocks.contains_key(&model_item_id) {
                         return Err(provider_protocol_violation(format!(
@@ -227,7 +226,7 @@ pub(crate) async fn stream_round(
                         local_id: model_item_id.clone(),
                     };
 
-                    if matches!(phase, KernelAssistantTextPhase::FinalAnswer) {
+                    if matches!(phase, AssistantTextPhase::FinalAnswer) {
                         if final_answer_started {
                             return Err(provider_protocol_violation(
                                 "multiple final answer blocks in one stream",
@@ -246,14 +245,14 @@ pub(crate) async fn stream_round(
                         .await?;
                         final_answer_started = true;
                         final_answer_streamed = true;
-                    } else if matches!(phase, KernelAssistantTextPhase::Commentary) {
+                    } else if matches!(phase, AssistantTextPhase::Commentary) {
                         ensure_not_after_final(final_answer_started, "commentary assistant text")?;
                     } else {
                         ensure_not_after_final(final_answer_started, "unknown assistant text")?;
                     }
 
                     assistant_text_streamed = true;
-                    if matches!(phase, KernelAssistantTextPhase::Unknown) {
+                    if matches!(phase, AssistantTextPhase::Unknown) {
                         unknown_assistant_text_items.push(item_key.clone());
                     }
                     active_blocks.insert(
@@ -543,9 +542,9 @@ pub(crate) async fn stream_round(
     };
     if !unknown_assistant_text_items.is_empty() {
         let phase = if tool_calls.is_empty() {
-            KernelAssistantTextPhase::FinalAnswer
+            AssistantTextPhase::FinalAnswer
         } else {
-            KernelAssistantTextPhase::Commentary
+            AssistantTextPhase::Commentary
         };
         for item_key in unknown_assistant_text_items {
             emit_stream_event(
@@ -558,15 +557,15 @@ pub(crate) async fn stream_round(
             )
             .await;
         }
-        if matches!(phase, KernelAssistantTextPhase::FinalAnswer) {
+        if matches!(phase, AssistantTextPhase::FinalAnswer) {
             final_answer_streamed = true;
         }
     }
     if !assistant_text_streamed && !content.trim().is_empty() {
         let phase = if tool_calls.is_empty() {
-            KernelAssistantTextPhase::FinalAnswer
+            AssistantTextPhase::FinalAnswer
         } else {
-            KernelAssistantTextPhase::Commentary
+            AssistantTextPhase::Commentary
         };
         assistant_text_streamed = emit_assistant_text_stream_item(
             stream_tx,
@@ -580,7 +579,7 @@ pub(crate) async fn stream_round(
         )
         .await;
         final_answer_streamed =
-            assistant_text_streamed && matches!(phase, KernelAssistantTextPhase::FinalAnswer);
+            assistant_text_streamed && matches!(phase, AssistantTextPhase::FinalAnswer);
     }
 
     Ok(StreamRound {
@@ -618,7 +617,7 @@ async fn chat_round(
 pub(crate) async fn emit_assistant_text_stream_item(
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
     item_key: KernelStreamItemKey,
-    phase: KernelAssistantTextPhase,
+    phase: AssistantTextPhase,
     round: Option<u32>,
     text: &str,
 ) -> bool {
@@ -663,8 +662,8 @@ async fn emit_assistant_text_for_step(
     disposition: GeneralTurnStepDisposition,
 ) -> bool {
     let phase = match disposition {
-        GeneralTurnStepDisposition::ContinueWithTools => KernelAssistantTextPhase::Commentary,
-        GeneralTurnStepDisposition::FinalResponse => KernelAssistantTextPhase::FinalAnswer,
+        GeneralTurnStepDisposition::ContinueWithTools => AssistantTextPhase::Commentary,
+        GeneralTurnStepDisposition::FinalResponse => AssistantTextPhase::FinalAnswer,
     };
     emit_assistant_text_stream_item(
         stream_tx,

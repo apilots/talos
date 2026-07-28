@@ -238,7 +238,7 @@ pub struct KernelStreamItemKey {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum KernelAssistantTextPhase {
+pub enum AssistantTextPhase {
     Unknown,
     Commentary,
     FinalAnswer,
@@ -254,7 +254,7 @@ pub enum KernelModelCallMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantTextStartedStreamData {
     pub item_key: KernelStreamItemKey,
-    pub phase: KernelAssistantTextPhase,
+    pub phase: AssistantTextPhase,
     pub round: Option<u32>,
 }
 
@@ -272,7 +272,7 @@ pub struct AssistantTextCompletedStreamData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AssistantTextCommittedStreamData {
     pub item_key: KernelStreamItemKey,
-    pub phase: KernelAssistantTextPhase,
+    pub phase: AssistantTextPhase,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

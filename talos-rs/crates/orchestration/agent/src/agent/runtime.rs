@@ -16,9 +16,9 @@ use crate::{
     AgentRunConfig, AgentRunContext, AgentRunParams, AgentRunResult, SkillRootsResolver,
 };
 use talos_agent_kernel::{
-    run_general_turn_with_resume, AttachmentReader, ContextStateBags, DynamicToolResultResume,
-    GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions,
-    InvocationContext, InvocationExecutionState, InvocationLimits, KernelAssistantTextPhase,
+    run_general_turn_with_resume, AssistantTextPhase, AttachmentReader, ContextStateBags,
+    DynamicToolResultResume, GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume,
+    GeneralTurnSkillOptions, InvocationContext, InvocationExecutionState, InvocationLimits,
     KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
     KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, ResumeToolCall,
     StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind, ToolStreamKey,
@@ -856,26 +856,26 @@ pub(crate) fn emit_kernel_timeline_events(
                 )));
             }
             state.completed_assistant_text_items.remove(&data.item_key);
-            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer)
+            if matches!(data.phase, AssistantTextPhase::FinalAnswer)
                 && state.final_answer_item_id.is_some()
             {
                 return Err(TalosError::ValidationError(
                     "timeline final answer item already started".to_string(),
                 ));
             }
-            if matches!(data.phase, KernelAssistantTextPhase::Commentary) {
+            if matches!(data.phase, AssistantTextPhase::Commentary) {
                 reject_after_final_answer(state, "commentary assistant text")?;
             }
             let started = match data.phase {
-                KernelAssistantTextPhase::Unknown => {
+                AssistantTextPhase::Unknown => {
                     reject_after_final_answer(state, "unknown assistant text")?;
                     timeline.start_unknown_assistant_text()
                 }
-                KernelAssistantTextPhase::Commentary => timeline.start_commentary(),
-                KernelAssistantTextPhase::FinalAnswer => timeline.start_final_answer(),
+                AssistantTextPhase::Commentary => timeline.start_commentary(),
+                AssistantTextPhase::FinalAnswer => timeline.start_final_answer(),
             };
             let item_id = item_id_from_started(&started)?;
-            if matches!(data.phase, KernelAssistantTextPhase::FinalAnswer) {
+            if matches!(data.phase, AssistantTextPhase::FinalAnswer) {
                 state.final_answer_item_id = Some(item_id.clone());
             }
             state.assistant_text_items.insert(data.item_key, item_id);
@@ -928,7 +928,7 @@ pub(crate) fn emit_kernel_timeline_events(
             KernelStreamEventType::AssistantTextCommitted,
             KernelStreamEventData::AssistantTextCommitted(data),
         ) => {
-            if matches!(data.phase, KernelAssistantTextPhase::Unknown) {
+            if matches!(data.phase, AssistantTextPhase::Unknown) {
                 return Err(TalosError::ValidationError(
                     "timeline assistant text commit phase cannot be unknown".to_string(),
                 ));
@@ -945,12 +945,12 @@ pub(crate) fn emit_kernel_timeline_events(
                     ))
                 })?;
             let phase = match data.phase {
-                KernelAssistantTextPhase::Unknown => unreachable!(),
-                KernelAssistantTextPhase::Commentary => {
+                AssistantTextPhase::Unknown => unreachable!(),
+                AssistantTextPhase::Commentary => {
                     reject_after_final_answer(state, "commentary assistant text commit")?;
                     TalosTimelinePhase::Commentary
                 }
-                KernelAssistantTextPhase::FinalAnswer => {
+                AssistantTextPhase::FinalAnswer => {
                     if state
                         .final_answer_item_id
                         .as_ref()

@@ -10,7 +10,7 @@ use talos_error::TalosResult;
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ReasoningContinuation, ReasoningOutput, Role, Usage,
+    ModelBlockStreamEvent, ModelOutputPhase, ReasoningContinuation, ReasoningOutput, Role, Usage,
 };
 use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
@@ -292,7 +292,7 @@ impl LlmProvider for IntegrationMockProvider {
                     .await;
                 let _ = tx
                     .send(Ok(ModelBlockStreamEvent::BlockStarted(
-                        ModelBlockStarted::assistant_text(None, None),
+                        ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
                     )))
                     .await;
                 let _ = tx
@@ -375,7 +375,7 @@ impl LlmProvider for IntegrationMockProvider {
                 .await;
             let _ = tx
                 .send(Ok(ModelBlockStreamEvent::BlockStarted(
-                    ModelBlockStarted::assistant_text(None, None),
+                    ModelBlockStarted::assistant_text(None, ModelOutputPhase::Unknown),
                 )))
                 .await;
             let _ = tx

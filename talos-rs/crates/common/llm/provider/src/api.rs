@@ -552,17 +552,22 @@ pub enum ModelBlockKind {
     SystemNotice,
 }
 
+/// Provider-reported phase for an assistant text model output block.
+///
+/// This is the model protocol boundary value. Agent kernel code must normalize
+/// it into its own assistant text phase before emitting kernel stream events.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum AssistantTextPhaseHint {
+pub enum ModelOutputPhase {
+    Unknown,
     Commentary,
     FinalAnswer,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AssistantTextPhaseHintSource {
-    ExplicitProviderPhase,
+impl Default for ModelOutputPhase {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -577,10 +582,8 @@ pub struct ModelBlockStarted {
     pub model_item_id: String,
     pub provider_item_id: Option<String>,
     pub kind: ModelBlockKind,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assistant_text_phase_hint: Option<AssistantTextPhaseHint>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub assistant_text_phase_hint_source: Option<AssistantTextPhaseHintSource>,
+    #[serde(default)]
+    pub output_phase: ModelOutputPhase,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call: Option<ModelToolCallStart>,
 }
@@ -591,23 +594,20 @@ impl ModelBlockStarted {
             model_item_id: "reasoning".to_string(),
             provider_item_id,
             kind: ModelBlockKind::Reasoning,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: None,
         }
     }
 
     pub fn assistant_text(
         provider_item_id: Option<String>,
-        phase_hint: Option<AssistantTextPhaseHint>,
+        output_phase: ModelOutputPhase,
     ) -> Self {
         Self {
             model_item_id: "assistant_text".to_string(),
             provider_item_id,
             kind: ModelBlockKind::AssistantText,
-            assistant_text_phase_hint: phase_hint,
-            assistant_text_phase_hint_source: phase_hint
-                .map(|_| AssistantTextPhaseHintSource::ExplicitProviderPhase),
+            output_phase,
             tool_call: None,
         }
     }
@@ -618,8 +618,7 @@ impl ModelBlockStarted {
             model_item_id,
             provider_item_id: call_id.clone(),
             kind: ModelBlockKind::ToolCall,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: Some(ModelToolCallStart {
                 index,
                 call_id,

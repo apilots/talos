@@ -1,9 +1,9 @@
 use crate::{
     ChatChunk, ChatMessage, ChatRequest, ChatResponse, ChatStream, FunctionCall,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
-    ModelBlockStreamEvent, ModelToolCallStart, ReasoningBlock, ReasoningContinuation,
-    ReasoningEncryptedBlock, ReasoningOutput, ReasoningSummaryBlock, ReasoningTextBlock, Role,
-    SseLineDecoder, ToolChoice, ToolDefinition, Usage,
+    ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
+    ReasoningContinuation, ReasoningEncryptedBlock, ReasoningOutput, ReasoningSummaryBlock,
+    ReasoningTextBlock, Role, SseLineDecoder, ToolChoice, ToolDefinition, Usage,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -871,8 +871,7 @@ async fn ensure_reasoning_block(
             model_item_id,
             provider_item_id: provider_item_id(item, index),
             kind: ModelBlockKind::Reasoning,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: None,
         }),
     )
@@ -891,6 +890,8 @@ async fn ensure_text_block(
         return true;
     }
     let item = event.get("item").unwrap_or(&Value::Null);
+    let output_phase = ModelOutputPhase::deserialize(item.get("phase").unwrap_or(&Value::Null))
+        .unwrap_or_default();
     let model_item_id = block_model_item_id(item_prefix, "text", index);
     active_blocks.insert(
         key,
@@ -904,8 +905,7 @@ async fn ensure_text_block(
             model_item_id,
             provider_item_id: provider_item_id(item, index),
             kind: ModelBlockKind::AssistantText,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase,
             tool_call: None,
         }),
     )
@@ -937,8 +937,7 @@ async fn ensure_tool_block(
             model_item_id,
             provider_item_id: provider_item_id(item, index),
             kind: ModelBlockKind::ToolCall,
-            assistant_text_phase_hint: None,
-            assistant_text_phase_hint_source: None,
+            output_phase: ModelOutputPhase::Unknown,
             tool_call: Some(ModelToolCallStart {
                 index,
                 call_id: item
