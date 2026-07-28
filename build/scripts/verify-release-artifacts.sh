@@ -31,6 +31,14 @@ verify_server_config_template() {
     echo "Missing server config template in ${archive_path}" >&2
     exit 1
   fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/migrations/sqlite/.+\.sql$'; then
+    echo "Missing server SQLite migrations in ${archive_path}" >&2
+    exit 1
+  fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/migrations/postgres/README.md$'; then
+    echo "Missing server PostgreSQL migration placeholder in ${archive_path}" >&2
+    exit 1
+  fi
 }
 
 verify_tui() {
@@ -42,6 +50,14 @@ verify_tui() {
   fi
   if ! tar -tzf "${archive_path}" | grep -Eq '^conf/talos.yaml$'; then
     echo "Missing TUI config template in ${archive_path}" >&2
+    exit 1
+  fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/migrations/sqlite/.+\.sql$'; then
+    echo "Missing TUI SQLite migrations in ${archive_path}" >&2
+    exit 1
+  fi
+  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/migrations/postgres/README.md$'; then
+    echo "Missing TUI PostgreSQL migration placeholder in ${archive_path}" >&2
     exit 1
   fi
 }
@@ -67,6 +83,16 @@ verify_macos_app_server() {
   local config_template="${mount_dir}/Talos.app/Contents/Resources/conf/talos.yaml"
   if [[ ! -f "${config_template}" ]]; then
     echo "Missing packaged macOS config template: ${config_template}" >&2
+    exit 1
+  fi
+  local sqlite_migrations="${mount_dir}/Talos.app/Contents/Resources/conf/migrations/sqlite"
+  if ! find "${sqlite_migrations}" -maxdepth 1 -name '*.sql' -print -quit | grep -q .; then
+    echo "Missing packaged macOS SQLite migrations: ${sqlite_migrations}" >&2
+    exit 1
+  fi
+  local postgres_migrations="${mount_dir}/Talos.app/Contents/Resources/conf/migrations/postgres"
+  if [[ ! -f "${postgres_migrations}/README.md" ]]; then
+    echo "Missing packaged macOS PostgreSQL migration placeholder: ${postgres_migrations}" >&2
     exit 1
   fi
 

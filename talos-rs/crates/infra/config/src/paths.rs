@@ -4,6 +4,8 @@ use std::sync::OnceLock;
 
 use talos_error::TalosResult;
 
+use crate::DatabaseType;
+
 static TALOS_HOME_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,6 +53,13 @@ impl TalosPaths {
 
     pub fn memory_dir_for_agent(&self, agent_name: &str) -> PathBuf {
         self.workspace_dir_for_agent(agent_name).join("memory")
+    }
+
+    /// Return the product-managed migration directory for one configured database backend.
+    pub fn database_migrations_dir(&self, database_type: DatabaseType) -> PathBuf {
+        self.conf_dir
+            .join("migrations")
+            .join(database_type.as_str())
     }
 
     pub fn ensure_base_dirs(&self) -> TalosResult<()> {

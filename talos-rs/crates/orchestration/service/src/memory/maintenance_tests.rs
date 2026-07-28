@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::run_test_migrations;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
@@ -85,6 +86,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
     let mut config = TalosConfig::default();
     config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
     let storage = Arc::new(SqliteStorage::new(":memory:").await.expect("storage"));
+    run_test_migrations(storage.pool()).await;
     let sessions = Arc::new(
         DatabaseSessionStore::new(storage)
             .await
@@ -93,11 +95,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
     let artifacts = Arc::new(talos_store::session::FileSessionArtifactStore::default());
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
         sessions
-            .insert_session_record(
-                &session_record(session_id, user_id, last_activity),
-                "talos",
-                "test",
-            )
+            .insert_session_record(&session_record(session_id, user_id, last_activity), "test")
             .await
             .expect("insert session");
         let kernel_config = resolve_effective_kernel_workspace(&config.agent.kernel, user_id)
@@ -199,6 +197,8 @@ async fn daily_maintenance_processes_two_user_scopes() {
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {
     SessionRecord {
         id: session_id.to_string(),
+        agent_id: "talos".to_string(),
+        tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         workspace_id: None,
         title: "Memory test".to_string(),
         user_id: user_id.to_string(),

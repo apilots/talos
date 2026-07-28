@@ -473,6 +473,26 @@ impl TimelineEventStore for MockStore {
             .collect())
     }
 
+    async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> talos_error::TalosResult<Vec<AgentEvent>> {
+        let mut events = self
+            .events
+            .lock()
+            .expect("events lock")
+            .iter()
+            .rev()
+            .filter(|event| event.session_id == session_id && event.turn_id == turn_id)
+            .take(limit.max(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        events.reverse();
+        Ok(events)
+    }
+
     async fn latest_event_id(
         &self,
         session_id: &str,

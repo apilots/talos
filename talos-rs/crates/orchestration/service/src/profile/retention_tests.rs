@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
+use crate::test_support::run_test_migrations;
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 use talos_config::ProfileUsageRetentionConfig;
-use talos_store::migration::run_migrations;
+use talos_storage::SqliteStorage;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore, TurnUsageUpdate};
 use talos_types::{ModelRef, StopReason, TokenUsage};
 
@@ -36,8 +36,11 @@ fn update(id: &str, completed_at_ms: i64) -> TurnUsageUpdate {
 
 #[tokio::test]
 async fn retention_stops_after_configured_batch_limit() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    run_test_migrations(&pool).await;
     let store = Arc::new(DatabaseProfileStore::new(pool.clone()));
     for id in ["one", "two", "three"] {
         store.record_turn_usage(update(id, 1_000)).await.unwrap();

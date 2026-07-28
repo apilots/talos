@@ -47,11 +47,11 @@ fn test_policy_checker() {
     let policy = ToolPolicy::allow_list(vec!["read", "write"]);
     let checker = ToolPolicyChecker::new(policy);
 
-    // 允许的工具
+    // Allowed tools.
     assert!(checker.check_tool_access("read").is_ok());
     assert!(checker.check_tool_access("write").is_ok());
 
-    // 不允许的工具
+    // Denied tool.
     assert!(checker.check_tool_access("exec").is_err());
 }
 
@@ -60,19 +60,19 @@ fn test_batch_check() {
     let policy = ToolPolicy::allow_list(vec!["read", "write"]);
     let checker = ToolPolicyChecker::new(policy);
 
-    // 全部允许的工具
+    // All tools are allowed.
     assert!(checker
-        .check_tools_access(&vec!["read".to_string(), "write".to_string()])
+        .check_tools_access(&["read".to_string(), "write".to_string()])
         .is_ok());
 
-    // 包含不允许的工具
+    // One tool is denied.
     assert!(checker
-        .check_tools_access(&vec!["read".to_string(), "exec".to_string()])
+        .check_tools_access(&["read".to_string(), "exec".to_string()])
         .is_err());
 }
 
 #[test]
-fn test_default_policy_allows_memory_tools() {
+fn test_default_policy_allows_builtin_tools() {
     let policy = ToolPolicy::default();
 
     assert!(policy.is_allowed("MemorySearch"));
@@ -81,5 +81,16 @@ fn test_default_policy_allows_memory_tools() {
     assert!(policy.is_allowed("Read"));
     assert!(policy.is_allowed("Grep"));
     assert!(policy.is_allowed("ApplyPatch"));
+    for tool in [
+        "spawn_agent",
+        "send_message",
+        "followup_task",
+        "wait_agent",
+        "interrupt_agent",
+        "list_agents",
+    ] {
+        assert!(policy.is_allowed(tool));
+    }
+    assert!(!policy.is_allowed("Agent"));
     assert!(!policy.is_allowed("Skill"));
 }

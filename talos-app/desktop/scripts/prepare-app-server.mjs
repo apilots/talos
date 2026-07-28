@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, copyFileSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +33,11 @@ const configTemplateSource =
 const configTemplateDestination = path.join(resourcesConfDir, "talos.yaml");
 copyFileSync(configTemplateSource, configTemplateDestination);
 console.log(`Prepared desktop config template: ${configTemplateDestination}`);
+
+const migrationSource = path.join(confDir, "migrations");
+const migrationDestination = path.join(resourcesConfDir, "migrations");
+cpSync(migrationSource, migrationDestination, { recursive: true });
+console.log(`Prepared desktop migrations: ${migrationDestination}`);
 
 function buildAppServer() {
   const args = [

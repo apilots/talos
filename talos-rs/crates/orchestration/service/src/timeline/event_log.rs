@@ -62,6 +62,17 @@ impl TimelineEventService {
             .await
     }
 
+    pub(crate) async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEvent>> {
+        self.event_store
+            .list_turn_events(session_id, turn_id, limit)
+            .await
+    }
+
     pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.event_store.latest_event_id(session_id).await
     }

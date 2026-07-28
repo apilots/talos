@@ -118,6 +118,8 @@ export function outputContentToText(content: TalosContentItem[]) {
           return item.text;
         case "json":
           return JSON.stringify(jsonContentValue(item.value), null, 2);
+        case "subagent_result":
+          return `subagent:${item.result.operation}`;
         case "file_read":
           return item.content;
         case "diff":

@@ -35,6 +35,7 @@ fn test_build_general_turn_step_request() {
         warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
+        message_rx: None,
     };
     let mut state = GeneralTurnLoopState::new(&prepared);
 

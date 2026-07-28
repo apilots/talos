@@ -9,7 +9,7 @@ use talos_agent::{
 use talos_error::{TalosError, TalosResult};
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
-    AgentDispatchResumeToolCall,
+    AgentDispatchResumeToolCall, DispatchBinding,
 };
 use talos_types::talos::{
     AgentEvent, StopReason, TalosContext, TalosInputItem, TalosProvider, TalosSourceType,
@@ -132,6 +132,7 @@ fn test_dispatch_params(session_id: &str, turn_id: &str) -> AgentDispatchParams 
     let context = test_context("msg-dispatch");
     AgentDispatchParams {
         turn_id: turn_id.to_string(),
+        binding: DispatchBinding::Routed,
         session: test_session(session_id, context),
         resume_context: None,
         input: vec![TalosInputItem::Text {
@@ -245,7 +246,7 @@ impl AgentHarness for RecordingStreamAgent {
 
     async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
         self.interrupt_requests.lock().unwrap().push(params);
-        Ok(AgentInterruptResult { interrupted: false })
+        Ok(AgentInterruptResult { interrupted: true })
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {
@@ -286,6 +287,7 @@ async fn cancel_active_turn_forwards_turn_id_to_agent() {
     SessionRuntime::cancel_active_turn(
         &coordinator,
         talos_types::CancelActiveTurnParams {
+            binding: DispatchBinding::Routed,
             session,
             turn_id: "turn-route".to_string(),
         },
@@ -381,6 +383,7 @@ async fn cancel_active_turn_rejects_agent_without_interrupt_capability() {
     let error = SessionRuntime::cancel_active_turn(
         &coordinator,
         talos_types::CancelActiveTurnParams {
+            binding: DispatchBinding::Routed,
             session,
             turn_id: "turn-no-interrupt".to_string(),
         },
@@ -412,6 +415,7 @@ async fn submit_dynamic_tool_result_rejects_agent_without_dynamic_input_capabili
     let error = talos_types::AgentDispatchRuntime::submit_input(
         &coordinator,
         AgentDispatchInputParams {
+            binding: DispatchBinding::Routed,
             session,
             turn_id: "turn-no-input".to_string(),
             input: AgentDispatchInput::DynamicToolResult {
@@ -428,6 +432,71 @@ async fn submit_dynamic_tool_result_rejects_agent_without_dynamic_input_capabili
     assert!(matches!(error, TalosError::ValidationError(_)));
     assert!(error.to_string().contains("dynamic_input"));
     assert!(input_requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn exact_agent_binding_bypasses_mutable_router_for_all_runtime_operations() {
+    let coordinator = CoordinatorImpl::new(Arc::new(MockRouter::with_target(Some("routed"))));
+    let routed = Arc::new(RecordingStreamAgent::with_id("routed"));
+    let routed_streams = routed.stream_requests.clone();
+    let routed_inputs = routed.input_requests.clone();
+    let routed_interrupts = routed.interrupt_requests.clone();
+    coordinator.register_agent("routed", routed).await.unwrap();
+
+    let persisted = Arc::new(RecordingStreamAgent::with_id("persisted"));
+    let persisted_streams = persisted.stream_requests.clone();
+    let persisted_inputs = persisted.input_requests.clone();
+    let persisted_interrupts = persisted.interrupt_requests.clone();
+    coordinator
+        .register_agent("persisted", persisted)
+        .await
+        .unwrap();
+
+    let mut dispatch = test_dispatch_params("child-1", "turn-1");
+    dispatch.binding = DispatchBinding::Exact {
+        agent_id: "persisted".to_string(),
+    };
+    let _stream = AgentDispatchRuntime::handle_stream(&coordinator, dispatch)
+        .await
+        .unwrap();
+    let session = test_session("child-1", test_context("message-input"));
+    AgentDispatchRuntime::submit_input(
+        &coordinator,
+        AgentDispatchInputParams {
+            binding: DispatchBinding::Exact {
+                agent_id: "persisted".to_string(),
+            },
+            session: session.clone(),
+            turn_id: "turn-1".to_string(),
+            input: AgentDispatchInput::DynamicToolResult {
+                call_id: "call-1".to_string(),
+                tool_name: "approval".to_string(),
+                output: "approved".to_string(),
+                success: true,
+            },
+        },
+    )
+    .await
+    .unwrap();
+    SessionRuntime::cancel_active_turn(
+        &coordinator,
+        talos_types::CancelActiveTurnParams {
+            binding: DispatchBinding::Exact {
+                agent_id: "persisted".to_string(),
+            },
+            session,
+            turn_id: "turn-1".to_string(),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(persisted_streams.lock().unwrap().len(), 1);
+    assert_eq!(persisted_inputs.lock().unwrap().len(), 1);
+    assert_eq!(persisted_interrupts.lock().unwrap().len(), 1);
+    assert!(routed_streams.lock().unwrap().is_empty());
+    assert!(routed_inputs.lock().unwrap().is_empty());
+    assert!(routed_interrupts.lock().unwrap().is_empty());
 }
 
 #[path = "tests/core.rs"]

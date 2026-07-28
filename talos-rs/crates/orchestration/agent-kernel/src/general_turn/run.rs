@@ -30,6 +30,7 @@ pub async fn run_general_turn(
         kernel_config,
         None,
         Some(skill_options),
+        None,
     )
     .await
 }
@@ -47,8 +48,9 @@ pub async fn run_general_turn_with_resume(
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
     skill_options: Option<GeneralTurnSkillOptions>,
+    message_rx: Option<mpsc::Receiver<String>>,
 ) -> TalosResult<GeneralTurnResult> {
-    let prepared = prepare_general_turn(
+    let mut prepared = prepare_general_turn(
         ctx,
         agent_name,
         agent_description,
@@ -60,6 +62,7 @@ pub async fn run_general_turn_with_resume(
         skill_options.clone(),
     )
     .await?;
+    prepared.message_rx = message_rx.map(|receiver| Arc::new(std::sync::Mutex::new(receiver)));
     let mut prompt_diagnostics = prepared.prompt_diagnostics.clone();
     let warnings = prepared.warnings.clone();
     if let Some(prompt_warning_state) = prepared.prompt_warning_state.as_ref() {

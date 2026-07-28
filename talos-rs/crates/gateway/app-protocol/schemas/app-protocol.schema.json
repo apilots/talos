@@ -386,6 +386,60 @@
       ],
       "type": "string"
     },
+    "AgentPath": {
+      "description": "Canonical logical address of one node inside a Primary Session Agent tree.\n\nThis type owns path parsing and ancestry rules. Session IDs remain the durable execution identity and must not be inferred from this path.",
+      "type": "string"
+    },
+    "AgentTreeNode": {
+      "description": "One Agent tree node and its direct child nodes.",
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/definitions/AgentTreeNode"
+          },
+          "type": "array"
+        },
+        "snapshot": {
+          "$ref": "#/definitions/SubagentSnapshot"
+        }
+      },
+      "required": [
+        "children",
+        "snapshot"
+      ],
+      "type": "object"
+    },
+    "AgentTreeSnapshot": {
+      "description": "One recursively nested Agent tree projected from durable child Sessions.",
+      "properties": {
+        "children": {
+          "items": {
+            "$ref": "#/definitions/AgentTreeNode"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "children"
+      ],
+      "type": "object"
+    },
+    "AgentTurnRef": {
+      "description": "Exact Session Turn identity constructed by a trusted application adapter.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "turnId"
+      ],
+      "type": "object"
+    },
     "AppServerErrorBody": {
       "properties": {
         "code": {
@@ -2036,6 +2090,119 @@
           },
           "required": [
             "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CollaborationToolResult": {
+      "description": "Canonical strongly typed result emitted by collaboration Tools.\n\nGeneric Tool transport may serialize this enum once, but business and presentation consumers must decode this tagged contract rather than select a result shape from the Tool name.",
+      "oneOf": [
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "spawnAgent"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/SubagentSpawnResult"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "sendMessage"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/SendMessageResult"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "waitAgent"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/SubagentSnapshot"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "interruptAgent"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/SubagentSnapshot"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "followupTask"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/SubagentSnapshot"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "enum": [
+                "listAgents"
+              ],
+              "type": "string"
+            },
+            "result": {
+              "$ref": "#/definitions/AgentTreeSnapshot"
+            }
+          },
+          "required": [
+            "operation",
+            "result"
           ],
           "type": "object"
         }
@@ -3987,6 +4154,30 @@
       ],
       "type": "object"
     },
+    "SendMessageResult": {
+      "description": "Accepted message delivery to one exact running child Turn.",
+      "properties": {
+        "accepted": {
+          "type": "boolean"
+        },
+        "agentId": {
+          "type": "string"
+        },
+        "subagent": {
+          "$ref": "#/definitions/SubagentRef"
+        },
+        "turn": {
+          "$ref": "#/definitions/AgentTurnRef"
+        }
+      },
+      "required": [
+        "accepted",
+        "agentId",
+        "subagent",
+        "turn"
+      ],
+      "type": "object"
+    },
     "ServerInfo": {
       "properties": {
         "auth_enabled": {
@@ -4656,6 +4847,233 @@
       ],
       "type": "string"
     },
+    "SubagentOutcome": {
+      "description": "Current state projected from the child Session's existing Turn facts.",
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "running"
+              ],
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "waitingUserAction"
+              ],
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "cancelling"
+              ],
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "output": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "completed"
+              ],
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "output",
+            "status",
+            "truncated",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "error",
+            "status",
+            "truncated",
+            "turnId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "status": {
+              "enum": [
+                "interrupted"
+              ],
+              "type": "string"
+            },
+            "turnId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "turnId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SubagentRef": {
+      "description": "Stable handle for a child Session and its immutable owner.",
+      "properties": {
+        "parent": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "path": {
+          "$ref": "#/definitions/AgentPath"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "parent",
+        "path",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SubagentSnapshot": {
+      "description": "Durable child identity paired with its projected execution state.",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "latestUpdate": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubagentUpdate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "$ref": "#/definitions/SubagentOutcome"
+        },
+        "subagent": {
+          "$ref": "#/definitions/SubagentRef"
+        }
+      },
+      "required": [
+        "agentId",
+        "outcome",
+        "subagent"
+      ],
+      "type": "object"
+    },
+    "SubagentSpawnResult": {
+      "description": "Exact durable child identity and the initial Turn accepted for execution.",
+      "properties": {
+        "agentId": {
+          "type": "string"
+        },
+        "subagent": {
+          "$ref": "#/definitions/SubagentRef"
+        },
+        "turn": {
+          "$ref": "#/definitions/AgentTurnRef"
+        }
+      },
+      "required": [
+        "agentId",
+        "subagent",
+        "turn"
+      ],
+      "type": "object"
+    },
+    "SubagentUpdate": {
+      "description": "Latest bounded assistant activity for the current child Turn.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/SubagentUpdateKind"
+        },
+        "text": {
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "truncated"
+      ],
+      "type": "object"
+    },
+    "SubagentUpdateKind": {
+      "description": "Kind of bounded assistant activity exposed by a Subagent snapshot.",
+      "enum": [
+        "commentary",
+        "finalAnswer"
+      ],
+      "type": "string"
+    },
     "SubmitDynamicToolResultRequest": {
       "properties": {
         "call_id": {
@@ -4842,6 +5260,24 @@
           "required": [
             "type",
             "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "result": {
+              "$ref": "#/definitions/CollaborationToolResult"
+            },
+            "type": {
+              "enum": [
+                "subagent_result"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "result",
+            "type"
           ],
           "type": "object"
         },
@@ -6621,6 +7057,9 @@
     "cloud_login_status_response": {
       "$ref": "#/definitions/CloudLoginStatusResponse"
     },
+    "collaboration_tool_result": {
+      "$ref": "#/definitions/CollaborationToolResult"
+    },
     "error": {
       "$ref": "#/definitions/AppServerErrorBody"
     },
@@ -6718,6 +7157,7 @@
     "cloud_login_cancel_response",
     "cloud_login_start_response",
     "cloud_login_status_response",
+    "collaboration_tool_result",
     "error",
     "event_unsubscribe_response",
     "file_delete_response",

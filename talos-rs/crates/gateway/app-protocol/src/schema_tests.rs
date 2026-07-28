@@ -25,6 +25,17 @@ fn generated_protocol_includes_timeline_types() {
 }
 
 #[test]
+fn generated_protocol_includes_subagent_result_types() {
+    let schema = generate_json_schema();
+    assert!(schema.contains("CollaborationToolResult"));
+    assert!(schema.contains("SubagentSnapshot"));
+
+    let typescript = generate_typescript();
+    assert!(typescript.contains("CollaborationToolResult"));
+    assert!(typescript.contains(r#""type": "subagent_result""#));
+}
+
+#[test]
 fn json_schema_fixture_is_current() {
     let expected = generate_json_schema();
     let actual = std::fs::read_to_string(schema_fixture_path())

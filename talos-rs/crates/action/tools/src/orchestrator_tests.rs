@@ -103,12 +103,12 @@ fn test_mutating_tools_execute_under_configured_policy() {
 }
 
 #[test]
-fn test_collaboration_tools_execute_under_configured_policy() {
+fn test_subagent_tools_execute_under_configured_policy() {
     let context = test_context();
     let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
     let spec = RegisteredToolSpec::new(
         ToolDefinition::new(
-            "Agent",
+            "spawn_agent",
             "spawn sub-agent",
             Some(json!({ "type": "object" })),
         ),
@@ -121,7 +121,11 @@ fn test_collaboration_tools_execute_under_configured_policy() {
 
     let plan = orchestrator
         .plan(
-            &ToolInvocation::function("call-3", "Agent", json!({ "description": "count" })),
+            &ToolInvocation::function(
+                "call-3",
+                "spawn_agent",
+                json!({ "taskName": "review", "prompt": "count" }),
+            ),
             &context,
             Some(&spec),
         )

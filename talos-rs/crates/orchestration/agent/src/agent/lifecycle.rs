@@ -1,12 +1,63 @@
-use super::runtime::AgentRuntimeAbortHandle;
 use super::AgentHarnessImpl;
 use crate::{AgentResult, AgentRunParams, AgentRunResult};
 use dashmap::mapref::entry::Entry;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::AgentEvent;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::AbortHandle;
+
+/// Harness-owned abort handle for a runtime execution.
+///
+/// Runtime implementations can expose backend abort mechanics through this
+/// wrapper, but callers outside Harness must use AgentInterruptParams instead.
+#[derive(Clone)]
+pub(crate) struct AgentRuntimeAbortHandle {
+    outer: Option<AbortHandle>,
+    inner: Arc<Mutex<Option<AbortHandle>>>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl AgentRuntimeAbortHandle {
+    /// Create an abort handle for a newly spawned runtime task.
+    pub(crate) fn new(outer: AbortHandle) -> Self {
+        Self {
+            outer: Some(outer),
+            inner: Arc::new(Mutex::new(None)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(super) fn inner_only() -> Self {
+        Self {
+            outer: None,
+            inner: Arc::new(Mutex::new(None)),
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub(super) fn attach_inner(&self, handle: AbortHandle) {
+        self.inner.lock().unwrap().replace(handle);
+    }
+
+    pub(super) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Abort all tracked runtime tasks for the active Harness run.
+    pub(crate) fn abort(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        if let Some(outer) = &self.outer {
+            outer.abort();
+        }
+        if let Some(inner) = self.inner.lock().unwrap().as_ref() {
+            inner.abort();
+        }
+    }
+}
 
 /// Harness-internal operation selected for a queued or active run.
 ///
@@ -35,6 +86,8 @@ pub(crate) enum ActiveTurnHandle {
         turn_id: String,
         /// Abort handle owned by the concrete runtime task.
         execution_task: AgentRuntimeAbortHandle,
+        /// Bounded input sender for the exact running turn.
+        message_tx: Option<mpsc::Sender<String>>,
     },
 }
 
@@ -88,12 +141,14 @@ impl AgentHarnessImpl {
         session_id: &str,
         turn_id: String,
         execution_task: AgentRuntimeAbortHandle,
+        message_tx: Option<mpsc::Sender<String>>,
     ) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
             Entry::Occupied(mut entry) => {
                 entry.insert(ActiveTurnHandle::Running {
                     turn_id,
                     execution_task,
+                    message_tx,
                 });
                 Ok(())
             }

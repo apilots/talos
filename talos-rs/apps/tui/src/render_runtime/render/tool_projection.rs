@@ -7,6 +7,8 @@ use crate::utils::display_tool_name;
 use talos_sdk::TalosContentItem;
 use talos_types::talos::{TalosToolDiffLine, TalosToolTaskStatus};
 
+use super::subagent_projection::project_subagent;
+
 const TOOL_PREVIEW_LIMIT: usize = 96;
 
 pub(crate) fn tool_running_line(name: &str, call_id: &str, arguments: &str) -> StyledLine {
@@ -35,13 +37,13 @@ fn tool_header(text: String) -> StyledLine {
 }
 
 #[derive(Default)]
-struct ToolRenderData {
-    title: String,
-    summary: String,
-    detail_lines: Vec<String>,
-    preview_lines: Vec<String>,
-    output_lines: Vec<String>,
-    force_show_output: bool,
+pub(super) struct ToolRenderData {
+    pub(super) title: String,
+    pub(super) summary: String,
+    pub(super) detail_lines: Vec<String>,
+    pub(super) preview_lines: Vec<String>,
+    pub(super) output_lines: Vec<String>,
+    pub(super) force_show_output: bool,
 }
 
 fn project_tool_content(
@@ -51,6 +53,9 @@ fn project_tool_content(
     content: &[TalosContentItem],
     is_error: bool,
 ) -> ToolRenderData {
+    if let Some(projection) = project_subagent(name, call_id, arguments, content, is_error) {
+        return projection;
+    }
     if let Some(projection) = project_diff(content, is_error) {
         return projection;
     }
@@ -462,7 +467,7 @@ fn file_change_counts(file: &talos_types::talos::TalosToolFileDiff) -> (usize, u
     (added, removed)
 }
 
-fn tool_title(name: &str, _call_id: &str, arguments: &str) -> String {
+pub(super) fn tool_title(name: &str, _call_id: &str, arguments: &str) -> String {
     let name = display_tool_name(name);
     tool_title_argument(name, arguments)
         .map(|argument| format!("{name}({})", compact_tool_preview(&argument)))
@@ -508,7 +513,7 @@ fn append_output(target: &mut String, value: &str) {
     target.push_str(value);
 }
 
-fn completed_title(title: String, is_error: bool) -> String {
+pub(super) fn completed_title(title: String, is_error: bool) -> String {
     format!("{title} {}", if is_error { "failed" } else { "completed" })
 }
 
@@ -557,7 +562,7 @@ fn preview_lines(stdout: &str, stderr: &str) -> Vec<String> {
         .collect()
 }
 
-fn preview_lines_from_output(output_lines: &[String], limit: usize) -> Vec<String> {
+pub(super) fn preview_lines_from_output(output_lines: &[String], limit: usize) -> Vec<String> {
     output_lines
         .iter()
         .filter(|line| !line.trim().is_empty())

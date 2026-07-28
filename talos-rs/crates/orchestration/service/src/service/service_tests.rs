@@ -1,5 +1,6 @@
 use super::*;
 use crate::access::CreateSessionRequest;
+use crate::test_support::run_test_migrations;
 use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -17,7 +18,6 @@ use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::memory::MemoryStore;
-use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::StorageProjectStore;
 use talos_store::session::{
@@ -83,6 +83,17 @@ impl TimelineEventStore for FailOnceTimelineEventStore {
             .await
     }
 
+    async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEvent>> {
+        self.inner
+            .list_turn_events(session_id, turn_id, limit)
+            .await
+    }
+
     async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.inner.latest_event_id(session_id).await
     }
@@ -129,6 +140,10 @@ fn configured_test_config() -> TalosConfig {
 
 #[async_trait]
 impl TurnExecutor for TestTurnExecutor {
+    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn start_turn_stream(
         &self,
         _request: AgentDispatchParams,
@@ -308,7 +323,7 @@ async fn test_application_with_runtime_and_event_failure(
     fail_on_event_call: Option<usize>,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-    run_migrations(storage.pool()).await.unwrap();
+    run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());

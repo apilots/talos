@@ -44,10 +44,13 @@ export function useChatSession(
     shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
   );
   const streamState = useAppStore((state) => state.streams[sessionId]);
+  const shouldSubscribeTimeline =
+    Boolean(streamState?.isStreaming) ||
+    (shouldRecoverLiveTail && sessionHistoryQuery.isSuccess);
   const { retryTimeline } = useSessionTimelineEvents(
     sessionId,
     sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
-    Boolean(sessionId) && (sessionAvailable || Boolean(streamState?.activeMessageId)),
+    Boolean(sessionId) && shouldSubscribeTimeline,
   );
   const contextCompactionStage = activeContextCompactionStage(streamState);
   const pendingInput = streamState?.pendingInput;

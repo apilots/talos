@@ -35,7 +35,8 @@ fn agent_run_params_from_session(
     turn_id: &str,
     input: Vec<TalosInputItem>,
 ) -> AgentRunParams {
-    let context = AgentRunContext::from_session(session, turn_id.to_string());
+    let context =
+        AgentRunContext::from_session(session, turn_id.to_string(), "demo_agent_1".to_string());
     let config = AgentRunConfig::from_session(session);
     let session_state = AgentRunSessionState::from_session(session);
     let options = AgentRunOptions::from_config(&config);

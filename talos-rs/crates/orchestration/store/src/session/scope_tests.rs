@@ -2,11 +2,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::*;
+use crate::migration::{run_migrations, test_migrations_dir};
 use crate::project::{ProjectStore, StorageProjectStore};
 use serde_json::Value;
 use talos_storage::{Row, SqliteStorage, Storage};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{ModelRef, ModelSelection, SessionConf, DEFAULT_SESSION_TITLE};
+use talos_types::{AgentTurnRef, ModelRef, ModelSelection, SessionConf, DEFAULT_SESSION_TITLE};
 
 fn sample_context() -> TalosContext {
     TalosContext {
@@ -34,6 +35,8 @@ fn record(
     };
     SessionRecord {
         id: id.to_string(),
+        agent_id: "agent-a".to_string(),
+        tree_identity: SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
         context,
@@ -53,6 +56,9 @@ fn record(
 
 async fn store() -> DatabaseSessionStore {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
     DatabaseSessionStore::new(storage).await.unwrap()
 }
 
@@ -92,33 +98,150 @@ async fn test_insert_and_get_session_record_roundtrip() {
         }),
     };
 
-    store
-        .insert_session_record(&record, "agent-a", "api")
-        .await
-        .unwrap();
+    store.insert_session_record(&record, "api").await.unwrap();
     let loaded = store
         .get_session_record("session-1")
         .await
         .unwrap()
         .unwrap();
 
-    assert_eq!(loaded.id, record.id);
-    assert_eq!(loaded.workspace_id, record.workspace_id);
-    assert_eq!(loaded.project_id, record.project_id);
-    assert_eq!(loaded.current_directory, record.current_directory);
-    assert_eq!(loaded.title, DEFAULT_SESSION_TITLE);
-    assert_eq!(loaded.conf, record.conf);
+    assert_eq!(loaded, record);
+}
+
+#[tokio::test]
+async fn subagent_identity_roundtrips_and_rejects_duplicate_tree_path() {
+    let store = store().await;
+    let parent = AgentTurnRef {
+        session_id: "root-session".to_string(),
+        turn_id: "root-turn".to_string(),
+    };
+    let mut child = record("child-1", "user-1", None, None);
+    child.tree_identity = SessionTreeIdentity::Subagent {
+        parent: parent.clone(),
+        tree_root_session_id: "root-session".to_string(),
+        path: "/root/reviewer".parse().unwrap(),
+    };
+    store.insert_session_record(&child, "api").await.unwrap();
+
+    let loaded = store.get_session_record("child-1").await.unwrap().unwrap();
+    assert_eq!(loaded, child);
+
+    let mut duplicate = record("child-2", "user-1", None, None);
+    duplicate.tree_identity = SessionTreeIdentity::Subagent {
+        parent,
+        tree_root_session_id: "root-session".to_string(),
+        path: "/root/reviewer".parse().unwrap(),
+    };
+    assert!(store
+        .insert_session_record(&duplicate, "api")
+        .await
+        .is_err());
+}
+
+#[tokio::test]
+async fn active_subagent_turn_check_uses_one_tree_query() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let mut child = record("child-session", "user-1", None, None);
+    child.tree_identity = SessionTreeIdentity::Subagent {
+        parent: AgentTurnRef {
+            session_id: "root-session".to_string(),
+            turn_id: "root-turn".to_string(),
+        },
+        tree_root_session_id: "root-session".to_string(),
+        path: "/root/reviewer".parse().unwrap(),
+    };
+    store.insert_session_record(&child, "api").await.unwrap();
+    storage
+        .execute(
+            "INSERT INTO active_turns (session_id, turn_id, status, updated_at) VALUES (?, 'turn-1', 'running', 1)",
+            &[&child.id],
+        )
+        .await
+        .unwrap();
+
+    assert!(store
+        .has_active_subagent_turn("root-session")
+        .await
+        .unwrap());
+    assert!(!store.has_active_subagent_turn("other-root").await.unwrap());
+}
+
+#[tokio::test]
+async fn delete_session_tree_removes_descendants_and_runtime_rows() {
+    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let root = record("root-session", "user-1", None, None);
+    let mut child = record("child-session", "user-1", None, None);
+    child.tree_identity = SessionTreeIdentity::Subagent {
+        parent: AgentTurnRef {
+            session_id: root.id.clone(),
+            turn_id: "root-turn".to_string(),
+        },
+        tree_root_session_id: root.id.clone(),
+        path: "/root/reviewer".parse().unwrap(),
+    };
+    store.insert_session_record(&root, "api").await.unwrap();
+    store.insert_session_record(&child, "api").await.unwrap();
+    for session_id in [&root.id, &child.id] {
+        storage
+            .execute(
+                "INSERT INTO timeline_events (session_id, turn_id, message_id, sequence, event_type, payload_json, created_at_ms) VALUES (?, 'turn-1', 'message-1', 1, 'turn_started', '{}', 1)",
+                &[session_id],
+            )
+            .await
+            .unwrap();
+        storage
+            .execute(
+                "INSERT INTO active_turns (session_id, turn_id, status, updated_at) VALUES (?, 'turn-1', 'running', 1)",
+                &[session_id],
+            )
+            .await
+            .unwrap();
+        storage
+            .execute(
+                "INSERT INTO message_idempotency_keys (session_id, idempotency_key, request_hash, turn_id, status, created_at, updated_at) VALUES (?, 'key-1', 'hash-1', 'turn-1', 'pending', 1, 1)",
+                &[session_id],
+            )
+            .await
+            .unwrap();
+    }
+
+    assert!(store.delete_session_tree(&root.id).await.unwrap());
+
+    let counts = storage
+        .query(
+            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM timeline_events) AS events, (SELECT COUNT(*) FROM active_turns) AS active_turns, (SELECT COUNT(*) FROM message_idempotency_keys) AS idempotency_keys",
+            &[],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            counts[0].get_i64("sessions"),
+            counts[0].get_i64("events"),
+            counts[0].get_i64("active_turns"),
+            counts[0].get_i64("idempotency_keys"),
+        ),
+        (Some(0), Some(0), Some(0), Some(0))
+    );
 }
 
 #[tokio::test]
 async fn test_get_session_record_reports_invalid_conf_json() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
-    let record = record("session-1", "user-1", None, None);
-    store
-        .insert_session_record(&record, "agent-a", "api")
+    run_migrations(storage.pool(), &test_migrations_dir())
         .await
         .unwrap();
+    let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
+    let record = record("session-1", "user-1", None, None);
+    store.insert_session_record(&record, "api").await.unwrap();
     storage
         .update(
             "sessions",
@@ -146,10 +269,7 @@ async fn test_get_session_record_reports_invalid_conf_json() {
 async fn test_update_session_record_persists_fields() {
     let store = store().await;
     let mut record = record("session-1", "user-1", None, None);
-    store
-        .insert_session_record(&record, "agent-a", "api")
-        .await
-        .unwrap();
+    store.insert_session_record(&record, "api").await.unwrap();
     store
         .advance_memory_processed_until_seq("session-1", 0, 3)
         .await
@@ -183,7 +303,7 @@ async fn test_update_session_record_persists_fields() {
 async fn memory_cursor_advance_is_idempotent() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "agent-a", "api")
+        .insert_session_record(&record("session-1", "user-1", None, None), "api")
         .await
         .unwrap();
 
@@ -211,7 +331,7 @@ async fn memory_cursor_advance_is_idempotent() {
 async fn memory_cursor_rejects_non_contiguous_advance() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "agent-a", "api")
+        .insert_session_record(&record("session-1", "user-1", None, None), "api")
         .await
         .unwrap();
 
@@ -227,10 +347,7 @@ async fn memory_cursor_rejects_non_contiguous_advance() {
 async fn test_delete_session_record_removes_session() {
     let store = store().await;
     let record = record("session-1", "user-1", None, None);
-    store
-        .insert_session_record(&record, "agent-a", "api")
-        .await
-        .unwrap();
+    store.insert_session_record(&record, "api").await.unwrap();
 
     assert!(store.delete_session_record("session-1").await.unwrap());
     assert!(store
@@ -246,7 +363,6 @@ async fn test_list_session_records_filters_by_project_id() {
     store
         .insert_session_record(
             &record("session-1", "user-1", Some("project-1".to_string()), None),
-            "agent-a",
             "api",
         )
         .await
@@ -254,7 +370,6 @@ async fn test_list_session_records_filters_by_project_id() {
     store
         .insert_session_record(
             &record("session-2", "user-1", Some("project-2".to_string()), None),
-            "agent-a",
             "api",
         )
         .await
@@ -276,15 +391,15 @@ async fn test_list_session_records_filters_by_project_id() {
 async fn test_list_session_records_respects_limit_and_offset() {
     let store = store().await;
     store
-        .insert_session_record(&record("session-1", "user-1", None, None), "agent-a", "api")
+        .insert_session_record(&record("session-1", "user-1", None, None), "api")
         .await
         .unwrap();
     store
-        .insert_session_record(&record("session-2", "user-1", None, None), "agent-a", "api")
+        .insert_session_record(&record("session-2", "user-1", None, None), "api")
         .await
         .unwrap();
     store
-        .insert_session_record(&record("session-3", "user-1", None, None), "agent-a", "api")
+        .insert_session_record(&record("session-3", "user-1", None, None), "api")
         .await
         .unwrap();
 
@@ -319,7 +434,7 @@ async fn memory_pending_session_pages_use_a_stable_cursor() {
     second_pending.latest_turn_seq = 1;
     for session in [&processed, &first_pending, &second_pending] {
         store
-            .insert_session_record(session, "agent-a", "api")
+            .insert_session_record(session, "api")
             .await
             .expect("insert session");
     }
@@ -357,7 +472,7 @@ async fn memory_pending_uses_monotonic_turn_seq_after_message_count_reset() {
     cleared.latest_turn_seq = 101;
     cleared.memory_processed_until_seq = 100;
     store
-        .insert_session_record(&cleared, "agent-a", "api")
+        .insert_session_record(&cleared, "api")
         .await
         .expect("insert cleared session");
 
@@ -381,6 +496,9 @@ async fn memory_pending_uses_monotonic_turn_seq_after_message_count_reset() {
 #[tokio::test]
 async fn test_list_projects_returns_session_count() {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
     let store = DatabaseSessionStore::new(storage.clone()).await.unwrap();
     let project_store = StorageProjectStore::new(storage).await.unwrap();
     let project = project_store
@@ -395,7 +513,6 @@ async fn test_list_projects_returns_session_count() {
                 Some(project.project_id.clone()),
                 None,
             ),
-            "agent-a",
             "api",
         )
         .await

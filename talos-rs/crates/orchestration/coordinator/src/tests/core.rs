@@ -44,6 +44,7 @@ async fn test_handle_stream_returns_agent_events() {
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-stream".to_string(),
+            binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
@@ -91,6 +92,7 @@ async fn test_handle_request_uses_prepared_session() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-title".to_string(),
+            binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
@@ -130,6 +132,7 @@ async fn test_handle_request_uses_resume_api_for_resume_context() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-original".to_string(),
+            binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session: test_session("test-session", context.clone()),
             resume_context: Some(AgentDispatchResumeContext {
                 tool_call: Some(AgentDispatchResumeToolCall {
@@ -155,7 +158,7 @@ async fn test_handle_request_uses_resume_api_for_resume_context() {
 }
 
 #[tokio::test]
-async fn test_handle_request_uses_routed_agent_from_registry() {
+async fn test_handle_request_prefers_exact_agent_binding() {
     let mock_router = Arc::new(MockRouter::with_target(Some("reviewer")));
     let context = TalosContext {
         source_type: TalosSourceType::Im,
@@ -186,6 +189,9 @@ async fn test_handle_request_uses_routed_agent_from_registry() {
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-routed".to_string(),
+            binding: talos_types::agent_dispatch::DispatchBinding::Exact {
+                agent_id: "default".to_string(),
+            },
             session: test_session("test-session", context.clone()),
             resume_context: None,
             input: vec![TalosInputItem::Text {
@@ -196,11 +202,11 @@ async fn test_handle_request_uses_routed_agent_from_registry() {
         .expect("request should succeed");
 
     assert_eq!(response.output_text, "ok");
-    assert!(default_requests.lock().unwrap().is_empty());
-    let reviewer_requests = reviewer_requests.lock().unwrap();
-    let request = reviewer_requests
+    assert!(reviewer_requests.lock().unwrap().is_empty());
+    let default_requests = default_requests.lock().unwrap();
+    let request = default_requests
         .first()
-        .expect("routed agent should receive request");
+        .expect("exactly bound agent should receive request");
     assert_eq!(request.turn_id(), "turn-routed");
     assert_eq!(request.context.turn_id, "turn-routed");
 }
@@ -233,6 +239,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-original".to_string(),
+            binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session,
             resume_context: Some(AgentDispatchResumeContext {
                 tool_call: Some(AgentDispatchResumeToolCall {

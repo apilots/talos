@@ -29,4 +29,7 @@ pub use idempotency::{
 };
 pub use mock_store::MockSessionStore;
 pub use store::{DatabaseSessionStore, SessionStore};
-pub use types::{SessionPageCursor, SessionPatchAck, SessionQuery, SessionRecord, SessionSummary};
+pub use types::{
+    SessionPageCursor, SessionPatchAck, SessionQuery, SessionRecord, SessionSummary,
+    SessionTreeIdentity, SessionTreeScope,
+};

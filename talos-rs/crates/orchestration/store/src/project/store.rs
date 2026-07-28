@@ -41,7 +41,6 @@ pub struct StorageProjectStore {
 
 impl StorageProjectStore {
     pub async fn new(storage: Arc<dyn Storage>) -> TalosResult<Self> {
-        storage.init_schema().await?;
         Ok(Self { storage })
     }
 

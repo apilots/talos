@@ -37,4 +37,5 @@ talos-app-server = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-plugin = { workspace = true }
 talos-store = { workspace = true }
+talos-storage = { workspace = true }
 tempfile = "3"

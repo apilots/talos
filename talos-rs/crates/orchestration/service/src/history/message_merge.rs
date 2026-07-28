@@ -99,7 +99,7 @@ fn history_message_from_completed_turn_events(
     message_id: &str,
     events: Vec<AgentEvent>,
 ) -> Option<SessionHistoryMessage> {
-    let mut items: Vec<TalosTimelineItem> = Vec::new();
+    let items = timeline_items_from_events(&events);
     let mut usage = TokenUsage::default();
     let mut metrics = None;
     let mut stop_reason = StopReason::EndTurn;
@@ -107,34 +107,6 @@ fn history_message_from_completed_turn_events(
 
     for event in events {
         match event.payload {
-            AgentEventPayload::ItemStarted(started) => {
-                items.push(started.item);
-            }
-            AgentEventPayload::ItemDelta(delta) => {
-                if let Some(item) = items.iter_mut().find(|item| item.item_id == delta.item_id) {
-                    apply_history_delta(item, delta.delta);
-                }
-            }
-            AgentEventPayload::ItemCompleted(item_completed) => {
-                if let Some(item) = items
-                    .iter_mut()
-                    .find(|item| item.item_id == item_completed.item_id)
-                {
-                    item.status = item_completed.status;
-                    item.completed_at_ms = Some(item_completed.completed_at_ms);
-                    if let Some(final_content) = item_completed.final_content {
-                        item.content = final_content;
-                    }
-                }
-            }
-            AgentEventPayload::AssistantTextCommitted(committed) => {
-                if let Some(item) = items
-                    .iter_mut()
-                    .find(|item| item.item_id == committed.item_id)
-                {
-                    item.phase = committed.phase;
-                }
-            }
             AgentEventPayload::TurnCompleted(turn_completed) => {
                 usage = turn_completed.usage;
                 metrics = turn_completed.metrics;
@@ -143,7 +115,11 @@ fn history_message_from_completed_turn_events(
             }
             AgentEventPayload::TurnStarted(_)
             | AgentEventPayload::TurnMetrics(_)
-            | AgentEventPayload::TurnError(_) => {}
+            | AgentEventPayload::TurnError(_)
+            | AgentEventPayload::ItemStarted(_)
+            | AgentEventPayload::ItemDelta(_)
+            | AgentEventPayload::ItemCompleted(_)
+            | AgentEventPayload::AssistantTextCommitted(_) => {}
         }
     }
 
@@ -159,6 +135,47 @@ fn history_message_from_completed_turn_events(
         usage,
         metrics,
     })
+}
+
+pub(crate) fn timeline_items_from_events(events: &[AgentEvent]) -> Vec<TalosTimelineItem> {
+    let mut items = Vec::new();
+    for event in events {
+        match &event.payload {
+            AgentEventPayload::ItemStarted(started) => {
+                items.push(started.item.clone());
+            }
+            AgentEventPayload::ItemDelta(delta) => {
+                if let Some(item) = items.iter_mut().find(|item| item.item_id == delta.item_id) {
+                    apply_history_delta(item, delta.delta.clone());
+                }
+            }
+            AgentEventPayload::ItemCompleted(item_completed) => {
+                if let Some(item) = items
+                    .iter_mut()
+                    .find(|item| item.item_id == item_completed.item_id)
+                {
+                    item.status = item_completed.status;
+                    item.completed_at_ms = Some(item_completed.completed_at_ms);
+                    if let Some(final_content) = &item_completed.final_content {
+                        item.content = final_content.clone();
+                    }
+                }
+            }
+            AgentEventPayload::AssistantTextCommitted(committed) => {
+                if let Some(item) = items
+                    .iter_mut()
+                    .find(|item| item.item_id == committed.item_id)
+                {
+                    item.phase = committed.phase;
+                }
+            }
+            AgentEventPayload::TurnCompleted(_)
+            | AgentEventPayload::TurnStarted(_)
+            | AgentEventPayload::TurnMetrics(_)
+            | AgentEventPayload::TurnError(_) => {}
+        }
+    }
+    items
 }
 
 fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) {

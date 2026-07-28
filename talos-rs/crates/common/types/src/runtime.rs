@@ -15,6 +15,8 @@ pub fn now() -> u64 {
 /// Parameters for cancelling the active turn through the internal runtime boundary.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CancelActiveTurnParams {
+    /// Exhaustive routed or exact Agent binding selected by trusted Service logic.
+    pub binding: crate::agent_dispatch::DispatchBinding,
     /// Prepared session used to resolve the owning agent.
     pub session: crate::session::TalosSession,
     /// Active turn identity from TalosService.
@@ -27,6 +29,9 @@ pub struct CancelActiveTurnParams {
 /// TalosService -> AgentCoordinator dispatch boundary.
 #[async_trait]
 pub trait AgentDispatchRuntime: Send + Sync {
+    /// Validates one exact registered Agent without invoking routing policy.
+    async fn validate_agent_id(&self, agent_id: &str) -> crate::TalosResult<()>;
+
     /// Dispatch a prepared agent request and return a response.
     async fn handle(
         &self,

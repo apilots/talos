@@ -349,7 +349,7 @@ impl SessionStoreAdapter {
     }
 
     fn to_record(&self, session: TalosSession) -> talos_error::TalosResult<SessionRecord> {
-        Ok(SessionRecord::from_session(&session))
+        Ok(SessionRecord::from_session(&session, "default"))
     }
 }
 
@@ -358,7 +358,6 @@ impl SessionStore for SessionStoreAdapter {
     async fn insert_session_record(
         &self,
         _record: &SessionRecord,
-        _agent_id: &str,
         _scope: &str,
     ) -> talos_error::TalosResult<()> {
         Ok(())
@@ -372,6 +371,14 @@ impl SessionStore for SessionStoreAdapter {
             Some(session) => Ok(Some(self.to_record(session)?)),
             None => Ok(None),
         }
+    }
+
+    async fn get_subagent_record(
+        &self,
+        _tree_root_session_id: &str,
+        _agent_path: &talos_types::AgentPath,
+    ) -> talos_error::TalosResult<Option<SessionRecord>> {
+        Ok(None)
     }
 
     async fn list_session_records(
@@ -407,6 +414,13 @@ impl SessionStore for SessionStoreAdapter {
         Ok(SessionSummary::default())
     }
 
+    async fn has_active_subagent_turn(
+        &self,
+        _tree_root_session_id: &str,
+    ) -> talos_error::TalosResult<bool> {
+        Ok(false)
+    }
+
     async fn update_session_record(
         &self,
         _record: &SessionRecord,
@@ -425,6 +439,17 @@ impl SessionStore for SessionStoreAdapter {
 
     async fn delete_session_record(&self, session_id: &str) -> talos_error::TalosResult<bool> {
         Ok(self.service.delete_session(session_id).await?.success)
+    }
+
+    async fn delete_session_tree(
+        &self,
+        tree_root_session_id: &str,
+    ) -> talos_error::TalosResult<bool> {
+        Ok(self
+            .service
+            .delete_session(tree_root_session_id)
+            .await?
+            .success)
     }
 }
 
@@ -489,6 +514,26 @@ impl TimelineEventStore for RecordingEventStore {
             .take(limit)
             .cloned()
             .collect())
+    }
+
+    async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEvent>> {
+        let mut events = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .filter(|event| event.session_id == session_id && event.turn_id == turn_id)
+            .take(limit.max(1))
+            .cloned()
+            .collect::<Vec<_>>();
+        events.reverse();
+        Ok(events)
     }
 
     async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {

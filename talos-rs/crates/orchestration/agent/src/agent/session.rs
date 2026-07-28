@@ -1,4 +1,4 @@
-use super::runtime::AgentRuntimeAbortHandle;
+use super::lifecycle::AgentRuntimeAbortHandle;
 use super::AgentHarnessImpl;
 use crate::AgentSessionCompactionParams;
 use chrono::Utc;
@@ -229,9 +229,12 @@ impl AgentHarnessImpl {
                 Ok(report)
             });
             let abort_handle = AgentRuntimeAbortHandle::new(task.abort_handle());
-            if let Err(error) =
-                self.activate_reserved_turn(&session_id, identity.turn_id.clone(), abort_handle)
-            {
+            if let Err(error) = self.activate_reserved_turn(
+                &session_id,
+                identity.turn_id.clone(),
+                abort_handle,
+                None,
+            ) {
                 task.abort();
                 return Err(error);
             }

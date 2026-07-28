@@ -37,6 +37,7 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
         warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
+        message_rx: None,
     }
 }
 

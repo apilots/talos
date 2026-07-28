@@ -59,6 +59,7 @@ impl<'a> AgentCapabilityValidator<'a> {
 
     /// Validate a non-streaming run request.
     pub fn validate_run(&self, request: &AgentRunParams) -> AgentResult<()> {
+        self.validate_agent_identity(request)?;
         self.validate_run_options(&request.options)?;
         self.validate_model_option_matches_session(request)?;
         if request.resume_context.is_some() {
@@ -78,6 +79,7 @@ impl<'a> AgentCapabilityValidator<'a> {
 
     /// Validate a same-turn continuation request.
     pub fn validate_resume(&self, params: &AgentResumeParams) -> AgentResult<()> {
+        self.validate_agent_identity(&params.run)?;
         self.validate_run_options(&params.run.options)?;
         self.validate_model_option_matches_session(&params.run)?;
         if params.run.resume_context.is_none() {
@@ -105,6 +107,7 @@ impl<'a> AgentCapabilityValidator<'a> {
     pub fn validate_input(&self, params: &AgentInputParams) -> AgentResult<()> {
         match &params.input {
             AgentInput::DynamicToolResult { .. } => self.require(AgentCapability::DynamicInput),
+            AgentInput::Message { .. } => Ok(()),
         }
     }
 
@@ -133,6 +136,16 @@ impl<'a> AgentCapabilityValidator<'a> {
         Err(AgentError::invalid_execution_context(format!(
             "agent `{}` run option model `{}` does not match session model `{}`",
             self.agent_id, selected_model, session_model
+        )))
+    }
+
+    fn validate_agent_identity(&self, request: &AgentRunParams) -> AgentResult<()> {
+        if request.context.agent_id == self.agent_id {
+            return Ok(());
+        }
+        Err(AgentError::invalid_execution_context(format!(
+            "run targets agent `{}` but reached agent `{}`",
+            request.context.agent_id, self.agent_id
         )))
     }
 

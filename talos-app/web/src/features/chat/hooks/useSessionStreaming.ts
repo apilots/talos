@@ -129,7 +129,7 @@ export function useSessionStreaming(
         return;
       }
 
-      if (isAbort || currentStream?.isStreaming) {
+      if (isAbort || (currentStream?.isStreaming && currentStream.activeMessageId)) {
         useAppStore.getState().setStreamError(sessionId, undefined);
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: true,
@@ -141,6 +141,7 @@ export function useSessionStreaming(
         return;
       }
 
+      useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
         error instanceof Error ? error.message : "Failed to stream message.",
@@ -204,6 +205,7 @@ export function useSessionStreaming(
       });
     },
     onError: async (error) => {
+      useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
         error instanceof Error ? error.message : "Failed to retry response.",

@@ -70,6 +70,8 @@ pub async fn execute_general_turn_loop_with_policy(
     }
 
     let (final_text, stop_reason) = loop {
+        let messages = take_running_messages(&prepared)?;
+        apply_running_messages(&mut state, messages);
         enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
         let tool_definitions =
             tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
@@ -86,6 +88,8 @@ pub async fn execute_general_turn_loop_with_policy(
                 execution_mode: execution_settings.tool_execution_mode,
                 execution_context: ToolExecutionContext {
                     session_id: prepared.session_id.clone(),
+                    turn_id: prepared.invocation_id.clone(),
+                    agent_id: prepared.agent_id.clone(),
                     user_id: prepared.user_id.clone(),
                     project_root: prepared.project_root.clone(),
                     kernel_config: kernel_config.clone(),
@@ -102,6 +106,14 @@ pub async fn execute_general_turn_loop_with_policy(
         }
         let step_text = step.text.clone();
         let step_disposition = step.disposition;
+        let mut pending_messages = take_running_messages(&prepared)?;
+        if !pending_messages.is_empty() && step.tool_calls.is_empty() {
+            apply_general_turn_step(&mut state, &step);
+            state.messages.push(ChatMessage::assistant(step_text));
+            apply_running_messages(&mut state, pending_messages);
+            emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
+            continue;
+        }
         if let Some(cause) = should_force_finalization_for_step(&mut tool_loop_guard, &step) {
             let mut messages = prepared.messages.clone();
             messages.extend(state.messages.clone());
@@ -184,6 +196,9 @@ pub async fn execute_general_turn_loop_with_policy(
         if should_inject_read_only_nudge(&tool_loop_guard) {
             state.messages.push(build_read_only_nudge_message());
         }
+        pending_messages.extend(take_running_messages(&prepared)?);
+        let received_messages = !pending_messages.is_empty();
+        apply_running_messages(&mut state, pending_messages);
 
         if let Some(policy_stop) = policy_stop {
             break (policy_stop.output_text, policy_stop.stop_reason);
@@ -192,11 +207,38 @@ pub async fn execute_general_turn_loop_with_policy(
         if !tool_batch.pending_dynamic_requests.is_empty() {
             break (String::new(), StopReason::WaitingDynamicInput);
         }
+        if received_messages {
+            continue;
+        }
     };
 
     let executed = finalize_general_turn_artifacts(state, final_text, stop_reason);
     emit_general_turn_finalization_stream(&prepared, &executed).await;
     Ok(executed)
+}
+
+fn take_running_messages(prepared: &PreparedGeneralTurn) -> TalosResult<Vec<String>> {
+    let Some(receiver) = &prepared.message_rx else {
+        return Ok(Vec::new());
+    };
+    let mut receiver = receiver
+        .lock()
+        .map_err(|_| TalosError::InternalError("active turn message input lock poisoned".into()))?;
+    let mut messages = Vec::new();
+    while let Ok(message) = receiver.try_recv() {
+        messages.push(message);
+    }
+    Ok(messages)
+}
+
+fn apply_running_messages(state: &mut GeneralTurnLoopState, messages: Vec<String>) {
+    for message in messages {
+        state.messages.push(ChatMessage::user(message.clone()));
+        state.output_items.push(RunItem::UserInput {
+            text: message,
+            file_ids: Vec::new(),
+        });
+    }
 }
 
 async fn emit_turn_metrics_stream_event(

@@ -2,11 +2,23 @@ use crate::talos::{RunItem, StopReason, TalosInputItem, TalosReasoning, TokenUsa
 use crate::TalosSession;
 use serde::{Deserialize, Serialize};
 
+/// Deterministic Agent selection at the Service-to-Coordinator boundary.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DispatchBinding {
+    /// Apply the existing Coordinator routing policy.
+    Routed,
+    /// Dispatch only to the named registered Agent.
+    Exact { agent_id: String },
+}
+
 /// Internal request dispatched from TalosService to AgentCoordinator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchParams {
     /// Talos turn id; this is also the internal Agent run identity.
     pub turn_id: String,
+    /// Exhaustive routed or exact Agent binding selected by trusted Service logic.
+    pub binding: DispatchBinding,
     /// Prepared product session used as the single identity and context source.
     ///
     /// Service must merge per-turn product context, such as workspace override
@@ -23,6 +35,8 @@ pub struct AgentDispatchParams {
 /// extend AgentDispatchInput instead of adding parallel submit_* methods.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchInputParams {
+    /// Exhaustive routed or exact Agent binding selected by trusted Service logic.
+    pub binding: DispatchBinding,
     /// Prepared product session used to route the input to the owning Agent.
     pub session: TalosSession,
     /// Talos turn id; this is also the internal Agent run identity.
@@ -45,6 +59,8 @@ pub enum AgentDispatchInput {
         output: String,
         success: bool,
     },
+    /// Message delivered to the exact currently running Agent turn.
+    Message { message: String },
 }
 
 /// Internal continuation context passed from Service to Coordinator/Harness.

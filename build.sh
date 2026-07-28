@@ -143,6 +143,8 @@ copy_conf_resource() {
   local output_dir="$1"
   mkdir -p "${output_dir}/conf"
   cp "${CONF_DIR}/talos-prod.yaml" "${output_dir}/conf/talos.yaml"
+  rm -rf "${output_dir}/conf/migrations"
+  cp -R "${CONF_DIR}/migrations" "${output_dir}/conf/migrations"
 }
 
 cleanup_desktop_package_dir() {

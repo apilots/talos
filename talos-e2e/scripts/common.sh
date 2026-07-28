@@ -423,7 +423,8 @@ start_server() {
   mkdir -p "${SCENARIO_REPORT_DIR}"
   prepare_talos_home
   : > "${SERVER_LOG}"
-  "${TALOS_RS_DIR}/target/debug/talos-server" >>"${SERVER_LOG}" 2>&1 &
+  TALOS_RESOURCE_DIR="${REPO_ROOT}" \
+    "${TALOS_RS_DIR}/target/debug/talos-server" >>"${SERVER_LOG}" 2>&1 &
   export TALOS_SERVER_PID=$!
   if ! wait_for_health 90; then
     echo "Server failed to start. See log: ${SERVER_LOG}" >&2

@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use opendal::services::{Fs, S3};
 use opendal::Operator;
-use talos_config::{Config, FileStorageBackendConfig, FileStorageConfig};
+use talos_config::{
+    install_database_migrations, Config, FileStorageBackendConfig, FileStorageConfig,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{create_storage, SqliteStorage, StorageConfig};
 use talos_store::file::{DatabaseFileStore, FileStore};
@@ -18,13 +20,14 @@ pub(crate) async fn build_application_storage(
     Arc<dyn ProfileStore>,
     Arc<dyn FileStore>,
 )> {
+    let migration_dir = install_database_migrations(config)?;
     let storage = create_storage(&StorageConfig {
         database_type: config.storage.database_type,
         connection_string: config.storage.connection_string.clone(),
         max_connections: config.storage.max_connections,
     })
     .await?;
-    run_migrations(storage.pool()).await?;
+    run_migrations(storage.pool(), &migration_dir).await?;
     let storage = Arc::new(storage);
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));

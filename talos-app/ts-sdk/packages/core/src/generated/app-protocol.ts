@@ -662,6 +662,30 @@ export type TalosRunErrorInfo = { code: TalosRunErrorCode, message: string, };
 
 export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, error_info: TalosRunErrorInfo | null, failed_at_ms: number, };
 
+export type AgentPath = string;
+
+export type AgentTurnRef = { sessionId: string, turnId: string, };
+
+export type SubagentRef = { path: AgentPath, sessionId: string, parent: AgentTurnRef, };
+
+export type SubagentSpawnResult = { subagent: SubagentRef, agentId: string, turn: AgentTurnRef, };
+
+export type SendMessageResult = { subagent: SubagentRef, agentId: string, turn: AgentTurnRef, accepted: boolean, };
+
+export type SubagentOutcome = { "status": "running", turnId: string, } | { "status": "waitingUserAction", turnId: string, } | { "status": "cancelling", turnId: string, } | { "status": "completed", turnId: string, output: string, truncated: boolean, } | { "status": "failed", turnId: string, error: string, truncated: boolean, } | { "status": "interrupted", turnId: string, };
+
+export type SubagentUpdateKind = "commentary" | "finalAnswer";
+
+export type SubagentUpdate = { kind: SubagentUpdateKind, text: string, truncated: boolean, };
+
+export type SubagentSnapshot = { subagent: SubagentRef, agentId: string, latestUpdate: SubagentUpdate | null, outcome: SubagentOutcome, };
+
+export type AgentTreeNode = { snapshot: SubagentSnapshot, children: Array<AgentTreeNode>, };
+
+export type AgentTreeSnapshot = { children: Array<AgentTreeNode>, };
+
+export type CollaborationToolResult = { "operation": "spawnAgent", "result": SubagentSpawnResult } | { "operation": "sendMessage", "result": SendMessageResult } | { "operation": "waitAgent", "result": SubagentSnapshot } | { "operation": "interruptAgent", "result": SubagentSnapshot } | { "operation": "followupTask", "result": SubagentSnapshot } | { "operation": "listAgents", "result": AgentTreeSnapshot };
+
 export type JsonContentValue = { value: unknown, };
 
 export type ToolArguments = { value: unknown, };
@@ -670,7 +694,7 @@ export type DynamicToolArguments = { value: unknown, };
 
 export type ToolExecutionResult = { value: unknown, };
 
-export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: JsonContentValue, } | { "type": "file_read", path: string, offset: number, limit: number, total_lines: number, content: string, truncated: boolean, } | { "type": "diff", files: Array<TalosToolFileDiff>, } | { "type": "search_results", query: string | null, matches: Array<TalosToolSearchMatch>, offset: number, limit: number, total_matches: number | null, more_available: boolean, partial: boolean, } | { "type": "bash_output", session_id: number | null, status: TalosToolTaskStatus, exit_code: number | null, stdout: string, stderr: string, truncated: boolean, elapsed_ms: number | null, } | { "type": "web_reference", url: string, title: string | null, citation_id: string | null, snippet: string | null, source_domain: string | null, published_at: string | null, provider_rank: number | null, } | { "type": "artifact_ref", artifact_id: string, mime_type: string | null, label: string | null, } | { "type": "mcp_resource_ref", server: string, uri: string, mime_type: string | null, } | { "type": "progress", message: string, elapsed_ms: number | null, };
+export type TalosContentItem = { "type": "text", text: string, } | { "type": "json", value: JsonContentValue, } | { "type": "subagent_result", result: CollaborationToolResult, } | { "type": "file_read", path: string, offset: number, limit: number, total_lines: number, content: string, truncated: boolean, } | { "type": "diff", files: Array<TalosToolFileDiff>, } | { "type": "search_results", query: string | null, matches: Array<TalosToolSearchMatch>, offset: number, limit: number, total_matches: number | null, more_available: boolean, partial: boolean, } | { "type": "bash_output", session_id: number | null, status: TalosToolTaskStatus, exit_code: number | null, stdout: string, stderr: string, truncated: boolean, elapsed_ms: number | null, } | { "type": "web_reference", url: string, title: string | null, citation_id: string | null, snippet: string | null, source_domain: string | null, published_at: string | null, provider_rank: number | null, } | { "type": "artifact_ref", artifact_id: string, mime_type: string | null, label: string | null, } | { "type": "mcp_resource_ref", server: string, uri: string, mime_type: string | null, } | { "type": "progress", message: string, elapsed_ms: number | null, };
 
 export type TalosToolTaskStatus = "queued" | "running" | "completed" | "failed" | "timed_out" | "cancelled";
 

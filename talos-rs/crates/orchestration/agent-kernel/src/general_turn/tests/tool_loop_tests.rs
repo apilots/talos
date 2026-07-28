@@ -627,6 +627,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
+        message_rx: None,
     };
 
     let result = execute_general_turn_loop_with_policy(
@@ -710,6 +711,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
+        message_rx: None,
     };
     let resume = GeneralTurnResume::DynamicToolResult(DynamicToolResultResume {
         call_id: "call_dynamic".to_string(),

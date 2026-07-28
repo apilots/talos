@@ -342,6 +342,8 @@ pub async fn execute_general_turn_tool_batch(
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
         session_id: prepared.session_id.clone(),
+        turn_id: prepared.invocation_id.clone(),
+        agent_id: prepared.agent_id.clone(),
         user_id: user_id.to_string(),
         project_root: prepared.project_root.clone(),
         kernel_config,

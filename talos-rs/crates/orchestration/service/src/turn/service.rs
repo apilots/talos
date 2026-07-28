@@ -10,7 +10,7 @@ use talos_store::session::{
 };
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
-    AgentDispatchResumeToolCall,
+    AgentDispatchResumeToolCall, DispatchBinding,
 };
 use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem, TalosTurnErrorEvent};
 use talos_types::{ModelRef, StartTurnRequest, TalosConfig, TalosSession};
@@ -26,6 +26,9 @@ use super::{
     result_from_idempotency_record, retry_idempotency_key, turn_submission_hash,
     validate_retry_request, validate_user_input, TurnExecutor, TurnRetryParams,
 };
+
+#[path = "service_subagent.rs"]
+mod subagent;
 
 #[derive(Clone)]
 struct ProfileTurnContext {
@@ -48,6 +51,7 @@ pub struct TurnService {
 struct TurnSubmission {
     input: Vec<TalosInputItem>,
     workspace_id: Option<String>,
+    binding: DispatchBinding,
 }
 
 struct ActiveResumeContext {
@@ -57,6 +61,17 @@ struct ActiveResumeContext {
 }
 
 impl TurnService {
+    async fn session_binding(&self, session_id: &str) -> TalosResult<DispatchBinding> {
+        let record = self
+            .sessions
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+        Ok(DispatchBinding::Exact {
+            agent_id: record.agent_id,
+        })
+    }
+
     pub fn new(
         executor: Arc<dyn TurnExecutor>,
         event_service: Arc<TimelineEventService>,
@@ -260,11 +275,13 @@ impl TurnService {
         idempotency_key: Option<String>,
     ) -> TalosResult<MessageCommandResult> {
         Self::validate_start_turn_request(&request)?;
+        let binding = self.session_binding(&session.context.session_id).await?;
         self.submit_turn(
             session,
             TurnSubmission {
                 input: request.input,
                 workspace_id: request.workspace_id,
+                binding,
             },
             idempotency_key,
         )
@@ -325,6 +342,7 @@ impl TurnService {
 
         let dispatch_request = AgentDispatchParams {
             turn_id: turn_id.clone(),
+            binding: submission.binding.clone(),
             session: Self::session_for_turn_dispatch(&session, submission.workspace_id.clone()),
             resume_context: None,
             input: submission.input.clone(),
@@ -360,6 +378,7 @@ impl TurnService {
                 if let Err(err) = self
                     .session_runtime
                     .cancel_active_turn(talos_types::CancelActiveTurnParams {
+                        binding: submission.binding.clone(),
                         session: session.clone(),
                         turn_id: turn_id.clone(),
                     })
@@ -442,9 +461,11 @@ impl TurnService {
         let resume = self
             .pending_dynamic_resume_context(&session_id, call_id, tool_name)
             .await?;
+        let binding = self.session_binding(&session_id).await?;
         let turn_id = resume.turn_id.clone();
         self.executor
             .submit_input(AgentDispatchInputParams {
+                binding: binding.clone(),
                 session: session.clone(),
                 turn_id,
                 input: AgentDispatchInput::DynamicToolResult {
@@ -459,7 +480,8 @@ impl TurnService {
             .resolve_pending_user_action(&session_id)
             .await
             .map_err(|err| TalosError::StorageError(format!("active turn update failed: {err}")))?;
-        self.resume_after_user_action(session, resume).await
+        self.resume_after_user_action(session, resume, binding)
+            .await
     }
 
     pub async fn submit_retry(
@@ -488,11 +510,13 @@ impl TurnService {
         }
 
         self.validate_retry_attempt(&session_id, &request).await?;
+        let binding = self.session_binding(&session_id).await?;
         self.submit_turn(
             session,
             TurnSubmission {
                 input: request.input,
                 workspace_id: request.workspace_id,
+                binding,
             },
             Some(idempotency_key),
         )
@@ -550,12 +574,14 @@ impl TurnService {
         &self,
         session: TalosSession,
         resume: ActiveResumeContext,
+        binding: DispatchBinding,
     ) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let turn_id = resume.turn_id;
         let dispatch_request = AgentDispatchParams {
             turn_id: turn_id.clone(),
+            binding,
             session: Self::session_for_resume_dispatch(&session, resume.message_id),
             resume_context: resume.gateway_resume,
             input: Vec::new(),

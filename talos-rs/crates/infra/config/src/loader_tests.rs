@@ -79,3 +79,65 @@ fn first_run_config_copy_fails_when_resource_template_is_missing() {
     assert!(err.to_string().contains("missing default config template"));
     assert!(err.to_string().contains("TALOS_RESOURCE_DIR"));
 }
+
+#[test]
+fn migration_install_replaces_only_the_managed_directory() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let paths = TalosPaths::from_home(dir.path().join(".talos"));
+    paths
+        .ensure_base_dirs()
+        .expect("base dirs should be created");
+    std::fs::write(&paths.config_file, "custom: true\n").expect("config should be written");
+
+    let existing = paths.conf_dir.join("migrations").join("sqlite");
+    std::fs::create_dir_all(&existing).expect("existing migrations should be created");
+    std::fs::write(existing.join("obsolete.sql"), "SELECT 0;")
+        .expect("obsolete migration should be written");
+
+    let source = dir.path().join("release").join("conf").join("migrations");
+    std::fs::create_dir_all(source.join("sqlite")).expect("sqlite source should be created");
+    std::fs::create_dir_all(source.join("postgres")).expect("postgres source should be created");
+    std::fs::write(source.join("sqlite").join("001_init.sql"), "SELECT 1;")
+        .expect("sqlite migration should be written");
+    std::fs::write(source.join("postgres").join("README.md"), "Reserved")
+        .expect("postgres marker should be written");
+
+    let selected = replace_migration_resources_from_candidates(
+        &paths,
+        crate::DatabaseType::Sqlite,
+        vec![source],
+    )
+    .expect("migration resources should install");
+
+    assert_eq!(selected, paths.conf_dir.join("migrations").join("sqlite"));
+    assert_eq!(
+        std::fs::read_to_string(&paths.config_file).expect("config should remain readable"),
+        "custom: true\n"
+    );
+    assert!(!selected.join("obsolete.sql").exists());
+    assert!(selected.join("001_init.sql").is_file());
+    assert!(paths
+        .conf_dir
+        .join("migrations")
+        .join("postgres")
+        .join("README.md")
+        .is_file());
+}
+
+#[test]
+fn migration_install_returns_the_configured_backend_directory() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let paths = TalosPaths::from_home(dir.path().join(".talos"));
+    let source = dir.path().join("release").join("conf").join("migrations");
+    std::fs::create_dir_all(source.join("sqlite")).expect("sqlite source should be created");
+    std::fs::create_dir_all(source.join("postgres")).expect("postgres source should be created");
+
+    let selected = replace_migration_resources_from_candidates(
+        &paths,
+        crate::DatabaseType::Postgres,
+        vec![source],
+    )
+    .expect("postgres migration path should resolve");
+
+    assert_eq!(selected, paths.conf_dir.join("migrations").join("postgres"));
+}

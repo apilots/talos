@@ -4,6 +4,8 @@ use std::{fmt, path::PathBuf};
 use ts_rs::TS;
 use uuid::Uuid;
 
+use crate::subagent::CollaborationToolResult;
+
 pub use crate::event_api::{
     ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger,
@@ -389,6 +391,9 @@ pub enum TalosContentItem {
     Json {
         value: JsonContentValue,
     },
+    SubagentResult {
+        result: CollaborationToolResult,
+    },
     FileRead {
         path: String,
         offset: usize,
@@ -513,98 +518,6 @@ pub struct TalosToolSearchMatch {
     pub before: Vec<String>,
     #[serde(default)]
     pub after: Vec<String>,
-}
-
-impl TalosContentItem {
-    pub fn display_text(&self) -> String {
-        match self {
-            Self::Text { text } => text.clone(),
-            Self::Json { value } => value.to_string(),
-            Self::FileRead { content, .. } => content.clone(),
-            Self::Diff { files } => format!("diff: {} file(s)", files.len()),
-            Self::SearchResults {
-                matches,
-                more_available,
-                partial,
-                ..
-            } => {
-                let suffix = if *partial {
-                    " partial"
-                } else if *more_available {
-                    " more_available"
-                } else {
-                    ""
-                };
-                format!("search_results: {} match(es){suffix}", matches.len())
-            }
-            Self::BashOutput {
-                stdout,
-                stderr,
-                exit_code,
-                status,
-                ..
-            } => {
-                let mut parts = Vec::new();
-                if !stdout.trim().is_empty() {
-                    parts.push(stdout.trim().to_string());
-                }
-                if !stderr.trim().is_empty() {
-                    parts.push(stderr.trim().to_string());
-                }
-                if parts.is_empty() {
-                    parts.push(format!("bash: {:?} exit_code={exit_code:?}", status));
-                }
-                parts.join("\n")
-            }
-            Self::WebReference {
-                url,
-                title,
-                citation_id,
-                snippet,
-                ..
-            } => format!(
-                "web_reference: {}{}{}{}",
-                title.as_deref().unwrap_or(url),
-                title
-                    .as_ref()
-                    .map(|_| format!(" ({url})"))
-                    .unwrap_or_default(),
-                citation_id
-                    .as_ref()
-                    .map(|id| format!(" [{id}]"))
-                    .unwrap_or_default(),
-                snippet
-                    .as_ref()
-                    .filter(|value| !value.trim().is_empty())
-                    .map(|value| format!("\n{value}"))
-                    .unwrap_or_default()
-            ),
-            Self::ArtifactRef {
-                artifact_id,
-                label,
-                mime_type,
-            } => format!(
-                "artifact: {}{}",
-                label.as_deref().unwrap_or(artifact_id),
-                mime_type
-                    .as_ref()
-                    .map(|mime| format!(" ({mime})"))
-                    .unwrap_or_default()
-            ),
-            Self::McpResourceRef {
-                server,
-                uri,
-                mime_type,
-            } => format!(
-                "mcp_resource: {server}:{uri}{}",
-                mime_type
-                    .as_ref()
-                    .map(|mime| format!(" ({mime})"))
-                    .unwrap_or_default()
-            ),
-            Self::Progress { message, .. } => message.clone(),
-        }
-    }
 }
 
 /// Structured item produced while executing an agent run.

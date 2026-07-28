@@ -48,6 +48,8 @@ pub struct AgentSessionCompactionParams {
 /// Gateway DTOs, or a complete TalosSession.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentRunContext {
+    /// Stable identity selected by Coordinator for this Agent run.
+    pub agent_id: String,
     /// Product session id associated with this Agent run.
     pub session_id: String,
     /// Talos turn id; this is also the internal Agent run identity.
@@ -75,8 +77,9 @@ pub struct AgentRunContext {
 
 impl AgentRunContext {
     /// Build the minimal Agent run context from a prepared Talos session.
-    pub fn from_session(session: &TalosSession, turn_id: String) -> Self {
+    pub fn from_session(session: &TalosSession, turn_id: String, agent_id: String) -> Self {
         Self {
+            agent_id,
             session_id: session.context.session_id.clone(),
             turn_id,
             message_id: session.context.message_id.clone(),
@@ -357,6 +360,8 @@ pub enum AgentInput {
         output: String,
         success: bool,
     },
+    /// Message for the exact currently running Agent turn.
+    Message { message: String },
 }
 
 /// Result of delivering structured input to AgentHarness.

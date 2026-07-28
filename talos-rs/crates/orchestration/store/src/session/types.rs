@@ -2,11 +2,13 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{SessionConf, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{AgentPath, AgentTurnRef, SessionConf, TalosSession, DEFAULT_SESSION_TITLE};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionRecord {
     pub id: String,
+    pub agent_id: String,
+    pub tree_identity: SessionTreeIdentity,
     #[serde(default)]
     pub workspace_id: Option<String>,
     pub title: String,
@@ -30,12 +32,27 @@ pub struct SessionRecord {
     pub current_directory: Option<PathBuf>,
 }
 
+/// Exhaustive persisted identity of a Primary or Subagent Session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionTreeIdentity {
+    #[default]
+    Primary,
+    Subagent {
+        parent: AgentTurnRef,
+        tree_root_session_id: String,
+        path: AgentPath,
+    },
+}
+
 impl SessionRecord {
-    pub fn from_session(session: &TalosSession) -> Self {
+    pub fn from_session(session: &TalosSession, agent_id: impl Into<String>) -> Self {
         let effective_model = session.config.llm.model.clone();
 
         Self {
             id: session.context.session_id.clone(),
+            agent_id: agent_id.into(),
+            tree_identity: SessionTreeIdentity::Primary,
             workspace_id: session.context.workspace_id.clone(),
             title: session.title.clone(),
             user_id: session.user_id.clone(),
@@ -69,8 +86,20 @@ impl SessionRecord {
     }
 }
 
+/// Selects the persisted Session tree relation for one Store query.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SessionTreeScope {
+    Primary,
+    SubagentTree {
+        tree_root_session_id: String,
+    },
+    #[default]
+    All,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SessionQuery {
+    pub tree_scope: SessionTreeScope,
     pub user_id: Option<String>,
     pub channel_id: Option<String>,
     pub provider: Option<String>,

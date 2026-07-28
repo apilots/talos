@@ -18,6 +18,7 @@ vi.hoisted(() => {
 });
 
 const mocks = vi.hoisted(() => ({
+  activeTurn: undefined as unknown,
   createInitialTurnRequest: vi.fn(() => ({
     session_id: "session-1",
     input: [{ type: "files", fileIds: ["file-1"] }],
@@ -33,7 +34,7 @@ vi.mock("../api", () => ({
 }));
 
 vi.mock("./useChatQueries", () => ({
-  useActiveTurnQuery: () => ({ data: undefined, error: undefined }),
+  useActiveTurnQuery: () => ({ data: mocks.activeTurn, error: undefined }),
   useLiveRecoveryQuery: () => ({ data: undefined }),
   useSessionHistoryQuery: () => ({
     data: { last_stable_event_id: null, messages: [] },
@@ -70,6 +71,7 @@ describe("useChatSession", () => {
     mocks.send.mockClear();
     mocks.createInitialTurnRequest.mockClear();
     mocks.timeline.mockClear();
+    mocks.activeTurn = undefined;
     useAppStore.getState().resetStream("session-1");
   });
 
@@ -83,7 +85,7 @@ describe("useChatSession", () => {
     expect(result.current.draft).toBe("keep this input");
   });
 
-  it("starts the new session timeline after the first turn is accepted", () => {
+  it("starts the new session timeline while the local turn is streaming", () => {
     const { rerender } = renderHook(() => useChatSession("session-1"));
 
     expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, false);
@@ -91,11 +93,28 @@ describe("useChatSession", () => {
     act(() => {
       useAppStore.getState().setStreamMeta("session-1", {
         activeMessageId: "message-1",
+        isStreaming: true,
       });
     });
     rerender();
 
     expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, true);
+  });
+
+  it("does not replay the timeline for a completed historical session", () => {
+    mocks.activeTurn = {
+      session_id: "session-1",
+      turn_id: "turn-1",
+      message_id: "message-1",
+      status: "completed",
+      last_event_id: "event-1",
+      pending_user_action: null,
+      updated_at: 1,
+    };
+
+    renderHook(() => useChatSession("session-1", 1));
+
+    expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, false);
   });
 
   it("allows an attachment-only turn and forwards ordered file ids", async () => {

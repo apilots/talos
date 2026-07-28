@@ -1,13 +1,16 @@
-use sqlx::SqlitePool;
+use talos_storage::SqliteStorage;
 use talos_types::{ModelRef, StopReason, TokenUsage};
 
-use crate::migration::run_migrations;
+use crate::migration::{run_migrations, test_migrations_dir};
 
 use super::{DatabaseProfileStore, ProfileStore, TurnUsageUpdate};
 
 async fn store() -> DatabaseProfileStore {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
     DatabaseProfileStore::new(pool)
 }
 

@@ -3,7 +3,7 @@ use crate::{KernelStreamEventData, ToolProgressKind, ToolStreamKey};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use talos_tools::spec::ToolBehaviorFlags;
 use talos_tools::{register_core_local_tools, Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use tokio::sync::mpsc;
@@ -13,6 +13,37 @@ struct ObservedDelayTool {
     name: &'static str,
     concurrent: Arc<AtomicUsize>,
     max_concurrent: Arc<AtomicUsize>,
+}
+
+struct AgentIdentityTool {
+    observed_agent_id: Arc<Mutex<Option<String>>>,
+}
+
+#[async_trait]
+impl Tool for AgentIdentityTool {
+    fn name(&self) -> &str {
+        "Read"
+    }
+
+    fn description(&self) -> &str {
+        "Observe the trusted Agent identity"
+    }
+
+    fn parameters_schema(&self) -> Option<Value> {
+        Some(json!({ "type": "object", "additionalProperties": false }))
+    }
+
+    async fn execute_payload(
+        &self,
+        _input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        self.observed_agent_id
+            .lock()
+            .unwrap()
+            .replace(context.agent_id().unwrap_or_default().to_string());
+        Ok(ToolOutputPayload::success_text("ok"))
+    }
 }
 
 #[async_trait]
@@ -68,6 +99,42 @@ impl Tool for ObservedDelayTool {
 }
 
 #[tokio::test]
+async fn tool_execution_context_propagates_the_trusted_agent_id() {
+    let registry = Arc::new(ToolRegistry::new());
+    let observed_agent_id = Arc::new(Mutex::new(None));
+    registry.register(Arc::new(AgentIdentityTool {
+        observed_agent_id: observed_agent_id.clone(),
+    }));
+    let execution_context = ToolExecutionContext {
+        session_id: "s1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "reviewer".to_string(),
+        user_id: "u1".to_string(),
+        project_root: None,
+        kernel_config: Arc::new(AgentKernelConfig::default()),
+        dynamic_tool_results: HashMap::new(),
+    };
+
+    SequentialToolExecutor
+        .execute(
+            &execution_context,
+            registry,
+            &[ToolExecutionInput {
+                call_id: "call-1".to_string(),
+                tool_name: "Read".to_string(),
+                arguments: json!({}),
+            }],
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        observed_agent_id.lock().unwrap().as_deref(),
+        Some("reviewer")
+    );
+}
+
+#[tokio::test]
 async fn test_parallel_tool_executor_preserves_input_order() {
     let registry = Arc::new(ToolRegistry::new());
     let concurrent = Arc::new(AtomicUsize::new(0));
@@ -80,6 +147,8 @@ async fn test_parallel_tool_executor_preserves_input_order() {
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
         session_id: "s1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-1".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
@@ -136,6 +205,8 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
     let executor = ParallelToolExecutor;
     let execution_context = ToolExecutionContext {
         session_id: "s1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-1".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
@@ -178,6 +249,8 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
     let (stream_tx, mut stream_rx) = mpsc::channel(16);
     let execution_context = ToolExecutionContext {
         session_id: "s1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-1".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),

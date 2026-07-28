@@ -48,7 +48,12 @@ impl Default for ToolPolicy {
                 "EnterPlanMode".to_string(),
                 "ExitPlanMode".to_string(),
                 "AskUserQuestion".to_string(),
-                "Agent".to_string(),
+                "spawn_agent".to_string(),
+                "send_message".to_string(),
+                "followup_task".to_string(),
+                "wait_agent".to_string(),
+                "interrupt_agent".to_string(),
+                "list_agents".to_string(),
             ]
             .into_iter()
             .collect(),

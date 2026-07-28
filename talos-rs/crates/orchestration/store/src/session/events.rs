@@ -63,6 +63,14 @@ pub trait TimelineEventStore: Send + Sync {
         limit: usize,
     ) -> TalosResult<Vec<AgentEvent>>;
 
+    /// Lists the latest bounded event projection for one exact Turn in event order.
+    async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEvent>>;
+
     async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>>;
 
     async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>>;
@@ -184,6 +192,33 @@ impl TimelineEventStore for DatabaseSessionStore {
                 LIMIT ?
                 "#,
                 &[session_id, after_seq.as_str(), limit.as_str()],
+            )
+            .await?;
+        rows.iter().map(parse_event_row).collect()
+    }
+
+    async fn list_turn_events(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        limit: usize,
+    ) -> TalosResult<Vec<AgentEvent>> {
+        let limit = limit.max(1).to_string();
+        let rows = self
+            .storage
+            .query(
+                r#"
+                SELECT event_seq, session_id, turn_id, message_id, sequence, event_type, payload_json, created_at_ms
+                FROM (
+                    SELECT event_seq, session_id, turn_id, message_id, sequence, event_type, payload_json, created_at_ms
+                    FROM timeline_events
+                    WHERE session_id = ? AND turn_id = ?
+                    ORDER BY event_seq DESC
+                    LIMIT ?
+                )
+                ORDER BY event_seq ASC
+                "#,
+                &[session_id, turn_id, limit.as_str()],
             )
             .await?;
         rows.iter().map(parse_event_row).collect()

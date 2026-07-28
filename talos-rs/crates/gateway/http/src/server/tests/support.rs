@@ -1,6 +1,7 @@
 use super::*;
 use opendal::{services::Memory, Operator};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Mutex;
 use talos_service::FileService;
 use talos_store::file::DatabaseFileStore;
@@ -20,12 +21,13 @@ pub(crate) async fn test_file_service(
     projects: std::sync::Arc<dyn ProjectStore>,
     config: talos_config::FileStorageConfig,
 ) -> std::sync::Arc<FileService> {
-    let pool = sqlx::sqlite::SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+    let storage = talos_storage::SqliteStorage::new_with_max_connections(":memory:", 1)
         .await
         .unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
+    run_migrations(&pool, &migration_dir).await.unwrap();
     let operator = Operator::new(Memory::default()).unwrap().finish();
     std::sync::Arc::new(
         FileService::new(
@@ -58,6 +60,10 @@ fn test_timeline_event(
 
 #[async_trait::async_trait]
 impl TurnExecutor for MockGateway {
+    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn start_turn_stream(
         &self,
         _request: AgentDispatchParams,
@@ -181,6 +187,10 @@ impl TurnExecutor for MockGateway {
 
 #[async_trait::async_trait]
 impl TurnExecutor for SilentGateway {
+    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn start_turn_stream(
         &self,
         _request: AgentDispatchParams,

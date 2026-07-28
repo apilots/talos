@@ -4,20 +4,24 @@ use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
+use talos_types::{AgentPath, SessionConf, DEFAULT_SESSION_TITLE};
 
-use super::{SessionQuery, SessionRecord, SessionSummary};
+use super::{
+    ActiveTurnStatus, SessionQuery, SessionRecord, SessionSummary, SessionTreeIdentity,
+    SessionTreeScope,
+};
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {
-    async fn insert_session_record(
-        &self,
-        record: &SessionRecord,
-        agent_id: &str,
-        scope: &str,
-    ) -> TalosResult<()>;
+    async fn insert_session_record(&self, record: &SessionRecord, scope: &str) -> TalosResult<()>;
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>>;
+
+    async fn get_subagent_record(
+        &self,
+        tree_root_session_id: &str,
+        agent_path: &AgentPath,
+    ) -> TalosResult<Option<SessionRecord>>;
 
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>>;
 
@@ -25,6 +29,9 @@ pub trait SessionStore: Send + Sync {
 
     /// Returns current Session and Message counts for one owner.
     async fn summarize_sessions(&self, user_id: &str) -> TalosResult<SessionSummary>;
+
+    /// Returns whether one Session tree contains a non-terminal child Turn.
+    async fn has_active_subagent_turn(&self, tree_root_session_id: &str) -> TalosResult<bool>;
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool>;
 
@@ -37,6 +44,9 @@ pub trait SessionStore: Send + Sync {
     ) -> TalosResult<()>;
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool>;
+
+    /// Deletes one Primary Session and every Session in its Agent tree.
+    async fn delete_session_tree(&self, tree_root_session_id: &str) -> TalosResult<bool>;
 }
 
 pub struct DatabaseSessionStore {
@@ -45,12 +55,11 @@ pub struct DatabaseSessionStore {
 
 impl DatabaseSessionStore {
     pub async fn new(storage: Arc<dyn Storage>) -> TalosResult<Self> {
-        storage.init_schema().await?;
         Ok(Self { storage })
     }
 
     async fn fetch_session_row(&self, session_key: &str) -> TalosResult<Option<Row>> {
-        let sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
+        let sql = "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE session_key = ?";
         let rows = self.storage.query(sql, &[session_key]).await?;
         Ok(rows.into_iter().next())
     }
@@ -85,10 +94,55 @@ impl DatabaseSessionStore {
             .unwrap_or_default();
 
         let id = row.get_string("session_key").unwrap_or_default();
+        let parent_session_id =
+            Self::normalized_optional_string(row.get_string("parent_session_id"));
+        let parent_turn_id = Self::normalized_optional_string(row.get_string("parent_turn_id"));
+        let tree_root_session_id =
+            Self::normalized_optional_string(row.get_string("tree_root_session_id"));
+        let agent_path = Self::normalized_optional_string(row.get_string("agent_path"))
+            .map(|path| {
+                path.parse::<AgentPath>().map_err(|error| {
+                    TalosError::SerializationError(format!(
+                        "session '{id}' has invalid agent path: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
+        let tree_identity = match (
+            parent_session_id,
+            parent_turn_id,
+            tree_root_session_id,
+            agent_path,
+        ) {
+            (None, None, None, None) => SessionTreeIdentity::Primary,
+            (Some(session_id), Some(turn_id), Some(tree_root_session_id), Some(path)) => {
+                SessionTreeIdentity::Subagent {
+                    parent: talos_types::AgentTurnRef {
+                        session_id,
+                        turn_id,
+                    },
+                    tree_root_session_id,
+                    path,
+                }
+            }
+            _ => {
+                return Err(TalosError::SerializationError(format!(
+                    "session '{id}' has incomplete subagent tree identity"
+                )));
+            }
+        };
         let conf = Self::parse_conf_json(row.get_string("conf_json"), &id)?;
+        let agent_id =
+            Self::normalized_optional_string(row.get_string("agent_id")).ok_or_else(|| {
+                TalosError::SerializationError(format!(
+                    "session '{id}' is missing its agent binding"
+                ))
+            })?;
 
         Ok(SessionRecord {
             id,
+            agent_id,
+            tree_identity,
             workspace_id: Self::normalized_optional_string(row.get_string("workspace_id")),
             title: row
                 .get_string("title")
@@ -165,6 +219,23 @@ impl DatabaseSessionStore {
             .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
     }
 
+    fn append_tree_scope(
+        scope: &SessionTreeScope,
+        clauses: &mut Vec<&'static str>,
+        params: &mut Vec<String>,
+    ) {
+        match scope {
+            SessionTreeScope::Primary => clauses.push("NULLIF(parent_session_id, '') IS NULL"),
+            SessionTreeScope::SubagentTree {
+                tree_root_session_id,
+            } => {
+                clauses.push("tree_root_session_id = ?");
+                params.push(tree_root_session_id.clone());
+            }
+            SessionTreeScope::All => {}
+        }
+    }
+
     fn record_update_row(record: &SessionRecord) -> TalosResult<Row> {
         Ok(Row::new(
             vec![
@@ -211,12 +282,21 @@ impl DatabaseSessionStore {
 
 #[async_trait]
 impl SessionStore for DatabaseSessionStore {
-    async fn insert_session_record(
-        &self,
-        record: &SessionRecord,
-        agent_id: &str,
-        scope: &str,
-    ) -> TalosResult<()> {
+    async fn insert_session_record(&self, record: &SessionRecord, scope: &str) -> TalosResult<()> {
+        let (parent_session_id, parent_turn_id, tree_root_session_id, agent_path) =
+            match &record.tree_identity {
+                SessionTreeIdentity::Primary => (None, None, None, None),
+                SessionTreeIdentity::Subagent {
+                    parent,
+                    tree_root_session_id,
+                    path,
+                } => (
+                    Some(parent.session_id.clone()),
+                    Some(parent.turn_id.clone()),
+                    Some(tree_root_session_id.clone()),
+                    Some(path.to_string()),
+                ),
+            };
         let row = Row::new(
             vec![
                 "session_key".to_string(),
@@ -225,6 +305,10 @@ impl SessionStore for DatabaseSessionStore {
                 "scope".to_string(),
                 "peer_id".to_string(),
                 "agent_id".to_string(),
+                "parent_session_id".to_string(),
+                "parent_turn_id".to_string(),
+                "tree_root_session_id".to_string(),
+                "agent_path".to_string(),
                 "account_id".to_string(),
                 "thread_id".to_string(),
                 "created_at".to_string(),
@@ -252,7 +336,13 @@ impl SessionStore for DatabaseSessionStore {
                     .unwrap_or(Value::Null),
                 Value::String(scope.to_string()),
                 Value::String(record.user_id.clone()),
-                Value::String(agent_id.to_string()),
+                Value::String(record.agent_id.clone()),
+                parent_session_id.map(Value::String).unwrap_or(Value::Null),
+                parent_turn_id.map(Value::String).unwrap_or(Value::Null),
+                tree_root_session_id
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+                agent_path.map(Value::String).unwrap_or(Value::Null),
                 Value::Null,
                 record
                     .context
@@ -296,10 +386,26 @@ impl SessionStore for DatabaseSessionStore {
         row.as_ref().map(Self::parse_session_record).transpose()
     }
 
+    async fn get_subagent_record(
+        &self,
+        tree_root_session_id: &str,
+        agent_path: &AgentPath,
+    ) -> TalosResult<Option<SessionRecord>> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions WHERE tree_root_session_id = ? AND agent_path = ?",
+                &[tree_root_session_id, agent_path.as_str()],
+            )
+            .await?;
+        rows.first().map(Self::parse_session_record).transpose()
+    }
+
     async fn list_session_records(&self, query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
-        let mut sql = "SELECT session_key, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
+        let mut sql = "SELECT session_key, agent_id, parent_session_id, parent_turn_id, tree_root_session_id, agent_path, title, user_id, channel, thread_id, created_at, last_activity, context_json, model, message_count, latest_turn_seq, memory_processed_until_seq, usage_json, conf_json, workspace_id, project_id, current_directory FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
+        Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
         if let Some(user_id) = query.user_id.as_deref() {
             clauses.push("user_id = ?");
             params.push(user_id.to_string());
@@ -365,6 +471,7 @@ impl SessionStore for DatabaseSessionStore {
         let mut sql = "SELECT COUNT(*) as total FROM sessions".to_string();
         let mut clauses = Vec::new();
         let mut params = Vec::new();
+        Self::append_tree_scope(&query.tree_scope, &mut clauses, &mut params);
         if let Some(user_id) = query.user_id.as_deref() {
             clauses.push("user_id = ?");
             params.push(user_id.to_string());
@@ -403,7 +510,7 @@ impl SessionStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT COUNT(*) AS session_count, COALESCE(SUM(message_count), 0) AS message_count FROM sessions WHERE user_id = ?",
+                "SELECT COUNT(*) AS session_count, COALESCE(SUM(message_count), 0) AS message_count FROM sessions WHERE user_id = ? AND NULLIF(parent_session_id, '') IS NULL",
                 &[user_id],
             )
             .await?;
@@ -432,6 +539,22 @@ impl SessionStore for DatabaseSessionStore {
                 )
             })?,
         })
+    }
+
+    async fn has_active_subagent_turn(&self, tree_root_session_id: &str) -> TalosResult<bool> {
+        let rows = self
+            .storage
+            .query(
+                "SELECT 1 AS active FROM sessions AS child INNER JOIN active_turns AS turn ON turn.session_id = child.session_key WHERE child.tree_root_session_id = ? AND turn.status IN (?, ?, ?) LIMIT 1",
+                &[
+                    tree_root_session_id,
+                    ActiveTurnStatus::Running.as_str(),
+                    ActiveTurnStatus::WaitingUserAction.as_str(),
+                    ActiveTurnStatus::Cancelling.as_str(),
+                ],
+            )
+            .await?;
+        Ok(!rows.is_empty())
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
@@ -501,18 +624,21 @@ impl SessionStore for DatabaseSessionStore {
     }
 
     async fn delete_session_record(&self, session_id: &str) -> TalosResult<bool> {
-        self.storage
-            .delete("timeline_events", "session_id = ?", &[session_id])
-            .await?;
-        self.storage
-            .delete("active_turns", "session_id = ?", &[session_id])
-            .await?;
-        self.storage
-            .delete("message_idempotency_keys", "session_id = ?", &[session_id])
-            .await?;
         let affected = self
             .storage
             .delete("sessions", "session_key = ?", &[session_id])
+            .await?;
+        Ok(affected > 0)
+    }
+
+    async fn delete_session_tree(&self, tree_root_session_id: &str) -> TalosResult<bool> {
+        let affected = self
+            .storage
+            .delete(
+                "sessions",
+                "session_key = ? OR tree_root_session_id = ?",
+                &[tree_root_session_id, tree_root_session_id],
+            )
             .await?;
         Ok(affected > 0)
     }

@@ -35,6 +35,7 @@ pub struct AppProtocolSchemaRoot {
     pub recover_timeline_request: talos_types::RecoverTimelineRequest,
     pub timeline_event: talos_types::talos::AgentEvent,
     pub timeline_event_envelope: talos_types::talos::TimelineEventEnvelope,
+    pub collaboration_tool_result: talos_types::CollaborationToolResult,
     pub initialize_response: InitializeResponse,
     pub turn_start_response: talos_types::StartTurnResponse,
     pub session_history_response: talos_types::SessionHistoryResponse,
@@ -370,6 +371,18 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::talos::TalosRunErrorCode>());
     output.push_str(&export::<talos_types::talos::TalosRunErrorInfo>());
     output.push_str(&export::<talos_types::talos::TalosTurnErrorEvent>());
+    output.push_str(&export::<talos_types::AgentPath>());
+    output.push_str(&export::<talos_types::AgentTurnRef>());
+    output.push_str(&export::<talos_types::SubagentRef>());
+    output.push_str(&export::<talos_types::SubagentSpawnResult>());
+    output.push_str(&export::<talos_types::SendMessageResult>());
+    output.push_str(&export::<talos_types::SubagentOutcome>());
+    output.push_str(&export::<talos_types::SubagentUpdateKind>());
+    output.push_str(&export::<talos_types::SubagentUpdate>());
+    output.push_str(&export::<talos_types::SubagentSnapshot>());
+    output.push_str(&export::<talos_types::AgentTreeNode>());
+    output.push_str(&export::<talos_types::AgentTreeSnapshot>());
+    output.push_str(&export::<talos_types::CollaborationToolResult>());
     output.push_str(&export::<talos_types::talos::JsonContentValue>());
     output.push_str(&export::<talos_types::talos::ToolArguments>());
     output.push_str(&export::<talos_types::talos::DynamicToolArguments>());

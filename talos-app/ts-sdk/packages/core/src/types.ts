@@ -68,6 +68,18 @@ import type {
   TalosSourceType as ProtocolTalosSourceType,
   AgentEvent as ProtocolAgentEvent,
   AgentEventPayload as ProtocolAgentEventPayload,
+  AgentPath as ProtocolAgentPath,
+  AgentTreeNode as ProtocolAgentTreeNode,
+  AgentTreeSnapshot as ProtocolAgentTreeSnapshot,
+  AgentTurnRef as ProtocolAgentTurnRef,
+  CollaborationToolResult as ProtocolCollaborationToolResult,
+  SendMessageResult as ProtocolSendMessageResult,
+  SubagentOutcome as ProtocolSubagentOutcome,
+  SubagentRef as ProtocolSubagentRef,
+  SubagentSnapshot as ProtocolSubagentSnapshot,
+  SubagentSpawnResult as ProtocolSubagentSpawnResult,
+  SubagentUpdate as ProtocolSubagentUpdate,
+  SubagentUpdateKind as ProtocolSubagentUpdateKind,
   TalosTimelineItem as ProtocolTalosTimelineItem,
   TalosTurnCompletedEvent as ProtocolTalosTurnCompletedEvent,
   TalosTurnMetricsEvent as ProtocolTalosTurnMetricsEvent,
@@ -300,6 +312,19 @@ export type TalosReasoning = ProtocolTalosReasoning;
 export type TalosInputItem = ProtocolTalosInputItem;
 
 export type TalosContentItem = ProtocolTalosContentItem;
+
+export type AgentPath = ProtocolAgentPath;
+export type AgentTurnRef = ProtocolAgentTurnRef;
+export type SubagentRef = ProtocolSubagentRef;
+export type SubagentSpawnResult = ProtocolSubagentSpawnResult;
+export type SendMessageResult = ProtocolSendMessageResult;
+export type SubagentOutcome = ProtocolSubagentOutcome;
+export type SubagentUpdateKind = ProtocolSubagentUpdateKind;
+export type SubagentUpdate = ProtocolSubagentUpdate;
+export type SubagentSnapshot = ProtocolSubagentSnapshot;
+export type AgentTreeNode = ProtocolAgentTreeNode;
+export type AgentTreeSnapshot = ProtocolAgentTreeSnapshot;
+export type CollaborationToolResult = ProtocolCollaborationToolResult;
 
 export type RunItem = ProtocolRunItem;
 

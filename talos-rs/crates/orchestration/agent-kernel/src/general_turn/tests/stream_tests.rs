@@ -1152,6 +1152,8 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
     register_core_local_tools(registry.as_ref());
     let execution_context = ToolExecutionContext {
         session_id: "agent-a1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-a1".to_string(),
         user_id: "talos".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),

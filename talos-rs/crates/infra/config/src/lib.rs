@@ -80,6 +80,7 @@ pub use domains::tools::{
     WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
+pub use loader::install_database_migrations;
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };

@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::sync::Arc;
 
+use crate::test_support::run_test_migrations;
 use base64::Engine;
 use bytes::Bytes;
 use futures_util::stream;
@@ -11,7 +12,6 @@ use talos_config::{FileStorageConfig, FileStorageLimits};
 use talos_error::{TalosError, TalosFileErrorKind};
 use talos_storage::SqliteStorage;
 use talos_store::file::{DatabaseFileStore, FileStatus, FileStore};
-use talos_store::migration::run_migrations;
 use talos_store::project::{ProjectStore, StorageProjectStore};
 use talos_types::{
     FileDeleteRequest, FileListRequest, FileReadRequest, FileScope, FileUpdateRequest,
@@ -89,7 +89,7 @@ struct TestFiles {
 impl TestFiles {
     async fn new(configure: impl FnOnce(&mut FileStorageConfig)) -> Self {
         let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-        run_migrations(storage.pool()).await.unwrap();
+        run_test_migrations(storage.pool()).await;
         let store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
         let project_store = Arc::new(StorageProjectStore::new(storage.clone()).await.unwrap());
         let root = tempfile::tempdir().unwrap();

@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 
 use tokio::sync::mpsc;
-use tokio::task::{AbortHandle, JoinHandle};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use super::kernel;
+use super::lifecycle::AgentRuntimeAbortHandle;
 use super::request::{agent_run_params_to_kernel_params, AgentKernelParams};
 use super::runtime_compaction::emit_context_compaction_timeline_events;
 use crate::session_artifacts::SessionStoreKernelTranscriptService;
@@ -34,6 +33,7 @@ use talos_memory::MemoryWriter;
 use talos_store::session::{
     SessionArtifactStore, SessionStore, SessionTranscriptBranch, SessionTranscriptPayload,
 };
+
 use talos_tools::ToolRegistry;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
@@ -60,24 +60,28 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
     fn run(
         &self,
         params: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Execute a backend run and stream standardized Agent events.
     fn run_streamed(
         &self,
         params: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 
     /// Continue a non-streaming backend run using same-turn Agent parameters.
     fn resume(
         &self,
         params: AgentResumeParams,
+        message_rx: mpsc::Receiver<String>,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Continue a backend run and stream standardized same-turn Agent events.
     fn resume_streamed(
         &self,
         params: AgentResumeParams,
+        message_rx: mpsc::Receiver<String>,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 }
 
@@ -92,47 +96,6 @@ pub(crate) struct AgentRuntimeStream {
     pub(crate) abort_handle: AgentRuntimeAbortHandle,
     /// Completion task that resolves to the final AgentRunResult.
     pub(crate) completion: JoinHandle<AgentResult<AgentRunResult>>,
-}
-
-/// Harness-owned abort handle for a runtime execution.
-///
-/// Runtime implementations can expose backend abort mechanics through this
-/// wrapper, but callers outside Harness must use AgentInterruptParams instead.
-#[derive(Clone)]
-pub(crate) struct AgentRuntimeAbortHandle {
-    outer: Option<AbortHandle>,
-    inner: Arc<StdMutex<Option<AbortHandle>>>,
-    cancelled: Arc<AtomicBool>,
-}
-
-impl AgentRuntimeAbortHandle {
-    /// Create an abort handle for a newly spawned runtime task.
-    pub(crate) fn new(outer: AbortHandle) -> Self {
-        Self {
-            outer: Some(outer),
-            inner: Arc::new(StdMutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    fn inner_only(inner: Arc<StdMutex<Option<AbortHandle>>>) -> Self {
-        Self {
-            outer: None,
-            inner,
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    /// Abort all tracked runtime tasks for the active Harness run.
-    pub(crate) fn abort(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        if let Some(outer) = &self.outer {
-            outer.abort();
-        }
-        if let Some(inner) = self.inner.lock().unwrap().as_ref() {
-            inner.abort();
-        }
-    }
 }
 
 /// Built-in Talos runtime implementation for AgentRuntime.
@@ -263,7 +226,7 @@ impl KernelAgent {
                 .unwrap_or_else(|| agent_request.context.owner_user_id.clone()),
             message_id,
             invocation_id,
-            agent_id: self.id.clone(),
+            agent_id: agent_request.context.agent_id.clone(),
             workspace_id,
             project_root: agent_request.context.project_root.clone(),
             input,
@@ -410,7 +373,11 @@ impl KernelAgent {
         }
     }
 
-    async fn execute_unary_run(&self, request: AgentRunParams) -> AgentResult<AgentRunResult> {
+    async fn execute_unary_run(
+        &self,
+        request: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRunResult> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
@@ -450,6 +417,7 @@ impl KernelAgent {
             &kernel_config,
             resume,
             Some(skill_options),
+            Some(message_rx),
         )
         .await?;
 
@@ -458,7 +426,11 @@ impl KernelAgent {
         ))
     }
 
-    async fn start_streamed_run(&self, request: AgentRunParams) -> AgentResult<AgentRuntimeStream> {
+    async fn start_streamed_run(
+        &self,
+        request: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRuntimeStream> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
         let agent_request = agent_run_params_to_kernel_params(request);
@@ -478,10 +450,8 @@ impl KernelAgent {
 
         let (tx, rx) = mpsc::channel(256);
         let this = self.clone();
-        let inner_abort_handle = Arc::new(StdMutex::new(None));
-        let abort_handle = AgentRuntimeAbortHandle::inner_only(inner_abort_handle.clone());
+        let abort_handle = AgentRuntimeAbortHandle::inner_only();
         let task_abort_handle = abort_handle.clone();
-        let task_inner_abort_handle = inner_abort_handle.clone();
         let task: JoinHandle<AgentResult<AgentRunResult>> = tokio::spawn(async move {
             let llm_provider = match this.llm_provider_for_run(&agent_request.config) {
                 Ok(llm_provider) => llm_provider,
@@ -574,16 +544,14 @@ impl KernelAgent {
                         &kernel_config,
                         resume,
                         Some(skill_options),
+                        Some(message_rx),
                     )
                     .await
                 }
             });
             let run_abort_handle = run_handle.abort_handle();
-            task_inner_abort_handle
-                .lock()
-                .unwrap()
-                .replace(run_abort_handle.clone());
-            if task_abort_handle.cancelled.load(Ordering::SeqCst) {
+            task_abort_handle.attach_inner(run_abort_handle.clone());
+            if task_abort_handle.is_cancelled() {
                 run_abort_handle.abort();
             }
 
@@ -1446,19 +1414,35 @@ impl AgentRuntime for KernelAgent {
         AgentCapabilities::kernel()
     }
 
-    async fn run(&self, params: AgentRunParams) -> AgentResult<AgentRunResult> {
-        self.execute_unary_run(params).await
+    async fn run(
+        &self,
+        params: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRunResult> {
+        self.execute_unary_run(params, message_rx).await
     }
 
-    async fn run_streamed(&self, params: AgentRunParams) -> AgentResult<AgentRuntimeStream> {
-        self.start_streamed_run(params).await
+    async fn run_streamed(
+        &self,
+        params: AgentRunParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRuntimeStream> {
+        self.start_streamed_run(params, message_rx).await
     }
 
-    async fn resume(&self, params: AgentResumeParams) -> AgentResult<AgentRunResult> {
-        self.execute_unary_run(params.run).await
+    async fn resume(
+        &self,
+        params: AgentResumeParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRunResult> {
+        self.execute_unary_run(params.run, message_rx).await
     }
 
-    async fn resume_streamed(&self, params: AgentResumeParams) -> AgentResult<AgentRuntimeStream> {
-        self.start_streamed_run(params.run).await
+    async fn resume_streamed(
+        &self,
+        params: AgentResumeParams,
+        message_rx: mpsc::Receiver<String>,
+    ) -> AgentResult<AgentRuntimeStream> {
+        self.start_streamed_run(params.run, message_rx).await
     }
 }

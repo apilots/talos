@@ -39,6 +39,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
+        message_rx: None,
     };
 
     let result = execute_general_turn_loop(

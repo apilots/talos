@@ -106,11 +106,11 @@ pub use memory_summary::{
 };
 pub use persist::persist_general_turn_artifacts;
 pub use prepare::prepare_general_turn;
-pub use prepare::SESSION_COMPACTION_STATE_KEY;
 pub(crate) use prepare::{next_session_compaction_state, stage_session_state_update};
 pub(crate) use prepare::{
     LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
 };
+pub use prepare_compaction::SESSION_COMPACTION_STATE_KEY;
 pub(crate) use prepare_continuity::build_session_continuity;
 pub use run::{run_general_turn, run_general_turn_with_resume};
 #[cfg(test)]

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use talos_config::resolve_effective_kernel_workspace;
 use talos_error::TalosResult;
-use talos_store::session::{SessionArtifactStore, TimelineEventId};
-use talos_types::talos::{SessionHistoryMessage, SessionHistorySnapshot};
+use talos_store::session::{SessionArtifactStore, SessionTurnWindow, TimelineEventId};
+use talos_types::talos::{SessionHistoryMessage, SessionHistorySnapshot, TalosTimelineItem};
 use talos_types::TalosSession;
 
 use super::message_merge::{
@@ -55,6 +55,35 @@ impl SessionHistoryService {
             generated_at_ms: chrono::Utc::now().timestamp_millis(),
             last_stable_event_id,
         })
+    }
+
+    /// Loads the one persisted latest Turn and verifies its message identity.
+    ///
+    /// Subagent projection uses this bounded path because ActiveTurn identifies
+    /// the latest Turn. General Session history must continue using `snapshot`.
+    pub(crate) async fn latest_turn_items(
+        &self,
+        session: &TalosSession,
+        expected_message_id: &str,
+    ) -> TalosResult<Vec<TalosTimelineItem>> {
+        let session_id = &session.context.session_id;
+        let workspace_root =
+            resolve_effective_kernel_workspace(&session.config.agent.kernel, &session.user_id)?
+                .user_workspace_dir;
+        let turns = self
+            .session_artifact_store
+            .load_turn_window(&workspace_root, session_id, SessionTurnWindow::Latest, 1)
+            .await?;
+        let message = map_turns_to_history_messages(turns)
+            .into_iter()
+            .next()
+            .filter(|message| message.message_id == expected_message_id)
+            .ok_or_else(|| {
+                talos_error::TalosError::Conflict(format!(
+                    "latest persisted turn for session '{session_id}' does not belong to message '{expected_message_id}'"
+                ))
+            })?;
+        Ok(message.items)
     }
 
     async fn completed_timeline_messages(

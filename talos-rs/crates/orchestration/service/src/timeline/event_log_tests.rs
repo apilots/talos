@@ -1,4 +1,5 @@
 use super::*;
+use crate::test_support::run_test_migrations;
 use std::sync::Arc;
 use talos_storage::SqliteStorage;
 use talos_store::session::{
@@ -12,6 +13,7 @@ use talos_types::talos::{
 
 async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_test_migrations(storage.pool()).await;
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
     let event_store: Arc<dyn TimelineEventStore> = store.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();

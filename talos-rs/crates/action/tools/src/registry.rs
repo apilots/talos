@@ -11,7 +11,6 @@ use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
 use talos_tools_sandbox::{ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode};
 use tracing::warn;
 
-use crate::collaboration::CollaborationRuntime;
 use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
@@ -24,6 +23,7 @@ use crate::spec::{
     ToolSelectionRequest, ToolSource, ToolVisibility,
 };
 use crate::state::{get_session_tool_state, PermissionMode};
+use crate::AgentControl;
 use crate::ToolContext;
 
 const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
@@ -125,7 +125,7 @@ pub struct ToolRegistry {
     handlers: DashMap<String, Arc<dyn ToolHandler>>,
     router: ToolRouter,
     policy_checker: ToolPolicyChecker,
-    collaboration_runtime: DashMap<&'static str, Arc<CollaborationRuntime>>,
+    agent_control: DashMap<&'static str, Arc<dyn AgentControl>>,
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
 }
 
@@ -295,13 +295,14 @@ impl ToolRegistry {
     fn register_local_tool(&self, tool: Arc<dyn Tool>) {
         let tool_name = tool.internal_name().to_string();
         let mutating = tool.mutating();
+        let source = tool.source();
         let spec = RegisteredToolSpec::new(
             ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema()),
-            tool.source(),
+            source,
             tool.payload_kind(),
             tool.parallelism(),
             mutating,
-            Self::default_governance(tool.internal_name()),
+            Self::default_governance(tool.internal_name(), source),
         )
         .with_internal_name(tool.internal_name())
         .with_aliases(tool.aliases().iter().copied())
@@ -316,14 +317,14 @@ impl ToolRegistry {
         );
     }
 
-    fn default_governance(name: &str) -> ToolGovernanceSpec {
+    fn default_governance(name: &str, source: ToolSource) -> ToolGovernanceSpec {
         match name {
             "bash" => ToolGovernanceSpec {
                 preferred_sandbox: ToolSandboxMode::UseDefault,
                 argument_override: ToolGovernanceArgumentOverride::BashCommandPermissions,
                 retry_without_sandbox: true,
             },
-            _ => default_governance_for_source(ToolSource::Local),
+            _ => default_governance_for_source(source),
         }
     }
 
@@ -355,6 +356,9 @@ impl ToolRegistry {
         if Self::activated_deferred_names(request).contains(name) {
             return true;
         }
+        if matches!(spec.source, ToolSource::Collaboration) {
+            return true;
+        }
 
         match name {
             "Bash" | "Read" | "Grep" | "Glob" | "Edit" | "Write" => true,
@@ -375,16 +379,6 @@ impl ToolRegistry {
                     "preference",
                     "decision",
                     "todo",
-                ],
-            ),
-            "Agent" => Self::input_contains_any(
-                request,
-                &[
-                    "agent",
-                    "subagent",
-                    "delegate",
-                    "parallel",
-                    "background research",
                 ],
             ),
             "TodoWrite" => {
@@ -462,7 +456,7 @@ impl ToolRegistry {
             handlers: DashMap::new(),
             router: ToolRouter,
             policy_checker: ToolPolicyChecker::new(policy),
-            collaboration_runtime: DashMap::new(),
+            agent_control: DashMap::new(),
             memory_reader: DashMap::new(),
         }
     }
@@ -698,12 +692,12 @@ impl ToolRegistry {
                 })
                 .collect(),
         );
-        let ctx = if let Some(runtime) = self
-            .collaboration_runtime
+        let ctx = if let Some(control) = self
+            .agent_control
             .get("default")
             .map(|entry| entry.value().clone())
         {
-            ctx.with_collaboration_runtime(runtime)
+            ctx.with_agent_control(control)
         } else {
             ctx
         };
@@ -718,8 +712,9 @@ impl ToolRegistry {
         }
     }
 
-    pub fn set_collaboration_runtime(&self, runtime: Arc<CollaborationRuntime>) {
-        self.collaboration_runtime.insert("default", runtime);
+    /// Configures the application-owned child Session control port.
+    pub fn set_agent_control(&self, control: Arc<dyn AgentControl>) {
+        self.agent_control.insert("default", control);
     }
 
     pub fn set_memory_reader(&self, reader: Arc<dyn MemoryReader>) {

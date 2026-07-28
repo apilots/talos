@@ -19,6 +19,8 @@ use tokio::task::JoinSet;
 #[derive(Debug, Clone)]
 pub struct ToolExecutionContext {
     pub session_id: String,
+    pub turn_id: String,
+    pub agent_id: String,
     pub user_id: String,
     pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
@@ -64,11 +66,14 @@ fn build_tool_context(
     call_id: &str,
     progress_emitter: Option<ToolProgressEmitter>,
 ) -> talos_tools::ToolContext {
-    let ctx = registry.build_context(
-        execution_context.session_id.clone(),
-        execution_context.user_id.clone(),
-        Some(execution_context.kernel_config.clone()),
-    );
+    let ctx = registry
+        .build_context(
+            execution_context.session_id.clone(),
+            execution_context.user_id.clone(),
+            Some(execution_context.kernel_config.clone()),
+        )
+        .with_turn_id(execution_context.turn_id.clone())
+        .with_agent_id(execution_context.agent_id.clone());
     let ctx = if let Some(project_root) = execution_context.project_root.clone() {
         ctx.with_project_root(project_root)
     } else {
@@ -124,12 +129,22 @@ async fn execute_single_tool_call(
                 .unwrap_or(false),
             outcome: payload,
         },
-        Err(error) => ToolExecutionOutput {
-            call_id: call.call_id,
-            tool_name: call.tool_name,
-            outcome: tool_error_outcome(error),
-            is_error: true,
-        },
+        Err(error) => {
+            tracing::error!(
+                session_id = %execution_context.session_id,
+                turn_id = %execution_context.turn_id,
+                tool_name = %call.tool_name,
+                call_id = %call.call_id,
+                error = ?error,
+                "tool execution failed"
+            );
+            ToolExecutionOutput {
+                call_id: call.call_id,
+                tool_name: call.tool_name,
+                outcome: tool_error_outcome(error),
+                is_error: true,
+            }
+        }
     }
 }
 
@@ -228,6 +243,8 @@ impl ToolExecutor for ParallelToolExecutor {
             let registry = registry.clone();
             let tool_context =
                 build_tool_context(execution_context, registry.as_ref(), &call.call_id, None);
+            let session_id = execution_context.session_id.clone();
+            let turn_id = execution_context.turn_id.clone();
             join_set.spawn(async move {
                 let result = match call.build_invocation(registry.as_ref()) {
                     Ok(invocation) => {
@@ -247,12 +264,22 @@ impl ToolExecutor for ParallelToolExecutor {
                             .unwrap_or(false),
                         outcome: payload,
                     },
-                    Err(error) => ToolExecutionOutput {
-                        call_id: call.call_id,
-                        tool_name: call.tool_name,
-                        outcome: tool_error_outcome(error),
-                        is_error: true,
-                    },
+                    Err(error) => {
+                        tracing::error!(
+                            session_id = %session_id,
+                            turn_id = %turn_id,
+                            tool_name = %call.tool_name,
+                            call_id = %call.call_id,
+                            error = ?error,
+                            "tool execution failed"
+                        );
+                        ToolExecutionOutput {
+                            call_id: call.call_id,
+                            tool_name: call.tool_name,
+                            outcome: tool_error_outcome(error),
+                            is_error: true,
+                        }
+                    }
                 };
                 (index, output)
             });

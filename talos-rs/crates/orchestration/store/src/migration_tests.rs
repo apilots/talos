@@ -1,13 +1,118 @@
-use sqlx::SqlitePool;
+use sqlx::Row;
+use talos_storage::SqliteStorage;
 
-use super::run_migrations;
+use super::{run_migrations, test_migrations_dir};
+
+#[tokio::test]
+async fn migration_initializes_base_schema_once() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+
+    let tables = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'bindings', 'projects', 'users', 'user_tokens', 'timeline_events', 'active_turns', 'message_idempotency_keys') ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        tables,
+        vec![
+            "active_turns".to_string(),
+            "bindings".to_string(),
+            "message_idempotency_keys".to_string(),
+            "projects".to_string(),
+            "sessions".to_string(),
+            "timeline_events".to_string(),
+            "user_tokens".to_string(),
+            "users".to_string(),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn migration_adopts_supported_unversioned_schema_without_losing_sessions() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    sqlx::raw_sql(
+        r#"
+        CREATE TABLE sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_key TEXT UNIQUE NOT NULL,
+            user_id TEXT NOT NULL,
+            channel TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            peer_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            account_id TEXT,
+            thread_id TEXT,
+            created_at INTEGER NOT NULL,
+            last_activity INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT 'Untitled Session',
+            context_json TEXT,
+            model TEXT,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            usage_json TEXT,
+            conf_json TEXT,
+            project_id TEXT,
+            current_directory TEXT,
+            workspace_id TEXT,
+            memory_processed_until_seq INTEGER NOT NULL DEFAULT 0
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO sessions (session_key, user_id, channel, scope, peer_id, agent_id, created_at, last_activity, message_count, memory_processed_until_seq) VALUES ('session-1', 'user-1', 'http', 'api', 'user-1', 'talos', 1, 1, 5, 4)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+
+    let session_id =
+        sqlx::query_scalar::<_, String>("SELECT session_key FROM sessions WHERE session_key = ?")
+            .bind("session-1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let columns = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    let latest_turn_seq =
+        sqlx::query_scalar::<_, i64>("SELECT latest_turn_seq FROM sessions WHERE session_key = ?")
+            .bind("session-1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (session_id, latest_turn_seq, columns.contains("agent_path")),
+        ("session-1".to_string(), 4, true)
+    );
+}
 
 #[tokio::test]
 async fn migration_creates_profile_usage_schema() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
 
-    run_migrations(&pool).await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
 
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'profile_turn_usage'",
@@ -28,8 +133,11 @@ async fn migration_creates_profile_usage_schema() {
 
 #[tokio::test]
 async fn migration_enforces_file_state_invariants() {
-    let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
 
     sqlx::query(
         r#"
@@ -71,4 +179,46 @@ async fn migration_enforces_file_state_invariants() {
     .await;
 
     assert!(invalid.is_err());
+}
+
+#[tokio::test]
+async fn migration_owns_subagent_session_schema() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+
+    let columns = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    for column in [
+        "latest_turn_seq",
+        "parent_session_id",
+        "parent_turn_id",
+        "tree_root_session_id",
+        "agent_path",
+    ] {
+        assert!(columns.contains(column));
+    }
+
+    let objects = sqlx::query_scalar::<_, String>(
+        "SELECT name FROM sqlite_master WHERE name IN ('sessions_tree_agent_path_unique', 'sessions_cleanup_after_delete') ORDER BY name",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        objects,
+        vec![
+            "sessions_cleanup_after_delete".to_string(),
+            "sessions_tree_agent_path_unique".to_string(),
+        ]
+    );
 }

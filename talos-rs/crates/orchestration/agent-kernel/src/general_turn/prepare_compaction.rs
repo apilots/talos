@@ -5,6 +5,9 @@ use talos_types::talos::{
     ContextCompactionTrigger,
 };
 
+/// Session transcript state key controlling the next prompt's compaction policy.
+pub const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
+
 pub(super) fn count_section_kind(
     sections: &[talos_prompt::PromptSection],
     kind: PromptSectionKind,

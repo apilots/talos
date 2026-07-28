@@ -6,6 +6,7 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
     MockSessionStore, SessionQuery, SessionRecord, SessionStore, SessionSummary,
+    SessionTreeIdentity,
 };
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{ModelRef, ModelSelection, SessionConf};
@@ -20,12 +21,7 @@ struct RecordingSessionStore {
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
-    async fn insert_session_record(
-        &self,
-        record: &SessionRecord,
-        _agent_id: &str,
-        _scope: &str,
-    ) -> TalosResult<()> {
+    async fn insert_session_record(&self, record: &SessionRecord, _scope: &str) -> TalosResult<()> {
         self.records.lock().unwrap().push(record.clone());
         Ok(())
     }
@@ -37,6 +33,27 @@ impl SessionStore for RecordingSessionStore {
             .unwrap()
             .iter()
             .find(|record| record.id == session_id)
+            .cloned())
+    }
+
+    async fn get_subagent_record(
+        &self,
+        tree_root_session_id: &str,
+        agent_path: &talos_types::AgentPath,
+    ) -> TalosResult<Option<SessionRecord>> {
+        Ok(self
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| match &record.tree_identity {
+                SessionTreeIdentity::Subagent {
+                    tree_root_session_id: root,
+                    path,
+                    ..
+                } => root == tree_root_session_id && path == agent_path,
+                SessionTreeIdentity::Primary => false,
+            })
             .cloned())
     }
 
@@ -60,6 +77,10 @@ impl SessionStore for RecordingSessionStore {
             session_count,
             message_count,
         })
+    }
+
+    async fn has_active_subagent_turn(&self, _tree_root_session_id: &str) -> TalosResult<bool> {
+        Ok(false)
     }
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
@@ -104,6 +125,22 @@ impl SessionStore for RecordingSessionStore {
         let mut records = self.records.lock().unwrap();
         let len_before = records.len();
         records.retain(|record| record.id != session_id);
+        Ok(records.len() != len_before)
+    }
+
+    async fn delete_session_tree(&self, tree_root_session_id: &str) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let len_before = records.len();
+        records.retain(|record| {
+            record.id != tree_root_session_id
+                && !matches!(
+                    &record.tree_identity,
+                    SessionTreeIdentity::Subagent {
+                        tree_root_session_id: root,
+                        ..
+                    } if root == tree_root_session_id
+                )
+        });
         Ok(records.len() != len_before)
     }
 }
@@ -423,6 +460,41 @@ async fn reset_keeps_monotonic_turn_seq_for_the_next_completed_turn() {
         .expect("read session")
         .expect("session exists");
     assert_eq!((record.message_count, record.latest_turn_seq), (2, 2));
+}
+
+#[tokio::test]
+async fn ordinary_delete_rejects_a_subagent_session() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "current-model"),
+    );
+    let child = service
+        .create_subagent_session(
+            create_session_params(context(), "default", None),
+            talos_types::AgentTurnRef {
+                session_id: "root-session".to_string(),
+                turn_id: "root-turn".to_string(),
+            },
+            "root-session".to_string(),
+            "/root/reviewer".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+    let child_id = &child.context.session_id;
+
+    assert!(matches!(
+        service.delete_session(child_id).await,
+        Err(TalosError::ValidationError(_))
+    ));
+    assert!(
+        service
+            .delete_subagent_session(child_id)
+            .await
+            .unwrap()
+            .success
+    );
 }
 
 #[tokio::test]

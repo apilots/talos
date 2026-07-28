@@ -8,8 +8,8 @@ use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{
-    ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest, SessionPatch,
-    TalosConfig, DEFAULT_SESSION_TITLE,
+    AgentTurnRef, ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest,
+    SessionPatch, TalosConfig, DEFAULT_SESSION_TITLE,
 };
 
 #[derive(Default)]
@@ -64,12 +64,7 @@ fn recording_access_service(
 
 #[async_trait]
 impl SessionStore for RecordingSessionStore {
-    async fn insert_session_record(
-        &self,
-        record: &SessionRecord,
-        _agent_id: &str,
-        _scope: &str,
-    ) -> TalosResult<()> {
+    async fn insert_session_record(&self, record: &SessionRecord, _scope: &str) -> TalosResult<()> {
         self.records.lock().unwrap().push(record.clone());
         Ok(())
     }
@@ -81,6 +76,27 @@ impl SessionStore for RecordingSessionStore {
             .unwrap()
             .iter()
             .find(|record| record.id == session_id)
+            .cloned())
+    }
+
+    async fn get_subagent_record(
+        &self,
+        tree_root_session_id: &str,
+        agent_path: &talos_types::AgentPath,
+    ) -> TalosResult<Option<SessionRecord>> {
+        Ok(self
+            .records
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|record| match &record.tree_identity {
+                talos_store::session::SessionTreeIdentity::Subagent {
+                    tree_root_session_id: root,
+                    path,
+                    ..
+                } => root == tree_root_session_id && path == agent_path,
+                talos_store::session::SessionTreeIdentity::Primary => false,
+            })
             .cloned())
     }
 
@@ -119,6 +135,10 @@ impl SessionStore for RecordingSessionStore {
         })
     }
 
+    async fn has_active_subagent_turn(&self, _tree_root_session_id: &str) -> TalosResult<bool> {
+        Ok(false)
+    }
+
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool> {
         let mut records = self.records.lock().unwrap();
         let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
@@ -155,6 +175,10 @@ impl SessionStore for RecordingSessionStore {
         let len_before = records.len();
         records.retain(|record| record.id != session_id);
         Ok(records.len() != len_before)
+    }
+
+    async fn delete_session_tree(&self, tree_root_session_id: &str) -> TalosResult<bool> {
+        self.delete_session_record(tree_root_session_id).await
     }
 }
 
@@ -249,48 +273,6 @@ impl SessionRuntime for NoopSessionRuntime {
     }
 }
 
-#[derive(Default)]
-struct RecordingSessionRuntime {
-    prepared_deletes: Mutex<Vec<String>>,
-}
-
-#[async_trait]
-impl SessionRuntime for RecordingSessionRuntime {
-    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<talos_types::TokenUsage> {
-        unreachable!("not used in this test")
-    }
-
-    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn prepare_delete_session(&self, session: talos_types::TalosSession) -> TalosResult<()> {
-        self.prepared_deletes
-            .lock()
-            .unwrap()
-            .push(session.context.session_id);
-        Ok(())
-    }
-
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-}
-
 fn record_for(
     user_id: &str,
     session_id: &str,
@@ -305,6 +287,8 @@ fn record_for(
     };
     SessionRecord {
         id: session_id.to_string(),
+        agent_id: "default".to_string(),
+        tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: user_id.to_string(),
         context: TalosContext {
@@ -386,31 +370,28 @@ async fn regular_actor_cannot_read_or_patch_other_user_session() {
 }
 
 #[tokio::test]
-async fn delete_session_prepares_runtime_then_deletes_record() {
-    let store = Arc::new(RecordingSessionStore::from_records(vec![record_for(
-        "member-user",
-        "session-1",
-        None,
-        None,
-    )]));
-    let runtime = Arc::new(RecordingSessionRuntime::default());
-    let access = recording_access_service(runtime.clone(), store.clone());
+async fn child_session_rejects_ordinary_external_access() {
+    let mut child = record_for("member-user", "child-1", None, None);
+    child.tree_identity = talos_store::session::SessionTreeIdentity::Subagent {
+        parent: AgentTurnRef {
+            session_id: "parent-1".to_string(),
+            turn_id: "turn-parent".to_string(),
+        },
+        tree_root_session_id: "parent-1".to_string(),
+        path: "/root/child_1".parse().unwrap(),
+    };
+    let store = Arc::new(RecordingSessionStore::from_records(vec![child]));
+    let access = recording_access_service(Arc::new(NoopSessionRuntime), store);
+    let actor = Actor::regular("member-user");
 
-    let ack = access
-        .delete_session(&Actor::regular("member-user"), "session-1")
-        .await
-        .expect("delete_session should succeed");
-
-    assert!(ack.success);
-    assert_eq!(
-        runtime.prepared_deletes.lock().unwrap().as_slice(),
-        ["session-1"]
-    );
-    assert_eq!(
-        store.deleted_sessions.lock().unwrap().as_slice(),
-        ["session-1"]
-    );
-    assert!(store.records.lock().unwrap().is_empty());
+    assert!(matches!(
+        access.get_session(&actor, "child-1").await,
+        Err(talos_error::TalosError::ValidationError(_))
+    ));
+    assert!(matches!(
+        access.get_session(&actor, "child-1").await,
+        Err(talos_error::TalosError::ValidationError(_))
+    ));
 }
 
 #[tokio::test]

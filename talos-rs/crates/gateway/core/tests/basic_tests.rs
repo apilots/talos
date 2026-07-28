@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use opendal::{services::Memory, Operator};
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::Arc;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{
@@ -37,6 +38,10 @@ struct TestAuthService;
 
 #[async_trait]
 impl AgentDispatchRuntime for RecordingHandler {
+    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn handle(
         &self,
         _request: AgentDispatchParams,
@@ -149,7 +154,11 @@ impl UserService for TestAuthService {
 async fn test_gateway() -> ServiceGateway {
     let config = test_config();
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-    run_migrations(storage.pool()).await.unwrap();
+    let migration_dir =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
+    run_migrations(storage.pool(), &migration_dir)
+        .await
+        .unwrap();
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());

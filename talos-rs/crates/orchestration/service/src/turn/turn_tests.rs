@@ -1,11 +1,11 @@
 use super::*;
 use crate::session::SessionService;
+use crate::test_support::run_test_migrations;
 use crate::{TimelineEventRetentionConfig, TimelineEventService};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_storage::SqliteStorage;
-use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
@@ -89,6 +89,10 @@ impl SessionRuntime for NoopSessionRuntime {
 
 #[async_trait]
 impl TurnExecutor for RecordingTurnExecutor {
+    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+        Ok(())
+    }
+
     async fn start_turn_stream(
         &self,
         request: AgentDispatchParams,
@@ -127,7 +131,14 @@ impl TurnExecutor for RecordingTurnExecutor {
     }
 
     async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
-        let AgentDispatchInput::DynamicToolResult { .. } = params.input;
+        assert!(matches!(
+            params.binding,
+            talos_types::DispatchBinding::Exact { ref agent_id } if agent_id == "default"
+        ));
+        assert!(matches!(
+            params.input,
+            AgentDispatchInput::DynamicToolResult { .. }
+        ));
         self.dynamic_turn_id.lock().unwrap().replace(params.turn_id);
         Ok(())
     }
@@ -181,7 +192,7 @@ async fn test_service(
     Arc<DatabaseSessionStore>,
 ) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
-    run_migrations(storage.pool()).await.unwrap();
+    run_test_migrations(storage.pool()).await;
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let store = Arc::new(DatabaseSessionStore::new(storage).await.unwrap());
@@ -269,9 +280,9 @@ fn test_session() -> TalosSession {
 
 async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
     let session = test_session();
-    let record = talos_store::session::SessionRecord::from_session(&session);
+    let record = talos_store::session::SessionRecord::from_session(&session, "default");
     store
-        .insert_session_record(&record, "default", "api")
+        .insert_session_record(&record, "api")
         .await
         .expect("session record should be created");
 }
@@ -279,7 +290,7 @@ async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
 #[tokio::test]
 async fn submit_start_turn_records_completed_turn_progress() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor).await;
+    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
     create_test_session_record(store.clone()).await;
 
     service
@@ -302,6 +313,15 @@ async fn submit_start_turn_records_completed_turn_progress() {
         .await
         .expect("message should be submitted");
 
+    assert!(matches!(
+        turn_executor
+            .stream_request
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|request| &request.binding),
+        Some(talos_types::DispatchBinding::Exact { agent_id }) if agent_id == "default"
+    ));
     let record = store
         .get_session_record("s1")
         .await
@@ -443,6 +463,7 @@ async fn submit_start_turn_persists_agent_title_update() {
 async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
     let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    create_test_session_record(store.clone()).await;
     store
         .upsert_active_turn(ActiveTurnUpdate {
             session_id: "s1".to_string(),

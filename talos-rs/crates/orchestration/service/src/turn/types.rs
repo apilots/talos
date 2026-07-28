@@ -9,6 +9,8 @@ use tokio::sync::mpsc;
 
 #[async_trait]
 pub trait TurnExecutor: Send + Sync {
+    async fn validate_agent_id(&self, agent_id: &str) -> TalosResult<()>;
+
     async fn start_turn_stream(
         &self,
         request: AgentDispatchParams,
@@ -38,6 +40,10 @@ impl AgentDispatchTurnExecutor {
 
 #[async_trait]
 impl TurnExecutor for AgentDispatchTurnExecutor {
+    async fn validate_agent_id(&self, agent_id: &str) -> TalosResult<()> {
+        self.handler.validate_agent_id(agent_id).await
+    }
+
     async fn start_turn_stream(
         &self,
         request: AgentDispatchParams,

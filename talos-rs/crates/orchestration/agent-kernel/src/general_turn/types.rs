@@ -118,6 +118,7 @@ pub struct PreparedGeneralTurn {
     pub warnings: Vec<KernelWarning>,
     pub prompt_warning_state: Option<PromptWarningState>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pub message_rx: Option<Arc<std::sync::Mutex<mpsc::Receiver<String>>>>,
 }
 
 #[derive(Debug, Clone)]

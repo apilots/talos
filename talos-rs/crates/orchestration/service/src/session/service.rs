@@ -4,13 +4,16 @@ use std::sync::{Arc, RwLock};
 use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
-use talos_store::session::{SessionPatchAck, SessionQuery, SessionRecord, SessionStore};
+use talos_store::session::{
+    SessionPatchAck, SessionQuery, SessionRecord, SessionStore, SessionTreeIdentity,
+    SessionTreeScope,
+};
 use talos_types::talos::{TalosConnectionMode, TalosContext};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_default_model_selection,
-    resolve_effective_project_root, ModelInfo, ModelSelection, OptionalCurrentDirectoryPatch,
-    OptionalProjectIdPatch, SessionConfigOverridePolicy, SessionContext, SessionPatch,
-    SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    resolve_effective_project_root, AgentTurnRef, ModelInfo, ModelSelection,
+    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConfigOverridePolicy,
+    SessionContext, SessionPatch, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
@@ -177,9 +180,33 @@ impl SessionService {
         Ok(())
     }
 
-    pub async fn create_session(
+    pub async fn create_session(&self, params: CreateSessionParams) -> TalosResult<TalosSession> {
+        self.create_session_with_tree_identity(params, SessionTreeIdentity::Primary)
+            .await
+    }
+
+    pub(crate) async fn create_subagent_session(
+        &self,
+        params: CreateSessionParams,
+        parent: AgentTurnRef,
+        tree_root_session_id: String,
+        agent_path: talos_types::AgentPath,
+    ) -> TalosResult<TalosSession> {
+        self.create_session_with_tree_identity(
+            params,
+            SessionTreeIdentity::Subagent {
+                parent,
+                tree_root_session_id,
+                path: agent_path,
+            },
+        )
+        .await
+    }
+
+    async fn create_session_with_tree_identity(
         &self,
         mut params: CreateSessionParams,
+        tree_identity: SessionTreeIdentity,
     ) -> TalosResult<TalosSession> {
         if let Some(project_id) = params.project_id.as_deref() {
             self.validate_project_id(project_id).await?;
@@ -187,9 +214,12 @@ impl SessionService {
         params.context.project_root = None;
         params.current_directory =
             normalize_current_directory(&params.context, params.current_directory)?;
-        let record = self.create_session_in_store(params).await?;
+        let record = self.build_session_record(params, tree_identity)?;
         let mut session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
         session.context.project_root = self.resolve_effective_root(&session).await?;
+        self.session_store
+            .insert_session_record(&record, API_SESSION_SCOPE)
+            .await?;
         Ok(session)
     }
 
@@ -212,6 +242,48 @@ impl SessionService {
 
     pub async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         self.load_session(session_id, Some(self.default_workspace_id.clone()))
+            .await
+    }
+
+    pub(crate) async fn get_session_record(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<Option<SessionRecord>> {
+        self.session_store.get_session_record(session_id).await
+    }
+
+    pub(crate) async fn get_subagent_record(
+        &self,
+        tree_root_session_id: &str,
+        agent_path: &talos_types::AgentPath,
+    ) -> TalosResult<Option<SessionRecord>> {
+        self.session_store
+            .get_subagent_record(tree_root_session_id, agent_path)
+            .await
+    }
+
+    pub(crate) async fn list_subagent_tree_records(
+        &self,
+        tree_root_session_id: String,
+        limit: Option<usize>,
+    ) -> TalosResult<Vec<SessionRecord>> {
+        self.session_store
+            .list_session_records(&SessionQuery {
+                tree_scope: SessionTreeScope::SubagentTree {
+                    tree_root_session_id,
+                },
+                limit,
+                ..SessionQuery::default()
+            })
+            .await
+    }
+
+    pub(crate) async fn has_active_subagent_turn(
+        &self,
+        tree_root_session_id: &str,
+    ) -> TalosResult<bool> {
+        self.session_store
+            .has_active_subagent_turn(tree_root_session_id)
             .await
     }
 
@@ -344,6 +416,34 @@ impl SessionService {
     }
 
     pub async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck> {
+        let record = self
+            .session_store
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+        if matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
+            return Err(TalosError::ValidationError(format!(
+                "session '{session_id}' is controlled by its parent agent"
+            )));
+        }
+        let success = self.session_store.delete_session_tree(session_id).await?;
+        Ok(SessionPatchAck { success })
+    }
+
+    pub(crate) async fn delete_subagent_session(
+        &self,
+        session_id: &str,
+    ) -> TalosResult<SessionPatchAck> {
+        let record = self
+            .session_store
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+        if !matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
+            return Err(TalosError::ValidationError(format!(
+                "session '{session_id}' is not a subagent session"
+            )));
+        }
         let success = self.session_store.delete_session_record(session_id).await?;
         Ok(SessionPatchAck { success })
     }
@@ -367,9 +467,10 @@ impl SessionService {
         Ok(patch)
     }
 
-    async fn create_session_in_store(
+    fn build_session_record(
         &self,
         params: CreateSessionParams,
+        tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
         let session_id = params
             .session_id
@@ -394,6 +495,8 @@ impl SessionService {
         let now = chrono::Utc::now().timestamp_millis();
         let record = SessionRecord {
             id: session_id,
+            agent_id: params.target_agent,
+            tree_identity,
             workspace_id: params.workspace_id,
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: params.context.user_id.clone(),
@@ -409,9 +512,6 @@ impl SessionService {
             project_id: params.project_id,
             current_directory: params.current_directory,
         };
-        self.session_store
-            .insert_session_record(&record, &params.target_agent, API_SESSION_SCOPE)
-            .await?;
         Ok(record)
     }
 

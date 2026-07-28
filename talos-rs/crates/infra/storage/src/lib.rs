@@ -87,9 +87,6 @@ pub trait Storage: Send + Sync {
 
     /// Check if a table exists
     async fn table_exists(&self, table: &str) -> TalosResult<bool>;
-
-    /// Create tables if they don't exist
-    async fn init_schema(&self) -> TalosResult<()>;
 }
 
 /// Storage configuration

@@ -18,7 +18,7 @@ mod tests;
 
 pub use mock::MockAgent;
 
-use lifecycle::{ActiveTurnHandle, AgentRunMode, QueuedTurn};
+use lifecycle::{ActiveTurnHandle, AgentRunMode, AgentRuntimeAbortHandle, QueuedTurn};
 
 use crate::{
     AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentInput, AgentInputParams,
@@ -28,7 +28,7 @@ use crate::{
 };
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
-use runtime::{AgentRuntime, AgentRuntimeAbortHandle, KernelAgent, KernelAgentParams};
+use runtime::{AgentRuntime, KernelAgent, KernelAgentParams};
 use talos_agent_kernel::{AttachmentReader, TimelineBuilder};
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
@@ -40,6 +40,7 @@ use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
 use talos_types::{normalize_session_title, ModelSelection};
 use tracing::warn;
 
+const ACTIVE_TURN_MESSAGE_CAPACITY: usize = 16;
 const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the conversation.
 
 Rules:
@@ -292,14 +293,21 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let run_config = request.config.clone();
         let title_input = request::AgentKernelParams::extract_text_input(&request.input);
         let runtime = self.runtime.clone();
+        let (message_tx, message_rx) = mpsc::channel(ACTIVE_TURN_MESSAGE_CAPACITY);
         let run_handle = tokio::spawn(async move {
             match mode {
-                AgentRunMode::Start => runtime.run(request).await,
-                AgentRunMode::Resume => runtime.resume(AgentResumeParams::new(request)).await,
+                AgentRunMode::Start => runtime.run(request, message_rx).await,
+                AgentRunMode::Resume => {
+                    runtime
+                        .resume(AgentResumeParams::new(request), message_rx)
+                        .await
+                }
             }
         });
         let abort_handle = AgentRuntimeAbortHandle::new(run_handle.abort_handle());
-        if let Err(err) = self.activate_reserved_turn(&session_id, turn_id, abort_handle) {
+        if let Err(err) =
+            self.activate_reserved_turn(&session_id, turn_id, abort_handle, Some(message_tx))
+        {
             run_handle.abort();
             self.finish_active_turn_and_dispatch_next(&session_id).await;
             return Err(err.into());
@@ -353,11 +361,12 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let title_input = request::AgentKernelParams::extract_text_input(&request.input);
             let title_turn_id = request_turn_id.clone();
             let runtime = this.runtime.clone();
+            let (message_tx, message_rx) = mpsc::channel(ACTIVE_TURN_MESSAGE_CAPACITY);
             let runtime_stream = match mode {
-                AgentRunMode::Start => runtime.run_streamed(request).await,
+                AgentRunMode::Start => runtime.run_streamed(request, message_rx).await,
                 AgentRunMode::Resume => {
                     runtime
-                        .resume_streamed(AgentResumeParams::new(request))
+                        .resume_streamed(AgentResumeParams::new(request), message_rx)
                         .await
                 }
             };
@@ -378,9 +387,12 @@ After receiving tool outputs, continue reasoning and provide the final response.
             };
 
             let abort_handle = runtime_stream.abort_handle.clone();
-            if let Err(err) =
-                this.activate_reserved_turn(&session_id, request_turn_id, abort_handle)
-            {
+            if let Err(err) = this.activate_reserved_turn(
+                &session_id,
+                request_turn_id,
+                abort_handle,
+                Some(message_tx),
+            ) {
                 runtime_stream.abort_handle.abort();
                 runtime_stream.completion.abort();
                 let mut timeline = TimelineBuilder::new(
@@ -550,6 +562,7 @@ impl AgentHarness for AgentHarnessImpl {
         if let ActiveTurnHandle::Running {
             turn_id,
             execution_task,
+            ..
         } = handle.value()
         {
             if turn_id != &params.turn_id {
@@ -590,6 +603,47 @@ impl AgentHarness for AgentHarnessImpl {
                 )
                 .await
                 .map_err(Self::map_dynamic_input_error)?;
+                Ok(AgentInputResult { accepted: true })
+            }
+            AgentInput::Message { message } => {
+                let session_id = params.session.context.session_id;
+                let handle = self.active_turns.get(&session_id).ok_or_else(|| {
+                    AgentError::run_not_found(format!(
+                        "active turn for session {session_id} is not running"
+                    ))
+                })?;
+                let ActiveTurnHandle::Running {
+                    turn_id,
+                    message_tx,
+                    ..
+                } = handle.value()
+                else {
+                    return Err(AgentError::run_not_found(format!(
+                        "active turn for session {session_id} is not running"
+                    )));
+                };
+                if turn_id != &params.turn_id {
+                    return Err(AgentError::run_not_found(format!(
+                        "active turn `{}` for session {session_id}",
+                        params.turn_id
+                    )));
+                }
+                let sender = message_tx.as_ref().ok_or_else(|| {
+                    AgentError::input_rejected(format!(
+                        "active turn `{}` does not accept messages",
+                        params.turn_id
+                    ))
+                })?;
+                sender.try_send(message).map_err(|error| match error {
+                    mpsc::error::TrySendError::Full(_) => AgentError::input_rejected(format!(
+                        "active turn `{}` message input is full",
+                        params.turn_id
+                    )),
+                    mpsc::error::TrySendError::Closed(_) => AgentError::run_not_found(format!(
+                        "active turn `{}` message input is closed",
+                        params.turn_id
+                    )),
+                })?;
                 Ok(AgentInputResult { accepted: true })
             }
         }

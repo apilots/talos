@@ -12,10 +12,14 @@ mod project;
 mod service;
 mod session;
 mod skills;
+mod subagent;
 mod timeline;
 pub mod turn;
 mod workspace;
 mod workspace_docs;
+
+#[cfg(test)]
+mod test_support;
 
 pub use access::{Actor, CreateSessionRequest};
 pub use account::AccountService;

@@ -5,13 +5,13 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::{MemoryReader, MemoryScope};
 
-use crate::collaboration::CollaborationRuntime;
 use crate::handlers::dynamic::StoredDynamicToolResult;
 use crate::state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
     PermissionMode, ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore,
     ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
+use crate::AgentControl;
 
 /// Classifies best-effort progress emitted while a tool is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,11 +56,13 @@ impl fmt::Debug for ToolProgressEmitter {
 #[derive(Clone)]
 pub struct ToolContext {
     session_id: String,
+    turn_id: Option<String>,
+    agent_id: Option<String>,
     user_id: String,
     project_root: Option<PathBuf>,
     dynamic_tool_results: Arc<DashMap<String, StoredDynamicToolResult>>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
-    collaboration_runtime: Option<Arc<CollaborationRuntime>>,
+    agent_control: Option<Arc<dyn AgentControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
     memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
@@ -80,11 +82,13 @@ impl ToolContext {
         let session_id = session_id.into();
         Self {
             session_id: session_id.clone(),
+            turn_id: None,
+            agent_id: None,
             user_id: user_id.into(),
             project_root: None,
             dynamic_tool_results: Arc::new(DashMap::new()),
             kernel_config,
-            collaboration_runtime: None,
+            agent_control: None,
             memory_reader: None,
             memory_scope: None,
             session_state: get_session_tool_state(&session_id),
@@ -92,8 +96,20 @@ impl ToolContext {
         }
     }
 
-    pub fn with_collaboration_runtime(mut self, runtime: Arc<CollaborationRuntime>) -> Self {
-        self.collaboration_runtime = Some(runtime);
+    /// Attaches the application-owned child Session control port.
+    pub fn with_agent_control(mut self, control: Arc<dyn AgentControl>) -> Self {
+        self.agent_control = Some(control);
+        self
+    }
+
+    pub fn with_turn_id(mut self, turn_id: impl Into<String>) -> Self {
+        self.turn_id = Some(turn_id.into());
+        self
+    }
+
+    /// Attaches the trusted identity of the Agent executing this Tool.
+    pub fn with_agent_id(mut self, agent_id: impl Into<String>) -> Self {
+        self.agent_id = Some(agent_id.into());
         self
     }
 
@@ -134,12 +150,22 @@ impl ToolContext {
         &self.user_id
     }
 
+    pub fn turn_id(&self) -> Option<&str> {
+        self.turn_id.as_deref()
+    }
+
+    /// Returns the trusted executing Agent identity when this is an Agent Tool call.
+    pub fn agent_id(&self) -> Option<&str> {
+        self.agent_id.as_deref()
+    }
+
     pub fn kernel_config(&self) -> Option<&AgentKernelConfig> {
         self.kernel_config.as_deref()
     }
 
-    pub fn collaboration_runtime(&self) -> Option<Arc<CollaborationRuntime>> {
-        self.collaboration_runtime.clone()
+    /// Returns the application-owned child Session control port when configured.
+    pub fn agent_control(&self) -> Option<Arc<dyn AgentControl>> {
+        self.agent_control.clone()
     }
 
     pub fn memory_reader(&self) -> Option<Arc<dyn MemoryReader>> {

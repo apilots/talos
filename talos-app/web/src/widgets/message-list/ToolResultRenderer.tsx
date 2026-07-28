@@ -6,6 +6,13 @@ import type { TalosContentItem } from "@/shared/types/protocol";
 import type { ChatTimelineItem, ChatToolStatus } from "@/shared/types/ui";
 
 type ToolProgress = Extract<ChatTimelineItem, { kind: "tool_call" }>["progress"];
+type SubagentResultItem = Extract<TalosContentItem, { type: "subagent_result" }>;
+type SubagentResult = SubagentResultItem["result"];
+type SubagentSnapshot = Extract<
+  SubagentResult,
+  { operation: "waitAgent" | "interruptAgent" | "followupTask" }
+>["result"];
+type AgentTreeNode = Extract<SubagentResult, { operation: "listAgents" }>["result"]["children"][number];
 
 type ToolResultRenderModel = {
   summary: string;
@@ -25,6 +32,12 @@ export function buildToolResultModel({
   status: ChatToolStatus;
 }): ToolResultRenderModel {
   const items = contentItems ?? [];
+  const subagentItem = items.find(
+    (item): item is SubagentResultItem => item.type === "subagent_result",
+  );
+  if (subagentItem) {
+    return buildSubagentModel(subagentItem.result, status);
+  }
   if (items.some((item) => item.type === "bash_output")) {
     return buildTaskModel(items, progress, status);
   }
@@ -44,6 +57,81 @@ export function buildToolResultModel({
     return buildTextJsonModel(items, status);
   }
   return buildProgressFallbackModel(progress, fallbackOutput, status);
+}
+
+function buildSubagentModel(
+  result: SubagentResult,
+  status: ChatToolStatus,
+): ToolResultRenderModel {
+  const lines: string[] = [];
+  let summary: string;
+  switch (result.operation) {
+    case "spawnAgent":
+      summary = `Spawned ${result.result.subagent.path}`;
+      lines.push(
+        `agent: ${result.result.subagent.path}`,
+        `agent id: ${result.result.agentId}`,
+        `session: ${result.result.subagent.sessionId}`,
+        `turn: ${result.result.turn.turnId}`,
+      );
+      break;
+    case "sendMessage":
+      summary = `Message accepted by ${result.result.subagent.path}`;
+      lines.push(
+        `agent: ${result.result.subagent.path}`,
+        `agent id: ${result.result.agentId}`,
+        `session: ${result.result.subagent.sessionId}`,
+        `turn: ${result.result.turn.turnId}`,
+      );
+      break;
+    case "waitAgent":
+    case "interruptAgent":
+    case "followupTask":
+      summary = `${result.result.subagent.path} · ${result.result.outcome.status}`;
+      pushSubagentSnapshot(lines, result.result);
+      break;
+    case "listAgents":
+      for (const child of result.result.children) {
+        pushAgentTreeNode(lines, child, 0);
+      }
+      summary = `${lines.length} agent(s)`;
+      break;
+  }
+  return {
+    summary: `${toolResultStateLabel(status)} · ${summary}`,
+    preview: lines.slice(0, 2),
+    body: <ResultList lines={lines} />,
+  };
+}
+
+function pushSubagentSnapshot(lines: string[], snapshot: SubagentSnapshot) {
+  lines.push(
+    `agent: ${snapshot.agentId}`,
+    `session: ${snapshot.subagent.sessionId}`,
+    `turn: ${snapshot.outcome.turnId}`,
+  );
+  if (snapshot.outcome.status === "completed" && snapshot.outcome.output) {
+    lines.push(formatBoundedText(snapshot.outcome.output, snapshot.outcome.truncated));
+  }
+  if (snapshot.outcome.status === "failed") {
+    lines.push(formatBoundedText(snapshot.outcome.error, snapshot.outcome.truncated));
+  }
+  if (snapshot.latestUpdate?.text) {
+    lines.push(formatBoundedText(snapshot.latestUpdate.text, snapshot.latestUpdate.truncated));
+  }
+}
+
+function pushAgentTreeNode(lines: string[], node: AgentTreeNode, depth: number) {
+  lines.push(
+    `${"  ".repeat(depth)}${node.snapshot.subagent.path} · ${node.snapshot.outcome.status}`,
+  );
+  for (const child of node.children) {
+    pushAgentTreeNode(lines, child, depth + 1);
+  }
+}
+
+function formatBoundedText(text: string, truncated: boolean) {
+  return truncated ? `${text} [truncated]` : text;
 }
 
 export function ToolResultRenderer(props: {

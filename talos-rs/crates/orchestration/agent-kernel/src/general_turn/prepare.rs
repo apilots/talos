@@ -14,8 +14,6 @@ use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
-/// Session transcript state key controlling the next prompt's compaction policy.
-pub const SESSION_COMPACTION_STATE_KEY: &str = "session_compaction_state";
 
 fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
     PromptLoadPolicy {
@@ -971,5 +969,6 @@ pub async fn prepare_general_turn(
         warnings,
         prompt_warning_state,
         stream_tx,
+        message_rx: None,
     })
 }

@@ -21,3 +21,19 @@ fn ensure_agent_workspace_does_not_migrate_prefix_files() {
         .join("MEMORY.md")
         .exists());
 }
+
+#[test]
+fn database_migration_path_uses_the_typed_backend() {
+    let paths = TalosPaths::from_home(PathBuf::from("/tmp/talos-path-test"));
+
+    assert_eq!(
+        (
+            paths.database_migrations_dir(crate::DatabaseType::Sqlite),
+            paths.database_migrations_dir(crate::DatabaseType::Postgres),
+        ),
+        (
+            PathBuf::from("/tmp/talos-path-test/conf/migrations/sqlite"),
+            PathBuf::from("/tmp/talos-path-test/conf/migrations/postgres"),
+        )
+    );
+}

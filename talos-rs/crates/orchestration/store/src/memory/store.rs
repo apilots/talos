@@ -9,55 +9,7 @@ use talos_error::{TalosError, TalosResult};
 use super::parser::parse_source;
 use super::types::{memory_importance_as_str, memory_kind_as_str, ParsedMemorySource};
 
-const SCHEMA: &str = r#"
-CREATE TABLE IF NOT EXISTS memory_entries (
-    row_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    memory_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    importance TEXT NOT NULL,
-    occurred_at INTEGER NOT NULL,
-    session_id TEXT,
-    source_from_seq INTEGER,
-    source_until_seq INTEGER,
-    source_path TEXT NOT NULL,
-    source_date TEXT NOT NULL,
-    UNIQUE(user_id, memory_id)
-);
-CREATE INDEX IF NOT EXISTS idx_memory_entries_user_time
-    ON memory_entries(user_id, occurred_at DESC, memory_id);
-CREATE INDEX IF NOT EXISTS idx_memory_entries_user_source
-    ON memory_entries(user_id, source_path);
-CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_fts USING fts5(
-    title,
-    body,
-    content='memory_entries',
-    content_rowid='row_id',
-    tokenize='trigram'
-);
-CREATE TRIGGER IF NOT EXISTS memory_entries_ai AFTER INSERT ON memory_entries BEGIN
-    INSERT INTO memory_entries_fts(rowid, title, body)
-    VALUES (new.row_id, new.title, new.body);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_entries_ad AFTER DELETE ON memory_entries BEGIN
-    INSERT INTO memory_entries_fts(memory_entries_fts, rowid, title, body)
-    VALUES ('delete', old.row_id, old.title, old.body);
-END;
-CREATE TRIGGER IF NOT EXISTS memory_entries_au AFTER UPDATE ON memory_entries BEGIN
-    INSERT INTO memory_entries_fts(memory_entries_fts, rowid, title, body)
-    VALUES ('delete', old.row_id, old.title, old.body);
-    INSERT INTO memory_entries_fts(rowid, title, body)
-    VALUES (new.row_id, new.title, new.body);
-END;
-CREATE TABLE IF NOT EXISTS memory_sources (
-    user_id TEXT NOT NULL,
-    source_path TEXT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    PRIMARY KEY(user_id, source_path)
-);
-"#;
+static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/memory/migrations/sqlite");
 
 /// SQLite-backed derived index for canonical daily Markdown memory files.
 #[derive(Clone)]
@@ -108,15 +60,15 @@ impl MemoryStore {
                     "memory index is corrupt after rebuild".to_string(),
                 ));
             }
-            match sqlx::raw_sql(SCHEMA).execute(&pool).await {
+            match SQLITE_MIGRATOR.run(&pool).await {
                 Ok(_) => {
                     return Ok(Self { pool });
                 }
-                Err(error) if attempt == 0 && is_sqlite_corruption(&error) => {
-                    pool.close().await;
-                    remove_index_files(path).await?;
+                Err(error) => {
+                    return Err(TalosError::StorageError(format!(
+                        "initialize memory index: {error}"
+                    )));
                 }
-                Err(error) => return Err(storage_error("initialize memory index")(error)),
             }
         }
         Err(TalosError::StorageError(
@@ -131,10 +83,9 @@ impl MemoryStore {
             .connect("sqlite::memory:")
             .await
             .map_err(storage_error("connect memory index"))?;
-        sqlx::raw_sql(SCHEMA)
-            .execute(&pool)
-            .await
-            .map_err(storage_error("initialize memory index"))?;
+        SQLITE_MIGRATOR.run(&pool).await.map_err(|error| {
+            TalosError::StorageError(format!("initialize memory index: {error}"))
+        })?;
         Ok(Self { pool })
     }
 

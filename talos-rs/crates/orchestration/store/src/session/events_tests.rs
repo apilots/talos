@@ -1,4 +1,5 @@
 use super::*;
+use crate::migration::{run_migrations, test_migrations_dir};
 use crate::session::active_turn::{ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate};
 use std::sync::Arc;
 use talos_storage::SqliteStorage;
@@ -6,6 +7,9 @@ use talos_types::talos::TalosTurnStartedEvent;
 
 async fn store() -> DatabaseSessionStore {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    run_migrations(storage.pool(), &test_migrations_dir())
+        .await
+        .unwrap();
     DatabaseSessionStore::new(storage).await.unwrap()
 }
 

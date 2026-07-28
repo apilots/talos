@@ -88,6 +88,7 @@ impl ResourceAccessService {
         request: SessionListRequest,
     ) -> TalosResult<Vec<TalosSession>> {
         let query = SessionQuery {
+            tree_scope: talos_store::session::SessionTreeScope::Primary,
             user_id: Some(actor.user_id.clone()),
             channel_id: None,
             provider: None,
@@ -107,6 +108,19 @@ impl ResourceAccessService {
     ) -> TalosResult<TalosSession> {
         let session = self.get_session_record(session_id).await?;
         self.ensure_session_visibility(actor, &session)?;
+        let record = self
+            .sessions
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+        if matches!(
+            record.tree_identity,
+            talos_store::session::SessionTreeIdentity::Subagent { .. }
+        ) {
+            return Err(TalosError::ValidationError(format!(
+                "session '{session_id}' is controlled by its parent agent"
+            )));
+        }
         Ok(session)
     }
 
@@ -218,8 +232,19 @@ impl ResourceAccessService {
         turn_id: String,
     ) -> TalosResult<()> {
         let session = self.get_session(actor, session_id).await?;
-        self.cancel_runtime_turn(CancelActiveTurnParams { session, turn_id })
-            .await
+        let record = self
+            .sessions
+            .get_session_record(session_id)
+            .await?
+            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+        self.cancel_runtime_turn(CancelActiveTurnParams {
+            binding: talos_types::agent_dispatch::DispatchBinding::Exact {
+                agent_id: record.agent_id,
+            },
+            session,
+            turn_id,
+        })
+        .await
     }
 
     pub(crate) async fn list_projects(&self, actor: &Actor) -> TalosResult<Vec<ProjectRecord>> {

@@ -480,7 +480,7 @@ fn build_request(input: &str) -> AgentRunParams {
         config,
         state: SessionState::default(),
     };
-    let context = AgentRunContext::from_session(&session, turn_id);
+    let context = AgentRunContext::from_session(&session, turn_id, "integration_agent".to_string());
     let config = AgentRunConfig::from_session(&session);
     let session_state = AgentRunSessionState::from_session(&session);
     let options = AgentRunOptions::from_config(&config);

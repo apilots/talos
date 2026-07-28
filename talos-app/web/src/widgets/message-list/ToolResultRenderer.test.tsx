@@ -65,4 +65,74 @@ describe("buildToolResultModel", () => {
       preview: ["1 file(s) changed · +1 -1"],
     });
   });
+
+  it("renders server-owned subagent result without deriving lifecycle", () => {
+    const model = buildToolResultModel({
+      contentItems: [{
+        type: "subagent_result",
+        result: {
+          operation: "waitAgent",
+          result: {
+            subagent: {
+              path: "/root/review",
+              sessionId: "child-session",
+              parent: {
+                sessionId: "root-session",
+                turnId: "root-turn",
+              },
+            },
+            agentId: "reviewer",
+            latestUpdate: null,
+            outcome: {
+              status: "completed",
+              turnId: "child-turn",
+              output: "review complete",
+              truncated: false,
+            },
+          },
+        },
+      }],
+      progress: [],
+      status: "done",
+    });
+
+    expect({ summary: model.summary, preview: model.preview }).toEqual({
+      summary: "Completed · /root/review · completed",
+      preview: ["agent: reviewer", "session: child-session"],
+    });
+  });
+
+  it("renders the server-owned send-message acknowledgement", () => {
+    const model = buildToolResultModel({
+      contentItems: [{
+        type: "subagent_result",
+        result: {
+          operation: "sendMessage",
+          result: {
+            subagent: {
+              path: "/root/review",
+              sessionId: "child-session",
+              parent: {
+                sessionId: "root-session",
+                turnId: "root-turn",
+              },
+            },
+            agentId: "reviewer",
+            turn: {
+              sessionId: "child-session",
+              turnId: "child-turn",
+            },
+            accepted: true,
+          },
+        },
+      }],
+      progress: [],
+      status: "done",
+    });
+
+    expect({ summary: model.summary, preview: model.preview }).toEqual({
+      summary: "Completed · Message accepted by /root/review",
+      preview: ["agent: /root/review", "agent id: reviewer"],
+    });
+  });
 });

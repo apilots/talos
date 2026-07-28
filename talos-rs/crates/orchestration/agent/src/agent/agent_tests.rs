@@ -35,6 +35,11 @@ use talos_types::talos::{
     TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
     TokenUsage,
 };
+
+#[path = "message_input_tests.rs"]
+mod message_input_tests;
+#[path = "run_validation_tests.rs"]
+mod run_validation_tests;
 use talos_types::{
     ModelRef, ModelSelection, SessionConf, SessionContext, SessionState, TalosSession,
     DEFAULT_SESSION_TITLE,
@@ -631,7 +636,8 @@ fn agent_run_params(
     turn_id: &str,
     input: Vec<TalosInputItem>,
 ) -> AgentRunParams {
-    let context = AgentRunContext::from_session(&session, turn_id.to_string());
+    let context =
+        AgentRunContext::from_session(&session, turn_id.to_string(), "test_agent".to_string());
     let config = AgentRunConfig::from_session(&session);
     let session_state = AgentRunSessionState::from_session(&session);
     let options = AgentRunOptions::from_config(&config);
@@ -1848,28 +1854,6 @@ async fn test_resume_streamed_rejects_missing_resume_context() {
 
     assert!(error.to_string().contains("resume requires"));
     assert!(error.to_string().contains("turn-no-resume-context"));
-}
-
-#[tokio::test]
-async fn test_run_rejects_resume_context() {
-    let agent = build_test_agent();
-    let session = build_test_session("session-run-with-resume-context", "workspace-1");
-    let mut request = agent_run_params(session, "turn-run-with-resume-context", Vec::new());
-    request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
-            item_id: "tool-item-original".to_string(),
-            call_id: "call-dynamic".to_string(),
-            tool_name: "echo_dynamic".to_string(),
-        }),
-    });
-
-    let error = match agent.run(request).await {
-        Ok(_) => panic!("run should reject continuation context"),
-        Err(error) => error,
-    };
-
-    assert!(error.to_string().contains("use resume API"));
-    assert!(error.to_string().contains("turn-run-with-resume-context"));
 }
 
 #[tokio::test]

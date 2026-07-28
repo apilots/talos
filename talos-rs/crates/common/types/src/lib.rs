@@ -20,7 +20,9 @@ pub mod runtime;
 pub mod schema;
 pub mod session;
 pub mod skills;
+pub mod subagent;
 pub mod talos;
+mod talos_content_display;
 pub mod turn_api;
 
 pub use agent_dispatch::*;
@@ -37,6 +39,7 @@ pub use profile_api::*;
 pub use runtime::*;
 pub use session::*;
 pub use skills::*;
+pub use subagent::*;
 pub use talos::*;
 pub use turn_api::*;
 

@@ -11,12 +11,14 @@ use talos_store::session::{
     SessionArtifactStore, SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
-    InterruptTurnRequest, InterruptTurnResponse, ModelInfo, OptionalCurrentDirectoryPatch,
+    AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, InterruptTurnRequest,
+    InterruptTurnResponse, ListSubagentsRequest, ModelInfo, OptionalCurrentDirectoryPatch,
     ProjectInfo, ProjectPatch, RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest,
-    RetryTurnResponse, SessionConfigOverridePolicy, SessionListRequest, SessionPatch,
-    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    RetryTurnResponse, SendMessageResult, SendSubagentMessageRequest, SessionConfigOverridePolicy,
+    SessionListRequest, SessionPatch, SpawnSubagentRequest, StartTurnRequest, StartTurnResponse,
+    SubagentSnapshot, SubagentSpawnResult, SubmitDynamicToolResultRequest,
     SubmitDynamicToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
-    TimelineActiveTurnSnapshot,
+    TimelineActiveTurnSnapshot, WaitSubagentRequest,
 };
 
 use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
@@ -25,6 +27,7 @@ use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::file::FileService;
 use crate::fs::FsService;
 use crate::project::ProjectService;
+use crate::subagent::SubagentService;
 use crate::{
     AccountService, Actor, ConfigService, MemoryService, PluginManagerService, ProfileService,
     RuntimeConfigReloadHook, SessionHistoryService, SessionService, SkillsService,
@@ -41,6 +44,7 @@ pub struct TalosService {
     event_log: Arc<TimelineEventService>,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
+    subagents: SubagentService,
     pub config: ConfigService,
     pub files: Arc<FileService>,
     fs: FsService,
@@ -134,6 +138,22 @@ impl TalosService {
             base_config.agent.kernel.plugins.clone(),
         )
         .with_plugin_manager(plugins.clone());
+        let turns = TurnService::new(
+            turn_executor,
+            event_service.clone(),
+            idempotency_store,
+            profile_store.clone(),
+            sessions.clone(),
+            session_runtime.clone(),
+            base_config.clone(),
+        );
+        let history = SessionHistoryService::new(session_artifact_store, event_service.clone());
+        let subagents = SubagentService::new(
+            sessions.clone(),
+            Arc::new(turns.clone()),
+            event_service.clone(),
+            history.clone(),
+        );
 
         Self {
             access: ResourceAccessService::with_services(
@@ -146,15 +166,7 @@ impl TalosService {
                 user_service,
                 base_config.cloud.api_base_url.clone(),
             ),
-            turns: TurnService::new(
-                turn_executor,
-                event_service.clone(),
-                idempotency_store,
-                profile_store.clone(),
-                sessions,
-                session_runtime,
-                base_config.clone(),
-            ),
+            turns,
             event_log: event_service.clone(),
             profile: ProfileService::new(
                 session_store,
@@ -163,7 +175,8 @@ impl TalosService {
                 base_config.agent.kernel.timezone.clone(),
             ),
             events: TimelineSubscriptionService::new(event_service.clone()),
-            history: SessionHistoryService::new(session_artifact_store, event_service.clone()),
+            history,
+            subagents,
             config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
             files,
             fs: FsService::new(base_config.fs.directory_picker.clone()),
@@ -397,6 +410,54 @@ impl TalosService {
         })
     }
 
+    /// Starts one child Session owned by the caller's active parent turn.
+    pub async fn spawn_subagent(
+        &self,
+        request: SpawnSubagentRequest,
+    ) -> ServiceResult<SubagentSpawnResult> {
+        self.subagents.spawn(request).await
+    }
+
+    /// Sends a message to one authorized running child Turn.
+    pub async fn send_subagent_message(
+        &self,
+        request: SendSubagentMessageRequest,
+    ) -> ServiceResult<SendMessageResult> {
+        self.subagents.send_message(request).await
+    }
+
+    /// Waits until one selected child reaches a terminal state or the timeout expires.
+    pub async fn wait_subagent(
+        &self,
+        request: WaitSubagentRequest,
+    ) -> ServiceResult<SubagentSnapshot> {
+        self.subagents.wait(request).await
+    }
+
+    /// Requests cancellation of one authorized descendant Session.
+    pub async fn interrupt_subagent(
+        &self,
+        request: InterruptSubagentRequest,
+    ) -> ServiceResult<SubagentSnapshot> {
+        self.subagents.interrupt(request).await
+    }
+
+    /// Starts another turn in an idle authorized descendant Session.
+    pub async fn follow_up_subagent(
+        &self,
+        request: FollowUpSubagentRequest,
+    ) -> ServiceResult<SubagentSnapshot> {
+        self.subagents.follow_up(request).await
+    }
+
+    /// Lists the complete Agent tree rooted at the caller's collaboration root.
+    pub async fn list_subagents(
+        &self,
+        request: ListSubagentsRequest,
+    ) -> ServiceResult<AgentTreeSnapshot> {
+        self.subagents.list(request).await
+    }
+
     pub async fn submit_retry(
         &self,
         actor: &Actor,
@@ -497,6 +558,7 @@ impl TalosService {
     ) -> ServiceResult<SessionPatchAck> {
         let _session = self.access.get_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
+        self.subagents.ensure_tree_inactive(session_id).await?;
         self.access.delete_session(actor, session_id).await
     }
 

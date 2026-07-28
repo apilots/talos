@@ -4,7 +4,7 @@ use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
-use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
+use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary, SessionTreeIdentity};
 
 pub struct MockSessionStore {
     memory_processed_until_seq: AtomicU64,
@@ -29,7 +29,6 @@ impl SessionStore for MockSessionStore {
     async fn insert_session_record(
         &self,
         _record: &SessionRecord,
-        _agent_id: &str,
         _scope: &str,
     ) -> TalosResult<()> {
         Ok(())
@@ -38,6 +37,8 @@ impl SessionStore for MockSessionStore {
     async fn get_session_record(&self, session_id: &str) -> TalosResult<Option<SessionRecord>> {
         Ok(Some(SessionRecord {
             id: session_id.to_string(),
+            agent_id: "default".to_string(),
+            tree_identity: SessionTreeIdentity::Primary,
             title: DEFAULT_SESSION_TITLE.to_string(),
             user_id: "mock-user".to_string(),
             context: TalosContext {
@@ -65,6 +66,14 @@ impl SessionStore for MockSessionStore {
         }))
     }
 
+    async fn get_subagent_record(
+        &self,
+        _tree_root_session_id: &str,
+        _agent_path: &talos_types::AgentPath,
+    ) -> TalosResult<Option<SessionRecord>> {
+        Ok(None)
+    }
+
     async fn list_session_records(&self, _query: &SessionQuery) -> TalosResult<Vec<SessionRecord>> {
         Ok(Vec::new())
     }
@@ -75,6 +84,10 @@ impl SessionStore for MockSessionStore {
 
     async fn summarize_sessions(&self, _user_id: &str) -> TalosResult<SessionSummary> {
         Ok(SessionSummary::default())
+    }
+
+    async fn has_active_subagent_turn(&self, _tree_root_session_id: &str) -> TalosResult<bool> {
+        Ok(false)
     }
 
     async fn update_session_record(&self, _record: &SessionRecord) -> TalosResult<bool> {
@@ -102,6 +115,10 @@ impl SessionStore for MockSessionStore {
     }
 
     async fn delete_session_record(&self, _session_id: &str) -> TalosResult<bool> {
+        Ok(true)
+    }
+
+    async fn delete_session_tree(&self, _tree_root_session_id: &str) -> TalosResult<bool> {
         Ok(true)
     }
 }

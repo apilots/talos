@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use sqlx::sqlite::SqlitePoolOptions;
+use talos_storage::SqliteStorage;
 use talos_types::FileScope;
 
-use crate::migration::run_migrations;
+use crate::migration::{run_migrations, test_migrations_dir};
 
 use super::{
     DatabaseFileStore, FileIncompleteCursor, FileListCursor, FileListQuery, FileOwnerKey,
@@ -11,20 +11,17 @@ use super::{
 };
 
 async fn store() -> DatabaseFileStore {
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
         .await
         .unwrap();
-    sqlx::query("CREATE TABLE projects (project_id TEXT PRIMARY KEY NOT NULL)")
+    let pool = storage.pool().clone();
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO projects (project_id, name, user_id, directory, created_at, updated_at) VALUES ('project-1', 'Project 1', 'user-1', '/project-1', 1, 1)",
+    )
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO projects (project_id) VALUES ('project-1')")
-        .execute(&pool)
-        .await
-        .unwrap();
-    run_migrations(&pool).await.unwrap();
     DatabaseFileStore::new(pool)
 }
 

@@ -28,3 +28,10 @@ fn test_context_reuses_session_state() {
 
     assert_eq!(context_b.permission_mode(), PermissionMode::Plan);
 }
+
+#[test]
+fn test_context_carries_trusted_turn_identity() {
+    let context = ToolContext::new("session-1", "user-1").with_turn_id("turn-1");
+
+    assert_eq!(context.turn_id(), Some("turn-1"));
+}
