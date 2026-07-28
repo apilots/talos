@@ -7,7 +7,7 @@ import { contextCompactionStarted } from "../__tests__/streaming-fixtures";
 import { activeContextCompactionStage } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useAppStore } from "@/shared/store/app-store";
-import type { TimelineEventEnvelope } from "@talos/sdk-browser";
+import { TalosHttpError, type TimelineEventEnvelope } from "@talos/sdk-browser";
 
 vi.hoisted(() => {
   Object.defineProperty(globalThis, "localStorage", {
@@ -21,16 +21,19 @@ vi.hoisted(() => {
 });
 
 const apiMocks = vi.hoisted(() => ({
+  recoverTimelineLiveTail: vi.fn(),
   subscribeTimelineEvents: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../api", () => ({
+  recoverTimelineLiveTail: apiMocks.recoverTimelineLiveTail,
   subscribeTimelineEvents: apiMocks.subscribeTimelineEvents,
 }));
 
 describe("useSessionTimelineEvents", () => {
   beforeEach(() => {
     apiMocks.subscribeTimelineEvents.mockReset().mockResolvedValue(undefined);
+    apiMocks.recoverTimelineLiveTail.mockReset();
     useAppStore.getState().resetStream("sess-1");
   });
 
@@ -73,6 +76,62 @@ describe("useSessionTimelineEvents", () => {
 
     expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
     expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-7");
+  });
+
+  it("recovers the server cursor before resubscribing after retention", async () => {
+    apiMocks.subscribeTimelineEvents
+      .mockRejectedValueOnce(
+        new TalosHttpError({
+          method: "GET",
+          status: 410,
+          statusText: "Gone",
+          body: JSON.stringify({
+            code: "event_cursor_expired",
+            message: "event cursor is older than retained timeline events",
+          }),
+          url: "http://localhost/v1/sessions/sess-1/events",
+        }),
+      )
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    apiMocks.recoverTimelineLiveTail.mockResolvedValue({
+      replay: {
+        events: [],
+        high_water_mark_event_id: "event-9",
+        last_replay_seq: 9,
+        cursor_status: "fromBeginning",
+      },
+      active_turn: {
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        message_id: "message-1",
+        status: "running",
+        last_event_id: "event-9",
+        pending_user_action: null,
+        updated_at: 1,
+      },
+    });
+    useAppStore.getState().setStreamMeta("sess-1", {
+      activeMessageId: "message-1",
+      isStreaming: true,
+      connectionState: "streaming",
+      lastEventId: "event-1",
+    });
+
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-1", true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.recoverTimelineLiveTail).toHaveBeenCalledWith("sess-1");
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
+    expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-9");
+    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
+      activeMessageId: "message-1",
+      isStreaming: true,
+      lastEventId: "event-9",
+      error: undefined,
+    });
   });
 
   it("continues reconnecting with the maximum delay after the initial attempts", async () => {

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { TalosHttpError } from "@talos/sdk-browser";
 
-import { subscribeTimelineEvents } from "../api";
-import { applyStreamEvent } from "../stream-events";
+import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
+import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
@@ -47,11 +48,38 @@ export function useSessionTimelineEvents(
           if (disposed || (error instanceof Error && error.name === "AbortError")) {
             return;
           }
+          let subscriptionError = error;
+          if (
+            error instanceof TalosHttpError &&
+            error.status === 410 &&
+            error.code === "event_cursor_expired"
+          ) {
+            try {
+              const recovery = await recoverTimelineLiveTail(sessionId);
+              recovery.replay.events
+                .slice()
+                .sort((left, right) => left.event_seq - right.event_seq)
+                .forEach((event) => applyStreamEvent(sessionId, event));
+              if (recovery.active_turn) {
+                applyActiveTurnSnapshot(sessionId, recovery.active_turn);
+              }
+              const state = useAppStore.getState();
+              state.setStreamError(sessionId, undefined);
+              if (!state.streams[sessionId]?.isStreaming) {
+                return;
+              }
+              continue;
+            } catch (recoveryError: unknown) {
+              subscriptionError = recoveryError;
+            }
+          }
           const exhausted = attempt + 1 >= RECONNECT_DELAYS_MS.length;
           const state = useAppStore.getState();
           state.setStreamError(
             sessionId,
-            error instanceof Error ? error.message : "Session event subscription failed.",
+            subscriptionError instanceof Error
+              ? subscriptionError.message
+              : "Session event subscription failed.",
           );
           if (state.streams[sessionId]?.isStreaming) {
             state.setStreamMeta(sessionId, {

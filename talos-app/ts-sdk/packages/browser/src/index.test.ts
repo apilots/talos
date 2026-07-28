@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createBrowserTalosClient } from "./index";
+import { createBrowserTalosClient, TalosHttpError } from "./index";
+
+const streamMocks = vi.hoisted(() => ({
+  fetchEventSource: vi.fn(),
+}));
+
+vi.mock("@microsoft/fetch-event-source", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@microsoft/fetch-event-source")>();
+  return {
+    ...original,
+    fetchEventSource: streamMocks.fetchEventSource,
+  };
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  streamMocks.fetchEventSource.mockReset();
 });
 
 describe("Browser files client", () => {
@@ -98,6 +111,42 @@ describe("Browser files client", () => {
     await expect(upload).rejects.toMatchObject({ name: "AbortError" });
     expect(xhr.abort).not.toHaveBeenCalled();
     expect(xhr.body).toBeNull();
+  });
+});
+
+describe("Browser timeline client", () => {
+  it("preserves a structured HTTP error returned instead of an event stream", async () => {
+    streamMocks.fetchEventSource.mockImplementation(
+      async (_url: string, options: { onopen?: (response: Response) => Promise<void> }) => {
+        await options.onopen?.(
+          new Response(
+            JSON.stringify({
+              code: "event_cursor_expired",
+              message: "event cursor is older than retained timeline events",
+            }),
+            {
+              status: 410,
+              statusText: "Gone",
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      },
+    );
+    const client = createBrowserTalosClient({ baseUrl: "http://localhost:8080" });
+
+    const subscription = client.turns.events(
+      "session-1",
+      "event-1",
+      vi.fn(),
+    );
+
+    await expect(subscription).rejects.toMatchObject({
+      name: "TalosHttpError",
+      status: 410,
+      code: "event_cursor_expired",
+      message: "event cursor is older than retained timeline events",
+    } satisfies Partial<TalosHttpError>);
   });
 });
 

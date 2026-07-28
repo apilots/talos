@@ -1,4 +1,7 @@
-import { fetchEventSource } from "@microsoft/fetch-event-source";
+import {
+  EventStreamContentType,
+  fetchEventSource,
+} from "@microsoft/fetch-event-source";
 import {
   TalosClient,
   type HttpAdapter,
@@ -144,6 +147,20 @@ class BrowserStreamAdapter implements StreamAdapter {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(options.headers ?? {}),
+        },
+        async onopen(response) {
+          const contentType = response.headers.get("content-type");
+          if (response.ok && contentType?.startsWith(EventStreamContentType)) {
+            return;
+          }
+          const body = await response.text();
+          throw new TalosHttpError({
+            method: options.method ?? "GET",
+            status: response.status,
+            statusText: response.statusText,
+            body,
+            url,
+          });
         },
         onmessage(event) {
           if (event.data) {
