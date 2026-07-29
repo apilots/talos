@@ -35,6 +35,7 @@ pub mod loader;
 pub mod paths;
 pub mod service;
 pub mod store;
+pub mod upgrade;
 pub mod validate;
 pub mod workspace;
 
@@ -80,12 +81,16 @@ pub use domains::tools::{
     WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
-pub use loader::install_database_migrations;
+pub use loader::{install_database_migrations, DatabaseMigrationsInstallReport};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };
 pub use service::{LlmConfigManager, LlmConfigService};
 pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
+pub use upgrade::{
+    refresh_default_config_template, upgrade_default_config, ConfigTemplateRefreshReport,
+    ConfigUpgradeReport,
+};
 pub use workspace::{
     resolve_effective_kernel_workspace, validate_session_workspace_user,
     validate_user_workspace_segment, EffectiveKernelWorkspace,
@@ -199,6 +204,11 @@ pub fn parse_timezone(input: &str) -> TalosResult<TalosTimezone> {
 }
 
 impl Config {
+    /// Attach runtime-only environment values loaded by the configuration layer.
+    pub fn attach_runtime_env(&mut self, runtime_env: RuntimeEnv) {
+        self.agent.kernel.runtime_env = runtime_env;
+    }
+
     pub fn talos_paths(&self) -> TalosPaths {
         TalosPaths::resolve()
     }

@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use talos_config::{WebSearchProviderConfig, WebSearchToolConfig};
+use talos_config::{RuntimeEnv, WebSearchProviderConfig, WebSearchToolConfig};
 use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::web_common::{normalize_domain, parse_http_url, truncate_chars, url_domain};
@@ -68,9 +68,10 @@ trait SearchProvider: Send + Sync {
 pub async fn run_with_config(
     request: &WebSearchRequest,
     config: &WebSearchToolConfig,
+    runtime_env: &RuntimeEnv,
 ) -> TalosResult<WebSearchResponse> {
     validate_request(request)?;
-    let provider = provider_for_config(config)?;
+    let provider = provider_for_config(config, runtime_env)?;
     let freshness_applied = request.recency_days.is_some() && provider.supports_recency();
     let candidates = provider.search(request).await?;
     let hits = finalize_hits(request, candidates)?;
@@ -84,16 +85,21 @@ pub async fn run_with_config(
     })
 }
 
-fn provider_for_config(config: &WebSearchToolConfig) -> TalosResult<Box<dyn SearchProvider>> {
+fn provider_for_config(
+    config: &WebSearchToolConfig,
+    runtime_env: &RuntimeEnv,
+) -> TalosResult<Box<dyn SearchProvider>> {
     match config.provider {
         WebSearchProviderConfig::Firecrawl => Ok(Box::new(
-            firecrawl::FirecrawlSearchProvider::new(config.firecrawl.clone())?,
+            firecrawl::FirecrawlSearchProvider::new(config.firecrawl.clone(), runtime_env)?,
         )),
         WebSearchProviderConfig::Brave => Ok(Box::new(brave::BraveSearchProvider::new(
             config.brave.clone(),
+            runtime_env,
         )?)),
         WebSearchProviderConfig::Tavily => Ok(Box::new(tavily::TavilySearchProvider::new(
             config.tavily.clone(),
+            runtime_env,
         )?)),
     }
 }
@@ -165,7 +171,10 @@ fn provider_result_limit(request: &WebSearchRequest) -> usize {
     }
 }
 
-fn configured_api_key(config: &talos_config::WebSearchProviderRuntimeConfig) -> Option<String> {
+fn configured_api_key(
+    config: &talos_config::WebSearchProviderRuntimeConfig,
+    runtime_env: &RuntimeEnv,
+) -> Option<String> {
     config
         .api_key
         .as_deref()
@@ -176,16 +185,17 @@ fn configured_api_key(config: &talos_config::WebSearchProviderRuntimeConfig) -> 
                 .api_key_env
                 .as_deref()
                 .filter(|value| !value.trim().is_empty())
-                .and_then(|name| std::env::var(name).ok())
+                .and_then(|name| runtime_env.get(name).map(str::to_string))
                 .filter(|value| !value.trim().is_empty())
         })
 }
 
 fn resolve_api_key(
     config: &talos_config::WebSearchProviderRuntimeConfig,
+    runtime_env: &RuntimeEnv,
     provider: &str,
 ) -> TalosResult<String> {
-    configured_api_key(config).ok_or_else(|| {
+    configured_api_key(config, runtime_env).ok_or_else(|| {
         let requirement = config
             .api_key_env
             .as_deref()

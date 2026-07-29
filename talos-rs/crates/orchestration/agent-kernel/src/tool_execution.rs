@@ -357,6 +357,7 @@ pub struct StreamingToolExecutionOutput {
 
 pub struct StreamingToolScheduler {
     execution_mode: ToolExecutionMode,
+    max_parallelism: usize,
     execution_context: ToolExecutionContext,
     registry: Arc<dyn ToolExecutorPort>,
     stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
@@ -369,12 +370,18 @@ pub struct StreamingToolScheduler {
 impl StreamingToolScheduler {
     pub fn new(
         execution_mode: ToolExecutionMode,
+        max_parallelism: usize,
         execution_context: ToolExecutionContext,
         registry: Arc<dyn ToolExecutorPort>,
         stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
     ) -> Self {
+        let max_parallelism = match execution_mode {
+            ToolExecutionMode::Sequential => 1,
+            ToolExecutionMode::Parallel => max_parallelism.max(1),
+        };
         Self {
             execution_mode,
+            max_parallelism,
             execution_context,
             registry,
             stream_tx,
@@ -383,6 +390,10 @@ impl StreamingToolScheduler {
             parallel_running: 0,
             serial_running: false,
         }
+    }
+
+    pub fn has_running(&self) -> bool {
+        self.parallel_running > 0 || self.serial_running
     }
 
     pub async fn push_call(
@@ -419,6 +430,21 @@ impl StreamingToolScheduler {
         Ok(completed)
     }
 
+    pub async fn next_completed(&mut self) -> TalosResult<Option<StreamingToolExecutionOutput>> {
+        let Some(result) = self.running_tasks.join_next().await else {
+            return Ok(None);
+        };
+        let (running_call, output) = result.map_err(|error| {
+            TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
+        })?;
+        self.mark_completed(&running_call);
+        self.schedule_ready_calls().await;
+        Ok(Some(StreamingToolExecutionOutput {
+            stream_key: running_call.stream_key,
+            output,
+        }))
+    }
+
     pub async fn finish(&mut self) -> TalosResult<Vec<StreamingToolExecutionOutput>> {
         let mut completed = self.drain_completed().await?;
         loop {
@@ -429,18 +455,10 @@ impl StreamingToolScheduler {
                 self.schedule_ready_calls().await;
                 continue;
             }
-            let Some(result) = self.running_tasks.join_next().await else {
+            let Some(completed_output) = self.next_completed().await? else {
                 break;
             };
-            let (running_call, output) = result.map_err(|error| {
-                TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
-            })?;
-            self.mark_completed(&running_call);
-            completed.push(StreamingToolExecutionOutput {
-                stream_key: running_call.stream_key,
-                output,
-            });
-            self.schedule_ready_calls().await;
+            completed.push(completed_output);
             completed.extend(self.drain_completed().await?);
         }
         Ok(completed)
@@ -482,6 +500,9 @@ impl StreamingToolScheduler {
                     return;
                 }
                 StreamingToolSchedulingClass::ParallelSafe => {
+                    if self.parallel_running >= self.max_parallelism {
+                        return;
+                    }
                     let next_call = self
                         .pending_calls
                         .pop_front()

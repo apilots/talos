@@ -258,6 +258,7 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
     };
     let mut scheduler = StreamingToolScheduler::new(
         ToolExecutionMode::Sequential,
+        1,
         execution_context,
         registry,
         Some(stream_tx),
@@ -292,4 +293,53 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
         }
     }
     assert!(saw_tool_progress);
+}
+
+#[tokio::test]
+async fn test_streaming_scheduler_limits_parallel_safe_tools() {
+    let registry = Arc::new(ToolRegistry::new());
+    let concurrent = Arc::new(AtomicUsize::new(0));
+    let max_concurrent = Arc::new(AtomicUsize::new(0));
+    registry.register(Arc::new(ObservedDelayTool {
+        name: "Read",
+        concurrent: concurrent.clone(),
+        max_concurrent: max_concurrent.clone(),
+    }));
+    let execution_context = ToolExecutionContext {
+        session_id: "s1".to_string(),
+        turn_id: "turn-1".to_string(),
+        agent_id: "agent-1".to_string(),
+        user_id: "u1".to_string(),
+        project_root: None,
+        kernel_config: Arc::new(AgentKernelConfig::default()),
+        dynamic_tool_results: HashMap::new(),
+    };
+    let mut scheduler = StreamingToolScheduler::new(
+        ToolExecutionMode::Parallel,
+        2,
+        execution_context,
+        registry,
+        None,
+    );
+
+    for index in 0..4 {
+        scheduler
+            .push_call(
+                ToolStreamKey { round: 0, index },
+                ToolExecutionInput {
+                    call_id: format!("call_{index}"),
+                    tool_name: "Read".to_string(),
+                    arguments: json!({
+                        "label": format!("read-{index}"),
+                        "delay_ms": 25
+                    }),
+                },
+            )
+            .await
+            .expect("tool should schedule");
+    }
+    let outputs = scheduler.finish().await.expect("tools should finish");
+
+    assert_eq!(outputs.len(), 4);
+    assert_eq!(max_concurrent.load(Ordering::SeqCst), 2);
 }

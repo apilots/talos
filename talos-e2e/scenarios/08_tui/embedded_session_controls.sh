@@ -204,7 +204,7 @@ mkdir -p "${WORKSPACE_DIR}"
 tmux new-session -d -s "${TUI_SESSION_NAME}" \
   "cd '${WORKSPACE_DIR}' && TALOS_HOME='${TALOS_HOME}' '${TALOS_RS_DIR}/target/debug/talos'"
 
-if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message or use /help" 160 0.25 "${PANE_SNAPSHOT}"; then
+if ! tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message, Ctrl+V an image, or use /help" 160 0.25 "${PANE_SNAPSHOT}"; then
   dump_failure_context
   echo "CASE embedded_tui_session_controls_bootstrap FAIL"
   exit 1

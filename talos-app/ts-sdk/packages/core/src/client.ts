@@ -98,6 +98,7 @@ import type {
   InterruptTurnRequest,
   RetryTurnRequest,
   RecoverTimelineRequest,
+  SubscriptionTerminatedEvent,
   StartTurnRequest,
   StartTurnResponse,
   TimelineEventEnvelope,
@@ -112,6 +113,18 @@ import type {
 
 interface RequestControlOptions {
   signal?: AbortSignal;
+}
+
+export class TalosStreamTerminatedError extends Error {
+  public readonly reason: SubscriptionTerminatedEvent["reason"];
+  public readonly responseMessage: string;
+
+  constructor(event: SubscriptionTerminatedEvent) {
+    super(event.message);
+    this.name = "TalosStreamTerminatedError";
+    this.reason = event.reason;
+    this.responseMessage = event.message;
+  }
 }
 
 export class TalosClient {
@@ -570,7 +583,15 @@ export class TalosClient {
           if (data === "[DONE]") {
             return;
           }
-          onEvent(normalizeTimelineEnvelope(JSON.parse(data)));
+          const payload = JSON.parse(data) as unknown;
+          const terminated = normalizeSubscriptionTerminatedEvent(payload);
+          if (terminated) {
+            if (terminated.reason === "completed") {
+              return;
+            }
+            throw new TalosStreamTerminatedError(terminated);
+          }
+          onEvent(normalizeTimelineEnvelope(payload));
         },
       );
     },
@@ -654,6 +675,32 @@ function createIdempotencyKey() {
 
 function normalizeTimelineEnvelope(value: unknown): TimelineEventEnvelope {
   return value as TimelineEventEnvelope;
+}
+
+function normalizeSubscriptionTerminatedEvent(
+  value: unknown,
+): SubscriptionTerminatedEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Partial<SubscriptionTerminatedEvent>;
+  if (typeof candidate.reason !== "string" || typeof candidate.message !== "string") {
+    return null;
+  }
+  if (
+    candidate.reason !== "completed" &&
+    candidate.reason !== "interrupted" &&
+    candidate.reason !== "server_shutdown" &&
+    candidate.reason !== "session_deleted" &&
+    candidate.reason !== "lagged" &&
+    candidate.reason !== "slow_consumer"
+  ) {
+    return null;
+  }
+  return {
+    reason: candidate.reason,
+    message: candidate.message,
+  };
 }
 
 function isTerminalTimelineEvent(envelope: TimelineEventEnvelope): boolean {

@@ -4,7 +4,7 @@ use std::path::Path;
 #[test]
 fn build_welcome_card_separates_title_and_session_block() {
     let card = build_welcome_card(
-        "v0.1.4",
+        "v0.1.5",
         "qwen-plus",
         Some(Path::new("/Users/xujiang/data/ailabs/talos/talos-rs")),
     );
@@ -12,7 +12,7 @@ fn build_welcome_card_separates_title_and_session_block() {
     let lines: Vec<&str> = card.lines().collect();
     assert_eq!(
         lines[1],
-        "│ >_ Talos TUI (v0.1.4)                            │"
+        "│ >_ Talos TUI (v0.1.5)                            │"
     );
     assert!(lines[3].starts_with("│ model:"));
     assert!(lines[3].contains("/model to change"));

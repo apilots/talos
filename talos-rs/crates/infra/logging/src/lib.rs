@@ -64,9 +64,32 @@ pub struct LogGuard {
     _guards: Vec<WorkerGuard>,
 }
 
+/// Paths and process-entry behavior used to initialize logging before full config loading.
+#[derive(Debug, Clone)]
+pub struct StartupLoggingOptions {
+    pub config_file: PathBuf,
+    pub log_file: PathBuf,
+    pub stdout: bool,
+}
+
 /// 初始化日志系统
 pub fn init() -> TalosResult<LogGuard> {
     init_with_config(LoggingConfig::default())
+}
+
+/// Initialize logging once from the raw `logging` YAML node and stable startup defaults.
+pub fn init_startup_once(options: StartupLoggingOptions) -> TalosResult<LogGuard> {
+    let (config, warning) = startup_logging_config(&options);
+    let guard = init_with_config(config)?;
+    if let Some(warning) = warning {
+        tracing::warn!("{warning}");
+    }
+    tracing::info!(
+        config_file = %options.config_file.display(),
+        log_file = %options.log_file.display(),
+        "startup logging initialized"
+    );
+    Ok(guard)
 }
 
 /// 使用配置初始化
@@ -89,6 +112,64 @@ pub fn init_with_config(config: LoggingConfig) -> TalosResult<LogGuard> {
 /// 使用默认配置初始化（保留旧接口名以兼容调用方）
 pub fn init_from_env() -> TalosResult<LogGuard> {
     init_with_config(LoggingConfig::default())
+}
+
+fn startup_logging_config(options: &StartupLoggingOptions) -> (LoggingConfig, Option<String>) {
+    let config = LoggingConfig {
+        file: Some(options.log_file.to_string_lossy().to_string()),
+        stdout: options.stdout,
+        ..LoggingConfig::default()
+    };
+
+    let raw = match std::fs::read_to_string(&options.config_file) {
+        Ok(raw) => raw,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return (config, None),
+        Err(err) => {
+            return (
+                config,
+                Some(format!(
+                    "failed to read logging config {}: {err}",
+                    options.config_file.display()
+                )),
+            )
+        }
+    };
+
+    let root = match serde_yaml::from_str::<serde_yaml::Value>(&raw) {
+        Ok(root) => root,
+        Err(err) => {
+            return (
+                config,
+                Some(format!(
+                    "failed to parse logging config yaml {}: {err}",
+                    options.config_file.display()
+                )),
+            )
+        }
+    };
+    let Some(logging) = root
+        .as_mapping()
+        .and_then(|mapping| mapping.get(serde_yaml::Value::String("logging".to_string())))
+    else {
+        return (config, None);
+    };
+
+    match serde_yaml::from_value::<LoggingConfig>(logging.clone()) {
+        Ok(mut parsed) => {
+            if parsed.file.is_none() {
+                parsed.file = Some(options.log_file.to_string_lossy().to_string());
+            }
+            parsed.stdout = options.stdout;
+            (parsed, None)
+        }
+        Err(err) => (
+            config,
+            Some(format!(
+                "failed to decode logging config {}: {err}",
+                options.config_file.display()
+            )),
+        ),
+    }
 }
 
 fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {

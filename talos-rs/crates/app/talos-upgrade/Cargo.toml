@@ -1,0 +1,13 @@
+[package]
+name = "talos-upgrade"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos startup upgrade coordinator"
+repository.workspace = true
+
+[dependencies]
+talos-config = { workspace = true }
+talos-error = { workspace = true }
+tracing = { workspace = true }

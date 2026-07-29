@@ -177,6 +177,45 @@ session: legacy-session
 }
 
 #[tokio::test]
+async fn rebuild_accepts_medium_importance_as_normal() {
+    let workspace = tempfile::tempdir().expect("workspace");
+    let content = r#"## [09:30] Medium importance
+memory_id: mem_0123456789abcdef0123456789abcdef
+occurred_at: 1784251800
+session: session-1
+kind: fact
+importance: medium
+source_from_seq: 12
+source_until_seq: 18
+
+- Medium importance should normalize to normal.
+"#;
+    write_memory_file(workspace.path(), "2026-07-17", content);
+    let store = test_store(workspace.path()).await;
+
+    store
+        .rebuild_scope("user-1", workspace.path(), "memory", UTC)
+        .await
+        .expect("rebuild medium importance");
+    let results = store
+        .search(
+            "user-1",
+            &MemorySearchQuery {
+                text: "normalize".to_string(),
+                limit: 6,
+                kinds: None,
+                since_at: None,
+                until_at: None,
+            },
+        )
+        .await
+        .expect("search medium importance");
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].memory.importance, MemoryImportance::Normal);
+}
+
+#[tokio::test]
 async fn rebuild_uses_the_configured_memory_directory() {
     let workspace = tempfile::tempdir().expect("workspace");
     let memory_dir = workspace.path().join("journal");

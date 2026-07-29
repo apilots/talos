@@ -1,7 +1,8 @@
 use super::{
-    apply_runtime_options, build_application_runtime, create_llm_provider, resolve_webui_dir,
-    ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle, TalosServerOptions,
-    WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    apply_runtime_options, build_application_runtime, build_application_runtime_with_migration_dir,
+    create_llm_provider, resolve_webui_dir, ModelSetupRequiredProvider, ReloadableLlmProvider,
+    TalosServerHandle, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
+    SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,6 +22,10 @@ use tokio::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 static TEMP_DIR_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
+fn test_migrations_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite")
+}
 
 #[test]
 fn resolve_webui_dir_uses_explicit_env_dir() {
@@ -197,7 +202,7 @@ async fn application_runtime_builds_when_model_key_is_missing() {
     config.llm.anthropic.models = vec![provider_model(&config.llm.model)];
     config.llm.anthropic.api_key = None;
 
-    let runtime = build_application_runtime(config)
+    let runtime = build_application_runtime_with_migration_dir(config, &test_migrations_dir())
         .await
         .expect("runtime should start before model setup is complete");
 
@@ -241,7 +246,7 @@ async fn application_runtime_registers_configured_default_agent() {
         }),
     }];
 
-    let runtime = build_application_runtime(config)
+    let runtime = build_application_runtime_with_migration_dir(config, &test_migrations_dir())
         .await
         .expect("runtime should build with configured agent");
 
@@ -288,7 +293,7 @@ async fn application_runtime_skips_disabled_agent_definitions() {
         },
     ];
 
-    let runtime = build_application_runtime(config)
+    let runtime = build_application_runtime_with_migration_dir(config, &test_migrations_dir())
         .await
         .expect("runtime should build with enabled agent");
 

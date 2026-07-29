@@ -40,6 +40,14 @@ fmt-check:
 build *args:
     cargo build "$@"
 
+# Run the development server with repository resources.
+dev-server *args:
+    TALOS_RESOURCE_DIR="$PWD/.." cargo run -p talos-server --bin talos-server "$@"
+
+# Run the development Web UI with repository resources in the process environment.
+dev-web *args:
+    TALOS_RESOURCE_DIR="$PWD/.." pnpm --dir ../talos-app dev "$@"
+
 # Type-check selected packages or the current workspace selection.
 check *args:
     CARGO_TARGET_DIR=target/talos-check cargo check "$@"

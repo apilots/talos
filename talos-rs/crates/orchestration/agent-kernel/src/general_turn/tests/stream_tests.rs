@@ -1161,6 +1161,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         Some(&tx),
         Some(StreamingToolExecutionConfig {
             execution_mode: ToolExecutionMode::Parallel,
+            max_parallelism: 3,
             execution_context,
             tool_registry: registry,
         }),

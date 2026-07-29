@@ -281,6 +281,14 @@ impl TimelineBuilder {
         Ok(self.event(AgentEventType::ItemDelta, payload))
     }
 
+    pub fn append_status_delta(
+        &mut self,
+        item_id: &str,
+        status: TalosTimelineItemStatus,
+    ) -> TalosResult<AgentEvent> {
+        self.append_delta(item_id, TalosTimelineDelta::Status { status })
+    }
+
     pub fn complete_item(
         &mut self,
         item_id: &str,
@@ -441,6 +449,7 @@ impl TimelineBuilder {
 
 fn should_close_item(current: TalosTimelineItemStatus, terminal: TalosTimelineItemStatus) -> bool {
     match current {
+        TalosTimelineItemStatus::Queued => true,
         TalosTimelineItemStatus::Running => true,
         TalosTimelineItemStatus::WaitingDynamicInput => {
             terminal != TalosTimelineItemStatus::Completed

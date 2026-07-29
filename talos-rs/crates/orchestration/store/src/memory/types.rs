@@ -33,6 +33,7 @@ pub(super) fn memory_importance_as_str(importance: MemoryImportance) -> &'static
 pub(super) fn parse_memory_importance(value: &str) -> Option<MemoryImportance> {
     match value {
         "low" => Some(MemoryImportance::Low),
+        "medium" => Some(MemoryImportance::Normal),
         "normal" => Some(MemoryImportance::Normal),
         "high" => Some(MemoryImportance::High),
         _ => None,

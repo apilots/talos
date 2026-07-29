@@ -112,6 +112,8 @@ export type {
   TalosTimelineNoticeLevel,
   TalosTimelinePhase,
   TimelineSubscriptionNotification,
+  SubscriptionTerminatedEvent,
+  SubscriptionTerminatedReason,
   TimelineActiveTurnSnapshot,
   TimelineActiveTurnStatus,
   TimelineCursorStatus,

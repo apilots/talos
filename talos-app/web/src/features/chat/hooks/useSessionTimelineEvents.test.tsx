@@ -7,7 +7,11 @@ import { contextCompactionStarted } from "../__tests__/streaming-fixtures";
 import { activeContextCompactionStage } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useAppStore } from "@/shared/store/app-store";
-import { TalosHttpError, type TimelineEventEnvelope } from "@talos/sdk-browser";
+import {
+  TalosHttpError,
+  TalosStreamTerminatedError,
+  type TimelineEventEnvelope,
+} from "@talos/sdk-browser";
 
 vi.hoisted(() => {
   Object.defineProperty(globalThis, "localStorage", {
@@ -130,6 +134,56 @@ describe("useSessionTimelineEvents", () => {
       activeMessageId: "message-1",
       isStreaming: true,
       lastEventId: "event-9",
+      error: undefined,
+    });
+  });
+
+  it("recovers a lagged live subscription from the last received event", async () => {
+    apiMocks.subscribeTimelineEvents
+      .mockRejectedValueOnce(
+        new TalosStreamTerminatedError({
+          reason: "lagged",
+          message: "subscription lagged behind retained live events",
+        }),
+      )
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    apiMocks.recoverTimelineLiveTail.mockResolvedValue({
+      replay: {
+        events: [],
+        high_water_mark_event_id: "event-11",
+        last_replay_seq: 11,
+        cursor_status: "replayed",
+      },
+      active_turn: {
+        session_id: "sess-1",
+        turn_id: "turn-1",
+        message_id: "message-1",
+        status: "running",
+        last_event_id: "event-11",
+        pending_user_action: null,
+        updated_at: 1,
+      },
+    });
+    useAppStore.getState().setStreamMeta("sess-1", {
+      activeMessageId: "message-1",
+      isStreaming: true,
+      connectionState: "streaming",
+      lastEventId: "event-7",
+    });
+
+    renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(apiMocks.recoverTimelineLiveTail).toHaveBeenCalledWith("sess-1", "event-7");
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
+    expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-11");
+    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
+      activeMessageId: "message-1",
+      isStreaming: true,
+      lastEventId: "event-11",
       error: undefined,
     });
   });

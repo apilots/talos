@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
 
@@ -150,12 +150,30 @@ pub enum MemoryKind {
     Episode,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum MemoryImportance {
     Low,
     Normal,
     High,
+}
+
+impl<'de> Deserialize<'de> for MemoryImportance {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "low" => Ok(Self::Low),
+            "medium" | "normal" => Ok(Self::Normal),
+            "high" => Ok(Self::High),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &["low", "normal", "medium", "high"],
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

@@ -639,7 +639,7 @@ pub enum TalosTimelineItemKind {
     SystemNotice,
 }
 
-/// Server-normalized timeline phase; assistant output is normalized by the kernel.
+/// Server-normalized display-layer union of model, assistant, and kernel execution phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelinePhase {
@@ -652,10 +652,10 @@ pub enum TalosTimelinePhase {
     System,
 }
 
-/// Lifecycle status for a timeline item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelineItemStatus {
+    Queued,
     Running,
     WaitingDynamicInput,
     Completed,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { TalosHttpError } from "@talos/sdk-browser";
+import { TalosHttpError, TalosStreamTerminatedError } from "@talos/sdk-browser";
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
@@ -56,6 +56,27 @@ export function useSessionTimelineEvents(
           ) {
             try {
               const recovery = await recoverTimelineLiveTail(sessionId);
+              recovery.replay.events
+                .slice()
+                .sort((left, right) => left.event_seq - right.event_seq)
+                .forEach((event) => applyStreamEvent(sessionId, event));
+              if (recovery.active_turn) {
+                applyActiveTurnSnapshot(sessionId, recovery.active_turn);
+              }
+              const state = useAppStore.getState();
+              state.setStreamError(sessionId, undefined);
+              if (!state.streams[sessionId]?.isStreaming) {
+                return;
+              }
+              continue;
+            } catch (recoveryError: unknown) {
+              subscriptionError = recoveryError;
+            }
+          }
+          if (error instanceof TalosStreamTerminatedError && error.reason === "lagged") {
+            try {
+              const cursor = useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId;
+              const recovery = await recoverTimelineLiveTail(sessionId, cursor);
               recovery.replay.events
                 .slice()
                 .sort((left, right) => left.event_seq - right.event_seq)

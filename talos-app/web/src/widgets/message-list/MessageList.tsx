@@ -622,6 +622,9 @@ function timelineToolStatus(item: Extract<ChatRenderBlock, { kind: "timeline" }>
   if (item.kind !== "tool_call") {
     return "queued";
   }
+  if (item.status === "queued") {
+    return "queued";
+  }
   if (item.status === "completed") {
     return item.isError ? "error" : "done";
   }

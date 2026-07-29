@@ -121,6 +121,7 @@ mod parsing_tests;
 mod persist_tests;
 mod prompt_warning_tests;
 mod step_request_tests;
+mod stream_live_tool_result_tests;
 mod stream_tests;
 mod tool_loop_tests;
 

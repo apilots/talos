@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use firecrawl::{Client, SearchOptions, SearchResultOrDocument, SearchSource};
-use talos_config::WebSearchProviderRuntimeConfig;
+use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
 
 use super::{
@@ -14,12 +14,15 @@ pub(super) struct FirecrawlSearchProvider {
 }
 
 impl FirecrawlSearchProvider {
-    pub(super) fn new(config: WebSearchProviderRuntimeConfig) -> TalosResult<Self> {
+    pub(super) fn new(
+        config: WebSearchProviderRuntimeConfig,
+        runtime_env: &RuntimeEnv,
+    ) -> TalosResult<Self> {
         let base_url = config
             .base_url
             .as_deref()
             .unwrap_or("https://api.firecrawl.dev");
-        let api_key = configured_api_key(&config);
+        let api_key = configured_api_key(&config, runtime_env);
         let client = Client::new_selfhosted(base_url, api_key.as_deref()).map_err(|err| {
             TalosError::InvalidConfiguration(format!("build Firecrawl search client: {err}"))
         })?;

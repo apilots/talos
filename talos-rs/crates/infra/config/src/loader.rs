@@ -4,23 +4,35 @@ use std::path::{Path, PathBuf};
 use talos_error::TalosResult;
 use talos_fs::FileSystem;
 
-use crate::{env::RuntimeEnv, validate, Config, EnvSecretStore, TalosPaths};
+use crate::{env::RuntimeEnv, validate, Config, DatabaseType, EnvSecretStore, TalosPaths};
 
-const TALOS_RESOURCE_DIR_ENV: &str = "TALOS_RESOURCE_DIR";
+pub(crate) const TALOS_RESOURCE_DIR_ENV: &str = "TALOS_RESOURCE_DIR";
 const TALOS_CONFIG_ENV: &str = "TALOS_CONFIG";
 const DEFAULT_CONFIG_RELATIVE_PATH: &str = "conf/talos.yaml";
 const DEFAULT_MIGRATIONS_RELATIVE_PATH: &str = "conf/migrations";
+
+/// Result of installing product-managed database migration resources.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatabaseMigrationsInstallReport {
+    pub source_dir: PathBuf,
+    pub target_dir: PathBuf,
+    pub backend_dir: PathBuf,
+    pub database_type: DatabaseType,
+    pub changed: bool,
+}
 
 /// Replace the runtime migration resources and return the selected backend directory.
 ///
 /// The release resource directory owns migration files. This operation replaces only
 /// `<talos_home>/conf/migrations` and never modifies the user's `talos.yaml`.
-pub fn install_database_migrations(config: &Config) -> TalosResult<PathBuf> {
+pub fn install_database_migrations(
+    config: &Config,
+) -> TalosResult<DatabaseMigrationsInstallReport> {
     let paths = config.talos_paths();
     replace_migration_resources_from_candidates(
         &paths,
         config.storage.database_type,
-        database_migration_candidates(&config.source_path()),
+        vec![database_migration_resource_dir()?],
     )
 }
 
@@ -73,6 +85,7 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     let mut config = resolve_env_placeholders(config, &runtime_env)?;
     config.source_path = Some(config_path);
     config.apply_derived_paths();
+    config.attach_runtime_env(runtime_env);
     config
         .talos_paths()
         .ensure_agent_workspace(&config.agent.name)?;
@@ -95,7 +108,7 @@ fn ensure_first_run_files(paths: &TalosPaths) -> TalosResult<()> {
 }
 
 fn copy_default_config_template(paths: &TalosPaths) -> TalosResult<()> {
-    copy_default_config_template_from_candidates(paths, default_config_template_candidates())
+    copy_default_config_template_from_candidates(paths, vec![default_config_resource_path()?])
 }
 
 fn copy_default_config_template_from_candidates<I>(
@@ -115,7 +128,7 @@ where
             .collect::<Vec<_>>()
             .join(", ");
         return Err(TalosError::InvalidConfiguration(format!(
-            "missing default config template: expected {DEFAULT_CONFIG_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV} or installed resource directory; searched: {searched}"
+            "missing default config template: expected {DEFAULT_CONFIG_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV}; searched: {searched}"
         )));
     };
 
@@ -130,54 +143,35 @@ where
     Ok(())
 }
 
-fn default_config_template_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(resource_dir) = std::env::var_os(TALOS_RESOURCE_DIR_ENV) {
-        candidates.push(default_config_template_path(PathBuf::from(resource_dir)));
-    }
-
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(bin_dir) = current_exe.parent() {
-            candidates.push(default_config_template_path(bin_dir));
-            if let Some(parent_dir) = bin_dir.parent() {
-                candidates.push(default_config_template_path(parent_dir));
-            }
-        }
-    }
-
-    candidates
+pub(crate) fn default_config_resource_path() -> TalosResult<PathBuf> {
+    Ok(default_config_template_path(required_resource_dir()?))
 }
 
-fn default_config_template_path(resource_dir: impl AsRef<Path>) -> PathBuf {
+pub(crate) fn default_config_template_path(resource_dir: impl AsRef<Path>) -> PathBuf {
     resource_dir.as_ref().join(DEFAULT_CONFIG_RELATIVE_PATH)
 }
 
-fn database_migration_candidates(config_path: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(resource_dir) = std::env::var_os(TALOS_RESOURCE_DIR_ENV) {
-        candidates.push(PathBuf::from(resource_dir).join(DEFAULT_MIGRATIONS_RELATIVE_PATH));
-    }
+fn database_migration_resource_dir() -> TalosResult<PathBuf> {
+    Ok(required_resource_dir()?.join(DEFAULT_MIGRATIONS_RELATIVE_PATH))
+}
 
-    if let Ok(current_exe) = std::env::current_exe() {
-        if let Some(bin_dir) = current_exe.parent() {
-            candidates.push(bin_dir.join(DEFAULT_MIGRATIONS_RELATIVE_PATH));
-            if let Some(parent_dir) = bin_dir.parent() {
-                candidates.push(parent_dir.join(DEFAULT_MIGRATIONS_RELATIVE_PATH));
-            }
-        }
-    }
+pub(crate) fn required_resource_dir() -> TalosResult<PathBuf> {
+    use talos_error::TalosError;
 
-    if let Some(config_dir) = config_path.parent() {
-        candidates.push(config_dir.join("migrations"));
-    }
-    candidates
+    std::env::var_os(TALOS_RESOURCE_DIR_ENV)
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            TalosError::InvalidConfiguration(format!(
+                "{TALOS_RESOURCE_DIR_ENV} must be set to the Talos installation resource root"
+            ))
+        })
 }
 
 fn replace_migration_resources_from_candidates<I>(
     paths: &TalosPaths,
-    database_type: crate::DatabaseType,
+    database_type: DatabaseType,
     candidates: I,
-) -> TalosResult<PathBuf>
+) -> TalosResult<DatabaseMigrationsInstallReport>
 where
     I: IntoIterator<Item = PathBuf>,
 {
@@ -191,12 +185,13 @@ where
             .collect::<Vec<_>>()
             .join(", ");
         return Err(TalosError::InvalidConfiguration(format!(
-            "missing database migrations: expected {DEFAULT_MIGRATIONS_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV}, installed resources, or the config directory; searched: {searched}"
+            "missing database migrations: expected {DEFAULT_MIGRATIONS_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV}; searched: {searched}"
         )));
     };
 
     let target_dir = &paths.conf_dir.join("migrations");
-    if source_dir.canonicalize().ok() != target_dir.canonicalize().ok() {
+    let changed = source_dir.canonicalize().ok() != target_dir.canonicalize().ok();
+    if changed {
         replace_directory(source_dir, target_dir)?;
     }
 
@@ -208,7 +203,13 @@ where
             backend_dir.display()
         )));
     }
-    Ok(backend_dir)
+    Ok(DatabaseMigrationsInstallReport {
+        source_dir: source_dir.clone(),
+        target_dir: target_dir.clone(),
+        backend_dir,
+        database_type,
+        changed,
+    })
 }
 
 fn replace_directory(source: &Path, target: &Path) -> TalosResult<()> {

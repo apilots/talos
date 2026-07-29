@@ -15,6 +15,9 @@ mod session;
 #[cfg(test)]
 #[path = "agent/agent_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "agent/timeline_status_tests.rs"]
+mod timeline_status_tests;
 
 pub use mock::MockAgent;
 

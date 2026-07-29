@@ -51,3 +51,25 @@ fn finalize_hits_applies_domain_filters_and_rank() {
         ]
     );
 }
+
+#[test]
+fn configured_api_key_reads_loaded_runtime_env() {
+    let dir = tempfile::tempdir().expect("temp dir should be created");
+    let env_file = dir.path().join(".env");
+    std::fs::write(
+        &env_file,
+        "TALOS_TEST_WEB_SEARCH_FIRECRAWL_API_KEY=from-runtime-env\n",
+    )
+    .expect("env file should write");
+    let runtime_env = RuntimeEnv::load_from_iter(&env_file, std::iter::empty::<(&str, &str)>())
+        .expect("runtime env should load");
+    let config = talos_config::WebSearchProviderRuntimeConfig {
+        api_key_env: Some("TALOS_TEST_WEB_SEARCH_FIRECRAWL_API_KEY".to_string()),
+        ..talos_config::WebSearchProviderRuntimeConfig::default()
+    };
+
+    assert_eq!(
+        configured_api_key(&config, &runtime_env).as_deref(),
+        Some("from-runtime-env")
+    );
+}

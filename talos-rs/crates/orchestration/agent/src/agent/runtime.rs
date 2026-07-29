@@ -1042,12 +1042,7 @@ pub(crate) fn emit_kernel_timeline_events(
                 Some(&data.tool_name),
                 String::new(),
             )?;
-            let delta = timeline.append_delta(
-                &item_id,
-                TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::Running,
-                },
-            )?;
+            let delta = timeline.append_status_delta(&item_id, TalosTimelineItemStatus::Queued)?;
             events.extend(optional_started_with_delta(started, delta));
             Ok(events)
         }
@@ -1062,7 +1057,8 @@ pub(crate) fn emit_kernel_timeline_events(
                 Some(&data.tool_name),
                 String::new(),
             )?;
-            let delta = timeline.append_delta(
+            let delta = timeline.append_status_delta(&item_id, TalosTimelineItemStatus::Running)?;
+            let progress = timeline.append_delta(
                 &item_id,
                 TalosTimelineDelta::ToolProgress {
                     progress_kind: TalosToolProgressKind::Status,
@@ -1070,6 +1066,7 @@ pub(crate) fn emit_kernel_timeline_events(
                 },
             )?;
             events.extend(optional_started_with_delta(started, delta));
+            events.push(progress);
             Ok(events)
         }
         (
@@ -1148,12 +1145,10 @@ pub(crate) fn emit_kernel_timeline_events(
                         data.call_id
                     ))
                 })?;
-            events.push(timeline.append_delta(
-                &item_id,
-                TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingDynamicInput,
-                },
-            )?);
+            events.push(
+                timeline
+                    .append_status_delta(&item_id, TalosTimelineItemStatus::WaitingDynamicInput)?,
+            );
             events.push(timeline.append_delta(
                 &item_id,
                 TalosTimelineDelta::ToolDynamicRequest {

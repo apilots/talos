@@ -114,7 +114,7 @@ impl AgentHarnessImpl {
         success: bool,
     ) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
-        let kernel_config = Self::kernel_config_for_session(&session)?;
+        let kernel_config = self.runtime_kernel_config_for_session(&session)?;
         self.validate_dynamic_tool_submission(
             &kernel_config,
             &session_id,
@@ -161,7 +161,7 @@ impl AgentHarnessImpl {
         let session_id = session.context.session_id.clone();
         self.try_reserve_active_turn(&session_id)?;
         let result = async {
-            let kernel_config = Self::kernel_config_for_session(&session)?;
+            let kernel_config = self.runtime_kernel_config_for_session(&session)?;
             let selected_model = Self::session_model(&session)?;
             let llm_provider = self.llm_provider_for_session(&session)?;
             let memory_scope = talos_memory::MemoryScope {
@@ -441,7 +441,7 @@ impl AgentHarnessImpl {
         let session_id = session.context.session_id.clone();
         self.try_reserve_active_turn(&session_id)?;
         let result = async {
-            let kernel_config = Self::kernel_config_for_session(&session)?;
+            let kernel_config = self.runtime_kernel_config_for_session(&session)?;
             let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
             let latest_seq = self
                 .session_artifact_store

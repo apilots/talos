@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use std::time::Duration;
-use talos_config::WebSearchProviderRuntimeConfig;
+use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
 use tavily::{SearchRequest, Tavily};
 
@@ -14,8 +14,11 @@ pub(super) struct TavilySearchProvider {
 }
 
 impl TavilySearchProvider {
-    pub(super) fn new(config: WebSearchProviderRuntimeConfig) -> TalosResult<Self> {
-        let api_key = resolve_api_key(&config, "tavily")?;
+    pub(super) fn new(
+        config: WebSearchProviderRuntimeConfig,
+        runtime_env: &RuntimeEnv,
+    ) -> TalosResult<Self> {
+        let api_key = resolve_api_key(&config, runtime_env, "tavily")?;
         let base_url = config
             .base_url
             .as_deref()

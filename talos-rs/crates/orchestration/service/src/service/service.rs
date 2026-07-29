@@ -35,6 +35,9 @@ use crate::{
     TimelineSubscriptionSource, TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
 };
 
+#[path = "orphan_turn_recovery.rs"]
+mod orphan_turn_recovery;
+
 #[derive(Clone)]
 pub struct TalosService {
     access: ResourceAccessService,
@@ -592,9 +595,24 @@ impl TalosService {
             | ActiveTurnStatus::Cancelling => {}
             ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => return Ok(()),
         }
-        self.access
-            .cancel_active_turn(actor, session_id, active_turn.turn_id)
+        match self
+            .access
+            .cancel_active_turn(actor, session_id, active_turn.turn_id.clone())
             .await
+        {
+            Ok(()) => Ok(()),
+            Err(TalosError::ResourceNotFound(message)) => {
+                tracing::warn!(
+                    session_id = %session_id,
+                    turn_id = %active_turn.turn_id,
+                    missing_resource = %message,
+                    "finalizing orphaned active turn after interrupt"
+                );
+                self.finalize_orphaned_active_turn(session_id, &active_turn)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn interrupt_turn(

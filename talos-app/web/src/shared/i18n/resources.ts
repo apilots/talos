@@ -39,7 +39,7 @@ export const resources = {
       allThreads: "All chats",
       projects: "Projects",
       plugins: "Plugins",
-      memory: "Memory",
+      memory: "Memories",
       files: "Files",
       settings: "Settings",
       signedIn: "Signed in",

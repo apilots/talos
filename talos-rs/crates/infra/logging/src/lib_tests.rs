@@ -13,6 +13,59 @@ fn temp_log_path(name: &str) -> PathBuf {
 }
 
 #[test]
+fn startup_logging_config_uses_raw_logging_node_with_stable_file() {
+    let log_path = temp_log_path("startup/talos.log");
+    let config_path = log_path
+        .parent()
+        .expect("log parent should exist")
+        .join("talos.yaml");
+    fs::create_dir_all(config_path.parent().expect("config parent should exist"))
+        .expect("config parent should be created");
+    fs::write(
+        &config_path,
+        "logging:\n  level: debug\n  format: json\n  stdout: true\n",
+    )
+    .expect("config should be written");
+
+    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
+        config_file: config_path,
+        log_file: log_path.clone(),
+        stdout: false,
+    });
+
+    assert_eq!(warning, None);
+    assert_eq!(config.level, "debug");
+    assert_eq!(config.format, "json");
+    assert_eq!(config.file, Some(log_path.to_string_lossy().to_string()));
+    assert!(!config.stdout);
+}
+
+#[test]
+fn startup_logging_config_falls_back_when_yaml_is_malformed() {
+    let log_path = temp_log_path("startup-fallback/talos.log");
+    let config_path = log_path
+        .parent()
+        .expect("log parent should exist")
+        .join("talos.yaml");
+    fs::create_dir_all(config_path.parent().expect("config parent should exist"))
+        .expect("config parent should be created");
+    fs::write(&config_path, "logging: [").expect("config should be written");
+
+    let (config, warning) = startup_logging_config(&StartupLoggingOptions {
+        config_file: config_path,
+        log_file: log_path.clone(),
+        stdout: false,
+    });
+
+    assert!(warning
+        .expect("malformed yaml should produce warning")
+        .contains("failed to parse logging config yaml"));
+    assert_eq!(config.level, "info");
+    assert_eq!(config.file, Some(log_path.to_string_lossy().to_string()));
+    assert!(!config.stdout);
+}
+
+#[test]
 fn test_build_dispatch_rejects_empty_outputs() {
     let config = LoggingConfig {
         level: "info".to_string(),

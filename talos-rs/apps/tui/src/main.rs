@@ -28,12 +28,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn create_embedded_client(
 ) -> Result<(talos_logging::LogGuard, EmbeddedServerClient), Box<dyn std::error::Error>> {
-    let config = Config::load()?;
     let logging_options = talos_base::TalosServerOptions {
         logging_stdout: Some(false),
         ..Default::default()
     };
-    let log_guard = talos_base::init_logging(&config, Some(&logging_options))?;
+    let log_guard = talos_base::prepare_startup(Some(&logging_options))?;
+    let config = Config::load()?;
     let client = EmbeddedServerClient::connect(EmbeddedServerClientConfig::new(config)).await?;
     Ok((log_guard, client))
 }

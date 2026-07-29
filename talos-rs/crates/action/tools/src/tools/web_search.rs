@@ -86,13 +86,15 @@ impl Tool for WebSearchTool {
         let request: WebSearchRequest = serde_json::from_value(input)
             .map_err(|err| TalosError::ToolError(format!("invalid web_search arguments: {err}")))?;
         let default_config;
-        let config = if let Some(kernel_config) = context.kernel_config() {
-            &kernel_config.tools.web_search
+        let default_runtime_env;
+        let (config, runtime_env) = if let Some(kernel_config) = context.kernel_config() {
+            (&kernel_config.tools.web_search, &kernel_config.runtime_env)
         } else {
             default_config = talos_config::WebSearchToolConfig::default();
-            &default_config
+            default_runtime_env = talos_config::RuntimeEnv::default();
+            (&default_config, &default_runtime_env)
         };
-        let response = run_with_config(&request, config).await?;
+        let response = run_with_config(&request, config, runtime_env).await?;
         let structured = serde_json::to_value(&response).map_err(|err| {
             TalosError::ToolError(format!("serialize web_search response: {err}"))
         })?;

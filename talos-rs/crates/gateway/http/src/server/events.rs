@@ -10,9 +10,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
 use talos_app_protocol::events::canonical_method;
+use talos_app_protocol::events::{SubscriptionTerminatedEvent, SubscriptionTerminatedReason};
 use talos_app_protocol::requests::TimelineRecoveryResponse;
 use talos_auth::RequestIdentity;
-use talos_service::TimelineSubscriptionMessage;
+use talos_service::{
+    TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
+};
 use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
 
 use super::access::shared_actor;
@@ -71,11 +74,14 @@ pub(super) async fn subscribe_timeline_events_handler(
         .await
         .map_err(map_event_replay_error)?;
 
-    let stream = ReceiverStream::new(subscription.subscription.events).filter_map(|message| {
-        let TimelineSubscriptionMessage::Event(record) = message else {
-            return None;
-        };
-        Some(timeline_sse_event(record).map_err(io::Error::other))
+    let stream = ReceiverStream::new(subscription.subscription.events).map(|message| {
+        match message {
+            TimelineSubscriptionMessage::Event(record) => timeline_sse_event(record),
+            TimelineSubscriptionMessage::Closed(closed) => {
+                timeline_subscription_closed_sse_event(closed)
+            }
+        }
+        .map_err(io::Error::other)
     });
 
     Ok(Sse::new(stream)
@@ -134,6 +140,28 @@ pub(super) async fn recover_timeline_handler(
         .map_err(map_event_replay_error)?;
 
     Ok(Json(response))
+}
+
+fn timeline_subscription_closed_sse_event(
+    closed: TimelineSubscriptionClosed,
+) -> Result<Event, serde_json::Error> {
+    let data = serde_json::to_string(&SubscriptionTerminatedEvent {
+        reason: map_subscription_close_reason(closed.reason),
+        message: closed.message,
+    })?;
+    Ok(Event::default().event("subscription.terminated").data(data))
+}
+
+fn map_subscription_close_reason(
+    reason: TimelineSubscriptionCloseReason,
+) -> SubscriptionTerminatedReason {
+    match reason {
+        TimelineSubscriptionCloseReason::Completed => SubscriptionTerminatedReason::Completed,
+        TimelineSubscriptionCloseReason::ServerShutdown => {
+            SubscriptionTerminatedReason::ServerShutdown
+        }
+        TimelineSubscriptionCloseReason::Lagged => SubscriptionTerminatedReason::Lagged,
+    }
 }
 
 fn parse_cursor(

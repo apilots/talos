@@ -67,6 +67,7 @@ RUN chmod 755 /opt/talos/bin/talos-server \
 
 ENV HOME=/home/talos \
     SHELL=/bin/bash \
+    TALOS_RESOURCE_DIR=/opt/talos \
     PATH=/opt/talos/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 USER talos

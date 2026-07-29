@@ -41,7 +41,8 @@ pub(crate) async fn state_for_event(
         AgentEventPayload::ItemCompleted(payload)
             if matches!(
                 payload.status,
-                talos_types::talos::TalosTimelineItemStatus::WaitingDynamicInput
+                talos_types::talos::TalosTimelineItemStatus::Queued
+                    | talos_types::talos::TalosTimelineItemStatus::WaitingDynamicInput
             ) =>
         {
             None

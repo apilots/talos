@@ -67,6 +67,18 @@ fn test_model_info_serializes_canonical_model_fields_flat() {
 }
 
 #[test]
+fn test_memory_importance_accepts_medium_as_normal() {
+    let parsed: MemoryImportance =
+        serde_json::from_str("\"medium\"").expect("medium importance should decode");
+
+    assert_eq!(parsed, MemoryImportance::Normal);
+    assert_eq!(
+        serde_json::to_string(&parsed).expect("importance should encode"),
+        "\"normal\""
+    );
+}
+
+#[test]
 fn test_agent_id() {
     let id = AgentId::new("test");
     assert_eq!(id.0, "test");

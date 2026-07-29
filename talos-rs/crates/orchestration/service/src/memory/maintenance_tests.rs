@@ -3,7 +3,7 @@ use crate::test_support::run_test_migrations;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use talos_llm_provider::{
     ChatChunk, ChatResponse, ChatStream, LlmProvider, ReasoningOutput, Usage,
 };
@@ -12,7 +12,7 @@ use talos_store::session::{DatabaseSessionStore, SessionArtifactStore, SessionRe
 use talos_types::talos::{
     RunItem, StopReason, TalosContext, TalosProvider, TalosSourceType, TokenUsage,
 };
-use talos_types::{ModelRef, SessionConf};
+use talos_types::{resolve_default_model_selection, ModelRef, ModelSelection, SessionConf};
 use tokio::sync::mpsc;
 
 struct TestProvider {
@@ -53,10 +53,15 @@ impl LlmProvider for TestProvider {
 
 struct TestRouter {
     provider: Arc<dyn LlmProvider>,
+    requested_model_refs: Mutex<Vec<ModelRef>>,
 }
 
 impl LlmProviderRouter for TestRouter {
-    fn provider_for(&self, _model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
+    fn provider_for(&self, model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
+        self.requested_model_refs
+            .lock()
+            .expect("requested model refs")
+            .push(model_ref.clone());
         Ok(self.provider.clone())
     }
 }
@@ -85,6 +90,20 @@ async fn daily_maintenance_processes_two_user_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
     let mut config = TalosConfig::default();
     config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    config.llm.provider = "anthropic".to_string();
+    config.llm.model = "default-maintenance-model".to_string();
+    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
+        id: config.llm.model.clone(),
+        name: "Default maintenance model".to_string(),
+        context_window: 32_768,
+        reasoning: false,
+        reasoning_effort: Default::default(),
+        speed: Default::default(),
+        input: Vec::new(),
+        cost: Default::default(),
+    }];
+    let default_selection =
+        resolve_default_model_selection(&config.llm).expect("default model selection");
     let storage = Arc::new(SqliteStorage::new(":memory:").await.expect("storage"));
     run_test_migrations(storage.pool()).await;
     let sessions = Arc::new(
@@ -94,8 +113,12 @@ async fn daily_maintenance_processes_two_user_scopes() {
     );
     let artifacts = Arc::new(talos_store::session::FileSessionArtifactStore::default());
     for (session_id, user_id, last_activity) in [("s1", "u1", 2), ("s2", "u2", 1)] {
+        let mut record = session_record(session_id, user_id, last_activity);
+        if session_id == "s2" {
+            record.conf.model_selection = None;
+        }
         sessions
-            .insert_session_record(&session_record(session_id, user_id, last_activity), "test")
+            .insert_session_record(&record, "test")
             .await
             .expect("insert session");
         let kernel_config = resolve_effective_kernel_workspace(&config.agent.kernel, user_id)
@@ -141,12 +164,16 @@ async fn daily_maintenance_processes_two_user_scopes() {
             "- managed memory".to_string(),
         ])),
     });
+    let router = Arc::new(TestRouter {
+        provider,
+        requested_model_refs: Mutex::new(Vec::new()),
+    });
     let maintenance = MemoryDailyMaintenance::new(
         sessions.clone(),
         sessions.clone(),
         artifacts,
         memory,
-        Arc::new(TestRouter { provider }),
+        router.clone(),
         config,
         MemoryDailyMaintenanceConfig {
             batch_size: 1,
@@ -192,6 +219,15 @@ async fn daily_maintenance_processes_two_user_scopes() {
             failed_users: 0,
         }
     );
+    let requested_model_refs = router
+        .requested_model_refs
+        .lock()
+        .expect("requested model refs")
+        .clone();
+    assert!(!requested_model_refs.is_empty());
+    assert!(requested_model_refs
+        .iter()
+        .all(|model_ref| model_ref == &default_selection.model_ref));
 }
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {

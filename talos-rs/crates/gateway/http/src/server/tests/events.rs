@@ -70,6 +70,36 @@ fn turn_completed(turn_id: &str, message_id: &str, sequence: u64) -> AgentEvent 
 }
 
 #[tokio::test]
+async fn test_subscribe_timeline_events_exposes_subscription_closed() {
+    let state = test_state(false).await;
+    let app = Router::new()
+        .route(
+            "/v1/sessions/:session_id/events",
+            get(subscribe_timeline_events_handler),
+        )
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/sessions/mock-session/events?close_when_idle=true")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), 4096)
+        .await
+        .expect("event body should be readable");
+    let body_text = String::from_utf8_lossy(&body);
+    assert!(body_text.contains("event: subscription.terminated"));
+    assert!(body_text.contains(r#""reason":"completed""#));
+}
+
+#[tokio::test]
 async fn test_subscribe_timeline_events_replays_after_cursor() {
     let state = test_state(false).await;
     let first = state

@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use serde::Deserialize;
 use std::time::Duration;
-use talos_config::WebSearchProviderRuntimeConfig;
+use talos_config::{RuntimeEnv, WebSearchProviderRuntimeConfig};
 use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::web_common::DEFAULT_WEB_USER_AGENT;
@@ -18,8 +18,11 @@ pub(super) struct BraveSearchProvider {
 }
 
 impl BraveSearchProvider {
-    pub(super) fn new(config: WebSearchProviderRuntimeConfig) -> TalosResult<Self> {
-        let api_key = resolve_api_key(&config, "brave")?;
+    pub(super) fn new(
+        config: WebSearchProviderRuntimeConfig,
+        runtime_env: &RuntimeEnv,
+    ) -> TalosResult<Self> {
+        let api_key = resolve_api_key(&config, runtime_env, "brave")?;
         let base_url = config
             .base_url
             .unwrap_or_else(|| "https://api.search.brave.com/res/v1/web/search".to_string());

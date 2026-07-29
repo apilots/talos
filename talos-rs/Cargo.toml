@@ -43,6 +43,7 @@ members = [
     "crates/gateway/app-protocol",
     "crates/gateway/app-server",
     # App
+    "crates/app/talos-upgrade",
     "crates/app/talos-base",
     # Apps
     "apps/sdk",
@@ -55,7 +56,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 authors = ["Liu Xi"]
 license = "MIT"
@@ -151,6 +152,7 @@ talos-channel = { path = "crates/perception/channels" }
 talos-sdk = { path = "apps/sdk" }
 talos-sdk-embedded = { path = "apps/sdk-embedded" }
 talos-base = { path = "crates/app/talos-base" }
+talos-upgrade = { path = "crates/app/talos-upgrade" }
 
 [profile.dev]
 # Keep useful line tables and backtraces without emitting full local variable

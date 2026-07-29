@@ -7,15 +7,15 @@ use talos_config::{AgentKernelConfig, PlannerMode};
 /// Tests that AgentKernelConfig default values match the specification.
 ///
 /// Default values per specification:
-/// - tool_parallelism: 1
+/// - tool_parallelism: 3
 /// - planner_mode: "built_in"
 #[test]
 fn test_default_values() {
     let config = AgentKernelConfig::default();
 
     assert_eq!(
-        config.tool_parallelism, 1,
-        "tool_parallelism should default to 1"
+        config.tool_parallelism, 3,
+        "tool_parallelism should default to 3"
     );
     assert_eq!(
         config.planner_mode,

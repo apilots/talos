@@ -383,6 +383,7 @@ pub struct GeneralTurnStepResult {
 #[derive(Clone)]
 pub struct StreamingToolExecutionConfig {
     pub execution_mode: ToolExecutionMode,
+    pub max_parallelism: usize,
     pub execution_context: ToolExecutionContext,
     pub tool_registry: Arc<dyn ToolExecutorPort>,
 }
@@ -391,6 +392,7 @@ impl fmt::Debug for StreamingToolExecutionConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StreamingToolExecutionConfig")
             .field("execution_mode", &self.execution_mode)
+            .field("max_parallelism", &self.max_parallelism)
             .field("execution_context", &self.execution_context)
             .field("tool_registry", &"<dyn ToolExecutorPort>")
             .finish()

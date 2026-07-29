@@ -622,7 +622,7 @@ export type TalosTimelineItemKind = "user_input" | "reasoning" | "assistant_text
 
 export type TalosTimelinePhase = "input" | "thinking" | "acting" | "unknown" | "commentary" | "final_answer" | "system";
 
-export type TalosTimelineItemStatus = "running" | "waiting_dynamic_input" | "completed" | "failed" | "cancelled";
+export type TalosTimelineItemStatus = "queued" | "running" | "waiting_dynamic_input" | "completed" | "failed" | "cancelled";
 
 export type TalosTimelineNoticeLevel = "info" | "warning" | "error";
 

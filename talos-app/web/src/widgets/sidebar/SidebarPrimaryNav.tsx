@@ -1,4 +1,4 @@
-import { Blocks, FileText, PenLine, Search } from "lucide-react";
+import { Blocks, Brain, FileText, PenLine } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { SidebarNavItem } from "./SidebarNavItem";
@@ -20,7 +20,7 @@ export function SidebarPrimaryNav({ onCreateThread }: SidebarPrimaryNavProps) {
         <PenLine aria-hidden="true" size={16} />
         <span>{t("chat:newThread")}</span>
       </button>
-      <SidebarNavItem icon={<Search aria-hidden="true" size={16} />} label={t("common:search")} to="/memory" />
+      <SidebarNavItem icon={<Brain aria-hidden="true" size={16} />} label={t("sidebar:memory")} to="/memory" />
       <SidebarNavItem icon={<Blocks aria-hidden="true" size={16} />} label={t("sidebar:plugins")} to="/plugins" />
       <SidebarNavItem icon={<FileText aria-hidden="true" size={16} />} label={t("sidebar:files")} to="/files" />
     </nav>

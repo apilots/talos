@@ -9,7 +9,7 @@ use talos_llm_provider::{
     AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider, ModelBlockStream,
     PromptCacheSupport, ReasoningEffort,
 };
-use tracing::{error, info};
+use tracing::info;
 
 /// Bailian API configuration.
 #[derive(Debug, Clone)]
@@ -137,7 +137,6 @@ impl BailianProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            error!("Bailian API error: {} - {}", status, error_text);
             return Err(TalosError::InternalError(format!(
                 "Bailian API error: {} - {}",
                 status, error_text

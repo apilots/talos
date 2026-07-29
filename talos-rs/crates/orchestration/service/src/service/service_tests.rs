@@ -925,7 +925,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
 }
 
 #[tokio::test]
-async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
+async fn interrupt_turn_finalizes_orphaned_active_turn() {
     let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
     let (service, store) = test_application_with_runtime(
         Arc::new(TestTurnExecutor {
@@ -959,7 +959,7 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
         .await
         .expect("active turn should be inserted");
 
-    let error = service
+    let response = service
         .interrupt_turn(
             &actor,
             talos_types::InterruptTurnRequest {
@@ -967,13 +967,28 @@ async fn interrupt_turn_reports_missing_runtime_for_persisted_active_turn() {
             },
         )
         .await
-        .expect_err("runtime state mismatch should be reported");
+        .expect("orphaned active turn should be finalized");
 
-    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert!(response.success);
     assert_eq!(
         *cancelled_turn_ids.lock().unwrap(),
         vec!["turn-existing".to_string()]
     );
+    let active_turn = store
+        .get_active_turn("session-interrupt-runtime-missing")
+        .await
+        .expect("active turn should load")
+        .expect("active turn should remain as terminal recovery state");
+    assert_eq!(active_turn.status, ActiveTurnStatus::Failed);
+    let events = store
+        .list_turn_events("session-interrupt-runtime-missing", "turn-existing", 10)
+        .await
+        .expect("turn events should load");
+    assert!(matches!(
+        events.last().map(|event| &event.payload),
+        Some(AgentEventPayload::TurnError(error))
+            if error.error.contains("server restarted before the turn completed")
+    ));
 }
 
 #[tokio::test]

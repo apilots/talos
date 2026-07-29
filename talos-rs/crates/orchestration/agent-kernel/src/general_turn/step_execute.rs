@@ -183,13 +183,50 @@ pub(crate) async fn stream_round(
     let mut scheduler = streaming_tool_execution.map(|config| {
         crate::tool_execution::StreamingToolScheduler::new(
             config.execution_mode,
+            config.max_parallelism,
             config.execution_context,
             config.tool_registry,
             stream_tx.cloned(),
         )
     });
 
-    while let Some(event) = stream.next().await {
+    enum StreamRoundInput {
+        Model(Option<TalosResult<ModelBlockStreamEvent>>),
+        Tool(TalosResult<Option<crate::tool_execution::StreamingToolExecutionOutput>>),
+    }
+
+    loop {
+        let input = if scheduler
+            .as_ref()
+            .map(crate::tool_execution::StreamingToolScheduler::has_running)
+            .unwrap_or(false)
+        {
+            let scheduler = scheduler
+                .as_mut()
+                .expect("scheduler must exist when it reports running tasks");
+            tokio::select! {
+                event = stream.next() => StreamRoundInput::Model(event),
+                completed = scheduler.next_completed() => StreamRoundInput::Tool(completed),
+            }
+        } else {
+            StreamRoundInput::Model(stream.next().await)
+        };
+
+        let Some(event) = (match input {
+            StreamRoundInput::Tool(completed) => {
+                if let Some(completed) = completed? {
+                    super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output)
+                        .await;
+                    streamed_tool_outputs.push(completed.output);
+                }
+                continue;
+            }
+            StreamRoundInput::Model(event) => event,
+        }) else {
+            break;
+        };
+
+        let mut stream_done = false;
         match event? {
             ModelBlockStreamEvent::BlockStarted(started) => match started.kind {
                 ModelBlockKind::Reasoning => {
@@ -497,7 +534,7 @@ pub(crate) async fn stream_round(
                 if let Some(final_usage) = final_usage {
                     usage = talos_usage_from_provider_usage(&final_usage);
                 }
-                break;
+                stream_done = true;
             }
         }
 
@@ -507,6 +544,10 @@ pub(crate) async fn stream_round(
                     .await;
                 streamed_tool_outputs.push(completed.output);
             }
+        }
+
+        if stream_done {
+            break;
         }
     }
 

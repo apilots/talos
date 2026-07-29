@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     default_timezone, AgentKernelMcpConfig, AgentKernelPromptConfig, PlannerMode,
-    PluginsRuntimeConfig, SkillsRuntimeConfig, ToolsRuntimeConfig,
+    PluginsRuntimeConfig, RuntimeEnv, SkillsRuntimeConfig, ToolsRuntimeConfig,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -299,6 +299,10 @@ impl Default for AgentKernelCompactionConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentKernelConfig {
+    /// Runtime environment loaded by the Talos configuration layer.
+    #[serde(skip)]
+    pub runtime_env: RuntimeEnv,
+
     /// Effective agent workspace root for prompt, memory, sessions, and file tool fallback.
     #[serde(default = "default_kernel_workspace_dir")]
     pub workspace_dir: String,
@@ -361,7 +365,7 @@ pub struct AgentKernelConfig {
 }
 
 fn default_kernel_tool_parallelism() -> usize {
-    1
+    3
 }
 
 fn default_kernel_workspace_dir() -> String {
@@ -390,6 +394,7 @@ fn default_kernel_planner_mode() -> PlannerMode {
 impl Default for AgentKernelConfig {
     fn default() -> Self {
         Self {
+            runtime_env: RuntimeEnv::default(),
             workspace_dir: default_kernel_workspace_dir(),
             tool_parallelism: default_kernel_tool_parallelism(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),

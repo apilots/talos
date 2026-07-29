@@ -52,18 +52,29 @@ pub(super) async fn interrupt_turn_handler(
         .interrupt_turn(&shared_actor(&actor.0), request)
         .await
         .map(Json)
-        .map_err(|err| match err {
-            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
+        .map_err(map_interrupt_turn_error)
+}
+
+fn map_interrupt_turn_error(error: talos_error::TalosError) -> ApiError {
+    match error {
+        talos_error::TalosError::ResourceNotFound(resource)
+            if resource.trim_start().starts_with("session ") =>
+        {
+            ApiError::new(
                 StatusCode::NOT_FOUND,
                 HttpApiErrorCode::InvalidRequest,
                 "session not found",
-            ),
-            _ => ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                HttpApiErrorCode::InternalError,
-                err.to_string(),
-            ),
-        })
+            )
+        }
+        talos_error::TalosError::ResourceNotFound(resource) => {
+            ApiError::new(StatusCode::NOT_FOUND, HttpApiErrorCode::NotFound, resource)
+        }
+        error => ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            HttpApiErrorCode::InternalError,
+            error.to_string(),
+        ),
+    }
 }
 
 fn start_turn_idempotency_key(
@@ -182,5 +193,50 @@ fn map_turn_submit_error(error: talos_error::TalosError) -> ApiError {
             HttpApiErrorCode::InternalError,
             other.to_string(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use serde_json::Value;
+    use talos_error::TalosError;
+
+    use super::map_interrupt_turn_error;
+
+    const ERROR_BODY_LIMIT: usize = 4096;
+
+    #[tokio::test]
+    async fn interrupt_error_maps_missing_session_to_session_not_found() {
+        let response = map_interrupt_turn_error(TalosError::ResourceNotFound(
+            "session missing-session".to_string(),
+        ))
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), ERROR_BODY_LIMIT)
+            .await
+            .expect("error body should be readable");
+        let payload: Value = serde_json::from_slice(&body).expect("error body should be json");
+        assert_eq!(payload["code"], "invalid_request");
+        assert_eq!(payload["message"], "session not found");
+    }
+
+    #[tokio::test]
+    async fn interrupt_error_preserves_non_session_not_found_context() {
+        let response = map_interrupt_turn_error(TalosError::ResourceNotFound(
+            "active turn for session mock-session".to_string(),
+        ))
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = to_bytes(response.into_body(), ERROR_BODY_LIMIT)
+            .await
+            .expect("error body should be readable");
+        let payload: Value = serde_json::from_slice(&body).expect("error body should be json");
+        assert_eq!(payload["code"], "not_found");
+        assert_eq!(payload["message"], "active turn for session mock-session");
     }
 }

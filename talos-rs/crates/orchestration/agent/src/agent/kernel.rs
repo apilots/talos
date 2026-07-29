@@ -22,6 +22,15 @@ impl AgentHarnessImpl {
         Ok(resolve_effective_kernel_workspace(&kernel_config, &session.user_id)?.kernel_config)
     }
 
+    pub(crate) fn runtime_kernel_config_for_session(
+        &self,
+        session: &TalosSession,
+    ) -> TalosResult<AgentKernelConfig> {
+        let mut kernel_config = Self::kernel_config_for_session(session)?;
+        kernel_config.runtime_env = self.kernel_config.runtime_env.clone();
+        Ok(kernel_config)
+    }
+
     pub(crate) fn llm_provider_for_session(
         &self,
         session: &TalosSession,

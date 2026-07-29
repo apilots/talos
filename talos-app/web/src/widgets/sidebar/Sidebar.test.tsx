@@ -95,7 +95,7 @@ describe("Sidebar", () => {
 
     expect(screen.getByText("Talos")).toBeTruthy();
     expect(screen.getByText("New chat")).toBeTruthy();
-    expect(screen.getByText("Search")).toBeTruthy();
+    expect(screen.getByText("Memories")).toBeTruthy();
     expect(screen.getByText("Plugins")).toBeTruthy();
     expect(screen.getByText("Files")).toBeTruthy();
     expect(screen.getByText("Projects")).toBeTruthy();

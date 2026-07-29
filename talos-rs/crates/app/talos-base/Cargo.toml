@@ -37,6 +37,7 @@ talos-storage = { workspace = true }
 talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
+talos-upgrade = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

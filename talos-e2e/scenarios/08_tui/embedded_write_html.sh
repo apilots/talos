@@ -52,7 +52,7 @@ dump_failure_context() {
 }
 
 wait_for_tui_ready() {
-  if tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message or use /help" 120 0.25; then
+  if tui_wait_for_text "${TUI_SESSION_NAME}" "Type a message, Ctrl+V an image, or use /help" 120 0.25; then
     return 0
   fi
   dump_failure_context

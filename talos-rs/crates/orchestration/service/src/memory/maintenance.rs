@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use talos_config::{resolve_effective_kernel_workspace, MemoryDailyMaintenanceConfig};
@@ -10,7 +10,7 @@ use talos_store::session::{
     SessionStore,
 };
 use talos_types::{
-    ModelSelection, SessionConfigOverridePolicy, TalosConfig, MEMORY_FILE_MAX_CHARS,
+    resolve_default_model_selection, ModelSelection, TalosConfig, MEMORY_FILE_MAX_CHARS,
 };
 
 use super::MemoryService;
@@ -65,7 +65,8 @@ impl MemoryDailyMaintenance {
 
     pub async fn run(&self) -> TalosResult<MemoryDailyMaintenanceReport> {
         let mut report = MemoryDailyMaintenanceReport::default();
-        let mut user_models = HashMap::new();
+        let selection = resolve_default_model_selection(&self.base_config.llm)?;
+        let mut users = BTreeSet::new();
         let mut after = None;
         for _ in 0..self.config.max_batches {
             let records = self
@@ -83,24 +84,7 @@ impl MemoryDailyMaintenance {
             });
             for record in records {
                 let session_id = record.id.clone();
-                let selection = match SessionConfigOverridePolicy::extract_model_selection(
-                    &record.conf,
-                ) {
-                    Ok(Some(selection)) => selection,
-                    Err(error) => {
-                        report.failed_sessions += 1;
-                        tracing::warn!(session_id, error = %error, "daily memory session configuration is invalid");
-                        continue;
-                    }
-                    Ok(None) => {
-                        report.failed_sessions += 1;
-                        tracing::warn!(session_id = %record.id, "daily memory session is missing model selection");
-                        continue;
-                    }
-                };
-                user_models
-                    .entry(record.user_id.clone())
-                    .or_insert_with(|| selection.clone());
+                users.insert(record.user_id.clone());
                 match self.process_session(record, &selection).await {
                     Ok(true) => report.processed_sessions += 1,
                     Ok(false) => {}
@@ -114,7 +98,7 @@ impl MemoryDailyMaintenance {
                 break;
             }
         }
-        for (user_id, selection) in user_models {
+        for user_id in users {
             match self.refresh_managed_memory(&user_id, &selection).await {
                 Ok(true) => report.updated_users += 1,
                 Ok(false) => {}

@@ -23,6 +23,30 @@ fn test_default_config() {
 }
 
 #[test]
+fn test_attach_runtime_env_keeps_values_runtime_only() {
+    let mut config = Config::default();
+    let runtime_env = RuntimeEnv::load_from_iter(
+        std::path::Path::new("__talos_missing_env_file__"),
+        [("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY", "firecrawl-key")],
+    )
+    .expect("runtime env should load");
+
+    config.attach_runtime_env(runtime_env);
+
+    assert_eq!(
+        config
+            .agent
+            .kernel
+            .runtime_env
+            .get("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY"),
+        Some("firecrawl-key")
+    );
+    let serialized = serde_yaml::to_string(&config).expect("config should encode");
+    assert!(!serialized.contains("runtime_env"));
+    assert!(!serialized.contains("firecrawl-key"));
+}
+
+#[test]
 fn memory_directory_must_not_escape_the_workspace() {
     let mut config = Config::default();
     config.memory.memory_dirname = "../../shared".to_string();

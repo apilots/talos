@@ -86,6 +86,7 @@ pub async fn execute_general_turn_loop_with_policy(
         if prepared.stream_tx.is_some() {
             step_request.streaming_tool_execution = Some(StreamingToolExecutionConfig {
                 execution_mode: execution_settings.tool_execution_mode,
+                max_parallelism: kernel_config.tool_parallelism,
                 execution_context: ToolExecutionContext {
                     session_id: prepared.session_id.clone(),
                     turn_id: prepared.invocation_id.clone(),

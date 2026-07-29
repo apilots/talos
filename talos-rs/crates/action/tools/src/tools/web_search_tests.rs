@@ -1,6 +1,6 @@
 use super::*;
 use std::sync::Arc;
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, RuntimeEnv, WebSearchProviderConfig};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -141,5 +141,63 @@ async fn execute_payload_reads_web_search_provider_config_from_context() {
             published_at: None,
             provider_rank: Some(1),
         }]
+    );
+}
+
+#[tokio::test]
+async fn execute_payload_reads_api_key_from_context_runtime_env() {
+    let base_url = spawn_json_server(
+        r#"{
+                "web": {
+                    "results": [{
+                        "url": "https://www.rust-lang.org/tools",
+                        "title": "Rust Tools",
+                        "description": "Official tools page"
+                    }]
+                }
+            }"#,
+    )
+    .await;
+    let mut kernel_config = AgentKernelConfig::default();
+    kernel_config.tools.web_search.provider = WebSearchProviderConfig::Brave;
+    kernel_config.tools.web_search.brave.base_url = Some(base_url);
+    kernel_config.tools.web_search.brave.api_key_env =
+        Some("TALOS_TEST_WEB_SEARCH_BRAVE_API_KEY".to_string());
+    kernel_config.runtime_env = RuntimeEnv::load_from_iter(
+        std::path::Path::new("__talos_missing_env_file__"),
+        [("TALOS_TEST_WEB_SEARCH_BRAVE_API_KEY", "brave-key")],
+    )
+    .expect("runtime env should load");
+    let context = ToolContext::new_with_kernel_config(
+        "web-search-session",
+        "user-1",
+        Some(Arc::new(kernel_config)),
+    );
+
+    let payload = WebSearchTool
+        .execute_payload(
+            serde_json::json!({
+                "query": "rust tools",
+                "limit": 1
+            }),
+            context,
+        )
+        .await
+        .expect("web search should execute with runtime env key");
+
+    let ToolOutputPayload::Function {
+        success,
+        structured_content,
+        ..
+    } = payload
+    else {
+        panic!("web search should return a function payload");
+    };
+    assert!(success);
+    assert_eq!(
+        structured_content
+            .expect("structured content should exist")
+            .get("provider"),
+        Some(&serde_json::json!("brave"))
     );
 }

@@ -102,14 +102,22 @@ fn migration_install_replaces_only_the_managed_directory() {
     std::fs::write(source.join("postgres").join("README.md"), "Reserved")
         .expect("postgres marker should be written");
 
-    let selected = replace_migration_resources_from_candidates(
+    let report = replace_migration_resources_from_candidates(
         &paths,
         crate::DatabaseType::Sqlite,
         vec![source],
     )
     .expect("migration resources should install");
+    let selected = report.backend_dir;
 
     assert_eq!(selected, paths.conf_dir.join("migrations").join("sqlite"));
+    assert_eq!(
+        report.source_dir,
+        dir.path().join("release").join("conf").join("migrations")
+    );
+    assert_eq!(report.target_dir, paths.conf_dir.join("migrations"));
+    assert_eq!(report.database_type, crate::DatabaseType::Sqlite);
+    assert!(report.changed);
     assert_eq!(
         std::fs::read_to_string(&paths.config_file).expect("config should remain readable"),
         "custom: true\n"
@@ -132,12 +140,16 @@ fn migration_install_returns_the_configured_backend_directory() {
     std::fs::create_dir_all(source.join("sqlite")).expect("sqlite source should be created");
     std::fs::create_dir_all(source.join("postgres")).expect("postgres source should be created");
 
-    let selected = replace_migration_resources_from_candidates(
+    let report = replace_migration_resources_from_candidates(
         &paths,
         crate::DatabaseType::Postgres,
         vec![source],
     )
     .expect("postgres migration path should resolve");
 
-    assert_eq!(selected, paths.conf_dir.join("migrations").join("postgres"));
+    assert_eq!(
+        report.backend_dir,
+        paths.conf_dir.join("migrations").join("postgres")
+    );
+    assert_eq!(report.database_type, crate::DatabaseType::Postgres);
 }
