@@ -1,10 +1,10 @@
 # Talos-RS 架构设计文档
 
-**版本**: v2.0  
-**最后更新**: 2026-06-21
+**版本**: v2.1
+**最后更新**: 2026-07-29
 
 > 说明：本文档描述 Talos 的目标架构与设计意图，不作为实时 crate 清单。
-> 当前实际挂载模块以 `Cargo.toml` workspace members 与 `README.md` 为准。
+> 当前实际挂载模块以 `Cargo.toml` workspace members 与 `MODULES.md` 为准。
 
 ---
 
@@ -170,19 +170,73 @@
 
 ### Orchestration 层（编排）
 
-**定位**：Agent 调度、会话管理、任务规划
+**定位**：Agent Runtime 注册与分发、Session/Turn 管理、Subagent 协作和任务规划
 
 | 模块 | 职责 | 依赖 |
 |------|------|------|
-| **agent/** | Agent 核心 (生命周期) | `common/llm`, `cognition/memory` |
+| **agent/** | `AgentDefinition`、`AgentHarness`、Runtime SPI 和公共生命周期 | `common/llm`, `cognition/memory` |
 | **agent-workspace/** | 工作空间管理 (AGENTS.md/SOUL.md 注入) | `agent`, `infra/storage` |
-| **session/** | 会话管理 (SessionKey/dmScope) | `infra/*` |
+| **session/** | Session/Turn 生命周期和 Subagent 父子执行拓扑 | `infra/*` |
 | **store/** | `talos-store`，project/session DB 持久化 | `infra/storage` |
 | **routing/** | 路由规则 (Bindings) | `session` |
 | **scheduler/** | 任务调度 (cron/heartbeat) | `agent` |
 | **planner/** | 任务规划/工作流 | `agent`, `cognition/reasoning` |
-| **coordinator/** | 多 Agent 协调 | `agent`, `planner` |
+| **coordinator/** | Agent Registry、Agent 选择、binding 解析和 Harness 分发 | `agent`, `routing` |
 | **queue/** | 消息队列 (steer/followup/collect) | `session` |
+
+#### Agent Runtime 与 Subagent 协作边界
+
+Talos 将“可注册的多 Agent Runtime”和“父子 Session/Turn 协作”建模为两套正交机制。前者决定由哪个 Agent 实现执行 Turn，后者描述同一 Agent binding 下的递归协作拓扑。
+
+**Agent 启动与注册**：
+
+```text
+AgentDefinition
+    -> AgentHarnessFactory
+    -> AgentHarness(AgentRuntime)
+    -> Coordinator.register_agent()
+    -> AgentRegistry
+```
+
+`AgentDefinition` 是从产品配置解析出的构造领域对象。Factory 根据 definition 创建包含具体 `AgentRuntime` 的 `AgentHarness`，再由 Coordinator 注册到 `AgentRegistry`。Registry 只保存可路由的 descriptor 和 Harness，不保存 definition，也不负责实例化 Runtime。
+
+**Turn 执行分发**：
+
+```text
+Turn dispatch
+    -> Coordinator
+    -> AgentRegistry
+    -> AgentHarness
+    -> AgentRuntime
+```
+
+Coordinator 根据 `DispatchBinding` 选择已注册 Agent。`Routed` binding 经过路由策略选择 Agent；`Exact` binding 直接解析指定 `agent_id`。Coordinator 只调用稳定的 Harness API，不依赖或向下转型具体 Runtime。
+
+**Subagent 协作**：
+
+```text
+Parent Turn
+    -> collaboration tool
+    -> SubagentService
+    -> Child Session/Turn
+    -> inherited DispatchBinding::Exact { agent_id }
+    -> Coordinator
+    -> AgentRegistry
+    -> same registered AgentHarness instance
+    -> its AgentRuntime
+```
+
+`spawn_agent` 等 collaboration tools 是模型可调用的协作控制入口。属于 `talos-service` 的 `SubagentService` 负责父子关系、生命周期控制和结果投影；Child Session/Turn 继承调用者已经确定的 `agent_id`，并通过标准 Turn dispatch 重新解析到同一个已注册 `AgentHarness` 实例及其 `AgentRuntime`。
+
+这两套机制必须保持以下约束：
+
+1. `AgentDefinition` 描述可注册的 Agent Runtime，不表示 Subagent 节点。
+2. Subagent 是 Session/Turn 执行拓扑，不创建新的 Agent Runtime 抽象。
+3. `SubagentService` 不拥有 Agent Registry，也不直接调用具体 Runtime。
+4. Coordinator 不管理 Subagent 树，只负责 Agent 选择、binding 解析和执行分发。
+5. Child Turn 必须继承父级的确定 Agent binding，并复用完整核心执行链。
+6. 跨 `AgentDefinition` 委派是独立的未来能力，不属于当前 `spawn_agent` 的继承语义。
+7. Gateway 继续保持 Session-first；内部 Agent Runtime 和 Subagent 树不改变对外 Session/Turn 契约。
 
 ---
 
@@ -240,33 +294,37 @@ pub struct Learner {
 
 ## 核心数据流
 
-### 场景 1：用户消息 → Agent 响应
+### 场景 1：用户输入 → Agent 响应
 
 ```
-用户 (WhatsApp)
+用户输入
     ↓
 ┌─────────────────┐
-│  Gateway (ws/)  │ 接收 WebSocket 消息
+│ Gateway / App   │ 接收 HTTP、JSON-RPC 或 Channel 输入
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Gateway (core) │ 验证/认证
+│  TalosService   │ 解析 Session/Turn 请求
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Routing        │ 匹配 Binding → SessionKey
+│ Session / Turn  │ 持久化输入并确定 DispatchBinding
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Session-Store  │ 加载会话上下文
+│  Coordinator    │ 解析 Routed 或 Exact binding
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Queue          │ steer/followup 模式处理
+│ AgentRegistry   │ 返回已注册的 AgentHarness
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Agent          │ 执行 Agent 逻辑
+│ AgentHarness    │ 执行公共生命周期和事件归一化
+└────────┬────────┘
+         ↓
+┌─────────────────┐
+│ AgentRuntime    │ 执行 Agent 逻辑
 │  ├─ Memory      │ 获取短期/长期记忆
 │  ├─ Knowledge   │ RAG 检索相关知识
 │  ├─ Prompt      │ 注入 AGENTS、Skills 和动态上下文
@@ -280,17 +338,39 @@ pub struct Learner {
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Output         │ 格式化响应
+│ Session/Timeline│ 持久化输出和执行事件
 └────────┬────────┘
          ↓
 ┌─────────────────┐
-│  Gateway (ws/)  │ 发送回复
+│ Gateway / App   │ 投影并发送响应
 └────────┬────────┘
          ↓
-用户 (WhatsApp)
+用户
 ```
 
-### 场景 2：定时任务（Heartbeat）
+### 场景 2：父 Turn 创建 Subagent
+
+```text
+Parent AgentRuntime
+    ↓ calls collaboration tool
+SubagentService
+    ↓ validates caller and inherited agent_id
+Child Session
+    ↓ creates Child Turn with Exact binding
+Coordinator
+    ↓ resolves the same registered Agent
+AgentRegistry
+    ↓ returns the registered Harness
+AgentHarness
+    ↓
+AgentRuntime
+    ↓
+Child Timeline / result projection
+```
+
+Subagent 控制操作可以启动、恢复、中断或关闭 Child Turn，但不能绕过 Session/Turn 生命周期，也不能把 Child Turn 静默切换到其他 `AgentDefinition`。
+
+### 场景 3：定时任务（Heartbeat）
 
 ```
 ┌─────────────────┐

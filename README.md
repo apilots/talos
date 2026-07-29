@@ -12,7 +12,8 @@ Talos 是一个 AI 智能管家底层框架，为上层应用（如贾维斯 Jar
 
 - **感知层**：多模态输入处理、环境理解、事件监听
 - **认知层**：记忆系统、推理引擎、决策系统
-- **执行层**：工具调用、按需工具发现、Skills、MCP server plugins、多 Agent 协作、输出通道
+- **执行层**：工具调用、按需工具发现、Skills、MCP server plugins、输出通道
+- **编排层**：多 Agent Runtime 注册与分发、Session/Turn 生命周期、Subagent 协作
 - **元认知层**：自我监控、持续学习
 
 ## 用户界面
@@ -213,6 +214,8 @@ cargo run -p talos-server --bin talos-server
 │     自我监控 / 持续学习 / 人格管理        │
 └─────────────────────────────────────────┘
 ```
+
+Talos 将“可注册的多 Agent Runtime”与“基于父子 Session/Turn 的 Subagent 协作”建模为两套正交机制。Subagent 继承父级已经确定的 Agent binding，重新进入 Coordinator 分发链，并解析到同一个已注册的 AgentHarness 实例及其 AgentRuntime。完整边界参见 [Talos-RS 架构设计](talos-rs/ARCHITECTURE.md#agent-runtime-与-subagent-协作边界)。
 
 ---
 

@@ -25,10 +25,11 @@ Talos is an AI Agent Framework designed to serve as the software brain for AI as
 - **Sandbox Execution**: Isolated execution environments for security
 
 ### Orchestration Layer
-- **Agent Core**: Main agent functionality with LLM integration
+- **Agent Runtime Registration**: Agent definitions are built into harnesses and registered for Coordinator dispatch
+- **Agent Core**: Shared Harness lifecycle with pluggable Agent Runtime implementations
 - **Session Management**: Database-backed session storage with multi-channel support
-- **Routing System**: Message routing to appropriate agents
-- **Coordination**: Multi-agent coordination and management
+- **Routing System**: Routed or exact Agent binding for each Session/Turn
+- **Subagent Collaboration**: Collaboration tools create child Sessions/Turns that inherit the parent Agent binding
 
 ### Gateway Layer
 - **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/turns/start`)
@@ -245,6 +246,14 @@ Talos follows an eight-layer architecture with clear separation of concerns:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+Talos keeps multi-Agent Runtime registration separate from Subagent
+collaboration. `AgentDefinition` builds a registered Agent Harness and Runtime;
+a Subagent creates a child Session/Turn, inherits the parent's exact Agent
+binding, and re-enters the same Coordinator dispatch path. It does not create
+or select another Agent definition. See
+[ARCHITECTURE.md](ARCHITECTURE.md#agent-runtime-与-subagent-协作边界) for the
+complete ownership boundaries and invariants.
+
 ## 📁 Project Structure
 
 - `crates/common/` - Shared utilities and LLM abstractions
@@ -287,7 +296,7 @@ The system can be configured via `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` a
 Future enhancements include:
 - Enhanced memory management with vector storage
 - Advanced reasoning and planning capabilities
-- Multi-agent collaboration
+- Cross-AgentDefinition delegation
 - Additional integration channels (WhatsApp, Slack, Discord)
 - Web-based administration interface
 

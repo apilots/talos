@@ -1,6 +1,6 @@
 # Talos-RS 模块清单
 
-**最后更新**: 2026-06-21
+**最后更新**: 2026-07-29
 **当前挂载模块数**: 37 个 crate
 **说明**: 本文档是实时 workspace 清单；目标架构与未来扩展方向请看 `ARCHITECTURE.md`。
 
@@ -40,7 +40,7 @@
 | `talos-llm-openai` | `crates/common/llm/openai` | OpenAI provider 实现；也承载 Ollama-compatible 接入 |
 | `talos-fs` | `crates/common/fs` | 通用文件系统封装，提供目录创建/删除、原子写入和文件锁等安全文件操作 |
 | `talos-prompt` | `crates/common/prompt` | `PromptBuilder`、prompt 预算和动态上下文组装 |
-| `talos-types` | `crates/common/types` | Session、Talos item、usage、source/provider 等共享类型 |
+| `talos-types` | `crates/common/types` | Session、Turn、Subagent、Agent dispatch、Talos item、usage、source/provider 等共享类型 |
 
 ## Infra
 
@@ -80,11 +80,11 @@
 | Crate | 路径 | 说明 |
 |------|------|------|
 | `talos-agent-kernel` | `crates/orchestration/agent-kernel` | `general_turn`、planner、processor、runtime 主执行流 |
-| `talos-agent` | `crates/orchestration/agent` | Agent facade、kernel binding、flush manager |
+| `talos-agent` | `crates/orchestration/agent` | `AgentDefinition`、`AgentHarness`、Runtime SPI、公共生命周期和 Kernel-backed 实现 |
 | `talos-store` | `crates/orchestration/store` | project/session DB record、store trait、持久化实现和测试 mock |
-| `talos-service` | `crates/orchestration/service` | 统一服务层 crate，包含 `TalosService` facade 以及 session、timeline、history、turn、project、file、plugin、skills 等业务服务 |
+| `talos-service` | `crates/orchestration/service` | `TalosService` facade、Session/Turn 生命周期、Timeline/History 和 Subagent 父子协作编排 |
 | `talos-router` | `crates/orchestration/router` | routing rule、binding、优先级匹配 |
-| `talos-coordinator` | `crates/orchestration/coordinator` | session -> agent 编排、多 turn 协调和工具审批转发 |
+| `talos-coordinator` | `crates/orchestration/coordinator` | `AgentRegistry`、Agent 路由、dispatch binding 解析和 `AgentHarness` 分发 |
 
 ## Gateway
 
