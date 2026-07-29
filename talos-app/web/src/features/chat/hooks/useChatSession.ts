@@ -45,7 +45,7 @@ export function useChatSession(
   );
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const shouldSubscribeTimeline =
-    Boolean(streamState?.isStreaming) ||
+    Boolean(streamState?.isStreaming && streamState.activeMessageId) ||
     (shouldRecoverLiveTail && sessionHistoryQuery.isSuccess);
   const { retryTimeline } = useSessionTimelineEvents(
     sessionId,

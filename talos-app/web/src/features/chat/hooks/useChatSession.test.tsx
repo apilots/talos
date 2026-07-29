@@ -85,8 +85,17 @@ describe("useChatSession", () => {
     expect(result.current.draft).toBe("keep this input");
   });
 
-  it("starts the new session timeline while the local turn is streaming", () => {
+  it("starts the new session timeline after the server accepts the local turn", () => {
     const { rerender } = renderHook(() => useChatSession("session-1"));
+
+    expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, false);
+
+    act(() => {
+      useAppStore.getState().setStreamMeta("session-1", {
+        isStreaming: true,
+      });
+    });
+    rerender();
 
     expect(mocks.timeline).toHaveBeenLastCalledWith("session-1", undefined, false);
 
