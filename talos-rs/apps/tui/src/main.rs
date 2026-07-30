@@ -4,13 +4,12 @@ use std::time::Duration;
 
 mod cli;
 
-use talos_config::Config;
 use talos_sdk::{
     now_ms, open_external_url, CloudLoginClientKind, CloudLoginStartRequest,
     CloudLoginStatusRequest, CloudLoginStatusResponse, GatewayClient as SdkGatewayClient,
     TalosError, UserCurrentRequest,
 };
-use talos_sdk_embedded::{EmbeddedServerClient, EmbeddedServerClientConfig};
+use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::run_tui_app_with_gateway_client;
 use tokio::sync::Mutex;
 
@@ -32,10 +31,9 @@ async fn create_embedded_client(
         logging_stdout: Some(false),
         ..Default::default()
     };
-    let log_guard = talos_base::prepare_startup(Some(&logging_options))?;
-    let config = Config::load()?;
-    let client = EmbeddedServerClient::connect(EmbeddedServerClientConfig::new(config)).await?;
-    Ok((log_guard, client))
+    let app_server = talos_base::run_embedded_app_server(Some(&logging_options)).await?;
+    let client = EmbeddedServerClient::from_runtime(app_server.runtime).await?;
+    Ok((app_server.log_guard, client))
 }
 
 async fn run_embedded_tui() -> Result<(), Box<dyn std::error::Error>> {

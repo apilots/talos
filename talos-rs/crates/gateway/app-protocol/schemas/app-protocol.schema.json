@@ -6326,7 +6326,6 @@
       "type": "string"
     },
     "TalosTimelineItemStatus": {
-      "description": "Lifecycle status for a timeline item.",
       "enum": [
         "queued",
         "running",
@@ -6346,7 +6345,7 @@
       "type": "string"
     },
     "TalosTimelinePhase": {
-      "description": "Server-normalized execution phase for timeline clients.\n\nThis enum is the display-layer union of server execution phases. Kernel execution maps model output phases into this type, and assistant text items also use the assistant text phases normalized by the kernel.",
+      "description": "Server-normalized display-layer union of model, assistant, and kernel execution phases.",
       "enum": [
         "input",
         "thinking",

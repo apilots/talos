@@ -29,15 +29,7 @@ impl TranscriptStore {
     pub(crate) fn push_finalized(&mut self, block: FinalizedTranscriptBlock) -> TranscriptBlockId {
         let id = TranscriptBlockId(self.next_block_id);
         self.next_block_id += 1;
-        let transcript_lines = block
-            .lines
-            .into_iter()
-            .map(|line| {
-                let line_id = TranscriptLineId(self.next_line_id);
-                self.next_line_id += 1;
-                TranscriptLine::new(line_id, line)
-            })
-            .collect();
+        let transcript_lines = self.transcript_lines(block.lines);
         let mut transcript_block = TranscriptBlock::new(id, block.kind, transcript_lines)
             .with_copy_markdown(block.copy_markdown);
         if let Some(round_duration_ms) = block.round_duration_ms {
@@ -45,6 +37,32 @@ impl TranscriptStore {
         }
         self.blocks.push(transcript_block);
         id
+    }
+
+    pub(crate) fn replace_user_input(
+        &mut self,
+        block_id: TranscriptBlockId,
+        block: FinalizedTranscriptBlock,
+    ) -> bool {
+        if block.kind != TranscriptBlockKind::UserInput {
+            return false;
+        }
+        let Some(index) = self
+            .blocks
+            .iter()
+            .position(|block| block.id == block_id && block.kind == TranscriptBlockKind::UserInput)
+        else {
+            return false;
+        };
+        let lines = self.transcript_lines(block.lines);
+        let current = self
+            .blocks
+            .get_mut(index)
+            .expect("block should exist after replacement lookup");
+        current.lines = lines;
+        current.round_duration_ms = block.round_duration_ms;
+        current.copy_markdown = block.copy_markdown;
+        true
     }
 
     pub(crate) fn upsert_session_header(&mut self, lines: Vec<StyledLine>) -> TranscriptBlockId {
@@ -141,6 +159,17 @@ impl TranscriptStore {
         for block_id in block_ids {
             self.mark_terminal_synced(block_id);
         }
+    }
+
+    fn transcript_lines(&mut self, lines: Vec<StyledLine>) -> Vec<TranscriptLine> {
+        lines
+            .into_iter()
+            .map(|line| {
+                let line_id = TranscriptLineId(self.next_line_id);
+                self.next_line_id += 1;
+                TranscriptLine::new(line_id, line)
+            })
+            .collect()
     }
 }
 
@@ -261,6 +290,42 @@ mod tests {
                 TranscriptBlockKind::Thinking,
             ]
         );
+    }
+
+    #[test]
+    fn replace_user_input_requires_matching_user_block_id() {
+        let mut store = TranscriptStore::default();
+        let user_id = store.push_block(
+            TranscriptBlockKind::UserInput,
+            vec![StyledLine::plain("local input")],
+        );
+        let answer_id = store.push_block(
+            TranscriptBlockKind::FinalAnswer,
+            vec![StyledLine::plain("answer")],
+        );
+
+        let wrong_kind = store.replace_user_input(
+            answer_id,
+            FinalizedTranscriptBlock::new(
+                TranscriptBlockKind::UserInput,
+                vec![StyledLine::plain("server input")],
+            ),
+        );
+        let replaced = store.replace_user_input(
+            user_id,
+            FinalizedTranscriptBlock::new(
+                TranscriptBlockKind::UserInput,
+                vec![StyledLine::plain("server input")],
+            ),
+        );
+
+        assert!(!wrong_kind);
+        assert!(replaced);
+        assert_eq!(
+            store.blocks()[0].lines[0].content.plain_text(),
+            "server input"
+        );
+        assert_eq!(store.blocks()[1].lines[0].content.plain_text(), "answer");
     }
 
     #[test]

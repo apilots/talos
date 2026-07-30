@@ -15,7 +15,7 @@ use crate::render_runtime::transcript::store::PendingTerminalBlock;
 use crate::render_runtime::transcript::store::TranscriptStore;
 use talos_sdk::{
     AgentEventPayload, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelinePhase,
+    TalosTimelinePhase,
 };
 
 /// Runtime engine for the render runtime.
@@ -27,6 +27,7 @@ pub(crate) struct RenderRuntimeEngine {
     live: LiveReducer,
     store: TranscriptStore,
     timeline_items: HashMap<String, TalosTimelineItem>,
+    local_user_input_block: Option<TranscriptBlockId>,
 }
 
 impl RenderRuntimeEngine {
@@ -35,10 +36,12 @@ impl RenderRuntimeEngine {
         if text.trim().is_empty() {
             return;
         }
-        self.push_finalized(FinalizedTranscriptBlock::new(
+        let block_id = self.store.push_finalized(FinalizedTranscriptBlock::new(
             TranscriptBlockKind::UserInput,
             vec![StyledLine::plain(text)],
         ));
+        self.local_user_input_block = Some(block_id);
+        self.runtime.handle_event(TuiRuntimeEvent::LiveCommitTick);
     }
 
     pub(crate) fn append_command_input(&mut self, text: impl Into<String>) {
@@ -138,9 +141,7 @@ impl RenderRuntimeEngine {
             AgentEventPayload::ItemStarted(payload) => {
                 self.timeline_items
                     .insert(payload.item.item_id.clone(), payload.item.clone());
-                if !self.is_duplicate_pending_user_input(&payload.item) {
-                    self.apply_timeline_item_started(&payload.item);
-                }
+                self.apply_timeline_item_started(&payload.item);
             }
             AgentEventPayload::ItemDelta(payload) => {
                 let Some(item) = self.timeline_items.get(&payload.item_id).cloned() else {
@@ -229,6 +230,7 @@ impl RenderRuntimeEngine {
         self.store.clear();
         self.live = LiveReducer::default();
         self.timeline_items.clear();
+        self.local_user_input_block = None;
     }
 
     fn push_finalized(&mut self, block: FinalizedTranscriptBlock) {
@@ -239,6 +241,14 @@ impl RenderRuntimeEngine {
     fn push_many_finalized(&mut self, blocks: impl IntoIterator<Item = FinalizedTranscriptBlock>) {
         let mut pushed = false;
         for block in blocks {
+            if block.kind == TranscriptBlockKind::UserInput {
+                if let Some(block_id) = self.local_user_input_block.take() {
+                    if self.store.replace_user_input(block_id, block.clone()) {
+                        pushed = true;
+                        continue;
+                    }
+                }
+            }
             self.store.push_finalized(block);
             pushed = true;
         }
@@ -272,25 +282,6 @@ impl RenderRuntimeEngine {
             | TalosTimelineDelta::ContextCompaction { .. }
             | TalosTimelineDelta::Status { .. } => {}
         }
-    }
-
-    fn is_duplicate_pending_user_input(&self, item: &TalosTimelineItem) -> bool {
-        let TalosTimelineItem {
-            kind: TalosTimelineItemKind::UserInput,
-            phase: TalosTimelinePhase::Input,
-            content: TalosTimelineContent::Text { text },
-            ..
-        } = item
-        else {
-            return false;
-        };
-        self.store.blocks().last().is_some_and(|block| {
-            block.kind == TranscriptBlockKind::UserInput
-                && block
-                    .lines
-                    .first()
-                    .is_some_and(|line| line.content.plain_text() == *text)
-        })
     }
 }
 
@@ -384,10 +375,24 @@ mod tests {
     }
 
     #[test]
-    fn agent_event_user_input_started_does_not_duplicate_local_pending_user_block() {
+    fn agent_event_user_input_started_renders_server_user_block() {
         let mut engine = RenderRuntimeEngine::default();
-        engine.append_user_input("hello");
         let item = timeline_user_input_item("hello");
+
+        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
+            request_id: "request-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item,
+        }));
+
+        assert_eq!(pending_plain_text(&engine), vec!["hello"]);
+    }
+
+    #[test]
+    fn agent_event_user_input_started_replaces_local_pending_user_block() {
+        let mut engine = RenderRuntimeEngine::default();
+        engine.append_user_input("local input");
+        let item = timeline_user_input_item("server input");
 
         engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
             request_id: "request-1".to_string(),
@@ -400,21 +405,22 @@ mod tests {
             .blocks()
             .iter()
             .filter(|block| block.kind == TranscriptBlockKind::UserInput)
-            .count();
-        assert_eq!(user_blocks, 1);
+            .collect::<Vec<_>>();
+        assert_eq!(user_blocks.len(), 1);
+        assert_eq!(user_blocks[0].lines[0].content.plain_text(), "server input");
     }
 
     #[test]
-    fn agent_event_user_input_started_does_not_duplicate_local_synced_user_block() {
+    fn agent_event_user_input_started_replaces_local_synced_user_block() {
         let mut engine = RenderRuntimeEngine::default();
-        engine.append_user_input("hello");
+        engine.append_user_input("local input");
         let synced_ids = engine
             .pending_terminal_projection()
             .into_iter()
             .map(|block| block.block_id)
             .collect::<Vec<_>>();
         engine.mark_terminal_blocks_synced(synced_ids);
-        let item = timeline_user_input_item("hello");
+        let item = timeline_user_input_item("server input");
 
         engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
             request_id: "request-1".to_string(),
@@ -427,8 +433,34 @@ mod tests {
             .blocks()
             .iter()
             .filter(|block| block.kind == TranscriptBlockKind::UserInput)
-            .count();
-        assert_eq!(user_blocks, 1);
+            .collect::<Vec<_>>();
+        assert_eq!(user_blocks.len(), 1);
+        assert_eq!(user_blocks[0].lines[0].content.plain_text(), "server input");
+    }
+
+    #[test]
+    fn agent_event_user_input_started_preserves_history_user_block() {
+        let mut engine = RenderRuntimeEngine::default();
+        engine.append_history([FinalizedTranscriptBlock::new(
+            TranscriptBlockKind::UserInput,
+            vec![StyledLine::plain("history input")],
+        )]);
+        let item = timeline_user_input_item("server input");
+
+        engine.apply_agent_event_payload(AgentEventPayload::ItemStarted(TalosItemStartedEvent {
+            request_id: "request-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            item,
+        }));
+
+        let user_text = engine
+            .store()
+            .blocks()
+            .iter()
+            .filter(|block| block.kind == TranscriptBlockKind::UserInput)
+            .map(|block| block.lines[0].content.plain_text())
+            .collect::<Vec<_>>();
+        assert_eq!(user_text, vec!["history input", "server input"]);
     }
 
     #[test]

@@ -1,8 +1,7 @@
 use super::{
-    apply_runtime_options, build_application_runtime, build_application_runtime_with_migration_dir,
-    create_llm_provider, resolve_webui_dir, ModelSetupRequiredProvider, ReloadableLlmProvider,
-    TalosServerHandle, TalosServerOptions, WebuiLookupInput, WebuiLookupResult,
-    SERVER_SHUTDOWN_WAIT_TIMEOUT,
+    apply_runtime_options, build_application_runtime_with_migration_dir, create_llm_provider,
+    resolve_webui_dir, ModelSetupRequiredProvider, ReloadableLlmProvider, TalosServerHandle,
+    TalosServerOptions, WebuiLookupInput, WebuiLookupResult, SERVER_SHUTDOWN_WAIT_TIMEOUT,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -211,13 +210,13 @@ async fn application_runtime_builds_when_model_key_is_missing() {
     let _ = fs::remove_dir_all(workspace);
 }
 
-#[tokio::test]
-async fn application_runtime_rejects_invalid_profile_usage_retention() {
+#[test]
+fn runtime_config_rejects_invalid_profile_usage_retention() {
     let mut config = Config::default();
     config.automation.profile_usage_retention.retention_days = 0;
 
-    let error = match build_application_runtime(config).await {
-        Ok(_) => panic!("invalid Profile retention should prevent runtime startup"),
+    let error = match config.validate_runtime() {
+        Ok(_) => panic!("invalid Profile retention should fail runtime validation"),
         Err(error) => error,
     };
 

@@ -46,7 +46,6 @@ mod startup;
 #[cfg(test)]
 pub(crate) use application_runtime::build_application_runtime_with_migration_dir;
 use reloadable_llm_provider::ReloadableLlmProvider;
-pub use startup::prepare_startup;
 
 #[derive(Clone)]
 struct AgentSkillRootsResolver {
@@ -137,6 +136,15 @@ pub struct TalosServerRuntime {
     automation: Automation,
 }
 
+/// Owns the resources created for an in-process app-server runtime.
+///
+/// This is the product-level embedded entrypoint result used by local clients such as the TUI.
+/// Callers must keep the `log_guard` alive for the lifetime of the embedded runtime.
+pub struct EmbeddedAppServer {
+    pub log_guard: LogGuard,
+    pub runtime: TalosApplicationRuntime,
+}
+
 #[derive(Clone)]
 pub struct TalosApplicationRuntime {
     pub config: Config,
@@ -202,21 +210,25 @@ pub async fn run_app_server() -> TalosResult<()> {
         logging_stdout: Some(false),
         ..TalosServerOptions::default()
     };
-    let _log_guard = prepare_startup(Some(&logging_options))?;
+    let _log_guard = startup::prepare_startup(Some(&logging_options))?;
     let config = load_runtime_config()?;
     let config_source = resolve_config_source_path(&config);
     log_config_source(config_source);
+    let startup_report = startup::finish_startup(&config)?;
 
-    run_json_rpc_stdio(config).await.map_err(|error| {
-        error!("app-server error: {}", error);
-        error
-    })
+    run_json_rpc_stdio_after_startup(config, &startup_report)
+        .await
+        .map_err(|error| {
+            error!("app-server error: {}", error);
+            error
+        })
 }
 
 pub async fn run_server() -> TalosResult<()> {
-    let _log_guard = prepare_startup(None)?;
+    let _log_guard = startup::prepare_startup(None)?;
     let config = load_runtime_config()?;
     let config_source = resolve_config_source_path(&config);
+    let startup_report = startup::finish_startup(&config)?;
     let mut server_options = TalosServerOptions::default();
     log_config_source(config_source);
     server_options.webui_dir = resolve_packaged_webui_dir();
@@ -225,11 +237,28 @@ pub async fn run_server() -> TalosResult<()> {
         config.gateway.host, config.gateway.port
     );
 
-    let server = start_server(config, Some(server_options)).await?;
+    let server = start_server_after_startup(config, Some(server_options), &startup_report).await?;
     server.run().await.map_err(|error| {
         error!("host error: {}", error);
         error
     })
+}
+
+/// Starts the product-managed in-process app-server runtime.
+///
+/// This entrypoint owns the full startup lifecycle for embedded clients: startup logging,
+/// pre-config upgrades, runtime config loading, post-config upgrades, and runtime assembly.
+/// Lower-level runtime builders must not repeat startup lifecycle work.
+pub async fn run_embedded_app_server(
+    options: Option<&TalosServerOptions>,
+) -> TalosResult<EmbeddedAppServer> {
+    let log_guard = startup::prepare_startup(options)?;
+    let config = load_runtime_config()?;
+    let config_source = resolve_config_source_path(&config);
+    log_config_source(config_source);
+    let startup_report = startup::finish_startup(&config)?;
+    let runtime = build_application_runtime_after_startup(config, &startup_report).await?;
+    Ok(EmbeddedAppServer { log_guard, runtime })
 }
 
 pub fn should_print_version(arg: Option<&str>) -> bool {
@@ -488,12 +517,14 @@ pub fn init_logging(
     talos_logging::init_with_config(config.logging)
 }
 
-pub async fn start_server(
+async fn start_server_after_startup(
     config: Config,
     options: Option<TalosServerOptions>,
+    startup_report: &startup::FinishStartupReport,
 ) -> TalosResult<TalosServerRuntime> {
     let config = apply_runtime_options(config, options.as_ref());
-    let runtime = build_application_runtime(config.clone()).await?;
+    config.validate_runtime()?;
+    let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
 
     let mut http_server = HttpServer::new(
         runtime.service.clone(),
@@ -544,7 +575,10 @@ pub async fn start_server(
     })
 }
 
-pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
+async fn run_json_rpc_stdio_after_startup(
+    config: Config,
+    startup_report: &startup::FinishStartupReport,
+) -> TalosResult<()> {
     let max_incoming_frame_bytes = usize::try_from(
         config
             .storage
@@ -556,7 +590,7 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
             .saturating_add(1024 * 1024),
     )
     .unwrap_or(usize::MAX);
-    let runtime = build_application_runtime(config.clone()).await?;
+    let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
     let automation = runtime.automation.clone();
     let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
     let service = runtime.service.clone();
@@ -586,12 +620,13 @@ pub async fn run_json_rpc_stdio(config: Config) -> TalosResult<()> {
     application_automation::finish(result, &automation).await
 }
 
-pub async fn build_application_runtime(config: Config) -> TalosResult<TalosApplicationRuntime> {
-    config.validate_runtime()?;
-    let after_report = startup::upgrade_after(&config)?;
+async fn build_application_runtime_after_startup(
+    config: Config,
+    startup_report: &startup::FinishStartupReport,
+) -> TalosResult<TalosApplicationRuntime> {
     application_runtime::build_application_runtime_with_migration_dir(
         config,
-        &after_report.database_migrations.backend_dir,
+        &startup_report.upgrade.database_migrations.backend_dir,
     )
     .await
 }

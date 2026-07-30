@@ -23,7 +23,6 @@ talos-types = { workspace = true }
 talos-tools-policy = { workspace = true }
 talos-sdk = { path = "../sdk" }
 talos-sdk-embedded = { path = "../sdk-embedded" }
-talos-config = { workspace = true }
 talos-base = { workspace = true }
 talos-logging = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

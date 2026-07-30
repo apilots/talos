@@ -12,7 +12,6 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 talos-auth = { workspace = true }
 talos-base = { workspace = true }
-talos-config = { workspace = true }
 talos-error = { workspace = true }
 talos-gateway = { workspace = true }
 talos-sdk = { workspace = true }

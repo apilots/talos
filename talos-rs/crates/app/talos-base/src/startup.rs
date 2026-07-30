@@ -6,6 +6,12 @@ use tracing::{error, info};
 
 use super::TalosServerOptions;
 
+/// Startup work completed after strict runtime configuration is available.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinishStartupReport {
+    pub upgrade: AfterUpgradeReport,
+}
+
 /// Initializes logging and runs pre-configuration startup upgrades.
 pub fn prepare_startup(options: Option<&TalosServerOptions>) -> TalosResult<LogGuard> {
     let paths = TalosPaths::resolve();
@@ -22,8 +28,16 @@ pub fn prepare_startup(options: Option<&TalosServerOptions>) -> TalosResult<LogG
     Ok(log_guard)
 }
 
+/// Runs startup steps that require a validated runtime configuration.
+pub fn finish_startup(config: &Config) -> TalosResult<FinishStartupReport> {
+    let upgrade = upgrade_after(config)?;
+    let report = FinishStartupReport { upgrade };
+    info!(report = ?report, "finish_startup completed");
+    Ok(report)
+}
+
 /// Runs upgrade steps that must happen before runtime configuration is loaded.
-pub fn upgrade_before() -> TalosResult<BeforeUpgradeReport> {
+fn upgrade_before() -> TalosResult<BeforeUpgradeReport> {
     talos_upgrade::upgrade_before().map_err(|error| {
         error!("upgrade_before failed: {}", error);
         error
@@ -31,7 +45,7 @@ pub fn upgrade_before() -> TalosResult<BeforeUpgradeReport> {
 }
 
 /// Runs upgrade steps that require a validated runtime configuration.
-pub fn upgrade_after(config: &Config) -> TalosResult<AfterUpgradeReport> {
+fn upgrade_after(config: &Config) -> TalosResult<AfterUpgradeReport> {
     talos_upgrade::upgrade_after(config).map_err(|error| {
         error!("upgrade_after failed: {}", error);
         error

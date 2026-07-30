@@ -6,8 +6,7 @@ use talos_auth::{
     CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginStartRequest,
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, RequestIdentity,
 };
-use talos_base::{build_application_runtime, TalosApplicationRuntime};
-use talos_config::Config;
+use talos_base::TalosApplicationRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
 use talos_service::{Actor, TimelineSubscriptionMessage};
@@ -48,28 +47,6 @@ use talos_types::{
 };
 use tokio::task::JoinHandle;
 
-pub struct EmbeddedServerClientConfig {
-    pub config: Config,
-    pub actor: Actor,
-    actor_overridden: bool,
-}
-
-impl EmbeddedServerClientConfig {
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            actor: Actor::regular("local"),
-            actor_overridden: false,
-        }
-    }
-
-    pub fn with_actor(mut self, actor: Actor) -> Self {
-        self.actor = actor;
-        self.actor_overridden = true;
-        self
-    }
-}
-
 pub struct EmbeddedServerClient {
     runtime: TalosApplicationRuntime,
     actor: Actor,
@@ -77,22 +54,27 @@ pub struct EmbeddedServerClient {
 }
 
 impl EmbeddedServerClient {
-    pub async fn connect(config: EmbeddedServerClientConfig) -> TalosResult<Self> {
-        let auth_enabled = config.config.gateway.auth;
-        let actor_overridden = config.actor_overridden;
-        let runtime = build_application_runtime(config.config)
-            .await
-            .map_err(|error| {
-                TalosError::RuntimeUnavailable(format!(
-                    "embedded runtime initialization failed: {error}"
-                ))
-            })?;
+    pub async fn from_runtime(runtime: TalosApplicationRuntime) -> TalosResult<Self> {
+        let auth_enabled = runtime.config.gateway.auth;
+        Self::from_runtime_with_actor(
+            runtime,
+            Actor::regular("local"),
+            auth_enabled,
+            /*actor_overridden*/ false,
+        )
+        .await
+    }
+
+    async fn from_runtime_with_actor(
+        runtime: TalosApplicationRuntime,
+        actor: Actor,
+        auth_enabled: bool,
+        actor_overridden: bool,
+    ) -> TalosResult<Self> {
         let actor = if auth_enabled && !actor_overridden {
-            resolve_cached_actor(&runtime)
-                .await?
-                .unwrap_or(config.actor)
+            resolve_cached_actor(&runtime).await?.unwrap_or(actor)
         } else {
-            config.actor
+            actor
         };
         Ok(Self {
             runtime,
