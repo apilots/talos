@@ -111,6 +111,9 @@ export function createDesktopTalosClient(
     user: {
       current: () => client.getCurrentUser(),
     },
+    profile: {
+      read: () => client.readProfile(),
+    },
     llm: {
       get: (): Promise<ConfigGetResponse> => client.getLlmConfig(),
       update: (config: LlmConfig): Promise<ConfigUpdateResponse> => client.updateLlmConfig(config),
