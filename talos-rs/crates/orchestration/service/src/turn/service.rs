@@ -140,6 +140,7 @@ impl TurnService {
                     error!(error = %err, "failed to persist timeline stream event");
                     continue;
                 }
+                log_turn_error_event(&progress_event);
                 if let Some(profile_context) = profile_context.as_ref() {
                     Self::record_profile_turn_usage(
                         profile_store.as_ref(),
@@ -410,6 +411,7 @@ impl TurnService {
             .record_talos_event(first_event)
             .await
             .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
+        log_turn_error_event(&progress_event);
         Self::record_profile_turn_usage(
             self.profile_store.as_ref(),
             &profile_context,
@@ -633,6 +635,7 @@ impl TurnService {
             .record_talos_event(first_event)
             .await
             .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
+        log_turn_error_event(&progress_event);
         Self::record_profile_turn_usage(
             self.profile_store.as_ref(),
             &profile_context,
@@ -732,13 +735,19 @@ impl TurnService {
             }),
         };
         let message_id = error_event.message_id.clone();
-        if let Err(err) = self.event_service.record_talos_event(error_event).await {
+        if let Err(err) = self
+            .event_service
+            .record_talos_event(error_event.clone())
+            .await
+        {
             error!(
                 session_id = %session_id,
                 turn_id = %turn_id,
                 error = %err,
                 "failed to persist first-event timeout error event"
             );
+        } else {
+            log_turn_error_event(&error_event);
         }
         if let Err(err) = self
             .profile_store
@@ -796,6 +805,21 @@ impl TurnService {
         )
         .await;
     }
+}
+
+fn log_turn_error_event(event: &AgentEvent) {
+    let AgentEventPayload::TurnError(payload) = &event.payload else {
+        return;
+    };
+    error!(
+        session_id = %event.session_id,
+        turn_id = %event.turn_id,
+        message_id = %event.message_id,
+        request_id = %payload.request_id,
+        error = %payload.error,
+        error_code = ?payload.error_info.as_ref().map(|info| info.code),
+        "turn failed"
+    );
 }
 
 fn usage_is_available(usage: &talos_types::TokenUsage) -> bool {
