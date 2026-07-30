@@ -1,0 +1,23 @@
+api.example.com {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8787
+}
+
+agent.example.com {
+	@sse path /v1/sessions/*/events
+
+	handle @sse {
+		header {
+			Cache-Control no-cache
+			X-Accel-Buffering no
+		}
+		reverse_proxy 127.0.0.1:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:8080
+	}
+}

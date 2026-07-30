@@ -1,0 +1,26 @@
+services:
+  talos-server:
+    image: ${TALOS_SERVER_IMAGE:-ghcr.io/apilots/talos-server}:${TALOS_SERVER_VERSION:-v0.1.6}
+    container_name: talos-server
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - talos-data:/home/talos/.talos
+    mem_limit: 1g
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  talos-data:

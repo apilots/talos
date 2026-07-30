@@ -91,12 +91,34 @@ async fn test_subscribe_timeline_events_exposes_subscription_closed() {
         .expect("request should succeed");
 
     assert_eq!(resp.status(), StatusCode::OK);
+    assert_sse_headers(&resp);
     let body = axum::body::to_bytes(resp.into_body(), 4096)
         .await
         .expect("event body should be readable");
     let body_text = String::from_utf8_lossy(&body);
     assert!(body_text.contains("event: subscription.terminated"));
     assert!(body_text.contains(r#""reason":"completed""#));
+}
+
+fn assert_sse_headers(resp: &axum::response::Response) {
+    let content_type = resp
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .expect("SSE response should include content-type");
+    assert!(content_type.starts_with("text/event-stream"));
+    assert_eq!(
+        resp.headers()
+            .get(axum::http::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("no-cache"),
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-accel-buffering")
+            .and_then(|value| value.to_str().ok()),
+        Some("no"),
+    );
 }
 
 #[tokio::test]

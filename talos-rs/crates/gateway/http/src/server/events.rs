@@ -2,7 +2,8 @@ use std::io;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::header::CACHE_CONTROL;
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Json, Response};
 use serde::Deserialize;
@@ -84,9 +85,18 @@ pub(super) async fn subscribe_timeline_events_handler(
         .map_err(io::Error::other)
     });
 
-    Ok(Sse::new(stream)
-        .keep_alive(KeepAlive::default())
-        .into_response())
+    Ok(timeline_sse_response(
+        Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response(),
+    ))
+}
+
+fn timeline_sse_response(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(CACHE_CONTROL, HeaderValue::from_static("no-cache"));
+    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    response
 }
 
 fn timeline_sse_event(
