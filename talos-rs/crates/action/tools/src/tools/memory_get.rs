@@ -60,7 +60,8 @@ impl Tool for MemoryGetTool {
             .unwrap_or_default()
             .trim();
         if memory_id.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "memoryId is required".to_string(),
             ));
         }
@@ -73,13 +74,20 @@ impl Tool for MemoryGetTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let reader = context.memory_reader().ok_or_else(|| {
-            TalosError::ToolError("memory_get requires memory access".to_string())
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "memory_get requires memory access".to_string(),
+            )
         })?;
         let scope = context.memory_scope().ok_or_else(|| {
-            TalosError::ToolError("memory_get requires a memory scope".to_string())
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "memory_get requires a memory scope".to_string(),
+            )
         })?;
-        let request = serde_json::from_value::<MemoryGetRequest>(input)
-            .map_err(|err| TalosError::ValidationError(err.to_string()))?;
+        let request = serde_json::from_value::<MemoryGetRequest>(input).map_err(|err| {
+            TalosError::public(talos_error::ErrorCode::InvalidRequest, err.to_string())
+        })?;
         let response = reader.get(scope, request).await?;
         ToolOutputPayload::success_json(&response, "serialize memory_get result")
     }

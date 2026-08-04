@@ -350,10 +350,7 @@ async fn regular_actor_cannot_read_or_patch_other_user_session() {
         .get_session(&Actor::regular("member-user"), "session-1")
         .await
         .expect_err("other user session should be hidden");
-    assert!(matches!(
-        read_error,
-        talos_error::TalosError::ResourceNotFound(_)
-    ));
+    assert!(read_error.is_code(talos_error::ErrorCode::ResourceNotFound));
 
     let patch_error = access
         .patch_session(
@@ -363,10 +360,7 @@ async fn regular_actor_cannot_read_or_patch_other_user_session() {
         )
         .await
         .expect_err("other user session should not be patched");
-    assert!(matches!(
-        patch_error,
-        talos_error::TalosError::ResourceNotFound(_)
-    ));
+    assert!(patch_error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -384,14 +378,14 @@ async fn child_session_rejects_ordinary_external_access() {
     let access = recording_access_service(Arc::new(NoopSessionRuntime), store);
     let actor = Actor::regular("member-user");
 
-    assert!(matches!(
-        access.get_session(&actor, "child-1").await,
-        Err(talos_error::TalosError::ValidationError(_))
-    ));
-    assert!(matches!(
-        access.get_session(&actor, "child-1").await,
-        Err(talos_error::TalosError::ValidationError(_))
-    ));
+    assert!(access
+        .get_session(&actor, "child-1")
+        .await
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
+    assert!(access
+        .get_session(&actor, "child-1")
+        .await
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
 }
 
 #[tokio::test]

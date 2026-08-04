@@ -133,14 +133,12 @@ fn build_prompt_builder<'a>(
         .user_input(input.to_string());
 
     let skill_options = skill_options.ok_or_else(|| {
-        TalosError::ConfigError(
+        TalosError::internal(
             "skill options must be provided by the orchestration layer".to_string(),
         )
     })?;
     let roots = skill_options.roots.ok_or_else(|| {
-        TalosError::ConfigError(
-            "skill roots must be provided by the orchestration layer".to_string(),
-        )
+        TalosError::internal("skill roots must be provided by the orchestration layer".to_string())
     })?;
     let provider = std::sync::Arc::new(LocalSkillProvider::new(roots));
     builder = builder.skills(
@@ -462,7 +460,7 @@ fn load_session_state_value<T: DeserializeOwned>(ctx: &InvocationContext, key: &
 }
 
 pub(crate) fn blocked_compaction_error(session_id: &str) -> talos_error::TalosError {
-    talos_error::TalosError::ContextCompactionFailed(format!(
+    talos_error::TalosError::public(talos_error::ErrorCode::ContextCompactionFailed, format!(
         "session `{session_id}` is blocked because prompt budget remains exhausted after compaction; reset_session or create a new session to continue"
     ))
 }
@@ -716,9 +714,7 @@ pub async fn prepare_general_turn(
                 ExecutionBranch::ModelThinking,
                 SESSION_COMPACTION_STATE_KEY,
                 serde_json::to_value(SessionCompactionState::normal()).map_err(|error| {
-                    TalosError::SerializationError(format!(
-                        "serialize session compaction state: {error}"
-                    ))
+                    TalosError::internal(format!("serialize session compaction state: {error}"))
                 })?,
             )
             .await?;
@@ -770,9 +766,7 @@ pub async fn prepare_general_turn(
             ExecutionBranch::ModelThinking,
             SESSION_COMPACTION_STATE_KEY,
             serde_json::to_value(state).map_err(|error| {
-                TalosError::SerializationError(format!(
-                    "serialize session compaction state: {error}"
-                ))
+                TalosError::internal(format!("serialize session compaction state: {error}"))
             })?,
         )
         .await?;

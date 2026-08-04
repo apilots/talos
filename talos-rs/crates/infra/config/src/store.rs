@@ -58,7 +58,7 @@ impl YamlLlmConfigStore {
 impl LlmConfigStore for YamlLlmConfigStore {
     fn load_raw(&self) -> TalosResult<LlmConfig> {
         let text = std::fs::read_to_string(&self.config_path).map_err(|e| {
-            TalosError::ConfigError(format!(
+            TalosError::internal(format!(
                 "failed to read config file {}: {}",
                 self.config_path.display(),
                 e
@@ -66,7 +66,7 @@ impl LlmConfigStore for YamlLlmConfigStore {
         })?;
 
         let root: serde_yaml::Value = serde_yaml::from_str(&text)
-            .map_err(|e| TalosError::ConfigError(format!("failed to parse yaml: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("failed to parse yaml: {}", e)))?;
 
         let llm_node = root
             .get("llm")
@@ -74,7 +74,7 @@ impl LlmConfigStore for YamlLlmConfigStore {
             .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
         let mut llm: LlmConfig = serde_yaml::from_value(llm_node).map_err(|e| {
-            TalosError::ConfigError(format!("failed to deserialize llm config: {}", e))
+            TalosError::internal(format!("failed to deserialize llm config: {}", e))
         })?;
         sanitize_llm_for_read(&mut llm);
         Ok(llm)
@@ -88,7 +88,7 @@ impl LlmConfigStore for YamlLlmConfigStore {
 
     fn save(&self, llm: &LlmConfig) -> TalosResult<LlmConfig> {
         let text = std::fs::read_to_string(&self.config_path).map_err(|e| {
-            TalosError::ConfigError(format!(
+            TalosError::internal(format!(
                 "failed to read config file {}: {}",
                 self.config_path.display(),
                 e
@@ -96,7 +96,7 @@ impl LlmConfigStore for YamlLlmConfigStore {
         })?;
 
         let mut root: serde_yaml::Value = serde_yaml::from_str(&text)
-            .map_err(|e| TalosError::ConfigError(format!("failed to parse yaml: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("failed to parse yaml: {}", e)))?;
 
         let existing_llm = self.load_raw_unsanitized()?;
         let mut safe_llm = llm.clone();
@@ -143,28 +143,27 @@ impl LlmConfigStore for YamlLlmConfigStore {
             Some(&existing_llm.openrouter),
         )?;
 
-        let llm_value = serde_yaml::to_value(&safe_llm).map_err(|e| {
-            TalosError::ConfigError(format!("failed to serialize llm config: {}", e))
-        })?;
+        let llm_value = serde_yaml::to_value(&safe_llm)
+            .map_err(|e| TalosError::internal(format!("failed to serialize llm config: {}", e)))?;
 
         match &mut root {
             serde_yaml::Value::Mapping(map) => {
                 map.insert(serde_yaml::Value::String("llm".to_string()), llm_value);
             }
             _ => {
-                return Err(TalosError::ConfigError(
+                return Err(TalosError::internal(
                     "config file root is not a yaml mapping".to_string(),
                 ));
             }
         }
 
         let output = serde_yaml::to_string(&root)
-            .map_err(|e| TalosError::ConfigError(format!("failed to serialize yaml: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("failed to serialize yaml: {}", e)))?;
 
         talos_fs::std_fs()
             .write_file(&self.config_path, &output)
             .map_err(|e| {
-                TalosError::ConfigError(format!(
+                TalosError::internal(format!(
                     "failed to write config file {}: {}",
                     self.config_path.display(),
                     e
@@ -179,7 +178,7 @@ impl LlmConfigStore for YamlLlmConfigStore {
 impl YamlLlmConfigStore {
     fn load_raw_unsanitized(&self) -> TalosResult<LlmConfig> {
         let text = std::fs::read_to_string(&self.config_path).map_err(|e| {
-            TalosError::ConfigError(format!(
+            TalosError::internal(format!(
                 "failed to read config file {}: {}",
                 self.config_path.display(),
                 e
@@ -187,16 +186,15 @@ impl YamlLlmConfigStore {
         })?;
 
         let root: serde_yaml::Value = serde_yaml::from_str(&text)
-            .map_err(|e| TalosError::ConfigError(format!("failed to parse yaml: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("failed to parse yaml: {}", e)))?;
 
         let llm_node = root
             .get("llm")
             .cloned()
             .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
-        serde_yaml::from_value(llm_node).map_err(|e| {
-            TalosError::ConfigError(format!("failed to deserialize llm config: {}", e))
-        })
+        serde_yaml::from_value(llm_node)
+            .map_err(|e| TalosError::internal(format!("failed to deserialize llm config: {}", e)))
     }
 }
 

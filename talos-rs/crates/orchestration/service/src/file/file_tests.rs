@@ -9,7 +9,7 @@ use futures_util::stream;
 use opendal::{services::Fs, Operator};
 use talos_agent_kernel::{AttachmentReader, TurnFileScope};
 use talos_config::{FileStorageConfig, FileStorageLimits};
-use talos_error::{TalosError, TalosFileErrorKind};
+use talos_error::TalosFileErrorKind;
 use talos_storage::SqliteStorage;
 use talos_store::file::{DatabaseFileStore, FileStatus, FileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -251,13 +251,7 @@ async fn csv_validation_reads_the_complete_upload() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedMediaType,
-            ..
-        }
-    ));
+    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -348,13 +342,7 @@ async fn malformed_excel_content_is_rejected() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedMediaType,
-            ..
-        }
-    ));
+    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -378,13 +366,7 @@ async fn binary_content_is_not_misclassified_as_csv() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedMediaType,
-            ..
-        }
-    ));
+    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -461,7 +443,7 @@ async fn file_scope_and_owner_are_enforced_as_not_found() {
         )
         .await
         .unwrap_err();
-    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -496,7 +478,7 @@ async fn project_file_relation_is_preserved_by_store_writes() {
         .delete_project(&project.project_id)
         .await
         .unwrap_err();
-    assert!(matches!(conflict, TalosError::Conflict(_)));
+    assert!(conflict.is_code(talos_error::ErrorCode::Conflict));
 
     files
         .service
@@ -526,7 +508,7 @@ async fn project_file_relation_is_preserved_by_store_writes() {
         })
         .await
         .unwrap_err();
-    assert!(matches!(missing_project, TalosError::ResourceNotFound(_)));
+    assert!(missing_project.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -597,7 +579,7 @@ async fn attachment_reader_rejects_project_mismatch_and_count_limit() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(mismatch, TalosError::ResourceNotFound(_)));
+    assert!(mismatch.is_code(talos_error::ErrorCode::ResourceNotFound));
 
     let count = AttachmentReader::read(
         &files.service,
@@ -609,13 +591,7 @@ async fn attachment_reader_rejects_project_mismatch_and_count_limit() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(
-        count,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::AttachmentLimitExceeded,
-            ..
-        }
-    ));
+    assert!(count.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded));
 }
 
 #[tokio::test]
@@ -652,13 +628,7 @@ async fn attachment_reader_rejects_an_oversized_object_before_loading_it() {
     .await
     .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::AttachmentLimitExceeded,
-            ..
-        }
-    ));
+    assert!(error.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded));
 }
 
 #[tokio::test]
@@ -705,14 +675,8 @@ async fn upload_rejects_invalid_metadata_and_stream_limits_before_visibility() {
         .await
         .unwrap();
 
-    assert!(matches!(
-        too_large,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UploadTooLarge,
-            ..
-        }
-    ));
-    assert!(matches!(invalid_name, TalosError::ValidationError(_)));
+    assert!(too_large.is_file_error_kind(TalosFileErrorKind::UploadTooLarge));
+    assert!(invalid_name.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(visible.data.is_empty());
 }
 
@@ -737,7 +701,7 @@ async fn failed_input_stream_aborts_the_object_and_uploading_record() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::StorageError(_)));
+    assert!(error.is_internal());
     assert!(files
         .store
         .list_incomplete_files(None, 100)
@@ -792,14 +756,8 @@ async fn unsupported_media_and_ready_transition_failure_leave_no_visible_file() 
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        unsupported,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedMediaType,
-            ..
-        }
-    ));
-    assert!(matches!(ready_failure, TalosError::StorageError(_)));
+    assert!(unsupported.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
+    assert!(ready_failure.is_internal());
     assert!(files
         .store
         .list_incomplete_files(None, 100)
@@ -828,7 +786,7 @@ async fn failed_object_delete_remains_recoverable() {
         .unwrap_err();
     let incomplete = files.store.list_incomplete_files(None, 100).await.unwrap();
 
-    assert!(matches!(error, TalosError::StorageError(_)));
+    assert!(error.is_internal());
     assert_eq!(
         incomplete
             .iter()
@@ -873,7 +831,7 @@ async fn recovery_rejects_records_for_unconfigured_storage() {
 
     let error = files.service.reconcile_incomplete().await.unwrap_err();
 
-    assert!(matches!(error, TalosError::InvalidConfiguration(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert_eq!(
         files.store.list_incomplete_files(None, 100).await.unwrap(),
         vec![record]

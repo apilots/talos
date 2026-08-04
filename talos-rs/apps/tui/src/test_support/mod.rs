@@ -763,9 +763,7 @@ impl GatewayClient for MockGatewayClient {
         let mut state = self.state.lock().unwrap();
         if state.list_models_failures_remaining > 0 {
             state.list_models_failures_remaining -= 1;
-            return Err(TalosError::ClientError(
-                "mock list_models failure".to_string(),
-            ));
+            return Err(TalosError::internal("mock list_models failure".to_string()));
         }
         let default_model = state
             .models
@@ -834,7 +832,7 @@ impl GatewayClient for MockGatewayClient {
         state.upload_requests.push((request.clone(), data.clone()));
         let call = state.upload_requests.len();
         if state.upload_failure_calls.contains(&call) {
-            return Err(TalosError::ClientError(format!(
+            return Err(TalosError::internal(format!(
                 "mock upload failure on call {call}"
             )));
         }
@@ -877,7 +875,7 @@ impl GatewayClient for MockGatewayClient {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if should_fail {
-            return Err(TalosError::ClientError(
+            return Err(TalosError::internal(
                 "mock close session failure".to_string(),
             ));
         }
@@ -910,7 +908,7 @@ impl GatewayClient for MockGatewayClient {
         state.compact_calls = state.compact_calls.saturating_add(1);
         if state.compact_failures_remaining > 0 {
             state.compact_failures_remaining -= 1;
-            return Err(TalosError::ClientError(
+            return Err(TalosError::internal(
                 "mock session compaction failure".to_string(),
             ));
         }
@@ -964,7 +962,7 @@ impl GatewayClient for MockGatewayClient {
             tokio::time::sleep(Duration::from_millis(delay)).await;
         }
         if should_fail {
-            return Err(TalosError::ClientError(
+            return Err(TalosError::internal(
                 "mock stream connect failure".to_string(),
             ));
         }
@@ -1057,7 +1055,8 @@ impl GatewayClient for MockGatewayClient {
             state.reconnect_events.clone()
         };
         if events.is_empty() {
-            return Err(TalosError::Conflict(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
                 "No active turn stream is available for this session.".to_string(),
             ));
         }

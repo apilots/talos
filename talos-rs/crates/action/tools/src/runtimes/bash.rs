@@ -160,7 +160,10 @@ impl BashSessionManager {
         context: &ToolContext,
     ) -> TalosResult<BashSessionResponse> {
         if request.cmd.trim().is_empty() {
-            return Err(TalosError::ToolError("cmd cannot be empty".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "cmd cannot be empty".to_string(),
+            ));
         }
 
         let base_dir = resolve_base_dir(context)?;
@@ -171,9 +174,12 @@ impl BashSessionManager {
             .unwrap_or(base_dir);
 
         let mut command = build_command(request, &workdir)?;
-        let mut child = command
-            .spawn()
-            .map_err(|err| TalosError::ToolError(format!("failed to execute command: {}", err)))?;
+        let mut child = command.spawn().map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("failed to execute command: {}", err),
+            )
+        })?;
 
         let session_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let process_id = child.id();
@@ -230,7 +236,12 @@ impl BashSessionManager {
             .sessions
             .get(&session_id)
             .map(|entry| entry.value().clone())
-            .ok_or_else(|| TalosError::ToolError(format!("session {} not found", session_id)))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("session {} not found", session_id),
+                )
+            })?;
 
         if yield_time_ms > 0 {
             let deadline = Instant::now() + Duration::from_millis(yield_time_ms);

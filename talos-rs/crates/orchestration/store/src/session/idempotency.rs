@@ -92,7 +92,7 @@ fn parse_status(raw: &str) -> TalosResult<IdempotencyStatus> {
         "accepted" => Ok(IdempotencyStatus::Accepted),
         "failed" => Ok(IdempotencyStatus::Failed),
         "failed_no_first_event" => Ok(IdempotencyStatus::FailedNoFirstEvent),
-        _ => Err(TalosError::SerializationError(format!(
+        _ => Err(TalosError::internal(format!(
             "unknown idempotency status: {raw}"
         ))),
     }
@@ -103,9 +103,8 @@ fn parse_record(row: &Row) -> TalosResult<IdempotencyRecord> {
         .get_string("result_json")
         .filter(|value| !value.trim().is_empty())
         .map(|raw| {
-            serde_json::from_str::<MessageCommandResult>(&raw).map_err(|err| {
-                TalosError::SerializationError(format!("parse idempotency result: {}", err))
-            })
+            serde_json::from_str::<MessageCommandResult>(&raw)
+                .map_err(|err| TalosError::internal(format!("parse idempotency result: {}", err)))
         })
         .transpose()?;
     Ok(IdempotencyRecord {
@@ -205,7 +204,7 @@ impl MessageIdempotencyStore for DatabaseSessionStore {
             .get_idempotency_record(session_id, idempotency_key)
             .await?
             .ok_or_else(|| {
-                TalosError::StorageError("idempotency reserve did not create a row".to_string())
+                TalosError::internal("idempotency reserve did not create a row".to_string())
             })?;
         if affected > 0 {
             Ok(IdempotencyReservation::Reserved(record))
@@ -223,8 +222,8 @@ impl MessageIdempotencyStore for DatabaseSessionStore {
         result: &MessageCommandResult,
         now_ms: i64,
     ) -> TalosResult<()> {
-        let result_json = serde_json::to_string(result)
-            .map_err(|err| TalosError::SerializationError(err.to_string()))?;
+        let result_json =
+            serde_json::to_string(result).map_err(|err| TalosError::internal(err.to_string()))?;
         let now = now_ms.to_string();
         let message_id = message_id.unwrap_or_default();
         self.storage

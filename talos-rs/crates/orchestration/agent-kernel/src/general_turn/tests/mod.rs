@@ -50,7 +50,7 @@ impl MemoryWriter for FailingMemoryWriter {
         _scope: &'a MemoryScope,
         _batch: MemoryWriteBatch,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
-        Box::pin(async { Err(TalosError::StorageError("memory write failed".to_string())) })
+        Box::pin(async { Err(TalosError::internal("memory write failed".to_string())) })
     }
 }
 

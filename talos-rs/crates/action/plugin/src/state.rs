@@ -85,21 +85,21 @@ impl PluginStateStore {
         action: impl FnOnce() -> TalosResult<T>,
     ) -> TalosResult<T> {
         talos_fs::create_directory(&self.root, true).map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to create plugin state root `{}`: {err}",
                 self.root.display()
             ))
         })?;
         let path = self.lock_path();
         let lock = talos_fs::std_fs().with_file_lock(&path).map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to lock plugin state for {operation} `{}`: {err}",
                 path.display()
             ))
         })?;
         let result = action();
         let unlock_result = lock.unlock().map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to unlock plugin state for {operation} `{}`: {err}",
                 path.display()
             ))
@@ -150,7 +150,7 @@ impl PluginStateStore {
     pub fn save_installs(&self, installs: &PluginInstallsFile) -> TalosResult<()> {
         #[cfg(test)]
         if self.fail_next_save_installs.swap(false, Ordering::SeqCst) {
-            return Err(TalosError::StorageError(
+            return Err(TalosError::internal(
                 "injected plugin installs save failure".to_string(),
             ));
         }
@@ -178,7 +178,7 @@ impl PluginStateStore {
             return Ok(());
         }
         talos_fs::std_fs().remove_directory(&path).map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to remove plugin source cache `{}`: {err}",
                 path.display()
             ))
@@ -191,7 +191,7 @@ fn remove_transaction_root(path: &Path, label: &str) -> TalosResult<()> {
         return Ok(());
     }
     talos_fs::std_fs().remove_directory(path).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to remove {label} dir `{}`: {err}",
             path.display()
         ))

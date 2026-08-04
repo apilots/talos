@@ -135,7 +135,7 @@ impl ToolPolicyChecker {
         if self.policy.is_allowed(tool_name) {
             Ok(())
         } else {
-            Err(talos_error::TalosError::AuthorizationDenied)
+            Err(talos_error::TalosError::authorization_denied())
         }
     }
 

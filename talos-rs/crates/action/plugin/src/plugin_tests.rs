@@ -3,7 +3,6 @@ use crate::{
     PluginManager, PluginStateStore,
 };
 use talos_config::{PluginSourceConfig, PluginSourceKind, PluginSourceType, PluginsRuntimeConfig};
-use talos_error::TalosError;
 use talos_types::{
     MarketplaceSourceInput, MarketplaceSourceType, PluginDefinition, PluginDocumentMediaType,
     PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallTarget,
@@ -110,7 +109,7 @@ fn corrupt_source_state_fails_fast() {
         .list_sources(talos_types::PluginSourceListRequest::default())
         .expect_err("corrupt source state should fail");
 
-    assert!(matches!(err, TalosError::SerializationError(_)));
+    assert!(err.is_internal());
 }
 
 #[test]
@@ -179,7 +178,7 @@ fn configured_sources_cannot_be_removed() {
         })
         .expect_err("configured source removal should fail");
 
-    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]
@@ -511,7 +510,7 @@ This document is intentionally longer than the test limit.
         })
         .expect_err("oversized skill document should be rejected");
 
-    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]
@@ -760,5 +759,5 @@ Escaped skill.
         })
         .expect_err("sparse path symlink escape should be rejected");
 
-    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
 }

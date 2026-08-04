@@ -91,9 +91,7 @@ impl SessionStore for RecordingSessionStore {
             })
             .is_ok()
         {
-            return Err(TalosError::StorageError(
-                "injected update failure".to_string(),
-            ));
+            return Err(TalosError::internal("injected update failure".to_string()));
         }
         let mut records = self.records.lock().unwrap();
         let Some(stored) = records.iter_mut().find(|stored| stored.id == record.id) else {
@@ -484,10 +482,10 @@ async fn ordinary_delete_rejects_a_subagent_session() {
         .unwrap();
     let child_id = &child.context.session_id;
 
-    assert!(matches!(
-        service.delete_session(child_id).await,
-        Err(TalosError::ValidationError(_))
-    ));
+    assert!(service
+        .delete_session(child_id)
+        .await
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
     assert!(
         service
             .delete_subagent_session(child_id)

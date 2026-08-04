@@ -149,16 +149,17 @@ async fn execute_single_tool_call(
 }
 
 fn tool_error_outcome(error: TalosError) -> ToolDispatchOutcome {
-    match error {
-        TalosError::ToolFailure {
-            kind,
-            message,
-            gate_source,
-        } => structured_tool_failure(kind, message, gate_source),
-        other => ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-            content: other.to_string(),
+    if let Some(diagnostic) = error.tool_failure_diagnostic() {
+        structured_tool_failure(
+            diagnostic.kind,
+            error.diagnostic_message().to_string(),
+            diagnostic.gate_source.clone(),
+        )
+    } else {
+        ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
+            content: error.to_string(),
             is_error: true,
-        }),
+        })
     }
 }
 
@@ -288,7 +289,7 @@ impl ToolExecutor for ParallelToolExecutor {
         let mut outputs = vec![None; calls.len()];
         while let Some(result) = join_set.join_next().await {
             let (index, output) = result.map_err(|error| {
-                TalosError::InternalError(format!("parallel tool execution task failed: {error}"))
+                TalosError::internal(format!("parallel tool execution task failed: {error}"))
             })?;
             outputs[index] = Some(output);
         }
@@ -297,9 +298,7 @@ impl ToolExecutor for ParallelToolExecutor {
             .enumerate()
             .map(|(index, output)| {
                 output.ok_or_else(|| {
-                    TalosError::InternalError(format!(
-                        "missing parallel tool output at index {index}"
-                    ))
+                    TalosError::internal(format!("missing parallel tool output at index {index}"))
                 })
             })
             .collect()
@@ -416,7 +415,7 @@ impl StreamingToolScheduler {
         let mut completed = Vec::new();
         while let Some(result) = self.running_tasks.try_join_next() {
             let (running_call, output) = result.map_err(|error| {
-                TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
+                TalosError::internal(format!("streaming tool execution task failed: {error}"))
             })?;
             self.mark_completed(&running_call);
             completed.push(StreamingToolExecutionOutput {
@@ -435,7 +434,7 @@ impl StreamingToolScheduler {
             return Ok(None);
         };
         let (running_call, output) = result.map_err(|error| {
-            TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
+            TalosError::internal(format!("streaming tool execution task failed: {error}"))
         })?;
         self.mark_completed(&running_call);
         self.schedule_ready_calls().await;

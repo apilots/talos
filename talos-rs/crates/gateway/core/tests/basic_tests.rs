@@ -8,7 +8,7 @@ use talos_config::{
     InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService, ProviderModelConfig,
 };
 use talos_coordinator::SessionRuntime;
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_service::{Actor, AgentDispatchTurnExecutor, FileService, MemoryService, TalosService};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
@@ -318,7 +318,9 @@ async fn gateway_patch_session_rejects_missing_session_id() {
         )
         .await;
 
-    assert!(matches!(result, Err(TalosError::ValidationError(_))));
+    assert!(result
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
 }
 
 #[tokio::test]

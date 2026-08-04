@@ -29,14 +29,14 @@ pub(crate) fn materialize_source(
                 talos_fs::std_fs()
                     .remove_directory(&repo_dir)
                     .map_err(|err| {
-                        TalosError::StorageError(format!(
+                        TalosError::internal(format!(
                             "failed to clear plugin source cache `{}`: {err}",
                             repo_dir.display()
                         ))
                     })?;
             }
             talos_fs::create_directory(&repo_dir, true).map_err(|err| {
-                TalosError::StorageError(format!(
+                TalosError::internal(format!(
                     "failed to create plugin source cache `{}`: {err}",
                     repo_dir.display()
                 ))
@@ -85,12 +85,15 @@ where
     if output.status.success() {
         return Ok(());
     }
-    Err(TalosError::ToolError(format!(
-        "git {} failed in `{}`: {}",
-        args.join(" "),
-        cwd.display(),
-        String::from_utf8_lossy(&output.stderr).trim()
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!(
+            "git {} failed in `{}`: {}",
+            args.join(" "),
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    ))
 }
 
 fn git_output<I, S>(args: I, cwd: &Path) -> TalosResult<String>
@@ -106,12 +109,15 @@ where
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
-    Err(TalosError::ToolError(format!(
-        "git {} failed in `{}`: {}",
-        args.join(" "),
-        cwd.display(),
-        String::from_utf8_lossy(&output.stderr).trim()
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!(
+            "git {} failed in `{}`: {}",
+            args.join(" "),
+            cwd.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ),
+    ))
 }
 
 fn run_git_command(args: &[String], cwd: &Path) -> TalosResult<Output> {
@@ -120,29 +126,35 @@ fn run_git_command(args: &[String], cwd: &Path) -> TalosResult<Output> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
-            TalosError::ToolError(format!("failed to run git in `{}`: {err}", cwd.display()))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("failed to run git in `{}`: {err}", cwd.display()),
+            )
         })?;
     match child.wait_timeout(GIT_COMMAND_TIMEOUT).map_err(|err| {
-        TalosError::ToolError(format!(
-            "failed to wait for git in `{}`: {err}",
-            cwd.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("failed to wait for git in `{}`: {err}", cwd.display()),
+        )
     })? {
         Some(_) => child.wait_with_output().map_err(|err| {
-            TalosError::ToolError(format!(
-                "failed to collect git output in `{}`: {err}",
-                cwd.display()
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("failed to collect git output in `{}`: {err}", cwd.display()),
+            )
         }),
         None => {
             let _ = child.kill();
             let _ = child.wait();
-            Err(TalosError::ToolError(format!(
-                "git {} timed out after {} seconds in `{}`",
-                args.join(" "),
-                GIT_COMMAND_TIMEOUT.as_secs(),
-                cwd.display()
-            )))
+            Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "git {} timed out after {} seconds in `{}`",
+                    args.join(" "),
+                    GIT_COMMAND_TIMEOUT.as_secs(),
+                    cwd.display()
+                ),
+            ))
         }
     }
 }

@@ -74,7 +74,7 @@ impl TalosPaths {
             &self.data_dir,
         ] {
             std::fs::create_dir_all(dir).map_err(|err| {
-                TalosError::StorageError(format!(
+                TalosError::internal(format!(
                     "create talos runtime dir {}: {}",
                     dir.display(),
                     err
@@ -89,7 +89,7 @@ impl TalosPaths {
 
         let workspace_dir = self.workspace_dir_for_agent(agent_name);
         std::fs::create_dir_all(&workspace_dir).map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "create agent workspace dir {}: {}",
                 workspace_dir.display(),
                 err
@@ -97,7 +97,7 @@ impl TalosPaths {
         })?;
         let dir = workspace_dir.join("users").join("anonymous");
         std::fs::create_dir_all(&dir).map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "create agent workspace dir {}: {}",
                 dir.display(),
                 err
@@ -111,7 +111,10 @@ pub fn set_talos_home(path: impl Into<PathBuf>) -> TalosResult<()> {
     use talos_error::TalosError;
 
     TALOS_HOME_OVERRIDE.set(path.into()).map_err(|_| {
-        TalosError::InvalidConfiguration("talos_home is already initialized".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "talos_home is already initialized".to_string(),
+        )
     })
 }
 

@@ -42,7 +42,7 @@ fn rejects_unsafe_user_id() {
     let error = resolve_effective_kernel_workspace(&test_kernel_config(), "../alice")
         .expect_err("unsafe user id should fail");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]
@@ -50,5 +50,5 @@ fn rejects_inconsistent_session_user() {
     let error = validate_session_workspace_user("user_1", "user_2")
         .expect_err("session user mismatch should fail");
 
-    assert!(matches!(error, TalosError::InternalError(_)));
+    assert!(error.is_internal());
 }

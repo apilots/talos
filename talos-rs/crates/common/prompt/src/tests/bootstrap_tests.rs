@@ -158,5 +158,5 @@ async fn test_prompt_builder_rejects_oversized_memory() {
         .await
         .expect_err("oversized memory should fail prompt build");
 
-    assert!(matches!(error, talos_error::TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }

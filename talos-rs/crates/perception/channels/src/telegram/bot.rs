@@ -153,7 +153,7 @@ impl Channel for TelegramChannel {
             .into_iter()
             .find(|account| account.id == ctx.account_id)
             .ok_or_else(|| {
-                TalosError::ConfigError(format!(
+                TalosError::internal(format!(
                     "Telegram account '{}' is not enabled or not configured",
                     ctx.account_id
                 ))

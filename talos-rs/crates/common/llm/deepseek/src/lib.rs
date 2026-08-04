@@ -149,9 +149,10 @@ impl DeepSeekProvider {
             DeepSeekProtocol::Messages => self.config.api_key.clone(),
         };
         let key = header::HeaderValue::from_str(&key).map_err(|error| {
-            TalosError::InvalidConfiguration(format!(
-                "DeepSeek API key cannot be encoded as an HTTP header: {error}"
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("DeepSeek API key cannot be encoded as an HTTP header: {error}"),
+            )
         })?;
         match self.config.protocol {
             DeepSeekProtocol::Chat => {
@@ -196,7 +197,7 @@ impl DeepSeekProvider {
             ),
         };
         let body = body.map_err(|error| {
-            TalosError::InternalError(format!("DeepSeek request serialization failed: {error}"))
+            TalosError::internal(format!("DeepSeek request serialization failed: {error}"))
         })?;
         Ok((endpoint, body))
     }
@@ -210,7 +211,7 @@ impl DeepSeekProvider {
             .send()
             .await
             .map_err(|error| {
-                TalosError::InternalError(format!("DeepSeek {endpoint} request failed: {error}"))
+                TalosError::internal(format!("DeepSeek {endpoint} request failed: {error}"))
             })?;
         let status = response.status();
         if status.is_success() {
@@ -220,7 +221,7 @@ impl DeepSeekProvider {
             .text()
             .await
             .unwrap_or_else(|_| "response body unavailable".to_string());
-        Err(TalosError::InternalError(format!(
+        Err(TalosError::internal(format!(
             "DeepSeek API error for {endpoint}: {status} - {message}"
         )))
     }
@@ -235,7 +236,7 @@ impl DeepSeekProvider {
                     .json::<chat_protocol::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::InternalError(format!(
+                        TalosError::internal(format!(
                             "DeepSeek Chat response parsing failed: {error}"
                         ))
                     })?;
@@ -246,7 +247,7 @@ impl DeepSeekProvider {
                     .json::<messages_protocol::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::InternalError(format!(
+                        TalosError::internal(format!(
                             "DeepSeek Messages response parsing failed: {error}"
                         ))
                     })?;

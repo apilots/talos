@@ -61,16 +61,19 @@ pub(crate) fn source_from_input(input: MarketplaceSourceInput) -> TalosResult<Ma
         MarketplaceSourceInput::LocalFolder { path, sparse_paths } => {
             validate_sparse_paths(&sparse_paths)?;
             let path = fs::canonicalize(&path).map_err(|err| {
-                TalosError::ValidationError(format!(
-                    "invalid local plugin source `{}`: {err}",
-                    path.display()
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("invalid local plugin source `{}`: {err}", path.display()),
+                )
             })?;
             if !path.is_dir() {
-                return Err(TalosError::ValidationError(format!(
-                    "local plugin source `{}` is not a directory",
-                    path.display()
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "local plugin source `{}` is not a directory",
+                        path.display()
+                    ),
+                ));
             }
             let path_key = path.display().to_string();
             Ok(MarketplaceSource {
@@ -137,9 +140,10 @@ fn validate_git_url(url: &str) -> TalosResult<()> {
     {
         return Ok(());
     }
-    Err(TalosError::ValidationError(format!(
-        "unsupported plugin source git URL `{url}`"
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::InvalidRequest,
+        format!("unsupported plugin source git URL `{url}`"),
+    ))
 }
 
 fn validate_reference(reference: &str) -> TalosResult<()> {
@@ -149,9 +153,10 @@ fn validate_reference(reference: &str) -> TalosResult<()> {
         || reference.contains('\\')
         || reference.chars().any(char::is_whitespace)
     {
-        return Err(TalosError::ValidationError(format!(
-            "invalid plugin source git ref `{reference}`"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid plugin source git ref `{reference}`"),
+        ));
     }
     Ok(())
 }
@@ -165,9 +170,10 @@ fn validate_sparse_paths(paths: &[String]) -> TalosResult<()> {
             || path.contains('\\')
             || path.split('/').any(|segment| segment.is_empty())
         {
-            return Err(TalosError::ValidationError(format!(
-                "invalid plugin source sparse path `{path}`"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid plugin source sparse path `{path}`"),
+            ));
         }
     }
     Ok(())

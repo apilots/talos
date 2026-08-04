@@ -1451,7 +1451,7 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
                 break;
             }
             AgentEventPayload::TurnError(payload) => {
-                panic!("resume stream failed: {}", payload.error);
+                panic!("resume stream failed: {:?}", payload.error);
             }
             _ => {}
         }
@@ -1791,7 +1791,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
         .expect("wrong-turn resume should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("turn-other"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InvalidRequest);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -1834,7 +1834,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         .expect("missing tool call should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("missing tool call metadata"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InvalidRequest);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -1950,7 +1950,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
         .expect("missing request should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("no pending request"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InvalidRequest);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }

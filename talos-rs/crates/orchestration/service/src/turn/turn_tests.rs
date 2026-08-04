@@ -155,7 +155,10 @@ impl TurnExecutor for RecordingTurnExecutor {
 #[tokio::test]
 async fn submit_start_turn_preserves_executor_error_semantics() {
     let turn_executor = Arc::new(RecordingTurnExecutor {
-        stream_error: Mutex::new(Some(TalosError::Conflict("agent busy".to_string()))),
+        stream_error: Mutex::new(Some(TalosError::public(
+            talos_error::ErrorCode::Conflict,
+            "agent busy".to_string(),
+        ))),
         ..Default::default()
     });
     let (service, _event_service, store) = test_service(turn_executor).await;
@@ -181,7 +184,7 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
         .await
         .expect_err("executor conflict should propagate");
 
-    assert!(matches!(error, TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
 }
 
 async fn test_service(
@@ -404,7 +407,7 @@ async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result(
         .await
         .expect_err("missing idempotency result should fail fast");
 
-    assert!(matches!(error, TalosError::IdempotencyError(_)));
+    assert!(error.is_internal());
     assert!(turn_executor.stream_request.lock().unwrap().is_none());
 }
 
@@ -542,7 +545,7 @@ async fn submit_dynamic_tool_result_requires_original_tool_item_id() {
         .await
         .expect_err("missing item id should fail before runtime dispatch");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(turn_executor.stream_request.lock().unwrap().is_none());
     assert!(turn_executor.dynamic_turn_id.lock().unwrap().is_none());
     let active = store.get_active_turn("s1").await.unwrap().unwrap();

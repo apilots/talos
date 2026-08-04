@@ -143,7 +143,7 @@ impl CloudLoginService {
             .map_err(map_cloud_error)?;
         self.pending
             .lock()
-            .map_err(|_| TalosError::InternalError("cloud login pending store poisoned".into()))?
+            .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
             .insert(
                 response.session_id.clone(),
                 PendingCloudLogin {
@@ -169,8 +169,9 @@ impl CloudLoginService {
             PendingLookup::Active(pending) => pending,
             PendingLookup::Expired => return Ok(CloudLoginStatusResponse::Expired),
             PendingLookup::Missing => {
-                return Err(TalosError::AuthError(
-                    "cloud login session not found".into(),
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Unauthenticated,
+                    "cloud login session not found",
                 ));
             }
         };
@@ -189,9 +190,7 @@ impl CloudLoginService {
             DeviceLoginPollResponseDto::Approved { auth } => {
                 self.pending
                     .lock()
-                    .map_err(|_| {
-                        TalosError::InternalError("cloud login pending store poisoned".into())
-                    })?
+                    .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
                     .remove(&request.login_id);
                 let auth_response = map_auth_response(auth);
                 let user = auth_response.user.clone();
@@ -204,7 +203,7 @@ impl CloudLoginService {
                     self.session_cache
                         .store_verified_session(&entry)
                         .map_err(|err| {
-                            TalosError::StorageError(format!("store cloud login session: {err}"))
+                            TalosError::internal(format!("store cloud login session: {err}"))
                         })?;
                 }
                 Ok(CloudLoginStatusResponse::Authenticated {
@@ -240,9 +239,14 @@ impl CloudLoginService {
     fn remove_pending(&self, login_id: &str) -> TalosResult<PendingCloudLogin> {
         self.pending
             .lock()
-            .map_err(|_| TalosError::InternalError("cloud login pending store poisoned".into()))?
+            .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?
             .remove(login_id)
-            .ok_or_else(|| TalosError::AuthError("cloud login session not found".into()))
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::Unauthenticated,
+                    "cloud login session not found",
+                )
+            })
     }
 
     fn lookup_pending(&self, login_id: &str) -> TalosResult<PendingLookup> {
@@ -250,7 +254,7 @@ impl CloudLoginService {
         let mut pending = self
             .pending
             .lock()
-            .map_err(|_| TalosError::InternalError("cloud login pending store poisoned".into()))?;
+            .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?;
         if let Some(login) = pending.get(login_id).cloned() {
             if login.expires_at_ms <= now_ms {
                 pending.remove(login_id);
@@ -268,7 +272,7 @@ impl CloudLoginService {
         let mut pending = self
             .pending
             .lock()
-            .map_err(|_| TalosError::InternalError("cloud login pending store poisoned".into()))?;
+            .map_err(|_| TalosError::internal("cloud login pending store poisoned"))?;
         cleanup_expired_pending_locked(&mut pending, now_ms);
         Ok(())
     }
@@ -320,8 +324,12 @@ fn map_client_kind(value: CloudLoginClientKind) -> DeviceClientKindDto {
 #[async_trait]
 impl UserService for CloudAuthService {
     async fn get_current_user(&self, actor: &RequestIdentity) -> TalosResult<UserDto> {
-        let token = bearer_from_actor(actor)
-            .ok_or_else(|| TalosError::AuthError("cloud access token is missing".to_string()))?;
+        let token = bearer_from_actor(actor).ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::Unauthenticated,
+                "cloud access token is missing".to_string(),
+            )
+        })?;
         self.with_token(&token)
             .me()
             .await
@@ -339,21 +347,31 @@ fn map_identity(
     raw_token: &str,
 ) -> TalosResult<RequestIdentity> {
     if !response.active {
-        return Err(TalosError::AuthError("cloud token is inactive".to_string()));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
+            "cloud token is inactive".to_string(),
+        ));
     }
-    let user = response
-        .user
-        .ok_or_else(|| TalosError::AuthError("cloud introspection missing user".to_string()))?;
+    let user = response.user.ok_or_else(|| {
+        TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
+            "cloud introspection missing user".to_string(),
+        )
+    })?;
     if user.status != UserStatusDto::Active {
-        return Err(TalosError::AuthError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
             "cloud user is not active".to_string(),
         ));
     }
     let entitlement = response.entitlement.ok_or_else(|| {
-        TalosError::AuthError("cloud introspection missing entitlement".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
+            "cloud introspection missing entitlement".to_string(),
+        )
     })?;
     if !entitlement.can_use {
-        return Err(TalosError::AuthorizationDenied);
+        return Err(TalosError::authorization_denied());
     }
     Ok(RequestIdentity {
         user_id: user.user_id,
@@ -410,7 +428,8 @@ fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
     if response.success {
         Ok(())
     } else {
-        Err(TalosError::AuthError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
             "cloud auth request did not complete".to_string(),
         ))
     }
@@ -418,9 +437,12 @@ fn expect_success(response: LogoutResponseDto) -> TalosResult<()> {
 
 fn map_cloud_error(error: CloudSdkError) -> TalosError {
     match error {
-        CloudSdkError::Transport(err) => TalosError::NetworkError(err.to_string()),
-        CloudSdkError::Api { code, message, .. } => {
-            TalosError::AuthError(format!("cloud auth request failed: {code}: {message}"))
+        CloudSdkError::Transport(err) => {
+            TalosError::public(talos_error::ErrorCode::ServiceUnavailable, err.to_string())
         }
+        CloudSdkError::Api { code, message, .. } => TalosError::public(
+            talos_error::ErrorCode::Unauthenticated,
+            format!("cloud auth request failed: {code}: {message}"),
+        ),
     }
 }

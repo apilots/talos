@@ -335,16 +335,16 @@ async fn load_sequence_state(
         return Ok(None);
     };
     let state = serde_json::from_str::<SequenceState>(&content).map_err(|error| {
-        TalosError::SerializationError(format!(
+        TalosError::internal(format!(
             "parse session sequence state {}: {error}",
             path.display()
         ))
     })?;
     if state.version != SEQUENCE_STATE_VERSION || state.next_turn_seq == 0 {
-        return Err(TalosError::ValidationError(format!(
-            "invalid session sequence state: {}",
-            path.display()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid session sequence state: {}", path.display()),
+        ));
     }
     Ok(Some(state))
 }
@@ -359,7 +359,7 @@ async fn save_sequence_state(
         next_turn_seq,
     };
     let content = serde_json::to_string(&state).map_err(|error| {
-        TalosError::SerializationError(format!("serialize session sequence state: {error}"))
+        TalosError::internal(format!("serialize session sequence state: {error}"))
     })?;
     talos_fs::write_file(&sequence_state_file(workspace_root, session_id), &content).await
 }
@@ -400,9 +400,8 @@ async fn append_artifact(
     timestamp: DateTime<Utc>,
     record: &SessionArtifactRecord,
 ) -> TalosResult<()> {
-    let line = serde_json::to_string(record).map_err(|error| {
-        TalosError::SerializationError(format!("serialize session artifact: {error}"))
-    })?;
+    let line = serde_json::to_string(record)
+        .map_err(|error| TalosError::internal(format!("serialize session artifact: {error}")))?;
     talos_fs::append_file(
         &day_file(workspace_root, session_id, timestamp),
         &format!("{line}\n"),
@@ -417,7 +416,7 @@ async fn load_artifacts(
     let mut records = Vec::new();
     for path in list_day_files(workspace_root, session_id).await? {
         let content = talos_fs::read_file(&path).await?.ok_or_else(|| {
-            TalosError::StorageError(format!("session artifact file missing: {}", path.display()))
+            TalosError::internal(format!("session artifact file missing: {}", path.display()))
         })?;
         for (line_index, line) in content.lines().enumerate() {
             if line.trim().is_empty() {
@@ -451,17 +450,20 @@ fn parse_artifact_record(
     session_id: &str,
 ) -> TalosResult<SessionArtifactRecord> {
     let record: SessionArtifactRecord = serde_json::from_str(line).map_err(|error| {
-        TalosError::SerializationError(format!(
+        TalosError::internal(format!(
             "parse session artifact {} at {location}: {error}",
             path.display(),
         ))
     })?;
     if record.session_id() != session_id {
-        return Err(TalosError::ValidationError(format!(
-            "session artifact {} at {location} belongs to session {}, expected {session_id}",
-            path.display(),
-            record.session_id()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "session artifact {} at {location} belongs to session {}, expected {session_id}",
+                path.display(),
+                record.session_id()
+            ),
+        ));
     }
     Ok(record)
 }
@@ -494,7 +496,8 @@ impl SessionArtifactStore for FileSessionArtifactStore {
             || turn.message_id.trim().is_empty()
             || turn.session_id.trim().is_empty()
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "turn_id, message_id, and session_id are required".to_string(),
             ));
         }
@@ -564,7 +567,8 @@ impl SessionArtifactStore for FileSessionArtifactStore {
             || record.header.session_id.trim().is_empty()
             || record.header.invocation_id.trim().is_empty()
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "transcript id, session_id, and invocation_id are required".to_string(),
             ));
         }
@@ -605,7 +609,8 @@ impl SessionArtifactStore for FileSessionArtifactStore {
 
     async fn save_summary(&self, workspace_root: &Path, record: &SummaryRecord) -> TalosResult<()> {
         if record.header.session_id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "summary session_id is required".to_string(),
             ));
         }

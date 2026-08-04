@@ -13,7 +13,10 @@ impl AuthService for FakeAuthService {
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
-            return Err(TalosError::AuthError("invalid token".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Unauthenticated,
+                "invalid token".to_string(),
+            ));
         }
         Ok(RequestIdentity {
             user_id: "user-1".to_string(),

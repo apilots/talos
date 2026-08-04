@@ -31,7 +31,10 @@ impl BraveSearchProvider {
             .timeout(Duration::from_millis(config.timeout_ms.max(1)))
             .build()
             .map_err(|err| {
-                TalosError::InvalidConfiguration(format!("build Brave search client: {err}"))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("build Brave search client: {err}"),
+                )
             })?;
         Ok(Self {
             api_key,
@@ -58,12 +61,27 @@ impl SearchProvider for BraveSearchProvider {
             .query(&query)
             .send()
             .await
-            .map_err(|err| TalosError::ToolError(format!("Brave search failed: {err}")))?
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("Brave search failed: {err}"),
+                )
+            })?
             .error_for_status()
-            .map_err(|err| TalosError::ToolError(format!("Brave search failed: {err}")))?
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("Brave search failed: {err}"),
+                )
+            })?
             .json()
             .await
-            .map_err(|err| TalosError::ToolError(format!("parse Brave search response: {err}")))?;
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("parse Brave search response: {err}"),
+                )
+            })?;
 
         Ok(response
             .web

@@ -15,7 +15,7 @@ use talos_types::{
 
 use std::sync::Arc;
 use std::time::Duration;
-use talos_error::TalosResult;
+use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 
 /// Abstraction for draining application-owned background tasks during shutdown.
 #[async_trait::async_trait]
@@ -35,19 +35,20 @@ where
     }
 }
 
+pub type ApplicationResult<T> = Result<T, ApiError>;
 pub type ProtocolResult<T> = Result<T, AppServerErrorBody>;
 
 #[async_trait]
 pub trait AppServerApplication: Send + Sync {
-    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ProtocolResult<Value>;
+    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ApplicationResult<Value>;
 
     async fn subscribe_timeline_events(
         &self,
         actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ProtocolResult<SubscriptionSource>;
+    ) -> ApplicationResult<SubscriptionSource>;
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()>;
+    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()>;
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
@@ -97,16 +98,14 @@ impl TalosApplicationAdapter {
 
 #[async_trait]
 impl AppServerApplication for TalosApplicationAdapter {
-    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ProtocolResult<Value> {
+    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ApplicationResult<Value> {
         match request.params {
-            ClientRequestParams::Initialize(_) => Err(AppServerErrorBody::invalid_request(
-                "initialize is handled by the app-server runtime",
-            )),
+            ClientRequestParams::Initialize(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::ProfileRead(params) => to_value(
                 self.gateway
                     .read_profile(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SessionList(params) => {
                 to_value(self.list_sessions(actor, params).await?)
@@ -115,7 +114,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 self.gateway
                     .get_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SessionPatch(params) => {
                 to_value(self.patch_session(actor, params).await?)
@@ -125,7 +124,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .gateway
                     .delete_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::SessionClose(params) => {
@@ -133,34 +132,34 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .gateway
                     .close_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::SessionCompact(params) => to_value(
                 self.gateway
                     .compact_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SessionClear(params) => to_value(
                 self.gateway
                     .clear_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SessionActiveTurn(params) => {
                 let snapshot = self
                     .gateway
                     .get_active_turn(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
             ClientRequestParams::SessionHistory(params) => to_value(
                 self.gateway
                     .get_session_history(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::TimelineRecover(params) => {
                 let snapshot = self
@@ -176,54 +175,54 @@ impl AppServerApplication for TalosApplicationAdapter {
                         },
                     )
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(snapshot)
             }
             ClientRequestParams::ProjectCreate(params) => to_value(
                 self.gateway
                     .create_project(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ProjectList(_) => {
                 let response = self
                     .gateway
                     .list_projects(actor, talos_types::ProjectListRequest::default())
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::ProjectRead(params) => to_value(
                 self.gateway
                     .get_project(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ProjectPatch(params) => to_value(
                 self.gateway
                     .patch_project(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ProjectDelete(params) => {
                 let response = self
                     .gateway
                     .delete_project(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::FsDirectoryRead(params) => to_value(
                 self.gateway
                     .read_fs_directory(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FsDirectoryCreate(params) => to_value(
                 self.gateway
                     .create_fs_directory(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::TurnStart(params) => {
                 to_value(self.start_turn(actor, params).await?)
@@ -232,7 +231,7 @@ impl AppServerApplication for TalosApplicationAdapter {
                 self.gateway
                     .interrupt_turn(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::TurnRetry(params) => {
                 let request: SharedRetryTurnRequest = params;
@@ -240,34 +239,32 @@ impl AppServerApplication for TalosApplicationAdapter {
                     self.gateway
                         .retry_turn(actor, request)
                         .await
-                        .map_err(AppServerErrorBody::from_talos_error)?,
+                        .map_err(talos_error_to_api_error)?,
                 )
             }
-            ClientRequestParams::EventSubscribe(_) => Err(AppServerErrorBody::invalid_request(
-                "event.subscribe is handled by the app-server runtime",
-            )),
-            ClientRequestParams::EventUnsubscribe(_) => Err(AppServerErrorBody::invalid_request(
-                "event.unsubscribe is handled by the app-server runtime",
-            )),
+            ClientRequestParams::EventSubscribe(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
+            ClientRequestParams::EventUnsubscribe(_) => {
+                Err(ApiError::new(ErrorCode::InvalidRequest))
+            }
             ClientRequestParams::ToolDynamicResultSubmit(params) => to_value(
                 self.gateway
                     .submit_dynamic_tool_result(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ModelList(_) => {
                 let models = self
                     .gateway
                     .list_models(actor, talos_types::ModelListRequest::default())
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(models)
             }
             ClientRequestParams::ConfigGet(params) => to_value(
                 self.gateway
                     .get_config(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileUpload(params) => {
                 let FileUploadParams {
@@ -283,254 +280,254 @@ impl AppServerApplication for TalosApplicationAdapter {
                     self.gateway
                         .upload_file(actor, request, body)
                         .await
-                        .map_err(AppServerErrorBody::from_talos_error)?,
+                        .map_err(talos_error_to_api_error)?,
                 )
             }
             ClientRequestParams::FileList(params) => to_value(
                 self.gateway
                     .list_files(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileRead(params) => to_value(
                 self.gateway
                     .read_file(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileUpdate(params) => to_value(
                 self.gateway
                     .update_file(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::FileDelete(params) => to_value(
                 self.gateway
                     .delete_file(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::MemoryFileList(params) => to_value(
                 self.gateway
                     .list_memory_files(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::MemoryFileRead(params) => to_value(
                 self.gateway
                     .read_memory_file(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::MemoryFileWrite(params) => to_value(
                 self.gateway
                     .write_memory_file(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::WorkspaceDocList(params) => to_value(
                 self.gateway
                     .list_workspace_docs(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::WorkspaceDocRead(params) => to_value(
                 self.gateway
                     .read_workspace_doc(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::WorkspaceDocWrite(params) => to_value(
                 self.gateway
                     .write_workspace_doc(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::WorkspaceInfo(params) => to_value(
                 self.gateway
                     .workspace_info(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ConfigUpdate(params) => to_value(
                 self.gateway
                     .update_config(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ConfigDelete(params) => to_value(
                 self.gateway
                     .delete_config(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::ConfigReload(params) => to_value(
                 self.gateway
                     .reload_config(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SkillsList(params) => to_value(
                 self.gateway
                     .list_skills(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SkillsRefresh(params) => to_value(
                 self.gateway
                     .refresh_skills(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SkillsSuggest(params) => to_value(
                 self.gateway
                     .suggest_skills(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SkillsRead(params) => to_value(
                 self.gateway
                     .read_skill(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::SkillsResolve(params) => to_value(
                 self.gateway
                     .resolve_skills(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginSourceList(params) => to_value(
                 self.gateway
                     .list_plugin_sources(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginSourceAdd(params) => to_value(
                 self.gateway
                     .add_plugin_source(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginSourceRefresh(params) => to_value(
                 self.gateway
                     .refresh_plugin_source(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginSourceRemove(params) => to_value(
                 self.gateway
                     .remove_plugin_source(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginSearch(params) => to_value(
                 self.gateway
                     .search_plugins(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginList(params) => to_value(
                 self.gateway
                     .list_plugins(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginRead(params) => to_value(
                 self.gateway
                     .read_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginInstall(params) => to_value(
                 self.gateway
                     .install_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginUpdate(params) => to_value(
                 self.gateway
                     .update_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginUninstall(params) => to_value(
                 self.gateway
                     .uninstall_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginEnable(params) => to_value(
                 self.gateway
                     .enable_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::PluginDisable(params) => to_value(
                 self.gateway
                     .disable_plugin(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::AuthLogout(params) => {
                 let response = self
                     .gateway
                     .logout(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::AuthLoginStart(params) => to_value(
                 self.gateway
                     .start_cloud_login(actor, params, talos_auth::CloudLoginPersistence::LocalCache)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::AuthLoginStatus(params) => to_value(
                 self.gateway
                     .cloud_login_status(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::AuthLoginCancel(params) => {
                 let response = self
                     .gateway
                     .cancel_cloud_login(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::AuthSessionRead(params) => to_value(
                 self.gateway
                     .read_auth_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::AuthSessionClear(params) => {
                 let response = self
                     .gateway
                     .clear_auth_session(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?;
+                    .map_err(talos_error_to_api_error)?;
                 to_value(response)
             }
             ClientRequestParams::UserCurrent(params) => to_value(
                 self.gateway
                     .current_user(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::MemorySearch(params) => to_value(
                 self.gateway
                     .search_memory(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
             ClientRequestParams::MemoryGet(params) => to_value(
                 self.gateway
                     .get_memory(actor, params)
                     .await
-                    .map_err(AppServerErrorBody::from_talos_error)?,
+                    .map_err(talos_error_to_api_error)?,
             ),
         }
     }
@@ -539,15 +536,15 @@ impl AppServerApplication for TalosApplicationAdapter {
         &self,
         actor: &Actor,
         mut request: SubscribeTimelineRequest,
-    ) -> ProtocolResult<SubscriptionSource> {
+    ) -> ApplicationResult<SubscriptionSource> {
         request.replay_limit = Some(request.replay_limit.unwrap_or(self.replay_limit).max(1));
         self.app
             .timeline_subscription_source(actor, request)
             .await
-            .map_err(AppServerErrorBody::from_talos_error)
+            .map_err(talos_error_to_api_error)
     }
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()> {
+    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()> {
         self.gateway
             .interrupt_turn(
                 actor,
@@ -557,7 +554,7 @@ impl AppServerApplication for TalosApplicationAdapter {
             )
             .await
             .map(|_| ())
-            .map_err(AppServerErrorBody::from_talos_error)
+            .map_err(talos_error_to_api_error)
     }
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()> {
@@ -574,64 +571,74 @@ impl TalosApplicationAdapter {
         &self,
         actor: &Actor,
         request: talos_types::SessionListRequest,
-    ) -> ProtocolResult<talos_types::SessionListResponse> {
+    ) -> ApplicationResult<talos_types::SessionListResponse> {
         self.gateway
             .list_sessions(actor, request)
             .await
-            .map_err(AppServerErrorBody::from_talos_error)
+            .map_err(talos_error_to_api_error)
     }
 
     async fn patch_session(
         &self,
         actor: &Actor,
         request: talos_types::SessionPatchRequest,
-    ) -> ProtocolResult<talos_types::SessionUpdateResponse> {
+    ) -> ApplicationResult<talos_types::SessionUpdateResponse> {
         self.gateway
             .patch_session(actor, request)
             .await
-            .map_err(AppServerErrorBody::from_talos_error)
+            .map_err(talos_error_to_api_error)
     }
 
     async fn start_turn(
         &self,
         actor: &Actor,
         request: StartTurnRequest,
-    ) -> ProtocolResult<StartTurnResponse> {
+    ) -> ApplicationResult<StartTurnResponse> {
         let client_request_id = request.client_request_id.clone();
         self.gateway
             .start_turn(actor, request, client_request_id)
             .await
-            .map_err(AppServerErrorBody::from_talos_error)
+            .map_err(talos_error_to_api_error)
     }
 }
 
-fn to_value<T: Serialize>(value: T) -> ProtocolResult<Value> {
-    serde_json::to_value(value)
-        .map_err(|error| AppServerErrorBody::invalid_request(error.to_string()))
+fn to_value<T: Serialize>(value: T) -> ApplicationResult<Value> {
+    serde_json::to_value(value).map_err(|error| {
+        tracing::error!(error = %error, "failed to serialize app-server application response");
+        ApiError::new(ErrorCode::InternalError)
+    })
 }
 
-fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> ProtocolResult<Bytes> {
+fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> ApplicationResult<Bytes> {
     let max_encoded_len = max_upload_bytes
         .saturating_add(2)
         .saturating_div(3)
         .saturating_mul(4);
-    let encoded_len = u64::try_from(data_base64.len())
-        .map_err(|_| AppServerErrorBody::invalid_params("file upload Base64 is too large"))?;
+    let encoded_len =
+        u64::try_from(data_base64.len()).map_err(|_| ApiError::new(ErrorCode::UploadTooLarge))?;
     if encoded_len > max_encoded_len {
-        return Err(AppServerErrorBody::invalid_params(
-            "file upload Base64 exceeds the encoded size limit",
-        ));
+        return Err(ApiError::new(ErrorCode::UploadTooLarge));
     }
 
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(data_base64)
-        .map_err(|_| AppServerErrorBody::invalid_params("file upload Base64 is invalid"))?;
+        .map_err(|_| ApiError::new(ErrorCode::InvalidRequest))?;
     if decoded.len() as u64 > max_upload_bytes {
-        return Err(AppServerErrorBody::invalid_params(
-            "decoded file upload exceeds the size limit",
-        ));
+        return Err(ApiError::new(ErrorCode::UploadTooLarge));
     }
     Ok(Bytes::from(decoded))
+}
+
+fn talos_error_to_api_error(error: TalosError) -> ApiError {
+    if error.is_internal() {
+        tracing::error!(
+            context = error.diagnostic_message(),
+            source = ?std::error::Error::source(&error),
+            location = %error.location(),
+            "internal JSON-RPC application error"
+        );
+    }
+    error.to_api_error()
 }
 
 #[cfg(test)]

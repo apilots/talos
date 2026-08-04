@@ -69,14 +69,14 @@ pub(super) fn accumulate_usage(left: TokenUsage, right: &TokenUsage) -> TalosRes
     let input_tokens = left
         .input_tokens
         .checked_add(right.input_tokens)
-        .ok_or_else(|| TalosError::StorageError("profile input token overflow".to_string()))?;
+        .ok_or_else(|| TalosError::internal("profile input token overflow".to_string()))?;
     let output_tokens = left
         .output_tokens
         .checked_add(right.output_tokens)
-        .ok_or_else(|| TalosError::StorageError("profile output token overflow".to_string()))?;
+        .ok_or_else(|| TalosError::internal("profile output token overflow".to_string()))?;
     let total_tokens = input_tokens
         .checked_add(output_tokens)
-        .ok_or_else(|| TalosError::StorageError("profile total token overflow".to_string()))?;
+        .ok_or_else(|| TalosError::internal("profile total token overflow".to_string()))?;
     Ok(TokenUsage {
         input_tokens,
         output_tokens,
@@ -93,7 +93,7 @@ pub(super) fn accumulate_usage(left: TokenUsage, right: &TokenUsage) -> TalosRes
 }
 
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
-    move |error| TalosError::StorageError(format!("{action}: {error}"))
+    move |error| TalosError::internal(format!("{action}: {error}"))
 }
 
 fn accumulate_optional(left: Option<u32>, right: Option<u32>) -> TalosResult<Option<u32>> {
@@ -101,15 +101,14 @@ fn accumulate_optional(left: Option<u32>, right: Option<u32>) -> TalosResult<Opt
         (Some(left), Some(right)) => left
             .checked_add(right)
             .map(Some)
-            .ok_or_else(|| TalosError::StorageError("profile cache token overflow".to_string())),
+            .ok_or_else(|| TalosError::internal("profile cache token overflow".to_string())),
         _ => Ok(None),
     }
 }
 
 fn token_value(value: i64, name: &str) -> TalosResult<u32> {
-    u32::try_from(value).map_err(|_| {
-        TalosError::StorageError(format!("profile {name} is outside the supported range"))
-    })
+    u32::try_from(value)
+        .map_err(|_| TalosError::internal(format!("profile {name} is outside the supported range")))
 }
 
 fn optional_token_value(value: Option<i64>, name: &str) -> TalosResult<Option<u32>> {

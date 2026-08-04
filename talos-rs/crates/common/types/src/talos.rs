@@ -10,7 +10,7 @@ pub use crate::event_api::{
     ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger,
 };
-pub use talos_error::{TalosRunErrorCode, TalosRunErrorInfo};
+pub use talos_error::ApiError;
 
 /// Talos gateway protocol types shared by server and client components.
 
@@ -860,10 +860,7 @@ pub struct TalosTurnCompletedEvent {
 pub struct TalosTurnErrorEvent {
     pub request_id: String,
     pub turn_id: String,
-    pub error: String,
-    #[serde(default)]
-    #[ts(type = "TalosRunErrorInfo | null")]
-    pub error_info: Option<TalosRunErrorInfo>,
+    pub error: ApiError,
     #[ts(type = "number")]
     pub failed_at_ms: u64,
 }

@@ -64,7 +64,7 @@ impl TimelineEventStream {
         self.receiver
             .recv()
             .await
-            .ok_or_else(|| TalosError::ClientError("timeline event stream closed".to_string()))
+            .ok_or_else(|| TalosError::internal("timeline event stream closed".to_string()))
     }
 
     pub fn into_inner(self) -> mpsc::Receiver<TimelineEventEnvelope> {
@@ -397,5 +397,5 @@ pub trait GatewayClient: Send {
 }
 
 fn file_client_unavailable() -> TalosError {
-    TalosError::ClientError("file API is not implemented by this gateway client".to_string())
+    TalosError::internal("file API is not implemented by this gateway client".to_string())
 }

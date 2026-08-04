@@ -121,12 +121,13 @@ async fn test_models() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["models"][0]["id"], "qwen-plus");
-    assert_eq!(payload["models"][0]["provider"], "bailian");
-    assert_eq!(payload["models"][0]["context_window"], 32_768);
-    assert_eq!(payload["models"][0]["reasoning"], true);
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["models"][0]["id"], "qwen-plus");
+    assert_eq!(payload["data"]["models"][0]["provider"], "bailian");
+    assert_eq!(payload["data"]["models"][0]["context_window"], 32_768);
+    assert_eq!(payload["data"]["models"][0]["reasoning"], true);
     assert_eq!(
-        payload["defaultModelSelection"],
+        payload["data"]["defaultModelSelection"],
         serde_json::json!({
             "modelRef": {"provider": "bailian", "id": "qwen-plus"},
             "reasoningEffort": "medium"
@@ -142,10 +143,11 @@ async fn test_profile_handler_returns_shared_profile_response() {
         .await
         .expect("profile read should succeed");
 
-    assert_eq!(response.0.session_count, 0);
-    assert_eq!(response.0.message_count, 0);
-    assert_eq!(response.0.project_count, 0);
-    assert!(!response.0.usage_available);
+    let data = expect_success(response.0);
+    assert_eq!(data.session_count, 0);
+    assert_eq!(data.message_count, 0);
+    assert_eq!(data.project_count, 0);
+    assert!(!data.usage_available);
 }
 
 #[tokio::test]
@@ -160,7 +162,8 @@ async fn test_list_sessions_handler_returns_data_array() {
     .await
     .expect("list sessions should succeed");
 
-    assert!(response.0["sessions"].is_array());
+    let data = expect_success(response.0);
+    assert!(data.sessions.is_empty());
 }
 
 #[tokio::test]
@@ -204,7 +207,8 @@ async fn test_patch_session_handler_returns_success_ack() {
     .await
     .expect("patch session should succeed");
 
-    assert_eq!(response.0["session"]["id"], "mock-session");
+    let data = expect_success(response.0);
+    assert_eq!(data.session.id, "mock-session");
 }
 
 #[tokio::test]
@@ -219,7 +223,8 @@ async fn test_close_session_handler_returns_success() {
     .await
     .expect("close session should succeed");
 
-    assert!(response.0.success);
+    let data = expect_success(response.0);
+    assert!(data.success);
 }
 
 #[tokio::test]
@@ -234,7 +239,8 @@ async fn test_delete_session_handler_returns_success() {
     .await
     .expect("delete session should succeed");
 
-    assert_eq!(response.0["success"], serde_json::Value::Bool(true));
+    let data = expect_success(response.0);
+    assert!(data.success);
 }
 
 #[tokio::test]
@@ -249,8 +255,9 @@ async fn test_compact_session_handler_returns_session_payload() {
     .await
     .expect("compact session should succeed");
 
-    assert_eq!(response.0["session"]["id"], "mock-session");
-    assert_eq!(response.0["session"]["message_count"], 1);
+    let data = expect_success(response.0);
+    assert_eq!(data.session.id, "mock-session");
+    assert_eq!(data.session.message_count, 1);
 }
 
 #[tokio::test]
@@ -293,9 +300,10 @@ async fn test_clear_session_handler_returns_reset_session_payload() {
     .await
     .expect("clear session should succeed");
 
-    assert_eq!(response.0["session"]["id"], "mock-session");
-    assert_eq!(response.0["session"]["message_count"], 0);
-    assert_eq!(response.0["session"]["usage"]["total_tokens"], 0);
+    let data = expect_success(response.0);
+    assert_eq!(data.session.id, "mock-session");
+    assert_eq!(data.session.message_count, 0);
+    assert_eq!(data.session.usage.total_tokens, 0);
 }
 
 #[tokio::test]
@@ -311,9 +319,10 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
     .await
     .expect("get workspace doc should succeed");
 
-    assert_eq!(response.0["doc"]["kind"], "soul");
-    assert_eq!(response.0["doc"]["exists"], serde_json::Value::Bool(false));
-    assert_eq!(response.0["doc"]["content"], "");
+    let data = expect_success(response.0);
+    assert_eq!(data.doc.kind, talos_types::WorkspaceDocKind::Soul);
+    assert!(!data.doc.exists);
+    assert_eq!(data.doc.content, "");
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
@@ -326,13 +335,14 @@ async fn test_get_workspace_info_handler_returns_effective_paths() {
         .await
         .expect("get workspace info should succeed");
 
+    let data = expect_success(response.0);
     assert_eq!(
-        response.0["base_workspace_dir"],
+        data.base_workspace_dir,
         workspace_dir.to_string_lossy().to_string()
     );
-    assert_eq!(response.0["user_id"], "static-token");
+    assert_eq!(data.user_id, "static-token");
     assert_eq!(
-        response.0["user_workspace_dir"],
+        data.user_workspace_dir,
         workspace_dir
             .join("users")
             .join("static-token")
@@ -361,7 +371,8 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("put memory file should succeed");
 
-    assert_eq!(put_response.0["file"]["date"], "2026-04-04");
+    let put_data = expect_success(put_response.0);
+    assert_eq!(put_data.file.date, "2026-04-04");
 
     let get_response = get_memory_file_handler(
         State(state.clone()),
@@ -371,10 +382,8 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("get memory file should succeed");
 
-    assert!(get_response.0["file"]["content"]
-        .as_str()
-        .unwrap()
-        .contains("stable fact"));
+    let get_data = expect_success(get_response.0);
+    assert!(get_data.file.content.contains("stable fact"));
 
     let list_response = list_memory_files_handler(
         State(state),
@@ -384,7 +393,8 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
     .await
     .expect("list memory files should succeed");
 
-    assert_eq!(list_response.0["data"][0]["date"], "2026-04-04");
+    let list_data = expect_success(list_response.0);
+    assert_eq!(list_data.data[0].date, "2026-04-04");
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 
@@ -417,7 +427,8 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
     )
     .await
     .expect("HTTP memory write should succeed");
-    assert_eq!(put_response.0["file"]["date"], "2026-04-04");
+    let put_data = expect_success(put_response.0);
+    assert_eq!(put_data.file.date, "2026-04-04");
 
     let app_server_memory = adapter
         .dispatch(
@@ -538,8 +549,9 @@ Use this skill for protocol contract verification.
     )
     .await
     .expect("HTTP plugin source add should succeed");
-    assert_eq!(added.0.plugins[0].metadata.name, "contract-skill");
-    assert!(added.0.warnings.is_empty());
+    let added = expect_success(added.0);
+    assert_eq!(added.plugins[0].metadata.name, "contract-skill");
+    assert!(added.warnings.is_empty());
 
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
     let actor = talos_service::Actor::regular("static-token");
@@ -550,7 +562,7 @@ Use this skill for protocol contract verification.
                 method: ClientMethod::PluginSearch,
                 params: ClientRequestParams::PluginSearch(PluginSearchRequest {
                     query: Some("contract".to_string()),
-                    source_id: Some(added.0.source.id),
+                    source_id: Some(added.source.id),
                     kind: Some(PluginKind::Skill),
                     status: Some(PluginSearchStatusFilter::Any),
                     refresh: PluginSearchRefreshPolicy::CacheOnly,
@@ -602,11 +614,9 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     .await
     .expect("search memory should succeed");
 
-    assert_eq!(response.0["data"][0]["source"]["date"], "2026-04-04");
-    let memory_id = response.0["data"][0]["memoryId"]
-        .as_str()
-        .expect("search result should include memoryId")
-        .to_string();
+    let search_data = expect_success(response.0);
+    assert_eq!(search_data.data[0].source.date, "2026-04-04");
+    let memory_id = search_data.data[0].memory_id.clone();
     let detail = get_memory_handler(
         State(state),
         axum::extract::Extension(test_auth()),
@@ -614,10 +624,9 @@ async fn test_search_memory_files_handler_returns_matching_data() {
     )
     .await
     .expect("get memory should succeed");
-    assert_eq!(detail.0["memory"]["memoryId"], memory_id);
-    assert!(detail.0["memory"]["body"]
-        .as_str()
-        .is_some_and(|body| body.contains("stable fact")));
+    let detail = expect_success(detail.0);
+    assert_eq!(detail.memory.memory_id, memory_id);
+    assert!(detail.memory.body.contains("stable fact"));
     let _ = std::fs::remove_dir_all(workspace_dir);
 }
 

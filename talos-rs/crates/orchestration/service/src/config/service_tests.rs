@@ -2,7 +2,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
-use talos_error::TalosError;
 use talos_types::{resolve_model_catalog, ModelRef, ModelSelection, ReasoningEffort};
 
 use super::ConfigService;
@@ -42,7 +41,7 @@ fn validate_model_selection_supported_rejects_unknown_provider() {
         }))
         .expect_err("unknown provider should be rejected");
 
-    assert!(matches!(error, TalosError::UnsupportedModel(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ProviderUnavailable));
 }
 
 #[test]
@@ -60,7 +59,7 @@ fn validate_model_selection_supported_rejects_effort_for_unsupported_model() {
         .validate_model_selection_supported(&selection)
         .expect_err("unsupported reasoning effort should be rejected");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]
@@ -107,7 +106,7 @@ async fn list_models_rejects_default_missing_from_provider_catalog() {
         .await
         .expect_err("unconfigured default model should be rejected");
 
-    assert!(matches!(error, TalosError::UnsupportedModel(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ProviderUnavailable));
 }
 
 #[test]
@@ -121,7 +120,7 @@ fn validate_model_selection_uses_exact_provider_identity() {
         }))
         .expect_err("provider identity should be case-sensitive");
 
-    assert!(matches!(error, TalosError::UnsupportedModel(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ProviderUnavailable));
 }
 
 #[test]

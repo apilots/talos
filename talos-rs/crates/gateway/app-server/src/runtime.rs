@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED, UNAUTHORIZED};
+use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED};
 use talos_app_protocol::events::{
     canonical_method, SubscriptionTerminatedEnvelope, SubscriptionTerminatedReason,
     TimelineSubscriptionNotification,
@@ -15,10 +15,11 @@ use talos_app_protocol::requests::{
     ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
+use talos_error::{ApiError, ErrorCode};
 use talos_service::{
     Actor, TimelineSubscription, TimelineSubscriptionCloseReason, TimelineSubscriptionMessage,
 };
-use talos_types::EventUnsubscribeResponse;
+use talos_types::{ApiResponse, EventUnsubscribeResponse};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc;
 
@@ -368,7 +369,7 @@ async fn handle_request(
             .await
             {
                 Ok(actor) => actor,
-                Err(error) => return send_error(outgoing_tx, id, error).await,
+                Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
             match app.subscribe_timeline_events(&actor, params).await {
                 Ok(source) => {
@@ -390,7 +391,7 @@ async fn handle_request(
                     state.subscription_tasks.insert(subscription_id, task);
                     Ok(())
                 }
-                Err(error) => send_error(outgoing_tx, id, error).await,
+                Err(error) => send_application_error(outgoing_tx, id, error).await,
             }
         }
         ClientRequestParams::EventUnsubscribe(params) => {
@@ -406,7 +407,7 @@ async fn handle_request(
             )
             .await
             {
-                return send_error(outgoing_tx, id, error).await;
+                return send_application_error(outgoing_tx, id, error).await;
             }
             let unsubscribed =
                 if let Some(task) = state.subscription_tasks.remove(&params.subscription_id) {
@@ -438,7 +439,7 @@ async fn handle_request(
             .await
             {
                 Ok(actor) => actor,
-                Err(error) => return send_error(outgoing_tx, id, error).await,
+                Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
             let request = ClientRequest {
                 method: decoded.method,
@@ -457,7 +458,7 @@ async fn handle_request(
                     }
                     send_result(outgoing_tx, id, Ok(result)).await
                 }
-                Err(error) => send_error(outgoing_tx, id, error).await,
+                Err(error) => send_application_error(outgoing_tx, id, error).await,
             }
         }
     }
@@ -469,7 +470,7 @@ async fn resolve_request_actor(
     config: &AppServerConfig,
     method: ClientMethod,
     request_actor_credentials: Option<ActorCredentials>,
-) -> Result<Actor, AppServerErrorBody> {
+) -> Result<Actor, ApiError> {
     if !config.auth_enabled {
         return Ok(Actor::regular("anonymous"));
     }
@@ -486,15 +487,11 @@ async fn resolve_request_actor(
         return state
             .actor
             .clone()
-            .ok_or_else(AppServerErrorBody::not_initialized);
+            .ok_or_else(|| ApiError::new(ErrorCode::Unauthenticated));
     }
 
-    let credentials = request_actor_credentials.ok_or_else(|| {
-        AppServerErrorBody::new(
-            UNAUTHORIZED,
-            "authenticated JSON-RPC request requires actor credentials",
-        )
-    })?;
+    let credentials =
+        request_actor_credentials.ok_or_else(|| ApiError::new(ErrorCode::Unauthenticated))?;
     validator.validate(&credentials).await
 }
 
@@ -606,11 +603,38 @@ async fn send_result(
 ) -> Result<(), ()> {
     match result {
         Ok(result) => outgoing_tx
-            .send(OutgoingMessage::Response(JsonRpcResponse::new(id, result)))
+            .send(OutgoingMessage::Response(JsonRpcResponse::new(
+                id,
+                api_success_value(result)?,
+            )))
             .await
             .map_err(|_| ()),
         Err(error) => send_error(outgoing_tx, id, error).await,
     }
+}
+
+async fn send_application_error(
+    outgoing_tx: mpsc::Sender<OutgoingMessage>,
+    id: RequestId,
+    error: ApiError,
+) -> Result<(), ()> {
+    let result = api_error_value(error).map_err(|error| {
+        tracing::error!(error = %error, "failed to serialize app-server application error");
+    })?;
+    outgoing_tx
+        .send(OutgoingMessage::Response(JsonRpcResponse::new(id, result)))
+        .await
+        .map_err(|_| ())
+}
+
+fn api_success_value(result: serde_json::Value) -> Result<serde_json::Value, ()> {
+    serde_json::to_value(ApiResponse::success(result)).map_err(|error| {
+        tracing::error!(error = %error, "failed to serialize app-server API success");
+    })
+}
+
+fn api_error_value(error: ApiError) -> Result<serde_json::Value, serde_json::Error> {
+    serde_json::to_value(ApiResponse::<serde_json::Value>::error(error))
 }
 
 async fn send_error(

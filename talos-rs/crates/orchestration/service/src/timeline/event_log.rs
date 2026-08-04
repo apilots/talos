@@ -117,7 +117,7 @@ impl TimelineEventService {
         let active_state = state_for_event(self.active_turn_store.as_ref(), &event).await?;
         let record = self.event_store.append_event(event).await?;
         let envelope = TimelineEventEnvelope::from_persisted_event(record).ok_or_else(|| {
-            talos_error::TalosError::SerializationError(
+            talos_error::TalosError::internal(
                 "persisted timeline event is missing envelope metadata".to_string(),
             )
         })?;

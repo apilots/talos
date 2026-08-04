@@ -60,7 +60,7 @@ fn rejects_unsafe_user_id() {
         .resolve_for_actor(&Actor::regular("../alice"))
         .expect_err("unsafe user id should fail");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn rejects_inconsistent_session_user() {
     let error =
         ensure_session_user_consistency(&session).expect_err("session user mismatch should fail");
 
-    assert!(matches!(error, TalosError::InternalError(_)));
+    assert!(error.is_internal());
 }
 
 #[tokio::test]

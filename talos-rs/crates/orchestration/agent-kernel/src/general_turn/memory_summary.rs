@@ -13,7 +13,8 @@ pub(super) fn validate_memory_candidates(
                 || candidate.body.chars().count() > 1_000
         })
     {
-        return Err(talos_error::TalosError::ValidationError(
+        return Err(talos_error::TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "memory candidates are invalid".to_string(),
         ));
     }
@@ -424,22 +425,24 @@ async fn request_compaction_output(
         )
         .await?;
     let parsed = serde_json::from_str::<CompactionMemoryOutput>(response.content.trim()).map_err(
-        |error| talos_error::TalosError::MemoryError {
-            kind: TalosMemoryErrorKind::SummaryParseFailed,
-            message: format!("parse compaction json for session '{session_id}': {error}"),
+        |error| {
+            talos_error::TalosError::memory_error(
+                TalosMemoryErrorKind::SummaryParseFailed,
+                format!("parse compaction json for session '{session_id}': {error}"),
+            )
         },
     )?;
     if parsed.title.trim().is_empty() {
-        return Err(talos_error::TalosError::MemoryError {
-            kind: TalosMemoryErrorKind::SummaryParseFailed,
-            message: format!("compaction title is blank for session '{session_id}'"),
-        });
+        return Err(talos_error::TalosError::memory_error(
+            TalosMemoryErrorKind::SummaryParseFailed,
+            format!("compaction title is blank for session '{session_id}'"),
+        ));
     }
     validate_memory_candidates(&parsed.memory_candidates).map_err(|error| {
-        talos_error::TalosError::MemoryError {
-            kind: TalosMemoryErrorKind::SummaryParseFailed,
-            message: format!("validate compaction for session '{session_id}': {error}"),
-        }
+        talos_error::TalosError::memory_error(
+            TalosMemoryErrorKind::SummaryParseFailed,
+            format!("validate compaction for session '{session_id}': {error}"),
+        )
     })?;
     Ok((parsed, response.usage))
 }
@@ -486,7 +489,12 @@ pub async fn compact_session_memory(
     let memory_processed_until_seq = session_store
         .get_session_record(session_id)
         .await?
-        .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?
+        .ok_or_else(|| {
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                session_id.to_string(),
+            )
+        })?
         .memory_processed_until_seq;
     let context = crate::build_session_prompt_context(
         session_artifact_store,
@@ -630,10 +638,13 @@ pub async fn compact_session_memory(
         .get(&coverage.covers_until_seq)
         .copied()
         .ok_or_else(|| {
-            talos_error::TalosError::ValidationError(format!(
-                "missing persisted timestamp for compacted session seq {}",
-                coverage.covers_until_seq
-            ))
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "missing persisted timestamp for compacted session seq {}",
+                    coverage.covers_until_seq
+                ),
+            )
         })?;
     if memory_processed_until_seq == previous_covers_until_seq {
         memory_writer

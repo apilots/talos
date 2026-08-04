@@ -172,10 +172,10 @@ pub trait LlmProvider: Send + Sync {
                 item_tokens: Vec::new(),
             });
         }
-        Err(TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedAttachment,
-            message: "model attachments are unsupported".to_string(),
-        })
+        Err(TalosError::file_error(
+            TalosFileErrorKind::UnsupportedAttachment,
+            "model attachments are unsupported",
+        ))
     }
 
     /// Validates every attached message before a provider constructs a request.
@@ -202,7 +202,7 @@ pub trait LlmProvider: Send + Sync {
 
     /// Provider-neutral model block stream.
     async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
-        Err(TalosError::InternalError(format!(
+        Err(TalosError::internal(format!(
             "{} provider must implement stream_model_blocks directly",
             self.name()
         )))
@@ -331,7 +331,8 @@ impl ChatMessage {
         attachments: Vec<Attachment>,
     ) -> TalosResult<Self> {
         if attachments.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "attached user message must include at least one attachment".to_string(),
             ));
         }
@@ -399,12 +400,14 @@ impl ChatMessage {
             return Ok(());
         };
         if attachments.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "attachments must be omitted instead of empty".to_string(),
             ));
         }
         if self.role != Role::User {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "only user messages may contain attachments".to_string(),
             ));
         }
@@ -698,7 +701,7 @@ impl SseLineDecoder {
                 line_bytes.pop();
             }
             lines.push(String::from_utf8(line_bytes).map_err(|err| {
-                TalosError::InternalError(format!("SSE line is not valid UTF-8: {err}"))
+                TalosError::internal(format!("SSE line is not valid UTF-8: {err}"))
             }));
         }
         lines

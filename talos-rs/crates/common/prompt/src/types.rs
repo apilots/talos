@@ -107,10 +107,10 @@ impl PlannerMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "none" => Ok(Self::None),
             "built_in" => Ok(Self::BuiltIn),
-            other => Err(TalosError::ValidationError(format!(
-                "invalid planner mode: {}",
-                other
-            ))),
+            other => Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid planner mode: {}", other),
+            )),
         }
     }
 

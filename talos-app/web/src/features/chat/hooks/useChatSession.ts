@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { TalosHttpError } from "@talos/sdk-browser";
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionStreaming } from "./useSessionStreaming";
@@ -20,6 +20,11 @@ import type {
   SessionInputHistoryItem,
 } from "@/shared/types/ui";
 import type { ModelSelection, SkillSuggestion } from "@talos/sdk-browser";
+
+const ACTIVE_TURN_NOT_FOUND_CODES = [
+  AppProtocol.ErrorCode.ResourceNotFound,
+  AppProtocol.ErrorCode.SessionNotFound,
+] as const satisfies readonly AppProtocol.ErrorCode[];
 
 export interface SendTextOptions {
   modelSelection?: ModelSelection;
@@ -101,7 +106,10 @@ export function useChatSession(
 
   useEffect(() => {
     const error = activeTurnQuery.error;
-    if (!(error instanceof TalosHttpError) || error.status !== 404) {
+    if (
+      !(error instanceof TalosApiError) ||
+      !ACTIVE_TURN_NOT_FOUND_CODES.some((code) => code === error.code)
+    ) {
       return;
     }
     clearInactiveTurnSnapshot(sessionId);

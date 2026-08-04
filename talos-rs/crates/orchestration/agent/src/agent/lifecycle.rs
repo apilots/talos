@@ -123,9 +123,10 @@ impl AgentHarnessImpl {
     /// runtime stream or task is being constructed.
     pub(crate) fn try_reserve_active_turn(&self, session_id: &str) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
-            Entry::Occupied(_) => Err(TalosError::ActiveTurnRunning(format!(
-                "session `{session_id}` already has an active turn"
-            ))),
+            Entry::Occupied(_) => Err(TalosError::public(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                format!("session `{session_id}` already has an active turn"),
+            )),
             Entry::Vacant(entry) => {
                 entry.insert(ActiveTurnHandle::Reserved);
                 Ok(())
@@ -152,7 +153,7 @@ impl AgentHarnessImpl {
                 });
                 Ok(())
             }
-            Entry::Vacant(_) => Err(TalosError::InternalError(format!(
+            Entry::Vacant(_) => Err(TalosError::internal(format!(
                 "missing reserved active turn slot for session `{session_id}`"
             ))),
         }
@@ -225,7 +226,7 @@ impl AgentHarnessImpl {
                 for session_id in &remaining {
                     self.clear_active_turn(session_id);
                 }
-                return Err(TalosError::InternalError(format!(
+                return Err(TalosError::internal(format!(
                     "drain_active_turns timed out with {} sessions still active: {:?}",
                     remaining.len(),
                     remaining

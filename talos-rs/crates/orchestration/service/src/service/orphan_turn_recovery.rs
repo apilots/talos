@@ -1,5 +1,7 @@
+use talos_agent_kernel::TimelineBuilder;
+use talos_error::TalosError;
 use talos_store::session::ActiveTurnRecord;
-use talos_types::talos::{AgentEvent, AgentEventPayload, AgentEventType, TalosTurnErrorEvent};
+use talos_types::talos::{AgentEvent, AgentEventPayload};
 use uuid::Uuid;
 
 use super::{ServiceResult, TalosService};
@@ -33,26 +35,16 @@ impl TalosService {
             .message_id
             .clone()
             .unwrap_or_else(|| format!("msg_{}", Uuid::new_v4().simple()));
-        let failed_at_ms = chrono::Utc::now().timestamp_millis().max(0) as u64;
-        let error_event = AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: AgentEventType::TurnError,
-            turn_id: active_turn.turn_id.clone(),
+        let mut timeline = TimelineBuilder::new_with_sequence(
+            request_id,
+            active_turn.turn_id.clone(),
             message_id,
-            session_id: session_id.to_string(),
+            session_id,
             sequence,
-            payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
-                request_id,
-                turn_id: active_turn.turn_id.clone(),
-                error:
-                    "Turn was interrupted because the server restarted before the turn completed."
-                        .to_string(),
-                error_info: None,
-                failed_at_ms,
-            }),
-        };
+        );
+        let error_event = timeline.fail_turn(&TalosError::internal(
+            "active turn remained running after process restart",
+        ));
         self.event_log.record_talos_event(error_event).await?;
         Ok(())
     }

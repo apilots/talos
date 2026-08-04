@@ -18,6 +18,12 @@ async fn test_models_require_bearer_when_auth_enabled() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "unauthenticated");
 }
 
 #[tokio::test]
@@ -49,6 +55,12 @@ async fn test_models_require_bearer_even_when_local_cache_exists() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "unauthenticated");
 }
 
 #[tokio::test]
@@ -142,7 +154,8 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert!(payload["sessions"].is_array());
+    assert_eq!(payload["status"], "success");
+    assert!(payload["data"]["sessions"].is_array());
 }
 
 #[tokio::test]
@@ -151,7 +164,8 @@ async fn test_get_llm_allows_auth_disabled_actor() {
     let response = get_llm_handler(State(state), None)
         .await
         .expect("auth disabled actor should access llm config");
-    assert_eq!(response.0.config.provider, "bailian");
+    let data = expect_success(response.0);
+    assert_eq!(data.config.provider, "bailian");
 }
 
 #[tokio::test]

@@ -8,7 +8,7 @@ fn validate_input_rejects_missing_required_fields() {
         .validate_input(&serde_json::json!({"path": "demo.txt"}))
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[tokio::test]

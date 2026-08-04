@@ -37,7 +37,8 @@ pub async fn run(
     context: &ToolContext,
 ) -> TalosResult<GlobFilesResponse> {
     if request.pattern.trim().is_empty() {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "pattern must not be empty".to_string(),
         ));
     }
@@ -47,7 +48,12 @@ pub async fn run(
         crate::runtimes::resolve_base_dir(context)?
     };
     let matcher = Glob::new(&request.pattern)
-        .map_err(|err| TalosError::ToolError(format!("invalid glob pattern: {}", err)))?
+        .map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("invalid glob pattern: {}", err),
+            )
+        })?
         .compile_matcher();
     let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
     let offset = request.offset.unwrap_or(0);

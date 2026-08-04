@@ -51,10 +51,10 @@ impl SubagentService {
             .get_session(&request.caller.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!(
-                    "parent session {}",
-                    request.caller.session_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("parent session {}", request.caller.session_id),
+                )
             })?;
         let child = self
             .sessions
@@ -111,10 +111,10 @@ impl SubagentService {
                 let cleanup = self.sessions.delete_subagent_session(&child_id).await;
                 return match cleanup {
                     Ok(result) if result.success => Err(start_error),
-                    Ok(_) => Err(TalosError::InternalError(format!(
+                    Ok(_) => Err(TalosError::internal(format!(
                         "subagent start failed and child session '{child_id}' was not removed: {start_error}"
                     ))),
-                    Err(cleanup_error) => Err(TalosError::InternalError(format!(
+                    Err(cleanup_error) => Err(TalosError::internal(format!(
                         "subagent start failed for child session '{child_id}': {start_error}; cleanup failed: {cleanup_error}"
                     ))),
                 };
@@ -140,9 +140,10 @@ impl SubagentService {
             .has_active_subagent_turn(tree_root_session_id)
             .await?
         {
-            return Err(TalosError::ActiveTurnRunning(format!(
-                "session tree '{tree_root_session_id}' has an active subagent turn"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                format!("session tree '{tree_root_session_id}' has an active subagent turn"),
+            ));
         }
         Ok(())
     }
@@ -154,7 +155,7 @@ impl SubagentService {
             || request.prompt.trim().is_empty()
             || request.prompt.len() > MAX_SUBAGENT_PROMPT_BYTES
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "caller session, caller turn, task_name, and a 1 to {MAX_SUBAGENT_PROMPT_BYTES} byte prompt are required"
                 ),

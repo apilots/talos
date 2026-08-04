@@ -333,9 +333,7 @@ impl TuiApp {
 
     pub(crate) async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
 
         let catalog = client.list_models().await?;
@@ -358,7 +356,7 @@ impl TuiApp {
             .filter(|key| !key.trim().is_empty())
             .collect::<Vec<_>>();
         if model_keys.is_empty() {
-            return Err(TalosError::ClientError(
+            return Err(TalosError::internal(
                 "gateway returned empty model list".to_string(),
             ));
         }
@@ -369,7 +367,7 @@ impl TuiApp {
                     && model.model.id == default_model_selection.model_ref.id
             })
             .ok_or_else(|| {
-                TalosError::ClientError(format!(
+                TalosError::internal(format!(
                     "configured default model '{}:{}' is missing from the gateway model catalog",
                     default_model_selection.model_ref.provider,
                     default_model_selection.model_ref.id
@@ -391,9 +389,7 @@ impl TuiApp {
 
     pub(crate) fn refresh_models_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
 
         self.spawn_command_task("models load started", async move {
@@ -404,9 +400,7 @@ impl TuiApp {
 
     pub(crate) fn status_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
         let session_id = self.session_id.clone();
         self.spawn_command_task("status request started", async move {
@@ -449,9 +443,7 @@ impl TuiApp {
 
     pub(crate) fn compact_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
         let Some(session_id) = self.active_session_id_for_control_command("compact") else {
             return Ok(());
@@ -498,9 +490,9 @@ impl TuiApp {
                     let message = err.to_string();
                     let _ = stream_tx.send(Err(err)).await;
                     let _ = command_tx
-                        .send(CommandUpdate::SessionCompacted(Err(
-                            TalosError::ClientError(message),
-                        )))
+                        .send(CommandUpdate::SessionCompacted(Err(TalosError::internal(
+                            message,
+                        ))))
                         .await;
                     return;
                 }
@@ -517,9 +509,7 @@ impl TuiApp {
 
     pub(crate) fn clear_session_command(&mut self) -> TalosResult<()> {
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
         let Some(session_id) = self.active_session_id_for_control_command("clear") else {
             return Ok(());
@@ -533,7 +523,7 @@ impl TuiApp {
         let Some(model_selection) =
             crate::model_selection::selection_for_key(&self.available_model_info, &requested, None)
         else {
-            return Err(TalosError::ClientError(format!(
+            return Err(TalosError::internal(format!(
                 "model '{}' is not available in the current model catalog",
                 requested
             )));
@@ -548,9 +538,7 @@ impl TuiApp {
             return Ok(());
         }
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
         let session_id = self.session_id.clone().expect("session checked above");
         self.spawn_command_task(format!("model switch started: {}", requested), async move {
@@ -720,9 +708,7 @@ impl TuiApp {
         }
 
         let Some(client) = self.gateway_client.clone() else {
-            return Err(TalosError::ClientError(
-                "missing gateway client".to_string(),
-            ));
+            return Err(TalosError::internal("missing gateway client".to_string()));
         };
         let session_id = self.session_id.clone();
         let closing_session_id = session_id.clone().unwrap_or_else(|| "none".to_string());
@@ -815,7 +801,7 @@ async fn close_session_and_shutdown(
         (Ok(session_id), Ok(())) => Ok(session_id),
         (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(error)) => Err(error),
-        (Err(close_error), Err(shutdown_error)) => Err(TalosError::ClientError(format!(
+        (Err(close_error), Err(shutdown_error)) => Err(TalosError::internal(format!(
             "close session failed: {close_error}; shutdown failed: {shutdown_error}"
         ))),
     };

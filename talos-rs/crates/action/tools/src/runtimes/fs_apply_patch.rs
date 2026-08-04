@@ -81,10 +81,13 @@ pub async fn run(
             PatchOperation::Add { path, lines } => {
                 let resolved = resolve_tool_path(&path, context)?;
                 if fs::try_exists(&resolved).await.map_err(inspect_error)? {
-                    return Err(TalosError::ToolError(format!(
-                        "cannot add `{}` because it already exists",
-                        resolved.display()
-                    )));
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        format!(
+                            "cannot add `{}` because it already exists",
+                            resolved.display()
+                        ),
+                    ));
                 }
                 if let Some(parent) = resolved.parent() {
                     fs::create_dir_all(parent).await.map_err(write_error)?;
@@ -132,11 +135,14 @@ pub async fn run(
                     source.clone()
                 };
                 if target != source && fs::try_exists(&target).await.map_err(inspect_error)? {
-                    return Err(TalosError::ToolError(format!(
-                        "cannot move `{}` to `{}` because the target exists",
-                        source.display(),
-                        target.display()
-                    )));
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        format!(
+                            "cannot move `{}` to `{}` because the target exists",
+                            source.display(),
+                            target.display()
+                        ),
+                    ));
                 }
                 if let Some(parent) = target.parent() {
                     fs::create_dir_all(parent).await.map_err(write_error)?;
@@ -179,12 +185,14 @@ fn parse_patch(patch: &str) -> TalosResult<ParsedPatch> {
         .collect::<Vec<_>>();
     let lines = trim_trailing_empty_lines(lines);
     if lines.first().map(String::as_str) != Some("*** Begin Patch") {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "patch must start with `*** Begin Patch`".to_string(),
         ));
     }
     if lines.last().map(String::as_str) != Some("*** End Patch") {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "patch must end with `*** End Patch`".to_string(),
         ));
     }
@@ -283,7 +291,8 @@ fn parse_patch(patch: &str) -> TalosResult<ParsedPatch> {
     }
 
     if operations.is_empty() {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "patch must include at least one file operation".to_string(),
         ));
     }
@@ -303,27 +312,36 @@ fn apply_hunks(path: &Path, original: &str, hunks: &[PatchHunk]) -> TalosResult<
         let old = hunk_old_text(hunk);
         let new = hunk_new_text(hunk);
         if old.is_empty() {
-            return Err(TalosError::ToolError(format!(
-                "patch hunk {} for `{}` has no removable or context text",
-                hunk_index + 1,
-                path.display()
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "patch hunk {} for `{}` has no removable or context text",
+                    hunk_index + 1,
+                    path.display()
+                ),
+            ));
         }
         let matches = updated.matches(&old).count();
         if matches == 0 {
-            return Err(TalosError::ToolError(format!(
-                "patch hunk {} did not match `{}`",
-                hunk_index + 1,
-                path.display()
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "patch hunk {} did not match `{}`",
+                    hunk_index + 1,
+                    path.display()
+                ),
+            ));
         }
         if matches > 1 {
-            return Err(TalosError::ToolError(format!(
-                "patch hunk {} matched {} locations in `{}`; add more context",
-                hunk_index + 1,
-                matches,
-                path.display()
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "patch hunk {} matched {} locations in `{}`; add more context",
+                    hunk_index + 1,
+                    matches,
+                    path.display()
+                ),
+            ));
         }
         updated = updated.replacen(&old, &new, 1);
     }
@@ -353,19 +371,31 @@ fn hunk_new_text(hunk: &PatchHunk) -> String {
 }
 
 fn patch_syntax_error(line: usize, message: &str) -> TalosError {
-    TalosError::ToolError(format!("patch syntax error at line {line}: {message}"))
+    TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!("patch syntax error at line {line}: {message}"),
+    )
 }
 
 fn inspect_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to inspect patch path: {err}"))
+    TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!("failed to inspect patch path: {err}"),
+    )
 }
 
 fn read_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to read patch target: {err}"))
+    TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!("failed to read patch target: {err}"),
+    )
 }
 
 fn write_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to write patch target: {err}"))
+    TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
+        format!("failed to write patch target: {err}"),
+    )
 }
 
 #[cfg(test)]

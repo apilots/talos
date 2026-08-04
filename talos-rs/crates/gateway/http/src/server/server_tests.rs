@@ -5,6 +5,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use serde::Deserialize;
 use serde_json::Value;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
@@ -42,6 +43,92 @@ use crate::server::misc::get_llm_handler;
 #[path = "tests/support.rs"]
 mod support;
 use support::*;
+
+fn expect_success<T>(response: talos_types::ApiResponse<T>) -> T {
+    match response {
+        talos_types::ApiResponse::Success { data } => data,
+        talos_types::ApiResponse::Error { error } => {
+            panic!("expected success response, got error: {error:?}")
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RejectionQuery {
+    limit: u32,
+}
+
+async fn json_rejection_handler(Json(_body): Json<serde_json::Value>) {}
+
+async fn query_rejection_handler(Query(query): Query<RejectionQuery>) {
+    let _ = query.limit;
+}
+
+async fn path_rejection_handler(Path(_id): Path<u64>) {}
+
+async fn assert_structured_invalid_request(response: axum::response::Response) {
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "status": "error",
+            "error": {
+                "code": "invalidRequest",
+                "message": "Invalid request"
+            }
+        })
+    );
+}
+
+#[tokio::test]
+async fn v1_extractor_rejections_are_structured() {
+    let app = Router::new()
+        .route("/v1/json", post(json_rejection_handler))
+        .route("/v1/query", get(query_rejection_handler))
+        .route("/v1/path/:id", get(path_rejection_handler))
+        .layer(middleware::from_fn(errors::normalize_extractor_rejection));
+
+    let malformed_json = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/json")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_json).await;
+
+    let malformed_query = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/query?limit=invalid")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_query).await;
+
+    let malformed_path = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/path/invalid")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_path).await;
+}
 
 struct EmptyProfileStore;
 
@@ -725,7 +812,10 @@ impl AuthService for FakeAuthService {
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
-            return Err(TalosError::AuthError("invalid token".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Unauthenticated,
+                "invalid token".to_string(),
+            ));
         }
         Ok(RequestIdentity {
             user_id: token.to_string(),

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
 use axum::http::header::CACHE_CONTROL;
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{HeaderMap, HeaderValue};
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::{IntoResponse, Json, Response};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
@@ -17,10 +17,13 @@ use talos_auth::RequestIdentity;
 use talos_service::{
     TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
 };
-use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
+use talos_types::{
+    RecoverTimelineRequest, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SubscribeTimelineRequest,
+};
 
 use super::access::shared_actor;
-use super::errors::{ApiError, HttpApiErrorCode};
+use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize)]
@@ -123,7 +126,7 @@ pub(super) async fn recover_timeline_handler(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<TimelineRecoveryQuery>,
-) -> Result<Json<TimelineRecoveryResponse>, ApiError> {
+) -> Result<JsonResponse<TimelineRecoveryResponse>, ApiError> {
     let after_event_id = parse_cursor(query.after_event_id, &headers)?;
     let limit = query
         .limit
@@ -149,7 +152,7 @@ pub(super) async fn recover_timeline_handler(
         .await
         .map_err(map_event_replay_error)?;
 
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 fn timeline_subscription_closed_sse_event(
@@ -189,27 +192,17 @@ fn parse_cursor(
 }
 
 fn map_event_replay_error(error: talos_error::TalosError) -> ApiError {
-    match error {
-        talos_error::TalosError::ResourceExpired(message) => ApiError::new(
-            StatusCode::GONE,
-            HttpApiErrorCode::EventCursorExpired,
-            message,
-        ),
-        talos_error::TalosError::ValidationError(message) => ApiError::new(
-            StatusCode::BAD_REQUEST,
-            HttpApiErrorCode::InvalidCursor,
-            message,
-        ),
-        talos_error::TalosError::ResourceNotFound(message) => ApiError::new(
-            StatusCode::NOT_FOUND,
-            HttpApiErrorCode::SessionNotFound,
-            message,
-        ),
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::EventReplayFailed,
-            other.to_string(),
-        ),
+    match error.error_code() {
+        talos_error::ErrorCode::ResourceExpired => {
+            ApiError::new(talos_error::ErrorCode::EventCursorExpired)
+        }
+        talos_error::ErrorCode::InvalidRequest => {
+            ApiError::new(talos_error::ErrorCode::InvalidCursor)
+        }
+        talos_error::ErrorCode::ResourceNotFound => {
+            ApiError::new(talos_error::ErrorCode::SessionNotFound)
+        }
+        _ => ApiError::from_talos_error(error),
     }
 }
 
@@ -217,7 +210,7 @@ pub(super) async fn get_active_turn_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<JsonResponse<SessionActiveTurnResponse>, ApiError> {
     let snapshot = state
         .gateway
         .get_active_turn(
@@ -227,28 +220,15 @@ pub(super) async fn get_active_turn_handler(
         .await
         .map_err(map_active_turn_error)?;
 
-    let value = serde_json::to_value(snapshot).map_err(|err| {
-        ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::ActiveTurnSerializeFailed,
-            format!("failed to serialize active turn snapshot: {err}"),
-        )
-    })?;
-    Ok(Json(value))
+    Ok(api_success(snapshot))
 }
 
 fn map_active_turn_error(error: talos_error::TalosError) -> ApiError {
-    match error {
-        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
-            StatusCode::NOT_FOUND,
-            HttpApiErrorCode::SessionNotFound,
-            "session not found",
-        ),
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::ActiveTurnFailed,
-            other.to_string(),
-        ),
+    match error.error_code() {
+        talos_error::ErrorCode::ResourceNotFound => {
+            ApiError::new(talos_error::ErrorCode::SessionNotFound)
+        }
+        _ => ApiError::from_talos_error(error),
     }
 }
 

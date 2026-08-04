@@ -452,7 +452,7 @@ impl LlmProvider for TestLlmProvider {
     }
 
     async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
-        Err(talos_error::TalosError::InternalError(
+        Err(talos_error::TalosError::internal(
             "stream is not used in this test".to_string(),
         ))
     }
@@ -498,7 +498,7 @@ async fn handle_shutdown_times_out_without_stopped_state() {
         .shutdown()
         .await
         .expect_err("shutdown should time out");
-    assert!(matches!(err, talos_error::TalosError::InternalError(_)));
+    assert!(err.is_internal());
 }
 
 #[tokio::test]

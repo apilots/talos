@@ -27,13 +27,15 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
         })
         .collect::<Vec<_>>();
     if files.len() > 1 {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "input must include at most one files item".to_string(),
         ));
     }
     if let Some(file_ids) = files.first() {
         if file_ids.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "files input must include at least one file id".to_string(),
             ));
         }
@@ -42,7 +44,8 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
             .iter()
             .any(|file_id| file_id.trim().is_empty() || !unique_ids.insert(file_id))
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "file ids must be non-empty and unique".to_string(),
             ));
         }
@@ -50,7 +53,8 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
     if has_text || !files.is_empty() {
         Ok(())
     } else {
-        Err(TalosError::ValidationError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "input must include non-empty text or files".to_string(),
         ))
     }
@@ -58,12 +62,14 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
 
 fn validate_retry_request(request: &TurnRetryParams) -> TalosResult<()> {
     if request.client_message_id.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "client_message_id is required".to_string(),
         ));
     }
     if request.retry_of_message_id.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "retry_of_message_id is required".to_string(),
         ));
     }
@@ -79,7 +85,7 @@ fn retry_idempotency_key(request: &TurnRetryParams) -> String {
 
 fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<MessageCommandResult> {
     record.result.ok_or_else(|| {
-        TalosError::IdempotencyError(format!(
+        TalosError::internal(format!(
             "idempotency record is missing result: session_id={}, key={}, status={}",
             record.session_id,
             record.idempotency_key,
@@ -100,16 +106,17 @@ async fn record_session_title(
     title: &str,
 ) {
     if let Err(err) = sessions.update_session_title(session_id, title).await {
-        match err {
-            TalosError::ResourceNotFound(_) => warn!(
+        if err.is_code(talos_error::ErrorCode::ResourceNotFound) {
+            warn!(
                 session_id = %session_id,
                 "session was deleted before its generated title could be persisted"
-            ),
-            err => error!(
+            );
+        } else {
+            error!(
                 session_id = %session_id,
                 error = %err,
                 "failed to persist session title"
-            ),
+            );
         }
         return;
     }
@@ -186,8 +193,8 @@ pub fn turn_submission_hash(
         "workspace_id": workspace_id,
         "input": input,
     });
-    let bytes = serde_json::to_vec(&canonical)
-        .map_err(|err| TalosError::SerializationError(err.to_string()))?;
+    let bytes =
+        serde_json::to_vec(&canonical).map_err(|err| TalosError::internal(err.to_string()))?;
     let digest = Sha256::digest(bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }

@@ -107,7 +107,7 @@ impl TimelineSubscriptionService {
     fn inner(&self) -> TalosResult<&Arc<TimelineEventService>> {
         self.inner
             .as_ref()
-            .ok_or_else(|| TalosError::InternalError("event service is not configured".to_string()))
+            .ok_or_else(|| TalosError::internal("event service is not configured".to_string()))
     }
 
     pub(super) fn inner_talos(&self) -> TalosResult<&Arc<TimelineEventService>> {

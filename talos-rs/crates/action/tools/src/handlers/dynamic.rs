@@ -66,10 +66,13 @@ impl ToolHandler for DynamicToolHandler {
         context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         let ToolCallPayload::Function { arguments } = invocation.payload else {
-            return Err(TalosError::ToolError(format!(
-                "Dynamic tool '{}' requires function payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Dynamic tool '{}' requires function payload",
+                    invocation.tool_name
+                ),
+            ));
         };
         match &self.backend {
             DynamicToolBackend::Inline(func) => {

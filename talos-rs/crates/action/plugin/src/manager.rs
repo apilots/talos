@@ -86,10 +86,10 @@ impl PluginManager {
         let source = source_from_input(request.source)?;
         let existing = self.list_sources(PluginSourceListRequest {})?;
         if existing.sources.iter().any(|item| item.id == source.id) {
-            return Err(TalosError::Conflict(format!(
-                "plugin source `{}` already exists",
-                source.id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("plugin source `{}` already exists", source.id.0),
+            ));
         }
 
         let mut file = self.state.load_sources()?;
@@ -153,10 +153,10 @@ impl PluginManager {
             .iter_mut()
             .find(|source| source.id == request.source_id)
         else {
-            return Err(TalosError::ResourceNotFound(format!(
-                "plugin source `{}` not found",
-                request.source_id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("plugin source `{}` not found", request.source_id.0),
+            ));
         };
         let scan = scan_source(&self.state, source)?;
         source.last_checked_commit = scan.source_commit.clone();
@@ -275,10 +275,10 @@ impl PluginManager {
         if expected_source_commit.is_some()
             && candidate.plugin.source_commit != expected_source_commit
         {
-            return Err(TalosError::Conflict(format!(
-                "plugin `{}` source commit changed",
-                plugin_id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("plugin `{}` source commit changed", plugin_id.0),
+            ));
         }
         let enabled = request.enable != Some(false);
         let activation = install_plugin(&self.state, candidate, request.conflict_policy, enabled)?;
@@ -312,10 +312,10 @@ impl PluginManager {
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
         {
-            return Err(TalosError::Conflict(format!(
-                "plugin install `{}` source commit changed",
-                install.id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("plugin install `{}` source commit changed", install.id.0),
+            ));
         }
         let activation = update_plugin(
             &self.state,
@@ -426,10 +426,13 @@ impl PluginManager {
             .iter()
             .any(|source| source.id == request.source_id)
         {
-            return Err(TalosError::ValidationError(format!(
-                "configured plugin source `{}` cannot be removed",
-                request.source_id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "configured plugin source `{}` cannot be removed",
+                    request.source_id.0
+                ),
+            ));
         }
 
         let mut file = self.state.load_sources()?;
@@ -540,10 +543,10 @@ impl PluginManager {
                 return Ok(InstallCandidate { plugin, source });
             }
         }
-        Err(TalosError::ResourceNotFound(format!(
-            "plugin `{}` not found in marketplace cache",
-            plugin_id.0
-        )))
+        Err(TalosError::public(
+            talos_error::ErrorCode::ResourceNotFound,
+            format!("plugin `{}` not found in marketplace cache", plugin_id.0),
+        ))
     }
 
     fn install_by_id(
@@ -556,7 +559,10 @@ impl PluginManager {
             .into_iter()
             .find(|install| &install.id == install_id)
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!("plugin install `{}` not found", install_id.0))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("plugin install `{}` not found", install_id.0),
+                )
             })
     }
 
@@ -620,7 +626,10 @@ impl PluginManager {
             .iter_mut()
             .find(|install| &install.id == install_id)
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!("plugin install `{}` not found", install_id.0))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("plugin install `{}` not found", install_id.0),
+                )
             })?;
         install.enabled = enabled;
         let install = install.clone();
@@ -675,10 +684,10 @@ impl PluginManager {
 
     fn update_candidate(&self, install: &PluginInstall) -> TalosResult<InstallCandidate> {
         let source_id = install_source_id(install).ok_or_else(|| {
-            TalosError::ValidationError(format!(
-                "plugin install `{}` has no update source",
-                install.id.0
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("plugin install `{}` has no update source", install.id.0),
+            )
         })?;
         let refreshed = self.refresh_source_locked(PluginSourceRefreshRequest { source_id })?;
         let plugin = refreshed
@@ -686,10 +695,13 @@ impl PluginManager {
             .into_iter()
             .find(|plugin| plugin.id == install.plugin_id)
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!(
-                    "plugin `{}` not found in refreshed source",
-                    install.plugin_id.0
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!(
+                        "plugin `{}` not found in refreshed source",
+                        install.plugin_id.0
+                    ),
+                )
             })?;
         Ok(InstallCandidate {
             plugin,

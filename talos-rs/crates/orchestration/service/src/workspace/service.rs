@@ -45,7 +45,7 @@ impl EffectiveWorkspaceResolver {
         talos_fs::write_file(
             &path,
             &serde_json::to_string_pretty(&payload)
-                .map_err(|err| TalosError::InternalError(err.to_string()))?,
+                .map_err(|err| TalosError::internal(err.to_string()))?,
         )
         .await
     }

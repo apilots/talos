@@ -3,12 +3,21 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { getTalosClient } from "@/shared/api/client";
 import { useConnectionKey } from "@/features/chat";
-import { TalosHttpError, type MemoryFileDetail } from "@talos/sdk-browser";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
+import { AppProtocol, TalosApiError, type MemoryFileDetail } from "@talos/sdk-browser";
 
 const MEMORY_SEARCH_TIMEOUT_MS = 30000;
+const MEMORY_NOT_FOUND_CODES = [
+  AppProtocol.ErrorCode.ResourceNotFound,
+  AppProtocol.ErrorCode.SessionNotFound,
+  AppProtocol.ErrorCode.PathNotFound,
+] as const satisfies readonly AppProtocol.ErrorCode[];
 
 function isNotFoundError(error: unknown) {
-  return error instanceof TalosHttpError && error.status === 404;
+  return (
+    error instanceof TalosApiError &&
+    MEMORY_NOT_FOUND_CODES.some((code) => code === error.code)
+  );
 }
 
 function buildMissingDetail(date: string): MemoryFileDetail {
@@ -212,8 +221,14 @@ export function useMemoryPage() {
     isSearching: searchQuery.isFetching,
     isSearchPending,
     isSaving: saveMutation.isPending,
-    searchError: searchQuery.error instanceof Error ? searchQuery.error.message : null,
-    memoryError: memoryEntryQuery.error instanceof Error ? memoryEntryQuery.error.message : null,
-    saveError: saveMutation.error instanceof Error ? saveMutation.error.message : null,
+    searchError: searchQuery.error
+      ? userVisibleErrorMessage(searchQuery.error, "Memory search failed.")
+      : null,
+    memoryError: memoryEntryQuery.error
+      ? userVisibleErrorMessage(memoryEntryQuery.error, "Failed to load memory.")
+      : null,
+    saveError: saveMutation.error
+      ? userVisibleErrorMessage(saveMutation.error, "Failed to save memory.")
+      : null,
   };
 }

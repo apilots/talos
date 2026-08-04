@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use axum::response::Json;
-use serde_json::{json, Value};
-
 use talos_auth::RequestIdentity;
 use talos_types::{
     SessionClearRequest, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
@@ -13,47 +10,41 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::{ApiError, HttpApiErrorCode};
+use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 pub(super) async fn list_sessions_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Query(request): Query<SessionListRequest>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionListResponse>, ApiError> {
     let response = state
         .gateway
         .list_sessions(&shared_actor(&actor.0), request)
         .await
-        .map_err(|e| {
-            ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                HttpApiErrorCode::InternalError,
-                e.to_string(),
-            )
-        })?;
-    Ok(Json(json!(response)))
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
 }
 
 pub(super) async fn get_session_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionGetResponse>, ApiError> {
     let session = state
         .gateway
         .get_session(&shared_actor(&actor.0), SessionGetRequest { session_id })
         .await
-        .map_err(|e| map_session_error(e, "session not found"))?;
+        .map_err(map_session_error)?;
 
-    Ok(Json(json!(session)))
+    Ok(api_success(session))
 }
 
 pub(super) async fn get_session_history_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<SessionHistoryResponse>, ApiError> {
+) -> Result<JsonResponse<SessionHistoryResponse>, ApiError> {
     let response = state
         .gateway
         .get_session_history(
@@ -61,9 +52,9 @@ pub(super) async fn get_session_history_handler(
             SessionHistoryRequest { session_id },
         )
         .await
-        .map_err(|e| map_session_error(e, "session not found"))?;
+        .map_err(map_session_error)?;
 
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn patch_session_handler(
@@ -71,75 +62,48 @@ pub(super) async fn patch_session_handler(
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
     Json(mut request): Json<SessionPatchRequest>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionUpdateResponse>, ApiError> {
     request.session_id = session_id;
     let response = state
         .gateway
         .patch_session(&shared_actor(&actor.0), request)
         .await
-        .map_err(|e| map_patch_session_error(e, "session not found"))?;
+        .map_err(map_session_error)?;
 
-    Ok(Json(json!(response)))
+    Ok(api_success(response))
 }
 
 pub(super) async fn close_session_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<SessionCloseResponse>, ApiError> {
+) -> Result<JsonResponse<SessionCloseResponse>, ApiError> {
     let response = state
         .gateway
         .close_session(&shared_actor(&actor.0), SessionCloseRequest { session_id })
         .await
-        .map_err(|err| match err {
-            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
-                StatusCode::NOT_FOUND,
-                HttpApiErrorCode::InvalidRequest,
-                "session not found",
-            ),
-            other => ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                HttpApiErrorCode::InternalError,
-                other.to_string(),
-            ),
-        })?;
-    Ok(Json(response))
+        .map_err(map_session_error)?;
+    Ok(api_success(response))
 }
 
 pub(super) async fn delete_session_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionDeleteResponse>, ApiError> {
     let response = state
         .gateway
         .delete_session(&shared_actor(&actor.0), SessionDeleteRequest { session_id })
         .await
-        .map_err(|err| match err {
-            talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
-                StatusCode::NOT_FOUND,
-                HttpApiErrorCode::InvalidRequest,
-                "session not found",
-            ),
-            talos_error::TalosError::ValidationError(message) => ApiError::new(
-                StatusCode::CONFLICT,
-                HttpApiErrorCode::InvalidRequest,
-                message,
-            ),
-            other => ApiError::new(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                HttpApiErrorCode::InternalError,
-                other.to_string(),
-            ),
-        })?;
-    Ok(Json(json!(response)))
+        .map_err(map_session_error)?;
+    Ok(api_success(response))
 }
 
 pub(super) async fn compact_session_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionCompactResponse>, ApiError> {
     let session = state
         .gateway
         .compact_session(
@@ -147,74 +111,28 @@ pub(super) async fn compact_session_handler(
             SessionCompactRequest { session_id },
         )
         .await
-        .map_err(|error| map_session_error(error, "session not found"))?;
-    Ok(Json(json!(session)))
+        .map_err(map_session_error)?;
+    Ok(api_success(session))
 }
 
 pub(super) async fn clear_session_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
     Path(session_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<talos_types::SessionClearResponse>, ApiError> {
     let session = state
         .gateway
         .clear_session(&shared_actor(&actor.0), SessionClearRequest { session_id })
         .await
-        .map_err(|error| map_session_error(error, "session not found"))?;
-    Ok(Json(json!(session)))
+        .map_err(map_session_error)?;
+    Ok(api_success(session))
 }
 
-fn map_session_error(error: talos_error::TalosError, not_found_message: &str) -> ApiError {
-    match error {
-        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
-            StatusCode::NOT_FOUND,
-            HttpApiErrorCode::InvalidRequest,
-            not_found_message,
-        ),
-        talos_error::TalosError::ValidationError(message) => ApiError::new(
-            StatusCode::CONFLICT,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        talos_error::TalosError::ActiveTurnRunning(message) => ApiError::new(
-            StatusCode::CONFLICT,
-            HttpApiErrorCode::ActiveTurnRunning,
-            message,
-        ),
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::InternalError,
-            other.to_string(),
-        ),
-    }
-}
-
-fn map_patch_session_error(error: talos_error::TalosError, not_found_message: &str) -> ApiError {
-    match error {
-        talos_error::TalosError::ResourceNotFound(_) => ApiError::new(
-            StatusCode::NOT_FOUND,
-            HttpApiErrorCode::InvalidRequest,
-            not_found_message,
-        ),
-        talos_error::TalosError::UnsupportedModel(message) => ApiError::new(
-            StatusCode::BAD_REQUEST,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        talos_error::TalosError::ValidationError(message) => ApiError::new(
-            StatusCode::CONFLICT,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        talos_error::TalosError::ActiveTurnRunning(message) => ApiError::new(
-            StatusCode::CONFLICT,
-            HttpApiErrorCode::ActiveTurnRunning,
-            message,
-        ),
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::InternalError,
-            other.to_string(),
-        ),
+fn map_session_error(error: talos_error::TalosError) -> ApiError {
+    match error.error_code() {
+        talos_error::ErrorCode::ResourceNotFound => {
+            ApiError::new(talos_error::ErrorCode::SessionNotFound)
+        }
+        _ => ApiError::from_talos_error(error),
     }
 }

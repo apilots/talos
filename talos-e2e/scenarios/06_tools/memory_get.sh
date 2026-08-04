@@ -147,7 +147,11 @@ memory_id="$(MEMORY_SEARCH_JSON="${memory_search_json}" python3 - <<'PY'
 import json
 import os
 
-data = json.loads(os.environ["MEMORY_SEARCH_JSON"]).get("data", [])
+raw = json.loads(os.environ["MEMORY_SEARCH_JSON"])
+if not (isinstance(raw, dict) and raw.get("status") == "success" and isinstance(raw.get("data"), dict)):
+    raise SystemExit("memory search response must be ApiResponse success envelope")
+raw = raw["data"]
+data = raw.get("data", [])
 print(data[0].get("memoryId", "") if data else "")
 PY
 )"

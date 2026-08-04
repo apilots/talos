@@ -103,7 +103,8 @@ impl RegistryOrchestrator {
             ToolGovernanceArgumentOverride::None => {}
             ToolGovernanceArgumentOverride::BashCommandPermissions => {
                 let ToolCallPayload::Function { arguments } = &invocation.payload else {
-                    return Err(TalosError::ToolError(
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::ToolExecutionFailed,
                         "shell tool requires function payload".to_string(),
                     ));
                 };

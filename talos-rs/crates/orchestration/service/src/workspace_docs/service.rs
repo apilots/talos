@@ -33,7 +33,8 @@ impl WorkspaceDocService {
             "user" => Ok(WorkspaceDocKind::User),
             "heartbeat" => Ok(WorkspaceDocKind::Heartbeat),
             "memory" => Ok(WorkspaceDocKind::Memory),
-            _ => Err(TalosError::ValidationError(
+            _ => Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "unsupported workspace doc kind".to_string(),
             )),
         }
@@ -129,9 +130,10 @@ impl WorkspaceDocService {
         if kind == WorkspaceDocKind::Memory
             && request.content.chars().count() > MEMORY_FILE_MAX_CHARS
         {
-            return Err(TalosError::ValidationError(format!(
-                "MEMORY.md exceeds the {MEMORY_FILE_MAX_CHARS} character limit"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("MEMORY.md exceeds the {MEMORY_FILE_MAX_CHARS} character limit"),
+            ));
         }
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;

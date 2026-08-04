@@ -312,9 +312,10 @@ impl TalosService {
                     .await?;
                 (session, false)
             }
-            Err(talos_error::TalosError::ResourceNotFound(_)) => {
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
                 let context = request.context.clone().ok_or_else(|| {
-                    talos_error::TalosError::ValidationError(
+                    talos_error::TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
                         "message context is required to create session".to_string(),
                     )
                 })?;
@@ -369,12 +370,15 @@ impl TalosService {
         if let Some(current_directory) = request.current_directory.clone() {
             match session.current_directory.as_ref() {
                 Some(bound) if bound != &current_directory => {
-                    return Err(talos_error::TalosError::ValidationError(format!(
-                        "session {} is bound to current_directory {}, but request used {}",
-                        session.context.session_id,
-                        bound.display(),
-                        current_directory.display()
-                    )));
+                    return Err(talos_error::TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "session {} is bound to current_directory {}, but request used {}",
+                            session.context.session_id,
+                            bound.display(),
+                            current_directory.display()
+                        ),
+                    ));
                 }
                 None => {
                     patch.current_directory = Some(OptionalCurrentDirectoryPatch::Set {
@@ -532,7 +536,7 @@ impl TalosService {
             .compact_session(actor, session_id, identity, event_tx)
             .await;
         let event_result = event_task.await.map_err(|error| {
-            TalosError::InternalError(format!("session compaction event task failed: {error}"))
+            TalosError::internal(format!("session compaction event task failed: {error}"))
         })?;
         event_result?;
         result
@@ -577,9 +581,10 @@ impl TalosService {
                     | ActiveTurnStatus::Cancelling
             )
         ) {
-            return Err(TalosError::ActiveTurnRunning(format!(
-                "session `{session_id}` already has an active turn"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                format!("session `{session_id}` already has an active turn"),
+            ));
         }
         Ok(())
     }
@@ -601,11 +606,11 @@ impl TalosService {
             .await
         {
             Ok(()) => Ok(()),
-            Err(TalosError::ResourceNotFound(message)) => {
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
                 tracing::warn!(
                     session_id = %session_id,
                     turn_id = %active_turn.turn_id,
-                    missing_resource = %message,
+                    missing_resource = %error.diagnostic_message(),
                     "finalizing orphaned active turn after interrupt"
                 );
                 self.finalize_orphaned_active_turn(session_id, &active_turn)

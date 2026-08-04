@@ -41,7 +41,7 @@ Invalid range.\n",
         .await
         .expect_err("out-of-range sequence must fail");
 
-    assert!(matches!(error, talos_error::TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 fn memory_batch(
@@ -510,7 +510,7 @@ async fn write_batch_rejects_partial_range_overlap_before_changing_markdown() {
         .await
         .expect_err("partial overlap must fail");
 
-    assert!(matches!(error, talos_error::TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert_eq!(
         fs::read_to_string(path).expect("read unchanged source"),
         original
@@ -539,7 +539,7 @@ async fn write_batch_rejects_cross_source_duplicate_before_creating_target() {
         .await
         .expect_err("cross-source duplicate must fail");
 
-    assert!(matches!(error, talos_error::TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert!(!original_path.exists());
 }
 
@@ -760,7 +760,7 @@ The user prefers concise proposals.
         .await
         .expect_err("generated provenance must be immutable");
 
-    assert!(matches!(error, talos_error::TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
 }
 
 #[tokio::test]

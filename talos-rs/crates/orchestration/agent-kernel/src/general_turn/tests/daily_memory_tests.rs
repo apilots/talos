@@ -100,7 +100,7 @@ async fn daily_memory_does_not_advance_cursor_when_write_fails() {
     .await
     .expect_err("failed write should fail daily memory");
 
-    assert!(matches!(error, TalosError::StorageError(_)));
+    assert!(error.is_internal());
     assert_eq!(
         session_store
             .get_session_record("s1")

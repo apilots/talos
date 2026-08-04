@@ -306,7 +306,7 @@ fn test_model_selection_rejects_explicit_effort_for_unsupported_model() {
         .resolve_reasoning(&model)
         .expect_err("explicit effort should be rejected");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[test]

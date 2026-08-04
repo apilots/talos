@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use axum::middleware::{self};
-use axum::routing::{get, post};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get, post};
 use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -79,8 +80,9 @@ use self::workspace_docs::{
     get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
     put_workspace_doc_handler,
 };
+use errors::ApiError;
 use talos_auth::AuthService;
-use talos_error::TalosResult;
+use talos_error::{ErrorCode, TalosResult};
 use talos_service::TalosService;
 use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
@@ -288,7 +290,10 @@ impl HttpServer {
                 "/v1/tools/dynamic-results/submit",
                 post(submit_dynamic_tool_result_handler),
             )
+            .route("/v1/*path", any(api_not_found_handler))
+            .method_not_allowed_fallback(api_method_not_allowed_handler)
             .with_state(state.clone())
+            .layer(middleware::from_fn(errors::normalize_extractor_rejection))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 lifecycle_gate_middleware,
@@ -306,7 +311,10 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Failed to bind to {}:{}: {}", self.host, self.port, e);
-                talos_error::TalosError::NetworkError(e.to_string())
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    e.to_string(),
+                )
             })?;
 
         info!("HTTP server listening on {}:{}", self.host, self.port);
@@ -318,7 +326,10 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Server error: {}", e);
-                talos_error::TalosError::NetworkError(e.to_string())
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    e.to_string(),
+                )
             });
 
         gc_task.abort();
@@ -328,6 +339,14 @@ impl HttpServer {
     fn listen_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+}
+
+async fn api_not_found_handler() -> Response {
+    ApiError::new(ErrorCode::ResourceNotFound).into_response()
+}
+
+async fn api_method_not_allowed_handler() -> Response {
+    ApiError::new(ErrorCode::InvalidRequest).into_response()
 }
 
 #[cfg(test)]

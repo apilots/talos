@@ -415,7 +415,7 @@ impl TalosServerHandle {
                     return Ok(());
                 }
                 updates.changed().await.map_err(|_| {
-                    TalosError::InternalError(
+                    TalosError::internal(
                         "server runtime stopped before reporting shutdown completion".to_string(),
                     )
                 })?;
@@ -423,7 +423,7 @@ impl TalosServerHandle {
         })
         .await
         .map_err(|_| {
-            TalosError::InternalError(format!(
+            TalosError::internal(format!(
                 "server shutdown timed out after {} secs",
                 wait_timeout.as_secs()
             ))
@@ -483,7 +483,7 @@ impl TalosServerRuntime {
 
                 let result = match tasks.join_next().await {
                     Some(Ok(result)) => result,
-                    Some(Err(err)) => Err(TalosError::InternalError(format!(
+                    Some(Err(err)) => Err(TalosError::internal(format!(
                         "server task join error: {}",
                         err
                     ))),
@@ -616,7 +616,7 @@ async fn run_json_rpc_stdio_after_startup(
         max_incoming_frame_bytes,
     )
     .await
-    .map_err(|error| TalosError::InternalError(error.message));
+    .map_err(|error| TalosError::internal(error.message));
     application_automation::finish(result, &automation).await
 }
 
@@ -667,7 +667,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
     match config.llm.provider.as_str() {
         "anthropic" => {
             let api_key = config.llm.anthropic.api_key.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.anthropic.api_key is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.anthropic.api_key is required".to_string(),
+                )
             })?;
             let base_url = config
                 .llm
@@ -682,7 +685,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         }
         "openai" => {
             let api_key = config.llm.openai.api_key.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.openai.api_key is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.openai.api_key is required".to_string(),
+                )
             })?;
             let mut openai_config = talos_llm_openai::OpenAIConfig::new(&api_key)
                 .with_default_model(&config.llm.model)
@@ -694,10 +700,16 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         }
         "bailian" => {
             let api_key = config.llm.bailian.api_key.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.bailian.api_key is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.bailian.api_key is required".to_string(),
+                )
             })?;
             let base_url = config.llm.bailian.base_url.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.bailian.base_url is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.bailian.base_url is required".to_string(),
+                )
             })?;
             let bailian_config =
                 talos_llm_bailian::BailianConfig::new(&api_key).with_base_url(&base_url);
@@ -705,7 +717,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         }
         "deepseek" => {
             let api_key = config.llm.deepseek.api_key.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.deepseek.api_key is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.deepseek.api_key is required".to_string(),
+                )
             })?;
             let base_url = config
                 .llm
@@ -721,7 +736,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         }
         "ollama" => {
             let base_url = config.llm.ollama.base_url.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.ollama.base_url is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.ollama.base_url is required".to_string(),
+                )
             })?;
             let mut ollama_config = OllamaConfig::new(&base_url, &config.llm.model);
             if let Some(api_key) = config.llm.ollama.api_key.as_deref() {
@@ -731,7 +749,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
         }
         "openrouter" => {
             let api_key = config.llm.openrouter.api_key.clone().ok_or_else(|| {
-                TalosError::InvalidConfiguration("llm.openrouter.api_key is required".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "llm.openrouter.api_key is required".to_string(),
+                )
             })?;
             let base_url = config
                 .llm
@@ -745,10 +766,10 @@ fn create_llm_provider(config: &Config) -> TalosResult<Arc<dyn LlmProvider>> {
                 .with_protocol(openrouter_protocol(&config.llm.openrouter)?);
             Ok(Arc::new(OpenRouterProvider::new(openrouter_config)))
         }
-        _ => Err(TalosError::InvalidConfiguration(format!(
-            "unsupported provider '{}'",
-            config.llm.provider
-        ))),
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("unsupported provider '{}'", config.llm.provider),
+        )),
     }
 }
 
@@ -757,19 +778,26 @@ fn openai_protocol(
     provider_config: &ProviderConfig,
 ) -> TalosResult<OpenAIProtocol> {
     match effective_llm_protocol(provider, provider_config).ok_or_else(|| {
-        TalosError::InvalidConfiguration(format!("llm.{provider}.protocol is required"))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("llm.{provider}.protocol is required"),
+        )
     })? {
         LlmProtocol::Chat => Ok(OpenAIProtocol::Chat),
         LlmProtocol::Responses => Ok(OpenAIProtocol::Responses),
-        protocol => Err(TalosError::InvalidConfiguration(format!(
-            "llm.{provider}.protocol does not support {protocol}"
-        ))),
+        protocol => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("llm.{provider}.protocol does not support {protocol}"),
+        )),
     }
 }
 
 fn openrouter_protocol(provider_config: &ProviderConfig) -> TalosResult<OpenRouterProtocol> {
     match effective_llm_protocol("openrouter", provider_config).ok_or_else(|| {
-        TalosError::InvalidConfiguration("llm.openrouter.protocol is required".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "llm.openrouter.protocol is required".to_string(),
+        )
     })? {
         LlmProtocol::Chat => Ok(OpenRouterProtocol::Chat),
         LlmProtocol::Responses => Ok(OpenRouterProtocol::Responses),
@@ -779,11 +807,15 @@ fn openrouter_protocol(provider_config: &ProviderConfig) -> TalosResult<OpenRout
 
 fn deepseek_protocol(provider_config: &ProviderConfig) -> TalosResult<DeepSeekProtocol> {
     match effective_llm_protocol("deepseek", provider_config).ok_or_else(|| {
-        TalosError::InvalidConfiguration("llm.deepseek.protocol is required".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "llm.deepseek.protocol is required".to_string(),
+        )
     })? {
         LlmProtocol::Chat => Ok(DeepSeekProtocol::Chat),
         LlmProtocol::Messages => Ok(DeepSeekProtocol::Messages),
-        LlmProtocol::Responses => Err(TalosError::InvalidConfiguration(
+        LlmProtocol::Responses => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "llm.deepseek.protocol does not support responses".to_string(),
         )),
     }
@@ -801,11 +833,17 @@ impl LlmProvider for ModelSetupRequiredProvider {
     }
 
     async fn chat(&self, _request: ChatRequest) -> TalosResult<ChatResponse> {
-        Err(TalosError::InvalidConfiguration(self.message.clone()))
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            self.message.clone(),
+        ))
     }
 
     async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
-        Err(TalosError::InvalidConfiguration(self.message.clone()))
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            self.message.clone(),
+        ))
     }
 
     fn default_model(&self) -> String {
@@ -816,7 +854,10 @@ impl LlmProvider for ModelSetupRequiredProvider {
         &self,
         _request: ChatRequest,
     ) -> TalosResult<talos_llm_provider::ModelBlockStream> {
-        Err(TalosError::InvalidConfiguration(self.message.clone()))
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            self.message.clone(),
+        ))
     }
 }
 

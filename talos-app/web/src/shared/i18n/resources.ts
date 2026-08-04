@@ -1,5 +1,6 @@
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
+import { errorResources } from "./errorResources";
 import { filesResources } from "./filesResources";
 
 export const resources = {
@@ -33,6 +34,7 @@ export const resources = {
       zhCn: "Chinese (Simplified)",
       en: "English",
     },
+    errors: errorResources.en,
     sidebar: {
       webConsole: "Web console",
       threads: "Chats",
@@ -509,6 +511,7 @@ export const resources = {
       zhCn: "简体中文",
       en: "English",
     },
+    errors: errorResources.zh,
     sidebar: {
       webConsole: "Web 控制台",
       threads: "会话",

@@ -68,7 +68,7 @@ impl FileService {
                 )));
             }
             if actual_size != expected_size {
-                return Err(TalosError::StorageError(
+                return Err(TalosError::internal(
                     "stored file size does not match file metadata".to_string(),
                 ));
             }
@@ -93,7 +93,8 @@ impl FileService {
             .iter()
             .any(|file_id| file_id.trim().is_empty() || !unique.insert(file_id))
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "file ids must be non-empty and unique".to_string(),
             ));
         }
@@ -118,7 +119,7 @@ impl FileService {
         let actual_size = u64::try_from(bytes.len())
             .map_err(|_| attachment_limit_error("file byte count overflow".to_string()))?;
         if actual_size != expected_size {
-            return Err(TalosError::StorageError(
+            return Err(TalosError::internal(
                 "stored file size does not match file metadata".to_string(),
             ));
         }
@@ -141,8 +142,5 @@ fn authorized_ready_record(record: &FileRecord, scope: &TurnFileScope) -> bool {
 }
 
 fn attachment_limit_error(message: String) -> TalosError {
-    TalosError::FileError {
-        kind: TalosFileErrorKind::AttachmentLimitExceeded,
-        message,
-    }
+    TalosError::file_error(TalosFileErrorKind::AttachmentLimitExceeded, message)
 }

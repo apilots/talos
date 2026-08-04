@@ -80,10 +80,10 @@ impl TalosMcpRuntime {
     pub async fn call_tool(&self, request: McpCallToolRequest) -> TalosResult<McpCallToolResponse> {
         let servers = self.servers.read().await;
         let server = servers.get(&request.server_name).ok_or_else(|| {
-            TalosError::ToolError(format!(
-                "MCP server `{}` not connected",
-                request.server_name
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("MCP server `{}` not connected", request.server_name),
+            )
         })?;
         server.call_tool(request).await
     }
@@ -94,10 +94,10 @@ impl TalosMcpRuntime {
     ) -> TalosResult<McpReadResourceResponse> {
         let servers = self.servers.read().await;
         let server = servers.get(&request.server_name).ok_or_else(|| {
-            TalosError::ToolError(format!(
-                "MCP server `{}` not connected",
-                request.server_name
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("MCP server `{}` not connected", request.server_name),
+            )
         })?;
         server.read_resource(request).await
     }
@@ -190,18 +190,19 @@ impl ManagedMcpServer {
 
     async fn call_tool(&self, request: McpCallToolRequest) -> TalosResult<McpCallToolResponse> {
         let Self::Ready { service, .. } = self else {
-            return Err(TalosError::ToolError(format!(
-                "MCP server `{}` is not ready",
-                request.server_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("MCP server `{}` is not ready", request.server_name),
+            ));
         };
         let arguments = match request.arguments {
             Value::Object(map) => Some(map),
             Value::Null => None,
             other => {
-                return Err(TalosError::ToolError(format!(
-                    "MCP tool arguments must be a JSON object, got {other}"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP tool arguments must be a JSON object, got {other}"),
+                ));
             }
         };
         let mut params = CallToolRequestParams::new(request.tool_name);
@@ -219,11 +220,17 @@ impl ManagedMcpServer {
                 .await
         })
         .await
-        .map_err(|_| TalosError::ToolError("MCP tools/call timed out".to_string()))?
+        .map_err(|_| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "MCP tools/call timed out".to_string(),
+            )
+        })?
         .map_err(map_service_error)?;
         match response {
             ServerResult::CallToolResult(result) => Ok(map_call_tool_result(result)),
-            _ => Err(TalosError::ToolError(
+            _ => Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
                 "MCP tools/call returned unexpected response".to_string(),
             )),
         }
@@ -234,15 +241,20 @@ impl ManagedMcpServer {
         request: McpReadResourceRequest,
     ) -> TalosResult<McpReadResourceResponse> {
         let Self::Ready { service, .. } = self else {
-            return Err(TalosError::ToolError(format!(
-                "MCP server `{}` is not ready",
-                request.server_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("MCP server `{}` is not ready", request.server_name),
+            ));
         };
         let params = ReadResourceRequestParams::new(request.uri);
         let result = time::timeout(DEFAULT_TOOL_TIMEOUT, service.read_resource(params))
             .await
-            .map_err(|_| TalosError::ToolError("MCP resources/read timed out".to_string()))?
+            .map_err(|_| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "MCP resources/read timed out".to_string(),
+                )
+            })?
             .map_err(map_service_error)?;
         Ok(McpReadResourceResponse {
             contents: result
@@ -303,7 +315,10 @@ async fn connect_service(server: &McpServerDefinition) -> TalosResult<RmcpServic
                 cmd.current_dir(cwd);
             }
             let (transport, _stderr) = TokioChildProcess::builder(cmd).spawn().map_err(|err| {
-                TalosError::ToolError(format!("failed to spawn MCP server `{command}`: {err}"))
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("failed to spawn MCP server `{command}`: {err}"),
+                )
             })?;
             time::timeout(
                 DEFAULT_STARTUP_TIMEOUT,
@@ -311,9 +326,17 @@ async fn connect_service(server: &McpServerDefinition) -> TalosResult<RmcpServic
             )
             .await
             .map_err(|_| {
-                TalosError::ToolError(format!("MCP server `{}` startup timed out", server.name))
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP server `{}` startup timed out", server.name),
+                )
             })?
-            .map_err(|err| TalosError::ToolError(format!("MCP initialize failed: {err}")))?
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP initialize failed: {err}"),
+                )
+            })?
         }
         McpTransportDefinition::StreamableHttp { url, .. } => {
             let transport = StreamableHttpClientTransport::from_uri(url.clone());
@@ -323,9 +346,17 @@ async fn connect_service(server: &McpServerDefinition) -> TalosResult<RmcpServic
             )
             .await
             .map_err(|_| {
-                TalosError::ToolError(format!("MCP server `{}` startup timed out", server.name))
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP server `{}` startup timed out", server.name),
+                )
             })?
-            .map_err(|err| TalosError::ToolError(format!("MCP initialize failed: {err}")))?
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP initialize failed: {err}"),
+                )
+            })?
         }
     };
     Ok(service)
@@ -340,7 +371,12 @@ async fn list_tools(
         service.list_tools(None::<PaginatedRequestParams>),
     )
     .await
-    .map_err(|_| TalosError::ToolError("MCP tools/list timed out".to_string()))?
+    .map_err(|_| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "MCP tools/list timed out".to_string(),
+        )
+    })?
     .map_err(map_service_error)?;
     Ok(result
         .tools
@@ -450,11 +486,11 @@ fn map_resource_contents(content: rmcp::model::ResourceContents) -> McpResourceC
 }
 
 fn map_service_error(error: ServiceError) -> TalosError {
-    TalosError::ToolFailure {
-        kind: TalosToolErrorKind::RuntimeFailure,
-        message: format!("MCP service error: {error}"),
-        gate_source: None,
-    }
+    TalosError::tool_failure(
+        TalosToolErrorKind::RuntimeFailure,
+        format!("MCP service error: {error}"),
+        None,
+    )
 }
 
 pub fn mcp_tool_name(server: &str, tool: &str) -> String {

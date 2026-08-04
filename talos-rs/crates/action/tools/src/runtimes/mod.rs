@@ -35,7 +35,8 @@ pub(crate) fn resolve_base_dir(context: &ToolContext) -> TalosResult<PathBuf> {
         }
     }
 
-    Err(TalosError::ToolError(
+    Err(TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
         "no project root is configured for this tool invocation".to_string(),
     ))
 }

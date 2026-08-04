@@ -5,11 +5,11 @@ use talos_app_protocol::requests::{ActorCredential, ActorCredentials};
 use talos_auth::{AuthService, CloudSessionCache, RequestIdentity};
 use talos_service::{AccountService, Actor};
 
-use crate::application::ProtocolResult;
+use crate::application::ApplicationResult;
 
 #[async_trait]
 pub trait ActorCredentialValidator: Send + Sync {
-    async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor>;
+    async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor>;
 }
 
 #[derive(Clone)]
@@ -43,7 +43,7 @@ impl AuthServiceCredentialValidator {
 
 #[async_trait]
 impl ActorCredentialValidator for AuthServiceCredentialValidator {
-    async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor> {
+    async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         match &credentials.credential {
             ActorCredential::ExistingSessionToken { token } => {
                 let identity = match self.auth_service.verify_access_token(token).await {
@@ -52,9 +52,7 @@ impl ActorCredentialValidator for AuthServiceCredentialValidator {
                         let _ = self
                             .account
                             .clear_rejected_access_token(token, CloudSessionCache::now_ms());
-                        return Err(
-                            talos_app_protocol::errors::AppServerErrorBody::from_talos_error(error),
-                        );
+                        return Err(error.to_api_error());
                     }
                 };
                 let _ = self

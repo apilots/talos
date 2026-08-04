@@ -56,17 +56,17 @@ impl ConfigService {
 
     fn model_info_for_ref(&self, model_ref: &ModelRef) -> TalosResult<ModelInfo> {
         if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
-            return Err(TalosError::UnsupportedModel(format!(
-                "{}:{}",
-                model_ref.provider, model_ref.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ProviderUnavailable,
+                format!("{}:{}", model_ref.provider, model_ref.id),
+            ));
         }
         let llm = self.llm_config_service.get()?;
         let Some(provider) = provider_config_for_llm(&llm, &model_ref.provider) else {
-            return Err(TalosError::UnsupportedModel(format!(
-                "{}:{}",
-                model_ref.provider, model_ref.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ProviderUnavailable,
+                format!("{}:{}", model_ref.provider, model_ref.id),
+            ));
         };
         if let Some(model) = provider
             .models
@@ -78,10 +78,10 @@ impl ConfigService {
                 model.clone(),
             ));
         }
-        Err(TalosError::UnsupportedModel(format!(
-            "{}:{}",
-            model_ref.provider, model_ref.id
-        )))
+        Err(TalosError::public(
+            talos_error::ErrorCode::ProviderUnavailable,
+            format!("{}:{}", model_ref.provider, model_ref.id),
+        ))
     }
 
     pub fn get_llm(&self) -> TalosResult<LlmConfig> {
@@ -111,7 +111,8 @@ impl ConfigService {
 
     pub fn delete_config(&self, request: ConfigDeleteRequest) -> TalosResult<ConfigDeleteResponse> {
         Self::validate_config_path(Some(&request.path))?;
-        Err(TalosError::ValidationError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "config delete is not supported for llm".to_string(),
         ))
     }
@@ -128,18 +129,17 @@ impl ConfigService {
         *self
             .models
             .try_write()
-            .map_err(|_| TalosError::ConfigError("models lock poisoned".to_string()))? =
-            new_catalog;
+            .map_err(|_| TalosError::internal("models lock poisoned".to_string()))? = new_catalog;
         Ok(())
     }
 
     fn validate_config_path(path: Option<&str>) -> TalosResult<()> {
         match path.unwrap_or("llm") {
             "" | "llm" => Ok(()),
-            other => Err(TalosError::ValidationError(format!(
-                "unsupported config path: {}",
-                other
-            ))),
+            other => Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("unsupported config path: {}", other),
+            )),
         }
     }
 }

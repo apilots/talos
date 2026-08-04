@@ -36,10 +36,10 @@ impl SubagentService {
             .get_active_turn(&subagent.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::Conflict(format!(
-                    "subagent '{}' has no turn state",
-                    subagent.session_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("subagent '{}' has no turn state", subagent.session_id),
+                )
             })?;
         let turn_events = self
             .complete_turn_events(&subagent.session_id, &active.turn_id)
@@ -68,16 +68,19 @@ impl SubagentService {
     ) -> TalosResult<SubagentSnapshot> {
         let active = self.timeline.get_active_turn(&subagent.session_id).await?;
         let active = active.ok_or_else(|| {
-            TalosError::Conflict(format!(
-                "subagent '{}' has no turn state",
-                subagent.session_id
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("subagent '{}' has no turn state", subagent.session_id),
+            )
         })?;
         if active.turn_id != turn_id {
-            return Err(TalosError::Conflict(format!(
-                "turn '{turn_id}' is not the current turn for subagent '{}'",
-                subagent.session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
+                    "turn '{turn_id}' is not the current turn for subagent '{}'",
+                    subagent.session_id
+                ),
+            ));
         }
         let turn_events = self
             .complete_turn_events(&subagent.session_id, turn_id)
@@ -140,7 +143,9 @@ impl SubagentService {
                     .iter()
                     .rev()
                     .find_map(|event| match &event.payload {
-                        AgentEventPayload::TurnError(payload) => Some(payload.error.clone()),
+                        AgentEventPayload::TurnError(payload) => {
+                            Some(payload.error.message.clone())
+                        }
                         _ => None,
                     })
                     .unwrap_or_else(|| "subagent turn failed".to_string());
@@ -160,7 +165,10 @@ impl SubagentService {
             .get_session_record(&subagent.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!("subagent {}", subagent.session_id))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("subagent {}", subagent.session_id),
+                )
             })?;
         Ok(record.agent_id)
     }
@@ -232,11 +240,19 @@ impl SubagentService {
             .sessions
             .get_session(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("subagent {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("subagent {session_id}"),
+                )
+            })?;
         let message_id = message_id.ok_or_else(|| {
-            TalosError::Conflict(format!(
-                "completed subagent turn for session '{session_id}' has no message identity"
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
+                    "completed subagent turn for session '{session_id}' has no message identity"
+                ),
+            )
         })?;
         self.history.latest_turn_items(&session, message_id).await
     }

@@ -8,10 +8,11 @@ use crate::{
 use futures_util::StreamExt;
 use serde_json::Value;
 use std::collections::HashMap;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use tokio::sync::mpsc;
 
 mod content;
+mod reasoning;
 mod types;
 
 #[cfg(test)]
@@ -19,6 +20,7 @@ mod types;
 mod tests;
 
 pub use content::content_text;
+use reasoning::reasoning_fields;
 pub use types::*;
 
 #[derive(Debug, Clone)]
@@ -214,82 +216,6 @@ pub fn messages(
         .collect()
 }
 
-type ChatReasoningFields = (
-    Option<String>,
-    Option<String>,
-    Option<Vec<ChatCompletionReasoningDetail>>,
-);
-
-fn reasoning_fields(
-    continuation: Option<ReasoningContinuation>,
-    format: ChatReasoningContinuationFormat,
-) -> TalosResult<ChatReasoningFields> {
-    let Some(continuation) = continuation else {
-        return Ok((None, None, None));
-    };
-
-    match (format, continuation) {
-        (ChatReasoningContinuationFormat::None, _) => Err(TalosError::ValidationError(
-            "Chat protocol received reasoning continuation without a replay format".to_string(),
-        )),
-        (ChatReasoningContinuationFormat::Reasoning, continuation) => {
-            let text = text_reasoning_continuation(continuation)?;
-            Ok((Some(text), None, None))
-        }
-        (ChatReasoningContinuationFormat::ReasoningContent, continuation) => {
-            let text = text_reasoning_continuation(continuation)?;
-            Ok((None, Some(text), None))
-        }
-        (ChatReasoningContinuationFormat::ReasoningDetails, ReasoningContinuation::Text(text)) => {
-            Ok((
-                None,
-                None,
-                Some(vec![ChatCompletionReasoningDetail::Text {
-                    text,
-                    signature: None,
-                    id: None,
-                    format: None,
-                    index: None,
-                }]),
-            ))
-        }
-        (
-            ChatReasoningContinuationFormat::ReasoningDetails,
-            ReasoningContinuation::Blocks(blocks),
-        ) => Ok((
-            None,
-            None,
-            Some(
-                blocks
-                    .into_iter()
-                    .map(ChatCompletionReasoningDetail::from)
-                    .collect(),
-            ),
-        )),
-    }
-}
-
-fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResult<String> {
-    match continuation {
-        ReasoningContinuation::Text(text) => Ok(text),
-        ReasoningContinuation::Blocks(blocks) => {
-            let mut text = String::new();
-            for block in blocks {
-                match block {
-                    ReasoningBlock::Text(block) => text.push_str(&block.text),
-                    ReasoningBlock::Summary(_) | ReasoningBlock::Encrypted(_) => {
-                        return Err(TalosError::ValidationError(
-                            "Chat text reasoning field cannot replay structured reasoning blocks"
-                                .to_string(),
-                        ));
-                    }
-                }
-            }
-            Ok(text)
-        }
-    }
-}
-
 pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ChatCompletionTool>> {
     definitions.map(|definitions| {
         definitions
@@ -354,9 +280,10 @@ pub fn chat_response(
     response: ChatCompletionResponse,
     provider_name: &str,
 ) -> TalosResult<ChatResponse> {
-    let choice = response.choices.into_iter().next().ok_or_else(|| {
-        TalosError::InternalError(format!("No choices in {provider_name} response"))
-    })?;
+    let choice =
+        response.choices.into_iter().next().ok_or_else(|| {
+            TalosError::internal(format!("No choices in {provider_name} response"))
+        })?;
 
     let usage_value = response.usage.unwrap_or(ChatCompletionUsage {
         prompt_tokens: 0,
@@ -547,9 +474,10 @@ fn accumulate_reasoning_detail(
             merge_reasoning_metadata(id, incoming_id, "id", index)?;
             merge_reasoning_metadata(format, incoming_format, "format", index)
         }
-        _ => Err(TalosError::ValidationError(format!(
-            "reasoning detail index {index} changed type across stream chunks"
-        ))),
+        _ => Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            format!("reasoning detail index {index} changed type across stream chunks"),
+        )),
     }
 }
 
@@ -560,11 +488,10 @@ fn merge_reasoning_metadata(
     index: u32,
 ) -> TalosResult<()> {
     match (current.as_ref(), incoming) {
-        (Some(current), Some(incoming)) if current != &incoming => {
-            Err(TalosError::ValidationError(format!(
-                "reasoning detail index {index} changed {field} across stream chunks"
-            )))
-        }
+        (Some(current), Some(incoming)) if current != &incoming => Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            format!("reasoning detail index {index} changed {field} across stream chunks"),
+        )),
         (None, Some(incoming)) => {
             *current = Some(incoming);
             Ok(())
@@ -616,7 +543,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} stream invalid SSE JSON: {error}"
                                     ))))
                                     .await;
@@ -645,9 +572,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }
@@ -714,7 +639,7 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{} model block stream invalid SSE JSON: {error}",
                                         options.provider_name
                                     ))))
@@ -753,10 +678,13 @@ pub fn model_blocks(
                                         Ok(detail) => detail,
                                         Err(error) => {
                                             let _ = tx
-                                                .send(Err(TalosError::ValidationError(format!(
-                                                    "{} reasoning detail is invalid: {error}",
-                                                    options.provider_name
-                                                ))))
+                                                .send(Err(TalosError::public(
+                                                    ErrorCode::InvalidRequest,
+                                                    format!(
+                                                        "{} reasoning detail is invalid: {error}",
+                                                        options.provider_name
+                                                    ),
+                                                )))
                                                 .await;
                                             return;
                                         }
@@ -966,9 +894,7 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }
@@ -1007,7 +933,7 @@ fn cache_creation_tokens(creation: &ChatCompletionCacheCreation) -> TalosResult<
         (Some(cache_creation_input_tokens), Some(ephemeral_5m_input_tokens))
             if cache_creation_input_tokens != ephemeral_5m_input_tokens =>
         {
-            Err(TalosError::ValidationError(format!(
+            Err(TalosError::public(ErrorCode::InvalidRequest, format!(
                 "Bailian cache creation token fields disagree: cache_creation_input_tokens={} ephemeral_5m_input_tokens={}",
                 cache_creation_input_tokens, ephemeral_5m_input_tokens
             )))

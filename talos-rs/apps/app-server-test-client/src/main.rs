@@ -203,7 +203,7 @@ async fn active_turn_conflict(client: &mut AppServerClient) -> Result<()> {
         ))
         .await
         .expect_err("second turn should conflict");
-    if matches!(err, talos_sdk::TalosError::ActiveTurnRunning(_)) {
+    if err.is_code(talos_sdk::ErrorCode::ActiveTurnRunning) {
         Ok(())
     } else {
         Err(anyhow!("expected active turn conflict, got {err}"))
@@ -221,7 +221,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         "## [00:00] App Server\nsession: sdk\n\n**Facts:**\n- app-server resource parity\n";
     let memory_expected_version = match read_memory_file(client, memory_date).await {
         Ok(existing) => Some(existing.file.version_token),
-        Err(TalosError::ResourceNotFound(_)) => None,
+        Err(error) if error.is_code(talos_sdk::ErrorCode::ResourceNotFound) => None,
         Err(error) => return Err(error.into()),
     };
     let written_memory = write_memory_file(
@@ -866,7 +866,7 @@ fn event_projection(event: &TimelineEventEnvelope) -> (&str, &str, Option<&str>,
 
 fn expect_validation<T>(result: Result<T, TalosError>, context: &str) -> Result<()> {
     match result {
-        Err(TalosError::ValidationError(_)) => Ok(()),
+        Err(error) if error.is_code(talos_sdk::ErrorCode::InvalidRequest) => Ok(()),
         Ok(_) => Err(anyhow!("{context}: expected validation error, got success")),
         Err(error) => Err(anyhow!("{context}: expected validation error, got {error}")),
     }
@@ -874,7 +874,7 @@ fn expect_validation<T>(result: Result<T, TalosError>, context: &str) -> Result<
 
 fn expect_conflict<T>(result: Result<T, TalosError>, context: &str) -> Result<()> {
     match result {
-        Err(TalosError::Conflict(_)) => Ok(()),
+        Err(error) if error.is_code(talos_sdk::ErrorCode::Conflict) => Ok(()),
         Ok(_) => Err(anyhow!("{context}: expected conflict, got success")),
         Err(error) => Err(anyhow!("{context}: expected conflict, got {error}")),
     }
@@ -882,7 +882,7 @@ fn expect_conflict<T>(result: Result<T, TalosError>, context: &str) -> Result<()
 
 fn expect_not_found<T>(result: Result<T, TalosError>, context: &str) -> Result<()> {
     match result {
-        Err(TalosError::ResourceNotFound(_)) => Ok(()),
+        Err(error) if error.is_code(talos_sdk::ErrorCode::ResourceNotFound) => Ok(()),
         Ok(_) => Err(anyhow!("{context}: expected not found, got success")),
         Err(error) => Err(anyhow!("{context}: expected not found, got {error}")),
     }

@@ -32,7 +32,7 @@ impl SqliteStorage {
         if let Some(parent) = Self::database_parent_dir(database_path) {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent).map_err(|err| {
-                    TalosError::StorageError(format!(
+                    TalosError::internal(format!(
                         "Failed to create database directory {}: {}",
                         parent.display(),
                         err
@@ -45,9 +45,7 @@ impl SqliteStorage {
             .max_connections(max_connections)
             .connect(&connection_string)
             .await
-            .map_err(|e| {
-                TalosError::StorageError(format!("Failed to connect to database: {}", e))
-            })?;
+            .map_err(|e| TalosError::internal(format!("Failed to connect to database: {}", e)))?;
 
         info!("SQLite connection established");
 
@@ -113,7 +111,7 @@ impl Storage for SqliteStorage {
         let rows = query
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| TalosError::StorageError(format!("Query failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Query failed: {}", e)))?;
 
         let mut result = Vec::new();
         for row in rows {
@@ -156,7 +154,7 @@ impl Storage for SqliteStorage {
         let result = query
             .execute(&self.pool)
             .await
-            .map_err(|e| TalosError::StorageError(format!("Execute failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Execute failed: {}", e)))?;
 
         Ok(result.rows_affected())
     }

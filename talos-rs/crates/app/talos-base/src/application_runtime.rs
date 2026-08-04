@@ -67,7 +67,12 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         .iter()
         .find(|definition| definition.enabled)
         .map(|definition| definition.id.clone())
-        .ok_or_else(|| TalosError::ValidationError("no enabled agent definitions".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "no enabled agent definitions".to_string(),
+            )
+        })?;
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
     if let Err(err) = router
         .add_binding(Binding {

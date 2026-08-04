@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { TalosHttpError, TalosStreamTerminatedError } from "@talos/sdk-browser";
+import { AppProtocol, TalosApiError, TalosStreamTerminatedError } from "@talos/sdk-browser";
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
 import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
+const EVENT_CURSOR_EXPIRED_CODE = AppProtocol.ErrorCode.EventCursorExpired;
 
 export function useSessionTimelineEvents(
   sessionId: string,
@@ -50,9 +51,8 @@ export function useSessionTimelineEvents(
           }
           let subscriptionError = error;
           if (
-            error instanceof TalosHttpError &&
-            error.status === 410 &&
-            error.code === "event_cursor_expired"
+            error instanceof TalosApiError &&
+            error.code === EVENT_CURSOR_EXPIRED_CODE
           ) {
             try {
               const recovery = await recoverTimelineLiveTail(sessionId);

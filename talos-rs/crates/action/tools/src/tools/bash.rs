@@ -85,7 +85,7 @@ impl Tool for BashTool {
     fn check_permissions(&self, input: &Value, _context: &ToolContext) -> TalosResult<()> {
         let input = parse_bash_input(input)?;
         if input.dangerously_disable_sandbox {
-            return Err(TalosError::AuthorizationDenied);
+            return Err(TalosError::authorization_denied());
         }
         Ok(())
     }
@@ -115,8 +115,12 @@ impl Tool for BashTool {
             prefix_rule: None,
         };
         let response = run_bash_command(&request, &context).await?;
-        let structured = serde_json::to_value(&response)
-            .map_err(|err| TalosError::ToolError(format!("serialize Bash response: {}", err)))?;
+        let structured = serde_json::to_value(&response).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize Bash response: {}", err),
+            )
+        })?;
         let status = match response.status {
             BashRunStatus::Running => TalosToolTaskStatus::Running,
             BashRunStatus::TimedOut => TalosToolTaskStatus::TimedOut,
@@ -161,10 +165,15 @@ fn bash_output_chunk(response: &crate::runtimes::bash::BashSessionResponse) -> (
 }
 
 fn parse_bash_input(input: &Value) -> TalosResult<BashInput> {
-    let parsed: BashInput = serde_json::from_value(input.clone())
-        .map_err(|err| TalosError::ValidationError(format!("invalid Bash arguments: {err}")))?;
+    let parsed: BashInput = serde_json::from_value(input.clone()).map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid Bash arguments: {err}"),
+        )
+    })?;
     if parsed.command.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "command must not be empty".to_string(),
         ));
     }

@@ -129,7 +129,7 @@ impl BailianProvider {
             .json(&bailian_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -137,7 +137,7 @@ impl BailianProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "Bailian API error: {} - {}",
                 status, error_text
             )));
@@ -146,7 +146,7 @@ impl BailianProvider {
         let bailian_resp: chat_protocol::ChatCompletionResponse = response
             .json()
             .await
-            .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
 
         chat_protocol::chat_response(bailian_resp, "Bailian")
     }
@@ -164,7 +164,7 @@ impl BailianProvider {
             .json(&bailian_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -172,7 +172,7 @@ impl BailianProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "Bailian API error: {} - {}",
                 status, error_text
             )));
@@ -202,10 +202,10 @@ impl LlmProvider for BailianProvider {
             .iter()
             .any(|attachment| attachment.kind == AttachmentKind::File)
         {
-            return Err(TalosError::FileError {
-                kind: talos_error::TalosFileErrorKind::UnsupportedAttachment,
-                message: "Bailian Chat Completions does not support file attachments".to_string(),
-            });
+            return Err(TalosError::file_error(
+                talos_error::TalosFileErrorKind::UnsupportedAttachment,
+                "Bailian Chat Completions does not support file attachments",
+            ));
         }
         validate_inline_attachments(attachments, |attachment| {
             matches!(
