@@ -17,8 +17,14 @@ fn web_search_defaults_to_keyless_base_provider() {
         config.web_search.firecrawl.base_url.as_deref(),
         Some("https://api.firecrawl.dev")
     );
-    assert!(config.web_search.brave.api_key_env.is_some());
-    assert!(config.web_search.tavily.api_key_env.is_some());
+    assert_eq!(
+        config.web_search.brave.api_key.as_deref(),
+        Some("${TALOS_WEB_SEARCH_BRAVE_API_KEY}")
+    );
+    assert_eq!(
+        config.web_search.tavily.api_key.as_deref(),
+        Some("${TALOS_WEB_SEARCH_TAVILY_API_KEY}")
+    );
 }
 
 #[test]
@@ -27,7 +33,7 @@ fn web_search_provider_config_deserializes_from_snake_case() {
         "web_search": {
             "provider": "firecrawl",
             "firecrawl": {
-                "api_key_env": "FIRECRAWL_API_KEY",
+                "api_key": "${FIRECRAWL_API_KEY}",
                 "base_url": "https://firecrawl.example"
             }
         }
@@ -39,8 +45,8 @@ fn web_search_provider_config_deserializes_from_snake_case() {
         WebSearchProviderConfig::Firecrawl
     );
     assert_eq!(
-        config.web_search.firecrawl.api_key_env.as_deref(),
-        Some("FIRECRAWL_API_KEY")
+        config.web_search.firecrawl.api_key.as_deref(),
+        Some("${FIRECRAWL_API_KEY}")
     );
     assert_eq!(
         config.web_search.firecrawl.base_url.as_deref(),
@@ -51,7 +57,7 @@ fn web_search_provider_config_deserializes_from_snake_case() {
         "web_search": {
             "provider": "brave",
             "brave": {
-                "api_key_env": "BRAVE_SEARCH_API_KEY",
+                "api_key": "${BRAVE_SEARCH_API_KEY}",
                 "base_url": "https://search.example/v1",
                 "timeout_ms": 5000
             }
@@ -61,8 +67,8 @@ fn web_search_provider_config_deserializes_from_snake_case() {
 
     assert_eq!(config.web_search.provider, WebSearchProviderConfig::Brave);
     assert_eq!(
-        config.web_search.brave.api_key_env.as_deref(),
-        Some("BRAVE_SEARCH_API_KEY")
+        config.web_search.brave.api_key.as_deref(),
+        Some("${BRAVE_SEARCH_API_KEY}")
     );
     assert_eq!(
         config.web_search.brave.base_url.as_deref(),

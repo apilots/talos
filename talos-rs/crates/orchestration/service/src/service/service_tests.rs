@@ -11,9 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{
-    resolve_effective_kernel_workspace, InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService,
-};
+use talos_config::{resolve_effective_kernel_workspace, ConfigStore, InMemoryLlmConfigStore};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
@@ -355,9 +353,8 @@ async fn test_application_with_runtime_and_event_failure(
         TimelineEventRetentionConfig::default(),
     ));
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
@@ -378,7 +375,7 @@ async fn test_application_with_runtime_and_event_failure(
         idempotency_store,
         config,
         memory,
-        llm_config_service,
+        config_store,
         Vec::new(),
         auth_service,
         user_service,

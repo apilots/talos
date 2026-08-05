@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use talos_auth::{AuthService, UserService};
-use talos_config::LlmConfigService;
+use talos_config::{Config, ConfigStore};
 use talos_coordinator::{AgentSessionCompactionIdentity, SessionRuntime};
 use talos_error::TalosError;
 use talos_store::profile::ProfileStore;
@@ -11,14 +11,15 @@ use talos_store::session::{
     SessionArtifactStore, SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
-    AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, InterruptTurnRequest,
-    InterruptTurnResponse, ListSubagentsRequest, ModelInfo, OptionalCurrentDirectoryPatch,
-    ProjectInfo, ProjectPatch, RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest,
-    RetryTurnResponse, SendMessageResult, SendSubagentMessageRequest, SessionConfigOverridePolicy,
-    SessionListRequest, SessionPatch, SpawnSubagentRequest, StartTurnRequest, StartTurnResponse,
-    SubagentSnapshot, SubagentSpawnResult, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
-    TimelineActiveTurnSnapshot, WaitSubagentRequest,
+    AgentTreeSnapshot, ConfigValue, FollowUpSubagentRequest, InterruptSubagentRequest,
+    InterruptTurnRequest, InterruptTurnResponse, ListSubagentsRequest, ModelInfo,
+    OptionalCurrentDirectoryPatch, ProjectInfo, ProjectPatch, RecoverTimelineRequest,
+    RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse, SendMessageResult,
+    SendSubagentMessageRequest, SessionConfigOverridePolicy, SessionListRequest, SessionPatch,
+    SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
+    SubagentSpawnResult, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubscribeTimelineRequest, TalosConfig, TalosSession, TimelineActiveTurnSnapshot,
+    WaitSubagentRequest,
 };
 
 use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
@@ -70,7 +71,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -87,7 +88,7 @@ impl TalosService {
             idempotency_store,
             base_config,
             memory,
-            llm_config_service,
+            config_store,
             models,
             auth_service,
             user_service,
@@ -107,7 +108,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -124,12 +125,19 @@ impl TalosService {
         let projects = Arc::new(ProjectService::new(project_store.clone()));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
             let sessions = sessions.clone();
-            Some(Arc::new(move |llm: &talos_config::LlmConfig| {
-                sessions.update_base_llm(llm);
-                if let Some(hook) = &reload_hook {
-                    hook(llm)?;
-                }
-                Ok(())
+            let base_config_state = Arc::new(std::sync::RwLock::new(base_config.clone()));
+            Some(Arc::new(move |value: ConfigValue| {
+                let reloaded_config = if let Some(hook) = &reload_hook {
+                    hook(value.clone())?
+                } else {
+                    let mut base_config = base_config_state
+                        .write()
+                        .expect("service base config write lock");
+                    apply_config_value_to_config(&mut base_config, &value);
+                    base_config.clone()
+                };
+                sessions.update_base_config(reloaded_config.clone());
+                Ok(reloaded_config)
             }))
         };
         let plugins = PluginManagerService::new(
@@ -180,7 +188,7 @@ impl TalosService {
             events: TimelineSubscriptionService::new(event_service.clone()),
             history,
             subagents,
-            config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
+            config: ConfigService::new_with_reload_hook(config_store, models, reload_hook),
             files,
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory,
@@ -202,7 +210,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -219,7 +227,7 @@ impl TalosService {
             idempotency_store,
             base_config,
             memory,
-            llm_config_service,
+            config_store,
             models,
             auth_service,
             user_service,
@@ -796,6 +804,17 @@ impl TalosService {
         name: String,
     ) -> ServiceResult<talos_types::FsDirectoryCreateResponse> {
         self.fs.create_directory(actor, parent, name).await
+    }
+}
+
+fn apply_config_value_to_config(config: &mut Config, value: &ConfigValue) {
+    match value {
+        ConfigValue::Llm(llm) => {
+            config.llm = (**llm).clone();
+        }
+        ConfigValue::WebSearch(web_search) => {
+            config.agent.kernel.tools.web_search = (**web_search).clone();
+        }
     }
 }
 

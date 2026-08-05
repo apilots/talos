@@ -2238,29 +2238,33 @@
     "ConfigGetRequest": {
       "properties": {
         "path": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConfigPath"
+            }
+          ],
+          "default": "llm"
         }
       },
       "type": "object"
+    },
+    "ConfigPath": {
+      "enum": [
+        "llm",
+        "webSearch"
+      ],
+      "type": "string"
     },
     "ConfigReloadRequest": {
       "type": "object"
     },
     "ConfigUpdateRequest": {
       "properties": {
-        "path": {
-          "type": "string"
-        },
         "value": {
           "$ref": "#/definitions/ConfigValue"
         }
       },
       "required": [
-        "path",
         "value"
       ],
       "type": "object"
@@ -2277,6 +2281,24 @@
             },
             "value": {
               "$ref": "#/definitions/LlmConfig"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "webSearch"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/WebSearchToolConfig"
             }
           },
           "required": [
@@ -7009,6 +7031,82 @@
         "max"
       ],
       "type": "string"
+    },
+    "WebSearchProviderConfig": {
+      "enum": [
+        "firecrawl",
+        "brave",
+        "tavily"
+      ],
+      "type": "string"
+    },
+    "WebSearchProviderRuntimeConfig": {
+      "properties": {
+        "api_key": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_url": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "default": 15000,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchToolConfig": {
+      "properties": {
+        "brave": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        },
+        "firecrawl": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        },
+        "provider": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderConfig"
+            }
+          ],
+          "default": "firecrawl"
+        },
+        "tavily": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        }
+      },
+      "type": "object"
     },
     "WorkspaceDocKind": {
       "enum": [

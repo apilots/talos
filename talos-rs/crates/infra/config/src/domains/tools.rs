@@ -1,5 +1,8 @@
+use schemars::JsonSchema;
+use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use ts_rs::TS;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolsRuntimeConfig {
@@ -42,7 +45,7 @@ impl Default for ToolsRuntimeConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WebSearchToolConfig {
     #[serde(default)]
     pub provider: WebSearchProviderConfig,
@@ -59,17 +62,17 @@ impl Default for WebSearchToolConfig {
         Self {
             provider: WebSearchProviderConfig::default(),
             firecrawl: WebSearchProviderRuntimeConfig {
-                api_key_env: Some("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY".to_string()),
+                api_key: Some("${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}".to_string()),
                 base_url: Some("https://api.firecrawl.dev".to_string()),
                 ..WebSearchProviderRuntimeConfig::default()
             },
             brave: WebSearchProviderRuntimeConfig {
-                api_key_env: Some("TALOS_WEB_SEARCH_BRAVE_API_KEY".to_string()),
+                api_key: Some("${TALOS_WEB_SEARCH_BRAVE_API_KEY}".to_string()),
                 base_url: Some("https://api.search.brave.com/res/v1/web/search".to_string()),
                 ..WebSearchProviderRuntimeConfig::default()
             },
             tavily: WebSearchProviderRuntimeConfig {
-                api_key_env: Some("TALOS_WEB_SEARCH_TAVILY_API_KEY".to_string()),
+                api_key: Some("${TALOS_WEB_SEARCH_TAVILY_API_KEY}".to_string()),
                 base_url: Some("https://api.tavily.com".to_string()),
                 ..WebSearchProviderRuntimeConfig::default()
             },
@@ -77,7 +80,7 @@ impl Default for WebSearchToolConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum WebSearchProviderConfig {
     #[default]
@@ -86,15 +89,16 @@ pub enum WebSearchProviderConfig {
     Tavily,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WebSearchProviderRuntimeConfig {
     #[serde(default)]
+    #[ts(optional)]
     pub api_key: Option<String>,
     #[serde(default)]
-    pub api_key_env: Option<String>,
-    #[serde(default)]
+    #[ts(optional)]
     pub base_url: Option<String>,
     #[serde(default = "default_tools_web_search_timeout_ms")]
+    #[ts(type = "number")]
     pub timeout_ms: u64,
 }
 
@@ -102,10 +106,35 @@ impl Default for WebSearchProviderRuntimeConfig {
     fn default() -> Self {
         Self {
             api_key: None,
-            api_key_env: None,
             base_url: None,
             timeout_ms: default_tools_web_search_timeout_ms(),
         }
+    }
+}
+
+impl Serialize for WebSearchProviderRuntimeConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut field_count = 1;
+        if self.api_key.is_some() {
+            field_count += 1;
+        }
+        if self.base_url.is_some() {
+            field_count += 1;
+        }
+
+        let mut state =
+            serializer.serialize_struct("WebSearchProviderRuntimeConfig", field_count)?;
+        if let Some(api_key) = &self.api_key {
+            state.serialize_field("api_key", api_key)?;
+        }
+        if let Some(base_url) = &self.base_url {
+            state.serialize_field("base_url", base_url)?;
+        }
+        state.serialize_field("timeout_ms", &self.timeout_ms)?;
+        state.end()
     }
 }
 

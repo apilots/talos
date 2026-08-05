@@ -271,13 +271,23 @@ export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
 export type ModelCostConfig = { input: number, output: number, cache_read: number, cache_write: number, };
 
-export type ConfigGetRequest = { path?: string, };
+export type WebSearchToolConfig = { provider: WebSearchProviderConfig, firecrawl: WebSearchProviderRuntimeConfig, brave: WebSearchProviderRuntimeConfig, tavily: WebSearchProviderRuntimeConfig, };
 
-export type ConfigGetResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
+export type WebSearchProviderConfig = "firecrawl" | "brave" | "tavily";
 
-export type ConfigUpdateRequest = { path: string, value: ConfigValue, };
+export type WebSearchProviderRuntimeConfig = { api_key?: string, base_url?: string, timeout_ms: number, };
 
-export type ConfigUpdateResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
+export type ConfigPath = "llm" | "webSearch";
+
+export type ConfigGetRequest = { path: ConfigPath, };
+
+export type ConfigUpdateRequest = { value: ConfigValue, };
+
+export type ConfigResponse = { "type": "llm", config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, } | { "type": "webSearch", config: WebSearchToolConfig, };
+
+export type ConfigGetResponse = ConfigResponse;
+
+export type ConfigUpdateResponse = ConfigResponse;
 
 export type ConfigDeleteRequest = { path: string, };
 
@@ -287,7 +297,7 @@ export type ConfigReloadRequest = Record<string, never>;
 
 export type ConfigReloadResponse = { success: boolean, };
 
-export type ConfigValue = { "type": "llm", "value": LlmConfig };
+export type ConfigValue = { "type": "llm", "value": LlmConfig } | { "type": "webSearch", "value": WebSearchToolConfig };
 
 export type ModelReadiness = { ready: boolean, provider: string, model: string, issues: Array<string>, };
 

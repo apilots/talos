@@ -6,36 +6,32 @@ use ts_rs::TS;
 
 pub use talos_config::{
     LlmConfig, ModelReadiness, ProviderKeyStatus, ProviderProtocolCapabilities,
+    WebSearchProviderConfig, WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ConfigPath {
+    #[default]
+    Llm,
+    WebSearch,
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ConfigGetRequest {
     #[serde(default)]
-    #[ts(optional)]
-    pub path: Option<String>,
+    pub path: ConfigPath,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ConfigGetResponse {
-    pub config: LlmConfig,
-    pub model_readiness: ModelReadiness,
-    pub provider_keys: BTreeMap<String, ProviderKeyStatus>,
-    pub provider_capabilities: BTreeMap<String, ProviderProtocolCapabilities>,
-}
+pub type ConfigGetResponse = ConfigResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ConfigUpdateRequest {
-    pub path: String,
     pub value: ConfigValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct ConfigUpdateResponse {
-    pub config: LlmConfig,
-    pub model_readiness: ModelReadiness,
-    pub provider_keys: BTreeMap<String, ProviderKeyStatus>,
-    pub provider_capabilities: BTreeMap<String, ProviderProtocolCapabilities>,
-}
+pub type ConfigUpdateResponse = ConfigResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ConfigDeleteRequest {
@@ -56,15 +52,32 @@ pub struct ConfigReloadResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+#[serde(tag = "type", content = "value", rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub enum ConfigValue {
-    Llm(LlmConfig),
+    Llm(Box<LlmConfig>),
+    WebSearch(Box<WebSearchToolConfig>),
 }
 
-impl From<talos_config::LlmConfigRead> for ConfigGetResponse {
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
+pub enum ConfigResponse {
+    Llm {
+        config: Box<LlmConfig>,
+        model_readiness: ModelReadiness,
+        provider_keys: BTreeMap<String, ProviderKeyStatus>,
+        provider_capabilities: BTreeMap<String, ProviderProtocolCapabilities>,
+    },
+    WebSearch {
+        config: Box<WebSearchToolConfig>,
+    },
+}
+
+impl From<talos_config::LlmConfigRead> for ConfigResponse {
     fn from(value: talos_config::LlmConfigRead) -> Self {
-        Self {
-            config: value.config,
+        Self::Llm {
+            config: Box::new(value.config),
             model_readiness: value.model_readiness,
             provider_keys: value.provider_keys,
             provider_capabilities: talos_config::provider_protocol_capabilities(),
@@ -72,14 +85,10 @@ impl From<talos_config::LlmConfigRead> for ConfigGetResponse {
     }
 }
 
-impl From<talos_config::LlmConfigRead> for ConfigUpdateResponse {
-    fn from(value: talos_config::LlmConfigRead) -> Self {
-        let response = ConfigGetResponse::from(value);
-        Self {
-            config: response.config,
-            model_readiness: response.model_readiness,
-            provider_keys: response.provider_keys,
-            provider_capabilities: response.provider_capabilities,
+impl From<WebSearchToolConfig> for ConfigResponse {
+    fn from(config: WebSearchToolConfig) -> Self {
+        Self::WebSearch {
+            config: Box::new(config),
         }
     }
 }

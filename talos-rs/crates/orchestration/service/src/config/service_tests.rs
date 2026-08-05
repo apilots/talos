@@ -1,8 +1,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use talos_config::{InMemoryLlmConfigStore, LlmConfigManager};
-use talos_types::{resolve_model_catalog, ModelRef, ModelSelection, ReasoningEffort};
+use talos_config::InMemoryLlmConfigStore;
+use talos_types::{
+    resolve_model_catalog, ConfigGetRequest, ConfigPath, ConfigResponse, ConfigUpdateRequest,
+    ConfigValue, ModelRef, ModelSelection, ReasoningEffort,
+};
 
 use super::ConfigService;
 
@@ -22,12 +25,7 @@ fn test_service() -> ConfigService {
         cost: Default::default(),
     }];
     let models = resolve_model_catalog(&llm);
-    ConfigService::new(
-        Arc::new(LlmConfigManager::new(Arc::new(
-            InMemoryLlmConfigStore::new(llm),
-        ))),
-        models,
-    )
+    ConfigService::new(Arc::new(InMemoryLlmConfigStore::new(llm)), models)
 }
 
 #[test]
@@ -95,9 +93,9 @@ async fn list_models_returns_explicit_configured_default() {
 #[tokio::test]
 async fn list_models_rejects_default_missing_from_provider_catalog() {
     let service = ConfigService::new(
-        Arc::new(LlmConfigManager::new(Arc::new(
-            InMemoryLlmConfigStore::new(talos_config::LlmConfig::default()),
-        ))),
+        Arc::new(InMemoryLlmConfigStore::new(
+            talos_config::LlmConfig::default(),
+        )),
         Vec::new(),
     );
 
@@ -128,13 +126,13 @@ fn update_llm_invokes_reload_hook() {
     let calls = Arc::new(AtomicUsize::new(0));
     let calls_for_hook = calls.clone();
     let service = ConfigService::new_with_reload_hook(
-        Arc::new(LlmConfigManager::new(Arc::new(
-            InMemoryLlmConfigStore::new(talos_config::LlmConfig::default()),
-        ))),
+        Arc::new(InMemoryLlmConfigStore::new(
+            talos_config::LlmConfig::default(),
+        )),
         Vec::new(),
         Some(Arc::new(move |_| {
             calls_for_hook.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(talos_config::Config::default())
         })),
     );
 
@@ -143,4 +141,136 @@ fn update_llm_invokes_reload_hook() {
     service.update_llm(llm).unwrap();
 
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn get_config_reads_web_search_variant() {
+    let service = test_service();
+
+    let response = service
+        .get_config(ConfigGetRequest {
+            path: ConfigPath::WebSearch,
+        })
+        .expect("web search config should load");
+
+    assert!(matches!(response, ConfigResponse::WebSearch { .. }));
+}
+
+#[test]
+fn update_config_saves_web_search_and_invokes_reload_hook() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_hook = calls.clone();
+    let service = ConfigService::new_with_reload_hook(
+        Arc::new(InMemoryLlmConfigStore::new(
+            talos_config::LlmConfig::default(),
+        )),
+        Vec::new(),
+        Some(Arc::new(move |_| {
+            calls_for_hook.fetch_add(1, Ordering::SeqCst);
+            Ok(talos_config::Config::default())
+        })),
+    );
+    let web_search = talos_config::WebSearchToolConfig {
+        provider: talos_config::WebSearchProviderConfig::Tavily,
+        ..Default::default()
+    };
+
+    let response = service
+        .update_config(ConfigUpdateRequest {
+            value: ConfigValue::WebSearch(Box::new(web_search)),
+        })
+        .expect("web search config should save");
+
+    match response {
+        ConfigResponse::WebSearch { config } => {
+            assert_eq!(
+                config.provider,
+                talos_config::WebSearchProviderConfig::Tavily
+            );
+        }
+        other => panic!("unexpected response: {other:?}"),
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn update_config_rejects_non_http_web_search_base_url() {
+    let service = test_service();
+    let web_search = talos_config::WebSearchToolConfig {
+        brave: talos_config::WebSearchProviderRuntimeConfig {
+            base_url: Some("ftp://brave.example/search".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let error = service
+        .update_config(ConfigUpdateRequest {
+            value: ConfigValue::WebSearch(Box::new(web_search)),
+        })
+        .expect_err("non-http base_url should be rejected");
+
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+}
+
+#[test]
+fn update_config_rejects_invalid_web_search_base_url() {
+    let service = test_service();
+    let web_search = talos_config::WebSearchToolConfig {
+        firecrawl: talos_config::WebSearchProviderRuntimeConfig {
+            base_url: Some("not a url".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let error = service
+        .update_config(ConfigUpdateRequest {
+            value: ConfigValue::WebSearch(Box::new(web_search)),
+        })
+        .expect_err("invalid base_url should be rejected");
+
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+}
+
+#[test]
+fn update_config_rejects_web_search_base_url_without_host() {
+    let service = test_service();
+    for base_url in ["http:/foo", "http:///foo"] {
+        let web_search = talos_config::WebSearchToolConfig {
+            firecrawl: talos_config::WebSearchProviderRuntimeConfig {
+                base_url: Some(base_url.to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let error = service
+            .update_config(ConfigUpdateRequest {
+                value: ConfigValue::WebSearch(Box::new(web_search)),
+            })
+            .expect_err("base_url without host should be rejected");
+
+        assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    }
+}
+
+#[test]
+fn update_config_rejects_zero_web_search_timeout() {
+    let service = test_service();
+    let web_search = talos_config::WebSearchToolConfig {
+        tavily: talos_config::WebSearchProviderRuntimeConfig {
+            timeout_ms: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let error = service
+        .update_config(ConfigUpdateRequest {
+            value: ConfigValue::WebSearch(Box::new(web_search)),
+        })
+        .expect_err("zero timeout should be rejected");
+
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }

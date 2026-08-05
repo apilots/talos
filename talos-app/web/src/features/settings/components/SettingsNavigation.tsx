@@ -7,6 +7,7 @@ import {
   ServerCog,
   Settings2,
   ShieldCheck,
+  Search,
   UserCircle,
   UserRoundCog,
 } from "lucide-react";
@@ -40,6 +41,7 @@ export type SettingsNavigationItem = InternalSettingsNavigationItem | ExternalSe
 type SettingsNavigationProps = {
   activeSection: SettingsSection;
   canOpenAccount: boolean;
+  canManageConfig: boolean;
 };
 
 const personalNavigation: SettingsNavigationItem[] = [
@@ -53,6 +55,7 @@ const personalNavigation: SettingsNavigationItem[] = [
 ];
 
 const extensionNavigation: SettingsNavigationItem[] = [
+  { id: "web-search", icon: Search },
   { id: "mcp-servers", icon: Boxes },
 ];
 
@@ -66,9 +69,15 @@ export const settingsNavigation: SettingsNavigationItem[] = [
   ...advancedNavigation,
 ];
 
-export function SettingsNavigation({ activeSection, canOpenAccount }: SettingsNavigationProps) {
+export function SettingsNavigation({ activeSection, canManageConfig, canOpenAccount }: SettingsNavigationProps) {
   const { t } = useTranslation(["settings", "common"]);
   const [accountOpenError, setAccountOpenError] = useState(false);
+  const visiblePersonalNavigation = canManageConfig
+    ? personalNavigation
+    : personalNavigation.filter((item) => item.id !== "models");
+  const visibleExtensionNavigation = canManageConfig
+    ? extensionNavigation
+    : extensionNavigation.filter((item) => item.id !== "web-search");
   const openAccount = () => {
     const preparedWindow = prepareExternalAuthWindow();
     setAccountOpenError(false);
@@ -97,14 +106,14 @@ export function SettingsNavigation({ activeSection, canOpenAccount }: SettingsNa
         <NavigationGroup
           activeSection={activeSection}
           canOpenAccount={canOpenAccount}
-          items={personalNavigation}
+          items={visiblePersonalNavigation}
           label={t("settings:navigation.personal")}
           onAccountClick={openAccount}
         />
         <NavigationGroup
           activeSection={activeSection}
           canOpenAccount={canOpenAccount}
-          items={extensionNavigation}
+          items={visibleExtensionNavigation}
           label={t("settings:navigation.extensions")}
           onAccountClick={openAccount}
         />

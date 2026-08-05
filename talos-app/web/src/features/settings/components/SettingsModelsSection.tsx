@@ -1,5 +1,5 @@
-import { SettingsModelsEditor } from "./models/SettingsModelsEditor";
+import { SettingsLlmConfigEditor } from "./models/SettingsLlmConfigEditor";
 
 export function SettingsModelsSection() {
-  return <SettingsModelsEditor />;
+  return <SettingsLlmConfigEditor />;
 }

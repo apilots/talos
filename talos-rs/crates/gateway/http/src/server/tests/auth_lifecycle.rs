@@ -165,24 +165,27 @@ async fn test_get_llm_allows_auth_disabled_actor() {
         .await
         .expect("auth disabled actor should access llm config");
     let data = expect_success(response.0);
-    assert_eq!(data.config.provider, "bailian");
+    match data {
+        talos_types::ConfigResponse::Llm { config, .. } => {
+            assert_eq!(config.provider, "bailian");
+        }
+        other => panic!("unexpected config response: {other:?}"),
+    }
 }
 
 #[tokio::test]
 async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
-    let llm_svc: Arc<dyn talos_config::LlmConfigService> =
-        Arc::new(talos_config::LlmConfigManager::new(Arc::new(
-            talos_config::InMemoryLlmConfigStore::new(Default::default()),
-        )));
+    let config_store: Arc<dyn talos_config::ConfigStore> =
+        Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
         Arc::new(MockGateway),
         true,
         Arc::new(RecordingEventStore::default()),
         test_config(),
         lifecycle,
-        llm_svc,
+        config_store,
     )
     .await;
     let app = Router::new()
@@ -210,17 +213,15 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
 async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
-    let llm_svc: Arc<dyn talos_config::LlmConfigService> =
-        Arc::new(talos_config::LlmConfigManager::new(Arc::new(
-            talos_config::InMemoryLlmConfigStore::new(Default::default()),
-        )));
+    let config_store: Arc<dyn talos_config::ConfigStore> =
+        Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
         Arc::new(MockGateway),
         true,
         Arc::new(RecordingEventStore::default()),
         test_config(),
         lifecycle,
-        llm_svc,
+        config_store,
     )
     .await;
     let app = Router::new()

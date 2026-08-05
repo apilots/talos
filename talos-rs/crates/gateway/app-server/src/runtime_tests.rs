@@ -23,6 +23,7 @@ use crate::auth::ActorCredentialValidator;
 struct MockApp {
     dispatched: Mutex<Vec<String>>,
     dispatched_actors: Mutex<Vec<String>>,
+    dispatched_auth_disabled: Mutex<Vec<bool>>,
     cancelled: Mutex<Vec<String>>,
     cancelled_actors: Mutex<Vec<String>>,
     drained: Mutex<usize>,
@@ -45,6 +46,10 @@ impl AppServerApplication for MockApp {
             .lock()
             .expect("dispatch actor lock")
             .push(actor.user_id.clone());
+        self.dispatched_auth_disabled
+            .lock()
+            .expect("dispatch auth-disabled lock")
+            .push(actor.auth_disabled);
         Ok(match request.params {
             ClientRequestParams::TurnStart(params) => json!({
                 "request_id": "req-1",
@@ -232,6 +237,13 @@ async fn auth_disabled_dispatches_business_requests_as_anonymous() {
             .expect("dispatch actor lock")
             .as_slice(),
         &["anonymous"]
+    );
+    assert_eq!(
+        app.dispatched_auth_disabled
+            .lock()
+            .expect("dispatch auth-disabled lock")
+            .as_slice(),
+        &[true]
     );
 }
 

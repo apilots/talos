@@ -6,7 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
-import { SettingsModelsEditor } from "./SettingsModelsEditor";
+import { SettingsLlmConfigEditor } from "./SettingsLlmConfigEditor";
 
 const getLlmConfig = vi.fn();
 
@@ -33,7 +33,7 @@ function createWrapper() {
   };
 }
 
-describe("SettingsModelsEditor", () => {
+describe("SettingsLlmConfigEditor", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
@@ -42,7 +42,7 @@ describe("SettingsModelsEditor", () => {
   it("shows config read errors instead of staying in loading state", async () => {
     getLlmConfig.mockRejectedValue(new Error("failed to read config"));
 
-    render(<SettingsModelsEditor />, { wrapper: createWrapper() });
+    render(<SettingsLlmConfigEditor />, { wrapper: createWrapper() });
 
     await waitFor(() => {
       expect(screen.getByText("failed to read config")).toBeTruthy();
@@ -58,6 +58,7 @@ describe("SettingsModelsEditor", () => {
       models: [],
     });
     getLlmConfig.mockResolvedValue({
+      type: "llm",
       config: {
         provider: "deepseek",
         model: "deepseek-v4-pro",
@@ -88,7 +89,7 @@ describe("SettingsModelsEditor", () => {
       },
     });
 
-    render(<SettingsModelsEditor />, { wrapper: createWrapper() });
+    render(<SettingsLlmConfigEditor />, { wrapper: createWrapper() });
 
     const deepseekTab = await screen.findByRole("button", { name: "DeepSeek" });
     fireEvent.click(deepseekTab);

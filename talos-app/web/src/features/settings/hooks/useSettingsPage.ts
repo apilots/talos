@@ -10,6 +10,7 @@ export type SettingsSection =
   | "models"
   | "agent-workspace"
   | "permissions"
+  | "web-search"
   | "mcp-servers"
   | "server";
 
@@ -20,6 +21,7 @@ export const settingsSections: SettingsSection[] = [
   "models",
   "agent-workspace",
   "permissions",
+  "web-search",
   "mcp-servers",
   "server",
 ];

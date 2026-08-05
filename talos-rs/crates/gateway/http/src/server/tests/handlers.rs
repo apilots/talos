@@ -8,9 +8,8 @@ async fn test_state_with_config_and_plugin_manager(
     let (auth_service, user_service) = test_auth_services();
     let event_store = Arc::new(RecordingEventStore::default());
     let event_service = event_service_from_store(event_store.clone());
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let session_service: Arc<dyn SessionService> = Arc::new(MockSessionService::default());
     let memory = talos_service::MemoryService::new(
         config.clone(),
@@ -31,7 +30,7 @@ async fn test_state_with_config_and_plugin_manager(
         event_store,
         config.clone(),
         memory,
-        llm_config_service,
+        config_store,
         vec![test_model_info()],
         auth_service.clone(),
         user_service,
@@ -133,6 +132,74 @@ async fn test_models() {
             "reasoningEffort": "medium"
         })
     );
+}
+
+#[tokio::test]
+async fn test_get_and_put_web_search_config_handlers() {
+    let state = test_state(false).await;
+    let web_search = talos_config::WebSearchToolConfig {
+        provider: talos_config::WebSearchProviderConfig::Brave,
+        brave: talos_config::WebSearchProviderRuntimeConfig {
+            base_url: Some("https://brave.example/search".to_string()),
+            timeout_ms: 12_000,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let update_response = put_config_handler(
+        State(state.clone()),
+        Some(axum::extract::Extension(admin_auth())),
+        Json(talos_types::ConfigValue::WebSearch(Box::new(
+            web_search.clone(),
+        ))),
+    )
+    .await
+    .expect("web search config update should succeed");
+    let update_data = expect_success(update_response.0);
+    assert_eq!(
+        update_data,
+        talos_types::ConfigResponse::WebSearch {
+            config: Box::new(web_search.clone())
+        }
+    );
+
+    let get_response = get_config_handler(
+        State(state),
+        Some(axum::extract::Extension(admin_auth())),
+        Path("webSearch".to_string()),
+    )
+    .await
+    .expect("web search config read should succeed");
+    let get_data = expect_success(get_response.0);
+
+    assert_eq!(
+        get_data,
+        talos_types::ConfigResponse::WebSearch {
+            config: Box::new(web_search)
+        }
+    );
+}
+
+#[tokio::test]
+async fn test_config_handler_rejects_regular_user_updates() {
+    let state = test_state(false).await;
+    let error = put_config_handler(
+        State(state),
+        Some(axum::extract::Extension(test_auth())),
+        Json(talos_types::ConfigValue::WebSearch(Box::default())),
+    )
+    .await
+    .expect_err("regular users should not update global config");
+
+    assert_eq!(error.into_response().status(), StatusCode::FORBIDDEN);
+}
+
+fn admin_auth() -> RequestIdentity {
+    RequestIdentity {
+        role: talos_auth::UserRole::Admin,
+        ..test_auth()
+    }
 }
 
 #[tokio::test]
@@ -412,6 +479,8 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
     let state = test_state_with_config(config, false).await;
     let adapter = TalosApplicationAdapter::new(state.app.clone(), 32);
     let actor = talos_service::Actor::regular("static-token");
+    let admin_actor =
+        talos_service::Actor::regular("admin-token").with_role(talos_auth::UserRole::Admin);
 
     let put_response = put_memory_file_handler(
         State(state.clone()),
@@ -478,7 +547,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
 
     let config = adapter
         .dispatch(
-            &actor,
+            &admin_actor,
             ClientRequest {
                 method: ClientMethod::ConfigGet,
                 params: ClientRequestParams::ConfigGet(ConfigGetRequest::default()),

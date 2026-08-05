@@ -8,7 +8,7 @@ use axum::Json;
 use serde::Deserialize;
 use serde_json::Value;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_config::{ConfigStore, InMemoryLlmConfigStore};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_service::{TalosService, TurnExecutor};
@@ -38,7 +38,7 @@ use crate::server::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
     submit_dynamic_tool_result_handler,
 };
-use crate::server::misc::get_llm_handler;
+use crate::server::misc::{get_config_handler, get_llm_handler, put_config_handler};
 
 #[path = "tests/support.rs"]
 mod support;
@@ -245,7 +245,7 @@ async fn test_state_with_lifecycle(
         base_config: test_config(),
         auth_disabled,
         lifecycle,
-        llm_config_service: None,
+        config_store: None,
     })
     .await
 }
@@ -257,17 +257,15 @@ struct TestStateConfig {
     base_config: talos_types::TalosConfig,
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
-    llm_config_service: Option<Arc<dyn LlmConfigService>>,
+    config_store: Option<Arc<dyn ConfigStore>>,
 }
 
 async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
-    let llm_config_service = config.llm_config_service.unwrap_or_else(|| {
-        Arc::new(LlmConfigManager::new(Arc::new(
-            InMemoryLlmConfigStore::new(config.base_config.llm.clone()),
-        )))
-    });
+    let config_store = config
+        .config_store
+        .unwrap_or_else(|| Arc::new(InMemoryLlmConfigStore::new(config.base_config.llm.clone())));
     let memory = talos_service::MemoryService::new(
         config.base_config.clone(),
         Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
@@ -294,7 +292,7 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
         config.event_store,
         config.base_config.clone(),
         memory,
-        llm_config_service,
+        config_store,
         vec![test_model_info()],
         auth_service.clone(),
         user_service,
@@ -325,7 +323,7 @@ async fn test_state_with_config(
         base_config: config,
         auth_disabled,
         lifecycle: Arc::new(ServerLifecycle::new()),
-        llm_config_service: None,
+        config_store: None,
     })
     .await
 }
@@ -359,16 +357,15 @@ async fn test_state_with_gateway_event_store_config(
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
 ) -> Arc<HttpApiState> {
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     test_state_with_gateway_event_store_config_and_lifecycle(
         turn_executor,
         auth_disabled,
         store,
         config,
         Arc::new(ServerLifecycle::new()),
-        llm_config_service,
+        config_store,
     )
     .await
 }
@@ -546,7 +543,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
     lifecycle: Arc<ServerLifecycle>,
-    llm_config_service: Arc<dyn LlmConfigService>,
+    config_store: Arc<dyn ConfigStore>,
 ) -> Arc<HttpApiState> {
     build_test_state(TestStateConfig {
         turn_executor,
@@ -555,7 +552,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
         base_config: config,
         auth_disabled,
         lifecycle,
-        llm_config_service: Some(llm_config_service),
+        config_store: Some(config_store),
     })
     .await
 }

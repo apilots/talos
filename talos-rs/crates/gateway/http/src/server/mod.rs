@@ -24,7 +24,7 @@ use std::sync::Arc;
 use axum::extract::DefaultBodyLimit;
 use axum::middleware::{self};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, get, post, put};
 use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -53,7 +53,8 @@ use self::messages::{
     submit_dynamic_tool_result_handler,
 };
 use self::misc::{
-    get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
+    get_config_handler, get_llm_handler, health_handler, list_models_handler, put_config_handler,
+    put_llm_handler, shutdown_signal,
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
@@ -184,6 +185,8 @@ impl HttpServer {
             .route("/v1/user", get(current_user_handler))
             .route("/v1/profile", get(read_profile_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
+            .route("/v1/config/:path", get(get_config_handler))
+            .route("/v1/config", put(put_config_handler))
             .route(
                 "/v1/fs/directory",
                 get(read_directory_handler).post(create_directory_handler),

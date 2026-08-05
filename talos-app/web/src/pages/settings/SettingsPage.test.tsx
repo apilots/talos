@@ -21,6 +21,7 @@ vi.mock("@/features/settings", async () => {
     SettingsPermissionsSection: () => <div>Permissions content</div>,
     SettingsProfileSection: () => <div>Profile content</div>,
     SettingsServerSection: () => <div>Advanced content</div>,
+    SettingsWebSearchSection: () => <div>Web Search content</div>,
     useSettingsPage: () => useSettingsPageMock(),
   };
 });
@@ -100,11 +101,11 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("link", { name: "Agent Workspace" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("shows model settings for regular authenticated users", () => {
+  it("hides model settings for regular authenticated users", () => {
     renderSettings("/settings");
 
     expect(screen.getByText("Profile content")).toBeTruthy();
-    expect(screen.getByText("Models")).toBeTruthy();
+    expect(screen.queryByText("Models")).toBeNull();
   });
 
   it("renders the mcp servers settings section", () => {
@@ -121,10 +122,24 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("link", { name: "Server" }).getAttribute("aria-current")).toBe("page");
   });
 
+  it("renders the web search settings section", () => {
+    renderSettings("/settings/web-search", "authenticated", "admin");
+
+    expect(screen.getByText("Web Search content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Web Search" }).getAttribute("aria-current")).toBe("page");
+  });
+
+  it("redirects regular users away from config management sections", () => {
+    renderSettings("/settings/web-search");
+
+    expect(screen.getByText("Profile content")).toBeTruthy();
+    expect(screen.queryByText("Web Search content")).toBeNull();
+  });
+
   it("renders the general settings section", () => {
     renderSettings("/settings/general");
 
-    expect(screen.getByText("Models")).toBeTruthy();
+    expect(screen.queryByText("Models")).toBeNull();
     expect(screen.getByText("General content")).toBeTruthy();
   });
 

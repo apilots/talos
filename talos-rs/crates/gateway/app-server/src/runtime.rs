@@ -472,7 +472,7 @@ async fn resolve_request_actor(
     request_actor_credentials: Option<ActorCredentials>,
 ) -> Result<Actor, ApiError> {
     if !config.auth_enabled {
-        return Ok(Actor::regular("anonymous"));
+        return Ok(Actor::auth_disabled());
     }
 
     if matches!(

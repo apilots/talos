@@ -3,10 +3,8 @@ use opendal::{services::Memory, Operator};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
-use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{
-    InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService, ProviderModelConfig,
-};
+use talos_auth::{AuthService, RequestIdentity, UserDto, UserRole, UserService};
+use talos_config::{ConfigStore, InMemoryLlmConfigStore, ProviderModelConfig};
 use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
@@ -28,8 +26,9 @@ use talos_types::talos::{
     TalosSourceType, TalosTurnStartedEvent,
 };
 use talos_types::{
-    AgentDispatchRuntime, SessionPatchRequest, StartTurnRequest, TalosConfig, TalosSession,
-    TokenUsage, TurnCommandStatus,
+    AgentDispatchRuntime, ConfigGetRequest, ConfigPath, ConfigUpdateRequest, ConfigValue,
+    SessionPatchRequest, StartTurnRequest, TalosConfig, TalosSession, TokenUsage,
+    TurnCommandStatus,
 };
 use tokio::sync::mpsc;
 
@@ -191,9 +190,8 @@ async fn test_gateway() -> ServiceGateway {
         handler.clone() as Arc<dyn AgentDispatchRuntime>
     ));
     let session_runtime: Arc<dyn SessionRuntime> = handler;
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
@@ -214,7 +212,7 @@ async fn test_gateway() -> ServiceGateway {
         idempotency_store,
         config,
         memory,
-        llm_config_service,
+        config_store,
         Vec::new(),
         auth_service,
         user_service,
@@ -301,6 +299,58 @@ async fn gateway_start_turn_rejects_invalid_request() {
         .await;
 
     assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn gateway_config_requires_admin_for_regular_auth() {
+    let gateway = test_gateway().await;
+
+    let read_error = gateway
+        .get_config(
+            &Actor::regular("user-1"),
+            ConfigGetRequest {
+                path: ConfigPath::WebSearch,
+            },
+        )
+        .await
+        .expect_err("regular users should not read global config");
+    assert!(read_error.is_code(talos_error::ErrorCode::PermissionDenied));
+
+    let update_error = gateway
+        .update_config(
+            &Actor::regular("user-1"),
+            ConfigUpdateRequest {
+                value: ConfigValue::WebSearch(Box::default()),
+            },
+        )
+        .await
+        .expect_err("regular users should not update global config");
+    assert!(update_error.is_code(talos_error::ErrorCode::PermissionDenied));
+}
+
+#[tokio::test]
+async fn gateway_config_allows_admin_and_auth_disabled() {
+    let gateway = test_gateway().await;
+
+    gateway
+        .get_config(
+            &Actor::regular("admin-1").with_role(UserRole::Admin),
+            ConfigGetRequest {
+                path: ConfigPath::WebSearch,
+            },
+        )
+        .await
+        .expect("admin should read global config");
+
+    gateway
+        .update_config(
+            &Actor::auth_disabled(),
+            ConfigUpdateRequest {
+                value: ConfigValue::WebSearch(Box::default()),
+            },
+        )
+        .await
+        .expect("auth-disabled mode should update global config");
 }
 
 #[tokio::test]

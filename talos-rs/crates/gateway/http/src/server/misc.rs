@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::extract::{Extension, State};
+use axum::extract::{Extension, Path, State};
 use axum::response::Json;
 use axum::Json as BodyJson;
 use serde_json::{json, Value};
@@ -8,8 +8,8 @@ use tokio::signal;
 
 use talos_auth::RequestIdentity;
 use talos_types::{
-    ConfigGetRequest, ConfigGetResponse, ConfigUpdateRequest, ConfigUpdateResponse, ConfigValue,
-    LlmConfig, ModelListRequest, ModelListResponse,
+    ConfigGetRequest, ConfigGetResponse, ConfigPath, ConfigUpdateRequest, ConfigUpdateResponse,
+    ConfigValue, LlmConfig, ModelListRequest, ModelListResponse,
 };
 
 use super::access::shared_actor;
@@ -56,6 +56,43 @@ pub(super) async fn get_llm_handler(
     Ok(api_success(llm))
 }
 
+pub(super) async fn get_config_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: Option<Extension<RequestIdentity>>,
+    Path(path): Path<String>,
+) -> Result<JsonResponse<ConfigGetResponse>, ApiError> {
+    let actor = actor
+        .map(|Extension(identity)| identity)
+        .unwrap_or_else(RequestIdentity::auth_disabled);
+    let config = state
+        .gateway
+        .get_config(
+            &shared_actor(&actor),
+            ConfigGetRequest {
+                path: parse_config_path(&path)?,
+            },
+        )
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(config))
+}
+
+pub(super) async fn put_config_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: Option<Extension<RequestIdentity>>,
+    BodyJson(value): BodyJson<ConfigValue>,
+) -> Result<JsonResponse<ConfigUpdateResponse>, ApiError> {
+    let actor = actor
+        .map(|Extension(identity)| identity)
+        .unwrap_or_else(RequestIdentity::auth_disabled);
+    let result = state
+        .gateway
+        .update_config(&shared_actor(&actor), ConfigUpdateRequest { value })
+        .await
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(result))
+}
+
 pub(super) async fn put_llm_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: Option<Extension<RequestIdentity>>,
@@ -69,13 +106,23 @@ pub(super) async fn put_llm_handler(
         .update_config(
             &shared_actor(&actor),
             ConfigUpdateRequest {
-                path: "llm".to_string(),
-                value: ConfigValue::Llm(llm),
+                value: ConfigValue::Llm(Box::new(llm)),
             },
         )
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(result))
+}
+
+fn parse_config_path(path: &str) -> Result<ConfigPath, ApiError> {
+    match path {
+        "llm" => Ok(ConfigPath::Llm),
+        "webSearch" | "web-search" => Ok(ConfigPath::WebSearch),
+        other => Err(ApiError::from_talos_error(talos_error::TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("unsupported config path: {}", other),
+        ))),
+    }
 }
 
 /// Handle shutdown signals.

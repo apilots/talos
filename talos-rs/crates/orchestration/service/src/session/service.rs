@@ -102,6 +102,13 @@ impl SessionService {
         base_config.llm = llm.clone();
     }
 
+    pub fn update_base_config(&self, config: TalosConfig) {
+        *self
+            .base_config
+            .write()
+            .expect("session base config write lock") = config;
+    }
+
     fn workspace_root(&self) -> Option<PathBuf> {
         let base_config = self.base_config_snapshot();
         let workspace_dir = base_config.agent.kernel.workspace_dir.trim();

@@ -169,10 +169,15 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::ModelSpeed>());
     output.push_str(&export::<talos_types::ModelInputKind>());
     output.push_str(&export::<talos_types::ModelCostConfig>());
+    output.push_str(&export::<talos_types::WebSearchToolConfig>());
+    output.push_str(&export::<talos_types::WebSearchProviderConfig>());
+    output.push_str(&export::<talos_types::WebSearchProviderRuntimeConfig>());
+    output.push_str(&export::<talos_types::ConfigPath>());
     output.push_str(&export::<talos_types::ConfigGetRequest>());
-    output.push_str(&export::<talos_types::ConfigGetResponse>());
     output.push_str(&export::<talos_types::ConfigUpdateRequest>());
-    output.push_str(&export::<talos_types::ConfigUpdateResponse>());
+    output.push_str(&export::<talos_types::ConfigResponse>());
+    output.push_str("export type ConfigGetResponse = ConfigResponse;\n\n");
+    output.push_str("export type ConfigUpdateResponse = ConfigResponse;\n\n");
     output.push_str(&export::<talos_types::ConfigDeleteRequest>());
     output.push_str(&export::<talos_types::ConfigDeleteResponse>());
     output.push_str(&export::<talos_types::ConfigReloadRequest>());

@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use talos_agent::{AgentDefinitionLoader, AgentHarness, AgentHarnessFactory};
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
-use talos_config::{Config, LlmConfigManager, LlmConfigService, YamlLlmConfigStore};
+use talos_config::{Config, ConfigStore, YamlConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl, SessionRuntime};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
@@ -161,11 +161,10 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         Arc::new(OpenModeUserService)
     };
 
-    let llm_store = Arc::new(YamlLlmConfigStore::with_env_path(
+    let config_store: Arc<dyn ConfigStore> = Arc::new(YamlConfigStore::with_env_path(
         config.source_path(),
         config.talos_paths().env_file,
     ));
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(llm_store));
 
     let model_catalog = resolve_model_catalog(&config.llm);
     let provider_reloader = reloadable_llm_provider.clone();
@@ -178,9 +177,9 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         provider_reloader.reload(reloaded_provider);
         *provider_router_config_reloader
             .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config;
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config.clone();
         provider_router_reloader.reload();
-        Ok(())
+        Ok(reloaded_config)
     });
     let service = Arc::new(TalosService::new_with_reload_hook(
         turn_executor,
@@ -194,7 +193,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         idempotency_store,
         config.clone(),
         memory_service.clone(),
-        llm_config_service,
+        config_store,
         model_catalog,
         auth_service.clone(),
         user_service,
