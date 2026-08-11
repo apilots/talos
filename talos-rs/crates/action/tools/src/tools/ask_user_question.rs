@@ -70,18 +70,18 @@ impl Tool for AskUserQuestionTool {
             "type": "object",
             "required": ["header", "question", "options"],
             "examples": [{
-                "header": "Execution Mode",
-                "question": "Choose mode",
+                "header": "Output Preference",
+                "question": "Choose response style",
                 "options": [
                     {
-                        "id": "plan",
-                        "label": "Plan",
-                        "description": "Explore the task before implementation"
+                        "id": "concise",
+                        "label": "Concise",
+                        "description": "Keep the answer brief"
                     },
                     {
-                        "id": "direct",
-                        "label": "Direct",
-                        "description": "Execute immediately with minimal planning"
+                        "id": "detailed",
+                        "label": "Detailed",
+                        "description": "Include supporting context"
                     }
                 ]
             }],

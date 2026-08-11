@@ -38,19 +38,6 @@ fn replace_todos_updates_runtime_and_shared_state() {
 }
 
 #[test]
-fn enter_and_exit_plan_mode_updates_shared_permission_state() {
-    let runtime = TaskStateRuntime::global();
-    let session_id = format!("session-{}", Uuid::new_v4());
-
-    assert_eq!(runtime.enter_plan_mode(&session_id), PermissionMode::Plan);
-    assert_eq!(
-        runtime.current_permission_mode(&session_id),
-        PermissionMode::Plan
-    );
-    assert_eq!(runtime.exit_plan_mode(&session_id), PermissionMode::Default);
-}
-
-#[test]
 fn question_roundtrip_tracks_answer() {
     let runtime = TaskStateRuntime::global();
     let session_id = format!("session-{}", Uuid::new_v4());
@@ -58,9 +45,9 @@ fn question_roundtrip_tracks_answer() {
     let record = runtime
         .ask_question(
             &session_id,
-            "Plan Mode".to_string(),
-            "Choose execution mode".to_string(),
-            vec![option("plan", "Plan"), option("direct", "Direct")],
+            "Output Preference".to_string(),
+            "Choose response style".to_string(),
+            vec![option("concise", "Concise"), option("detailed", "Detailed")],
             true,
         )
         .expect("question should be recorded");
@@ -70,7 +57,7 @@ fn question_roundtrip_tracks_answer() {
             &session_id,
             StructuredQuestionAnswer {
                 question_id: record.request.question_id.clone(),
-                selected_option_id: Some("plan".to_string()),
+                selected_option_id: Some("concise".to_string()),
                 free_form_text: None,
             },
         )
@@ -82,6 +69,6 @@ fn question_roundtrip_tracks_answer() {
             .answer
             .as_ref()
             .and_then(|answer| answer.selected_option_id.clone()),
-        Some("plan".to_string())
+        Some("concise".to_string())
     );
 }

@@ -185,22 +185,15 @@ impl<'a> PromptBuilder<'a> {
     }
 
     pub(crate) fn tool_selection_request(&self) -> ToolSelectionRequest {
-        let mut request = ToolSelectionRequest {
+        ToolSelectionRequest {
             phase: match self.phase {
                 PromptPhase::Planning => ToolSelectionPhase::Planning,
                 PromptPhase::Execution => ToolSelectionPhase::Execution,
             },
             planner_mode: Some(self.planner_mode.as_str().to_string()),
-            permission_mode: talos_tools::PermissionMode::Default,
             user_input: self.user_input.clone(),
             session_id: self.session_id.map(str::to_string),
-        };
-
-        if matches!(self.phase, PromptPhase::Planning) {
-            request.permission_mode = talos_tools::PermissionMode::Plan;
         }
-
-        request
     }
 
     async fn read_bootstrap_file(

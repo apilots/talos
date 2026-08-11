@@ -8,7 +8,7 @@ use crate::runtimes::task_state_types::{
     StructuredQuestionAnswer, StructuredQuestionOption, StructuredQuestionRecord,
     StructuredQuestionRequest, StructuredQuestionStatus, TodoItem, TodoListSnapshot, TodoStatus,
 };
-use crate::state::{get_session_tool_state, PermissionMode, TaskStateEntry};
+use crate::state::{get_session_tool_state, TaskStateEntry};
 
 #[derive(Debug, Default)]
 struct SessionTaskState {
@@ -61,22 +61,6 @@ impl TaskStateRuntime {
             .map_err(|_| TalosError::ToolError("todo state lock poisoned".to_string()))?
             .clone();
         Ok(TodoListSnapshot { items })
-    }
-
-    pub fn enter_plan_mode(&self, session_id: &str) -> PermissionMode {
-        let state = get_session_tool_state(session_id);
-        state.permissions.set_mode(PermissionMode::Plan);
-        state.permissions.mode()
-    }
-
-    pub fn exit_plan_mode(&self, session_id: &str) -> PermissionMode {
-        let state = get_session_tool_state(session_id);
-        state.permissions.set_mode(PermissionMode::Default);
-        state.permissions.mode()
-    }
-
-    pub fn current_permission_mode(&self, session_id: &str) -> PermissionMode {
-        get_session_tool_state(session_id).permissions.mode()
     }
 
     pub fn ask_question(

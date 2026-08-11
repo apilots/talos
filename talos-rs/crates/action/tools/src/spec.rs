@@ -3,8 +3,6 @@ use std::collections::BTreeSet;
 use talos_llm_provider::ToolDefinition;
 use talos_tools_sandbox::ToolGovernanceSpec;
 
-use crate::state::PermissionMode;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToolSource {
     Local,
@@ -195,7 +193,6 @@ impl RegisteredToolSpec {
 pub struct ToolSelectionRequest {
     pub phase: ToolSelectionPhase,
     pub planner_mode: Option<String>,
-    pub permission_mode: PermissionMode,
     pub user_input: Option<String>,
     pub session_id: Option<String>,
 }
@@ -205,7 +202,6 @@ impl Default for ToolSelectionRequest {
         Self {
             phase: ToolSelectionPhase::Execution,
             planner_mode: None,
-            permission_mode: PermissionMode::Default,
             user_input: None,
             session_id: None,
         }

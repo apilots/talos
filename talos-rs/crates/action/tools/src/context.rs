@@ -8,8 +8,8 @@ use talos_memory::{MemoryReader, MemoryScope};
 use crate::handlers::dynamic::StoredDynamicToolResult;
 use crate::state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
-    PermissionMode, ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore,
-    ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
+    ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore, ToolCatalogState,
+    ToolResultBudgetState,
 };
 use crate::AgentControl;
 
@@ -216,18 +216,6 @@ impl ToolContext {
 
     pub fn content_replacement_state(&self) -> &ContentReplacementState {
         &self.session_state.content_replacement
-    }
-
-    pub fn permission_context(&self) -> &ToolPermissionContext {
-        &self.session_state.permissions
-    }
-
-    pub fn permission_mode(&self) -> PermissionMode {
-        self.permission_context().mode()
-    }
-
-    pub fn set_permission_mode(&self, mode: PermissionMode) {
-        self.permission_context().set_mode(mode);
     }
 
     pub fn replace_tasks(&self, tasks: Vec<TaskStateEntry>) {

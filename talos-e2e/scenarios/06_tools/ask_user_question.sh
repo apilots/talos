@@ -96,7 +96,7 @@ if [[ -z "${session_id}" ]]; then
 fi
 echo "CASE ask_user_question_session_id PASS session_id=${session_id}"
 
-question_input="You must call tool 'AskUserQuestion' exactly once with header Execution Mode, question Choose mode, options plan and direct. After the tool call, respond with exactly ASK_USER_QUESTION_OK"
+question_input="You must call tool 'AskUserQuestion' exactly once with header Output Preference, question Choose response style, options concise and detailed. After the tool call, respond with exactly ASK_USER_QUESTION_OK"
 question_payload="$(build_payload "${question_input}")"
 question_json="$(send_message_response "${session_id}" "${question_payload}" "question")"
 log_case_json "tool_ask_user_question" "${question_payload}" "${question_json}"
@@ -123,7 +123,7 @@ assert item.get("type") == "json", item
 content = (item.get("value") or {}).get("value") or {}
 assert content.get("awaiting_user_response") is True, content
 question = content.get("question") or {}
-assert question.get("request", {}).get("header") == "Execution Mode", question
+assert question.get("request", {}).get("header") == "Output Preference", question
 PY
 
 echo "CASE tool_ask_user_question PASS"

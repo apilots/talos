@@ -31,8 +31,8 @@ pub use spec::{
 };
 pub use state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
-    PermissionMode, ReadFileStateEntry, ReadFileStateSource, ReadFileStateStore, SessionToolState,
-    TaskStateEntry, TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
+    ReadFileStateEntry, ReadFileStateSource, ReadFileStateStore, SessionToolState, TaskStateEntry,
+    TaskStateStore, ToolCatalogState, ToolResultBudgetState,
 };
 pub use subagent::{AgentControl, AgentControlFuture};
 
@@ -41,8 +41,6 @@ pub mod tools {
     pub mod ask_user_question;
     pub mod bash;
     pub mod edit;
-    pub mod enter_plan_mode;
-    pub mod exit_plan_mode;
     pub mod glob;
     pub mod grep;
     pub mod memory_get;
@@ -62,8 +60,7 @@ mod memory_tools_tests;
 
 // Re-export the built-in tools
 pub use tools::{
-    ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool,
-    enter_plan_mode::EnterPlanModeTool, exit_plan_mode::ExitPlanModeTool, glob::GlobTool,
+    ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool, glob::GlobTool,
     grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool, read::ReadTool,
     todo_write::TodoWriteTool, tool_search::ToolSearchTool, web_fetch::WebFetchTool,
     web_search::WebSearchTool, write::WriteTool,
@@ -86,8 +83,6 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     // Catalog and workflow tools
     registry.register(Arc::new(ToolSearchTool));
     registry.register(Arc::new(TodoWriteTool));
-    registry.register(Arc::new(EnterPlanModeTool));
-    registry.register(Arc::new(ExitPlanModeTool));
     registry.register(Arc::new(AskUserQuestionTool));
 }
 

@@ -24,8 +24,6 @@ fn workflow_tools_are_visible_while_compatibility_tools_stay_deferred() {
         assert!(visible_names.contains(name));
     }
     assert!(visible_names.contains("TodoWrite"));
-    assert!(visible_names.contains("EnterPlanMode"));
-    assert!(visible_names.contains("ExitPlanMode"));
     assert!(visible_names.contains("AskUserQuestion"));
     assert!(visible_names.contains("Bash"));
 

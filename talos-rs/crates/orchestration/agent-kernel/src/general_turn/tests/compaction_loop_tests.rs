@@ -181,7 +181,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
 
     let (stream_tx, mut stream_rx) = mpsc::channel(16);
     let mut ctx = build_ctx_with_stream(Some(stream_tx));
-    ctx.selected_model_info.model.context_window = 3_000;
+    ctx.selected_model_info.model.context_window = 2_800;
 
     let prepared = prepare_general_turn(
         &mut ctx,

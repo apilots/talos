@@ -20,16 +20,6 @@ fn test_context_typed_runtime_state() {
 }
 
 #[test]
-fn test_context_reuses_session_state() {
-    let context_a = ToolContext::new("shared-session", "user-1");
-    let context_b = ToolContext::new("shared-session", "user-1");
-
-    context_a.set_permission_mode(PermissionMode::Plan);
-
-    assert_eq!(context_b.permission_mode(), PermissionMode::Plan);
-}
-
-#[test]
 fn test_context_carries_trusted_turn_identity() {
     let context = ToolContext::new("session-1", "user-1").with_turn_id("turn-1");
 

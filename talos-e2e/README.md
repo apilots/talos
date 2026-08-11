@@ -41,8 +41,6 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `web_search.sh`
   - `tool_search.sh`
   - `ask_user_question.sh`
-  - `enter_plan_mode.sh`
-  - `exit_plan_mode.sh`
   - `agent.sh`
 
 7. `scenarios/07_memory/`

@@ -44,8 +44,6 @@ impl Default for ToolPolicy {
                 // State and discovery tools
                 "ToolSearch".to_string(),
                 "TodoWrite".to_string(),
-                "EnterPlanMode".to_string(),
-                "ExitPlanMode".to_string(),
                 "AskUserQuestion".to_string(),
                 "spawn_agent".to_string(),
                 "send_message".to_string(),

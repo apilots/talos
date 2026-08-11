@@ -11,11 +11,11 @@ async fn ask_user_question_records_pending_question() {
     let payload = tool
         .execute_payload(
             serde_json::json!({
-                "header": "Execution Mode",
-                "question": "How should the agent proceed?",
+                "header": "Output Preference",
+                "question": "How detailed should the response be?",
                 "options": [
-                    { "id": "plan", "label": "Plan", "description": "Think first" },
-                    { "id": "direct", "label": "Direct", "description": "Act now" }
+                    { "id": "concise", "label": "Concise", "description": "Keep it brief" },
+                    { "id": "detailed", "label": "Detailed", "description": "Include context" }
                 ]
             }),
             ToolContext::new(&session_id, "user-1"),
@@ -42,5 +42,5 @@ async fn ask_user_question_records_pending_question() {
         .expect("question lookup should succeed")
         .expect("question should be stored");
     assert_eq!(record.status, StructuredQuestionStatus::Pending);
-    assert_eq!(record.request.header, "Execution Mode");
+    assert_eq!(record.request.header, "Output Preference");
 }
