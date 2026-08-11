@@ -372,7 +372,7 @@ async fn list_models(
 async fn get_config(
     client: &mut AppServerClient,
 ) -> talos_sdk::TalosResult<talos_sdk::ConfigGetResponse> {
-    GatewayClient::get_config(client, ConfigGetRequest { path: None }).await
+    GatewayClient::get_config(client, ConfigGetRequest::default()).await
 }
 
 async fn list_memory_files(
