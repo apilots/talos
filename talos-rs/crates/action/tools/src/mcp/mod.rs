@@ -79,8 +79,12 @@ impl McpConnectionManager {
             .filter(|snapshot| server.is_none_or(|name| snapshot.server.name == name))
             .flat_map(|snapshot| snapshot.resources.clone())
             .collect::<Vec<_>>();
-        serde_json::to_value(resources)
-            .map_err(|err| TalosError::ToolError(format!("serialize MCP resources: {err}")))
+        serde_json::to_value(resources).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize MCP resources: {err}"),
+            )
+        })
     }
 
     pub async fn list_resource_templates(
@@ -95,7 +99,10 @@ impl McpConnectionManager {
             .flat_map(|snapshot| snapshot.resource_templates.clone())
             .collect::<Vec<_>>();
         serde_json::to_value(templates).map_err(|err| {
-            TalosError::ToolError(format!("serialize MCP resource templates: {err}"))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize MCP resource templates: {err}"),
+            )
         })
     }
 
@@ -271,7 +278,10 @@ fn mcp_content_to_payload(content: &[McpContent]) -> TalosResult<McpPayloadConte
             }
             McpContent::Resource { resource } => {
                 let raw = serde_json::to_value(resource).map_err(|err| {
-                    TalosError::ToolError(format!("serialize MCP resource content: {err}"))
+                    TalosError::public(
+                        talos_error::ErrorCode::ToolExecutionFailed,
+                        format!("serialize MCP resource content: {err}"),
+                    )
                 })?;
                 parts.push(raw.to_string());
                 entries.push(json!({

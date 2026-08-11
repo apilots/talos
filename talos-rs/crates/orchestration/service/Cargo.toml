@@ -33,6 +33,7 @@ talos-types = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
+url = "2"
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]

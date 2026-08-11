@@ -23,8 +23,8 @@ run_cli() {
 }
 
 models_json="$(run_cli models --format json)"
-primary_model="$(select_e2e_model_from_json "${models_json}")"
-primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
+primary_model="$(select_e2e_model_from_cli_json "${models_json}")"
+primary_provider="$(select_e2e_model_provider_from_cli_json "${models_json}" "${primary_model}")"
 if [[ -z "${primary_model}" || -z "${primary_provider}" ]]; then
   echo "CASE cli_stream_select_model FAIL models=${models_json}"
   exit 1

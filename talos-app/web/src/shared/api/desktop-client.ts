@@ -2,7 +2,9 @@ import { createElectronAppServerClient, type DesktopRendererBridge } from "@talo
 import type {
   AppProtocol,
   ConfigGetResponse,
+  ConfigPath,
   ConfigUpdateResponse,
+  ConfigValue,
   DocUpdateRequest,
   LlmConfig,
   MemoryFileListRequest,
@@ -117,6 +119,10 @@ export function createDesktopTalosClient(
     llm: {
       get: (): Promise<ConfigGetResponse> => client.getLlmConfig(),
       update: (config: LlmConfig): Promise<ConfigUpdateResponse> => client.updateLlmConfig(config),
+    },
+    config: {
+      get: (path: ConfigPath = "llm"): Promise<ConfigGetResponse> => client.configGet(path),
+      update: (value: ConfigValue): Promise<ConfigUpdateResponse> => client.configUpdate(value),
     },
     models: {
       list: () => client.listModels(),

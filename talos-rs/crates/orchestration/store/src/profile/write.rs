@@ -161,12 +161,16 @@ pub(super) async fn delete_finalized_before(
     limit: usize,
 ) -> TalosResult<u64> {
     if limit == 0 {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "profile usage retention batch size must be > 0".to_string(),
         ));
     }
     let limit = i64::try_from(limit).map_err(|_| {
-        TalosError::ValidationError("profile usage retention batch size is too large".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "profile usage retention batch size is too large".to_string(),
+        )
     })?;
     let result = sqlx::query(
         r#"
@@ -211,7 +215,8 @@ fn validate_existing_turn(
     if matches {
         Ok(())
     } else {
-        Err(TalosError::Conflict(
+        Err(TalosError::public(
+            talos_error::ErrorCode::Conflict,
             "profile turn usage context changed during a logical turn".to_string(),
         ))
     }

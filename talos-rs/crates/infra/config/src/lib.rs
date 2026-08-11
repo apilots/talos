@@ -33,7 +33,6 @@ pub mod domains;
 pub mod env;
 pub mod loader;
 pub mod paths;
-pub mod service;
 pub mod store;
 pub mod upgrade;
 pub mod validate;
@@ -85,8 +84,9 @@ pub use loader::{install_database_migrations, DatabaseMigrationsInstallReport};
 pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };
-pub use service::{LlmConfigManager, LlmConfigService};
-pub use store::{InMemoryLlmConfigStore, LlmConfigStore, YamlLlmConfigStore};
+pub use store::{
+    ConfigStore, InMemoryLlmConfigStore, LlmConfigStore, YamlConfigStore, YamlLlmConfigStore,
+};
 pub use upgrade::{
     refresh_default_config_template, upgrade_default_config, ConfigTemplateRefreshReport,
     ConfigUpgradeReport,
@@ -195,11 +195,10 @@ pub fn default_timezone() -> String {
 
 pub fn parse_timezone(input: &str) -> TalosResult<TalosTimezone> {
     input.trim().parse::<TalosTimezone>().map_err(|err| {
-        talos_error::TalosError::InvalidConfiguration(format!(
-            "invalid timezone `{}`: {}",
-            input.trim(),
-            err
-        ))
+        talos_error::TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid timezone `{}`: {}", input.trim(), err),
+        )
     })
 }
 

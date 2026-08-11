@@ -71,10 +71,12 @@ impl SkillsService {
     }
 
     pub fn read_with_request(&self, request: SkillsReadRequest) -> TalosResult<SkillDocument> {
-        request
-            .selector
-            .validate()
-            .map_err(|error| talos_error::TalosError::ValidationError(error.to_string()))?;
+        request.selector.validate().map_err(|error| {
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                error.to_string(),
+            )
+        })?;
         self.read_document(&request.selector)
     }
 

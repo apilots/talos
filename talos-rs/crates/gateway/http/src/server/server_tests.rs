@@ -5,9 +5,10 @@ use axum::extract::{Path, Query, State};
 use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
+use serde::Deserialize;
 use serde_json::Value;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService};
+use talos_config::{ConfigStore, InMemoryLlmConfigStore};
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_service::{TalosService, TurnExecutor};
@@ -37,11 +38,97 @@ use crate::server::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
     submit_dynamic_tool_result_handler,
 };
-use crate::server::misc::get_llm_handler;
+use crate::server::misc::{get_config_handler, get_llm_handler, put_config_handler};
 
 #[path = "tests/support.rs"]
 mod support;
 use support::*;
+
+fn expect_success<T>(response: talos_types::ApiResponse<T>) -> T {
+    match response {
+        talos_types::ApiResponse::Success { data } => data,
+        talos_types::ApiResponse::Error { error } => {
+            panic!("expected success response, got error: {error:?}")
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RejectionQuery {
+    limit: u32,
+}
+
+async fn json_rejection_handler(Json(_body): Json<serde_json::Value>) {}
+
+async fn query_rejection_handler(Query(query): Query<RejectionQuery>) {
+    let _ = query.limit;
+}
+
+async fn path_rejection_handler(Path(_id): Path<u64>) {}
+
+async fn assert_structured_invalid_request(response: axum::response::Response) {
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(
+        payload,
+        serde_json::json!({
+            "status": "error",
+            "error": {
+                "code": "invalidRequest",
+                "message": "Invalid request"
+            }
+        })
+    );
+}
+
+#[tokio::test]
+async fn v1_extractor_rejections_are_structured() {
+    let app = Router::new()
+        .route("/v1/json", post(json_rejection_handler))
+        .route("/v1/query", get(query_rejection_handler))
+        .route("/v1/path/:id", get(path_rejection_handler))
+        .layer(middleware::from_fn(errors::normalize_extractor_rejection));
+
+    let malformed_json = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/json")
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_json).await;
+
+    let malformed_query = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/v1/query?limit=invalid")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_query).await;
+
+    let malformed_path = app
+        .oneshot(
+            Request::builder()
+                .uri("/v1/path/invalid")
+                .body(Body::empty())
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+    assert_structured_invalid_request(malformed_path).await;
+}
 
 struct EmptyProfileStore;
 
@@ -158,7 +245,7 @@ async fn test_state_with_lifecycle(
         base_config: test_config(),
         auth_disabled,
         lifecycle,
-        llm_config_service: None,
+        config_store: None,
     })
     .await
 }
@@ -170,17 +257,15 @@ struct TestStateConfig {
     base_config: talos_types::TalosConfig,
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
-    llm_config_service: Option<Arc<dyn LlmConfigService>>,
+    config_store: Option<Arc<dyn ConfigStore>>,
 }
 
 async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
-    let llm_config_service = config.llm_config_service.unwrap_or_else(|| {
-        Arc::new(LlmConfigManager::new(Arc::new(
-            InMemoryLlmConfigStore::new(config.base_config.llm.clone()),
-        )))
-    });
+    let config_store = config
+        .config_store
+        .unwrap_or_else(|| Arc::new(InMemoryLlmConfigStore::new(config.base_config.llm.clone())));
     let memory = talos_service::MemoryService::new(
         config.base_config.clone(),
         Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
@@ -207,7 +292,7 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
         config.event_store,
         config.base_config.clone(),
         memory,
-        llm_config_service,
+        config_store,
         vec![test_model_info()],
         auth_service.clone(),
         user_service,
@@ -238,7 +323,7 @@ async fn test_state_with_config(
         base_config: config,
         auth_disabled,
         lifecycle: Arc::new(ServerLifecycle::new()),
-        llm_config_service: None,
+        config_store: None,
     })
     .await
 }
@@ -272,16 +357,15 @@ async fn test_state_with_gateway_event_store_config(
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
 ) -> Arc<HttpApiState> {
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     test_state_with_gateway_event_store_config_and_lifecycle(
         turn_executor,
         auth_disabled,
         store,
         config,
         Arc::new(ServerLifecycle::new()),
-        llm_config_service,
+        config_store,
     )
     .await
 }
@@ -459,7 +543,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
     store: Arc<RecordingEventStore>,
     config: talos_types::TalosConfig,
     lifecycle: Arc<ServerLifecycle>,
-    llm_config_service: Arc<dyn LlmConfigService>,
+    config_store: Arc<dyn ConfigStore>,
 ) -> Arc<HttpApiState> {
     build_test_state(TestStateConfig {
         turn_executor,
@@ -468,7 +552,7 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
         base_config: config,
         auth_disabled,
         lifecycle,
-        llm_config_service: Some(llm_config_service),
+        config_store: Some(config_store),
     })
     .await
 }
@@ -725,7 +809,10 @@ impl AuthService for FakeAuthService {
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
-            return Err(TalosError::AuthError("invalid token".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Unauthenticated,
+                "invalid token".to_string(),
+            ));
         }
         Ok(RequestIdentity {
             user_id: token.to_string(),

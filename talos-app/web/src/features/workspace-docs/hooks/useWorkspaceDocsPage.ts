@@ -4,6 +4,7 @@ import type { WorkspaceDocInfo, WorkspaceDocKind } from "@talos/sdk-browser";
 
 import { useConnectionKey } from "@/features/chat";
 import { getTalosClient } from "@/shared/api/client";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 const DOC_KINDS: WorkspaceDocKind[] = ["soul", "identity", "user", "heartbeat", "memory"];
 
@@ -93,7 +94,11 @@ export function useWorkspaceDocsPage() {
     isDirty: docDraft !== selectedDetail.content,
     isLoading: docDetailQuery.isLoading,
     isSaving: saveMutation.isPending,
-    loadError: docDetailQuery.error instanceof Error ? docDetailQuery.error.message : null,
-    saveError: saveMutation.error instanceof Error ? saveMutation.error.message : null,
+    loadError: docDetailQuery.error
+      ? userVisibleErrorMessage(docDetailQuery.error, "Failed to load workspace document.")
+      : null,
+    saveError: saveMutation.error
+      ? userVisibleErrorMessage(saveMutation.error, "Failed to save workspace document.")
+      : null,
   };
 }

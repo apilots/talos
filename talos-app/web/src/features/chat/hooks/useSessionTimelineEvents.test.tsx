@@ -8,7 +8,8 @@ import { activeContextCompactionStage } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useAppStore } from "@/shared/store/app-store";
 import {
-  TalosHttpError,
+  AppProtocol,
+  TalosApiError,
   TalosStreamTerminatedError,
   type TimelineEventEnvelope,
 } from "@talos/sdk-browser";
@@ -85,15 +86,9 @@ describe("useSessionTimelineEvents", () => {
   it("recovers the server cursor before resubscribing after retention", async () => {
     apiMocks.subscribeTimelineEvents
       .mockRejectedValueOnce(
-        new TalosHttpError({
-          method: "GET",
-          status: 410,
-          statusText: "Gone",
-          body: JSON.stringify({
-            code: "event_cursor_expired",
-            message: "event cursor is older than retained timeline events",
-          }),
-          url: "http://localhost/v1/sessions/sess-1/events",
+        new TalosApiError({
+          code: AppProtocol.ErrorCode.EventCursorExpired,
+          message: "Event cursor expired",
         }),
       )
       .mockImplementationOnce(() => new Promise(() => undefined));

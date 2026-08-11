@@ -67,7 +67,10 @@ impl Tool for ApplyPatchTool {
         let request = parse_apply_patch_request(&input)?;
         let result = run(&request, &context).await?;
         let structured = serde_json::to_value(&result).map_err(|err| {
-            TalosError::ToolError(format!("serialize apply patch response: {}", err))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize apply patch response: {}", err),
+            )
         })?;
         let mut files = Vec::new();
         for change in &result.changes {
@@ -92,10 +95,14 @@ impl Tool for ApplyPatchTool {
 
 fn parse_apply_patch_request(input: &Value) -> TalosResult<ApplyPatchRequest> {
     let request: ApplyPatchRequest = serde_json::from_value(input.clone()).map_err(|err| {
-        TalosError::ValidationError(format!("invalid apply patch arguments: {err}"))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid apply patch arguments: {err}"),
+        )
     })?;
     if request.patch.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "patch must not be empty".to_string(),
         ));
     }

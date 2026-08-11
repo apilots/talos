@@ -68,7 +68,7 @@ impl FileService {
                         .fail_upload(
                             &record,
                             Some(&mut writer),
-                            TalosError::StorageError(format!("read file upload body: {error}")),
+                            TalosError::internal(format!("read file upload body: {error}")),
                         )
                         .await
                 }
@@ -78,10 +78,10 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::FileError {
-                            kind: TalosFileErrorKind::UploadTooLarge,
-                            message: "file upload size overflow".to_string(),
-                        },
+                        TalosError::file_error(
+                            TalosFileErrorKind::UploadTooLarge,
+                            "file upload size overflow",
+                        ),
                     )
                     .await;
             };
@@ -91,13 +91,10 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::FileError {
-                            kind: TalosFileErrorKind::UploadTooLarge,
-                            message: format!(
-                                "file upload exceeds {} bytes",
-                                self.limits.max_upload_bytes
-                            ),
-                        },
+                        TalosError::file_error(
+                            TalosFileErrorKind::UploadTooLarge,
+                            format!("file upload exceeds {} bytes", self.limits.max_upload_bytes),
+                        ),
                     )
                     .await;
             }
@@ -123,10 +120,7 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::FileError {
-                            kind: TalosFileErrorKind::UnsupportedMediaType,
-                            message,
-                        },
+                        TalosError::file_error(TalosFileErrorKind::UnsupportedMediaType, message),
                     )
                     .await;
             }
@@ -157,7 +151,7 @@ impl FileService {
                     .fail_upload(
                         &record,
                         None,
-                        TalosError::StorageError(format!(
+                        TalosError::internal(format!(
                             "mark file ready returned no row for {file_id}"
                         )),
                     )
@@ -184,7 +178,7 @@ impl FileService {
         upload_error: TalosError,
     ) -> TalosResult<T> {
         if let Err(cleanup_error) = self.cleanup_upload(record, writer).await {
-            return Err(TalosError::StorageError(format!(
+            return Err(TalosError::internal(format!(
                 "file upload failed: {upload_error}; cleanup failed: {cleanup_error}"
             )));
         }

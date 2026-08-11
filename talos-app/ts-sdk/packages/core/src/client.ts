@@ -1,8 +1,10 @@
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import type {
   DocUpdateRequest,
+  ConfigPath,
   ConfigGetResponse,
   ConfigUpdateResponse,
+  ConfigValue,
   LlmConfig,
   MemoryFileListRequest,
   MemoryFileListResponse,
@@ -179,6 +181,18 @@ export class TalosClient {
       return this.http.request<ConfigUpdateResponse>(this.url("/v1/llm"), {
         method: "PUT",
         body: JSON.stringify(config),
+      });
+    },
+  };
+
+  config = {
+    get: (path: ConfigPath = "llm"): Promise<ConfigGetResponse> => {
+      return this.http.request<ConfigGetResponse>(this.url(`/v1/config/${path}`));
+    },
+    update: (value: ConfigValue): Promise<ConfigUpdateResponse> => {
+      return this.http.request<ConfigUpdateResponse>(this.url("/v1/config"), {
+        method: "PUT",
+        body: JSON.stringify(value),
       });
     },
   };

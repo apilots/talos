@@ -191,7 +191,7 @@ impl OpenAIProvider {
             .json(&openai_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -200,7 +200,7 @@ impl OpenAIProvider {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             error!("OpenAI API error: {status} - {error_text}");
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "OpenAI API error: {status} - {error_text}"
             )));
         }
@@ -208,7 +208,7 @@ impl OpenAIProvider {
         let openai_resp: chat_protocol::ChatCompletionResponse = response
             .json()
             .await
-            .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
 
         chat_protocol::chat_response(openai_resp, "OpenAI")
     }
@@ -229,7 +229,7 @@ impl OpenAIProvider {
             .json(&openai_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -238,7 +238,7 @@ impl OpenAIProvider {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             error!("OpenAI API error: {status} - {error_text}");
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "OpenAI API error: {status} - {error_text}"
             )));
         }
@@ -246,7 +246,7 @@ impl OpenAIProvider {
         let openai_resp: responses_protocol::ResponsesResponse = response
             .json()
             .await
-            .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
 
         Ok(responses_protocol::chat_response(openai_resp))
     }
@@ -257,13 +257,13 @@ impl OpenAIProvider {
             OpenAIProtocol::Chat => (
                 self.endpoint_url("chat/completions"),
                 serde_json::to_value(Self::build_request(request, true)?).map_err(|e| {
-                    TalosError::InternalError(format!("Failed to serialize request: {}", e))
+                    TalosError::internal(format!("Failed to serialize request: {}", e))
                 })?,
             ),
             OpenAIProtocol::Responses => (
                 self.endpoint_url("responses"),
                 serde_json::to_value(Self::responses_request(request, Some(true))?).map_err(
-                    |e| TalosError::InternalError(format!("Failed to serialize request: {}", e)),
+                    |e| TalosError::internal(format!("Failed to serialize request: {}", e)),
                 )?,
             ),
         };
@@ -276,7 +276,7 @@ impl OpenAIProvider {
             .json(&body)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -284,7 +284,7 @@ impl OpenAIProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "OpenAI API error: {status} - {error_text}"
             )));
         }

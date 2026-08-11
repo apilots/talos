@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createBrowserTalosClient, TalosHttpError } from "./index";
+import { AppProtocol, createBrowserTalosClient, TalosApiError } from "./index";
 
 const streamMocks = vi.hoisted(() => ({
   fetchEventSource: vi.fn(),
@@ -22,7 +22,7 @@ afterEach(() => {
 describe("Browser files client", () => {
   it("lets FormData supply its multipart boundary", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ file: {} }), {
+      new Response(JSON.stringify({ status: "success", data: { file: {} } }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -43,6 +43,13 @@ describe("Browser files client", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.body).toBeInstanceOf(FormData);
     expect(init.headers).not.toHaveProperty("Content-Type");
+  });
+
+  it("rejects HTTP 204 responses without an ApiResponse body", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 204 })));
+    const client = createBrowserTalosClient({ baseUrl: "http://localhost:8080" });
+
+    await expect(client.models.list()).rejects.toBeInstanceOf(SyntaxError);
   });
 
   it("uses XHR only when upload progress is requested", async () => {
@@ -68,6 +75,25 @@ describe("Browser files client", () => {
     expect(xhr.setRequestHeader).toHaveBeenCalledWith("Authorization", "Bearer token-1");
     expect(xhr.body).toBeInstanceOf(FormData);
     expect(onProgress).toHaveBeenCalledWith({ loadedBytes: 2, totalBytes: 4 });
+  });
+
+  it("rejects progress uploads when HTTP 204 omits the ApiResponse body", async () => {
+    const xhr = installPendingXhr();
+    const client = createBrowserTalosClient({ baseUrl: "http://localhost:8080" });
+    const upload = client.files.upload(
+      {
+        filename: "diagram.png",
+        scope: { type: "personal" },
+        tags: [],
+        metadata: {},
+      },
+      new Uint8Array([1, 2, 3]),
+      { onProgress: vi.fn() },
+    );
+
+    xhr.finishWith(204, "");
+
+    await expect(upload).rejects.toBeInstanceOf(SyntaxError);
   });
 
   it("aborts an in-flight progress upload with the caller signal", async () => {
@@ -121,8 +147,11 @@ describe("Browser timeline client", () => {
         await options.onopen?.(
           new Response(
             JSON.stringify({
-              code: "event_cursor_expired",
-              message: "event cursor is older than retained timeline events",
+              status: "error",
+              error: {
+                code: AppProtocol.ErrorCode.EventCursorExpired,
+                message: "Event cursor expired",
+              },
             }),
             {
               status: 410,
@@ -142,11 +171,10 @@ describe("Browser timeline client", () => {
     );
 
     await expect(subscription).rejects.toMatchObject({
-      name: "TalosHttpError",
-      status: 410,
-      code: "event_cursor_expired",
-      message: "event cursor is older than retained timeline events",
-    } satisfies Partial<TalosHttpError>);
+      name: "TalosApiError",
+      code: AppProtocol.ErrorCode.EventCursorExpired,
+      message: "Event cursor expired",
+    } satisfies Partial<TalosApiError>);
   });
 });
 
@@ -155,6 +183,7 @@ interface FakeXhr {
   body: Document | XMLHttpRequestBodyInit | null;
   emitProgress: (loaded: number, total: number) => void;
   finish: () => void;
+  finishWith: (status: number, responseText: string) => void;
   open: ReturnType<typeof vi.fn>;
   setRequestHeader: ReturnType<typeof vi.fn>;
 }
@@ -188,10 +217,13 @@ function installPendingXhr(autoFinish = false): FakeXhr {
         total,
       } as ProgressEvent),
     finish: () => {
+      xhr.finishWith(200, JSON.stringify({ status: "success", data: { file: {} } }));
+    },
+    finishWith: (status, responseText) => {
       Object.assign(getInstance(), {
-        status: 200,
-        responseText: JSON.stringify({ file: {} }),
-        statusText: "OK",
+        status,
+        responseText,
+        statusText: status === 200 ? "OK" : "No Content",
       });
       getInstance().onload?.();
     },

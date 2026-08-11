@@ -15,7 +15,7 @@ pub(crate) fn parse_retrieved_memory_items(
                     Ok(vec![response.memory])
                 }
                 Ok(_) => Ok(Vec::new()),
-                Err(error) => Err(TalosError::SerializationError(format!(
+                Err(error) => Err(TalosError::internal(format!(
                     "parse MemoryGet result during context rebuild: {error}"
                 ))),
             }

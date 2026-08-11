@@ -1,15 +1,15 @@
 use chrono::Utc;
 use std::collections::HashMap;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ApiError, TalosError, TalosResult};
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionMetrics,
     ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger, StopReason,
     TalosAssistantTextCommittedEvent, TalosContentItem, TalosItemCompletedEvent,
-    TalosItemDeltaEvent, TalosItemStartedEvent, TalosRunErrorInfo, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult,
-    TalosTurnCompletedEvent, TalosTurnErrorEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent,
-    TokenUsage, TurnExecutionMetrics,
+    TalosItemDeltaEvent, TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
+    TalosToolProgressEntry, TalosToolProgressKind, TalosToolResult, TalosTurnCompletedEvent,
+    TalosTurnErrorEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent, TokenUsage,
+    TurnExecutionMetrics,
 };
 
 #[derive(Debug, Clone)]
@@ -35,12 +35,23 @@ impl TimelineBuilder {
         message_id: impl Into<String>,
         session_id: impl Into<String>,
     ) -> Self {
+        Self::new_with_sequence(request_id, turn_id, message_id, session_id, 0)
+    }
+
+    /// Resume timeline construction at the next persisted sequence.
+    pub fn new_with_sequence(
+        request_id: impl Into<String>,
+        turn_id: impl Into<String>,
+        message_id: impl Into<String>,
+        session_id: impl Into<String>,
+        next_sequence: u64,
+    ) -> Self {
         Self {
             request_id: request_id.into(),
             turn_id: turn_id.into(),
             message_id: message_id.into(),
             session_id: session_id.into(),
-            next_sequence: 0,
+            next_sequence,
             next_item_index: 0,
             items: HashMap::new(),
         }
@@ -84,23 +95,30 @@ impl TimelineBuilder {
     }
 
     pub fn fail_turn(&mut self, error: &TalosError) -> AgentEvent {
-        self.fail_turn_with_info(error.to_string(), error.to_run_error_info())
+        if error.is_internal() {
+            tracing::error!(
+                request_id = %self.request_id,
+                turn_id = %self.turn_id,
+                message_id = %self.message_id,
+                session_id = %self.session_id,
+                context = error.diagnostic_message(),
+                source = ?std::error::Error::source(error),
+                location = %error.location(),
+                "internal timeline application error"
+            );
+        }
+        self.fail_turn_with_error(error.to_api_error())
     }
 
     pub fn fail_turn_message(&mut self, error: impl Into<String>) -> AgentEvent {
-        self.fail_turn_with_info(error.into(), None)
+        self.fail_turn(&TalosError::internal(error))
     }
 
-    pub fn fail_turn_with_info(
-        &mut self,
-        error: impl Into<String>,
-        error_info: Option<TalosRunErrorInfo>,
-    ) -> AgentEvent {
+    fn fail_turn_with_error(&mut self, error: ApiError) -> AgentEvent {
         let payload = AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: self.request_id.clone(),
             turn_id: self.turn_id.clone(),
-            error_info,
-            error: error.into(),
+            error,
             failed_at_ms: now_ms(),
         });
         self.event(AgentEventType::TurnError, payload)
@@ -320,12 +338,16 @@ impl TimelineBuilder {
         phase: TalosTimelinePhase,
     ) -> TalosResult<AgentEvent> {
         let state = self.items.get_mut(item_id).ok_or_else(|| {
-            TalosError::ValidationError(format!("timeline item not found: {item_id}"))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("timeline item not found: {item_id}"),
+            )
         })?;
         if !matches!(state.item.kind, TalosTimelineItemKind::AssistantText) {
-            return Err(TalosError::ValidationError(format!(
-                "timeline item is not assistant text: {item_id}"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("timeline item is not assistant text: {item_id}"),
+            ));
         }
         state.item.phase = phase;
         let payload = AgentEventPayload::AssistantTextCommitted(TalosAssistantTextCommittedEvent {
@@ -401,7 +423,10 @@ impl TimelineBuilder {
 
     fn active_item_mut(&mut self, item_id: &str) -> TalosResult<&mut TimelineItemState> {
         let state = self.items.get_mut(item_id).ok_or_else(|| {
-            TalosError::ValidationError(format!("timeline item not found: {item_id}"))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("timeline item not found: {item_id}"),
+            )
         })?;
         if matches!(
             state.item.status,
@@ -409,9 +434,10 @@ impl TimelineBuilder {
                 | TalosTimelineItemStatus::Failed
                 | TalosTimelineItemStatus::Cancelled
         ) {
-            return Err(TalosError::ValidationError(format!(
-                "timeline item is not active: {item_id}"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("timeline item is not active: {item_id}"),
+            ));
         }
         Ok(state)
     }
@@ -489,7 +515,8 @@ fn apply_context_compaction_delta(
             }
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "context compaction delta can only update context compaction timeline content"
                 .to_string(),
         )),
@@ -508,7 +535,8 @@ fn append_text(content: &mut TalosTimelineContent, text: &str) -> TalosResult<()
             current.push_str(text);
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "text delta can only update text timeline content".to_string(),
         )),
     }
@@ -523,7 +551,8 @@ fn append_tool_arguments(
             arguments.push_str(arguments_delta);
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "tool arguments delta can only update tool timeline content".to_string(),
         )),
     }
@@ -543,7 +572,8 @@ fn append_tool_progress(
             });
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "tool progress delta can only update tool timeline content".to_string(),
         )),
     }
@@ -562,7 +592,8 @@ fn set_tool_result(
             });
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "tool result delta can only update tool timeline content".to_string(),
         )),
     }

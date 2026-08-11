@@ -2,6 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import "@/shared/i18n/setup";
 import { useSessionCommands } from "./useSessionCommands";
@@ -47,7 +48,10 @@ describe("useSessionCommands", () => {
   });
 
   it("shows the busy notice when remote compaction wins the command race", async () => {
-    mocks.compact.mockRejectedValue({ code: -32013 });
+    mocks.compact.mockRejectedValue(new TalosApiError({
+      code: AppProtocol.ErrorCode.ActiveTurnRunning,
+      message: "Active turn is already running",
+    }));
     const { result } = renderHook(() => useSessionCommands({
       currentModel: "model-1",
       isStreaming: false,

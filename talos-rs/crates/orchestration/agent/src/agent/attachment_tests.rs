@@ -23,7 +23,8 @@ impl AttachmentReader for RecordingFailingAttachmentReader {
                 .lock()
                 .expect("attachment reader calls mutex should lock")
                 .push((scope.clone(), file_ids.to_vec()));
-            Err(talos_error::TalosError::ResourceNotFound(
+            Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
                 "one or more files are unavailable".to_string(),
             ))
         })

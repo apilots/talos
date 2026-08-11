@@ -4,13 +4,18 @@ use talos_error::{TalosError, TalosResult};
 pub(crate) const DEFAULT_WEB_USER_AGENT: &str = "Talos/0.1 (+https://github.com/xiliu/talos)";
 
 pub(crate) fn parse_http_url(raw: &str) -> TalosResult<Url> {
-    let url =
-        Url::parse(raw).map_err(|err| TalosError::ToolError(format!("invalid web url: {err}")))?;
+    let url = Url::parse(raw).map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("invalid web url: {err}"),
+        )
+    })?;
     match url.scheme() {
         "http" | "https" => Ok(url),
-        other => Err(TalosError::ToolError(format!(
-            "unsupported web url scheme: {other}"
-        ))),
+        other => Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("unsupported web url scheme: {other}"),
+        )),
     }
 }
 

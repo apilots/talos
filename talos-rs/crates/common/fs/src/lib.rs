@@ -255,7 +255,7 @@ impl FileSystem for StdFileSystem {
             .read_file(path)?
             .ok_or_else(|| storage_error(format!("read file `{}`: not found", path.display())))?;
         serde_json::from_str(&content).map_err(|err| {
-            TalosError::SerializationError(format!("parse json file `{}`: {err}", path.display()))
+            TalosError::internal(format!("parse json file `{}`: {err}", path.display()))
         })
     }
 
@@ -264,7 +264,7 @@ impl FileSystem for StdFileSystem {
             return Ok(T::default());
         };
         serde_json::from_str(&content).map_err(|err| {
-            TalosError::SerializationError(format!("parse json file `{}`: {err}", path.display()))
+            TalosError::internal(format!("parse json file `{}`: {err}", path.display()))
         })
     }
 
@@ -314,10 +314,7 @@ impl FileSystem for StdFileSystem {
         options: WriteOptions,
     ) -> TalosResult<()> {
         let payload = serde_json::to_vec_pretty(value).map_err(|err| {
-            TalosError::SerializationError(format!(
-                "serialize json file `{}`: {err}",
-                path.display()
-            ))
+            TalosError::internal(format!("serialize json file `{}`: {err}", path.display()))
         })?;
         self.write_bytes_with(path, &payload, options)
     }
@@ -667,7 +664,10 @@ fn write_create_new(path: &Path, bytes: &[u8], options: WriteOptions) -> TalosRe
     }
     let mut file = open_options.open(path).map_err(|err| {
         if err.kind() == std::io::ErrorKind::AlreadyExists {
-            TalosError::Conflict(format!("file already exists `{}`", path.display()))
+            TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("file already exists `{}`", path.display()),
+            )
         } else {
             storage_error(format!("create file `{}`: {err}", path.display()))
         }
@@ -761,7 +761,7 @@ fn sidecar_lock_path(path: &Path) -> PathBuf {
 }
 
 fn storage_error(message: String) -> TalosError {
-    TalosError::StorageError(message)
+    TalosError::internal(message)
 }
 
 #[cfg(test)]

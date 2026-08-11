@@ -335,6 +335,10 @@ async fn wait_for_screenshot_artifact() -> Result<PathBuf> {
 }
 
 fn latest_screenshot_artifact() -> Result<Option<PathBuf>> {
+    let requested_path = output_dir()?.join("hacker-news.png");
+    if requested_path.exists() {
+        return Ok(Some(requested_path));
+    }
     latest_playwright_artifact("png")
 }
 

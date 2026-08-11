@@ -38,7 +38,8 @@ impl MemoryStore {
     /// Read one stable memory ID from a user scope.
     pub async fn get(&self, user_id: &str, memory_id: &str) -> TalosResult<Option<MemoryRecord>> {
         if user_id.trim().is_empty() || memory_id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "memory user_id and memory_id are required".to_string(),
             ));
         }
@@ -62,7 +63,8 @@ impl MemoryStore {
         limit: u32,
     ) -> TalosResult<Vec<MemoryRecord>> {
         if user_id.trim().is_empty() || !(1..=20).contains(&limit) {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "memory user_id and limit are required".to_string(),
             ));
         }
@@ -165,7 +167,8 @@ fn validate_search_query(user_id: &str, query: &MemorySearchQuery) -> TalosResul
             .zip(query.until_at)
             .is_some_and(|(since, until)| since > until)
     {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "invalid memory search request".to_string(),
         ));
     }
@@ -223,11 +226,10 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<MemoryRecord> {
         body: row
             .try_get("body")
             .map_err(storage_error("decode memory body"))?,
-        kind: parse_memory_kind(&kind).ok_or_else(|| {
-            TalosError::StorageError(format!("invalid stored memory kind: {kind}"))
-        })?,
+        kind: parse_memory_kind(&kind)
+            .ok_or_else(|| TalosError::internal(format!("invalid stored memory kind: {kind}")))?,
         importance: parse_memory_importance(&importance).ok_or_else(|| {
-            TalosError::StorageError(format!("invalid stored memory importance: {importance}"))
+            TalosError::internal(format!("invalid stored memory importance: {importance}"))
         })?,
         occurred_at: row
             .try_get("occurred_at")
@@ -248,7 +250,7 @@ fn optional_u64(row: &SqliteRow, column: &str) -> TalosResult<Option<u64>> {
         .map_err(storage_error("decode memory sequence"))?
         .map(|value| {
             u64::try_from(value).map_err(|_| {
-                TalosError::StorageError(format!("invalid negative memory sequence: {value}"))
+                TalosError::internal(format!("invalid negative memory sequence: {value}"))
             })
         })
         .transpose()

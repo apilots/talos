@@ -48,9 +48,9 @@ impl ProfileService {
     ) -> TalosResult<ProfileReadResponse> {
         let timezone = parse_timezone(&self.timezone)?;
         let as_of_date = now.with_timezone(&timezone).date_naive();
-        let start_date = as_of_date.checked_sub_days(Days::new(363)).ok_or_else(|| {
-            TalosError::InternalError("profile date window underflow".to_string())
-        })?;
+        let start_date = as_of_date
+            .checked_sub_days(Days::new(363))
+            .ok_or_else(|| TalosError::internal("profile date window underflow".to_string()))?;
         let start_date = start_date.format("%Y-%m-%d").to_string();
         let as_of_date = as_of_date.format("%Y-%m-%d").to_string();
         let (sessions, project_count, usage, daily_usage, model_usage) = tokio::try_join!(

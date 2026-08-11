@@ -52,10 +52,10 @@ impl ToolHandler for McpToolHandler {
             ToolCallPayload::Function { arguments } => match invocation.tool_name.as_str() {
                 "ListMcpResources" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
-                        TalosError::ToolError(format!(
-                            "invalid ListMcpResources arguments: {}",
-                            err
-                        ))
+                        TalosError::public(
+                            talos_error::ErrorCode::ToolExecutionFailed,
+                            format!("invalid ListMcpResources arguments: {}", err),
+                        )
                     })?;
                     Ok(ToolDispatchOutcome::executed(
                         function_payload_from_mcp_result(
@@ -67,10 +67,10 @@ impl ToolHandler for McpToolHandler {
                 }
                 "ListMcpResourceTemplates" => {
                     let args: ListArgs = serde_json::from_value(arguments).map_err(|err| {
-                        TalosError::ToolError(format!(
-                            "invalid ListMcpResourceTemplates arguments: {}",
-                            err
-                        ))
+                        TalosError::public(
+                            talos_error::ErrorCode::ToolExecutionFailed,
+                            format!("invalid ListMcpResourceTemplates arguments: {}", err),
+                        )
                     })?;
                     Ok(ToolDispatchOutcome::executed(
                         function_payload_from_mcp_result(
@@ -83,10 +83,10 @@ impl ToolHandler for McpToolHandler {
                 "ReadMcpResource" => {
                     let args: ReadResourceArgs =
                         serde_json::from_value(arguments).map_err(|err| {
-                            TalosError::ToolError(format!(
-                                "invalid ReadMcpResource arguments: {}",
-                                err
-                            ))
+                            TalosError::public(
+                                talos_error::ErrorCode::ToolExecutionFailed,
+                                format!("invalid ReadMcpResource arguments: {}", err),
+                            )
                         })?;
                     Ok(ToolDispatchOutcome::executed(
                         self.manager
@@ -94,15 +94,18 @@ impl ToolHandler for McpToolHandler {
                             .await?,
                     ))
                 }
-                other => Err(TalosError::ToolError(format!(
-                    "MCP tool '{}' requires Mcp payload",
-                    other
-                ))),
+                other => Err(TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("MCP tool '{}' requires Mcp payload", other),
+                )),
             },
-            _ => Err(TalosError::ToolError(format!(
-                "MCP tool '{}' invoked with unsupported payload",
-                invocation.tool_name
-            ))),
+            _ => Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "MCP tool '{}' invoked with unsupported payload",
+                    invocation.tool_name
+                ),
+            )),
         }
     }
 }
@@ -112,8 +115,8 @@ fn function_payload_from_mcp_result(
 ) -> TalosResult<ToolOutputPayload> {
     match result {
         Ok(value) => Ok(ToolOutputPayload::success_structured(value)),
-        Err(TalosError::ToolError(message)) => {
-            let mapped = map_mcp_json_rpc_error(message.as_str());
+        Err(error) if error.is_code(talos_error::ErrorCode::ToolExecutionFailed) => {
+            let mapped = map_mcp_json_rpc_error(error.diagnostic_message());
             Ok(ToolOutputPayload::failure_structured(
                 mapped.clone(),
                 Some(serde_json::json!({ "error": mapped })),

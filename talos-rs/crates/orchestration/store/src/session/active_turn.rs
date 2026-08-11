@@ -80,7 +80,7 @@ fn parse_status(raw: &str) -> TalosResult<ActiveTurnStatus> {
         "cancelling" => Ok(ActiveTurnStatus::Cancelling),
         "completed" => Ok(ActiveTurnStatus::Completed),
         "failed" => Ok(ActiveTurnStatus::Failed),
-        _ => Err(TalosError::SerializationError(format!(
+        _ => Err(TalosError::internal(format!(
             "unknown active turn status: {raw}"
         ))),
     }
@@ -93,12 +93,12 @@ fn pending_json(
     match status {
         ActiveTurnStatus::WaitingUserAction => pending
             .map(|value| {
-                serde_json::to_string(&value)
-                    .map_err(|err| TalosError::SerializationError(err.to_string()))
+                serde_json::to_string(&value).map_err(|err| TalosError::internal(err.to_string()))
             })
             .transpose()?
             .ok_or_else(|| {
-                TalosError::ValidationError(
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
                     "waiting_user_action requires pending_user_action".to_string(),
                 )
             })
@@ -108,8 +108,7 @@ fn pending_json(
         }
         ActiveTurnStatus::Running => Ok(pending
             .map(|value| {
-                serde_json::to_string(&value)
-                    .map_err(|err| TalosError::SerializationError(err.to_string()))
+                serde_json::to_string(&value).map_err(|err| TalosError::internal(err.to_string()))
             })
             .transpose()?),
     }
@@ -121,9 +120,8 @@ fn parse_active_turn_row(row: &Row) -> TalosResult<ActiveTurnRecord> {
         .get_string("pending_user_action_json")
         .filter(|value| !value.trim().is_empty())
         .map(|raw| {
-            serde_json::from_str::<PendingUserAction>(&raw).map_err(|err| {
-                TalosError::SerializationError(format!("parse pending user action: {}", err))
-            })
+            serde_json::from_str::<PendingUserAction>(&raw)
+                .map_err(|err| TalosError::internal(format!("parse pending user action: {}", err)))
         })
         .transpose()?;
     let last_event_id = row

@@ -35,10 +35,16 @@ pub(super) fn usage_from_messages(usage: &MessagesUsage, output_tokens: u32) -> 
         .checked_add(usage.cache_creation_input_tokens.unwrap_or_default())
         .and_then(|value| value.checked_add(usage.cache_read_input_tokens.unwrap_or_default()))
         .ok_or_else(|| {
-            TalosError::ValidationError("Messages input token usage overflow".to_string())
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "Messages input token usage overflow".to_string(),
+            )
         })?;
     let total_tokens = prompt_tokens.checked_add(output_tokens).ok_or_else(|| {
-        TalosError::ValidationError("Messages total token usage overflow".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "Messages total token usage overflow".to_string(),
+        )
     })?;
     Ok(Usage {
         prompt_tokens,
@@ -59,6 +65,9 @@ pub(super) fn stream_input_usage(event: &Value) -> TalosResult<Option<MessagesUs
     serde_json::from_value(usage.clone())
         .map(Some)
         .map_err(|error| {
-            TalosError::ValidationError(format!("Messages stream usage is invalid: {error}"))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("Messages stream usage is invalid: {error}"),
+            )
         })
 }

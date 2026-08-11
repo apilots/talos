@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
-use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR, UNAUTHORIZED};
+use talos_app_protocol::errors::{NOT_INITIALIZED, PARSE_ERROR};
 use talos_app_protocol::requests::ActorCredentials;
 use talos_service::{
     Actor, EventReplay, TimelineSubscriptionCloseReason, TimelineSubscriptionClosed,
@@ -16,13 +16,14 @@ use tokio::io::{duplex, split, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, Buf
 use tokio::sync::{broadcast, mpsc};
 
 use super::*;
-use crate::application::SubscriptionSource;
+use crate::application::{ApplicationResult, SubscriptionSource};
 use crate::auth::ActorCredentialValidator;
 
 #[derive(Default)]
 struct MockApp {
     dispatched: Mutex<Vec<String>>,
     dispatched_actors: Mutex<Vec<String>>,
+    dispatched_auth_disabled: Mutex<Vec<bool>>,
     cancelled: Mutex<Vec<String>>,
     cancelled_actors: Mutex<Vec<String>>,
     drained: Mutex<usize>,
@@ -36,7 +37,7 @@ impl AppServerApplication for MockApp {
         &self,
         actor: &Actor,
         request: talos_app_protocol::requests::ClientRequest,
-    ) -> ProtocolResult<serde_json::Value> {
+    ) -> ApplicationResult<serde_json::Value> {
         self.dispatched
             .lock()
             .expect("dispatch lock")
@@ -45,6 +46,10 @@ impl AppServerApplication for MockApp {
             .lock()
             .expect("dispatch actor lock")
             .push(actor.user_id.clone());
+        self.dispatched_auth_disabled
+            .lock()
+            .expect("dispatch auth-disabled lock")
+            .push(actor.auth_disabled);
         Ok(match request.params {
             ClientRequestParams::TurnStart(params) => json!({
                 "request_id": "req-1",
@@ -61,7 +66,7 @@ impl AppServerApplication for MockApp {
         &self,
         _actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ProtocolResult<SubscriptionSource> {
+    ) -> ApplicationResult<SubscriptionSource> {
         let live_tx = self.live_tx.lock().expect("live tx lock").as_ref().cloned();
         match live_tx {
             Some(_live_tx) => {
@@ -92,11 +97,11 @@ impl AppServerApplication for MockApp {
                     },
                 })
             }
-            None => Err(AppServerErrorBody::method_not_found("event.subscribe")),
+            None => Err(ApiError::new(ErrorCode::ResourceNotFound)),
         }
     }
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ProtocolResult<()> {
+    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()> {
         self.cancelled
             .lock()
             .expect("cancel lock")
@@ -121,10 +126,8 @@ struct RejectingValidator;
 
 #[async_trait]
 impl ActorCredentialValidator for RejectingValidator {
-    async fn validate(&self, _credentials: &ActorCredentials) -> ProtocolResult<Actor> {
-        Err(AppServerErrorBody::from_talos_error(
-            talos_error::TalosError::AuthError("invalid token".to_string()),
-        ))
+    async fn validate(&self, _credentials: &ActorCredentials) -> ApplicationResult<Actor> {
+        Err(ApiError::new(ErrorCode::Unauthenticated))
     }
 }
 
@@ -132,16 +135,14 @@ struct ExistingTokenValidator;
 
 #[async_trait]
 impl ActorCredentialValidator for ExistingTokenValidator {
-    async fn validate(&self, credentials: &ActorCredentials) -> ProtocolResult<Actor> {
+    async fn validate(&self, credentials: &ActorCredentials) -> ApplicationResult<Actor> {
         match &credentials.credential {
             talos_app_protocol::requests::ActorCredential::ExistingSessionToken { token }
                 if token == "user-token" =>
             {
                 Ok(Actor::regular("user-1"))
             }
-            _ => Err(AppServerErrorBody::from_talos_error(
-                talos_error::TalosError::AuthError("invalid token".to_string()),
-            )),
+            _ => Err(ApiError::new(ErrorCode::Unauthenticated)),
         }
     }
 }
@@ -151,7 +152,7 @@ async fn request_before_initialize_returns_not_initialized() {
     let output = run_with_input(session_read_request()).await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[0]["error"]["code"], NOT_INITIALIZED);
+    assert_eq!(messages[0]["error"]["code"], NOT_INITIALIZED.as_i32());
 }
 
 #[tokio::test]
@@ -159,8 +160,8 @@ async fn malformed_line_returns_parse_error_and_keeps_running() {
     let output = run_with_input(format!("{{\n{}", initialize_request("secret"))).await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[0]["error"]["code"], PARSE_ERROR);
-    assert_eq!(messages[1]["result"]["protocol_version"]["major"], 0);
+    assert_eq!(messages[0]["error"]["code"], PARSE_ERROR.as_i32());
+    assert_eq!(result_data(&messages[1])["protocol_version"]["major"], 0);
 }
 
 #[tokio::test]
@@ -177,8 +178,8 @@ async fn incoming_jsonl_frame_respects_the_configured_byte_limit() {
     .await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[0]["result"]["protocol_version"]["major"], 0);
-    assert_eq!(messages[1]["error"]["code"], PARSE_ERROR);
+    assert_eq!(result_data(&messages[0])["protocol_version"]["major"], 0);
+    assert_eq!(messages[1]["error"]["code"], PARSE_ERROR.as_i32());
 }
 
 #[tokio::test]
@@ -199,7 +200,7 @@ async fn invalid_credentials_return_unauthorized() {
     .await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[1]["error"]["code"], UNAUTHORIZED);
+    assert_eq!(result_error(&messages[1])["code"], "unauthenticated");
 }
 
 #[tokio::test]
@@ -212,7 +213,7 @@ async fn dispatches_request_after_initialize() {
     .await;
     let messages = parse_output(&output);
 
-    assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+    assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched.lock().expect("dispatch lock").as_slice(),
         &["session.get"]
@@ -229,13 +230,20 @@ async fn auth_disabled_dispatches_business_requests_as_anonymous() {
     .await;
     let messages = parse_output(&output);
 
-    assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+    assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched_actors
             .lock()
             .expect("dispatch actor lock")
             .as_slice(),
         &["anonymous"]
+    );
+    assert_eq!(
+        app.dispatched_auth_disabled
+            .lock()
+            .expect("dispatch auth-disabled lock")
+            .as_slice(),
+        &[true]
     );
 }
 
@@ -254,7 +262,7 @@ async fn auth_enabled_requires_request_actor_credentials_after_initialize() {
     .await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[1]["error"]["code"], UNAUTHORIZED);
+    assert_eq!(result_error(&messages[1])["code"], "unauthenticated");
     assert!(app.dispatched.lock().expect("dispatch lock").is_empty());
 }
 
@@ -277,7 +285,7 @@ async fn auth_enabled_allows_session_cache_read_after_local_initialize() {
     .await;
     let messages = parse_output(&output);
 
-    assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+    assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched_actors
             .lock()
@@ -306,7 +314,7 @@ async fn auth_enabled_dispatches_with_existing_session_token_credentials() {
     .await;
     let messages = parse_output(&output);
 
-    assert!(messages[1]["result"]["ok"].as_bool().unwrap_or(false));
+    assert!(result_data(&messages[1])["ok"].as_bool().unwrap_or(false));
     assert_eq!(
         app.dispatched.lock().expect("dispatch lock").as_slice(),
         &["session.get"]
@@ -330,7 +338,7 @@ async fn owned_turn_shutdown_uses_business_request_actor() {
     .await;
     let messages = parse_output(&output);
 
-    assert_eq!(messages[1]["result"]["session_id"], "s1");
+    assert_eq!(result_data(&messages[1])["session_id"], "s1");
     assert_eq!(
         app.cancelled.lock().expect("cancel lock").as_slice(),
         &["s1"]
@@ -366,7 +374,7 @@ async fn idle_subscription_does_not_block_shutdown_after_background_drain() {
     .expect("run_jsonl should not hang on idle subscription");
     let messages = parse_output(&output);
 
-    assert_eq!(messages[1]["result"]["session_id"], "s1");
+    assert_eq!(result_data(&messages[1])["session_id"], "s1");
     assert_eq!(*app.drained.lock().expect("drain lock"), 1);
 }
 
@@ -405,15 +413,15 @@ async fn event_unsubscribe_stops_only_target_subscription() {
     let initialize = read_output_line(&mut output).await;
     let first_subscribe = read_output_line(&mut output).await;
     let second_subscribe = read_output_line(&mut output).await;
-    assert_eq!(initialize["result"]["protocol_version"]["major"], 0);
-    assert_eq!(first_subscribe["result"]["session_id"], "s1");
-    assert_eq!(second_subscribe["result"]["session_id"], "s1");
+    assert_eq!(result_data(&initialize)["protocol_version"]["major"], 0);
+    assert_eq!(result_data(&first_subscribe)["session_id"], "s1");
+    assert_eq!(result_data(&second_subscribe)["session_id"], "s1");
 
-    let first_subscription_id = first_subscribe["result"]["subscription_id"]
+    let first_subscription_id = result_data(&first_subscribe)["subscription_id"]
         .as_str()
         .expect("first subscription id")
         .to_string();
-    let second_subscription_id = second_subscribe["result"]["subscription_id"]
+    let second_subscription_id = result_data(&second_subscribe)["subscription_id"]
         .as_str()
         .expect("second subscription id")
         .to_string();
@@ -453,10 +461,10 @@ async fn event_unsubscribe_stops_only_target_subscription() {
         .expect("write unsubscribe request");
     let unsubscribe = read_output_line(&mut output).await;
     assert_eq!(
-        unsubscribe["result"]["subscription_id"],
+        result_data(&unsubscribe)["subscription_id"],
         first_subscription_id
     );
-    assert!(unsubscribe["result"]["unsubscribed"]
+    assert!(result_data(&unsubscribe)["unsubscribed"]
         .as_bool()
         .unwrap_or(false));
 
@@ -519,7 +527,7 @@ async fn closed_subscription_sends_completed_notification() {
 
     let _initialize = read_output_line(&mut output).await;
     let subscribe = read_output_line(&mut output).await;
-    let subscription_id = subscribe["result"]["subscription_id"]
+    let subscription_id = result_data(&subscribe)["subscription_id"]
         .as_str()
         .expect("subscription id")
         .to_string();
@@ -583,7 +591,7 @@ async fn lagged_subscription_close_is_not_reported_as_completed() {
 
     let _initialize = read_output_line(&mut output).await;
     let subscribe = read_output_line(&mut output).await;
-    let subscription_id = subscribe["result"]["subscription_id"]
+    let subscription_id = result_data(&subscribe)["subscription_id"]
         .as_str()
         .expect("subscription id")
         .to_string();
@@ -845,4 +853,14 @@ fn parse_output(output: &str) -> Vec<serde_json::Value> {
         .lines()
         .map(|line| serde_json::from_str(line).expect("json line"))
         .collect()
+}
+
+fn result_data(message: &serde_json::Value) -> &serde_json::Value {
+    assert_eq!(message["result"]["status"], "success");
+    &message["result"]["data"]
+}
+
+fn result_error(message: &serde_json::Value) -> &serde_json::Value {
+    assert_eq!(message["result"]["status"], "error");
+    &message["result"]["error"]
 }

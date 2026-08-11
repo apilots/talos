@@ -61,15 +61,17 @@ impl AgentPath {
     pub fn join(&self, task_name: &str) -> TalosResult<Self> {
         validate_agent_path_segment(task_name)?;
         if self.depth() >= MAX_AGENT_PATH_DEPTH {
-            return Err(TalosError::ValidationError(format!(
-                "agent path cannot exceed {MAX_AGENT_PATH_DEPTH} child segments"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent path cannot exceed {MAX_AGENT_PATH_DEPTH} child segments"),
+            ));
         }
         let value = format!("{}/{task_name}", self.0);
         if value.len() > MAX_AGENT_PATH_BYTES {
-            return Err(TalosError::ValidationError(format!(
-                "agent path cannot exceed {MAX_AGENT_PATH_BYTES} bytes"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent path cannot exceed {MAX_AGENT_PATH_BYTES} bytes"),
+            ));
         }
         Ok(Self(value))
     }
@@ -88,23 +90,26 @@ impl FromStr for AgentPath {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         if value.len() > MAX_AGENT_PATH_BYTES {
-            return Err(TalosError::ValidationError(format!(
-                "agent path cannot exceed {MAX_AGENT_PATH_BYTES} bytes"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent path cannot exceed {MAX_AGENT_PATH_BYTES} bytes"),
+            ));
         }
         if value == ROOT_AGENT_PATH {
             return Ok(Self::root());
         }
         let suffix = value.strip_prefix("/root/").ok_or_else(|| {
-            TalosError::ValidationError(
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "agent path must be '/root' or start with '/root/'".to_string(),
             )
         })?;
         let segments = suffix.split('/').collect::<Vec<_>>();
         if segments.len() > MAX_AGENT_PATH_DEPTH {
-            return Err(TalosError::ValidationError(format!(
-                "agent path cannot exceed {MAX_AGENT_PATH_DEPTH} child segments"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent path cannot exceed {MAX_AGENT_PATH_DEPTH} child segments"),
+            ));
         }
         for segment in segments {
             validate_agent_path_segment(segment)?;
@@ -144,9 +149,10 @@ fn validate_agent_path_segment(segment: &str) -> TalosResult<()> {
         character.is_ascii_lowercase() || character.is_ascii_digit() || character == b'_'
     });
     if !valid_length || !valid_characters || matches!(segment, "root" | "." | "..") {
-        return Err(TalosError::ValidationError(format!(
-            "invalid agent path segment '{segment}'"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid agent path segment '{segment}'"),
+        ));
     }
     Ok(())
 }

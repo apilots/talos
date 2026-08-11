@@ -101,14 +101,14 @@ impl ModelPickerState {
                 model.provider == current_model.provider && model.model.id == current_model.id
             })
             .ok_or_else(|| {
-                TalosError::ClientError(format!(
+                TalosError::internal(format!(
                     "current model '{}:{}' is missing from the model picker catalog",
                     current_model.provider, current_model.id
                 ))
             })?;
         let model = &models[selected_model];
         if model.model.reasoning != reasoning_effort_override.is_some() {
-            return Err(TalosError::ClientError(format!(
+            return Err(TalosError::internal(format!(
                 "current model '{}:{}' has inconsistent reasoning state",
                 current_model.provider, current_model.id
             )));

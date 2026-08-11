@@ -41,7 +41,7 @@ async fn job_failure_is_isolated_from_scheduler_startup() {
         "failing",
         "0 0 0 * * *",
         chrono_tz::UTC,
-        || async { Err(TalosError::InternalError("expected failure".to_string())) },
+        || async { Err(TalosError::internal("expected failure".to_string())) },
     )])
     .await
     .expect("job failure should not fail scheduler startup");
@@ -62,7 +62,9 @@ async fn invalid_cron_fails_automation_startup() {
     )])
     .await;
 
-    assert!(matches!(result, Err(TalosError::InvalidConfiguration(_))));
+    assert!(result
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
 }
 
 #[test]

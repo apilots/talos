@@ -13,12 +13,12 @@ const fsDirectoryCreateParams = (params: unknown) =>
 const fileUploadParams = (params: unknown) =>
   isRecord(params) && isRecord(params.request) && typeof params.dataBase64 === "string";
 const fileIdParams = (params: unknown) => hasString(params, "fileId");
-const llmConfigWriteParams = (params: unknown) =>
-  hasString(params, "path") &&
+const configGetParams = (params: unknown) =>
+  isRecord(params) && (params.path === "llm" || params.path === "webSearch");
+const configWriteParams = (params: unknown) =>
   isRecord(params) &&
-  params.path === "llm" &&
   isRecord(params.value) &&
-  params.value.type === "llm" &&
+  (params.value.type === "llm" || params.value.type === "webSearch") &&
   isRecord(params.value.value);
 const authLoginStartParams = (params: unknown) =>
   isRecord(params) &&
@@ -94,8 +94,8 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "auth.logout": emptyParams,
   "auth.session.clear": emptyParams,
   "auth.session.read": emptyParams,
-  "config.get": emptyParams,
-  "config.update": llmConfigWriteParams,
+  "config.get": configGetParams,
+  "config.update": configWriteParams,
   "config.delete": (params) => hasString(params, "path"),
   "config.reload": emptyParams,
   "event.subscribe": sessionParams,

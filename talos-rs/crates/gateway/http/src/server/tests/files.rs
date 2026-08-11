@@ -45,7 +45,7 @@ async fn file_routes_share_one_metadata_lifecycle() {
         .await
         .expect("upload request should complete");
     assert_eq!(response.status(), StatusCode::OK);
-    let uploaded: FileUploadResponse = response_json(response).await;
+    let uploaded: FileUploadResponse = response_success_json(response).await;
     assert_eq!(uploaded.file.original_filename, "diagram.png");
     assert_eq!(uploaded.file.tags, vec!["diagram", "image"]);
 
@@ -59,7 +59,7 @@ async fn file_routes_share_one_metadata_lifecycle() {
         )
         .await
         .expect("list request should complete");
-    let listed: FileListResponse = response_json(response).await;
+    let listed: FileListResponse = response_success_json(response).await;
     assert_eq!(listed.data, vec![uploaded.file.clone()]);
 
     let file_url = format!("/v1/files/{}", uploaded.file.file_id);
@@ -73,7 +73,7 @@ async fn file_routes_share_one_metadata_lifecycle() {
         )
         .await
         .expect("read request should complete");
-    let read: FileReadResponse = response_json(response).await;
+    let read: FileReadResponse = response_success_json(response).await;
     assert_eq!(read.file, uploaded.file);
 
     let response = app
@@ -101,7 +101,7 @@ async fn file_routes_share_one_metadata_lifecycle() {
         )
         .await
         .expect("delete request should complete");
-    let deleted: FileDeleteResponse = response_json(response).await;
+    let deleted: FileDeleteResponse = response_success_json(response).await;
     assert_eq!(deleted.file_id, uploaded.file.file_id);
 
     let response = app
@@ -133,7 +133,8 @@ async fn file_upload_rejects_transport_overflow_and_extra_parts() {
         .expect("overflow request should complete");
     assert_eq!(overflow.status(), StatusCode::PAYLOAD_TOO_LARGE);
     let overflow_body: Value = response_json(overflow).await;
-    assert_eq!(overflow_body["code"], "upload_too_large");
+    assert_eq!(overflow_body["status"], "error");
+    assert_eq!(overflow_body["error"]["code"], "uploadTooLarge");
 
     let extra = app
         .clone()
@@ -155,7 +156,7 @@ async fn file_upload_rejects_transport_overflow_and_extra_parts() {
         )
         .await
         .expect("list request should complete");
-    let listed: FileListResponse = response_json(listed).await;
+    let listed: FileListResponse = response_success_json(listed).await;
     assert!(listed.data.is_empty());
 }
 
@@ -294,18 +295,15 @@ fn file_error_mapping_is_exhaustive_and_machine_readable() {
         ),
         (
             TalosFileErrorKind::UnsupportedMediaType,
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
         ),
         (
             TalosFileErrorKind::UnsupportedAttachment,
             StatusCode::BAD_REQUEST,
         ),
     ] {
-        let response = ApiError::from_talos_error(TalosError::FileError {
-            kind,
-            message: "file rejected".to_string(),
-        })
-        .into_response();
+        let response = ApiError::from_talos_error(TalosError::file_error(kind, "file rejected"))
+            .into_response();
         assert_eq!(response.status(), status);
     }
 }
@@ -354,4 +352,11 @@ async fn response_json<T: serde::de::DeserializeOwned>(response: axum::response:
         .await
         .expect("response body should be readable");
     serde_json::from_slice(&bytes).expect("response body should be valid JSON")
+}
+
+async fn response_success_json<T: serde::de::DeserializeOwned>(
+    response: axum::response::Response,
+) -> T {
+    let envelope: talos_types::ApiResponse<T> = response_json(response).await;
+    expect_success(envelope)
 }

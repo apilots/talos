@@ -79,7 +79,8 @@ echo "DETAIL messages_non_stream_usage_total=${message_usage_total}"
 
 session_after_msg_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "messages_session_usage_after_non_stream" "{\"session_id\":\"${session_id}\"}" "${session_after_msg_json}"
-session_usage_total="$(usage_total_from_json "${session_after_msg_json}")"
+session_after_msg_data_json="$(api_data_json "${session_after_msg_json}")"
+session_usage_total="$(usage_total_from_json "${session_after_msg_data_json}")"
 if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 ]]; then
   echo "CASE messages_session_usage_after_non_stream FAIL response=${session_after_msg_json}"
   exit 1
@@ -174,7 +175,7 @@ echo "DETAIL messages_idempotency_second_output=${second_output}"
 
 recovery_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")"
 log_case_json "timeline_recovery" "{\"session_id\":\"${session_id}\"}" "${recovery_json}"
-RECOVERY_JSON="${recovery_json}" python3 - <<'PY'
+RECOVERY_JSON="$(api_data_json "${recovery_json}")" python3 - <<'PY'
 import json, os, sys
 raw = os.environ.get("RECOVERY_JSON", "")
 try:

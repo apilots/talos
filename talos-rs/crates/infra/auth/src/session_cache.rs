@@ -212,7 +212,7 @@ impl CloudSessionCache {
             Ok(content) => content,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => {
-                return Err(TalosError::StorageError(format!(
+                return Err(TalosError::internal(format!(
                     "read cloud session cache {}: {}",
                     self.path.display(),
                     err
@@ -220,7 +220,7 @@ impl CloudSessionCache {
             }
         };
         let entry: CloudSessionCacheEntry = serde_json::from_str(&content).map_err(|err| {
-            TalosError::SerializationError(format!(
+            TalosError::internal(format!(
                 "parse cloud session cache {}: {}",
                 self.path.display(),
                 err
@@ -235,12 +235,14 @@ impl CloudSessionCache {
 
     pub fn store(&self, entry: &CloudSessionCacheEntry) -> TalosResult<()> {
         if entry.schema_version != SCHEMA_VERSION {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "cloud session cache schema version is unsupported".to_string(),
             ));
         }
         if entry.access_token.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "cloud session cache access token is empty".to_string(),
             ));
         }
@@ -293,10 +295,13 @@ impl CloudSessionCache {
 
 fn acquire_cache_lock(path: &Path) -> TalosResult<talos_fs::FileLock> {
     talos_fs::std_fs().try_file_lock(path)?.ok_or_else(|| {
-        TalosError::Conflict(format!(
-            "cloud session cache lock already exists: {}",
-            path.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::Conflict,
+            format!(
+                "cloud session cache lock already exists: {}",
+                path.display()
+            ),
+        )
     })
 }
 

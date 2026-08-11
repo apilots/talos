@@ -108,9 +108,8 @@ fn legacy_memory_id(
         title,
         body,
     };
-    let bytes = serde_json::to_vec(&key).map_err(|error| {
-        TalosError::SerializationError(format!("serialize legacy memory id: {error}"))
-    })?;
+    let bytes = serde_json::to_vec(&key)
+        .map_err(|error| TalosError::internal(format!("serialize legacy memory id: {error}")))?;
     Ok(format!("mem_{}", &sha256_hex(&bytes)[..32]))
 }
 
@@ -119,7 +118,12 @@ fn legacy_occurred_at(date: NaiveDate, time: Option<NaiveTime>, timezone: Tz) ->
         .from_local_datetime(&date.and_time(time.unwrap_or(NaiveTime::MIN)))
         .earliest()
         .map(|value| value.timestamp())
-        .ok_or_else(|| TalosError::ValidationError("invalid legacy memory timestamp".to_string()))
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "invalid legacy memory timestamp".to_string(),
+            )
+        })
 }
 
 fn parse_required<'a>(
@@ -131,10 +135,13 @@ fn parse_required<'a>(
     metadata_value(lines, key)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
-            TalosError::ValidationError(format!(
-                "memory block {} in {source_path} is missing {key}",
-                ordinal + 1
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "memory block {} in {source_path} is missing {key}",
+                    ordinal + 1
+                ),
+            )
         })
 }
 
@@ -149,10 +156,13 @@ fn parse_block(
     lines: &[&str],
 ) -> TalosResult<ParsedMemoryRecord> {
     let heading = parse_heading(lines[0]).ok_or_else(|| {
-        TalosError::ValidationError(format!(
-            "invalid memory heading in {source_path} block {}",
-            ordinal + 1
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "invalid memory heading in {source_path} block {}",
+                ordinal + 1
+            ),
+        )
     })?;
     let v1 = [
         "memory_id",
@@ -177,10 +187,13 @@ fn parse_block(
         || title.chars().count() > MAX_TITLE_CHARS
         || body.chars().count() > MAX_BODY_CHARS
     {
-        return Err(TalosError::ValidationError(format!(
-            "memory block {} in {source_path} exceeds content limits",
-            ordinal + 1
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "memory block {} in {source_path} exceeds content limits",
+                ordinal + 1
+            ),
+        ));
     }
     let session_id = metadata_value(lines, "session")
         .filter(|value| !value.is_empty())
@@ -194,38 +207,53 @@ fn parse_block(
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
         {
-            return Err(TalosError::ValidationError(format!(
-                "memory block {} in {source_path} has invalid memory_id",
-                ordinal + 1
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "memory block {} in {source_path} has invalid memory_id",
+                    ordinal + 1
+                ),
+            ));
         }
         let source_from_seq = parse_required(lines, "source_from_seq", source_path, ordinal)?
             .parse()
             .map_err(|_| {
-                TalosError::ValidationError(format!(
-                    "memory block {} in {source_path} has invalid source_from_seq",
-                    ordinal + 1
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "memory block {} in {source_path} has invalid source_from_seq",
+                        ordinal + 1
+                    ),
+                )
             })?;
         let source_until_seq = parse_required(lines, "source_until_seq", source_path, ordinal)?
             .parse()
             .map_err(|_| {
-                TalosError::ValidationError(format!(
-                    "memory block {} in {source_path} has invalid source_until_seq",
-                    ordinal + 1
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "memory block {} in {source_path} has invalid source_until_seq",
+                        ordinal + 1
+                    ),
+                )
             })?;
         if source_from_seq > source_until_seq {
-            return Err(TalosError::ValidationError(format!(
-                "memory block {} in {source_path} has invalid source range",
-                ordinal + 1
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "memory block {} in {source_path} has invalid source range",
+                    ordinal + 1
+                ),
+            ));
         }
         if source_from_seq > i64::MAX as u64 || source_until_seq > i64::MAX as u64 {
-            return Err(TalosError::ValidationError(format!(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
                 "memory block {} in {source_path} has source range outside SQLite integer bounds",
                 ordinal + 1
-            )));
+            ),
+            ));
         }
         MemoryRecord {
             memory_id,
@@ -233,10 +261,13 @@ fn parse_block(
             body,
             kind: parse_memory_kind(parse_required(lines, "kind", source_path, ordinal)?)
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "memory block {} in {source_path} has invalid kind",
-                        ordinal + 1
-                    ))
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "memory block {} in {source_path} has invalid kind",
+                            ordinal + 1
+                        ),
+                    )
                 })?,
             importance: parse_memory_importance(parse_required(
                 lines,
@@ -245,18 +276,24 @@ fn parse_block(
                 ordinal,
             )?)
             .ok_or_else(|| {
-                TalosError::ValidationError(format!(
-                    "memory block {} in {source_path} has invalid importance",
-                    ordinal + 1
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "memory block {} in {source_path} has invalid importance",
+                        ordinal + 1
+                    ),
+                )
             })?,
             occurred_at: parse_required(lines, "occurred_at", source_path, ordinal)?
                 .parse()
                 .map_err(|_| {
-                    TalosError::ValidationError(format!(
-                        "memory block {} in {source_path} has invalid occurred_at",
-                        ordinal + 1
-                    ))
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "memory block {} in {source_path} has invalid occurred_at",
+                            ordinal + 1
+                        ),
+                    )
                 })?,
             source_date: source_date.to_string(),
             session_id: Some(parse_required(lines, "session", source_path, ordinal)?.to_string()),
@@ -300,9 +337,17 @@ pub(super) fn parse_source(
         .file_name()
         .and_then(|value| value.to_str())
         .and_then(|value| value.strip_suffix(".md"))
-        .ok_or_else(|| TalosError::ValidationError("invalid memory source path".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "invalid memory source path".to_string(),
+            )
+        })?;
     let date = NaiveDate::parse_from_str(source_date, "%Y-%m-%d").map_err(|_| {
-        TalosError::ValidationError(format!("invalid memory source date: {source_path}"))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid memory source date: {source_path}"),
+        )
     })?;
     let lines = content.lines().collect::<Vec<_>>();
     let starts = lines

@@ -12,6 +12,7 @@ import {
   SettingsPermissionsSection,
   SettingsProfileSection,
   SettingsServerSection,
+  SettingsWebSearchSection,
   isSettingsSection,
   type SettingsSection,
   useSettingsPage,
@@ -39,8 +40,12 @@ export function SettingsPage() {
   } = useSettingsPage();
   const requestedSection = params.section;
   const activeSection: SettingsSection = isSettingsSection(requestedSection) ? requestedSection : "profile";
+  const canManageConfig = connection.authStatus === "open" || connection.authRole === "admin";
 
   if (requestedSection && !isSettingsSection(requestedSection)) {
+    return <Navigate replace to="/settings" />;
+  }
+  if ((activeSection === "models" || activeSection === "web-search") && !canManageConfig) {
     return <Navigate replace to="/settings" />;
   }
 
@@ -48,6 +53,7 @@ export function SettingsPage() {
     <div className="grid h-full w-full grid-cols-[320px_minmax(0,1fr)] overflow-hidden bg-background">
       <SettingsNavigation
         activeSection={activeSection}
+        canManageConfig={canManageConfig}
         canOpenAccount={connection.authStatus === "authenticated"}
       />
       <div className="min-h-0 overflow-y-auto">
@@ -99,6 +105,8 @@ export function SettingsPage() {
             ) : null}
 
             {activeSection === "mcp-servers" ? <SettingsMcpServersSection /> : null}
+
+            {activeSection === "web-search" ? <SettingsWebSearchSection /> : null}
 
             {activeSection === "server" ? (
               <SettingsServerSection

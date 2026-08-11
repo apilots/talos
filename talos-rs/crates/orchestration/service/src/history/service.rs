@@ -79,7 +79,7 @@ impl SessionHistoryService {
             .next()
             .filter(|message| message.message_id == expected_message_id)
             .ok_or_else(|| {
-                talos_error::TalosError::Conflict(format!(
+                talos_error::TalosError::public(talos_error::ErrorCode::Conflict, format!(
                     "latest persisted turn for session '{session_id}' does not belong to message '{expected_message_id}'"
                 ))
             })?;

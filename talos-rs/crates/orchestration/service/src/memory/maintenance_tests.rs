@@ -82,7 +82,7 @@ fn managed_update_preserves_user_content() {
 fn managed_update_rejects_unpaired_marker() {
     let error = replace_managed_content(MANAGED_START, "- new").expect_err("invalid markers");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[tokio::test]

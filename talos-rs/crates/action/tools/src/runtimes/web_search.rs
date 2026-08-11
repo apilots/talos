@@ -106,12 +106,16 @@ fn provider_for_config(
 
 fn validate_request(request: &WebSearchRequest) -> TalosResult<()> {
     if request.query.trim().is_empty() {
-        return Err(TalosError::ToolError("query must not be empty".to_string()));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "query must not be empty".to_string(),
+        ));
     }
     if !(1..=MAX_RESULT_LIMIT).contains(&request.limit) {
-        return Err(TalosError::ToolError(format!(
-            "limit must be between 1 and {MAX_RESULT_LIMIT}"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("limit must be between 1 and {MAX_RESULT_LIMIT}"),
+        ));
     }
     Ok(())
 }
@@ -179,15 +183,25 @@ fn configured_api_key(
         .api_key
         .as_deref()
         .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            config
-                .api_key_env
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-                .and_then(|name| runtime_env.get(name).map(str::to_string))
-                .filter(|value| !value.trim().is_empty())
-        })
+        .and_then(|value| configured_api_key_value(value, runtime_env))
+}
+
+fn configured_api_key_value(value: &str, runtime_env: &RuntimeEnv) -> Option<String> {
+    let value = value.trim();
+    if let Some(name) = env_placeholder_name(value) {
+        return runtime_env
+            .get(name)
+            .map(str::to_string)
+            .filter(|value| !value.trim().is_empty());
+    }
+    Some(value.to_string()).filter(|value| !value.trim().is_empty())
+}
+
+fn env_placeholder_name(value: &str) -> Option<&str> {
+    value
+        .strip_prefix("${")
+        .and_then(|value| value.strip_suffix('}'))
+        .filter(|value| !value.trim().is_empty())
 }
 
 fn resolve_api_key(
@@ -197,14 +211,16 @@ fn resolve_api_key(
 ) -> TalosResult<String> {
     configured_api_key(config, runtime_env).ok_or_else(|| {
         let requirement = config
-            .api_key_env
+            .api_key
             .as_deref()
+            .and_then(env_placeholder_name)
             .filter(|value| !value.trim().is_empty())
             .map(|env_name| format!(" API key env `{env_name}`"))
             .unwrap_or_else(|| " an API key".to_string());
-        TalosError::InvalidConfiguration(format!(
-            "web search provider `{provider}` requires{requirement}"
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("web search provider `{provider}` requires{requirement}"),
+        )
     })
 }
 

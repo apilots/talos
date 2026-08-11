@@ -330,18 +330,7 @@
         {
           "properties": {
             "error": {
-              "type": "string"
-            },
-            "error_info": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TalosRunErrorInfo"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
+              "$ref": "#/definitions/ApiError"
             },
             "failed_at_ms": {
               "format": "uint64",
@@ -440,11 +429,11 @@
       ],
       "type": "object"
     },
-    "AppServerErrorBody": {
+    "ApiError": {
+      "description": "Public application error object shared by server and SDKs.\n\n`message` is an English fallback derived from `code`. Clients must branch on `code` and apply localization outside the backend.",
       "properties": {
         "code": {
-          "format": "int32",
-          "type": "integer"
+          "$ref": "#/definitions/ErrorCode"
         },
         "message": {
           "type": "string"
@@ -455,6 +444,33 @@
         "message"
       ],
       "type": "object"
+    },
+    "AppServerErrorBody": {
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/AppServerErrorCode"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AppServerErrorCode": {
+      "enum": [
+        -32700,
+        -32600,
+        -32601,
+        -32602,
+        -32603,
+        -32001,
+        -32002
+      ],
+      "type": "integer"
     },
     "AuthLogoutRequest": {
       "type": "object"
@@ -2222,29 +2238,33 @@
     "ConfigGetRequest": {
       "properties": {
         "path": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
+          "allOf": [
+            {
+              "$ref": "#/definitions/ConfigPath"
+            }
+          ],
+          "default": "llm"
         }
       },
       "type": "object"
+    },
+    "ConfigPath": {
+      "enum": [
+        "llm",
+        "webSearch"
+      ],
+      "type": "string"
     },
     "ConfigReloadRequest": {
       "type": "object"
     },
     "ConfigUpdateRequest": {
       "properties": {
-        "path": {
-          "type": "string"
-        },
         "value": {
           "$ref": "#/definitions/ConfigValue"
         }
       },
       "required": [
-        "path",
         "value"
       ],
       "type": "object"
@@ -2261,6 +2281,24 @@
             },
             "value": {
               "$ref": "#/definitions/LlmConfig"
+            }
+          },
+          "required": [
+            "type",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "webSearch"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/WebSearchToolConfig"
             }
           },
           "required": [
@@ -2419,6 +2457,49 @@
         "value"
       ],
       "type": "object"
+    },
+    "ErrorCode": {
+      "description": "Public application error code shared by server and SDKs.\n\nThis enum is the single source of truth for client-visible application error semantics. Transport adapters may map codes to protocol-specific envelopes or status codes, but they must not add new application semantics.",
+      "enum": [
+        "invalidRequest",
+        "invalidRetryRequest",
+        "unauthenticated",
+        "permissionDenied",
+        "resourceNotFound",
+        "sessionNotFound",
+        "resourceExpired",
+        "conflict",
+        "activeTurnRunning",
+        "retrySourceCompleted",
+        "retrySourceMismatch",
+        "idempotencyConflict",
+        "invalidCursor",
+        "eventCursorExpired",
+        "fsDisabled",
+        "invalidPath",
+        "pathOutsideRoot",
+        "symlinkNotSupported",
+        "pathNotFound",
+        "notDirectory",
+        "invalidName",
+        "alreadyExists",
+        "uploadTooLarge",
+        "unsupportedMediaType",
+        "attachmentLimitExceeded",
+        "unsupportedAttachment",
+        "fileInputRejected",
+        "contextWindowExceeded",
+        "sessionBudgetExceeded",
+        "usageLimitExceeded",
+        "contextCompactionFailed",
+        "providerUnavailable",
+        "toolExecutionFailed",
+        "timeout",
+        "cancelled",
+        "serviceUnavailable",
+        "internalError"
+      ],
+      "type": "string"
     },
     "EventUnsubscribeRequest": {
       "properties": {
@@ -5811,37 +5892,6 @@
       ],
       "type": "string"
     },
-    "TalosRunErrorCode": {
-      "description": "Stable machine-readable category for a failed Agent run.\n\nThis public run-level code is owned by `talos-error`. Protocol, SDK, UI, and TUI layers may expose or render it, but they must not derive it from error message text.",
-      "enum": [
-        "context_window_exceeded",
-        "session_budget_exceeded",
-        "usage_limit_exceeded",
-        "context_compaction_failed",
-        "provider_unavailable",
-        "permission_denied",
-        "tool_failure",
-        "file_input_rejected",
-        "internal_error"
-      ],
-      "type": "string"
-    },
-    "TalosRunErrorInfo": {
-      "description": "Optional structured error details carried by turn failure events.\n\nThe message is for display and diagnostics only. Callers must branch on `code`, never parse `message`.",
-      "properties": {
-        "code": {
-          "$ref": "#/definitions/TalosRunErrorCode"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "code",
-        "message"
-      ],
-      "type": "object"
-    },
     "TalosSessionEnvironment": {
       "properties": {
         "connection_mode": {
@@ -6981,6 +7031,82 @@
         "max"
       ],
       "type": "string"
+    },
+    "WebSearchProviderConfig": {
+      "enum": [
+        "firecrawl",
+        "brave",
+        "tavily"
+      ],
+      "type": "string"
+    },
+    "WebSearchProviderRuntimeConfig": {
+      "properties": {
+        "api_key": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "base_url": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "timeout_ms": {
+          "default": 15000,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "WebSearchToolConfig": {
+      "properties": {
+        "brave": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        },
+        "firecrawl": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        },
+        "provider": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderConfig"
+            }
+          ],
+          "default": "firecrawl"
+        },
+        "tavily": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/WebSearchProviderRuntimeConfig"
+            }
+          ],
+          "default": {
+            "timeout_ms": 15000
+          }
+        }
+      },
+      "type": "object"
     },
     "WorkspaceDocKind": {
       "enum": [

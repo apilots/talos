@@ -18,6 +18,12 @@ async fn test_models_require_bearer_when_auth_enabled() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "unauthenticated");
 }
 
 #[tokio::test]
@@ -49,6 +55,12 @@ async fn test_models_require_bearer_even_when_local_cache_exists() {
         .await
         .expect("request should succeed");
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .expect("body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "unauthenticated");
 }
 
 #[tokio::test]
@@ -142,7 +154,8 @@ async fn test_list_sessions_allows_anonymous_route_when_auth_disabled() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert!(payload["sessions"].is_array());
+    assert_eq!(payload["status"], "success");
+    assert!(payload["data"]["sessions"].is_array());
 }
 
 #[tokio::test]
@@ -151,24 +164,28 @@ async fn test_get_llm_allows_auth_disabled_actor() {
     let response = get_llm_handler(State(state), None)
         .await
         .expect("auth disabled actor should access llm config");
-    assert_eq!(response.0.config.provider, "bailian");
+    let data = expect_success(response.0);
+    match data {
+        talos_types::ConfigResponse::Llm { config, .. } => {
+            assert_eq!(config.provider, "bailian");
+        }
+        other => panic!("unexpected config response: {other:?}"),
+    }
 }
 
 #[tokio::test]
 async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
-    let llm_svc: Arc<dyn talos_config::LlmConfigService> =
-        Arc::new(talos_config::LlmConfigManager::new(Arc::new(
-            talos_config::InMemoryLlmConfigStore::new(Default::default()),
-        )));
+    let config_store: Arc<dyn talos_config::ConfigStore> =
+        Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
         Arc::new(MockGateway),
         true,
         Arc::new(RecordingEventStore::default()),
         test_config(),
         lifecycle,
-        llm_svc,
+        config_store,
     )
     .await;
     let app = Router::new()
@@ -196,17 +213,15 @@ async fn test_lifecycle_gate_rejects_new_requests_when_quiescing() {
 async fn test_lifecycle_gate_allows_health_when_quiescing() {
     let lifecycle = Arc::new(ServerLifecycle::new());
     lifecycle.store(ServerLifecycleState::Quiescing);
-    let llm_svc: Arc<dyn talos_config::LlmConfigService> =
-        Arc::new(talos_config::LlmConfigManager::new(Arc::new(
-            talos_config::InMemoryLlmConfigStore::new(Default::default()),
-        )));
+    let config_store: Arc<dyn talos_config::ConfigStore> =
+        Arc::new(talos_config::InMemoryLlmConfigStore::new(Default::default()));
     let state = test_state_with_gateway_event_store_config_and_lifecycle(
         Arc::new(MockGateway),
         true,
         Arc::new(RecordingEventStore::default()),
         test_config(),
         lifecycle,
-        llm_svc,
+        config_store,
     )
     .await;
     let app = Router::new()

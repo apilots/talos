@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_sdk::TimelineEventEnvelope;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TryRecvError;
@@ -8,7 +8,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use crate::{TuiApp, SPINNER_FRAMES, STREAM_STALL_TIMEOUT};
 
 fn is_active_turn_conflict(error: &TalosError) -> bool {
-    matches!(error, TalosError::ActiveTurnRunning(_))
+    error.is_code(ErrorCode::ActiveTurnRunning)
 }
 
 impl TuiApp {
@@ -46,7 +46,7 @@ impl TuiApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    connect_result = Some(Err(TalosError::ClientError(
+                    connect_result = Some(Err(TalosError::internal(
                         "stream connect channel dropped".to_string(),
                     )));
                     should_clear = true;
@@ -127,7 +127,7 @@ impl TuiApp {
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    connect_result = Some(Err(TalosError::ClientError(
+                    connect_result = Some(Err(TalosError::internal(
                         "session connect channel dropped".to_string(),
                     )));
                     should_clear = true;

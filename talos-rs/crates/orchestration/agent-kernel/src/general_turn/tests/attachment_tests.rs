@@ -225,11 +225,5 @@ async fn model_capability_rejects_attachments_before_prompt_work() {
     .await
     .expect_err("text-only model must reject attachments");
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: talos_error::TalosFileErrorKind::UnsupportedAttachment,
-            ..
-        }
-    ));
+    assert!(error.is_code(talos_error::ErrorCode::UnsupportedAttachment));
 }

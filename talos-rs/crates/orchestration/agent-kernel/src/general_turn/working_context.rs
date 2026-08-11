@@ -84,7 +84,7 @@ pub(crate) async fn enforce_working_context_budget(
     .await;
 
     if report.post_tokens > window_usage.effective_prompt_budget {
-        return Err(TalosError::ContextWindowExceeded(format!(
+        return Err(TalosError::public(talos_error::ErrorCode::ContextWindowExceeded, format!(
             "working context budget remains exhausted before model request: estimated_tokens={}, effective_prompt_budget={}",
             report.post_tokens, window_usage.effective_prompt_budget
         )));
@@ -153,21 +153,17 @@ pub(super) fn trim_working_context_to_budget(
         {
             let value =
                 serde_json::from_str::<serde_json::Value>(&message.content).map_err(|error| {
-                    TalosError::SerializationError(format!(
-                        "parse trimmed MemoryGet tool result: {error}"
-                    ))
+                    TalosError::internal(format!("parse trimmed MemoryGet tool result: {error}"))
                 })?;
             if value.get("ok").and_then(serde_json::Value::as_bool) == Some(false) {
                 continue;
             }
             let item = serde_json::from_value::<talos_types::talos::TalosContentItem>(value)
                 .map_err(|error| {
-                    TalosError::SerializationError(format!(
-                        "parse trimmed MemoryGet tool result: {error}"
-                    ))
+                    TalosError::internal(format!("parse trimmed MemoryGet tool result: {error}"))
                 })?;
             let talos_types::talos::TalosContentItem::Json { value } = item else {
-                return Err(TalosError::SerializationError(
+                return Err(TalosError::internal(
                     "trimmed MemoryGet tool result is not structured JSON".to_string(),
                 ));
             };

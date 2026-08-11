@@ -128,5 +128,5 @@ async fn list_rejects_an_agent_tree_beyond_the_response_limit() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }

@@ -85,7 +85,7 @@ pub(crate) fn document_media_type(path: &Path) -> PluginDocumentMediaType {
 pub(crate) fn relative_path(root: &Path, path: &Path) -> TalosResult<String> {
     path.strip_prefix(root)
         .map_err(|err| {
-            TalosError::InternalError(format!(
+            TalosError::internal(format!(
                 "plugin source path `{}` escaped root `{}`: {err}",
                 path.display(),
                 root.display()

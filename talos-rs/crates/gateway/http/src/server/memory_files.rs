@@ -1,20 +1,19 @@
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
 use axum::response::Json;
 use serde::Deserialize;
-use serde_json::{json, Value};
 
 use talos_auth::RequestIdentity;
 use talos_error::TalosError;
 use talos_types::{
-    MemoryFileListRequest, MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest,
-    MemoryKind, MemorySearchRequest,
+    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
+    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
+    MemoryKind, MemorySearchRequest, MemorySearchResponse,
 };
 
 use super::access::shared_actor;
-use super::errors::{ApiError, HttpApiErrorCode};
+use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 #[derive(Debug, Deserialize, Default)]
@@ -47,7 +46,7 @@ pub(super) async fn list_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemoryFilesQuery>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<MemoryFileListResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemoryFileListRequest {
         limit: query.limit,
@@ -59,22 +58,22 @@ pub(super) async fn list_memory_files_handler(
         .gateway
         .list_memory_files(&actor, request)
         .await
-        .map_err(map_memory_error)?;
-    Ok(Json(json!(response)))
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
 }
 
 pub(super) async fn get_memory_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<MemoryFileReadResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let detail = state
         .gateway
         .read_memory_file(&actor, MemoryFileReadRequest { date })
         .await
-        .map_err(map_memory_error)?;
-    Ok(Json(json!(detail)))
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(detail))
 }
 
 pub(super) async fn put_memory_file_handler(
@@ -82,28 +81,24 @@ pub(super) async fn put_memory_file_handler(
     auth: axum::extract::Extension<RequestIdentity>,
     Path(date): Path<String>,
     Json(request): Json<MemoryFileWriteRequest>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<MemoryFileWriteResponse>, ApiError> {
     if request.date != date {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            HttpApiErrorCode::InvalidRequest,
-            "memory file route date must match request date",
-        ));
+        return Err(ApiError::new(talos_error::ErrorCode::InvalidRequest));
     }
     let actor = shared_actor(&auth.0);
     let detail = state
         .gateway
         .write_memory_file(&actor, request)
         .await
-        .map_err(map_memory_error)?;
-    Ok(Json(json!(detail)))
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(detail))
 }
 
 pub(super) async fn search_memory_files_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Query(query): Query<MemorySearchHttpQuery>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<MemorySearchResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let request = MemorySearchRequest {
         query: query.query,
@@ -119,8 +114,8 @@ pub(super) async fn search_memory_files_handler(
         .gateway
         .search_memory(&actor, request)
         .await
-        .map_err(map_memory_error)?;
-    Ok(Json(json!(response)))
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
 }
 
 fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
@@ -132,9 +127,10 @@ fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
             "decision" => Ok(MemoryKind::Decision),
             "task" => Ok(MemoryKind::Task),
             "episode" => Ok(MemoryKind::Episode),
-            _ => Err(map_memory_error(TalosError::ValidationError(format!(
-                "unknown memory kind: {kind}"
-            )))),
+            _ => Err(ApiError::from_talos_error(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("unknown memory kind: {kind}"),
+            ))),
         })
         .collect()
 }
@@ -143,40 +139,12 @@ pub(super) async fn get_memory_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(memory_id): Path<String>,
-) -> Result<Json<Value>, ApiError> {
+) -> Result<JsonResponse<MemoryGetResponse>, ApiError> {
     let actor = shared_actor(&auth.0);
     let response = state
         .gateway
         .get_memory(&actor, MemoryGetRequest { memory_id })
         .await
-        .map_err(map_memory_error)?;
-    Ok(Json(json!(response)))
-}
-
-fn map_memory_error(error: TalosError) -> ApiError {
-    match error {
-        TalosError::ValidationError(message) => ApiError::new(
-            StatusCode::BAD_REQUEST,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        TalosError::ResourceNotFound(message) => ApiError::new(
-            StatusCode::NOT_FOUND,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        TalosError::Conflict(message) => ApiError::new(
-            StatusCode::CONFLICT,
-            HttpApiErrorCode::InvalidRequest,
-            message,
-        ),
-        TalosError::AuthError(message) => {
-            ApiError::new(StatusCode::FORBIDDEN, HttpApiErrorCode::Forbidden, message)
-        }
-        other => ApiError::new(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            HttpApiErrorCode::InternalError,
-            other.to_string(),
-        ),
-    }
+        .map_err(ApiError::from_talos_error)?;
+    Ok(api_success(response))
 }

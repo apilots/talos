@@ -102,9 +102,7 @@ impl DatabaseSessionStore {
         let agent_path = Self::normalized_optional_string(row.get_string("agent_path"))
             .map(|path| {
                 path.parse::<AgentPath>().map_err(|error| {
-                    TalosError::SerializationError(format!(
-                        "session '{id}' has invalid agent path: {error}"
-                    ))
+                    TalosError::internal(format!("session '{id}' has invalid agent path: {error}"))
                 })
             })
             .transpose()?;
@@ -126,7 +124,7 @@ impl DatabaseSessionStore {
                 }
             }
             _ => {
-                return Err(TalosError::SerializationError(format!(
+                return Err(TalosError::internal(format!(
                     "session '{id}' has incomplete subagent tree identity"
                 )));
             }
@@ -134,9 +132,7 @@ impl DatabaseSessionStore {
         let conf = Self::parse_conf_json(row.get_string("conf_json"), &id)?;
         let agent_id =
             Self::normalized_optional_string(row.get_string("agent_id")).ok_or_else(|| {
-                TalosError::SerializationError(format!(
-                    "session '{id}' is missing its agent binding"
-                ))
+                TalosError::internal(format!("session '{id}' is missing its agent binding"))
             })?;
 
         Ok(SessionRecord {
@@ -187,7 +183,7 @@ impl DatabaseSessionStore {
             return Ok(SessionConf::default());
         };
         serde_json::from_str(&conf_json).map_err(|error| {
-            talos_error::TalosError::SerializationError(format!(
+            talos_error::TalosError::internal(format!(
                 "parse session '{session_id}' conf_json: {error}"
             ))
         })
@@ -205,18 +201,15 @@ impl DatabaseSessionStore {
     }
 
     fn build_conf_json(conf: &SessionConf) -> TalosResult<String> {
-        serde_json::to_string(conf)
-            .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
+        serde_json::to_string(conf).map_err(|e| talos_error::TalosError::internal(e.to_string()))
     }
 
     fn build_context_json(context: &TalosContext) -> TalosResult<String> {
-        serde_json::to_string(context)
-            .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
+        serde_json::to_string(context).map_err(|e| talos_error::TalosError::internal(e.to_string()))
     }
 
     fn build_usage_json(usage: &TokenUsage) -> TalosResult<String> {
-        serde_json::to_string(usage)
-            .map_err(|e| talos_error::TalosError::SerializationError(e.to_string()))
+        serde_json::to_string(usage).map_err(|e| talos_error::TalosError::internal(e.to_string()))
     }
 
     fn append_tree_scope(
@@ -515,26 +508,22 @@ impl SessionStore for DatabaseSessionStore {
             )
             .await?;
         let row = rows.first().ok_or_else(|| {
-            TalosError::StorageError("summarize sessions returned no aggregate row".to_string())
+            TalosError::internal("summarize sessions returned no aggregate row".to_string())
         })?;
         let session_count = row.get_i64("session_count").ok_or_else(|| {
-            TalosError::StorageError(
-                "summarize sessions returned an invalid session count".to_string(),
-            )
+            TalosError::internal("summarize sessions returned an invalid session count".to_string())
         })?;
         let message_count = row.get_i64("message_count").ok_or_else(|| {
-            TalosError::StorageError(
-                "summarize sessions returned an invalid message count".to_string(),
-            )
+            TalosError::internal("summarize sessions returned an invalid message count".to_string())
         })?;
         Ok(SessionSummary {
             session_count: u64::try_from(session_count).map_err(|_| {
-                TalosError::StorageError(
+                TalosError::internal(
                     "summarize sessions returned a negative session count".to_string(),
                 )
             })?,
             message_count: u64::try_from(message_count).map_err(|_| {
-                TalosError::StorageError(
+                TalosError::internal(
                     "summarize sessions returned a negative message count".to_string(),
                 )
             })?,
@@ -577,14 +566,17 @@ impl SessionStore for DatabaseSessionStore {
         next_until_seq: u64,
     ) -> TalosResult<()> {
         if next_until_seq < expected_until_seq {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "memory cursor cannot move backwards".to_string(),
             ));
         }
-        let record = self
-            .get_session_record(session_id)
-            .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(session_id.to_string()))?;
+        let record = self.get_session_record(session_id).await?.ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                session_id.to_string(),
+            )
+        })?;
         let row = Row::new(
             vec![
                 "memory_processed_until_seq".to_string(),
@@ -613,12 +605,17 @@ impl SessionStore for DatabaseSessionStore {
         let current = self
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(session_id.to_string()))?
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    session_id.to_string(),
+                )
+            })?
             .memory_processed_until_seq;
         if current >= next_until_seq {
             return Ok(());
         }
-        Err(TalosError::Conflict(format!(
+        Err(TalosError::public(talos_error::ErrorCode::Conflict, format!(
             "memory cursor conflict for session '{session_id}': expected {expected_until_seq}, current {current}"
         )))
     }

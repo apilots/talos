@@ -477,7 +477,8 @@ impl InvocationContext {
     }
 
     pub fn set_user_state(&mut self, _key: impl Into<String>, _value: Value) -> TalosResult<()> {
-        Err(TalosError::ValidationError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "user_state is read-only by default in InvocationContext".to_string(),
         ))
     }
@@ -487,7 +488,8 @@ impl InvocationContext {
         _key: impl Into<String>,
         _value: Value,
     ) -> TalosResult<()> {
-        Err(TalosError::ValidationError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "workspace_state is read-only by default in InvocationContext".to_string(),
         ))
     }
@@ -506,7 +508,8 @@ impl InvocationContext {
 
     pub fn transcript_service(&self) -> TalosResult<std::sync::Arc<dyn KernelTranscriptService>> {
         self.transcript_service.clone().ok_or_else(|| {
-            TalosError::ValidationError(
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "transcript_service is not configured in InvocationContext".to_string(),
             )
         })
@@ -516,7 +519,8 @@ impl InvocationContext {
         &self,
     ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionArtifactStore>> {
         self.session_artifact_store.clone().ok_or_else(|| {
-            TalosError::ValidationError(
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "session_artifact_store is not configured in InvocationContext".to_string(),
             )
         })
@@ -526,7 +530,8 @@ impl InvocationContext {
         &self,
     ) -> TalosResult<std::sync::Arc<dyn talos_store::session::SessionStore>> {
         self.session_store.clone().ok_or_else(|| {
-            TalosError::ValidationError(
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "session_store is not configured in InvocationContext".to_string(),
             )
         })

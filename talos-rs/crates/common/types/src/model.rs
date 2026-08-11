@@ -60,17 +60,23 @@ impl ModelSelection {
         model: &ModelInfo,
     ) -> crate::TalosResult<Option<ReasoningEffort>> {
         if self.model_ref.provider != model.provider || self.model_ref.id != model.model.id {
-            return Err(crate::TalosError::ValidationError(format!(
-                "model selection '{}:{}' does not match model metadata '{}:{}'",
-                self.model_ref.provider, self.model_ref.id, model.provider, model.model.id
-            )));
+            return Err(crate::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "model selection '{}:{}' does not match model metadata '{}:{}'",
+                    self.model_ref.provider, self.model_ref.id, model.provider, model.model.id
+                ),
+            ));
         }
 
         match (model.model.reasoning, self.reasoning_effort) {
-            (false, Some(_)) => Err(crate::TalosError::ValidationError(format!(
-                "model '{}:{}' does not support reasoning effort selection",
-                model.provider, model.model.id
-            ))),
+            (false, Some(_)) => Err(crate::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "model '{}:{}' does not support reasoning effort selection",
+                    model.provider, model.model.id
+                ),
+            )),
             (_, None) => Ok(None),
             (true, Some(level)) => Ok(Some(level)),
         }
@@ -126,7 +132,10 @@ pub fn resolve_default_model_selection(llm: &LlmConfig) -> crate::TalosResult<Mo
         .into_iter()
         .find(|model| model.provider == model_ref.provider && model.model.id == model_ref.id)
         .ok_or_else(|| {
-            crate::TalosError::UnsupportedModel(format!("{}:{}", model_ref.provider, model_ref.id))
+            crate::TalosError::public(
+                talos_error::ErrorCode::ProviderUnavailable,
+                format!("{}:{}", model_ref.provider, model_ref.id),
+            )
         })?;
     Ok(ModelSelection::from_model(model_ref, &model.model))
 }

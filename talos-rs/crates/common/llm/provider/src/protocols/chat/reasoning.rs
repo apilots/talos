@@ -1,0 +1,81 @@
+use super::{ChatCompletionReasoningDetail, ChatReasoningContinuationFormat};
+use crate::{ReasoningBlock, ReasoningContinuation};
+use talos_error::{ErrorCode, TalosError, TalosResult};
+
+type ChatReasoningFields = (
+    Option<String>,
+    Option<String>,
+    Option<Vec<ChatCompletionReasoningDetail>>,
+);
+
+pub(super) fn reasoning_fields(
+    continuation: Option<ReasoningContinuation>,
+    format: ChatReasoningContinuationFormat,
+) -> TalosResult<ChatReasoningFields> {
+    let Some(continuation) = continuation else {
+        return Ok((None, None, None));
+    };
+
+    match (format, continuation) {
+        (ChatReasoningContinuationFormat::None, _) => Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            "Chat protocol received reasoning continuation without a replay format".to_string(),
+        )),
+        (ChatReasoningContinuationFormat::Reasoning, continuation) => {
+            let text = text_reasoning_continuation(continuation)?;
+            Ok((Some(text), None, None))
+        }
+        (ChatReasoningContinuationFormat::ReasoningContent, continuation) => {
+            let text = text_reasoning_continuation(continuation)?;
+            Ok((None, Some(text), None))
+        }
+        (ChatReasoningContinuationFormat::ReasoningDetails, ReasoningContinuation::Text(text)) => {
+            Ok((
+                None,
+                None,
+                Some(vec![ChatCompletionReasoningDetail::Text {
+                    text,
+                    signature: None,
+                    id: None,
+                    format: None,
+                    index: None,
+                }]),
+            ))
+        }
+        (
+            ChatReasoningContinuationFormat::ReasoningDetails,
+            ReasoningContinuation::Blocks(blocks),
+        ) => Ok((
+            None,
+            None,
+            Some(
+                blocks
+                    .into_iter()
+                    .map(ChatCompletionReasoningDetail::from)
+                    .collect(),
+            ),
+        )),
+    }
+}
+
+fn text_reasoning_continuation(continuation: ReasoningContinuation) -> TalosResult<String> {
+    match continuation {
+        ReasoningContinuation::Text(text) => Ok(text),
+        ReasoningContinuation::Blocks(blocks) => {
+            let mut text = String::new();
+            for block in blocks {
+                match block {
+                    ReasoningBlock::Text(block) => text.push_str(&block.text),
+                    ReasoningBlock::Summary(_) | ReasoningBlock::Encrypted(_) => {
+                        return Err(TalosError::public(
+                            ErrorCode::InvalidRequest,
+                            "Chat text reasoning field cannot replay structured reasoning blocks"
+                                .to_string(),
+                        ));
+                    }
+                }
+            }
+            Ok(text)
+        }
+    }
+}

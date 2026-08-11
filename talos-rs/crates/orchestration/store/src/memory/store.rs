@@ -22,7 +22,7 @@ impl MemoryStore {
     pub async fn open(path: &Path) -> TalosResult<Self> {
         if let Some(parent) = path.parent() {
             tokio::fs::create_dir_all(parent).await.map_err(|error| {
-                TalosError::StorageError(format!("create memory index directory: {error}"))
+                TalosError::internal(format!("create memory index directory: {error}"))
             })?;
         }
         for attempt in 0..2 {
@@ -56,7 +56,7 @@ impl MemoryStore {
                     remove_index_files(path).await?;
                     continue;
                 }
-                return Err(TalosError::StorageError(
+                return Err(TalosError::internal(
                     "memory index is corrupt after rebuild".to_string(),
                 ));
             }
@@ -65,13 +65,13 @@ impl MemoryStore {
                     return Ok(Self { pool });
                 }
                 Err(error) => {
-                    return Err(TalosError::StorageError(format!(
+                    return Err(TalosError::internal(format!(
                         "initialize memory index: {error}"
                     )));
                 }
             }
         }
-        Err(TalosError::StorageError(
+        Err(TalosError::internal(
             "failed to rebuild corrupt memory index".to_string(),
         ))
     }
@@ -83,9 +83,10 @@ impl MemoryStore {
             .connect("sqlite::memory:")
             .await
             .map_err(storage_error("connect memory index"))?;
-        SQLITE_MIGRATOR.run(&pool).await.map_err(|error| {
-            TalosError::StorageError(format!("initialize memory index: {error}"))
-        })?;
+        SQLITE_MIGRATOR
+            .run(&pool)
+            .await
+            .map_err(|error| TalosError::internal(format!("initialize memory index: {error}")))?;
         Ok(Self { pool })
     }
 
@@ -98,7 +99,8 @@ impl MemoryStore {
         timezone: Tz,
     ) -> TalosResult<()> {
         if user_id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "memory user_id cannot be empty".to_string(),
             ));
         }
@@ -107,10 +109,13 @@ impl MemoryStore {
         for source in &sources {
             for parsed in &source.records {
                 if !memory_ids.insert(parsed.record.memory_id.as_str()) {
-                    return Err(TalosError::ValidationError(format!(
-                        "duplicate memory_id {} in user scope",
-                        parsed.record.memory_id
-                    )));
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "duplicate memory_id {} in user scope",
+                            parsed.record.memory_id
+                        ),
+                    ));
                 }
             }
         }
@@ -195,10 +200,13 @@ impl MemoryStore {
         let mut memory_ids = HashSet::new();
         for parsed in &updated.records {
             if !memory_ids.insert(parsed.record.memory_id.clone()) {
-                return Err(TalosError::Conflict(format!(
-                    "duplicate memory_id {} in user scope",
-                    parsed.record.memory_id
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!(
+                        "duplicate memory_id {} in user scope",
+                        parsed.record.memory_id
+                    ),
+                ));
             }
         }
         let mut other_source_ids = HashSet::new();
@@ -227,14 +235,15 @@ impl MemoryStore {
         for parsed in &updated.records {
             let record = &parsed.record;
             if other_source_ids.contains(&record.memory_id) {
-                return Err(TalosError::Conflict(format!(
-                    "duplicate memory_id {} in user scope",
-                    record.memory_id
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("duplicate memory_id {} in user scope", record.memory_id),
+                ));
             }
             let Some(existing) = current_by_id.get(record.memory_id.as_str()) else {
                 if record.source_from_seq.is_some() {
-                    return Err(TalosError::Conflict(
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::Conflict,
                         "new generated memory blocks must use the memory writer".to_string(),
                     ));
                 }
@@ -245,10 +254,10 @@ impl MemoryStore {
                 || existing.source_from_seq != record.source_from_seq
                 || existing.source_until_seq != record.source_until_seq
             {
-                return Err(TalosError::Conflict(format!(
-                    "memory provenance is immutable for {}",
-                    record.memory_id
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("memory provenance is immutable for {}", record.memory_id),
+                ));
             }
         }
         Ok(())
@@ -298,10 +307,16 @@ impl MemoryStore {
         memory_ids: &[String],
     ) -> TalosResult<()> {
         let source_from_seq = i64::try_from(source_from_seq).map_err(|_| {
-            TalosError::ValidationError("memory source range exceeds SQLite bounds".to_string())
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "memory source range exceeds SQLite bounds".to_string(),
+            )
         })?;
         let source_until_seq = i64::try_from(source_until_seq).map_err(|_| {
-            TalosError::ValidationError("memory source range exceeds SQLite bounds".to_string())
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "memory source range exceeds SQLite bounds".to_string(),
+            )
         })?;
         let overlapping = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM memory_entries WHERE user_id = ? AND session_id = ? AND source_from_seq <= ? AND source_until_seq >= ? AND NOT (source_path = ? AND source_from_seq = ? AND source_until_seq = ?)",
@@ -317,7 +332,8 @@ impl MemoryStore {
         .await
         .map_err(storage_error("validate memory source range"))?;
         if overlapping > 0 {
-            return Err(TalosError::Conflict(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
                 "memory write batch overlaps an existing session range".to_string(),
             ));
         }
@@ -332,9 +348,10 @@ impl MemoryStore {
             .await
             .map_err(storage_error("validate generated memory id uniqueness"))?;
             if conflicting_source.is_some() {
-                return Err(TalosError::Conflict(format!(
-                    "duplicate memory_id {memory_id} in user scope"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("duplicate memory_id {memory_id} in user scope"),
+                ));
             }
         }
         Ok(())
@@ -369,11 +386,16 @@ pub(super) async fn load_sources(
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
-            .ok_or_else(|| TalosError::ValidationError("invalid memory filename".to_string()))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "invalid memory filename".to_string(),
+                )
+            })?;
         let source_path = format!("{memory_dirname}/{name}");
-        let content = talos_fs::read_file(&path).await?.ok_or_else(|| {
-            TalosError::StorageError(format!("memory source missing: {source_path}"))
-        })?;
+        let content = talos_fs::read_file(&path)
+            .await?
+            .ok_or_else(|| TalosError::internal(format!("memory source missing: {source_path}")))?;
         sources.push(parse_source(user_id, &source_path, &content, timezone)?);
     }
     Ok(sources)
@@ -397,7 +419,7 @@ async fn remove_index_files(path: &Path) -> TalosResult<()> {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                return Err(TalosError::StorageError(format!(
+                return Err(TalosError::internal(format!(
                     "remove corrupt memory index {}: {error}",
                     candidate.display()
                 )));
@@ -425,20 +447,26 @@ async fn replace_source(
             .map(i64::try_from)
             .transpose()
             .map_err(|_| {
-                TalosError::ValidationError(format!(
-                    "memory {} source_from_seq exceeds SQLite integer bounds",
-                    record.memory_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "memory {} source_from_seq exceeds SQLite integer bounds",
+                        record.memory_id
+                    ),
+                )
             })?;
         let source_until_seq = record
             .source_until_seq
             .map(i64::try_from)
             .transpose()
             .map_err(|_| {
-                TalosError::ValidationError(format!(
-                    "memory {} source_until_seq exceeds SQLite integer bounds",
-                    record.memory_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "memory {} source_until_seq exceeds SQLite integer bounds",
+                        record.memory_id
+                    ),
+                )
             })?;
         sqlx::query(
             "INSERT INTO memory_entries (user_id, memory_id, title, body, kind, importance, occurred_at, session_id, source_from_seq, source_until_seq, source_path, source_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -472,5 +500,5 @@ async fn replace_source(
 }
 
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
-    move |error| TalosError::StorageError(format!("{action}: {error}"))
+    move |error| TalosError::internal(format!("{action}: {error}"))
 }

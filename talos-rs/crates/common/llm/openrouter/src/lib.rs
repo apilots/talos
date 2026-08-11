@@ -153,9 +153,10 @@ impl OpenRouterProvider {
         let authorization =
             header::HeaderValue::from_str(&format!("Bearer {}", self.config.api_key)).map_err(
                 |error| {
-                    TalosError::InvalidConfiguration(format!(
-                        "OpenRouter API key cannot be encoded as an HTTP header: {error}"
-                    ))
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("OpenRouter API key cannot be encoded as an HTTP header: {error}"),
+                    )
                 },
             )?;
         let mut headers = header::HeaderMap::new();
@@ -198,7 +199,7 @@ impl OpenRouterProvider {
             ),
         };
         let body = body.map_err(|error| {
-            TalosError::InternalError(format!("OpenRouter request serialization failed: {error}"))
+            TalosError::internal(format!("OpenRouter request serialization failed: {error}"))
         })?;
         Ok((endpoint, body))
     }
@@ -212,7 +213,7 @@ impl OpenRouterProvider {
             .send()
             .await
             .map_err(|error| {
-                TalosError::InternalError(format!("OpenRouter {endpoint} request failed: {error}"))
+                TalosError::internal(format!("OpenRouter {endpoint} request failed: {error}"))
             })?;
         let status = response.status();
         if status.is_success() {
@@ -222,7 +223,7 @@ impl OpenRouterProvider {
             .text()
             .await
             .unwrap_or_else(|_| "response body unavailable".to_string());
-        Err(TalosError::InternalError(format!(
+        Err(TalosError::internal(format!(
             "OpenRouter API error for {endpoint}: {status} - {message}"
         )))
     }
@@ -237,7 +238,7 @@ impl OpenRouterProvider {
                     .json::<chat_protocol::ChatCompletionResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::InternalError(format!(
+                        TalosError::internal(format!(
                             "OpenRouter Chat response parsing failed: {error}"
                         ))
                     })?;
@@ -248,7 +249,7 @@ impl OpenRouterProvider {
                     .json::<responses_protocol::ResponsesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::InternalError(format!(
+                        TalosError::internal(format!(
                             "OpenRouter Responses response parsing failed: {error}"
                         ))
                     })?;
@@ -259,7 +260,7 @@ impl OpenRouterProvider {
                     .json::<messages_protocol::MessagesResponse>()
                     .await
                     .map_err(|error| {
-                        TalosError::InternalError(format!(
+                        TalosError::internal(format!(
                             "OpenRouter Messages response parsing failed: {error}"
                         ))
                     })?;

@@ -181,15 +181,18 @@ async fn run_job(name: String, task: JobTask, running: Arc<AtomicBool>) {
 }
 
 fn invalid_schedule(error_name: &str, error: impl std::fmt::Display) -> TalosError {
-    TalosError::InvalidConfiguration(format!("invalid automation cron for {error_name}: {error}"))
+    TalosError::public(
+        talos_error::ErrorCode::InvalidRequest,
+        format!("invalid automation cron for {error_name}: {error}"),
+    )
 }
 
 fn schedule_error(error: impl std::fmt::Display) -> TalosError {
-    TalosError::InternalError(format!("automation cron error: {error}"))
+    TalosError::internal(format!("automation cron error: {error}"))
 }
 
 fn task_error(error: tokio::task::JoinError) -> TalosError {
-    TalosError::InternalError(format!("automation task stopped unexpectedly: {error}"))
+    TalosError::internal(format!("automation task stopped unexpectedly: {error}"))
 }
 
 #[cfg(test)]

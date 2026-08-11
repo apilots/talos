@@ -59,10 +59,10 @@ impl AttachmentReader for RejectingAttachmentReader {
             if file_ids.is_empty() {
                 Ok(Vec::new())
             } else {
-                Err(TalosError::FileError {
-                    kind: TalosFileErrorKind::UnsupportedAttachment,
-                    message: "file attachment reader is not configured".to_string(),
-                })
+                Err(TalosError::file_error(
+                    TalosFileErrorKind::UnsupportedAttachment,
+                    "file attachment reader is not configured",
+                ))
             }
         })
     }

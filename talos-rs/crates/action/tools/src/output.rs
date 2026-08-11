@@ -135,10 +135,18 @@ impl ToolOutputPayload {
     where
         T: Serialize,
     {
-        let structured_content = serde_json::to_value(value)
-            .map_err(|err| TalosError::ToolError(format!("{context}: {err}")))?;
-        let content = serde_json::to_string(value)
-            .map_err(|err| TalosError::ToolError(format!("{context}: {err}")))?;
+        let structured_content = serde_json::to_value(value).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("{context}: {err}"),
+            )
+        })?;
+        let content = serde_json::to_string(value).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("{context}: {err}"),
+            )
+        })?;
         Ok(Self::Function {
             content,
             success: true,
@@ -191,7 +199,7 @@ impl ToolOutputPayload {
         } = self
         {
             if *success && content_items.is_empty() && structured_content.is_some() {
-                return Err(TalosError::ToolError(
+                return Err(TalosError::public(talos_error::ErrorCode::ToolExecutionFailed,
                     "canonical tool result requires content_items when structured_content is present"
                         .to_string(),
                 ));

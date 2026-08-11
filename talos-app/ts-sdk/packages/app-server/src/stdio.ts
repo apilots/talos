@@ -2,18 +2,21 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface, type Interface as ReadlineInterface } from "node:readline";
 
-import type { AppProtocol } from "@talos/sdk-core";
-
 import {
+  AppProtocol,
   AppServerClient,
   type AppServerErrorHandler,
   type AppServerEventHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
+  unwrapTalosApiResponse,
 } from "@talos/sdk-core";
 
 const PASSTHROUGH_ENV_KEYS = new Set(["HOME", "PATH", "SHELL", "TMPDIR", "USER"]);
+const APP_SERVER_ERROR_CODE_VALUES = new Set<number>(
+  Object.values(AppProtocol.AppServerErrorCode),
+);
 
 export interface JsonRpcStdioTransportOptions {
   command?: string;
@@ -43,7 +46,7 @@ interface PendingRequest {
 }
 
 export class AppServerProtocolError extends Error {
-  readonly code: number;
+  readonly code: AppProtocol.AppServerErrorCode;
 
   constructor(error: AppProtocol.AppServerErrorBody) {
     super(error.message);
@@ -226,9 +229,23 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
     if ("error" in message) {
       const pending = message.id === null ? undefined : this.pending.get(message.id);
+      let protocolError: AppProtocol.AppServerErrorBody;
+      try {
+        protocolError = decodeAppServerErrorBody(message.error);
+      } catch (error) {
+        const decodeError =
+          error instanceof Error ? error : new Error("Invalid app-server protocol error.");
+        if (pending) {
+          this.pending.delete(message.id as AppProtocol.RequestId);
+          pending.reject(decodeError);
+        } else {
+          this.events.emit("transportError", decodeError);
+        }
+        return;
+      }
       if (pending) {
         this.pending.delete(message.id as AppProtocol.RequestId);
-        pending.reject(new AppServerProtocolError(message.error));
+        pending.reject(new AppServerProtocolError(protocolError));
       }
       return;
     }
@@ -237,7 +254,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       const pending = this.pending.get(message.id);
       if (pending) {
         this.pending.delete(message.id);
-        pending.resolve(message.result);
+        try {
+          pending.resolve(unwrapAppServerResult(message.result));
+        } catch (error) {
+          pending.reject(error instanceof Error ? error : new Error("Invalid app-server result."));
+        }
       }
       return;
     }
@@ -261,7 +282,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
   private async handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<void> {
     const handler = this.serverRequestHandler;
     if (!handler) {
-      this.writeError(request.id, -32601, `unsupported server request: ${request.method}`);
+      this.writeError(
+        request.id,
+        AppProtocol.AppServerErrorCode.MethodNotFound,
+        `unsupported server request: ${request.method}`,
+      );
       return;
     }
 
@@ -269,7 +294,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       const result = await handler(request);
       this.writeResult(request.id, result ?? null);
     } catch (error) {
-      this.writeError(request.id, -32000, errorMessage(error));
+      this.writeError(
+        request.id,
+        AppProtocol.AppServerErrorCode.InternalError,
+        errorMessage(error),
+      );
     }
   }
 
@@ -282,7 +311,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     this.requireChild().stdin.write(`${JSON.stringify(response)}\n`);
   }
 
-  private writeError(id: AppProtocol.RequestId, code: number, message: string): void {
+  private writeError(
+    id: AppProtocol.RequestId,
+    code: AppProtocol.AppServerErrorCode,
+    message: string,
+  ): void {
     const response: AppProtocol.JsonRpcErrorResponse = {
       jsonrpc: "2.0",
       id,
@@ -405,6 +438,28 @@ function isSubscriptionTerminatedEnvelope(value: unknown): value is AppProtocol.
     typeof candidate.reason === "string" &&
     typeof candidate.message === "string"
   );
+}
+
+function unwrapAppServerResult(value: unknown): unknown {
+  return unwrapTalosApiResponse(value);
+}
+
+function decodeAppServerErrorBody(value: unknown): AppProtocol.AppServerErrorBody {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid app-server protocol error.");
+  }
+  const error = value as Record<string, unknown>;
+  if (
+    typeof error.code !== "number" ||
+    !APP_SERVER_ERROR_CODE_VALUES.has(error.code) ||
+    typeof error.message !== "string"
+  ) {
+    throw new Error("Invalid app-server protocol error.");
+  }
+  return {
+    code: error.code as AppProtocol.AppServerErrorCode,
+    message: error.message,
+  };
 }
 
 function errorMessage(error: unknown): string {

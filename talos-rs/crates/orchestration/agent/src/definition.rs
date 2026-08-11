@@ -150,10 +150,10 @@ impl AgentDefinitionLoader {
                 let definition =
                     definition_from_config(config, default_model_selection, definition)?;
                 if !seen_ids.insert(definition.id.clone()) {
-                    return Err(TalosError::ValidationError(format!(
-                        "duplicate agent definition id: {}",
-                        definition.id
-                    )));
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("duplicate agent definition id: {}", definition.id),
+                    ));
                 }
                 Ok(definition)
             })
@@ -204,10 +204,10 @@ impl AgentHarnessFactory {
     /// Kernel, otherwise routing and capability validation become misleading.
     pub fn build(&self, definition: &AgentDefinition) -> TalosResult<AgentHarnessImpl> {
         if !definition.enabled {
-            return Err(TalosError::ValidationError(format!(
-                "agent `{}` is disabled",
-                definition.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent `{}` is disabled", definition.id),
+            ));
         }
         match (&definition.kind, &definition.runtime_config) {
             (AgentKind::Kernel, AgentRuntimeConfig::Kernel { kernel }) => {
@@ -226,10 +226,10 @@ impl AgentHarnessFactory {
                     attachment_reader: self.attachment_reader.clone(),
                 })
             }
-            (kind, _) => Err(TalosError::UnsupportedModel(format!(
-                "agent runtime kind is not implemented: {:?}",
-                kind
-            ))),
+            (kind, _) => Err(TalosError::public(
+                talos_error::ErrorCode::ProviderUnavailable,
+                format!("agent runtime kind is not implemented: {:?}", kind),
+            )),
         }
     }
 }
@@ -284,7 +284,8 @@ fn definition_from_config(
 ) -> TalosResult<AgentDefinition> {
     let id = definition.id.trim();
     if id.is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "agent definition id cannot be empty".to_string(),
         ));
     }
@@ -298,10 +299,13 @@ fn definition_from_config(
             });
     let runtime_kind = kind_for_runtime_config(&runtime_config);
     if kind != runtime_kind {
-        return Err(TalosError::ValidationError(format!(
-            "agent `{id}` kind {:?} does not match runtime_config {:?}",
-            kind, runtime_kind
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "agent `{id}` kind {:?} does not match runtime_config {:?}",
+                kind, runtime_kind
+            ),
+        ));
     }
 
     Ok(AgentDefinition {

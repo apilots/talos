@@ -199,7 +199,8 @@ impl MemoryDailyMaintenance {
             .await?;
         let managed = response.content.trim();
         if managed.is_empty() || managed.chars().count() > MEMORY_FILE_MAX_CHARS {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "managed memory output is empty or too large".to_string(),
             ));
         }
@@ -207,7 +208,8 @@ impl MemoryDailyMaintenance {
         talos_fs::with_file_lock(&path, || async {
             let latest = talos_fs::read_file(&path).await?.unwrap_or_default();
             if latest != current {
-                return Err(TalosError::Conflict(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
                     "MEMORY.md changed during managed update".to_string(),
                 ));
             }
@@ -238,7 +240,8 @@ fn managed_content(content: &str) -> TalosResult<&str> {
         ([(start, _)], [(end, _)]) if start < end => {
             Ok(content[start + MANAGED_START.len()..*end].trim())
         }
-        _ => Err(TalosError::ValidationError(
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "MEMORY.md has invalid managed section markers".to_string(),
         )),
     }
@@ -257,7 +260,8 @@ fn replace_managed_content(content: &str, managed: &str) -> TalosResult<String> 
         _ => unreachable!("managed_content validates marker pairs"),
     };
     if updated.chars().count() > MEMORY_FILE_MAX_CHARS {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "MEMORY.md exceeds the 8000 character limit".to_string(),
         ));
     }

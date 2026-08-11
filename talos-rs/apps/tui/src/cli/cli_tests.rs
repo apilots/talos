@@ -142,8 +142,10 @@ fn render_event_returns_turn_error() {
             payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
                 request_id: "request-1".to_string(),
                 turn_id: "turn-1".to_string(),
-                error: "provider request failed".to_string(),
-                error_info: None,
+                error: talos_error::ApiError {
+                    code: talos_error::ErrorCode::ProviderUnavailable,
+                    message: "provider request failed".to_string(),
+                },
                 failed_at_ms: 1,
             }),
         },

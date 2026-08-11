@@ -235,7 +235,7 @@ async fn submit_channel_turn(
     loop {
         tokio::select! {
             _ = &mut timeout => {
-                return Err(TalosError::InternalError(format!(
+                return Err(TalosError::internal(format!(
                     "timed out waiting for channel turn `{}` to complete",
                     response.turn_id
                 )));

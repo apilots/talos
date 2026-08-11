@@ -12,10 +12,11 @@ trap stop_server EXIT
 
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "select_models" "{}" "${models_json}"
-default_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("defaultModelSelection") or {}, separators=(",", ":")))' <<< "${models_json}")"
+models_data_json="$(api_data_json "${models_json}")"
+default_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("defaultModelSelection") or {}, separators=(",", ":")))' <<< "${models_data_json}")"
 primary_provider="$(json_get "${default_selection}" "modelRef.provider")"
 primary_model="$(json_get "${default_selection}" "modelRef.id")"
-secondary_selection="$(PRIMARY_PROVIDER="${primary_provider}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); models=payload.get("models", payload.get("data", [])); item=next((model for model in models if model.get("provider") and model.get("provider") != os.environ["PRIMARY_PROVIDER"]), {}); effort=item.get("reasoning_effort") if item.get("reasoning") else None; print(json.dumps({"modelRef":{"provider":item.get("provider", ""),"id":item.get("id", "")},"reasoningEffort":effort}, separators=(",", ":")))' <<< "${models_json}")"
+secondary_selection="$(PRIMARY_PROVIDER="${primary_provider}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); models=payload.get("models", []); item=next((model for model in models if model.get("provider") and model.get("provider") != os.environ["PRIMARY_PROVIDER"]), {}); effort=item.get("reasoning_effort") if item.get("reasoning") else None; print(json.dumps({"modelRef":{"provider":item.get("provider", ""),"id":item.get("id", "")},"reasoningEffort":effort}, separators=(",", ":")))' <<< "${models_data_json}")"
 secondary_provider="$(json_get "${secondary_selection}" "modelRef.provider")"
 secondary_model="$(json_get "${secondary_selection}" "modelRef.id")"
 if [[ -z "${primary_model}" || -z "${primary_provider}" || -z "${secondary_provider}" || -z "${secondary_model}" ]]; then
@@ -62,8 +63,9 @@ echo "CASE first_message PASS session_id=${first_message_session_id}"
 
 detail_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "get_session" "{\"session_id\":\"${session_id}\"}" "${detail_json}"
-detail_id="$(json_get "${detail_json}" "session.id")"
-detail_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${detail_json}")"
+detail_data_json="$(api_data_json "${detail_json}")"
+detail_id="$(json_get "${detail_data_json}" "session.id")"
+detail_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${detail_data_json}")"
 if [[ "${detail_id}" != "${session_id}" ]] || ! json_equal "${detail_selection}" "${default_selection}"; then
   echo "CASE get_session FAIL expected_id=${session_id} actual_id=${detail_id} expected_selection=${default_selection} actual_selection=${detail_selection}"
   exit 1
@@ -74,8 +76,9 @@ patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
   -d "{\"conf\":{\"modelSelection\":${secondary_selection}}}")"
 log_case_json "patch_session_model" "{\"session_id\":\"${session_id}\",\"conf\":{\"modelSelection\":${secondary_selection}}}" "${patch_json}"
-patch_session_id="$(json_get "${patch_json}" "session.id")"
-patch_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${patch_json}")"
+patch_data_json="$(api_data_json "${patch_json}")"
+patch_session_id="$(json_get "${patch_data_json}" "session.id")"
+patch_selection="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(json.dumps(payload.get("session", {}).get("modelSelection") or {}, separators=(",", ":")))' <<< "${patch_data_json}")"
 if [[ "${patch_session_id}" != "${session_id}" ]] || ! json_equal "${patch_selection}" "${secondary_selection}"; then
   echo "CASE patch_session_model FAIL expected_selection=${secondary_selection} actual_selection=${patch_selection} response=${patch_json}"
   exit 1
@@ -84,7 +87,8 @@ echo "CASE patch_session_model PASS session_id=${patch_session_id}"
 
 list_json="$(curl -sS "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=http")"
 log_case_json "list_sessions_with_filter" "{\"user_id\":\"session-user\",\"channel_id\":\"session\",\"provider\":\"http\"}" "${list_json}"
-list_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(len(payload.get("sessions", payload.get("data", []))))' <<< "${list_json}")"
+list_data_json="$(api_data_json "${list_json}")"
+list_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(len(payload.get("sessions", [])))' <<< "${list_data_json}")"
 if [[ "${list_count}" -lt 1 ]]; then
   echo "CASE list_sessions_with_filter FAIL expected=>=1 actual=${list_count}"
   exit 1

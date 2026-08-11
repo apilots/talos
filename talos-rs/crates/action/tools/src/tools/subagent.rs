@@ -291,17 +291,26 @@ impl Tool for ListAgentsTool {
 }
 
 fn control(context: &ToolContext) -> TalosResult<Arc<dyn crate::AgentControl>> {
-    context
-        .agent_control()
-        .ok_or_else(|| TalosError::ToolError("subagent control is not configured".to_string()))
+    context.agent_control().ok_or_else(|| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "subagent control is not configured".to_string(),
+        )
+    })
 }
 
 fn trusted_caller(context: &ToolContext) -> TalosResult<AgentCaller> {
     let turn_id = context.turn_id().ok_or_else(|| {
-        TalosError::ToolError("subagent tool requires an active parent turn".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "subagent tool requires an active parent turn".to_string(),
+        )
     })?;
     let agent_id = context.agent_id().ok_or_else(|| {
-        TalosError::ToolError("subagent tool requires an active parent agent".to_string())
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "subagent tool requires an active parent agent".to_string(),
+        )
     })?;
     Ok(AgentCaller {
         session_id: context.session_id().to_string(),
@@ -311,14 +320,23 @@ fn trusted_caller(context: &ToolContext) -> TalosResult<AgentCaller> {
 }
 
 fn collaboration_payload(result: CollaborationToolResult) -> TalosResult<ToolOutputPayload> {
-    let structured_content = serde_json::to_value(&result)
-        .map_err(|err| TalosError::ToolError(format!("serialize subagent tool result: {err}")))?;
-    let encoded = serde_json::to_vec(&structured_content)
-        .map_err(|err| TalosError::ToolError(format!("encode subagent tool result: {err}")))?;
+    let structured_content = serde_json::to_value(&result).map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("serialize subagent tool result: {err}"),
+        )
+    })?;
+    let encoded = serde_json::to_vec(&structured_content).map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("encode subagent tool result: {err}"),
+        )
+    })?;
     if encoded.len() > MAX_COLLABORATION_RESULT_BYTES {
-        return Err(TalosError::ToolError(format!(
-            "subagent tool result exceeds the {MAX_COLLABORATION_RESULT_BYTES} byte limit"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("subagent tool result exceeds the {MAX_COLLABORATION_RESULT_BYTES} byte limit"),
+        ));
     }
     Ok(ToolOutputPayload::success_with_content_items(
         structured_content,

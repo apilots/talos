@@ -35,10 +35,12 @@ impl TaskStateRuntime {
         validate_todo_items(&items)?;
         let session = self.session_state(session_id);
         {
-            let mut guard = session
-                .todos
-                .write()
-                .map_err(|_| TalosError::ToolError("todo state lock poisoned".to_string()))?;
+            let mut guard = session.todos.write().map_err(|_| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "todo state lock poisoned".to_string(),
+                )
+            })?;
             *guard = items.clone();
         }
 
@@ -58,7 +60,12 @@ impl TaskStateRuntime {
         let items = session
             .todos
             .read()
-            .map_err(|_| TalosError::ToolError("todo state lock poisoned".to_string()))?
+            .map_err(|_| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "todo state lock poisoned".to_string(),
+                )
+            })?
             .clone();
         Ok(TodoListSnapshot { items })
     }
@@ -102,10 +109,12 @@ impl TaskStateRuntime {
         };
 
         {
-            let mut guard = session
-                .latest_question
-                .write()
-                .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))?;
+            let mut guard = session.latest_question.write().map_err(|_| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "question state lock poisoned".to_string(),
+                )
+            })?;
             *guard = Some(record.clone());
         }
 
@@ -125,7 +134,12 @@ impl TaskStateRuntime {
             .latest_question
             .read()
             .map(|guard| guard.clone())
-            .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))
+            .map_err(|_| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "question state lock poisoned".to_string(),
+                )
+            })
     }
 
     pub fn submit_question_answer(
@@ -134,18 +148,26 @@ impl TaskStateRuntime {
         answer: StructuredQuestionAnswer,
     ) -> TalosResult<StructuredQuestionRecord> {
         let session = self.session_state(session_id);
-        let mut guard = session
-            .latest_question
-            .write()
-            .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))?;
-        let record = guard
-            .as_mut()
-            .ok_or_else(|| TalosError::ResourceNotFound("pending question".to_string()))?;
+        let mut guard = session.latest_question.write().map_err(|_| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "question state lock poisoned".to_string(),
+            )
+        })?;
+        let record = guard.as_mut().ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                "pending question".to_string(),
+            )
+        })?;
         if record.request.question_id != answer.question_id {
-            return Err(TalosError::ValidationError(format!(
-                "question `{}` is not pending in session `{session_id}`",
-                answer.question_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "question `{}` is not pending in session `{session_id}`",
+                    answer.question_id
+                ),
+            ));
         }
 
         if let Some(selected_option_id) = answer.selected_option_id.as_deref() {
@@ -155,10 +177,13 @@ impl TaskStateRuntime {
                 .iter()
                 .any(|option| option.id == selected_option_id);
             if !option_exists {
-                return Err(TalosError::ValidationError(format!(
-                    "option `{selected_option_id}` does not exist for question `{}`",
-                    answer.question_id
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "option `{selected_option_id}` does not exist for question `{}`",
+                        answer.question_id
+                    ),
+                ));
             }
         }
 
@@ -170,7 +195,8 @@ impl TaskStateRuntime {
                 .unwrap_or_default()
                 .is_empty()
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "answer must contain either a selected option or free-form text".to_string(),
             ));
         }
@@ -204,7 +230,8 @@ fn todo_status_label(status: TodoStatus) -> &'static str {
 
 fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
     if items.is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "todos must contain at least one item".to_string(),
         ));
     }
@@ -212,20 +239,22 @@ fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
     let mut seen = std::collections::BTreeSet::new();
     for item in items {
         if item.id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "todo id cannot be empty".to_string(),
             ));
         }
         if item.content.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "todo content cannot be empty".to_string(),
             ));
         }
         if !seen.insert(item.id.clone()) {
-            return Err(TalosError::ValidationError(format!(
-                "duplicate todo id `{}`",
-                item.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("duplicate todo id `{}`", item.id),
+            ));
         }
     }
     Ok(())
@@ -237,17 +266,20 @@ fn validate_question(
     options: &[StructuredQuestionOption],
 ) -> TalosResult<()> {
     if header.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "header cannot be empty".to_string(),
         ));
     }
     if question.trim().is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "question cannot be empty".to_string(),
         ));
     }
     if !(2..=3).contains(&options.len()) {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "options must contain 2 or 3 entries".to_string(),
         ));
     }
@@ -255,25 +287,28 @@ fn validate_question(
     let mut seen = std::collections::BTreeSet::new();
     for option in options {
         if option.id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "option id cannot be empty".to_string(),
             ));
         }
         if option.label.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "option label cannot be empty".to_string(),
             ));
         }
         if option.description.trim().is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "option description cannot be empty".to_string(),
             ));
         }
         if !seen.insert(option.id.clone()) {
-            return Err(TalosError::ValidationError(format!(
-                "duplicate option id `{}`",
-                option.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("duplicate option id `{}`", option.id),
+            ));
         }
     }
 

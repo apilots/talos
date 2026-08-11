@@ -62,10 +62,13 @@ impl SessionService {
                     .find(|model| model.id == selection.model_ref.id)
             })
             .ok_or_else(|| {
-                TalosError::UnsupportedModel(format!(
-                    "{}:{}",
-                    selection.model_ref.provider, selection.model_ref.id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::ProviderUnavailable,
+                    format!(
+                        "{}:{}",
+                        selection.model_ref.provider, selection.model_ref.id
+                    ),
+                )
             })?;
         selection.resolve_reasoning(&ModelInfo::from_provider_model(
             selection.model_ref.provider.clone(),
@@ -76,7 +79,7 @@ impl SessionService {
 
     fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
         let selection = record.conf.model_selection.as_ref().ok_or_else(|| {
-            TalosError::SerializationError(format!(
+            TalosError::internal(format!(
                 "session '{}' uses an incompatible persisted session format: missing modelSelection",
                 record.id
             ))
@@ -97,6 +100,13 @@ impl SessionService {
             .write()
             .expect("session base config write lock");
         base_config.llm = llm.clone();
+    }
+
+    pub fn update_base_config(&self, config: TalosConfig) {
+        *self
+            .base_config
+            .write()
+            .expect("session base config write lock") = config;
     }
 
     fn workspace_root(&self) -> Option<PathBuf> {
@@ -156,7 +166,12 @@ impl SessionService {
                 self.project_store
                     .get_project(project_id)
                     .await?
-                    .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?
+                    .ok_or_else(|| {
+                        TalosError::public(
+                            talos_error::ErrorCode::ResourceNotFound,
+                            format!("project {}", project_id),
+                        )
+                    })?
                     .directory,
             )
         } else {
@@ -172,10 +187,10 @@ impl SessionService {
     async fn validate_project_id(&self, project_id: &str) -> TalosResult<()> {
         let exists = self.project_store.get_project(project_id).await?.is_some();
         if !exists {
-            return Err(TalosError::ValidationError(format!(
-                "project {} not found",
-                project_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("project {} not found", project_id),
+            ));
         }
         Ok(())
     }
@@ -343,10 +358,10 @@ impl SessionService {
         usage: &talos_types::talos::TokenUsage,
     ) -> TalosResult<()> {
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         };
         self.validate_persisted_model_selection(&record)?;
         record.last_activity = chrono::Utc::now()
@@ -367,10 +382,10 @@ impl SessionService {
         usage: &talos_types::talos::TokenUsage,
     ) -> TalosResult<()> {
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         };
         self.validate_persisted_model_selection(&record)?;
         if artifact_seq <= record.latest_turn_seq {
@@ -394,23 +409,24 @@ impl SessionService {
     pub async fn update_session_title(&self, session_id: &str, title: &str) -> TalosResult<()> {
         let normalized = title.trim();
         if normalized.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "session title must not be empty".to_string(),
             ));
         }
         let Some(mut record) = self.session_store.get_session_record(session_id).await? else {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         };
         self.validate_persisted_model_selection(&record)?;
         record.title = normalized.to_string();
         if !self.session_store.update_session_record(&record).await? {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         }
         Ok(())
     }
@@ -420,11 +436,17 @@ impl SessionService {
             .session_store
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("session {session_id}"),
+                )
+            })?;
         if matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
-            return Err(TalosError::ValidationError(format!(
-                "session '{session_id}' is controlled by its parent agent"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("session '{session_id}' is controlled by its parent agent"),
+            ));
         }
         let success = self.session_store.delete_session_tree(session_id).await?;
         Ok(SessionPatchAck { success })
@@ -438,11 +460,17 @@ impl SessionService {
             .session_store
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("session {session_id}"),
+                )
+            })?;
         if !matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
-            return Err(TalosError::ValidationError(format!(
-                "session '{session_id}' is not a subagent session"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("session '{session_id}' is not a subagent session"),
+            ));
         }
         let success = self.session_store.delete_session_record(session_id).await?;
         Ok(SessionPatchAck { success })

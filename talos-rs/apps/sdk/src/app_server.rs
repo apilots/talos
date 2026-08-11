@@ -20,7 +20,7 @@ use talos_auth::{
     CloudLoginCancelRequest, CloudLoginStartRequest, CloudLoginStartResponse,
     CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
@@ -144,16 +144,16 @@ impl AppServerClient {
             .stderr(Stdio::inherit())
             .spawn()
             .map_err(|error| {
-                TalosError::ClientError(format!("spawn {}: {error}", config.app_server_bin))
+                TalosError::internal(format!("spawn {}: {error}", config.app_server_bin))
             })?;
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| TalosError::ClientError("app-server stdin is not piped".to_string()))?;
+            .ok_or_else(|| TalosError::internal("app-server stdin is not piped".to_string()))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| TalosError::ClientError("app-server stdout is not piped".to_string()))?;
+            .ok_or_else(|| TalosError::internal("app-server stdout is not piped".to_string()))?;
         let pending_responses = Arc::new(Mutex::new(HashMap::new()));
         let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
         let pending_subscription_events = Arc::new(Mutex::new(HashMap::new()));
@@ -236,12 +236,12 @@ impl AppServerClient {
         self.events
             .recv()
             .await
-            .ok_or_else(|| TalosError::ClientError("app-server event stream closed".to_string()))
+            .ok_or_else(|| TalosError::internal("app-server event stream closed".to_string()))
     }
 
     pub async fn next_notification(&mut self) -> TalosResult<TimelineSubscriptionNotification> {
         self.notifications.recv().await.ok_or_else(|| {
-            TalosError::ClientError("app-server notification stream closed".to_string())
+            TalosError::internal("app-server notification stream closed".to_string())
         })
     }
 
@@ -253,17 +253,17 @@ impl AppServerClient {
             stdin
                 .shutdown()
                 .await
-                .map_err(|error| TalosError::ClientError(error.to_string()))?;
+                .map_err(|error| TalosError::internal(error.to_string()))?;
         }
         if let (AppServerOwnership::OwnedChild, Some(mut child)) = (self.ownership, child) {
             let status = child
                 .wait()
                 .await
-                .map_err(|error| TalosError::ClientError(error.to_string()))?;
+                .map_err(|error| TalosError::internal(error.to_string()))?;
             if status.success() {
                 Ok(())
             } else {
-                Err(TalosError::ClientError(format!(
+                Err(TalosError::internal(format!(
                     "app-server exited with {status}"
                 )))
             }
@@ -278,8 +278,7 @@ impl AppServerClient {
         T: DeserializeOwned,
     {
         let value = self.request_value(method, params).await?;
-        serde_json::from_value(value)
-            .map_err(|error| TalosError::SerializationError(error.to_string()))
+        serde_json::from_value(value).map_err(|error| TalosError::internal(error.to_string()))
     }
 
     async fn request_value<P>(&mut self, method: &str, params: P) -> TalosResult<Value>
@@ -288,7 +287,7 @@ impl AppServerClient {
     {
         let id = self.next_request_id();
         let params = serde_json::to_value(params)
-            .map_err(|error| TalosError::SerializationError(error.to_string()))?;
+            .map_err(|error| TalosError::internal(error.to_string()))?;
         let mut request = JsonRpcRequest::new(RequestId::Number(id), method, Some(params));
         request.actor_credentials = self.actor_credentials_for_request(method);
         let (tx, rx) = oneshot::channel();
@@ -301,27 +300,28 @@ impl AppServerClient {
             Ok(response) => response,
             Err(_) => {
                 self.pending_responses.lock().await.remove(&id);
-                return Err(TalosError::ClientError(
-                    "app-server request timeout".to_string(),
-                ));
+                return Err(TalosError::internal("app-server request timeout"));
             }
         };
 
         let result = response.map_err(|_| {
-            TalosError::ClientError(format!(
+            TalosError::internal(format!(
                 "app-server response channel closed for request {id}"
             ))
         })?;
         match result {
-            Err(TalosError::AuthError(message))
-                if self.use_cloud_session_cache
+            Err(error)
+                if error.is_code(ErrorCode::Unauthenticated)
+                    && self.use_cloud_session_cache
                     && self.actor_credentials.is_some()
                     && method != "auth.session.clear" =>
             {
+                let message = error.diagnostic_message().to_string();
                 self.actor_credentials = None;
-                Err(TalosError::AuthError(format!(
-                    "{message}; cached cloud session was rejected, please sign in again"
-                )))
+                Err(TalosError::public(
+                    ErrorCode::Unauthenticated,
+                    format!("{message}; cached cloud session was rejected, please sign in again"),
+                ))
             }
             other => other,
         }
@@ -339,23 +339,23 @@ impl AppServerClient {
 
     async fn write_json<T: serde::Serialize>(&mut self, value: &T) -> TalosResult<()> {
         let line = serde_json::to_string(value)
-            .map_err(|error| TalosError::SerializationError(error.to_string()))?;
+            .map_err(|error| TalosError::internal(error.to_string()))?;
         let stdin = self
             .stdin
             .as_mut()
-            .ok_or_else(|| TalosError::ClientError("app-server client is shut down".to_string()))?;
+            .ok_or_else(|| TalosError::internal("app-server client is shut down".to_string()))?;
         stdin
             .write_all(line.as_bytes())
             .await
-            .map_err(|error| TalosError::ClientError(error.to_string()))?;
+            .map_err(|error| TalosError::internal(error.to_string()))?;
         stdin
             .write_all(b"\n")
             .await
-            .map_err(|error| TalosError::ClientError(error.to_string()))?;
+            .map_err(|error| TalosError::internal(error.to_string()))?;
         stdin
             .flush()
             .await
-            .map_err(|error| TalosError::ClientError(error.to_string()))
+            .map_err(|error| TalosError::internal(error.to_string()))
     }
 }
 
@@ -898,7 +898,7 @@ fn spawn_stdout_reader(
                 JsonRpcMessage::Response(response) => {
                     if let RequestId::Number(id) = response.id {
                         if let Some(sender) = pending_responses.lock().await.remove(&id) {
-                            let _ = sender.send(Ok(response.result));
+                            let _ = sender.send(response::decode_api_response(response.result));
                         }
                     }
                 }

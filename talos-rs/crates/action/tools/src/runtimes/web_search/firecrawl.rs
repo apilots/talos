@@ -24,7 +24,10 @@ impl FirecrawlSearchProvider {
             .unwrap_or("https://api.firecrawl.dev");
         let api_key = configured_api_key(&config, runtime_env);
         let client = Client::new_selfhosted(base_url, api_key.as_deref()).map_err(|err| {
-            TalosError::InvalidConfiguration(format!("build Firecrawl search client: {err}"))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("build Firecrawl search client: {err}"),
+            )
         })?;
         Ok(Self {
             client,
@@ -55,9 +58,15 @@ impl SearchProvider for FirecrawlSearchProvider {
             .client
             .search(request.query.trim(), options)
             .await
-            .map_err(|err| TalosError::ToolError(format!("Firecrawl search failed: {err}")))?;
+            .map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("Firecrawl search failed: {err}"),
+                )
+            })?;
         if !response.success {
-            return Err(TalosError::ToolError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
                 "Firecrawl search returned an unsuccessful response".to_string(),
             ));
         }

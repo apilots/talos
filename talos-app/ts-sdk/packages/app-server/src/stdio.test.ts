@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
+
 import { AppServerProtocolError, JsonRpcStdioTransport, filterAppServerEnvironment } from "./stdio";
 
 describe("AppServerProtocolError", () => {
   it("preserves protocol error fields", () => {
     const error = new AppServerProtocolError({
-      code: -32002,
+      code: AppProtocol.AppServerErrorCode.AlreadyInitialized,
       message: "missing session",
     });
 
@@ -56,11 +58,100 @@ describe("JsonRpcStdioTransport server requests", () => {
         jsonrpc: "2.0",
         id: 9,
         error: {
-          code: -32601,
+          code: AppProtocol.AppServerErrorCode.MethodNotFound,
           message: "unsupported server request: client.unknown",
         },
       },
     ]);
+  });
+
+  it("returns the registered internal protocol code when a server request handler fails", async () => {
+    const transport = createTransportHarness();
+    transport.instance.onServerRequest(() => {
+      throw new Error("handler failed");
+    });
+
+    transport.handleLine(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 10,
+      method: "client.user_input.request",
+      params: { prompt: "Continue?" },
+    }));
+    await Promise.resolve();
+
+    expect(transport.writes.map((line) => JSON.parse(line))).toEqual([
+      {
+        jsonrpc: "2.0",
+        id: 10,
+        error: {
+          code: AppProtocol.AppServerErrorCode.InternalError,
+          message: "handler failed",
+        },
+      },
+    ]);
+  });
+});
+
+describe("JsonRpcStdioTransport responses", () => {
+  it("unwraps successful API result data", async () => {
+    const transport = createTransportHarness();
+    const request = transport.instance.request<{ ok: boolean }>("session.get", {
+      session_id: "session-1",
+    });
+
+    transport.handleLine(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        status: "success",
+        data: { ok: true },
+      },
+    }));
+
+    await expect(request).resolves.toEqual({ ok: true });
+  });
+
+  it("rejects application API errors separately from protocol errors", async () => {
+    const transport = createTransportHarness();
+    const request = transport.instance.request("session.get", {
+      session_id: "missing",
+    });
+
+    transport.handleLine(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        status: "error",
+        error: {
+          code: AppProtocol.ErrorCode.ResourceNotFound,
+          message: "Resource not found",
+        },
+      },
+    }));
+
+    await expect(request).rejects.toMatchObject({
+      name: "TalosApiError",
+      code: AppProtocol.ErrorCode.ResourceNotFound,
+      message: "Resource not found",
+    } satisfies Partial<TalosApiError>);
+  });
+
+  it("rejects unregistered protocol error codes", async () => {
+    const transport = createTransportHarness();
+    const request = transport.instance.request("session.get", {
+      session_id: "session-1",
+    });
+
+    transport.handleLine(JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      error: {
+        code: -32000,
+        message: "unregistered",
+      },
+    }));
+
+    await expect(request).rejects.toThrow("Invalid app-server protocol error.");
   });
 });
 

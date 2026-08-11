@@ -4,10 +4,11 @@ use std::time::Duration;
 
 mod cli;
 
+use talos_error::ErrorCode;
 use talos_sdk::{
     now_ms, open_external_url, CloudLoginClientKind, CloudLoginStartRequest,
     CloudLoginStatusRequest, CloudLoginStatusResponse, GatewayClient as SdkGatewayClient,
-    TalosError, UserCurrentRequest,
+    UserCurrentRequest,
 };
 use talos_sdk_embedded::EmbeddedServerClient;
 use talos_tui::run_tui_app_with_gateway_client;
@@ -53,7 +54,9 @@ where
 {
     match SdkGatewayClient::current_user(client, UserCurrentRequest {}).await {
         Ok(_) => Ok(()),
-        Err(TalosError::AuthError(_)) => login_with_cloud(client, client_kind, client_name).await,
+        Err(error) if error.is_code(ErrorCode::Unauthenticated) => {
+            login_with_cloud(client, client_kind, client_name).await
+        }
         Err(error) => Err(Box::new(error)),
     }
 }

@@ -45,7 +45,8 @@ pub(crate) fn build_file_operators(
             let operator = match backend {
                 FileStorageBackendConfig::Fs(file_system) => {
                     let root = file_system.root.to_str().ok_or_else(|| {
-                        TalosError::InvalidConfiguration(
+                        TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
                             "storage.files filesystem root is not valid UTF-8".to_string(),
                         )
                     })?;
@@ -81,7 +82,10 @@ pub(crate) fn build_file_operators(
 }
 
 fn operator_error(context: &str, error: &opendal::Error) -> TalosError {
-    TalosError::InvalidConfiguration(format!("{context} failed: {:?}", error.kind()))
+    TalosError::public(
+        talos_error::ErrorCode::InvalidRequest,
+        format!("{context} failed: {:?}", error.kind()),
+    )
 }
 
 #[cfg(test)]

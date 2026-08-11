@@ -80,6 +80,7 @@ talos/
 │   ├── crates/
 │   ├── apps/
 │   └── bin/
+├── deploy/            # 服务端部署示例与反向代理配置要求
 ├── talos-py/          # Python 实现（计划中）
 ├── talos-go/          # Go 实现（计划中）
 ├── talos-app/         # TypeScript Web / Desktop / SDK workspace
@@ -137,6 +138,11 @@ E2E 也可以通过 root `justfile` 运行：`just e2e` 会转发到
 如果 `talos-rs/target` 体积过大，先使用 `just target-size` 查看分布，再按需运行
 `just clean-incremental` 或 `just clean-debug`。不要把清理 target 当作常规验证步骤；
 它会牺牲后续增量编译速度。
+
+### 服务端部署
+
+HTTP/WebUI 服务端通过 SSE 推送实时 timeline 事件。反向代理必须对
+`/v1/sessions/*/events` 禁用压缩和缓冲，详见 [deploy/README.md](deploy/README.md)。
 
 ### 其他语言实现
 

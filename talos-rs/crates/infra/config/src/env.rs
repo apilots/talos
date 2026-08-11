@@ -51,7 +51,7 @@ impl EnvSecretStore {
         match std::fs::read_to_string(&self.path) {
             Ok(content) => Ok(parse_dotenv_filtered(&content)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-            Err(err) => Err(TalosError::ConfigError(format!(
+            Err(err) => Err(TalosError::internal(format!(
                 "failed to read env file {}: {}",
                 self.path.display(),
                 err
@@ -64,8 +64,9 @@ impl EnvSecretStore {
             return Ok(());
         }
         match talos_fs::std_fs().write_file_with(&self.path, "", WriteOptions::create_new()) {
-            Ok(()) | Err(TalosError::Conflict(_)) => Ok(()),
-            Err(err) => Err(TalosError::ConfigError(format!(
+            Ok(()) => Ok(()),
+            Err(err) if err.is_code(talos_error::ErrorCode::Conflict) => Ok(()),
+            Err(err) => Err(TalosError::internal(format!(
                 "failed to create env file {}: {}",
                 self.path.display(),
                 err
@@ -87,7 +88,7 @@ impl EnvSecretStore {
 
     pub fn set(&self, key: &str, value: &str) -> TalosResult<()> {
         if !is_talos_env_key(key) || !is_valid_env_name(key) {
-            return Err(TalosError::ConfigError(format!(
+            return Err(TalosError::internal(format!(
                 "invalid talos env key '{}'",
                 key
             )));
@@ -117,7 +118,7 @@ impl EnvSecretStore {
         talos_fs::std_fs()
             .write_file(&self.path, &output)
             .map_err(|err| {
-                TalosError::ConfigError(format!(
+                TalosError::internal(format!(
                     "failed to write env file {}: {}",
                     self.path.display(),
                     err

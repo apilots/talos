@@ -4,6 +4,7 @@ import type { FileInfo } from "@talos/sdk-browser";
 
 import { useConnectionKey } from "@/features/chat/hooks/useChatQueries";
 import { getTalosClient } from "@/shared/api/client";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { fileListQueryKey, uploadFile } from "../api";
 
 export type FileView = "grid" | "list";
@@ -176,12 +177,12 @@ export function useFilesPage() {
     isUpdating: updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
     error:
-      listQuery.error instanceof Error
-        ? listQuery.error.message
-        : detailQuery.error instanceof Error
-          ? detailQuery.error.message
-          : mutationError instanceof Error
-            ? mutationError.message
+      listQuery.error
+        ? userVisibleErrorMessage(listQuery.error, "Failed to load files.")
+        : detailQuery.error
+          ? userVisibleErrorMessage(detailQuery.error, "Failed to load file.")
+          : mutationError
+            ? userVisibleErrorMessage(mutationError, "File operation failed.")
             : null,
   };
 }

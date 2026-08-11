@@ -38,39 +38,58 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         .path
         .as_deref()
         .or(request.file_path.as_deref())
-        .ok_or_else(|| TalosError::ToolError("path is required".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "path is required".to_string(),
+            )
+        })?;
     let old_string = request
         .find
         .as_deref()
         .or(request.old_string.as_deref())
-        .ok_or_else(|| TalosError::ToolError("find/old_string is required".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "find/old_string is required".to_string(),
+            )
+        })?;
     let new_string = request
         .replace
         .as_deref()
         .or(request.new_string.as_deref())
-        .ok_or_else(|| TalosError::ToolError("replace/new_string is required".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "replace/new_string is required".to_string(),
+            )
+        })?;
 
     if old_string == new_string {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "old_string and new_string must differ".to_string(),
         ));
     }
 
     let path = resolve_tool_path(raw_path, context)?;
-    let original_file = fs::read_to_string(&path)
-        .await
-        .map_err(|err| TalosError::ToolError(format!("failed to read file: {}", err)))?;
+    let original_file = fs::read_to_string(&path).await.map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("failed to read file: {}", err),
+        )
+    })?;
     ensure_read_state_is_fresh(&path, &original_file, context)?;
 
     let replacements = original_file.matches(old_string).count();
     if replacements == 0 {
-        return Err(TalosError::ToolError(format!(
-            "target text not found in `{}`",
-            path.display()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("target text not found in `{}`", path.display()),
+        ));
     }
     if replacements > 1 && !request.replace_all {
-        return Err(TalosError::ToolError(format!(
+        return Err(TalosError::public(talos_error::ErrorCode::ToolExecutionFailed, format!(
             "target text matched {} times in `{}`; set replace_all=true or provide a more specific old_string",
             replacements,
             path.display()
@@ -83,9 +102,12 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         original_file.replacen(old_string, new_string, 1)
     };
 
-    fs::write(&path, &updated)
-        .await
-        .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
+    fs::write(&path, &updated).await.map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("failed to write file: {}", err),
+        )
+    })?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &updated);

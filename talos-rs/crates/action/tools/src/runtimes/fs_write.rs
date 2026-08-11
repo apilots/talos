@@ -39,7 +39,12 @@ pub async fn run(
         .path
         .as_deref()
         .or(request.file_path.as_deref())
-        .ok_or_else(|| TalosError::ToolError("path is required".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "path is required".to_string(),
+            )
+        })?;
     let path = resolve_tool_path(raw_path, context)?;
     let original_file = fs::read_to_string(&path).await.ok();
 
@@ -49,13 +54,19 @@ pub async fn run(
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await.map_err(|err| {
-            TalosError::ToolError(format!("failed to create parent dir: {}", err))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("failed to create parent dir: {}", err),
+            )
         })?;
     }
 
-    fs::write(&path, &request.content)
-        .await
-        .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
+    fs::write(&path, &request.content).await.map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("failed to write file: {}", err),
+        )
+    })?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &request.content);
@@ -78,17 +89,23 @@ pub fn ensure_read_state_is_fresh(
     context: &ToolContext,
 ) -> TalosResult<()> {
     let entry = context.read_file_state().get(path).ok_or_else(|| {
-        TalosError::ToolError(format!(
-            "file `{}` must be read before write or edit",
-            path.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!(
+                "file `{}` must be read before write or edit",
+                path.display()
+            ),
+        )
     })?;
     let current_hash = sha256_hex(current_content.as_bytes());
     if entry.content_hash != current_hash || entry.size_bytes != current_content.len() as u64 {
-        return Err(TalosError::ToolError(format!(
-            "file `{}` changed since last read; read it again before modifying",
-            path.display()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!(
+                "file `{}` changed since last read; read it again before modifying",
+                path.display()
+            ),
+        ));
     }
     Ok(())
 }

@@ -136,7 +136,7 @@ upload_response="$(curl -sS -w $'\n%{http_code}' \
   -F "file=@${FIXTURE_PATH};type=application/octet-stream")"
 upload_status="${upload_response##*$'\n'}"
 upload_body="${upload_response%$'\n'*}"
-file_id="$(json_get "${upload_body}" "file.fileId")"
+file_id="$(api_json_get "${upload_body}" "file.fileId")"
 if [[ "${upload_status}" != "200" || -z "${file_id}" ]]; then
   echo "CASE local_file_upload FAIL status=${upload_status} body=${upload_body}"
   exit 1
@@ -149,12 +149,15 @@ import json
 import os
 
 data = json.loads(os.environ["LIST_BODY"])
+if not (isinstance(data, dict) and data.get("status") == "success" and isinstance(data.get("data"), dict)):
+    raise SystemExit("file list response must be ApiResponse success envelope")
+data = data["data"]
 assert [item["fileId"] for item in data["data"]] == [os.environ["FILE_ID"]]
 PY
 echo "CASE local_file_list PASS file_id=${file_id}"
 
 read_body="$(curl -sS "${GATEWAY_URL}/v1/files/${file_id}")"
-if [[ "$(json_get "${read_body}" "file.fileId")" != "${file_id}" ]]; then
+if [[ "$(api_json_get "${read_body}" "file.fileId")" != "${file_id}" ]]; then
   echo "CASE local_file_read FAIL body=${read_body}"
   exit 1
 fi
@@ -167,7 +170,11 @@ UPDATE_BODY="${update_body}" python3 - <<'PY'
 import json
 import os
 
-file = json.loads(os.environ["UPDATE_BODY"])["file"]
+data = json.loads(os.environ["UPDATE_BODY"])
+if not (isinstance(data, dict) and data.get("status") == "success" and isinstance(data.get("data"), dict)):
+    raise SystemExit("file update response must be ApiResponse success envelope")
+data = data["data"]
+file = data["file"]
 assert file["tags"] == ["reviewed"]
 assert file["metadata"] == {"source": "model-e2e"}
 PY
@@ -248,7 +255,7 @@ PY
 echo "CASE local_mock_wire_attachment PASS"
 
 delete_body="$(curl -sS -X DELETE "${GATEWAY_URL}/v1/files/${file_id}")"
-if [[ "$(json_get "${delete_body}" "fileId")" != "${file_id}" ]]; then
+if [[ "$(api_json_get "${delete_body}" "fileId")" != "${file_id}" ]]; then
   echo "CASE local_file_delete FAIL body=${delete_body}"
   exit 1
 fi

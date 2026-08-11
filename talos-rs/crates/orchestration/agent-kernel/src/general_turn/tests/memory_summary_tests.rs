@@ -104,7 +104,7 @@ async fn compaction_does_not_advance_cursor_or_summary_when_memory_write_fails()
     .await
     .expect_err("failed memory write should fail compaction");
 
-    assert!(matches!(error, TalosError::StorageError(_)));
+    assert!(error.is_internal());
     assert_eq!(
         session_store
             .get_session_record("s1")

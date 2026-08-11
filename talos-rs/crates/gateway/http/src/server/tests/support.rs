@@ -276,10 +276,12 @@ impl SessionService for MockSessionService {
 
     async fn clear_session(&self, session_id: &str) -> TalosResult<talos_types::TalosSession> {
         *self.session_cleared.lock().expect("session state lock") = true;
-        let mut session = self
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?;
+        let mut session = self.get_session(session_id).await?.ok_or_else(|| {
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                session_id.to_string(),
+            )
+        })?;
         session.state.message_count = 0;
         session.state.usage = talos_types::talos::TokenUsage::default();
         Ok(session)

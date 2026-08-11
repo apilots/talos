@@ -142,10 +142,13 @@ impl CoordinatorImpl {
         let session_id = session.context.session_id.clone();
         let (_target_agent, agent) = self.resolve_session_agent(&session).await?;
         if agent.has_active_turn(&session_id) {
-            return Err(talos_error::TalosError::ValidationError(format!(
-                "cannot delete session `{}` while a turn is active",
-                session_id
-            )));
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "cannot delete session `{}` while a turn is active",
+                    session_id
+                ),
+            ));
         }
         agent.clear_session(session).await
     }

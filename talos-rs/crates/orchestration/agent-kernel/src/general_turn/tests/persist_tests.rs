@@ -12,7 +12,7 @@ impl KernelTranscriptService for FailingTranscriptService {
         _session: &mut InvocationSession,
         _event: KernelTranscriptEvent,
     ) -> TalosResult<KernelTranscriptEvent> {
-        Err(TalosError::StorageError(
+        Err(TalosError::internal(
             "injected transcript failure".to_string(),
         ))
     }

@@ -16,7 +16,7 @@ pub use talos_auth::{
     AuthResponse, CloudLoginCancelRequest, CloudLoginClientKind, CloudLoginStartRequest,
     CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, UserDto, UserRole,
 };
-pub use talos_error::{TalosError, TalosResult};
+pub use talos_error::{ApiError, ErrorCode, TalosError, TalosResult};
 pub use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, ContextCompactionMetrics,
     ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger,
