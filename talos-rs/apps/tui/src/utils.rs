@@ -16,7 +16,6 @@ pub fn display_tool_name(tool_name: &str) -> &str {
         "grep" | "Grep" => "Grep",
         "write" | "write_file" | "Write" => "Write",
         "edit" | "Edit" => "Edit",
-        "apply_patch" | "ApplyPatch" => "ApplyPatch",
         "memory_search" | "MemorySearch" => "MemorySearch",
         "memory_get" | "MemoryGet" => "MemoryGet",
         _ => tool_name,

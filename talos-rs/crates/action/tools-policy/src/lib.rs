@@ -31,7 +31,6 @@ impl Default for ToolPolicy {
                 "Write".to_string(),
                 "Edit".to_string(),
                 "Grep".to_string(),
-                "ApplyPatch".to_string(),
                 // Exec tools
                 "Bash".to_string(),
                 // Memory tools

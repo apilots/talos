@@ -59,7 +59,7 @@ describe("ToolCallBlock", () => {
         }]}
         progress={[]}
         status="error"
-        toolName="ApplyPatch"
+        toolName="Edit"
       />,
     );
 
@@ -68,7 +68,7 @@ describe("ToolCallBlock", () => {
       "Failed · 1 file(s) · +1 -0",
     );
 
-    const toggle = screen.getByRole("button", { name: /ApplyPatch · src\/app\.tsx/ });
+    const toggle = screen.getByRole("button", { name: /Edit · src\/app\.tsx/ });
     fireEvent.click(toggle);
 
     expect(toggle.getAttribute("aria-expanded")).toBe("true");

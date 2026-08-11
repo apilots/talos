@@ -80,7 +80,6 @@ fn test_default_policy_allows_builtin_tools() {
     assert!(policy.is_allowed("Bash"));
     assert!(policy.is_allowed("Read"));
     assert!(policy.is_allowed("Grep"));
-    assert!(policy.is_allowed("ApplyPatch"));
     for tool in [
         "spawn_agent",
         "send_message",

@@ -2,7 +2,7 @@ const ARGUMENT_PREVIEW_LIMIT = 94;
 
 const TOOL_ARGUMENT_KEYS: Array<{ names: string[]; keys: string[] }> = [
   { names: ["bash", "shell", "exec", "command"], keys: ["cmd", "command"] },
-  { names: ["read", "write", "edit", "patch"], keys: ["file_path", "path", "file"] },
+  { names: ["read", "write", "edit"], keys: ["file_path", "path", "file"] },
   { names: ["grep", "search"], keys: ["pattern", "query"] },
   { names: ["glob"], keys: ["pattern", "glob"] },
   { names: ["web", "reference", "url"], keys: ["url", "domain", "query"] },
