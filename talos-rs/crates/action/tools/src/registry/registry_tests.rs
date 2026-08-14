@@ -976,10 +976,6 @@ fn core_local_tools_declare_explicit_sandbox_operations() {
             talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
         ),
         (
-            "ApplyPatch",
-            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
-        ),
-        (
             "Glob",
             talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
         ),

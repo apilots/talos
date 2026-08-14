@@ -29,16 +29,3 @@ fn replace_todos_updates_runtime_and_shared_state() {
     assert_eq!(shared.len(), 2);
     assert!(shared[0].content.contains("in_progress"));
 }
-
-#[test]
-fn enter_and_exit_plan_mode_updates_shared_permission_state() {
-    let runtime = TaskStateRuntime::global();
-    let session_id = format!("session-{}", Uuid::new_v4());
-
-    assert_eq!(runtime.enter_plan_mode(&session_id), PermissionMode::Plan);
-    assert_eq!(
-        runtime.current_permission_mode(&session_id),
-        PermissionMode::Plan
-    );
-    assert_eq!(runtime.exit_plan_mode(&session_id), PermissionMode::Default);
-}

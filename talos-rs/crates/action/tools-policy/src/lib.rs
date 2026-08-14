@@ -31,7 +31,6 @@ impl Default for ToolPolicy {
                 "Write".to_string(),
                 "Edit".to_string(),
                 "Grep".to_string(),
-                "ApplyPatch".to_string(),
                 // Exec tools
                 "Bash".to_string(),
                 // Memory tools
@@ -45,8 +44,6 @@ impl Default for ToolPolicy {
                 // State and discovery tools
                 "ToolSearch".to_string(),
                 "TodoWrite".to_string(),
-                "EnterPlanMode".to_string(),
-                "ExitPlanMode".to_string(),
                 "AskUserQuestion".to_string(),
                 "spawn_agent".to_string(),
                 "send_message".to_string(),

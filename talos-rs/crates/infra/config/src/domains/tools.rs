@@ -16,8 +16,6 @@ pub struct ToolsRuntimeConfig {
     #[serde(default)]
     pub dynamic: DynamicToolConfig,
     #[serde(default = "default_true")]
-    pub enable_apply_patch: bool,
-    #[serde(default = "default_true")]
     pub enable_mcp_tools: bool,
     #[serde(default)]
     pub enable_dynamic_tools: bool,
@@ -34,7 +32,6 @@ impl Default for ToolsRuntimeConfig {
             web_search: WebSearchToolConfig::default(),
             mcp_runtime: McpToolConfig::default(),
             dynamic: DynamicToolConfig::default(),
-            enable_apply_patch: true,
             enable_mcp_tools: true,
             enable_dynamic_tools: false,
             enable_collaboration_tools: true,

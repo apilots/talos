@@ -8,7 +8,7 @@ use serde::de::DeserializeOwned;
 use talos_config::SkillsRuntimeConfig;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
 use talos_skills::{LocalSkillProvider, SkillPromptBudget, SkillPromptRequest};
-use talos_tools::{PermissionMode, ToolSelectionPhase, ToolSelectionRequest};
+use talos_tools::{ToolSelectionPhase, ToolSelectionRequest};
 use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
 
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
@@ -57,11 +57,6 @@ fn build_tool_selection_request(
             PromptPhase::Execution => ToolSelectionPhase::Execution,
         },
         planner_mode: Some(kernel_config.planner_mode.as_str().to_string()),
-        permission_mode: if matches!(phase, PromptPhase::Planning) {
-            PermissionMode::Plan
-        } else {
-            PermissionMode::Default
-        },
         user_input: Some(input.to_string()),
         session_id: Some(session_id.to_string()),
     }

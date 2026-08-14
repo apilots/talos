@@ -10,8 +10,8 @@ use talos_types::{UserActionResponse, UserPermissionMode};
 use crate::handlers::dynamic::StoredDynamicToolResult;
 use crate::state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
-    PermissionMode, ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore,
-    ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
+    ReadFileStateStore, SessionToolState, TaskStateEntry, TaskStateStore, ToolCatalogState,
+    ToolResultBudgetState,
 };
 use crate::AgentControl;
 use crate::CommandRiskAssessor;
@@ -304,20 +304,8 @@ impl ToolContext {
         &self.session_state.content_replacement
     }
 
-    pub fn permission_context(&self) -> &ToolPermissionContext {
-        &self.session_state.permissions
-    }
-
-    pub fn permission_mode(&self) -> PermissionMode {
-        self.permission_context().mode()
-    }
-
     pub fn sandbox_user_permission_mode(&self) -> UserPermissionMode {
         self.sandbox_user_permission_mode
-    }
-
-    pub fn set_permission_mode(&self, mode: PermissionMode) {
-        self.permission_context().set_mode(mode);
     }
 
     pub fn replace_tasks(&self, tasks: Vec<TaskStateEntry>) {

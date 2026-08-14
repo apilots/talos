@@ -3,10 +3,10 @@ use talos_types::{QuestionAnswer, UserActionResponse};
 
 fn arguments() -> Value {
     serde_json::json!({
-        "header": "Execution Mode",
+        "header": "Execution Style",
         "question": "How should the agent proceed?",
         "options": [
-            { "id": "plan", "label": "Plan", "description": "Think first" },
+            { "id": "review", "label": "Review", "description": "Review context first" },
             { "id": "direct", "label": "Direct", "description": "Act now" }
         ]
     })
@@ -33,13 +33,13 @@ async fn initial_call_returns_typed_question_pending() {
         ToolDispatchOutcome::pending_question(
             "AskUserQuestion",
             QuestionParams {
-                header: "Execution Mode".to_string(),
+                header: "Execution Style".to_string(),
                 question: "How should the agent proceed?".to_string(),
                 options: vec![
                     QuestionOption {
-                        id: "plan".to_string(),
-                        label: "Plan".to_string(),
-                        description: "Think first".to_string(),
+                        id: "review".to_string(),
+                        label: "Review".to_string(),
+                        description: "Review context first".to_string(),
                     },
                     QuestionOption {
                         id: "direct".to_string(),
@@ -59,7 +59,7 @@ async fn selected_option_resumes_with_stable_tool_result() {
             arguments(),
             context(Some(UserActionResponse::Question(
                 QuestionAnswer::SelectedOption {
-                    option_id: "plan".to_string(),
+                    option_id: "review".to_string(),
                 },
             ))),
         )
@@ -78,8 +78,8 @@ async fn selected_option_resumes_with_stable_tool_result() {
             "question": "How should the agent proceed?",
             "answer": {
                 "type": "selectedOption",
-                "optionId": "plan",
-                "label": "Plan"
+                "optionId": "review",
+                "label": "Review"
             }
         }))
     );

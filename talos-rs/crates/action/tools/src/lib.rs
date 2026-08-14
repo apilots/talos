@@ -42,20 +42,17 @@ pub use spec::{
 };
 pub use state::{
     get_session_tool_state, CatalogToolEntry, ContentReplacementState, DeferredToolState,
-    PermissionMode, ReadFileStateEntry, ReadFileStateSource, ReadFileStateStore, SessionToolState,
-    TaskStateEntry, TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
+    ReadFileStateEntry, ReadFileStateSource, ReadFileStateStore, SessionToolState, TaskStateEntry,
+    TaskStateStore, ToolCatalogState, ToolResultBudgetState,
 };
 pub use subagent::{AgentControl, AgentControlFuture};
 pub use talos_tools_sandbox::{AbsolutePathBuf, ToolSandboxEnvironment};
 
 // Built-in tools
 pub mod tools {
-    pub mod apply_patch;
     pub mod ask_user_question;
     pub mod bash;
     pub mod edit;
-    pub mod enter_plan_mode;
-    pub mod exit_plan_mode;
     pub mod glob;
     pub mod grep;
     pub mod memory_get;
@@ -75,11 +72,10 @@ mod memory_tools_tests;
 
 // Re-export the built-in tools
 pub use tools::{
-    apply_patch::ApplyPatchTool, ask_user_question::AskUserQuestionTool, bash::BashTool,
-    edit::EditTool, enter_plan_mode::EnterPlanModeTool, exit_plan_mode::ExitPlanModeTool,
-    glob::GlobTool, grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool,
-    read::ReadTool, todo_write::TodoWriteTool, tool_search::ToolSearchTool,
-    web_fetch::WebFetchTool, web_search::WebSearchTool, write::WriteTool,
+    ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool, glob::GlobTool,
+    grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool, read::ReadTool,
+    todo_write::TodoWriteTool, tool_search::ToolSearchTool, web_fetch::WebFetchTool,
+    web_search::WebSearchTool, write::WriteTool,
 };
 
 use std::sync::Arc;
@@ -89,7 +85,6 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     registry.register(Arc::new(ReadTool));
     registry.register(Arc::new(WriteTool));
     registry.register(Arc::new(EditTool));
-    registry.register(Arc::new(ApplyPatchTool));
     registry.register(Arc::new(GlobTool));
     registry.register(Arc::new(GrepTool));
     // Exec tools (runtime-based)
@@ -100,8 +95,6 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     // Catalog and workflow tools
     registry.register(Arc::new(ToolSearchTool));
     registry.register(Arc::new(TodoWriteTool));
-    registry.register(Arc::new(EnterPlanModeTool));
-    registry.register(Arc::new(ExitPlanModeTool));
     registry.register(Arc::new(AskUserQuestionTool));
 }
 

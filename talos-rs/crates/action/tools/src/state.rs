@@ -5,14 +5,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum PermissionMode {
-    #[default]
-    Default,
-    Plan,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ReadFileStateSource {
@@ -186,23 +178,6 @@ impl ContentReplacementState {
 }
 
 #[derive(Debug, Default)]
-pub struct ToolPermissionContext {
-    mode: Arc<std::sync::RwLock<PermissionMode>>,
-}
-
-impl ToolPermissionContext {
-    pub fn mode(&self) -> PermissionMode {
-        self.mode.read().map(|guard| *guard).unwrap_or_default()
-    }
-
-    pub fn set_mode(&self, mode: PermissionMode) {
-        if let Ok(mut guard) = self.mode.write() {
-            *guard = mode;
-        }
-    }
-}
-
-#[derive(Debug, Default)]
 pub struct SessionToolState {
     pub read_files: ReadFileStateStore,
     pub tasks: TaskStateStore,
@@ -210,7 +185,6 @@ pub struct SessionToolState {
     pub result_budget: ToolResultBudgetState,
     pub catalog: ToolCatalogState,
     pub content_replacement: ContentReplacementState,
-    pub permissions: ToolPermissionContext,
 }
 
 pub fn get_session_tool_state(session_id: &str) -> Arc<SessionToolState> {

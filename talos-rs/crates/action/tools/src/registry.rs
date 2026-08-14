@@ -9,7 +9,7 @@ use crate::spec::{
     default_governance_for_source, RegisteredToolSpec, ToolCatalog, ToolSelection,
     ToolSelectionRequest, ToolSource, ToolVisibility,
 };
-use crate::state::{get_session_tool_state, PermissionMode};
+use crate::state::get_session_tool_state;
 use crate::AgentControl;
 use crate::ToolContext;
 use async_trait::async_trait;
@@ -286,19 +286,12 @@ impl ToolRegistry {
                     "todo",
                 ],
             ),
-            "TodoWrite" => {
-                matches!(request.permission_mode, PermissionMode::Plan)
-                    || Self::input_contains_any(
-                        request,
-                        &["todo", "plan", "checklist", "step", "tasks", "task list"],
-                    )
-            }
-            "EnterPlanMode" | "ExitPlanMode" | "AskUserQuestion" => {
-                matches!(request.permission_mode, PermissionMode::Plan)
-                    || Self::input_contains_any(
-                        request,
-                        &["plan", "clarify", "question", "ask", "need info"],
-                    )
+            "TodoWrite" => Self::input_contains_any(
+                request,
+                &["todo", "plan", "checklist", "step", "tasks", "task list"],
+            ),
+            "AskUserQuestion" => {
+                Self::input_contains_any(request, &["clarify", "question", "ask", "need info"])
             }
             _ => matches!(spec.visibility, ToolVisibility::DefaultVisible),
         }

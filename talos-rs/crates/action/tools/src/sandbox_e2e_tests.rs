@@ -614,15 +614,6 @@ async fn file_tools() {
     )
     .await
     .expect("workspace edit must succeed");
-    dispatch(
-        &registry,
-        local_context,
-        "file-tools-patch-control",
-        "ApplyPatch",
-        json!({"patch": "*** Begin Patch\n*** Add File: patched.txt\n+patched\n*** End Patch"}),
-    )
-    .await
-    .expect("workspace patch must succeed");
 
     let outside_read_context = context(
         workspace.path(),
@@ -720,38 +711,10 @@ async fn file_tools() {
     .expect("approved outside edit must execute");
     assert!(!approved_edit.is_error());
 
-    let outside_patch = outside.path().join("patched.txt");
-    let approved_patch = dispatch_file_allow_once(
-        &registry,
-        context(
-            workspace.path(),
-            ToolUserPermissionModeConfig::AskForApproval,
-            ToolSandboxNetworkConfig::Restricted,
-        ),
-        "file-tools-patch-approved",
-        "ApplyPatch",
-        json!({
-            "patch": format!(
-                "*** Begin Patch\n*** Add File: {}\n+outside-patch\n*** End Patch",
-                outside_patch.display()
-            )
-        }),
-        SandboxFileOperation::Write,
-        vec![outside_glob_root.display().to_string()],
-    )
-    .await
-    .expect("approved outside patch must execute");
-    assert!(!approved_patch.is_error());
-
     assert_eq!(
         std::fs::read_to_string(workspace.path().join("inside.txt"))
             .expect("inside file must exist"),
         "edited"
-    );
-    assert_eq!(
-        std::fs::read_to_string(workspace.path().join("patched.txt"))
-            .expect("patched file must exist"),
-        "patched"
     );
     assert_eq!(
         std::fs::read_to_string(outside_write).expect("outside write must exist"),
@@ -760,10 +723,6 @@ async fn file_tools() {
     assert_eq!(
         std::fs::read_to_string(outside_edit).expect("outside edit must exist"),
         "after"
-    );
-    assert_eq!(
-        std::fs::read_to_string(outside_patch).expect("outside patch must exist"),
-        "outside-patch"
     );
     let events = sink.events.lock().expect("audit lock must succeed");
     assert!(events.iter().any(|event| {

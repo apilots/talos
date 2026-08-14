@@ -481,10 +481,9 @@ fn tool_title_argument(name: &str, arguments: &str) -> Option<String> {
             .get("cmd")
             .or_else(|| value.get("command"))
             .and_then(|value| value.as_str()),
-        "Read" | "Write" | "Edit" | "ApplyPatch" => value
+        "Read" | "Write" | "Edit" => value
             .get("file_path")
             .or_else(|| value.get("path"))
-            .or_else(|| value.get("patch"))
             .and_then(|value| value.as_str()),
         "Grep" => value
             .get("pattern")
@@ -737,9 +736,9 @@ mod tests {
     #[test]
     fn projects_diff_content_before_other_tool_content() {
         let block = tool_completed_block(
-            "apply_patch",
+            "edit",
             "call-4",
-            r#"{"patch":"*** Begin Patch"}"#,
+            r#"{"path":"/tmp/demo.rs"}"#,
             false,
             &[
                 TalosContentItem::FileRead {
@@ -776,7 +775,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(lines[0], "● Edited 1 files (+1 -0)");
         assert!(lines.iter().any(|line| line == "  │ +new();"));
-        assert!(!lines.iter().any(|line| line.contains("ApplyPatch")));
         assert!(!lines.iter().any(|line| line.starts_with("  ⎿ Read")));
     }
 }

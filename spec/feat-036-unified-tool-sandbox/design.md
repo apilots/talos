@@ -3,7 +3,7 @@
 Status: draft
 Owner: agent
 Created: 2026-08-06
-Updated: 2026-08-11
+Updated: 2026-08-14
 Related: `archive/2026/refactor-025-talos-tool-capability-alignment`, `feat-035-mcp-server-management-reliability`
 
 ## 背景与问题
@@ -12,7 +12,7 @@ Talos 当前已经有 `talos-tools-sandbox` crate，并且配置层已经暴露 
 
 1. `RegistryOrchestrator::resolve_pending()` 计算出 `ToolExecutionPlan` 后没有把 plan 传入 runtime 执行。
 2. `BashCommandRequest` 暴露 `sandbox_permissions`，但 bash runtime 仍直接构造 `tokio::process::Command` 并 `spawn()`。
-3. `Read`、`Write`、`Edit`、`Glob`、`Grep`、`apply_patch` 等文件工具直接使用本地路径解析、`tokio::fs` 或本地进程，没有统一文件系统沙箱边界。
+3. `Read`、`Write`、`Edit`、`Glob`、`Grep` 等文件工具直接使用本地路径解析、`tokio::fs` 或本地进程，没有统一文件系统沙箱边界。
 4. 现有 `ToolSandboxMode` 只有模式枚举，缺少用户权限模式、审批策略、文件系统、网络、workspace roots、平台能力和 platform provider 的统一领域模型。
 5. Linux 和 macOS 可以较早实现 OS sandbox；Windows 暂不实现，但如果抽象中不保留 Windows 平台语义，后续会被 Unix-only 假设绑住。
 
@@ -73,7 +73,7 @@ Talos 当前已经有 `talos-tools-sandbox` crate，并且配置层已经暴露 
 | Process filesystem `read_only` | Seatbelt or bubblewrap | `local_os` | Required |
 | Process filesystem `workspace_write` | Seatbelt or bubblewrap | `local_os` | Required |
 | Process network `restricted` / `enabled` | Seatbelt or Linux namespace/seccomp | `local_os` | Required |
-| `Read` / `Write` / `Edit` / `ApplyPatch` / `Glob` | `AuthorizingToolFileSystem` | `in_process_authorizer` | Required |
+| `Read` / `Write` / `Edit` / `Glob` | `AuthorizingToolFileSystem` | `in_process_authorizer` | Required |
 | Full Access | `NoopBackend` | `none` | Required as positive control |
 | deny-read for built-in file tools | `SandboxedToolFileSystem` + fs helper | `local_os` | Follow-up |
 | stdio MCP local process sandbox | MCP launcher integration | `local_os` | Follow-up |
@@ -250,7 +250,7 @@ SandboxProviderError
 - macOS、Linux 和 Windows placeholder crate 只实现 SPI；它们不依赖 Talos permission、Session、approval 或 UI 对象。
 - `talos-tools-sandbox` 已拥有 permission resolver、validated context、runtime facade、provider assembly、execution compiler、permit、filesystem handle、audit 和 diagnostics。
 - `RegistryOrchestrator` 在真实 dispatch 前生成 `ToolSandboxRequest`，只有 `Allowed` decision 才绑定 invocation-scoped permit；approval request 不是 grant。
-- Bash 和 Grep 通过 permit-bound process API 启动；Read、Write、Edit、ApplyPatch 和 Glob 通过 `ToolFileSystemHandle` 执行。
+- Bash 和 Grep 通过 permit-bound process API 启动；Read、Write、Edit 和 Glob 通过 `ToolFileSystemHandle` 执行。
 - Full Access 显式解析为 disabled Sandbox 和 Noop enforcement；受限模式的 provider、helper、probe、support 或 prepare 失败保持 fail-closed。
 - runtime 统一提供规范化 workspace/project roots，具体工具和 platform provider 不再推导 Session 路径。
 
@@ -384,10 +384,10 @@ existing tool runtime
 `ToolContext` 当前承载 session identity、project root、kernel config 和共享 session state；`ToolDispatchContext` 当前承载一次 dispatch。为避免大范围替换现有 `Tool` trait，同时保证 permit 不进入共享 `SessionToolState`，首期按以下 ownership 接入：
 
 1. `ToolDispatchContext` 是 invocation-bound permit 的 owner；Registry 每次 dispatch 都从无 permit 状态开始，不能继承上一个调用的 permit。
-2. `ToolHandler::pre_execute()` 完成现有输入和权限预检后，新增 sandbox request extraction；Bash 提取 process/network 请求，Read 提取 read path，ApplyPatch 必须先解析 patch 并提取全部 affected paths。
+2. `ToolHandler::pre_execute()` 完成现有输入和权限预检后，新增 sandbox request extraction；Bash 提取 process/network 请求，文件工具提取并规范化全部访问路径。
 3. `ToolSandbox::evaluate()` 返回 allowed permit 后，Registry 将 permit 绑定到当前 `ToolDispatchContext`；RequiresApproval、Denied 和 External 不进入本地 handler execution。
 4. `LocalToolHandler::handle()` 在调用现有 `Tool::execute_payload()` 时，把 permit 作为 `ToolContext` 的 private ephemeral execution field 一并转交。该字段不属于 session state、不能由公共 builder 构造，并在下一次 Registry dispatch 入口被清除。
-5. Bash、Read 和 ApplyPatch runtime 只通过 `ToolContext` 的 crate-private sandbox accessor 获得 permit-bound process/filesystem API；对 `talos-tools` 外部仍不公开 manager、SPI 或 raw context。
+5. Bash 和内建文件工具只通过 `ToolContext` 的 crate-private sandbox accessor 获得 permit-bound process/filesystem API；对 `talos-tools` 外部仍不公开 manager、SPI 或 raw context。
 
 这保留了现有 runtime API 的最小改动面，同时 permit 自身继续校验 invocation identity 和 operation kind。是否启用强制隔离由用户权限模式解析后的 effective `SandboxCapability` 决定：
 
@@ -867,7 +867,7 @@ bash / rg / local process tool
 文件型工具的隔离点是 `ToolFileSystem`：
 
 ```text
-Read / Write / Edit / ApplyPatch / Glob
+Read / Write / Edit / Glob
   -> ToolSandboxPermit.file_system()
   -> ToolFileSystemHandle
   -> internal ToolFileSystem
@@ -1234,7 +1234,7 @@ user directories.
 ### File tool
 
 ```text
-Read/Edit/Write/ApplyPatch
+Read / Edit / Write
   -> ToolSandbox.evaluate()
   -> ToolSandboxDecision::Allowed(ToolSandboxPermit)
   -> ToolSandboxPermit.file_system()
@@ -1243,8 +1243,6 @@ Read/Edit/Write/ApplyPatch
   -> AuthorizingToolFileSystem or SandboxedToolFileSystem
   -> local fs operation or fs_helper
 ```
-
-`apply_patch` 需要先解析 patch 并收集影响路径，再合并 additional write permissions。该逻辑属于 apply_patch handler/runtime，不属于 `ToolFileSystem` implementation。filesystem implementation 只负责 enforce effective policy。
 
 ### Grep and Glob
 
@@ -1486,11 +1484,11 @@ Bash runtime 改为只调用 `ToolSandboxPermit::spawn()`。facade 内部通过 
 
 ### ToolFileSystem 与文件工具收口
 
-引入 public `ToolFileSystemHandle` 和 crate-private `ToolFileSystem`，把 `Read`、`Write`、`Edit`、`Glob`、`apply_patch` 的核心文件访问迁移到 permit-bound handle。第一版内部使用 `AuthorizingToolFileSystem` 做 canonical path checks。
+引入 public `ToolFileSystemHandle` 和 crate-private `ToolFileSystem`，把 `Read`、`Write`、`Edit`、`Glob` 的核心文件访问迁移到 permit-bound handle。第一版内部使用 `AuthorizingToolFileSystem` 做 canonical path checks。
 
 验证重点：
 
-- read-only 拒绝 write/edit/apply_patch。
+- read-only 拒绝 write/edit。
 - workspace-write 只允许写 workspace roots。
 - denied roots 不能被 symlink 或 `..` 绕过。
 - 工具行为测试比较完整 response，不只验证 OK。
@@ -1525,7 +1523,7 @@ Bash runtime 改为只调用 `ToolSandboxPermit::spawn()`。facade 内部通过 
 - 各 platform crate 独立集成测试：同一组 SPI request scenarios 转换为真实平台隔离命令并验证副作用。
 - `talos-tools` 集成测试：registry constraints 到 `ToolSandbox::evaluate()`，以及 allowed permit 到 runtime 的传递。
 - bash runtime 测试：facade executor 接入、escalation、unsupported platform；runtime 不断言 provider 内部参数。
-- file runtime 测试：read/write/edit/apply_patch 在 read-only/workspace-write 下的行为。
+- file runtime 测试：read/write/edit/glob 在 read-only/workspace-write 下的行为。
 - symlink/path traversal 测试：确认 canonicalization 后 enforce。
 - schema 测试：配置 shape 变更后同步 Rust/TS schema。
 - 依赖边界测试或 workspace metadata check：runtime 只依赖 `talos-tools-sandbox`，platform crate 只依赖 `talos-sandbox-spi`。
@@ -1558,7 +1556,7 @@ macOS cases 使用本机构建的 Talos binary 和 `/usr/bin/sandbox-exec`。Lin
 3. `process_filesystem`: workspace read succeeds; read-only write fails; workspace-write succeeds inside writable roots and fails outside them。
 4. `escape_attempts`: `..`, symlink traversal and a nested child process cannot write outside effective writable roots。
 5. `network_policy`: a deterministic local TCP endpoint is reachable with network enabled and unreachable with network restricted。
-6. `file_tools`: `Read`、`Write`、`Edit`、`ApplyPatch` and `Glob` are exercised through real tool dispatch and `ToolFileSystemHandle`；outside writes fail under the authorizer。
+6. `file_tools`: `Read`、`Write`、`Edit` and `Glob` are exercised through real tool dispatch and `ToolFileSystemHandle`；outside writes fail under the authorizer。
 7. `full_access_control`: Full Access performs an operation denied by the restricted profile and audit reports `NoopBackend` / enforcement source `none`。
 8. `no_silent_fallback`: a valid Sandbox context deliberately points at an unavailable trusted provider/helper executable；provider preflight fails without executing the original command, switching to Noop or creating the sentinel output file。
 
@@ -1573,7 +1571,7 @@ Ubuntu fixture 必须定义准确的 image、architecture policy、system `bwrap
 - 在 macOS 下执行 HOME/PATH 中的用户工具、读取 workspace 文件、写 workspace 文件并尝试写 workspace 外文件。
 - 在本地 Ubuntu Docker 中执行同等命令，并确认 denial 来自 Talos Linux provider 而不是 Docker 外层限制。
 - 在 Windows 下请求 read-only/workspace-write，确认返回明确 unsupported，而不是直接执行。
-- 对 `Read`、`Write`、`Edit`、`apply_patch` 走真实用户路径验证权限表现。
+- 对 `Read`、`Write`、`Edit`、`Glob` 走真实用户路径验证权限表现。
 
 ## Open risks and follow-ups
 

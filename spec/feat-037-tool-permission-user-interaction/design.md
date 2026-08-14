@@ -3,7 +3,7 @@
 Status: draft
 Owner: agent
 Created: 2026-08-11
-Updated: 2026-08-11
+Updated: 2026-08-14
 
 ## 1. 结论
 
@@ -201,7 +201,7 @@ pub struct SessionConf {
 - Gateway/SDK 返回 `configured_default_mode` 和 `effective_mode`，客户端不自行猜测 fallback。
 - Session 只允许在没有 active Turn 时修改模式。首期不定义运行中切换的竞态语义。
 - 修改 Session 模式不写入 YAML，也不影响其他 Session。
-- `PermissionMode::Plan/Default` 是计划工具约束，和 `UserPermissionMode` 无关，不能互相映射。
+- 不存在并行的计划模式权限状态；工具执行权限只消费解析后的 `UserPermissionMode` 和 invocation-scoped sandbox permit。
 
 生产注入只有一条链路：
 
@@ -642,7 +642,7 @@ trait Tool {
 - header/question/options schema 和 2-3 options 校验。
 - option id/label/description 的非空和去重校验。
 - 原有 Dynamic Tool continuation 的持久化、幂等和 resume 基础设施。
-- `TaskStateRuntime` 中与 Todo 和 Plan Mode 相关的现有职责；本 Spec 不顺手重构这些能力。
+- `TaskStateRuntime` 中与 Todo 相关的现有职责；本 Spec 不顺手重构该能力。
 
 Question 成功结果使用稳定结构，不返回任意字符串：
 
