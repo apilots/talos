@@ -8,13 +8,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 034 |
 | `fix` | 005 |
-| `refactor` | 040 |
+| `refactor` | 041 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| refactor-040 | `refactor-040-agent-runtime-message-event-api` | draft |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |
 | feat-032 | `feat-032-session-subagent` | active |
 | refactor-039 | `refactor-039-memory-storage-retrieval` | draft |
