@@ -12,6 +12,7 @@ mod input;
 mod input_history;
 mod model_picker;
 mod model_selection;
+mod permission_picker;
 mod render;
 mod render_runtime;
 pub mod run;
@@ -25,6 +26,7 @@ mod terminal_adapter;
 mod terminal_surface;
 mod turn_request;
 mod types;
+mod user_action;
 mod utils;
 
 pub use client::GatewayClient;
@@ -35,6 +37,7 @@ pub use utils::display_tool_name;
 
 use input_history::InputHistoryState;
 use model_picker::ModelPickerState;
+use permission_picker::PermissionPickerState;
 use ratatui::layout::Rect;
 use render_runtime::runtime::engine::RenderRuntimeEngine;
 use render_runtime::transcript::block::TranscriptBlockId;
@@ -48,6 +51,7 @@ use std::{
 use talos_error::TalosResult;
 use talos_sdk::{
     ModelInfo, ReasoningEffort, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
+    UserPermissionMode,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
@@ -60,7 +64,7 @@ pub(crate) const SESSION_CLOSE_FORCE_TIMEOUT: Duration = Duration::from_secs(65)
 pub(crate) const SPINNER_FRAMES: &[char] = &['✻', '✢', '✳', '✶'];
 pub(crate) const CHAT_CONTENT_PADDING_LEFT: u16 = 0;
 pub(crate) const WELCOME_TIP_LINE: &str =
-    " Tip: Type a message, Ctrl+V an image, or use /help /model /sessions /status /compact /clear /quit";
+    " Tip: Type a message, Ctrl+V an image, or use /help /model /permissions /sessions /status /compact /clear /quit";
 pub(crate) const PASTED_BLOCK_CHAR_THRESHOLD: usize = 800;
 
 /// Main TUI app.
@@ -77,6 +81,7 @@ pub struct TuiApp {
     pub(crate) current_model: String,
     pub(crate) current_model_provider: String,
     pub(crate) reasoning_effort_override: Option<ReasoningEffort>,
+    pub(crate) current_permission_mode: UserPermissionMode,
     pub(crate) session_usage: TokenUsage,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,
@@ -118,6 +123,8 @@ pub struct TuiApp {
     pub(crate) last_stream_event_at: Option<Instant>,
     pub(crate) gateway_client: Option<Arc<dyn GatewayClient>>,
     pub(crate) model_picker: Option<ModelPickerState>,
+    pub(crate) permission_picker: Option<PermissionPickerState>,
+    pub(crate) pending_user_action: Option<user_action::PendingActionState>,
     pub(crate) session_picker: Option<SessionPickerState>,
     pub(crate) input_history: InputHistoryState,
     pub(crate) show_command_autocomplete: bool,

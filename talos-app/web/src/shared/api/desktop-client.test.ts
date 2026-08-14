@@ -5,6 +5,28 @@ import type { DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { createDesktopTalosClient } from "./desktop-client";
 
 describe("createDesktopTalosClient", () => {
+  it("submits user actions through the app-server transport", async () => {
+    const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
+    const bridge = bridgeWithInvoke(async function <T>(
+      method: AppProtocol.ClientMethod,
+      params?: unknown,
+    ): Promise<T> {
+      calls.push({ method, params });
+      return { actionId: "action-1", state: "responseAccepted" } as T;
+    });
+    const client = createDesktopTalosClient(bridge);
+    const request: AppProtocol.SubmitUserActionRequest = {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      actionId: "action-1",
+      response: { type: "question", response: { type: "selectedOption", optionId: "yes" } },
+    };
+
+    await client.userActions.submit(request);
+
+    expect(calls).toEqual([{ method: "userAction/submit", params: request }]);
+  });
+
   it("forwards request-object params without nesting session and project ids", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge = bridgeWithInvoke(async function <T>(

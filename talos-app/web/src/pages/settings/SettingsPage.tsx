@@ -9,7 +9,6 @@ import {
   SettingsMcpServersSection,
   SettingsModelsSection,
   SettingsNavigation,
-  SettingsPermissionsSection,
   SettingsProfileSection,
   SettingsServerSection,
   isSettingsSection,
@@ -31,10 +30,6 @@ export function SettingsPage() {
     setDraft,
     desktopNotifications,
     setDesktopNotifications,
-    safeFileReads,
-    setSafeFileReads,
-    safeFileWrites,
-    setSafeFileWrites,
     models,
   } = useSettingsPage();
   const requestedSection = params.section;
@@ -79,15 +74,6 @@ export function SettingsPage() {
             {activeSection === "models" ? <SettingsModelsSection /> : null}
 
             {activeSection === "agent-workspace" ? <SettingsAgentWorkspaceSection /> : null}
-
-            {activeSection === "permissions" ? (
-              <SettingsPermissionsSection
-                safeFileReads={safeFileReads}
-                safeFileWrites={safeFileWrites}
-                setSafeFileReads={setSafeFileReads}
-                setSafeFileWrites={setSafeFileWrites}
-              />
-            ) : null}
 
             {activeSection === "appearance" ? (
               <SettingsAppearanceSection

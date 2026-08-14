@@ -12,6 +12,7 @@ describe("useInitialSessionInput", () => {
   it("sends an attachment-only navigation draft once", async () => {
     const locationState = {
       initialPrompt: "",
+      initialPermissionMode: "approveForMe" as const,
       initialAttachments: [
         {
           fileId: "file-1",
@@ -27,8 +28,6 @@ describe("useInitialSessionInput", () => {
       ],
     };
     const sendText = vi.fn(() => new Promise<void>(() => undefined));
-    const stickToBottomRef = { current: false };
-    window.requestAnimationFrame = vi.fn(() => 1);
 
     renderHook(() =>
       useInitialSessionInput({
@@ -36,22 +35,20 @@ describe("useInitialSessionInput", () => {
         locationState,
         navigate: vi.fn(),
         projects: [],
-        scrollToBottom: vi.fn(),
         sendText,
         sessionId: "sess-1",
         setDraft: vi.fn(),
-        stickToBottomRef,
       }),
     );
 
     await waitFor(() => {
       expect(sendText).toHaveBeenCalledWith("", {
         modelSelection: undefined,
+        userPermissionMode: "approveForMe",
         project: undefined,
         fileIds: ["file-1"],
       });
     });
     expect(hasInitialSessionInput(locationState)).toBe(true);
-    expect(stickToBottomRef.current).toBe(true);
   });
 });

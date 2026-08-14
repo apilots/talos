@@ -39,11 +39,11 @@ use talos_types::{
     SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
     SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
     SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::task::JoinHandle;
 
@@ -500,6 +500,16 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime
             .gateway
             .submit_dynamic_tool_result(&self.actor, request)
+            .await
+    }
+
+    async fn submit_user_action(
+        &mut self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse> {
+        self.runtime
+            .gateway
+            .submit_user_action(&self.actor, request)
             .await
     }
 

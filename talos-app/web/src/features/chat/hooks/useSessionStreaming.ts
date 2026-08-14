@@ -32,7 +32,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "cancelling",
-        awaitingFinalResponse: false,
       });
       cancelStream();
       await cancelActiveTurn(sessionId);
@@ -44,7 +43,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       await invalidateSessionQueries();
     },
@@ -57,7 +55,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
     },
   });
@@ -84,7 +81,6 @@ export function useSessionStreaming(
         connectionState: "awaiting",
         activeInput: appendUserInput ? input : undefined,
         activeClientMessageId: appendUserInput ? clientMessageId : undefined,
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
       await eventMessage(request ?? { session_id: sessionId, input: [{ type: "text", text }] }, (messageId) => {
@@ -101,7 +97,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, undefined);
       void refreshSessionTitleAfterTurn({
@@ -118,7 +113,6 @@ export function useSessionStreaming(
           isStreaming: false,
           connectionState: "idle",
           activeMessageId: undefined,
-          awaitingFinalResponse: false,
         });
         return;
       }
@@ -134,7 +128,6 @@ export function useSessionStreaming(
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: true,
           connectionState: "detached",
-          awaitingFinalResponse: false,
         });
         setSessionStatus(sessionId, "running");
         await invalidateSessionQueries();
@@ -149,7 +142,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "error");
       await invalidateSessionQueries();
@@ -174,7 +166,6 @@ export function useSessionStreaming(
         connectionState: "awaiting",
         activeInput: input,
         activeClientMessageId: clientMessageId,
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "running");
       await retryMessage({
@@ -196,7 +187,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, undefined);
       void refreshSessionTitleAfterTurn({
@@ -213,7 +203,6 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       setSessionStatus(sessionId, "error");
       await invalidateSessionQueries();

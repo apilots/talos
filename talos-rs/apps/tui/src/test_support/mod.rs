@@ -16,11 +16,11 @@ pub(crate) use talos_sdk::{
     AuthSessionUserSnapshot, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger, FileInfo, FileUploadRequest, FileUploadResponse,
     SessionHistorySnapshot, SessionInfo, SkillSuggestion, StartTurnRequest, StopReason,
-    TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
-    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
-    TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics, UserRole,
-    WorkspaceInfoResponse,
+    SubmitUserActionRequest, TalosContentItem, TalosInputItem, TalosTimelineContent,
+    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
+    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
+    TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
+    UserPermissionMode, UserRole, WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
 
@@ -45,6 +45,8 @@ pub(crate) struct MockGatewayState {
     pub(crate) session_id: String,
     pub(crate) current_model: String,
     pub(crate) current_reasoning_effort: Option<talos_sdk::ReasoningEffort>,
+    pub(crate) current_permission_mode: UserPermissionMode,
+    pub(crate) submitted_user_actions: Vec<SubmitUserActionRequest>,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) auth_email: Option<String>,
     pub(crate) workspace_root: PathBuf,
@@ -108,6 +110,8 @@ impl MockGatewayState {
                 },
                 reasoning_effort: self.current_reasoning_effort,
             },
+            configured_default_mode: UserPermissionMode::FullAccess,
+            effective_mode: self.current_permission_mode,
             created_at: 1,
             last_activity: 2,
             message_count,
@@ -695,6 +699,8 @@ impl MockGatewayClient {
                 session_id: "sess-test".to_string(),
                 current_model: "qwen-plus".to_string(),
                 current_reasoning_effort: None,
+                current_permission_mode: UserPermissionMode::FullAccess,
+                submitted_user_actions: Vec::new(),
                 current_project_root: None,
                 auth_email: Some("talos@example.com".to_string()),
                 workspace_root: PathBuf::from("/tmp/talos-workspace"),
@@ -903,6 +909,32 @@ impl GatewayClient for MockGatewayClient {
         state.current_reasoning_effort = model_selection.reasoning_effort;
         state.updated_model = Some(model_selection.model_ref.id.clone());
         Ok(state.session_info(3))
+    }
+
+    async fn update_session_permission_mode(
+        &self,
+        _session_id: &str,
+        mode: UserPermissionMode,
+    ) -> TalosResult<SessionInfo> {
+        let mut state = self.state.lock().unwrap();
+        state.current_permission_mode = mode;
+        Ok(state.session_info(3))
+    }
+
+    async fn submit_user_action(
+        &self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<talos_sdk::SubmitUserActionResponse> {
+        let action_id = request.action_id.clone();
+        self.state
+            .lock()
+            .unwrap()
+            .submitted_user_actions
+            .push(request);
+        Ok(talos_sdk::SubmitUserActionResponse {
+            action_id,
+            state: talos_sdk::UserActionState::ResponseAccepted,
+        })
     }
 
     async fn compact_session(&self, _session_id: &str) -> TalosResult<SessionInfo> {

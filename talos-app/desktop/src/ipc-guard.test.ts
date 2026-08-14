@@ -52,6 +52,17 @@ describe("desktop IPC guard", () => {
     expect(() =>
       assertDesktopRendererInvoke("memory/get", { memoryId: "memory-1" }),
     ).not.toThrow();
+    expect(() =>
+      assertDesktopRendererInvoke("userAction/submit", {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        actionId: "action-1",
+        response: {
+          type: "question",
+          response: { type: "selectedOption", optionId: "now" },
+        },
+      }),
+    ).not.toThrow();
   });
 
   it("allows llm config methods", () => {
@@ -145,5 +156,13 @@ describe("desktop IPC guard", () => {
         parent: "/Users/example",
       }),
     ).toThrow("Invalid desktop renderer params for method: fs.directory.create");
+    expect(() =>
+      assertDesktopRendererInvoke("userAction/submit", {
+        sessionId: "session-1",
+        turnId: "turn-1",
+        actionId: "action-1",
+        response: { type: "unknown" },
+      }),
+    ).toThrow("Invalid desktop renderer params for method: userAction/submit");
   });
 });

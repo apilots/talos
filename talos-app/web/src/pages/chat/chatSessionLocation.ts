@@ -1,4 +1,9 @@
-import type { FileInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
+import type {
+  FileInfo,
+  ModelRef,
+  SkillSuggestion,
+  UserPermissionMode,
+} from "@talos/sdk-browser";
 
 import type { ProjectView, ReasoningLevel } from "@/shared/types/ui";
 
@@ -7,6 +12,7 @@ export interface SessionLocationState {
   initialPrompt?: string;
   initialModel?: ModelRef;
   initialReasoningLevel?: ReasoningLevel;
+  initialPermissionMode?: UserPermissionMode;
   initialProjectId?: string;
   initialProject?: ProjectView;
   initialSkills?: SkillSuggestion[];

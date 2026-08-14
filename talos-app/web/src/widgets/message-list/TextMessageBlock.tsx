@@ -10,10 +10,12 @@ const MarkdownRenderer = lazy(() =>
 export function TextMessageBlock({
   fileIds = [],
   kind,
+  messageId,
   text,
 }: {
   fileIds?: string[];
   kind: "user" | "assistant" | "thinking" | "system";
+  messageId?: string;
   text: string;
 }) {
   const { t } = useTranslation("chat");
@@ -22,7 +24,10 @@ export function TextMessageBlock({
   const isSystem = kind === "system";
   const icon = isUser ? <User size={16} /> : isThinking ? <Sparkles size={16} /> : isSystem ? <Wrench size={16} /> : <Bot size={16} />;
   return (
-    <div className={cn("flex items-start gap-3.5 md:gap-4", isUser ? "justify-end" : "justify-start")}>
+    <div
+      className={cn("flex items-start gap-3.5 md:gap-4", isUser ? "justify-end" : "justify-start")}
+      data-chat-user-block-id={isUser ? messageId : undefined}
+    >
       {!isUser ? (
         <div
           className={cn(

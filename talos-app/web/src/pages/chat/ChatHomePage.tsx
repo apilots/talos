@@ -18,7 +18,12 @@ import {
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { resolveProjectView } from "@/shared/types/domain";
-import type { FileInfo, ModelRef, SkillSuggestion } from "@talos/sdk-browser";
+import type {
+  FileInfo,
+  ModelRef,
+  SkillSuggestion,
+  UserPermissionMode,
+} from "@talos/sdk-browser";
 import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface HomeLocationState {
@@ -48,6 +53,7 @@ export function ChatHomePage() {
   const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
   const [selectedModel, setSelectedModel] = useState<ModelRef>();
   const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("none");
+  const [permissionMode, setPermissionMode] = useState<UserPermissionMode>("fullAccess");
   const selectedModelInfo = modelInfoForRef(models, selectedModel);
 
   const activeProject = useMemo(
@@ -89,6 +95,7 @@ export function ChatHomePage() {
             initialPrompt: trimmed ?? "",
             initialModel: selectedModel,
             initialReasoningLevel: selectedReasoningLevel,
+            initialPermissionMode: permissionMode,
             initialProjectId: activeProject?.id,
             initialProject: activeProject,
             initialSkills: initialSkillsState(skills),
@@ -101,6 +108,17 @@ export function ChatHomePage() {
   async function handleCreateProject(input: string | { directory: string; name?: string }) {
     const project = await createProject.mutateAsync(input);
     setActiveProjectId(project.id);
+  }
+
+  function handlePermissionModeChange(mode: UserPermissionMode) {
+    if (
+      mode === "fullAccess" &&
+      permissionMode !== "fullAccess" &&
+      !window.confirm(t("chat:fullAccessConfirmation"))
+    ) {
+      return;
+    }
+    setPermissionMode(mode);
   }
 
   return (
@@ -126,6 +144,7 @@ export function ChatHomePage() {
             setSelectedModel(modelRef);
             setSelectedReasoningLevel(reasoningLevelForModel(models, modelRef));
           }}
+          onPermissionModeChange={handlePermissionModeChange}
           onProjectChange={setActiveProjectId}
           onRuntimeModeChange={(mode) => {
             if (mode === "local") {
@@ -134,6 +153,7 @@ export function ChatHomePage() {
           }}
           onReasoningLevelChange={setSelectedReasoningLevel}
           onSend={(skills, attachments) => handleStartDraft(draft, skills, attachments)}
+          permissionMode={permissionMode}
           projects={projects}
           runtimeMode={connection.runtimeMode}
           selectedModel={selectedModel ? modelRefKey(selectedModel) : undefined}

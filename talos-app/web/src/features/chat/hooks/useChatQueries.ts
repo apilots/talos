@@ -1,5 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
+import type {
+  ModelSelection,
+  SessionInfo,
+  SubmitUserActionRequest,
+  UserPermissionMode,
+} from "@talos/sdk-browser";
 
 import {
   cancelActiveTurn,
@@ -11,12 +16,14 @@ import {
   getActiveTurn,
   getSessionHistory,
   recoverTimelineLiveTail,
+  submitUserAction,
   getSession,
   listModels,
   listProjects,
   listSessions,
   updateProjectName,
   updateSessionModel,
+  updateSessionPermissionMode,
   updateSessionProject,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
@@ -229,6 +236,42 @@ export function useUpdateSessionModelMutation(sessionId: string) {
       }
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       await queryClient.invalidateQueries({ queryKey: sessionKey });
+    },
+  });
+}
+
+export function useUpdateSessionPermissionModeMutation(sessionId: string) {
+  const connectionKey = useConnectionKey();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (mode: UserPermissionMode) => updateSessionPermissionMode(sessionId, mode),
+    onSuccess: (session) => {
+      queryClient.setQueryData<SessionInfo>(
+        chatKeys.session(connectionKey, sessionId),
+        session,
+      );
+    },
+  });
+}
+
+export function useSubmitUserActionMutation(sessionId: string) {
+  const connectionKey = useConnectionKey();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (request: Omit<SubmitUserActionRequest, "sessionId">) =>
+      submitUserAction({ ...request, sessionId }),
+    onSuccess: async (response) => {
+      const state = useAppStore.getState();
+      const pending = state.streams[sessionId]?.pendingUserAction;
+      if (pending?.actionId === response.actionId) {
+        state.setPendingUserAction(sessionId, {
+          ...pending,
+          state: response.state,
+        });
+      }
+      await queryClient.invalidateQueries({
+        queryKey: chatKeys.activeTurn(connectionKey, sessionId),
+      });
     },
   });
 }

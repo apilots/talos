@@ -10,7 +10,11 @@ import {
   useLiveRecoveryQuery,
 } from "./useChatQueries";
 import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
-import { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "../stream-events";
+import {
+  applyActiveTurnSnapshot,
+  applyTimelineRecovery,
+  clearInactiveTurnSnapshot,
+} from "../stream-events";
 import { activeContextCompactionStage } from "../timeline-state";
 import { useAppStore } from "@/shared/store/app-store";
 import type {
@@ -19,10 +23,11 @@ import type {
   SessionInputHistory,
   SessionInputHistoryItem,
 } from "@/shared/types/ui";
-import type { ModelSelection, SkillSuggestion } from "@talos/sdk-browser";
+import type { ModelSelection, SkillSuggestion, UserPermissionMode } from "@talos/sdk-browser";
 
 export interface SendTextOptions {
   modelSelection?: ModelSelection;
+  userPermissionMode?: UserPermissionMode;
   project?: ProjectView;
   skills?: SkillSuggestion[];
   fileIds?: string[];
@@ -35,15 +40,20 @@ export function useChatSession(
 ) {
   const [draft, setDraft] = useState("");
   const sessionAvailable = serverMessageCount !== undefined;
-  const activeTurnQuery = useActiveTurnQuery(sessionId, sessionAvailable);
+  const streamState = useAppStore((state) => state.streams[sessionId]);
+  const activeTurnQuery = useActiveTurnQuery(
+    sessionId,
+    sessionAvailable && !streamState?.isStreaming,
+  );
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
-  const shouldRecoverLiveTail = isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
+  const shouldRecoverLiveTail =
+    !streamState?.isStreaming &&
+    isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
   const liveRecoveryQuery = useLiveRecoveryQuery(
     sessionId,
     sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
     shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
   );
-  const streamState = useAppStore((state) => state.streams[sessionId]);
   const shouldSubscribeTimeline =
     Boolean(streamState?.isStreaming && streamState.activeMessageId) ||
     (shouldRecoverLiveTail && sessionHistoryQuery.isSuccess);
@@ -51,6 +61,12 @@ export function useChatSession(
     sessionId,
     sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
     Boolean(sessionId) && shouldSubscribeTimeline,
+    async () => {
+      await Promise.all([
+        sessionHistoryQuery.refetch(),
+        activeTurnQuery.refetch(),
+      ]);
+    },
   );
   const contextCompactionStage = activeContextCompactionStage(streamState);
   const pendingInput = streamState?.pendingInput;
@@ -76,28 +92,21 @@ export function useChatSession(
   );
 
   useEffect(() => {
-    if (!activeTurnQuery.data) {
+    if (
+      !activeTurnQuery.data ||
+      isLiveRecoverableActiveTurn(activeTurnQuery.data.status)
+    ) {
       return;
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
   }, [activeTurnQuery.data, sessionId]);
 
   useEffect(() => {
-    if (!liveRecoveryQuery.data?.active_turn) {
+    if (!liveRecoveryQuery.data) {
       return;
     }
-    applyActiveTurnSnapshot(sessionId, liveRecoveryQuery.data.active_turn);
-  }, [sessionId, liveRecoveryQuery.data?.active_turn]);
-
-  useEffect(() => {
-    const events = liveRecoveryQuery.data?.replay.events ?? [];
-    if (events.length === 0) {
-      return;
-    }
-    [...events]
-      .sort((left, right) => left.event_seq - right.event_seq)
-      .forEach((event) => applyStreamEvent(sessionId, event));
-  }, [sessionId, liveRecoveryQuery.data?.replay.events]);
+    applyTimelineRecovery(sessionId, liveRecoveryQuery.data);
+  }, [sessionId, liveRecoveryQuery.data]);
 
   useEffect(() => {
     const error = activeTurnQuery.error;
@@ -140,7 +149,6 @@ export function useChatSession(
       activeClientMessageId: undefined,
       lastEventSeq: undefined,
       lastSequence: undefined,
-      awaitingFinalResponse: false,
     });
   }, [
     sessionId,
@@ -171,6 +179,7 @@ export function useChatSession(
           options.project,
           options.skills ?? [],
           fileIds,
+          options.userPermissionMode,
         )
       : undefined;
     return streamText(content, request);
@@ -201,6 +210,7 @@ export function useChatSession(
             options.project,
             options.skills ?? [],
             fileIds,
+            options.userPermissionMode,
           )
         : undefined;
       return sendMutation.mutateAsync({ text, appendUserInput: true, request }).catch((error: unknown) => {
@@ -218,6 +228,8 @@ export function useChatSession(
     isStreaming,
     isCancelling,
     contextCompactionStage,
+    activeTurnId: streamState?.activeTurnId ?? activeTurnQuery.data?.turn_id ?? undefined,
+    pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",
     showReconnectControls: streamState?.showReconnectControls ?? false,
     streamError: streamState?.error,

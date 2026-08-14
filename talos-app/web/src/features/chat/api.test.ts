@@ -13,7 +13,7 @@ import {
 } from "@/shared/api/client";
 
 describe("chat api initial turn request", () => {
-  it("builds first-turn metadata without session create configuration", () => {
+  it("builds first-turn metadata with the selected permission mode", () => {
     const request = createInitialTurnRequest(
       "sess-1",
       "user-1",
@@ -23,6 +23,9 @@ describe("chat api initial turn request", () => {
         reasoningEffort: null,
       },
       undefined,
+      [],
+      [],
+      "askForApproval",
     );
 
     expect(request).toMatchObject({
@@ -32,13 +35,13 @@ describe("chat api initial turn request", () => {
         modelRef: { provider: "bailian", id: "qwen-max" },
         reasoningEffort: null,
       },
+      userPermissionMode: "askForApproval",
       context: expect.objectContaining({
         user_id: "user-1",
         source_type: "http",
         provider: "sdk",
       }),
     });
-    expect(request).not.toHaveProperty("conf");
   });
 
   it("keeps selected skills as structured input items", () => {

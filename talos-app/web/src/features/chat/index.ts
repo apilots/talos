@@ -15,9 +15,11 @@ export {
   startTimelineTurn,
   updateProjectName,
   updateSessionModel,
+  updateSessionPermissionMode,
   updateSessionProject,
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
+export { UserActionPanel } from "./components/user-action/UserActionPanel";
 export {
   supportedAttachmentKinds,
   modelInfoForRef,
@@ -47,7 +49,9 @@ export {
   useSessionsQuery,
   useUpdateProjectNameMutation,
   useUpdateSessionModelMutation,
+  useUpdateSessionPermissionModeMutation,
   useUpdateSessionProjectMutation,
+  useSubmitUserActionMutation,
 } from "./hooks/useChatQueries";
 export { useSessionBlocks } from "./hooks/useSessionBlocks";
 export { useSessionMessageStream } from "./hooks/useSessionMessageStream";

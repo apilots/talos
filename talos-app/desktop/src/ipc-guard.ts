@@ -86,6 +86,13 @@ const pluginUpdateParams = (params: unknown) =>
     params.expected_source_commit === undefined ||
     typeof params.expected_source_commit === "string") &&
   ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
+const userActionSubmitParams = (params: unknown) =>
+  hasString(params, "sessionId") &&
+  hasString(params, "turnId") &&
+  hasString(params, "actionId") &&
+  isRecord(params) &&
+  isRecord(params.response) &&
+  ["question", "sandboxApproval", "dynamicToolResult"].includes(String(params.response.type));
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "auth.login.cancel": authLoginSessionParams,
@@ -169,6 +176,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "session_id") &&
     hasArray(params, "input") &&
     hasString(params, "client_request_id"),
+  "userAction/submit": userActionSubmitParams,
   "user.current": emptyParams,
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),

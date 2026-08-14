@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
+use talos_sdk::UserPermissionMode;
 use talos_sdk::{AuthSessionReadResponse, ReasoningEffort, SessionInfo, WorkspaceInfoResponse};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
@@ -21,6 +22,7 @@ pub(crate) struct TuiStatusSnapshot {
     account: String,
     session_id: Option<String>,
     runtime_mode: &'static str,
+    permission_mode: UserPermissionMode,
     connection_status: String,
     usage: TokenUsage,
     turn: StatusTurn,
@@ -123,6 +125,9 @@ impl TuiStatusSnapshot {
             account,
             session_id,
             runtime_mode: "embedded",
+            permission_mode: session
+                .map(|session| session.effective_mode)
+                .unwrap_or(app.current_permission_mode),
             connection_status: app.connection_status.clone(),
             usage,
             turn: StatusTurn {
@@ -157,6 +162,10 @@ pub(crate) fn render_status_card(snapshot: &TuiStatusSnapshot) -> String {
     rows.push(status_row(
         "Runtime:",
         &format_runtime(snapshot.runtime_mode, &snapshot.connection_status),
+    ));
+    rows.push(status_row(
+        "Permissions:",
+        crate::permission_picker::permission_mode_label(snapshot.permission_mode),
     ));
     rows.push(status_row("Context:", &format_context_bar(snapshot)));
     rows.push(status_row(

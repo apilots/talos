@@ -3,7 +3,8 @@ use std::time::Instant;
 use talos_sdk::{
     AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage, SessionHistorySnapshot,
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TimelineEventEnvelope, TimelineRecoveryResponse,
+    TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnStatus, TimelineEventEnvelope,
+    TimelineRecoveryResponse, TimelineUserActionEvent,
 };
 use tokio::sync::mpsc;
 use tracing::error;
@@ -40,6 +41,8 @@ impl TuiApp {
             _ => {}
         }
 
+        let turn_id = envelope.turn_id.clone();
+        let is_live_metrics = matches!(&envelope.event.payload, AgentEventPayload::TurnMetrics(_));
         let event = envelope.event;
         if let Some(last_seq) = self.last_stream_sequence {
             if event.sequence <= last_seq {
@@ -51,7 +54,9 @@ impl TuiApp {
             }
         }
         self.last_stream_sequence = Some(event.sequence);
-        self.last_stream_event_id = Some(envelope.event_id);
+        if !is_live_metrics {
+            self.last_stream_event_id = Some(envelope.event_id);
+        }
         self.request_chat_activity();
 
         self.render_runtime
@@ -66,7 +71,7 @@ impl TuiApp {
                 self.handle_item_started(payload.item);
             }
             AgentEventPayload::ItemDelta(payload) => {
-                self.handle_item_delta(&payload.item_id, payload.delta);
+                self.handle_item_delta(&turn_id, &payload.item_id, payload.delta);
             }
             AgentEventPayload::ItemCompleted(payload) => {
                 self.handle_item_completed(
@@ -89,7 +94,12 @@ impl TuiApp {
                     self.turn_metrics = Some(metrics);
                 }
                 self.turn_metrics_live = false;
+                let user_action_cursor = self
+                    .pending_user_action
+                    .as_ref()
+                    .and(self.last_stream_event_id.clone());
                 self.finish_active_stream("stream completed", false, false);
+                self.last_stream_event_id = user_action_cursor;
             }
             AgentEventPayload::TurnError(payload) => {
                 self.turn_metrics_live = false;
@@ -101,6 +111,7 @@ impl TuiApp {
 
     pub(crate) fn replay_recovery_snapshot(&mut self, response: TimelineRecoveryResponse) -> usize {
         let snapshot = response.snapshot;
+        let active_turn = snapshot.active_turn.clone();
         let mut events = snapshot.replay.events;
         events.sort_by_key(|a| a.event_seq);
         let count = events.len();
@@ -113,7 +124,19 @@ impl TuiApp {
             }
             self.handle_stream_event(envelope);
         }
-        if self.active_context_compaction_stage().is_some() {
+        if let (Some(turn_id), Some(action)) = (
+            active_turn.turn_id.clone(),
+            active_turn.pending_user_action.clone(),
+        ) {
+            self.pending_user_action =
+                Some(crate::user_action::PendingActionState::new(turn_id, action));
+        }
+        let should_reconnect = self.active_context_compaction_stage().is_some()
+            || matches!(
+                active_turn.status,
+                TimelineActiveTurnStatus::Running | TimelineActiveTurnStatus::WaitingUserAction
+            );
+        if should_reconnect {
             self.in_flight = true;
             self.stream_started_at = Some(Instant::now());
             self.last_stream_event_at = Some(Instant::now());
@@ -310,7 +333,7 @@ impl TuiApp {
         }
     }
 
-    fn handle_item_delta(&mut self, item_id: &str, delta: TalosTimelineDelta) {
+    fn handle_item_delta(&mut self, turn_id: &str, item_id: &str, delta: TalosTimelineDelta) {
         match delta {
             TalosTimelineDelta::Text { text } => {
                 let Some(item) = self.timeline_items.get(item_id).cloned() else {
@@ -330,15 +353,29 @@ impl TuiApp {
             TalosTimelineDelta::ToolResult { content, is_error } => {
                 self.update_stored_tool_result(item_id, content, is_error);
             }
-            TalosTimelineDelta::ToolDynamicRequest {
-                call_id, tool_name, ..
-            } => {
-                self.push_right_event(format!(
-                    "dynamic tool requested: {} ({})",
-                    crate::utils::display_tool_name(&tool_name),
-                    call_id
-                ));
-            }
+            TalosTimelineDelta::UserAction { event } => match event {
+                TimelineUserActionEvent::Requested { action } => {
+                    self.pending_user_action = Some(crate::user_action::PendingActionState::new(
+                        turn_id.to_string(),
+                        action,
+                    ));
+                    self.in_flight = true;
+                }
+                TimelineUserActionEvent::Finished {
+                    action_id, state, ..
+                } => {
+                    if self
+                        .pending_user_action
+                        .as_ref()
+                        .is_some_and(|action| action.action.action_id == action_id)
+                    {
+                        self.pending_user_action = None;
+                        self.push_system_notice(format!(
+                            "User action {action_id} finished: {state:?}"
+                        ));
+                    }
+                }
+            },
             TalosTimelineDelta::ContextCompaction {
                 stage,
                 outcome,

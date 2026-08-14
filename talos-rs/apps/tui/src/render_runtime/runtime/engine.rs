@@ -278,7 +278,7 @@ impl RenderRuntimeEngine {
                 }
             }
             TalosTimelineDelta::ToolProgress { .. }
-            | TalosTimelineDelta::ToolDynamicRequest { .. }
+            | TalosTimelineDelta::UserAction { .. }
             | TalosTimelineDelta::ContextCompaction { .. }
             | TalosTimelineDelta::Status { .. } => {}
         }

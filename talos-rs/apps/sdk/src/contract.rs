@@ -38,11 +38,11 @@ use talos_types::{
     SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
     SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
     SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 
@@ -225,6 +225,11 @@ pub trait GatewayClient: Send {
         &mut self,
         request: SubmitDynamicToolResultRequest,
     ) -> TalosResult<SubmitDynamicToolResultResponse>;
+
+    async fn submit_user_action(
+        &mut self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse>;
 
     async fn list_projects(
         &mut self,

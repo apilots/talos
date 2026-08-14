@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { createJSONStorage } from "zustand/middleware";
 
 import "@/shared/i18n/setup";
@@ -18,10 +18,16 @@ const setActiveProjectIdMock = vi.fn((projectId: string) => {
 vi.mock("@/features/chat", () => ({
   ChatComposer: ({
     activeProjectId,
+    onPermissionModeChange,
+    onSend,
+    permissionMode,
     reasoningLevel,
     selectedModel,
   }: {
     activeProjectId: string;
+    onPermissionModeChange: (mode: "approveForMe") => void;
+    onSend: () => void;
+    permissionMode: string;
     reasoningLevel: string;
     selectedModel?: string;
   }) => (
@@ -29,6 +35,9 @@ vi.mock("@/features/chat", () => ({
       <span data-testid="composer-project">{activeProjectId}</span>
       <span data-testid="composer-model">{selectedModel}</span>
       <span data-testid="composer-reasoning">{reasoningLevel}</span>
+      <span data-testid="composer-permission">{permissionMode}</span>
+      <button onClick={() => onPermissionModeChange("approveForMe")}>Approve for me</button>
+      <button onClick={onSend}>Send</button>
     </div>
   ),
   useCreateProjectMutation: () => ({
@@ -84,7 +93,16 @@ vi.mock("@/features/chat", () => ({
   }),
 }));
 
+function LocationStateProbe() {
+  const location = useLocation();
+  return <pre data-testid="location-state">{JSON.stringify(location.state)}</pre>;
+}
+
 describe("ChatHomePage", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -136,5 +154,29 @@ describe("ChatHomePage", () => {
       "openrouter:tencent/hy3:free",
     );
     expect(screen.getByTestId("composer-reasoning").textContent).toBe("high");
+  });
+
+  it("carries the selected permission mode into a new session draft", async () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/", state: { initialDraft: "hello" } }]}>
+        <Routes>
+          <Route path="/" element={<ChatHomePage />} />
+          <Route path="/sessions/:sessionId" element={<LocationStateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByTestId("composer-permission").textContent).toBe("fullAccess");
+    fireEvent.click(screen.getByRole("button", { name: "Approve for me" }));
+    expect(screen.getByTestId("composer-permission").textContent).toBe("approveForMe");
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(JSON.parse(screen.getByTestId("location-state").textContent ?? "{}")).toMatchObject({
+        initialPrompt: "hello",
+        initialPermissionMode: "approveForMe",
+      });
+    });
   });
 });

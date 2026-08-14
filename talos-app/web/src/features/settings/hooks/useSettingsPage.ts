@@ -9,7 +9,6 @@ export type SettingsSection =
   | "appearance"
   | "models"
   | "agent-workspace"
-  | "permissions"
   | "mcp-servers"
   | "server";
 
@@ -19,7 +18,6 @@ export const settingsSections: SettingsSection[] = [
   "appearance",
   "models",
   "agent-workspace",
-  "permissions",
   "mcp-servers",
   "server",
 ];
@@ -32,8 +30,6 @@ export function useSettingsPage() {
   const { connection, setConnection, uiTheme, setUiTheme, locale, setLocale } = useConnectionSettings();
   const [draft, setDraft] = useState(connection);
   const [desktopNotifications, setDesktopNotifications] = useState(true);
-  const [safeFileReads, setSafeFileReads] = useState(true);
-  const [safeFileWrites, setSafeFileWrites] = useState(false);
   const models = useModelsQuery();
 
   useEffect(() => {
@@ -51,10 +47,6 @@ export function useSettingsPage() {
     setDraft,
     desktopNotifications,
     setDesktopNotifications,
-    safeFileReads,
-    setSafeFileReads,
-    safeFileWrites,
-    setSafeFileWrites,
     models,
   };
 }

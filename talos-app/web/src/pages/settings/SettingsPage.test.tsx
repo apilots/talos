@@ -18,7 +18,6 @@ vi.mock("@/features/settings", async () => {
     SettingsGeneralSection: () => <div>General content</div>,
     SettingsMcpServersSection: () => <div>MCP servers content</div>,
     SettingsModelsSection: () => <div>Models content</div>,
-    SettingsPermissionsSection: () => <div>Permissions content</div>,
     SettingsProfileSection: () => <div>Profile content</div>,
     SettingsServerSection: () => <div>Advanced content</div>,
     useSettingsPage: () => useSettingsPageMock(),
@@ -50,10 +49,6 @@ function buildSettingsState(
     setDraft: vi.fn(),
     desktopNotifications: true,
     setDesktopNotifications: vi.fn(),
-    safeFileReads: true,
-    setSafeFileReads: vi.fn(),
-    safeFileWrites: false,
-    setSafeFileWrites: vi.fn(),
     models: { refetch: vi.fn() },
   };
 }
@@ -105,6 +100,12 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("Profile content")).toBeTruthy();
     expect(screen.getByText("Models")).toBeTruthy();
+  });
+
+  it("does not expose disconnected global permission controls", () => {
+    renderSettings("/settings");
+
+    expect(screen.queryByRole("link", { name: "Files & Permissions" })).toBeNull();
   });
 
   it("renders the mcp servers settings section", () => {

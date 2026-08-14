@@ -1,5 +1,4 @@
 import {
-  dynamicToolArgumentsValue,
   type TalosActiveTurn,
   type TalosTimelineContent,
   type TalosTimelineDelta,
@@ -8,6 +7,7 @@ import {
   type TimelineEventEnvelope,
   type TalosHistoryTimelineItem,
   type TalosSessionHistorySnapshot,
+  type TimelineRecoverySnapshot,
 } from "@talos/sdk-core";
 
 import { useAppStore } from "@/shared/store/app-store";
@@ -185,6 +185,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
   }
 
   state.setStreamMeta(sessionId, {
+    activeTurnId: envelope.turn_id,
     lastEventId: envelope.event_id,
     lastEventSeq: envelope.event_seq,
     lastSequence: event.sequence,
@@ -193,7 +194,6 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
     connectionState: "streaming",
     reconnectAttempt: undefined,
     showReconnectControls: false,
-    awaitingFinalResponse: false,
   });
 
   switch (event.payload.type) {
@@ -219,27 +219,37 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
     case "assistant_text_committed":
       applyAssistantTextCommitted(sessionId, event.message_id, event.payload.item_id, event.payload.phase);
       return;
-    case "turn_completed":
+    case "turn_completed": {
+      const waitingForUserAction = event.payload.stop_reason === "waiting_user_action";
       if (event.payload.metrics) {
         state.setTurnMetrics(
           sessionId,
           event.message_id,
-          toChatTurnMetrics(event.payload.metrics as TalosTurnExecutionMetrics, "completed"),
+          toChatTurnMetrics(
+            event.payload.metrics as TalosTurnExecutionMetrics,
+            waitingForUserAction ? "running" : "completed",
+          ),
         );
       }
       markPendingInputCompleted(sessionId, event.message_id);
+      if (waitingForUserAction) {
+        state.setTimelineLive(sessionId, true);
+        state.setSessionStatus(sessionId, "running");
+        state.setStreamMeta(sessionId, {
+          isStreaming: true,
+          connectionState: "streaming",
+        });
+        return;
+      }
       timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
       state.setTimelineLive(sessionId, false);
-      state.setSessionStatus(
-        sessionId,
-        stream?.pendingUserAction ? "running" : undefined,
-      );
+      state.setSessionStatus(sessionId, undefined);
       state.setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",
-        awaitingFinalResponse: false,
       });
       return;
+    }
     case "turn_error":
       timelineItemsByMessage.delete(timelineMessageKey(sessionId, event.message_id));
       state.setTimelineLive(sessionId, false);
@@ -251,6 +261,29 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
         connectionState: "idle",
       });
       return;
+  }
+}
+
+export function applyTimelineRecovery(
+  sessionId: string,
+  recovery: TimelineRecoverySnapshot,
+) {
+  if (recovery.active_turn) {
+    applyActiveTurnSnapshot(sessionId, recovery.active_turn);
+  }
+  recovery.replay.events
+    .slice()
+    .sort((left, right) => left.event_seq - right.event_seq)
+    .forEach((event) => applyStreamEvent(sessionId, event));
+  const stream = useAppStore.getState().streams[sessionId];
+  if (
+    recovery.replay.high_water_mark_event_id &&
+    (stream?.lastEventSeq === undefined ||
+      stream.lastEventSeq <= recovery.replay.last_replay_seq)
+  ) {
+    useAppStore.getState().setStreamMeta(sessionId, {
+      lastEventId: recovery.replay.high_water_mark_event_id,
+    });
   }
 }
 
@@ -334,30 +367,24 @@ function applyItemDelta(
           output: outputContentToText(delta.content),
           contentItems: delta.content,
           isError: delta.is_error,
-          status: delta.is_error ? "failed" : "completed",
-          completedAtMs: Date.now(),
         });
-        state.setStreamMeta(sessionId, { awaitingFinalResponse: true });
       }
       return;
-    case "tool_dynamic_request":
-      state.setPendingUserAction(sessionId, {
-        type: "dynamic_tool_result",
-        call_id: delta.call_id,
-        tool_name: delta.tool_name,
-      });
-      ensureTimelineToolForRequest(sessionId, messageId, itemId, item, delta.call_id, delta.tool_name);
-      state.updateTimelineTool(sessionId, messageId, itemId, {
-        toolName: delta.tool_name,
-        arguments: dynamicToolArgumentsValue(delta.arguments),
-        status: "running",
-        progress: [
-          ...toolProgress(item),
-          { kind: "status", message: "Waiting for dynamic tool result." },
-        ],
-      });
+    case "user_action": {
+      const actionEvent = delta.event;
+      if (actionEvent.type === "finished") {
+        if (state.streams[sessionId]?.pendingUserAction?.actionId === actionEvent.actionId) {
+          state.setPendingUserAction(sessionId, undefined);
+        }
+        return;
+      }
+      const action = actionEvent.action;
+      const toolName = userActionToolName(action);
+      state.setPendingUserAction(sessionId, action);
+      ensureTimelineToolForRequest(sessionId, messageId, itemId, item, action.callId, toolName);
       state.setSessionStatus(sessionId, "running");
       return;
+    }
     case "context_compaction":
       if (!item || item.item.content.type !== "context_compaction") {
         return;
@@ -410,8 +437,6 @@ function applyItemCompleted(
     output: outputContentToText(result.content),
     contentItems: result.content,
     isError: result.is_error,
-    status: result.is_error ? "failed" : "completed",
-    completedAtMs,
   });
 }
 
@@ -425,11 +450,7 @@ function applyAssistantTextCommitted(
   if (item) {
     item.item.phase = phase;
   }
-  const state = useAppStore.getState();
-  state.commitTimelineAssistantText(sessionId, messageId, itemId, phase);
-  if (phase === "final_answer") {
-    state.setTimelineLive(sessionId, false);
-  }
+  useAppStore.getState().commitTimelineAssistantText(sessionId, messageId, itemId, phase);
 }
 
 function rememberTimelineItem(sessionId: string, messageId: string, item: TalosTimelineItem) {
@@ -588,7 +609,7 @@ function ensureTimelineToolForRequest(
     itemId,
     kind: "tool_call",
     phase: "acting",
-    status: "running",
+    status: "waiting_user_action",
     title: toolName,
     callId,
     toolName,
@@ -612,31 +633,28 @@ function toolProgress(item: TimelineItemSnapshot | undefined) {
 export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActiveTurn) {
   if (activeTurn.status === "completed") {
     const state = useAppStore.getState();
-    const stream = state.streams[sessionId];
     markPendingInputCompleted(sessionId, activeTurn.message_id ?? undefined);
     state.setPendingUserAction(sessionId, undefined);
     state.setSessionStatus(sessionId, undefined);
+    state.setTimelineLive(sessionId, false);
     state.setStreamMeta(sessionId, {
+      activeTurnId: activeTurn.turn_id ?? undefined,
       activeMessageId: activeTurn.message_id ?? undefined,
-      lastEventId: activeTurn.last_event_id ?? stream?.lastEventId,
-      lastEventSeq: stream?.lastEventSeq,
       isStreaming: false,
       connectionState: "idle",
       reconnectAttempt: undefined,
       showReconnectControls: undefined,
-      awaitingFinalResponse: false,
     });
     return;
   }
 
   if (activeTurn.status === "failed") {
     const state = useAppStore.getState();
-    const stream = state.streams[sessionId];
     state.setPendingUserAction(sessionId, undefined);
     state.setSessionStatus(sessionId, "error");
+    state.setTimelineLive(sessionId, false);
     state.setStreamMeta(sessionId, {
-      lastEventId: activeTurn.last_event_id ?? stream?.lastEventId,
-      lastEventSeq: stream?.lastEventSeq,
+      activeTurnId: activeTurn.turn_id ?? undefined,
       isStreaming: false,
       connectionState: "idle",
     });
@@ -665,8 +683,8 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
       });
     }
     state.setStreamMeta(sessionId, {
+      activeTurnId: activeTurn.turn_id ?? undefined,
       activeMessageId: activeTurn.message_id,
-      lastEventId: activeTurn.last_event_id ?? stream?.lastEventId,
       lastEventSeq: messageChanged ? undefined : stream?.lastEventSeq,
       lastSequence: messageChanged ? undefined : stream?.lastSequence,
       isStreaming: true,
@@ -684,31 +702,48 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
 
   const state = useAppStore.getState();
   state.setPendingUserAction(sessionId, pending);
-  const stream = state.streams[sessionId];
   state.setStreamMeta(sessionId, {
+    activeTurnId: activeTurn.turn_id ?? undefined,
     activeMessageId: activeTurn.message_id ?? undefined,
-    lastEventId: activeTurn.last_event_id ?? stream?.lastEventId,
-    lastEventSeq: stream?.lastEventSeq,
     isStreaming: true,
     connectionState: "detached",
   });
+  state.setTimelineLive(sessionId, true);
 
-  const itemId = pending.item_id ?? `pending-${pending.call_id}`;
+  const itemId = pending.itemId;
+  if (!itemId) {
+    state.setSessionStatus(sessionId, "running");
+    return;
+  }
+  const toolName = userActionToolName(pending);
   state.upsertTimelineItem(sessionId, activeTurn.message_id, {
     itemId,
     sourceItemId: itemId,
     kind: "tool_call",
     phase: "acting",
-    status: "running",
-    title: pending.tool_name,
-    callId: pending.call_id,
-    toolName: pending.tool_name,
+    status: "waiting_user_action",
+    title: toolName,
+    callId: pending.callId,
+    toolName,
     arguments: null,
-    progress: [{ kind: "status", message: "Waiting for dynamic tool result." }],
+    progress: [{ kind: "status", message: "Waiting for user input." }],
     startedAtMs: Date.now(),
     completedAtMs: null,
   });
   state.setSessionStatus(sessionId, "running");
+}
+
+function userActionToolName(action: TalosActiveTurn["pending_user_action"] extends infer T
+  ? NonNullable<T>
+  : never) {
+  switch (action.params.type) {
+    case "dynamicToolResult":
+      return action.params.params.toolName;
+    case "question":
+      return "AskUserQuestion";
+    case "sandboxApproval":
+      return action.params.params.toolName;
+  }
 }
 
 export function clearInactiveTurnSnapshot(sessionId: string) {
@@ -716,11 +751,11 @@ export function clearInactiveTurnSnapshot(sessionId: string) {
   state.setPendingUserAction(sessionId, undefined);
   state.setSessionStatus(sessionId, undefined);
   state.setStreamMeta(sessionId, {
+    activeTurnId: undefined,
     isStreaming: false,
     connectionState: "idle",
     reconnectAttempt: undefined,
     showReconnectControls: undefined,
-    awaitingFinalResponse: false,
   });
 }
 

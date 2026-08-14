@@ -14,7 +14,6 @@ export {
   SettingsMcpServersSection,
   SettingsModelsSection,
   SettingsNavigation,
-  SettingsPermissionsSection,
   SettingsProfileSection,
   SettingsServerSection,
 } from "./components";

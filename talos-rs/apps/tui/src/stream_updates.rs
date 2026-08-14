@@ -173,6 +173,55 @@ impl TuiApp {
                     self.push_right_event("model picker switch failed".to_string());
                 }
             },
+            CommandUpdate::PermissionModeSwitched(result) => match result {
+                Ok(info) => {
+                    self.apply_session_snapshot(&info);
+                    self.permission_picker = None;
+                    self.push_command_result(format!(
+                        "Permissions changed to {}",
+                        crate::permission_picker::permission_mode_label(
+                            self.current_permission_mode
+                        )
+                    ));
+                }
+                Err(err) => {
+                    self.permission_picker = None;
+                    self.push_system_notice(format!("Failed to change permissions: {err}"));
+                }
+            },
+            CommandUpdate::UserActionSubmitted { action_id, result } => {
+                let Some(action) = self
+                    .pending_user_action
+                    .as_mut()
+                    .filter(|action| action.action.action_id == action_id)
+                else {
+                    return;
+                };
+                match result {
+                    Ok(response) => {
+                        action.action.state = response.state;
+                        action.submitting = false;
+                        if matches!(
+                            response.state,
+                            talos_sdk::UserActionState::ResponseAccepted
+                                | talos_sdk::UserActionState::Resuming
+                        ) {
+                            self.reconnect_after_user_action();
+                        } else if matches!(
+                            response.state,
+                            talos_sdk::UserActionState::Resolved
+                                | talos_sdk::UserActionState::Cancelled
+                        ) {
+                            self.pending_user_action = None;
+                            self.in_flight = false;
+                        }
+                    }
+                    Err(err) => {
+                        action.submitting = false;
+                        action.error = Some(format!("Submit failed: {err}"));
+                    }
+                }
+            }
             CommandUpdate::SessionHistoryLoaded { session, result } => match *result {
                 Ok(load) => {
                     let sid = &session.id;

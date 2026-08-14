@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { TalosPendingUserAction } from "@talos/sdk-browser";
 import {
   Activity,
   Bot,
@@ -27,6 +28,8 @@ interface MessageListProps {
   emptyTitle: string;
   emptyDetail: string;
   actions?: ReactNode;
+  pendingUserAction?: TalosPendingUserAction;
+  renderUserAction?: (action: TalosPendingUserAction) => ReactNode;
 }
 
 type TimelineItem = Extract<ChatRenderBlock, { kind: "timeline" }>["items"][number];
@@ -35,7 +38,14 @@ type TimelineTextItem = Exclude<TimelineItem, { kind: "tool_call" }>;
 const FINAL_ANSWER_REPLAY_CHUNK_SIZE = 24;
 const FINAL_ANSWER_REPLAY_INTERVAL_MS = 16;
 
-export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: MessageListProps) {
+export function MessageList({
+  blocks,
+  emptyTitle,
+  emptyDetail,
+  actions,
+  pendingUserAction,
+  renderUserAction,
+}: MessageListProps) {
   const { t } = useTranslation("chat");
   const copyBlockLabel = t("copyBlock");
   const copiedBlockLabel = t("copiedBlock");
@@ -69,6 +79,8 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
               helpfulLabel={helpfulLabel}
               key={block.id}
               notHelpfulLabel={notHelpfulLabel}
+              pendingUserAction={pendingUserAction}
+              renderUserAction={renderUserAction}
             />
           );
         }
@@ -117,6 +129,7 @@ export function MessageList({ blocks, emptyTitle, emptyDetail, actions }: Messag
             <TextMessageBlock
               fileIds={block.kind === "user" ? block.fileIds : undefined}
               kind={block.kind}
+              messageId={block.kind === "user" ? block.id : undefined}
               text={block.text}
             />
           </CopyableBlock>
@@ -154,12 +167,16 @@ function TurnBlock({
   copyLabel,
   helpfulLabel,
   notHelpfulLabel,
+  pendingUserAction,
+  renderUserAction,
 }: {
   block: Extract<ChatRenderBlock, { kind: "timeline" }>;
   copiedLabel: string;
   copyLabel: string;
   helpfulLabel: string;
   notHelpfulLabel: string;
+  pendingUserAction?: TalosPendingUserAction;
+  renderUserAction?: (action: TalosPendingUserAction) => ReactNode;
 }) {
   return (
     <MessageTimelineBlock
@@ -170,6 +187,8 @@ function TurnBlock({
       live={Boolean(block.live)}
       metrics={block.metrics ?? null}
       notHelpfulLabel={notHelpfulLabel}
+      pendingUserAction={pendingUserAction}
+      renderUserAction={renderUserAction}
       timelineId={block.id}
     />
   );
@@ -183,6 +202,8 @@ function MessageTimelineBlock({
   live,
   metrics,
   notHelpfulLabel,
+  pendingUserAction,
+  renderUserAction,
   timelineId,
 }: {
   copiedLabel: string;
@@ -192,6 +213,8 @@ function MessageTimelineBlock({
   live: boolean;
   metrics: Extract<ChatRenderBlock, { kind: "timeline" }>["metrics"];
   notHelpfulLabel: string;
+  pendingUserAction?: TalosPendingUserAction;
+  renderUserAction?: (action: TalosPendingUserAction) => ReactNode;
   timelineId: string;
 }) {
   const { t } = useTranslation("chat");
@@ -199,7 +222,7 @@ function MessageTimelineBlock({
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
   const processItems = items.filter((item) => !isTimelineResponseItem(item));
-  const hasRunningItem = processItems.some((item) => item.status === "running" || item.status === "waiting_dynamic_input");
+  const hasRunningItem = processItems.some((item) => item.status === "running" || item.status === "waiting_user_action");
   const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
   const isAwaitingTimelineDelta =
     (live || hasRunningItem) && responseItems.length === 0;
@@ -291,18 +314,23 @@ function MessageTimelineBlock({
                           <TimelineItemIcon item={item} />
                         </span>
                         {item.kind === "tool_call" ? (
-                          <ToolCallBlock
-                            argumentsText={formatArguments(item.arguments)}
-                            callId={item.callId}
-                            contentItems={item.contentItems}
-                            output={item.output}
-                            progress={item.progress}
-                            prompt={item.prompt}
-                            status={timelineToolStatus(item)}
-                            timingMs={timelineItemDuration(item)}
-                            toolName={item.toolName}
-                            variant="timeline"
-                          />
+                          <div className="min-w-0">
+                            <ToolCallBlock
+                              argumentsText={formatArguments(item.arguments)}
+                              callId={item.callId}
+                              contentItems={item.contentItems}
+                              output={item.output}
+                              progress={item.progress}
+                              prompt={item.prompt}
+                              status={timelineToolStatus(item)}
+                              timingMs={timelineItemDuration(item)}
+                              toolName={item.toolName}
+                              variant="timeline"
+                            />
+                            {pendingUserAction?.itemId === item.itemId
+                              ? renderUserAction?.(pendingUserAction)
+                              : null}
+                          </div>
                         ) : (
                           <article className={timelineTextCardClass(role)} data-timeline-surface="plain">
                             {role === "system" || statusLabel ? (
@@ -631,7 +659,7 @@ function timelineToolStatus(item: Extract<ChatRenderBlock, { kind: "timeline" }>
   if (item.status === "failed") {
     return "error";
   }
-  if (item.status === "waiting_dynamic_input") {
+  if (item.status === "waiting_user_action") {
     return "waiting_dynamic_input";
   }
   return "running";

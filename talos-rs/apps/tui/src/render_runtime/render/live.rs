@@ -208,15 +208,6 @@ impl LiveReducer {
         ready.then(|| self.finalize_text(item_id)).flatten()
     }
 
-    pub(crate) fn start_tool(
-        &mut self,
-        item_id: impl Into<String>,
-        call_id: impl Into<String>,
-        name: impl Into<String>,
-    ) {
-        self.start_tool_with_arguments(item_id, call_id, name, "")
-    }
-
     pub(crate) fn start_tool_with_arguments(
         &mut self,
         item_id: impl Into<String>,

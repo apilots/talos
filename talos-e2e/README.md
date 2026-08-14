@@ -18,13 +18,13 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
 - Scope: async ack + timeline event SSE + idempotency behavior
 - Verifies: `/v1/sessions/{id}/messages`, `/v1/sessions/{id}/events`, `Idempotency-Key`
 
-4. `scenarios/05_cli/`
+5. `scenarios/05_cli/`
 - Scope: CLI-driven interactive scenarios
 - Files:
   - `full_flow.sh`
   - `bilingual_chat.sh`
 
-5. `scenarios/06_tools/`
+6. `scenarios/06_tools/`
 - Scope: tool-effect validation scenarios
 - Files:
   - `http_bash.sh`
@@ -40,7 +40,6 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `web_fetch.sh`
   - `web_search.sh`
   - `tool_search.sh`
-  - `ask_user_question.sh`
   - `enter_plan_mode.sh`
   - `exit_plan_mode.sh`
   - `agent.sh`
@@ -79,6 +78,30 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `local_model_input.sh`
   - `s3_lifecycle.sh`
 
+13. `scenarios/13_interaction/`
+- Scope: durable product interaction through the real HTTP, Timeline, WebUI/Desktop, TUI, and UserAction paths
+- Verifies: three-tool execution in every Session permission mode, real DeepSeek structured safe/risky assessment, ordered repeated approvals, identical concurrent approval submission with exactly-once execution, Question option and Other responses, same-Turn resume, refresh/reconnect recovery, and approval decisions
+- Files:
+  - `user_action_desktop.sh`
+  - `user_action_http.sh`
+  - `user_action_tui.sh`
+
+14. `scenarios/14_sandbox/`
+- Scope: unified tool sandbox acceptance through the real Registry dispatch path
+- Runs cases natively on macOS/Linux; the full macOS group runs all cases once in the fixed Ubuntu 24.04 Docker image
+- Files:
+  - `01_provider_preflight.sh`
+  - `02_process_runtime.sh`
+  - `03_bash_terminal_status.sh`
+  - `04_process_filesystem.sh`
+  - `05_escape_attempts.sh`
+  - `06_network_policy.sh`
+  - `07_file_tools.sh`
+  - `08_full_access_control.sh`
+  - `09_approve_for_me_risk.sh`
+  - `10_no_silent_fallback.sh`
+  - `99_linux_docker.sh` (group-level Linux verification on macOS)
+
 ## Runner
 
 Use:
@@ -93,6 +116,8 @@ talos-e2e/run_e2e.sh --case 09_app_server/skills_e2e
 talos-e2e/run_e2e.sh --case 09_app_server/mcp_e2e
 talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
 talos-e2e/run_e2e.sh --group 12_files
+talos-e2e/run_e2e.sh --group 13_interaction
+talos-e2e/run_e2e.sh --group 14_sandbox
 ```
 
 From the repository root, the same runner is also exposed through `just`:
@@ -101,6 +126,8 @@ From the repository root, the same runner is also exposed through `just`:
 just e2e
 just e2e-group 09_app_server
 just e2e-case 09_app_server/skills_e2e
+just e2e-group 14_sandbox
+just e2e-case 14_sandbox/01_provider_preflight
 ```
 
 The runner prebuilds only the binaries required by the selected scenario set.

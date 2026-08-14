@@ -261,16 +261,7 @@ fn render_event(
                     payload.item_id, is_error
                 );
             }
-            TalosTimelineDelta::ToolDynamicRequest {
-                call_id, tool_name, ..
-            } => {
-                eprintln!(
-                    "TOOL_CALL_DYNAMIC tool={} internal={} call_id={}",
-                    display_tool_name(tool_name),
-                    tool_name,
-                    call_id
-                );
-            }
+            TalosTimelineDelta::UserAction { .. } => {}
             TalosTimelineDelta::ContextCompaction {
                 stage,
                 outcome,

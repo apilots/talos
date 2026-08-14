@@ -128,6 +128,7 @@ pub(crate) fn build_welcome_card(
     version: &str,
     model: &str,
     working_directory: Option<&Path>,
+    permission_mode: talos_sdk::UserPermissionMode,
 ) -> String {
     const CARD_WIDTH: usize = 50;
 
@@ -168,7 +169,10 @@ pub(crate) fn build_welcome_card(
         card_line(""),
         info_line_with_suffix("model:", model, "/model to change"),
         info_line("directory:", &directory),
-        info_line("permissions:", "YOLO mode"),
+        info_line(
+            "permissions:",
+            crate::permission_picker::permission_mode_label(permission_mode),
+        ),
         "╰──────────────────────────────────────────────────╯".to_string(),
     ]
     .join("\n")

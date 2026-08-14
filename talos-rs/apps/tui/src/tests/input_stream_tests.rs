@@ -622,7 +622,7 @@ async fn test_help_command_writes_transcript() {
     assert!(!should_quit);
     let transcript = interactive_transcript_text(&app);
     assert!(transcript.contains("/help"));
-    assert!(transcript.contains("Commands: /help /model /models /sessions"));
+    assert!(transcript.contains("Commands: /help /model /models /permissions /sessions"));
 }
 
 #[tokio::test]

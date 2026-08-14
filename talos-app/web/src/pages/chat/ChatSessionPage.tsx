@@ -18,6 +18,7 @@ import {
   useSessionQuery,
   useUpdateSessionModelMutation,
   useUpdateSessionProjectMutation,
+  useSubmitUserActionMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
@@ -31,11 +32,8 @@ import {
 } from "./useInitialSessionInput";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useSessionCommands } from "./useSessionCommands";
-import type { ModelRef, SkillSuggestion } from "@talos/sdk-browser";
-
-function selectedSkillsOption(skills?: SkillSuggestion[]) {
-  return skills && skills.length > 0 ? skills : undefined;
-}
+import { useSessionPermissionMode } from "./useSessionPermissionMode";
+import type { ModelRef } from "@talos/sdk-browser";
 
 export function ChatSessionPage() {
   const navigate = useNavigate();
@@ -73,9 +71,12 @@ export function ChatSessionPage() {
     stopResponse,
     streamError,
     sessionHistoryQuery,
+    activeTurnId,
+    pendingUserAction,
   } = useChatSession(sessionId, session?.message_count, session?.title);
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
+  const submitUserAction = useSubmitUserActionMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const projects = projectsView.projects;
@@ -96,6 +97,13 @@ export function ChatSessionPage() {
     : draftReasoningLevel ?? (draftModel
         ? reasoningLevelForModel(models, draftModel)
         : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
+  const permissionMode = useSessionPermissionMode({
+    blocked: Boolean(isStreaming || pendingUserAction),
+    initialMode: locationState?.initialPermissionMode,
+    persistedMode: session?.effectiveMode,
+    sessionExists: Boolean(session),
+    sessionId,
+  });
   const sessionCommands = useSessionCommands({
     contextCompactionStage,
     currentModel,
@@ -105,7 +113,7 @@ export function ChatSessionPage() {
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
-  const autoScroll = useChatSessionAutoScroll({ blocks, sessionId, streamError });
+  const autoScroll = useChatSessionAutoScroll({ blocks, isStreaming, sessionId, streamError });
 
   const selectedProjectId = useMemo(() => {
     if (!session) {
@@ -125,11 +133,9 @@ export function ChatSessionPage() {
     models,
     navigate,
     projects,
-    scrollToBottom: autoScroll.scrollToBottom,
     sendText,
     sessionId,
     setDraft,
-    stickToBottomRef: autoScroll.stickToBottomRef,
   });
 
   if (!sessionId) {
@@ -160,6 +166,16 @@ export function ChatSessionPage() {
         contentRef={autoScroll.contentRef}
         endRef={autoScroll.endRef}
         isCancelling={isCancelling}
+        onUserActionSubmit={(response) => {
+          if (!pendingUserAction || !activeTurnId) {
+            return;
+          }
+          submitUserAction.mutate({
+            turnId: activeTurnId,
+            actionId: pendingUserAction.actionId,
+            response,
+          });
+        }}
         onRetryResponse={retryResponse}
         onRetryStream={retryStream}
         onScroll={autoScroll.handleScroll}
@@ -168,6 +184,13 @@ export function ChatSessionPage() {
         showMessageList={shouldShowMessageList}
         showReconnectControls={showReconnectControls}
         streamError={streamError}
+        pendingUserAction={pendingUserAction}
+        userActionDisabled={
+          submitUserAction.isPending || pendingUserAction?.state !== "pending"
+        }
+        userActionError={submitUserAction.error instanceof Error
+          ? submitUserAction.error.message
+          : undefined}
         viewportRef={autoScroll.viewportRef}
       />
       <div className="mt-4 shrink-0">
@@ -181,6 +204,8 @@ export function ChatSessionPage() {
             commandNotice={sessionCommands.notice}
             contextCompactionStage={sessionCommands.compactionStage}
             isStreaming={isStreaming}
+            permissionMode={permissionMode.value}
+            permissionModeDisabled={permissionMode.disabled}
             models={modelPickerOptions(models)}
             initialAttachments={locationState?.initialAttachments}
             onCancel={() => void stopResponse()}
@@ -204,6 +229,7 @@ export function ChatSessionPage() {
                 updateSessionModel(modelSelection);
               }
             }}
+            onPermissionModeChange={permissionMode.onChange}
             onProjectChange={(projectId) => {
               if (sessionCommands.compactionStage) {
                 return;
@@ -240,8 +266,6 @@ export function ChatSessionPage() {
               }
             }}
             onSend={(skills, attachments) => {
-              autoScroll.stickToBottomRef.current = true;
-              window.requestAnimationFrame(autoScroll.scrollToBottom);
               const fileIds = attachments.map((file) => file.fileId);
               const fileOptions = fileIds.length > 0 ? { fileIds } : {};
               if (!session) {
@@ -253,12 +277,13 @@ export function ChatSessionPage() {
                     currentReasoningLevel,
                   ),
                   project: selectedProject,
-                  skills: selectedSkillsOption(skills),
+                  skills: skills.length > 0 ? skills : undefined,
+                  userPermissionMode: permissionMode.value,
                   ...fileOptions,
                 });
               }
               return sendTurn({
-                skills: selectedSkillsOption(skills),
+                skills: skills.length > 0 ? skills : undefined,
                 ...fileOptions,
               });
             }}

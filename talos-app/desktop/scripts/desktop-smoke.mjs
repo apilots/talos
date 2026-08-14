@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,9 @@ const artifactDir = path.resolve(repoRoot, ".tmp/desktop-smoke", timestamp());
 const smokeHome = path.join(artifactDir, "home");
 const talosHome = path.join(smokeHome, ".talos");
 const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
+const modeSmokeFiles = [1, 2, 3].map((index) =>
+  path.join(talosHome, "workspace-talos", `desktop-mode-smoke-${index}.txt`)
+);
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
 const appExecutable = process.env.TALOS_DESKTOP_SMOKE_APP;
@@ -41,10 +44,15 @@ if (!appExecutable || explicitAppServerBin) {
 
 function configureSmokeHome() {
   const confRoot = path.join(talosHome, "conf");
+  const workspaceRoot = path.join(talosHome, "workspace-talos");
   const skillRoot = path.join(smokeHome, ".agents", "skills", "desktop-smoke");
   mkdirSync(confRoot, { recursive: true });
+  mkdirSync(workspaceRoot, { recursive: true });
   mkdirSync(skillRoot, { recursive: true });
   copyFileSync(talosConfig, path.join(confRoot, "talos.yaml"));
+  modeSmokeFiles.forEach((file, index) => {
+    writeFileSync(file, `DESKTOP_MODE_CONTENT_${index + 1}\n`);
+  });
   writeFileSync(
     path.join(skillRoot, "SKILL.md"),
     `---
@@ -86,24 +94,7 @@ try {
     throw new Error("Desktop smoke does not automate Talos Cloud browser login. Run this smoke with gateway.auth=false or validate auth manually.");
   }
 
-  await evaluate(
-    cdp,
-    `(() => {
-      const raw = window.localStorage?.getItem("talos-web-ui");
-      const token = raw ? JSON.parse(raw)?.state?.connection?.authToken : "";
-      window.__talosSmokeActorCredentials = token
-        ? { credential: { type: "existing_session_token", token } }
-        : null;
-      window.__talosSmokeInvoke = (method, params) => window.talos.invoke(
-        method,
-        params,
-        window.__talosSmokeActorCredentials
-          ? { actorCredentials: window.__talosSmokeActorCredentials }
-          : undefined
-      );
-      return true;
-    })()`,
-  );
+  await installSmokeInvoke(cdp);
 
   const modelCount = await waitForEvaluate(
     cdp,
@@ -142,6 +133,10 @@ try {
   await waitForExpression(cdp, "Boolean(document.querySelector('[data-smoke=\"chat-composer-input\"]'))", 30_000);
   await captureScreenshot(cdp, path.join(artifactDir, "home.png"));
 
+  const interaction = process.env.TALOS_DESKTOP_SMOKE_INTERACTION === "1"
+    ? await runInteractionSmoke(cdp, artifactDir)
+    : null;
+
   const routeInteractions = [];
   const linkedRoutes = [
     ["plugins", "#/plugins"],
@@ -163,7 +158,6 @@ try {
   const settingsRoutes = [
     ["settings-models", "#/settings/models"],
     ["settings-agent-workspace", "#/settings/agent-workspace"],
-    ["settings-permissions", "#/settings/permissions"],
     ["settings-appearance", "#/settings/appearance"],
     ["settings-server", "#/settings/server"],
   ];
@@ -220,6 +214,7 @@ try {
     serverInfo,
     modelCount,
     skillCount,
+    interaction,
     routes: routeInteractions,
   };
   writeFileSync(path.join(artifactDir, "desktop-smoke-report.json"), `${JSON.stringify(report, null, 2)}\n`);
@@ -236,6 +231,386 @@ try {
     electron.kill("SIGKILL");
   }
   cdp?.close?.();
+}
+
+async function runInteractionSmoke(cdp, outputDir) {
+  await sendComposerMessage(cdp, "Reply with exactly DESKTOP_INTERACTION_READY");
+  await waitForExpression(cdp, "location.hash.startsWith('#/sessions/')", 30_000);
+  const sessionId = await evaluate(cdp, "location.hash.split('/').pop()");
+  assert(sessionId, "Desktop interaction did not create a session.");
+  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  await evaluate(
+    cdp,
+    `history.replaceState(null, document.title, ${JSON.stringify(`#/sessions/${sessionId}`)}); location.reload(); undefined`,
+  );
+  await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
+  await installSmokeInvoke(cdp);
+  await waitForHash(cdp, `#/sessions/${sessionId}`, 30_000);
+  await sleep(1_000);
+  await captureScreenshot(cdp, path.join(outputDir, "interaction-reloaded.png"));
+  const reloadState = await evaluate(
+    cdp,
+    `(() => {
+      const button = document.querySelector('[data-smoke="chat-composer-send"]');
+      return {
+        bodyText: (document.body.textContent || '').slice(0, 2_000),
+        button: button ? { disabled: button.disabled, ariaLabel: button.getAttribute('aria-label') } : null,
+        hash: location.hash,
+      };
+    })()`,
+  );
+  writeFileSync(path.join(outputDir, "interaction-reloaded.json"), `${JSON.stringify(reloadState, null, 2)}\n`);
+  await waitForComposerIdle(cdp, 60_000);
+  const session = await waitForEvaluate(
+    cdp,
+    `window.__talosSmokeInvoke('session.get', { session_id: ${JSON.stringify(sessionId)} }).then((response) => {
+      if (!response.session) throw new Error('session not available');
+      return response.session;
+    })`,
+    30_000,
+  );
+  const permissionModes = [
+    ["askForApproval", "ask-for-approval", "Ask for approval"],
+    ["approveForMe", "approve-for-me", "Approve for me"],
+    ["fullAccess", "full-access", "Full access"],
+  ];
+  const modeResults = [];
+  for (const [mode, screenshotName, label] of permissionModes) {
+    await evaluate(
+      cdp,
+      `window.__talosSmokeInvoke('session.patch', {
+        session_id: ${JSON.stringify(sessionId)},
+        conf: { modelSelection: null, userPermissionMode: ${JSON.stringify(mode)} },
+        project_id: null,
+        current_directory: null
+      }).then((response) => {
+        if (response.session?.effectiveMode !== ${JSON.stringify(mode)}) {
+          throw new Error('session permission mode was not updated');
+        }
+        return response.session;
+      })`,
+    );
+    await evaluate(cdp, "location.reload(); undefined");
+    await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
+    await installSmokeInvoke(cdp);
+    await waitForHash(cdp, `#/sessions/${sessionId}`, 30_000);
+    await waitForComposerIdle(cdp, 60_000);
+    await waitForExpression(
+      cdp,
+      `(document.body.textContent || '').includes(${JSON.stringify(label)})`,
+      30_000,
+    );
+
+    const marker = `DESKTOP_MODE_${mode}_OK`;
+    await sendComposerMessage(
+      cdp,
+      `You must make exactly three independent Read tool calls, one for each exact path in this order: ${modeSmokeFiles.join(", ")}. Do not call any other tool. After all three tool results, respond with exactly ${marker}`,
+    );
+    await waitForActiveTurnStatus(cdp, sessionId, "completed", 90_000);
+    await waitForComposerIdle(cdp, 60_000);
+    const modeHistory = await evaluate(
+      cdp,
+      `window.__talosSmokeInvoke('session.history', { session_id: ${JSON.stringify(sessionId)} }).then((response) => {
+        const message = response.history.messages.at(-1);
+        const toolCalls = message?.items.filter((item) => item.content.type === 'tool_call') || [];
+        return {
+          stopReason: message?.stop_reason,
+          toolCalls: toolCalls.map((item) => ({
+            name: item.content.name,
+            status: item.status,
+            hasResult: item.content.result !== null
+          })),
+          metrics: message?.metrics
+        };
+      })`,
+    );
+    assert(
+      modeHistory?.stopReason === "end_turn",
+      `Mode ${mode} did not end: ${JSON.stringify(modeHistory)}`,
+    );
+    assert(
+      modeHistory?.toolCalls?.length === 3,
+      `Mode ${mode} did not execute three tools: ${JSON.stringify(modeHistory)}`,
+    );
+    assert(
+      modeHistory.toolCalls.every(
+        (call) => call.name === "Read" && call.status === "completed" && call.hasResult
+      ),
+      `Mode ${mode} tool calls were not terminal: ${JSON.stringify(modeHistory)}`,
+    );
+    assert(
+      modeHistory?.metrics?.tool_calls === 3,
+      `Mode ${mode} metrics were incorrect: ${JSON.stringify(modeHistory)}`,
+    );
+    await evaluate(cdp, "location.reload(); undefined");
+    await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
+    await installSmokeInvoke(cdp);
+    await waitForHash(cdp, `#/sessions/${sessionId}`, 30_000);
+    await waitForComposerIdle(cdp, 60_000);
+    await waitForExpression(
+      cdp,
+      `(document.body.textContent || '').includes(${JSON.stringify(marker)})`,
+      30_000,
+    );
+    await sleep(500);
+    await captureScreenshot(cdp, path.join(outputDir, `permission-${screenshotName}.png`));
+    modeResults.push({ mode, ...modeHistory });
+  }
+
+  await sendComposerMessage(
+    cdp,
+    "You must call AskUserQuestion exactly once. Use header Desktop Choice, question Choose delivery, and exactly these options: id now, label Now, description Deliver now; id later, label Later, description Deliver later. After receiving the answer, respond with exactly DESKTOP_QUESTION_OPTION_OK",
+  );
+  await waitForExpression(
+    cdp,
+    "Boolean(document.querySelector('section[data-user-action=\"question\"]')) && (document.body.textContent || '').includes('Desktop Choice')",
+    60_000,
+  );
+  const pendingBeforeRefresh = await waitForActiveTurnStatus(
+    cdp,
+    sessionId,
+    "waiting_user_action",
+    30_000,
+  );
+  const actionIdBeforeRefresh = pendingBeforeRefresh?.pending_user_action?.actionId;
+  assert(actionIdBeforeRefresh, "Desktop pending Question did not expose an action id.");
+  await evaluate(cdp, "location.reload(); undefined");
+  await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
+  await installSmokeInvoke(cdp);
+  await waitForHash(cdp, `#/sessions/${sessionId}`, 30_000);
+  await waitForExpression(
+    cdp,
+    "Boolean(document.querySelector('section[data-user-action=\"question\"]')) && (document.body.textContent || '').includes('Desktop Choice')",
+    60_000,
+  );
+  const pendingAfterRefresh = await waitForActiveTurnStatus(
+    cdp,
+    sessionId,
+    "waiting_user_action",
+    30_000,
+  );
+  assert(
+    pendingAfterRefresh?.pending_user_action?.actionId === actionIdBeforeRefresh,
+    `Desktop refresh changed the pending action: ${JSON.stringify({ pendingBeforeRefresh, pendingAfterRefresh })}`,
+  );
+  await clickButtonInUserAction(cdp, "Now");
+  await waitForUserActionClosed(cdp, 60_000);
+  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+
+  await sendComposerMessage(
+    cdp,
+    "You must call AskUserQuestion exactly once. Use header Desktop Choice, question Choose delivery, and exactly these options: id now, label Now, description Deliver now; id later, label Later, description Deliver later. After receiving the answer, respond with exactly DESKTOP_QUESTION_OTHER_OK",
+  );
+  await waitForExpression(
+    cdp,
+    "Boolean(document.querySelector('section[data-user-action=\"question\"]'))",
+    60_000,
+  );
+  await clickButtonInUserAction(cdp, "Other");
+  await setElementValue(cdp, "section[data-user-action=\"question\"] textarea", "Use a staged rollout");
+  const submitted = await evaluate(
+    cdp,
+    `(() => {
+      const section = document.querySelector('section[data-user-action="question"]');
+      const button = section?.querySelector('button[aria-label]');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`,
+  );
+  assert(submitted, "Other response submit button was not actionable.");
+  await waitForUserActionClosed(cdp, 60_000);
+  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+
+  const approvalMarker = path.join(talosHome, "workspace-talos", "desktop-approval-marker");
+  await evaluate(
+    cdp,
+    `window.__talosSmokeInvoke('session.patch', {
+      session_id: ${JSON.stringify(sessionId)},
+      conf: { modelSelection: null, userPermissionMode: 'askForApproval' },
+      project_id: null,
+      current_directory: null
+    }).then((response) => {
+      if (response.session?.effectiveMode !== 'askForApproval') {
+        throw new Error('session permission mode was not updated');
+      }
+      return response.session;
+    })`,
+  );
+  await sendComposerMessage(
+    cdp,
+    `You must call Bash exactly once with this exact command: printf desktop-approval >> '${approvalMarker}'. Do not call any other tool. After the tool result, respond with exactly DESKTOP_APPROVAL_OK`,
+  );
+  await waitForExpression(
+    cdp,
+    "Boolean(document.querySelector('section[data-user-action=\"sandbox-approval\"]'))",
+    60_000,
+  );
+  await clickButtonInUserAction(cdp, "Allow once", "sandbox-approval");
+  await waitForUserActionClosed(cdp, 60_000);
+  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  assert(
+    readFileSync(approvalMarker, "utf8") === "desktop-approval",
+    "Desktop AllowOnce did not execute the approved command exactly once.",
+  );
+  await evaluate(cdp, "location.reload(); undefined");
+  await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
+  await installSmokeInvoke(cdp);
+  await waitForHash(cdp, `#/sessions/${sessionId}`, 30_000);
+  await waitForComposerIdle(cdp, 60_000);
+  await captureScreenshot(cdp, path.join(outputDir, "interaction.png"));
+
+  const activeTurn = await evaluate(
+    cdp,
+    `window.__talosSmokeInvoke('session.active_turn', { session_id: ${JSON.stringify(sessionId)} }).then((response) => response.active_turn)`,
+  );
+  assert(
+    activeTurn?.status === "completed",
+    `Desktop interaction turn did not complete: ${JSON.stringify(activeTurn)}`,
+  );
+  return {
+    sessionId,
+    initialEffectiveMode: session.effectiveMode,
+    activeTurnStatus: activeTurn.status,
+    permissionModes: modeResults,
+  };
+}
+
+function installSmokeInvoke(cdp) {
+  return evaluate(
+    cdp,
+    `(() => {
+      const raw = window.localStorage?.getItem("talos-web-ui");
+      const token = raw ? JSON.parse(raw)?.state?.connection?.authToken : "";
+      window.__talosSmokeActorCredentials = token
+        ? { credential: { type: "existing_session_token", token } }
+        : null;
+      window.__talosSmokeInvoke = (method, params) => window.talos.invoke(
+        method,
+        params,
+        window.__talosSmokeActorCredentials
+          ? { actorCredentials: window.__talosSmokeActorCredentials }
+          : undefined
+      );
+      return true;
+    })()`,
+  );
+}
+
+async function sendComposerMessage(cdp, message) {
+  await setElementValue(cdp, '[data-smoke="chat-composer-input"]', message);
+  const sent = await evaluate(
+    cdp,
+    `(() => {
+      const button = document.querySelector('[data-smoke="chat-composer-send"]');
+      if (!button || button.disabled) return false;
+      button.click();
+      return true;
+    })()`,
+  );
+  assert(sent, "Chat composer send button was not actionable.");
+}
+
+async function setElementValue(cdp, selector, value) {
+  const updated = await evaluate(
+    cdp,
+    `(() => {
+      const element = document.querySelector(${JSON.stringify(selector)});
+      if (!element) return false;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+      setter.call(element, ${JSON.stringify(value)});
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`,
+  );
+  assert(updated, `Input not found: ${selector}`);
+}
+
+async function clickButtonByExactText(cdp, text) {
+  const clicked = await evaluate(
+    cdp,
+    `(() => {
+      const text = ${JSON.stringify(text)};
+      const button = Array.from(document.querySelectorAll('button')).find(
+        (candidate) => (candidate.textContent || '').trim() === text && !candidate.disabled
+      );
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`,
+  );
+  assert(clicked, `Button not found: ${text}`);
+}
+
+async function clickButtonInUserAction(cdp, text, actionType = "question") {
+  const clicked = await evaluate(
+    cdp,
+    `(() => {
+      const section = document.querySelector('section[data-user-action=${JSON.stringify(actionType)}]');
+      const text = ${JSON.stringify(text)};
+      const button = Array.from(section?.querySelectorAll('button') || []).find(
+        (candidate) => (candidate.textContent || '').trim().startsWith(text) && !candidate.disabled
+      );
+      if (!button) return false;
+      button.click();
+      return true;
+    })()`,
+  );
+  assert(clicked, `User action button not found: ${text}`);
+}
+
+function waitForComposerIdle(cdp, timeoutMs) {
+  return waitForExpression(
+    cdp,
+    `(() => {
+      const button = document.querySelector('[data-smoke="chat-composer-send"]');
+      return Boolean(button && button.getAttribute('aria-label') === 'Send');
+    })()`,
+    timeoutMs,
+  );
+}
+
+async function waitForActiveTurnStatus(cdp, sessionId, status, timeoutMs) {
+  const startedAt = Date.now();
+  let lastActiveTurn = null;
+  let lastError = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    let response;
+    try {
+      response = await evaluate(
+        cdp,
+        `window.__talosSmokeInvoke('session.active_turn', { session_id: ${JSON.stringify(sessionId)} })`,
+      );
+    } catch (error) {
+      lastError = error;
+      if (!errorMessage(error).includes("resource not found: session")) {
+        throw error;
+      }
+      await sleep(300);
+      continue;
+    }
+    lastActiveTurn = response.active_turn ?? null;
+    if (lastActiveTurn?.status === status) {
+      return lastActiveTurn;
+    }
+    if (lastActiveTurn && ["failed", "cancelled"].includes(lastActiveTurn.status)) {
+      throw new Error(`Active turn reached ${lastActiveTurn.status} while waiting for ${status}: ${JSON.stringify(lastActiveTurn)}`);
+    }
+    await sleep(300);
+  }
+  throw new Error(
+    `Timed out waiting for active turn status ${status}: ${JSON.stringify(lastActiveTurn)}\n${errorMessage(lastError)}`,
+  );
+}
+
+async function waitForUserActionClosed(cdp, timeoutMs) {
+  await waitForExpression(
+    cdp,
+    "!document.querySelector('section[data-user-action]')",
+    timeoutMs,
+  );
+  await waitForComposerIdle(cdp, timeoutMs);
 }
 
 async function findAvailablePort(start) {
@@ -305,7 +680,21 @@ function connectCdp(url) {
           const id = nextId++;
           socket.send(JSON.stringify({ id, method, params }));
           return new Promise((callResolve, callReject) => {
-            pending.set(id, { resolve: callResolve, reject: callReject });
+            const timeout = setTimeout(() => {
+              if (pending.delete(id)) {
+                callReject(new Error(`CDP request timed out: ${method}`));
+              }
+            }, 30_000);
+            pending.set(id, {
+              resolve(value) {
+                clearTimeout(timeout);
+                callResolve(value);
+              },
+              reject(error) {
+                clearTimeout(timeout);
+                callReject(error);
+              },
+            });
           });
         },
         close() {
@@ -355,7 +744,7 @@ async function evaluate(cdp, expression) {
 }
 
 async function captureScreenshot(cdp, outputPath) {
-  const result = await cdp.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+  const result = await cdp.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
   writeFileSync(outputPath, Buffer.from(result.data, "base64"));
 }
 

@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
-import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
+import { applyStreamEvent } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 import {
-  activeTurn,
   assistantTextCommitted,
   executionMetrics,
   historyTextItem,
@@ -70,6 +69,9 @@ describe("timeline stream events", () => {
     applyStreamEvent("sess-1", itemStarted("answer-1", "assistant_text", "unknown", 1));
     applyStreamEvent("sess-1", textDelta("answer-1", "first", 2));
     applyStreamEvent("sess-1", assistantTextCommitted("answer-1", "final_answer", 3));
+    expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual([
+      expect.objectContaining({ kind: "timeline", live: true }),
+    ]);
     applyStreamEvent("sess-1", textDelta("answer-1", " second", 4));
     applyStreamEvent("sess-1", itemCompleted("answer-1", 5));
 
@@ -117,6 +119,16 @@ describe("timeline stream events", () => {
         provider_rank: 1,
       },
     ], 3));
+
+    const runningTimeline = useAppStore.getState().streams["sess-1"]?.blocks.find(
+      (block) => block.kind === "timeline",
+    );
+    expect(runningTimeline).toMatchObject({
+      kind: "timeline",
+      items: [expect.objectContaining({ itemId: "tool-1", status: "running" })],
+    });
+
+    applyStreamEvent("sess-1", itemCompleted("tool-1", 4));
 
     const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
     expect(timeline).toMatchObject({
@@ -227,6 +239,29 @@ describe("timeline stream events", () => {
     expect(useAppStore.getState().streams["sess-1"]?.pendingInput?.phase).toBe("completed");
   });
 
+  it("uses the backend-acknowledged message id for a pending user block", () => {
+    useAppStore.getState().setPendingInput("sess-1", {
+      text: "hello from local",
+      fileIds: [],
+      clientMessageId: "client-1",
+      serverMessageId: "msg-1",
+      phase: "accepted",
+    });
+
+    const blocks = buildSessionBlocks({
+      sessionId: "sess-1",
+      streamState: useAppStore.getState().streams["sess-1"],
+      waitingResponseDetail: "waiting detail",
+      waitingResponseTitle: "waiting title",
+      stoppingResponseDetail: "stopping detail",
+      stoppingResponseTitle: "stopping title",
+    });
+
+    expect(blocks).toEqual([
+      expect.objectContaining({ id: "user-msg-1", kind: "user", live: true }),
+    ]);
+  });
+
   it("records cursor from the envelope event id", () => {
     applyStreamEvent("sess-1", itemStarted("commentary-1", "assistant_text", "commentary", 7));
 
@@ -292,61 +327,6 @@ describe("timeline stream events", () => {
         items: [expect.objectContaining({ itemId: "reasoning-5", text: "second" })],
       }),
     ]);
-  });
-
-  it("preserves active turn cursor while reconnecting running sessions", () => {
-    applyActiveTurnSnapshot("sess-1", activeTurn({
-      status: "running",
-      message_id: "msg-1",
-      last_event_id: "ev_9",
-    }));
-
-    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
-      activeMessageId: "msg-1",
-      lastEventId: "ev_9",
-      connectionState: "detached",
-      isStreaming: true,
-    });
-
-    applyStreamEvent("sess-1", itemStarted("final-1", "assistant_text", "final_answer", 10));
-    applyStreamEvent("sess-1", textDelta("final-1", "done", 11));
-
-    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
-      lastEventId: "ev_11",
-      connectionState: "streaming",
-    });
-    expect(useAppStore.getState().streams["sess-1"]?.blocks).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: "timeline",
-        items: [expect.objectContaining({ itemId: "final-1", phase: "final_answer", text: "done" })],
-      }),
-    ]));
-  });
-
-  it("restores pending dynamic tool result on the original timeline item id", () => {
-    applyActiveTurnSnapshot("sess-1", activeTurn({
-      status: "waiting_user_action",
-      pending_user_action: {
-        type: "dynamic_tool_result",
-        item_id: "tool-1",
-        call_id: "call-1",
-        tool_name: "DynamicTool",
-      },
-    }));
-    applyStreamEvent("sess-1", itemStarted("tool-1", "tool_call", "acting", 10));
-
-    const timeline = useAppStore.getState().streams["sess-1"]?.blocks.find((block) => block.kind === "timeline");
-    expect(timeline).toMatchObject({
-      kind: "timeline",
-      items: [
-        expect.objectContaining({
-          itemId: "tool-1",
-          callId: "call-1",
-          status: "running",
-        }),
-      ],
-    });
-    expect(timeline?.kind === "timeline" ? timeline.items : []).toHaveLength(1);
   });
 
   it("rebuilds completed session history from stable history snapshot", () => {

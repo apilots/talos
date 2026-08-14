@@ -6,7 +6,6 @@ import {
   FolderPlus,
   Plus,
   Search,
-  Shield,
   TriangleAlert,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -27,6 +26,7 @@ import { ComposerSubmitButton } from "./ComposerSubmitButton";
 import { buildInputHistoryNavigationItems } from "./composerInputHistory";
 import { ComposerModelSelect } from "./ComposerModelSelect";
 import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
+import { ComposerPermissionModeSelect } from "./ComposerPermissionModeSelect";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
 import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
@@ -47,6 +47,9 @@ export function ChatComposer({
   onCancel,
   inputHistory,
   disabled,
+  permissionMode = "fullAccess",
+  permissionModeDisabled = false,
+  onPermissionModeChange,
   isStreaming,
   isCancelling = false,
   contextCompactionStage,
@@ -459,18 +462,10 @@ export function ChatComposer({
             supportedKinds={supportedAttachmentKinds}
           />
 
-          <ComposerDropdown
-            header={t("chat:agentAccessMode")}
-            items={[
-              {
-                value: "full_access",
-                label: t("chat:fullAccess"),
-                description: t("chat:fullAccessDescription"),
-                icon: <Shield size={13} />,
-              },
-            ]}
-            onChange={() => undefined}
-            value="full_access"
+          <ComposerPermissionModeSelect
+            disabled={permissionModeDisabled}
+            onChange={onPermissionModeChange}
+            value={permissionMode}
           />
 
           <div className="min-w-4 flex-1" />

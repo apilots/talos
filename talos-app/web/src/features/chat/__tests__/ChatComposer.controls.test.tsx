@@ -168,6 +168,21 @@ describe("ChatComposer controls", () => {
     expect(
       screen.getByText("Unrestricted access to the internet and any file on your computer."),
     ).toBeInTheDocument();
+    expect(screen.getByText("Ask for approval")).toBeInTheDocument();
+    expect(screen.getByText("Approve for me")).toBeInTheDocument();
+  });
+
+  it("submits a permission mode selected from the fixed mode list", () => {
+    const onPermissionModeChange = vi.fn();
+    renderComposer({
+      permissionMode: "askForApproval",
+      onPermissionModeChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /ask for approval/i }));
+    fireEvent.click(screen.getByRole("button", { name: /approve for me/i }));
+
+    expect(onPermissionModeChange).toHaveBeenCalledWith("approveForMe");
   });
 
   it("shows skill suggestions above the composer and inserts the selected skill", async () => {

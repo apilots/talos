@@ -40,6 +40,7 @@ impl TuiApp {
             current_model: String::new(),
             current_model_provider: String::new(),
             reasoning_effort_override: None,
+            current_permission_mode: talos_sdk::UserPermissionMode::FullAccess,
             session_usage: TokenUsage::default(),
             turn_metrics: None,
             turn_metrics_live: false,
@@ -80,6 +81,8 @@ impl TuiApp {
             last_stream_event_at: None,
             gateway_client,
             model_picker: None,
+            permission_picker: None,
+            pending_user_action: None,
             session_picker: None,
             input_history: crate::input_history::InputHistoryState::default(),
             show_command_autocomplete: false,
@@ -291,6 +294,7 @@ impl TuiApp {
     pub(crate) fn apply_session_snapshot(&mut self, session: &SessionInfo) {
         self.session_id = Some(session.id.clone());
         self.set_current_model_selection(&session.model_selection);
+        self.current_permission_mode = session.effective_mode;
         self.session_usage = session.usage.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
@@ -326,6 +330,7 @@ impl TuiApp {
             APP_VERSION,
             &self.current_model,
             self.current_project_root.as_deref(),
+            self.current_permission_mode,
         );
         self.render_runtime.set_session_header(
             card.lines()

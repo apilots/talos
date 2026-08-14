@@ -8,6 +8,7 @@ use tracing::error;
 use crate::client::GatewayClient;
 use crate::input_history::InputHistoryNavigation;
 use crate::model_picker::{ModelPickerSelection, ModelPickerState};
+use crate::permission_picker::PermissionPickerState;
 use crate::session_picker::SessionPickerState;
 use crate::types::{
     CommandUpdate, QueuedMessage, SessionCloseUpdate, SessionHistoryLoad, StatusLoad,
@@ -15,6 +16,8 @@ use crate::types::{
 use crate::utils::summarize_for_queue;
 use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_FORCE_TIMEOUT};
 use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
+
+mod permission;
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
@@ -112,7 +115,7 @@ impl TuiApp {
         match cmd {
             "help" => {
                 self.push_system_notice(
-                    "Commands: /help /model /models /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+V paste image, Ctrl+O expand tool, Ctrl+U clear input"
+                    "Commands: /help /model /models /permissions /sessions /status /compact /clear /quit\nKeys: ↑/↓ history, Home/End cursor, Ctrl+V paste image, Ctrl+O expand tool, Ctrl+U clear input"
                         .to_string(),
                 );
                 Ok(false)
@@ -140,6 +143,19 @@ impl TuiApp {
 
                 self.switch_model_command(requested.to_string())?;
 
+                Ok(false)
+            }
+            "permissions" => {
+                if self.in_flight {
+                    self.push_system_notice(
+                        "Permissions can only be changed while the session is idle.".to_string(),
+                    );
+                } else if self.session_id.is_none() {
+                    self.push_system_notice("Permissions require an active session.".to_string());
+                } else {
+                    self.permission_picker =
+                        Some(PermissionPickerState::new(self.current_permission_mode));
+                }
                 Ok(false)
             }
             "sessions" | "s" => {

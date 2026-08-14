@@ -6,130 +6,18 @@ import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import "@/shared/i18n/setup";
 import { ChatSessionPage } from "./ChatSessionPage";
-
-const mocks = vi.hoisted(() => ({
-  sendText: vi.fn(),
-  sendTurn: vi.fn(),
-  setDraft: vi.fn(),
-  mutateModel: vi.fn(),
-  mutateProject: vi.fn(),
-  compactSession: vi.fn(),
-  clearSession: vi.fn(),
-  session: undefined as unknown,
-  sessionHistoryError: undefined as Error | undefined,
-  sessionHistoryIsSuccess: true,
-  sessionQueryEnabled: undefined as boolean | undefined,
-  composerProps: undefined as unknown,
-}));
+import { getChatSessionPageMocks } from "./ChatSessionPage.test-support";
 
 vi.mock("@/features/chat", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/features/chat")>();
-
-  return {
-    ...actual,
-    ChatComposer: (props: {
-      commandNotice?: string;
-      disabled?: boolean;
-      onModelChange?: (model: string) => void;
-      onCommand?: (command: "compact" | "clear" | "status" | "model") => Promise<void> | void;
-      onProjectChange: (projectId: string) => void;
-      onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
-      onSend: (skills: [], attachments: []) => Promise<void>;
-      showRuntimeModeSelector?: boolean;
-    }) => {
-      mocks.composerProps = props;
-      return (
-        <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
-          {props.commandNotice ? <div>{props.commandNotice}</div> : null}
-          <button onClick={() => props.onModelChange?.("model-2")} type="button">
-            Model
-          </button>
-          <button onClick={() => props.onProjectChange("project-1")} type="button">
-            Project
-          </button>
-          <button onClick={() => props.onReasoningLevelChange?.("high")} type="button">
-            Reasoning
-          </button>
-          <button onClick={() => void Promise.resolve(props.onCommand?.("compact")).catch(() => undefined)} type="button">
-            Compact
-          </button>
-          <button onClick={() => void props.onSend([], [])} type="button">
-            Send
-          </button>
-        </div>
-      );
-    },
-    useChatSession: () => ({
-      blocks: [],
-      draft: "",
-      setDraft: mocks.setDraft,
-      sendTurn: mocks.sendTurn,
-      sendText: mocks.sendText,
-      isStreaming: true,
-      isCancelling: false,
-      canRetryResponse: false,
-      retryResponse: vi.fn(),
-      retryStream: vi.fn(),
-      showReconnectControls: false,
-      stopResponse: vi.fn(),
-      streamError: undefined,
-      sessionHistoryQuery: {
-        error: mocks.sessionHistoryError,
-        isError: Boolean(mocks.sessionHistoryError),
-        isLoading: false,
-        isSuccess: mocks.sessionHistoryIsSuccess,
-      },
-    }),
-    useModelsQuery: () => ({
-      data: {
-        defaultModelSelection: {
-          modelRef: { provider: "mock", id: "model-1" },
-          reasoningEffort: "medium",
-        },
-        models: [
-          {
-            id: "model-1",
-            name: "Model 1",
-            provider: "mock",
-            reasoning: true,
-            reasoning_effort: "medium",
-          },
-        ],
-      },
-    }),
-    useProjectsView: () => ({
-      activeProjectId: "__unbound_project__",
-      projects: [
-        {
-          id: "project-1",
-          name: "Project 1",
-          directory: "/tmp/project-1",
-        },
-      ],
-      setActiveProjectId: vi.fn(),
-    }),
-    useSessionQuery: (_sessionId: string, enabled?: boolean) => {
-      mocks.sessionQueryEnabled = enabled;
-      return { data: mocks.session };
-    },
-    useUpdateSessionModelMutation: () => ({ mutate: mocks.mutateModel }),
-    useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
-    useSessionActions: () => ({
-      compact: { isPending: false, mutateAsync: mocks.compactSession },
-      clear: { isPending: false, mutateAsync: mocks.clearSession },
-    }),
-  };
+  const support = await import("./ChatSessionPage.test-support");
+  return support.createChatFeatureMock(importOriginal);
+});
+vi.mock("@/shared/store/app-store", async () => {
+  const support = await import("./ChatSessionPage.test-support");
+  return support.createAppStoreMock();
 });
 
-vi.mock("@/shared/store/app-store", () => ({
-  useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      connection: {
-        runtimeMode: "local",
-      },
-      setConnection: vi.fn(),
-    }),
-}));
+const mocks = getChatSessionPageMocks();
 
 function NavigateAwayButton() {
   const navigate = useNavigate();
@@ -159,6 +47,7 @@ describe("ChatSessionPage", () => {
     };
     mocks.sessionHistoryError = undefined;
     mocks.sessionHistoryIsSuccess = true;
+    mocks.isStreaming = false;
     mocks.composerProps = undefined;
     mocks.sessionQueryEnabled = undefined;
     mocks.sendText.mockImplementation(
@@ -207,6 +96,119 @@ describe("ChatSessionPage", () => {
     expect((mocks.composerProps as { showRuntimeModeSelector?: boolean }).showRuntimeModeSelector).toBe(false);
   });
 
+  it("keeps permission changes local before the session exists", () => {
+    mocks.session = undefined;
+    mocks.sendTurn.mockResolvedValue(undefined);
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: "/sessions/sess-1",
+          state: { initialPermissionMode: "askForApproval" },
+        }]}
+      >
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((mocks.composerProps as {
+      permissionMode?: string;
+      permissionModeDisabled?: boolean;
+    })).toMatchObject({
+      permissionMode: "askForApproval",
+      permissionModeDisabled: false,
+    });
+
+    act(() => {
+      (mocks.composerProps as {
+        onPermissionModeChange: (mode: "approveForMe") => void;
+      }).onPermissionModeChange("approveForMe");
+    });
+    expect((mocks.composerProps as { permissionMode?: string }).permissionMode).toBe("approveForMe");
+    expect(mocks.mutatePermissionMode).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(mocks.sendTurn).toHaveBeenCalledWith(expect.objectContaining({
+      userPermissionMode: "approveForMe",
+    }));
+  });
+
+  it("requires confirmation before enabling full access", () => {
+    mocks.session = {
+      ...mocks.session as object,
+      effectiveMode: "askForApproval",
+    };
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    (mocks.composerProps as {
+      onPermissionModeChange: (mode: "fullAccess") => void;
+    }).onPermissionModeChange("fullAccess");
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(mocks.mutatePermissionMode).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    (mocks.composerProps as {
+      onPermissionModeChange: (mode: "fullAccess") => void;
+    }).onPermissionModeChange("fullAccess");
+    expect(mocks.mutatePermissionMode).toHaveBeenCalledWith("fullAccess");
+  });
+
+  it("uses the persisted effective mode after the session loads", () => {
+    mocks.session = undefined;
+    const view = render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: "/sessions/sess-1",
+          state: { initialPermissionMode: "askForApproval" },
+        }]}
+      >
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((mocks.composerProps as { permissionMode?: string }).permissionMode).toBe(
+      "askForApproval",
+    );
+
+    mocks.session = {
+      effectiveMode: "approveForMe",
+      message_count: 1,
+      modelSelection: {
+        modelRef: { provider: "mock", id: "model-1" },
+        reasoningEffort: null,
+      },
+      project_id: null,
+      title: "Session 1",
+    };
+    view.rerender(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: "/sessions/sess-1",
+          state: { initialPermissionMode: "askForApproval" },
+        }]}
+      >
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect((mocks.composerProps as { permissionMode?: string }).permissionMode).toBe(
+      "approveForMe",
+    );
+  });
+
   it("submits an explicit reasoning effort through model selection", () => {
     render(
       <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
@@ -231,7 +233,10 @@ describe("ChatSessionPage", () => {
     mocks.sendTurn.mockResolvedValue(undefined);
 
     render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
+      <MemoryRouter initialEntries={[{
+        pathname: "/sessions/sess-1",
+        state: { initialPrompt: "hello", initialPermissionMode: "approveForMe" },
+      }]}>
         <Routes>
           <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
         </Routes>
@@ -241,6 +246,7 @@ describe("ChatSessionPage", () => {
     await waitFor(() => {
       expect(mocks.sendText).toHaveBeenCalledWith("hello", {
         modelSelection: undefined,
+        userPermissionMode: "approveForMe",
         project: undefined,
       });
     });
@@ -264,6 +270,7 @@ describe("ChatSessionPage", () => {
       },
       project: undefined,
       skills: undefined,
+      userPermissionMode: "approveForMe",
     });
   });
 

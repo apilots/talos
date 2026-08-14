@@ -6,7 +6,6 @@ import {
   Brush,
   ServerCog,
   Settings2,
-  ShieldCheck,
   UserCircle,
   UserRoundCog,
 } from "lucide-react";
@@ -49,7 +48,6 @@ const personalNavigation: SettingsNavigationItem[] = [
   { id: "appearance", icon: Brush },
   { id: "models", icon: Bot },
   { id: "agent-workspace", icon: UserRoundCog },
-  { id: "permissions", icon: ShieldCheck },
 ];
 
 const extensionNavigation: SettingsNavigationItem[] = [

@@ -172,6 +172,10 @@ export function createDesktopTalosClient(
           replay_limit: replayLimit ?? null,
         }),
     },
+    userActions: {
+      submit: (request: AppProtocol.SubmitUserActionRequest) =>
+        client.submitUserAction(request),
+    },
     projects: {
       list: () => client.listProjects({}),
       get: (request: Parameters<TalosWebClient["projects"]["get"]>[0]) =>
@@ -463,6 +467,7 @@ function toProtocolSessionConf(
   }
   return {
     modelSelection: conf.modelSelection,
+    userPermissionMode: conf.userPermissionMode,
   };
 }
 

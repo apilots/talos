@@ -47,14 +47,17 @@ use talos_types::{
     SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
     SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
     SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+
+mod events;
+use events::dispatch_application_event;
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
@@ -625,6 +628,13 @@ impl GatewayClient for AppServerClient {
             .await
     }
 
+    async fn submit_user_action(
+        &mut self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse> {
+        self.request_typed("userAction/submit", request).await
+    }
+
     async fn list_projects(
         &mut self,
         request: ProjectListRequest,
@@ -955,33 +965,6 @@ fn spawn_stdout_reader(
             }
         }
     });
-}
-
-async fn dispatch_application_event(
-    subscription_senders: &Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    pending_subscription_events: &Arc<Mutex<HashMap<String, Vec<TimelineEventEnvelope>>>>,
-    subscription_id: &str,
-    event: TimelineEventEnvelope,
-) {
-    let sender = {
-        let streams = subscription_senders.lock().await;
-        let Some(stream) = streams.get(subscription_id) else {
-            pending_subscription_events
-                .lock()
-                .await
-                .entry(subscription_id.to_string())
-                .or_default()
-                .push(event);
-            return;
-        };
-        if event.session_id != stream.session_id {
-            return;
-        }
-        stream.sender.clone()
-    };
-    if sender.try_send(event).is_err() {
-        subscription_senders.lock().await.remove(subscription_id);
-    }
 }
 
 #[cfg(test)]

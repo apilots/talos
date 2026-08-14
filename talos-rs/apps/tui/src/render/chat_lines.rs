@@ -180,6 +180,7 @@ impl TuiApp {
             APP_VERSION,
             &self.current_model,
             self.current_project_root.as_deref(),
+            self.current_permission_mode,
         );
         for line in welcome.lines() {
             self.rendered_chat_lines.push(RenderedChatLine {

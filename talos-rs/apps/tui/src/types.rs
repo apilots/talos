@@ -28,6 +28,12 @@ impl CommandSuggestion {
                 description: "Switch model (no args: show picker)".to_string(),
             },
             CommandSuggestion {
+                name: "permissions".to_string(),
+                insert_text: "/permissions".to_string(),
+                display_text: "/permissions".to_string(),
+                description: "Choose what Talos is allowed to do".to_string(),
+            },
+            CommandSuggestion {
                 name: "models".to_string(),
                 insert_text: "/models".to_string(),
                 display_text: "/models".to_string(),
@@ -183,6 +189,11 @@ pub(crate) enum CommandUpdate {
     ModelPickerSwitched {
         requested: String,
         result: TalosResult<SessionInfo>,
+    },
+    PermissionModeSwitched(TalosResult<SessionInfo>),
+    UserActionSubmitted {
+        action_id: String,
+        result: TalosResult<talos_sdk::SubmitUserActionResponse>,
     },
     SessionHistoryLoaded {
         session: SessionInfo,

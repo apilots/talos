@@ -98,6 +98,7 @@ describe("AppServerClient", () => {
     await client.patchSession({
       session_id: "session-1",
       conf: {
+        userPermissionMode: null,
         modelSelection: {
           modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
           reasoningEffort: null,
@@ -123,6 +124,15 @@ describe("AppServerClient", () => {
       output: "done",
       success: true,
     });
+    await client.submitUserAction({
+      sessionId: "session-1",
+      turnId: "turn-1",
+      actionId: "action-1",
+      response: {
+        type: "question",
+        response: { type: "selectedOption", optionId: "continue" },
+      },
+    });
     await client.startCloudLogin({ client_name: "Talos Test", client_kind: "web" });
     await client.getCloudLoginStatus({ login_id: "login-1" });
     await client.cancelCloudLogin({ login_id: "login-1" });
@@ -143,6 +153,7 @@ describe("AppServerClient", () => {
         params: {
           session_id: "session-1",
           conf: {
+            userPermissionMode: null,
             modelSelection: {
               modelRef: { provider: "bailian", id: "MiniMax-M2.5" },
               reasoningEffort: null,
@@ -179,6 +190,18 @@ describe("AppServerClient", () => {
           tool_name: "DynamicTool",
           output: "done",
           success: true,
+        },
+      },
+      {
+        method: "userAction/submit",
+        params: {
+          sessionId: "session-1",
+          turnId: "turn-1",
+          actionId: "action-1",
+          response: {
+            type: "question",
+            response: { type: "selectedOption", optionId: "continue" },
+          },
         },
       },
       {

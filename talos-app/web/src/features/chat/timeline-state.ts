@@ -94,7 +94,7 @@ function shouldCreateMetricsBlock(metrics: ChatTurnMetrics) {
 function mergeTimelineItem(current: ChatTimelineItem, next: ChatTimelineItem): ChatTimelineItem {
   if (current.kind === "tool_call" && next.kind === "tool_call") {
     const status =
-      current.status === "waiting_dynamic_input" && next.status === "running"
+      current.status === "waiting_user_action" && next.status === "running"
         ? current.status
         : next.status;
     return {

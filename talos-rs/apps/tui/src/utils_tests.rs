@@ -7,6 +7,7 @@ fn build_welcome_card_separates_title_and_session_block() {
         "v0.1.5",
         "qwen-plus",
         Some(Path::new("/Users/xujiang/data/ailabs/talos/talos-rs")),
+        talos_sdk::UserPermissionMode::FullAccess,
     );
 
     let lines: Vec<&str> = card.lines().collect();
@@ -18,6 +19,7 @@ fn build_welcome_card_separates_title_and_session_block() {
     assert!(lines[3].contains("/model to change"));
     assert!(lines[4].starts_with("│ directory:"));
     assert!(lines[5].starts_with("│ permissions:"));
+    assert!(lines[5].contains("Full access"));
     assert_eq!(
         lines[6],
         "╰──────────────────────────────────────────────────╯"

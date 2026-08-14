@@ -3,7 +3,6 @@ export { SettingsAppearanceSection } from "./SettingsAppearanceSection";
 export { SettingsGeneralSection } from "./SettingsGeneralSection";
 export { SettingsMcpServersSection } from "./SettingsMcpServersSection";
 export { SettingsModelsSection } from "./SettingsModelsSection";
-export { SettingsPermissionsSection } from "./SettingsPermissionsSection";
 export { SettingsProfileSection } from "./SettingsProfileSection";
 export { SettingsServerConnectionPanel } from "./SettingsServerConnectionPanel";
 export { SettingsServerSection } from "./SettingsServerSection";

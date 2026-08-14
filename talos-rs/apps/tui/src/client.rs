@@ -8,8 +8,9 @@ use talos_sdk::{
     SessionCloseRequest, SessionCompactRequest, SessionConf, SessionGetRequest,
     SessionHistoryRequest, SessionHistorySnapshot, SessionInfo, SessionListRequest,
     SessionPatchRequest, SkillSuggestion, SkillsSuggestRequest, StartTurnRequest,
-    SubscribeTimelineRequest, TimelineActiveTurnSnapshot, TimelineEventEnvelope,
-    TimelineRecoveryResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    SubmitUserActionRequest, SubmitUserActionResponse, SubscribeTimelineRequest,
+    TimelineActiveTurnSnapshot, TimelineEventEnvelope, TimelineRecoveryResponse,
+    UserPermissionMode, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -35,6 +36,15 @@ pub trait GatewayClient: Send + Sync {
         session_id: &str,
         model_selection: &ModelSelection,
     ) -> TalosResult<SessionInfo>;
+    async fn update_session_permission_mode(
+        &self,
+        session_id: &str,
+        mode: UserPermissionMode,
+    ) -> TalosResult<SessionInfo>;
+    async fn submit_user_action(
+        &self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse>;
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn clear_session(&self, session_id: &str) -> TalosResult<SessionInfo>;
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot>;
@@ -159,6 +169,7 @@ where
                 session_id: session_id.to_string(),
                 conf: Some(SessionConf {
                     model_selection: Some(model_selection.clone()),
+                    ..SessionConf::default()
                 }),
                 project_id: None,
                 current_directory: None,
@@ -166,6 +177,36 @@ where
         )
         .await
         .map(|response| response.session)
+    }
+
+    async fn update_session_permission_mode(
+        &self,
+        session_id: &str,
+        mode: UserPermissionMode,
+    ) -> TalosResult<SessionInfo> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::patch_session(
+            &mut *client,
+            SessionPatchRequest {
+                session_id: session_id.to_string(),
+                conf: Some(SessionConf {
+                    user_permission_mode: Some(mode),
+                    ..SessionConf::default()
+                }),
+                project_id: None,
+                current_directory: None,
+            },
+        )
+        .await
+        .map(|response| response.session)
+    }
+
+    async fn submit_user_action(
+        &self,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse> {
+        let mut client = self.lock().await;
+        SdkGatewayClient::submit_user_action(&mut *client, request).await
     }
 
     async fn compact_session(&self, session_id: &str) -> TalosResult<SessionInfo> {

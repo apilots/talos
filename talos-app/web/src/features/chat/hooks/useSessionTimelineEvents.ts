@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TalosHttpError, TalosStreamTerminatedError } from "@talos/sdk-browser";
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
-import { applyActiveTurnSnapshot, applyStreamEvent } from "../stream-events";
+import { applyStreamEvent, applyTimelineRecovery } from "../stream-events";
 import { useAppStore } from "@/shared/store/app-store";
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
@@ -11,8 +11,11 @@ export function useSessionTimelineEvents(
   sessionId: string,
   afterEventId: string | undefined,
   enabled: boolean,
+  onTerminalTurn?: () => void | Promise<void>,
 ) {
   const [retryGeneration, setRetryGeneration] = useState(0);
+  const onTerminalTurnRef = useRef(onTerminalTurn);
+  onTerminalTurnRef.current = onTerminalTurn;
 
   useEffect(() => {
     if (!enabled) {
@@ -39,6 +42,12 @@ export function useSessionTimelineEvents(
             (event) => {
               useAppStore.getState().setStreamError(sessionId, undefined);
               applyStreamEvent(sessionId, event);
+              if (
+                event.event.payload.type === "turn_completed" &&
+                event.event.payload.stop_reason !== "waiting_user_action"
+              ) {
+                void onTerminalTurnRef.current?.();
+              }
             },
             controller.signal,
             useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId,
@@ -56,13 +65,7 @@ export function useSessionTimelineEvents(
           ) {
             try {
               const recovery = await recoverTimelineLiveTail(sessionId);
-              recovery.replay.events
-                .slice()
-                .sort((left, right) => left.event_seq - right.event_seq)
-                .forEach((event) => applyStreamEvent(sessionId, event));
-              if (recovery.active_turn) {
-                applyActiveTurnSnapshot(sessionId, recovery.active_turn);
-              }
+              applyTimelineRecovery(sessionId, recovery);
               const state = useAppStore.getState();
               state.setStreamError(sessionId, undefined);
               if (!state.streams[sessionId]?.isStreaming) {
@@ -77,13 +80,7 @@ export function useSessionTimelineEvents(
             try {
               const cursor = useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId;
               const recovery = await recoverTimelineLiveTail(sessionId, cursor);
-              recovery.replay.events
-                .slice()
-                .sort((left, right) => left.event_seq - right.event_seq)
-                .forEach((event) => applyStreamEvent(sessionId, event));
-              if (recovery.active_turn) {
-                applyActiveTurnSnapshot(sessionId, recovery.active_turn);
-              }
+              applyTimelineRecovery(sessionId, recovery);
               const state = useAppStore.getState();
               state.setStreamError(sessionId, undefined);
               if (!state.streams[sessionId]?.isStreaming) {

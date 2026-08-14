@@ -24,6 +24,8 @@ fn session_info() -> SessionInfo {
             },
             reasoning_effort: None,
         },
+        configured_default_mode: talos_types::UserPermissionMode::FullAccess,
+        effective_mode: talos_types::UserPermissionMode::FullAccess,
         created_at: 1,
         last_activity: 2,
         message_count: 3,
@@ -107,6 +109,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     assert!(card.contains("Account:          status@example.com"));
     assert!(card.contains("Session:          sess-status"));
     assert!(card.contains("Runtime:          embedded ● connected"));
+    assert!(card.contains("Permissions:      Full access"));
     assert!(card.contains("[■■■■■■■■■■■■■■■■□□□□] 80% used"));
     assert!(card.contains("160.0K used / 200.0K total · 40.0K left"));
     assert!(card.contains("160.0K tokens · cache read 21.0K"));

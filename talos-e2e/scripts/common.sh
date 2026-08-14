@@ -771,6 +771,7 @@ usage = {
     "total_tokens": 0,
 }
 stop_reason = "end_turn"
+metrics = None
 
 def timeline_event(record):
     event = record.get("event")
@@ -837,6 +838,7 @@ with open(events_path, "r", encoding="utf-8") as handle:
         elif event_type == "turn_completed":
             stop_reason = payload.get("stop_reason", stop_reason)
             usage = payload.get("usage") or usage
+            metrics = payload.get("metrics") or metrics
         elif event_type == "turn_error":
             stop_reason = "error"
             error_text = "Error: " + payload.get("error", "")
@@ -884,6 +886,7 @@ response = {
     "reasoning": [{"text": reasoning_text}] if reasoning_text else [],
     "stop_reason": stop_reason,
     "usage": usage,
+    "metrics": metrics,
 }
 print(json.dumps(response, ensure_ascii=False, separators=(",", ":")))
 PY

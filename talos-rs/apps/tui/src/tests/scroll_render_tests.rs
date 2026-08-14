@@ -435,7 +435,9 @@ fn test_session_header_enters_terminal_projection() {
         .join("\n");
     assert!(text.contains("Talos TUI"));
     assert!(text.contains("qwen-test"));
-    assert!(text.contains(" Tip: Type a message, Ctrl+V an image, or use /help /model /sessions"));
+    assert!(text.contains(
+        " Tip: Type a message, Ctrl+V an image, or use /help /model /permissions /sessions"
+    ));
 }
 
 #[test]

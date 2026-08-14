@@ -69,7 +69,6 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
               connectionState: "idle",
               blocks: [],
               pendingUserAction: undefined,
-              awaitingFinalResponse: false,
               error: undefined,
             },
           },

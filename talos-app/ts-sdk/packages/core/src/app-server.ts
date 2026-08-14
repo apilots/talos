@@ -428,6 +428,12 @@ export class AppServerClient {
     return this.transport.request("tool.dynamic_result.submit", params);
   }
 
+  submitUserAction(
+    params: AppProtocol.SubmitUserActionRequest,
+  ): Promise<AppProtocol.SubmitUserActionResponse> {
+    return this.transport.request("userAction/submit", params);
+  }
+
   listMemoryFiles(request: MemoryFileListRequest = {}): Promise<MemoryFileListResponse> {
     return this.transport.request<MemoryFileListResponse>("memory.file.list", request);
   }

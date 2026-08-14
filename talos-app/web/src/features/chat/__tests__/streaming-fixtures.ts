@@ -233,15 +233,19 @@ export function turnMetrics(
   }, sequence);
 }
 
-export function turnCompleted(sequence: number, totalTokens = 0): TimelineEventEnvelope {
+export function turnCompleted(
+  sequence: number,
+  totalTokens = 0,
+  stopReason: "end_turn" | "waiting_user_action" = "end_turn",
+): TimelineEventEnvelope {
   return baseEvent({
     type: "turn_completed",
     request_id: "req-1",
     turn_id: "turn-1",
     completed_at_ms: sequence,
-    stop_reason: "end_turn",
+    stop_reason: stopReason,
     usage: { ...usage(), total_tokens: totalTokens },
-    metrics: executionMetrics(totalTokens),
+    metrics: { ...executionMetrics(totalTokens), stop_reason: stopReason },
   }, sequence);
 }
 

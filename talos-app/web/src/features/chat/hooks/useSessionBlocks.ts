@@ -23,8 +23,6 @@ export function useSessionBlocks({
       sessionHistory,
       waitingResponseDetail: t("waitingResponseDetail"),
       waitingResponseTitle: t("waitingResponseTitle"),
-      finalResponseWaitDetail: t("finalResponseWaitDetail"),
-      finalResponseWaitTitle: t("finalResponseWaitTitle"),
       stoppingResponseDetail: t("stoppingResponseDetail"),
       stoppingResponseTitle: t("stoppingResponseTitle"),
     });
@@ -42,8 +40,6 @@ export function buildSessionBlocks({
   sessionHistory,
   waitingResponseDetail,
   waitingResponseTitle,
-  finalResponseWaitDetail = "Talos is composing the final response.",
-  finalResponseWaitTitle = "Preparing final response",
   stoppingResponseDetail,
   stoppingResponseTitle,
 }: {
@@ -52,8 +48,6 @@ export function buildSessionBlocks({
   sessionHistory?: ChatApiSessionHistory;
   waitingResponseDetail: string;
   waitingResponseTitle: string;
-  finalResponseWaitDetail?: string;
-  finalResponseWaitTitle?: string;
   stoppingResponseDetail: string;
   stoppingResponseTitle: string;
 }) {
@@ -109,22 +103,6 @@ export function buildSessionBlocks({
     });
   }
 
-  if (
-    streamState?.awaitingFinalResponse &&
-    !historyHasActiveMessage &&
-    !streamState.pendingUserAction &&
-    !streamState.error
-  ) {
-    nextBlocks.push({
-      id: `status-final-response-${sessionId}`,
-      kind: "status",
-      variant: "thinking",
-      title: finalResponseWaitTitle,
-      detail: finalResponseWaitDetail,
-      live: true,
-    });
-  }
-
   if (streamState?.connectionState === "cancelling") {
     nextBlocks.push({
       id: `status-cancelling-${sessionId}`,
@@ -166,7 +144,7 @@ function createPendingInputBlock(
   }
 
   return {
-    id: `pending-user-${pendingInput.clientMessageId}`,
+    id: `user-${pendingInput.serverMessageId ?? pendingInput.clientMessageId}`,
     kind: "user",
     text: pendingInput.text,
     fileIds: pendingInput.fileIds,

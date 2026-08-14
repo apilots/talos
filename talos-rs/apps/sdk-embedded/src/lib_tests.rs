@@ -24,6 +24,7 @@ fn start_turn_request(
             environment,
         }),
         model_selection: None,
+        user_permission_mode: None,
         project_id: None,
         current_directory,
         client_request_id: None,

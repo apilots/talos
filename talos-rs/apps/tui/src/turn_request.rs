@@ -42,6 +42,7 @@ impl TerminalTurnRequest {
             model_selection: self.model_selection.filter(|selection| {
                 !selection.model_ref.provider.is_empty() && !selection.model_ref.id.is_empty()
             }),
+            user_permission_mode: None,
             project_id: self.project_id,
             current_directory: self.current_directory,
             client_request_id: self.client_request_id,

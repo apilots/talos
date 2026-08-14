@@ -179,12 +179,12 @@ export interface StreamSessionState {
   lastEventId?: string;
   lastEventSeq?: number;
   lastSequence?: number;
+  activeTurnId?: string;
   activeMessageId?: string;
   reconnectAttempt?: number;
   showReconnectControls?: boolean;
   activeInput?: ChatUserInput;
   activeClientMessageId?: string;
-  awaitingFinalResponse?: boolean;
   blocks: ChatRenderBlock[];
   pendingInput?: PendingInput;
   pendingUserAction?: TalosPendingUserAction;

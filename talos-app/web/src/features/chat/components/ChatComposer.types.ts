@@ -1,4 +1,4 @@
-import type { FileInfo, SkillSuggestion } from "@talos/sdk-browser";
+import type { FileInfo, SkillSuggestion, UserPermissionMode } from "@talos/sdk-browser";
 
 import type { ContextCompactionStage } from "@/shared/types/protocol";
 import type {
@@ -24,6 +24,9 @@ export interface ChatComposerProps {
   onCancel?: () => void;
   inputHistory?: SessionInputHistory;
   disabled?: boolean;
+  permissionMode?: UserPermissionMode;
+  permissionModeDisabled?: boolean;
+  onPermissionModeChange?: (mode: UserPermissionMode) => void;
   isStreaming?: boolean;
   isCancelling?: boolean;
   contextCompactionStage?: ContextCompactionStage;

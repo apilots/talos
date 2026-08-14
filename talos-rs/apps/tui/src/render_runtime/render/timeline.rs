@@ -90,19 +90,13 @@ pub(crate) fn apply_item_delta(
             .complete_tool(&item.item_id, is_error, content)
             .into_iter()
             .collect(),
-        TalosTimelineDelta::ToolDynamicRequest {
-            call_id, tool_name, ..
-        } => {
-            live.start_tool(&item.item_id, call_id, tool_name);
-            Vec::new()
-        }
         TalosTimelineDelta::ToolArguments { arguments_delta } => {
             live.append_tool_arguments(&item.item_id, &arguments_delta);
             Vec::new()
         }
-        TalosTimelineDelta::ContextCompaction { .. } | TalosTimelineDelta::Status { .. } => {
-            Vec::new()
-        }
+        TalosTimelineDelta::UserAction { .. }
+        | TalosTimelineDelta::ContextCompaction { .. }
+        | TalosTimelineDelta::Status { .. } => Vec::new(),
     }
 }
 

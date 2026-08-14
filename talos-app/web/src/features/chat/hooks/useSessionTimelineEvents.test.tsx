@@ -3,7 +3,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { contextCompactionStarted } from "../__tests__/streaming-fixtures";
+import { contextCompactionStarted, turnCompleted } from "../__tests__/streaming-fixtures";
 import { activeContextCompactionStage } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useAppStore } from "@/shared/store/app-store";
@@ -60,6 +60,35 @@ describe("useSessionTimelineEvents", () => {
     act(() => onEvent(contextCompactionStarted("compact-1", "preparing", "Preparing.", 5)));
 
     expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBe("preparing");
+  });
+
+  it("requests authoritative reconciliation after a terminal turn", () => {
+    const onTerminalTurn = vi.fn();
+    renderHook(() =>
+      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
+    );
+    const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
+      | ((event: TimelineEventEnvelope) => void)
+      | undefined;
+
+    expect(onEvent).toBeDefined();
+    act(() => onEvent?.(turnCompleted(5, 46)));
+
+    expect(onTerminalTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reconcile stable history while a turn waits for user action", () => {
+    const onTerminalTurn = vi.fn();
+    renderHook(() =>
+      useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
+    );
+    const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
+      | ((event: TimelineEventEnvelope) => void)
+      | undefined;
+
+    act(() => onEvent?.(turnCompleted(5, 0, "waiting_user_action")));
+
+    expect(onTerminalTurn).not.toHaveBeenCalled();
   });
 
   it("reconnects a failed subscription from the last received event", async () => {

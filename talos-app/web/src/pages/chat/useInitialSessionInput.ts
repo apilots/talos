@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef } from "react";
 import type { ModelInfo } from "@talos/sdk-browser";
 
 import { modelSelectionForRef, type SendTextOptions } from "@/features/chat";
@@ -17,11 +17,9 @@ interface InitialSessionInputParams {
   models?: ModelInfo[];
   navigate: Navigate;
   projects: ProjectView[];
-  scrollToBottom: () => void;
   sendText: SendText;
   sessionId: string;
   setDraft: (draft: string) => void;
-  stickToBottomRef: MutableRefObject<boolean>;
 }
 
 export function hasInitialSessionInput(state: SessionLocationState | null): boolean {
@@ -35,11 +33,9 @@ export function useInitialSessionInput({
   models,
   navigate,
   projects,
-  scrollToBottom,
   sendText,
   sessionId,
   setDraft,
-  stickToBottomRef,
 }: InitialSessionInputParams): void {
   const handledRef = useRef(false);
   const mountedRef = useRef(false);
@@ -61,8 +57,6 @@ export function useInitialSessionInput({
       return;
     }
     handledRef.current = true;
-    stickToBottomRef.current = true;
-    window.requestAnimationFrame(scrollToBottom);
 
     const initialPrompt = locationState?.initialPrompt?.trim() ?? "";
     const initialAttachments = locationState?.initialAttachments ?? [];
@@ -75,6 +69,7 @@ export function useInitialSessionInput({
         locationState?.initialModel,
         locationState?.initialReasoningLevel,
       ),
+      userPermissionMode: locationState?.initialPermissionMode,
       project,
       skills: locationState?.initialSkills?.length
         ? locationState.initialSkills
@@ -99,10 +94,8 @@ export function useInitialSessionInput({
     models,
     navigate,
     projects,
-    scrollToBottom,
     sendText,
     sessionId,
     setDraft,
-    stickToBottomRef,
   ]);
 }

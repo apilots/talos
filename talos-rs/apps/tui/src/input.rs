@@ -55,6 +55,91 @@ impl TuiApp {
             }
         }
 
+        if self.pending_user_action.is_some() {
+            if self
+                .pending_user_action
+                .as_ref()
+                .is_some_and(crate::user_action::PendingActionState::is_editing_other)
+            {
+                match key_event.code {
+                    KeyCode::Enter => self.submit_pending_user_action(),
+                    KeyCode::Backspace => {
+                        if let Some(action) = self.pending_user_action.as_mut() {
+                            action.backspace();
+                        }
+                    }
+                    KeyCode::Char(value)
+                        if !key_event
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                    {
+                        if let Some(action) = self.pending_user_action.as_mut() {
+                            action.insert_char(value);
+                        }
+                    }
+                    KeyCode::Esc => {
+                        self.show_status_hint(
+                            "User action remains pending.",
+                            Duration::from_secs(2),
+                        );
+                    }
+                    _ => {}
+                }
+                return Ok(false);
+            }
+            match key_event.code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(action) = self.pending_user_action.as_mut() {
+                        action.move_selection(-1);
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(action) = self.pending_user_action.as_mut() {
+                        action.move_selection(1);
+                    }
+                }
+                KeyCode::Enter => self.submit_pending_user_action(),
+                KeyCode::Backspace => {
+                    if let Some(action) = self.pending_user_action.as_mut() {
+                        action.backspace();
+                    }
+                }
+                KeyCode::Char(value)
+                    if !key_event
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                {
+                    if let Some(action) = self.pending_user_action.as_mut() {
+                        action.insert_char(value);
+                    }
+                }
+                KeyCode::Esc => {
+                    self.show_status_hint("User action remains pending.", Duration::from_secs(2));
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
+        if self.permission_picker.is_some() {
+            match key_event.code {
+                KeyCode::Esc => self.permission_picker = None,
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if let Some(picker) = self.permission_picker.as_mut() {
+                        picker.move_selection(-1);
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if let Some(picker) = self.permission_picker.as_mut() {
+                        picker.move_selection(1);
+                    }
+                }
+                KeyCode::Enter => self.confirm_permission_picker(),
+                _ => {}
+            }
+            return Ok(false);
+        }
+
         if self.model_picker.is_some() {
             match key_event.code {
                 KeyCode::Esc => {

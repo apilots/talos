@@ -87,7 +87,7 @@ import type {
   TimelineActiveTurnSnapshot as ProtocolTimelineActiveTurnSnapshot,
   TimelineActiveTurnStatus as ProtocolTimelineActiveTurnStatus,
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
-  TimelinePendingUserAction as ProtocolTimelinePendingUserAction,
+  PendingUserAction as ProtocolPendingUserAction,
   TimelineRecoveryResponse as ProtocolTimelineRecoveryResponse,
   TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
   TimelineReplay as ProtocolTimelineReplay,
@@ -117,8 +117,13 @@ export type {
   TimelineActiveTurnSnapshot,
   TimelineActiveTurnStatus,
   TimelineCursorStatus,
-  TimelinePendingDynamicToolResult,
-  TimelinePendingUserAction,
+  PendingUserAction,
+  QuestionAnswer,
+  SandboxApprovalDecision,
+  SubmitUserActionRequest,
+  SubmitUserActionResponse,
+  UserActionResponse,
+  UserPermissionMode,
   RecoverTimelineRequest,
   SessionHistoryMessage,
   SessionActiveTurnResponse,
@@ -355,7 +360,7 @@ export type TalosSessionHistoryMessage = ProtocolSessionHistoryMessage;
 export type TalosSessionHistorySnapshot = ProtocolSessionHistorySnapshot;
 
 export type TalosActiveTurnStatus = ProtocolTimelineActiveTurnStatus;
-export type TalosPendingUserAction = ProtocolTimelinePendingUserAction;
+export type TalosPendingUserAction = ProtocolPendingUserAction;
 export type TalosActiveTurn = ProtocolTimelineActiveTurnSnapshot;
 
 export type ModelInfo = ProtocolModelInfo;

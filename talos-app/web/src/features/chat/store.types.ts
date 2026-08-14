@@ -87,6 +87,7 @@ export interface ChatSlice {
       Pick<
         StreamSessionState,
         | "isStreaming"
+        | "activeTurnId"
         | "activeMessageId"
         | "lastEventId"
         | "lastEventSeq"
@@ -96,7 +97,6 @@ export interface ChatSlice {
         | "showReconnectControls"
         | "activeInput"
         | "activeClientMessageId"
-        | "awaitingFinalResponse"
       >
     >,
   ) => void;

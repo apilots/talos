@@ -2,6 +2,7 @@ import type { ComponentProps, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MessageList } from "@/widgets/message-list/MessageList";
+import { UserActionPanel } from "@/features/chat";
 import { ChatSessionReconnectPanel } from "./ChatSessionReconnectPanel";
 import { ChatSessionErrorPanel, ChatSessionMessageActions } from "./ChatSessionStatusPanels";
 
@@ -11,6 +12,10 @@ interface ChatSessionTimelineProps {
   contentRef: RefObject<HTMLDivElement | null>;
   endRef: RefObject<HTMLDivElement | null>;
   isCancelling: boolean;
+  pendingUserAction?: ComponentProps<typeof MessageList>["pendingUserAction"];
+  userActionDisabled?: boolean;
+  userActionError?: string;
+  onUserActionSubmit?: ComponentProps<typeof UserActionPanel>["onSubmit"];
   onRetryResponse: () => Promise<void> | void;
   onRetryStream: () => Promise<void> | void;
   onScroll: (element: HTMLDivElement) => void;
@@ -28,6 +33,10 @@ export function ChatSessionTimeline({
   contentRef,
   endRef,
   isCancelling,
+  pendingUserAction,
+  userActionDisabled,
+  userActionError,
+  onUserActionSubmit,
   onRetryResponse,
   onRetryStream,
   onScroll,
@@ -53,6 +62,17 @@ export function ChatSessionTimeline({
             blocks={blocks}
             emptyDetail={t("emptyReadyDetail")}
             emptyTitle={t("emptyReadyTitle")}
+            pendingUserAction={pendingUserAction}
+            renderUserAction={onUserActionSubmit
+              ? (action) => (
+                  <UserActionPanel
+                    action={action}
+                    disabled={userActionDisabled}
+                    error={userActionError}
+                    onSubmit={onUserActionSubmit}
+                  />
+                )
+              : undefined}
           />
         ) : null}
         {streamError ? <ChatSessionErrorPanel title={streamError} /> : null}

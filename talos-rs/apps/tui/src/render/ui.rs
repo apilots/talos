@@ -21,7 +21,11 @@ impl TuiApp {
         }
 
         self.render_left_panel(f, f.area());
-        if self.show_skill_autocomplete {
+        if let Some(action) = self.pending_user_action.as_ref() {
+            action.render(f, f.area());
+        } else if let Some(picker) = self.permission_picker.as_ref() {
+            picker.render(f, f.area());
+        } else if self.show_skill_autocomplete {
             self.render_skill_autocomplete(f, f.area());
         } else if self.show_command_autocomplete {
             self.render_command_autocomplete(f, f.area());
@@ -201,6 +205,8 @@ impl TuiApp {
         self.show_skill_autocomplete
             || self.show_command_autocomplete
             || self.model_picker.is_some()
+            || self.permission_picker.is_some()
+            || self.pending_user_action.is_some()
             || self.session_picker.is_some()
     }
 

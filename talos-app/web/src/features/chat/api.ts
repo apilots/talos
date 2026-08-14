@@ -8,10 +8,13 @@ import type {
   StartTurnRequest,
   SessionInfo,
   SessionPatchRequest,
+  SubmitUserActionRequest,
+  SubmitUserActionResponse,
   TalosContext,
   TalosInputItem,
   TalosSessionHistorySnapshot,
   TimelineEventEnvelope,
+  UserPermissionMode,
 } from "@talos/sdk-browser";
 
 import { getTalosClient } from "@/shared/api/client";
@@ -104,6 +107,7 @@ export function createInitialTurnRequest(
   project: ProjectView | undefined,
   skills: SkillSuggestion[] = [],
   fileIds: string[] = [],
+  userPermissionMode?: UserPermissionMode,
 ): StartTurnRequest {
   const input: TalosInputItem[] = [
     ...(text ? [{ type: "text" as const, text }] : []),
@@ -119,6 +123,7 @@ export function createInitialTurnRequest(
     input,
     context: createContext(userId),
     modelSelection,
+    userPermissionMode,
     project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
   };
 }
@@ -193,11 +198,35 @@ export async function updateSessionModel(sessionId: string, modelSelection: Mode
     session_id: sessionId,
     conf: {
       modelSelection,
+      userPermissionMode: null,
     },
     project_id: null,
     current_directory: null,
   };
   await getTalosClient().sessions.patch(request);
+}
+
+export async function updateSessionPermissionMode(
+  sessionId: string,
+  userPermissionMode: NonNullable<SessionInfo["effectiveMode"]>,
+) {
+  const request: SessionPatchRequest = {
+    session_id: sessionId,
+    conf: {
+      modelSelection: null,
+      userPermissionMode,
+    },
+    project_id: null,
+    current_directory: null,
+  };
+  const response = await getTalosClient().sessions.patch(request);
+  return response.session;
+}
+
+export async function submitUserAction(
+  request: SubmitUserActionRequest,
+): Promise<SubmitUserActionResponse> {
+  return getTalosClient().userActions.submit(request);
 }
 
 export async function closeSession(sessionId: string) {

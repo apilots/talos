@@ -94,6 +94,8 @@ import type {
   SessionListRequest,
   SessionListResponse,
   SessionUpdateResponse,
+  SubmitUserActionRequest,
+  SubmitUserActionResponse,
   InterruptTurnResponse,
   InterruptTurnRequest,
   RetryTurnRequest,
@@ -506,6 +508,14 @@ export class TalosClient {
       this.http.request<MemoryGetResponse>(
         this.url(`/v1/memory/entries/${encodeURIComponent(request.memoryId)}`),
       ),
+  };
+
+  userActions = {
+    submit: (request: SubmitUserActionRequest): Promise<SubmitUserActionResponse> =>
+      this.http.request<SubmitUserActionResponse>(this.url("/v1/user-actions/submit"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
   };
 
   workspaceDocs = {
