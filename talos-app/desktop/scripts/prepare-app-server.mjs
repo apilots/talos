@@ -15,7 +15,12 @@ const binaryName = process.platform === "win32" ? "app-server.exe" : "app-server
 const sourceBinary =
   process.env.TALOS_DESKTOP_APP_SERVER_BIN ??
   process.env.TALOS_APP_SERVER_BIN ??
-  buildAppServer();
+  buildRustBinary("app-server", binaryName);
+const linuxSandboxLauncherName = "talos-linux-sandbox-launcher";
+const sourceLinuxSandboxLauncher = process.platform === "linux"
+  ? process.env.TALOS_DESKTOP_LINUX_SANDBOX_LAUNCHER ??
+    buildRustBinary("talos-linux-sandbox", linuxSandboxLauncherName)
+  : null;
 
 rmSync(resourcesDir, { recursive: true, force: true });
 rmSync(resourcesConfDir, { recursive: true, force: true });
@@ -26,6 +31,13 @@ const destination = path.join(resourcesDir, binaryName);
 copyFileSync(sourceBinary, destination);
 chmodSync(destination, 0o755);
 console.log(`Prepared desktop app-server binary: ${destination}`);
+
+if (sourceLinuxSandboxLauncher) {
+  const launcherDestination = path.join(resourcesDir, linuxSandboxLauncherName);
+  copyFileSync(sourceLinuxSandboxLauncher, launcherDestination);
+  chmodSync(launcherDestination, 0o755);
+  console.log(`Prepared Linux sandbox launcher: ${launcherDestination}`);
+}
 
 const configTemplateSource =
   process.env.TALOS_DESKTOP_CONFIG_TEMPLATE ??
@@ -39,21 +51,21 @@ const migrationDestination = path.join(resourcesConfDir, "migrations");
 cpSync(migrationSource, migrationDestination, { recursive: true });
 console.log(`Prepared desktop migrations: ${migrationDestination}`);
 
-function buildAppServer() {
+function buildRustBinary(packageName, name) {
   const args = [
     "build",
     "--manifest-path",
     path.join(rustDir, "Cargo.toml"),
     "-p",
-    "app-server",
+    packageName,
     "--bin",
-    "app-server",
+    name,
   ];
   if (profile === "release") {
     args.push("--release");
   }
   run("cargo", args, repoRoot);
-  return path.join(rustDir, "target", profile === "release" ? "release" : "debug", binaryName);
+  return path.join(rustDir, "target", profile === "release" ? "release" : "debug", name);
 }
 
 function run(command, args, cwd) {

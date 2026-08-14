@@ -20,8 +20,8 @@ use talos_types::{
     RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
     SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest, SessionGetRequest,
     SessionHistoryRequest, SessionListRequest, SessionPatchRequest, StartTurnRequest,
-    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, UserCurrentRequest,
-    WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
+    SubmitDynamicToolResultRequest, SubmitUserActionRequest, SubscribeTimelineRequest,
+    UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
     WorkspaceInfoRequest,
 };
 pub use talos_types::{
@@ -29,8 +29,7 @@ pub use talos_types::{
     SkillSummary, SkillWarning, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
     SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
     SkillsSuggestResponse, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus,
-    TimelineCursorStatus, TimelinePendingDynamicToolResult, TimelinePendingUserAction,
-    TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay,
+    TimelineCursorStatus, TimelineRecoveryResponse, TimelineRecoverySnapshot, TimelineReplay,
 };
 
 pub const DEFERRED_CLIENT_METHODS: &[DeferredClientMethod] = &[];
@@ -93,6 +92,8 @@ pub enum ClientMethod {
     EventUnsubscribe,
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit,
+    #[serde(rename = "userAction/submit")]
+    UserActionSubmit,
     #[serde(rename = "model.list")]
     ModelList,
     #[serde(rename = "config.get")]
@@ -209,6 +210,7 @@ impl ClientMethod {
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
+            Self::UserActionSubmit => "userAction/submit",
             Self::ModelList => "model.list",
             Self::ConfigGet => "config.get",
             Self::ConfigUpdate => "config.update",
@@ -292,6 +294,7 @@ impl FromStr for ClientMethod {
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
+            "userAction/submit" => Ok(Self::UserActionSubmit),
             "model.list" => Ok(Self::ModelList),
             "config.get" => Ok(Self::ConfigGet),
             "config.update" => Ok(Self::ConfigUpdate),
@@ -393,6 +396,8 @@ pub enum ClientRequestParams {
     EventUnsubscribe(EventUnsubscribeRequest),
     #[serde(rename = "tool.dynamic_result.submit")]
     ToolDynamicResultSubmit(SubmitDynamicToolResultRequest),
+    #[serde(rename = "userAction/submit")]
+    UserActionSubmit(SubmitUserActionRequest),
     #[serde(rename = "model.list")]
     ModelList(ModelListRequest),
     #[serde(rename = "config.get")]
@@ -554,6 +559,9 @@ impl ClientRequest {
             }
             ClientMethod::ToolDynamicResultSubmit => {
                 ClientRequestParams::ToolDynamicResultSubmit(decode(params_value)?)
+            }
+            ClientMethod::UserActionSubmit => {
+                ClientRequestParams::UserActionSubmit(decode(params_value)?)
             }
             ClientMethod::ModelList => ClientRequestParams::ModelList(decode(params_value)?),
             ClientMethod::ConfigGet => ClientRequestParams::ConfigGet(decode(params_value)?),

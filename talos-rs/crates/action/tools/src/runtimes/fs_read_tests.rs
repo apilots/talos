@@ -2,6 +2,35 @@ use super::*;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 
+#[cfg(unix)]
+#[test]
+fn requested_read_access_resolves_a_symlink_to_its_target() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempfile::tempdir().expect("workspace should create");
+    let outside = NamedTempFile::new().expect("outside file should create");
+    let link = workspace.path().join("outside-link");
+    symlink(outside.path(), &link).expect("symlink should create");
+    let context = crate::ToolContext::new("session", "user").with_project_root(workspace.path());
+
+    let access = requested_file_system_access(
+        &ReadFileRequest {
+            path: Some(link.display().to_string()),
+            file_path: None,
+            offset: 1,
+            limit: 10,
+            pages: None,
+        },
+        &context,
+    )
+    .expect("read access should resolve");
+
+    assert_eq!(
+        access[0].paths[0].as_path(),
+        outside.path().canonicalize().unwrap()
+    );
+}
+
 #[tokio::test]
 async fn test_read_file_runtime_reads_numbered_lines() {
     let file = NamedTempFile::new().expect("temp file should create");
@@ -18,8 +47,10 @@ async fn test_read_file_runtime_reads_numbered_lines() {
             .to_string(),
         ..Default::default()
     };
-    let context =
-        crate::ToolContext::new_with_kernel_config("session", "user", Some(Arc::new(config)));
+    let context = crate::test_support::full_access_file_context(
+        crate::ToolContext::new_with_kernel_config("session", "user", Some(Arc::new(config)))
+            .with_project_root(file.path().parent().expect("parent should exist")),
+    );
 
     let output = run(
         &ReadFileRequest {
@@ -45,7 +76,10 @@ async fn test_read_file_runtime_reports_zero_based_offset() {
     tokio::fs::write(file.path(), "alpha\nbeta\ngamma\n")
         .await
         .expect("write should succeed");
-    let context = crate::ToolContext::new("session", "user");
+    let context = crate::test_support::full_access_file_context(
+        crate::ToolContext::new("session", "user")
+            .with_project_root(file.path().parent().expect("parent should exist")),
+    );
 
     let output = run(
         &ReadFileRequest {
@@ -68,7 +102,9 @@ async fn test_read_file_runtime_reports_zero_based_offset() {
 #[tokio::test]
 async fn test_read_file_runtime_rejects_directories() {
     let dir = tempfile::tempdir().expect("temp dir should create");
-    let context = crate::ToolContext::new("session", "user");
+    let context = crate::test_support::full_access_file_context(
+        crate::ToolContext::new("session", "user").with_project_root(dir.path()),
+    );
 
     let error = run(
         &ReadFileRequest {
@@ -92,7 +128,10 @@ async fn test_read_file_runtime_returns_unchanged_stub_for_repeat_read() {
     tokio::fs::write(file.path(), "alpha\n")
         .await
         .expect("write should succeed");
-    let context = crate::ToolContext::new("session", "user");
+    let context = crate::test_support::full_access_file_context(
+        crate::ToolContext::new("session", "user")
+            .with_project_root(file.path().parent().expect("parent should exist")),
+    );
     let request = ReadFileRequest {
         path: Some(file.path().to_string_lossy().to_string()),
         file_path: None,

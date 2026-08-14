@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -5,21 +6,28 @@ use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::profile::{ProfileStore, TurnUsageUpdate};
 use talos_store::session::{
-    ActiveTurnStatus, IdempotencyReservation, IdempotencyStatus, MessageCommandResult,
-    MessageIdempotencyStore, PendingUserAction,
+    ActiveTurnRecord, ActiveTurnStatus, IdempotencyReservation, IdempotencyStatus,
+    MessageCommandResult, MessageIdempotencyStore,
 };
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
     AgentDispatchResumeToolCall, DispatchBinding,
 };
-use talos_types::talos::{AgentEvent, AgentEventPayload, TalosInputItem, TalosTurnErrorEvent};
-use talos_types::{ModelRef, StartTurnRequest, TalosConfig, TalosSession};
+use talos_types::talos::{
+    AgentEvent, AgentEventPayload, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItemStatus, TalosTurnErrorEvent,
+};
+use talos_types::{
+    ModelRef, SandboxApprovalDecision, StartTurnRequest, TalosConfig, TalosSession,
+    UserActionParams, UserActionResponse, UserActionState,
+};
 use tokio::sync::mpsc;
 use tracing::error;
 use uuid::Uuid;
 
 use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
+use crate::user_action::UserActionService;
 
 use super::{
     completed_turn_from_event, record_completed_turn_progress, record_session_title,
@@ -29,6 +37,8 @@ use super::{
 
 #[path = "service_subagent.rs"]
 mod subagent;
+#[path = "user_action_resume.rs"]
+mod user_action_resume;
 
 #[derive(Clone)]
 struct ProfileTurnContext {
@@ -46,6 +56,7 @@ pub struct TurnService {
     sessions: Arc<SessionService>,
     session_runtime: Arc<dyn SessionRuntime>,
     base_config: TalosConfig,
+    user_actions: UserActionService,
 }
 
 struct TurnSubmission {
@@ -54,6 +65,7 @@ struct TurnSubmission {
     binding: DispatchBinding,
 }
 
+#[derive(Clone)]
 struct ActiveResumeContext {
     turn_id: String,
     message_id: String,
@@ -81,6 +93,7 @@ impl TurnService {
         session_runtime: Arc<dyn SessionRuntime>,
         base_config: TalosConfig,
     ) -> Self {
+        let user_actions = event_service.user_actions();
         Self {
             executor,
             event_service,
@@ -89,6 +102,7 @@ impl TurnService {
             sessions,
             session_runtime,
             base_config,
+            user_actions,
         }
     }
 
@@ -451,41 +465,6 @@ impl TurnService {
         Ok(result)
     }
 
-    pub async fn submit_dynamic_tool_result(
-        &self,
-        session: TalosSession,
-        call_id: &str,
-        tool_name: &str,
-        output: String,
-        success: bool,
-    ) -> TalosResult<()> {
-        let session_id = session.context.session_id.clone();
-        let resume = self
-            .pending_dynamic_resume_context(&session_id, call_id, tool_name)
-            .await?;
-        let binding = self.session_binding(&session_id).await?;
-        let turn_id = resume.turn_id.clone();
-        self.executor
-            .submit_input(AgentDispatchInputParams {
-                binding: binding.clone(),
-                session: session.clone(),
-                turn_id,
-                input: AgentDispatchInput::DynamicToolResult {
-                    call_id: call_id.to_string(),
-                    tool_name: tool_name.to_string(),
-                    output,
-                    success,
-                },
-            })
-            .await?;
-        self.event_service
-            .resolve_pending_user_action(&session_id)
-            .await
-            .map_err(|err| TalosError::StorageError(format!("active turn update failed: {err}")))?;
-        self.resume_after_user_action(session, resume, binding)
-            .await
-    }
-
     pub async fn submit_retry(
         &self,
         session: TalosSession,
@@ -651,60 +630,6 @@ impl TurnService {
             stream_rx,
         );
         Ok(())
-    }
-
-    async fn pending_dynamic_resume_context(
-        &self,
-        session_id: &str,
-        call_id: &str,
-        tool_name: &str,
-    ) -> TalosResult<ActiveResumeContext> {
-        let active = self
-            .event_service
-            .get_active_turn(session_id)
-            .await
-            .map_err(|err| TalosError::StorageError(format!("active turn lookup failed: {err}")))?
-            .ok_or_else(|| {
-                TalosError::Conflict("No pending user action for this session.".to_string())
-            })?;
-        if active.status != ActiveTurnStatus::WaitingUserAction {
-            return Err(TalosError::Conflict(
-                "The active turn is not waiting for user action.".to_string(),
-            ));
-        }
-        let message_id = active.message_id.clone().ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending user action is missing its original message id.".to_string(),
-            )
-        })?;
-        let Some(PendingUserAction::DynamicToolResult(pending)) = active.pending_user_action else {
-            return Err(TalosError::Conflict(
-                "The pending user action is not a dynamic tool result.".to_string(),
-            ));
-        };
-        if pending.call_id != call_id || pending.tool_name != tool_name {
-            return Err(TalosError::Conflict(format!(
-                "Pending dynamic result mismatch: expected {} {}, got {} {}",
-                pending.tool_name, pending.call_id, tool_name, call_id
-            )));
-        }
-        let item_id = pending.item_id.ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending dynamic tool result is missing its original timeline item id.".to_string(),
-            )
-        })?;
-        let tool_call = AgentDispatchResumeToolCall {
-            item_id,
-            call_id: pending.call_id,
-            tool_name: pending.tool_name,
-        };
-        Ok(ActiveResumeContext {
-            turn_id: active.turn_id,
-            message_id,
-            gateway_resume: Some(AgentDispatchResumeContext {
-                tool_call: Some(tool_call),
-            }),
-        })
     }
 
     async fn fail_without_first_event(

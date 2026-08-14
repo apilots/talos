@@ -76,7 +76,15 @@ impl TimelineSubscriptionService {
         session_id: &str,
     ) -> TalosResult<TimelineActiveTurnSnapshot> {
         let active_turn = self.get_active_turn(session_id).await?;
-        Ok(map_active_turn_snapshot(session_id, active_turn))
+        let pending_user_action = match active_turn.as_ref() {
+            Some(active) => self.inner_talos()?.get_current_user_action(active).await?,
+            None => None,
+        };
+        Ok(map_active_turn_snapshot(
+            session_id,
+            active_turn,
+            pending_user_action,
+        ))
     }
 
     pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {

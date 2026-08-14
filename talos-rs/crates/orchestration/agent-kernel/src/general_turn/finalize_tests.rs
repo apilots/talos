@@ -14,10 +14,12 @@ fn build_turn_execution_metrics_includes_elapsed_duration() {
         tool_result_log: Vec::new(),
         retrieved_memories: Vec::new(),
         tool_call_count: 0,
+        tool_result_count: 0,
         tool_error_count: 0,
-        pending_dynamic_requests: Vec::new(),
+        pending_user_action: None,
         final_answer_streamed: false,
         execution_summary_streamed: false,
+        elapsed_duration_ms: 0,
     };
 
     let metrics = build_turn_execution_metrics(&state, StopReason::EndTurn);

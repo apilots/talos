@@ -1,3 +1,4 @@
+pub mod command_risk;
 pub mod context;
 pub mod handlers;
 pub mod invocation;
@@ -13,6 +14,16 @@ pub mod subagent;
 pub mod r#trait;
 pub mod trait_impl;
 
+#[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
+mod sandbox_e2e_tests;
+
+pub use command_risk::{
+    BashCommandFacts, CommandRiskAssessmentError, CommandRiskAssessmentInput, CommandRiskAssessor,
+    EffectivePermissionSummary, LlmCommandRiskAssessor,
+};
 pub use context::{ToolContext, ToolProgressEmitter, ToolProgressEvent, ToolProgressKind};
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
@@ -35,6 +46,7 @@ pub use state::{
     TaskStateEntry, TaskStateStore, ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 pub use subagent::{AgentControl, AgentControlFuture};
+pub use talos_tools_sandbox::{AbsolutePathBuf, ToolSandboxEnvironment};
 
 // Built-in tools
 pub mod tools {

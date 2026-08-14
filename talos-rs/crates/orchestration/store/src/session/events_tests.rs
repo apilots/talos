@@ -86,7 +86,7 @@ async fn gc_does_not_delete_active_turn_events() {
             message_id: Some("msg_1".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1000,
         })
         .await

@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_read::{
+    normalize_existing_tool_path, normalize_write_scope, resolve_tool_path,
+};
 use crate::runtimes::fs_write::ensure_read_state_is_fresh;
+use crate::runtimes::map_sandbox_file_error;
 use crate::ToolContext;
+use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplyPatchRequest {
@@ -34,6 +37,53 @@ pub struct ApplyPatchFileChange {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplyPatchResult {
     pub changes: Vec<ApplyPatchFileChange>,
+}
+
+pub fn requested_file_system_access(
+    request: &ApplyPatchRequest,
+    context: &ToolContext,
+) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+    let parsed = parse_patch(&request.patch)?;
+    let mut read_paths = Vec::new();
+    let mut write_paths = Vec::new();
+    for operation in parsed.operations {
+        match operation {
+            PatchOperation::Add { path, .. } => {
+                let path = resolve_tool_path(&path, context)?;
+                write_paths.push(normalize_write_scope(&path)?);
+            }
+            PatchOperation::Delete { path } => {
+                let path = normalize_existing_tool_path(&resolve_tool_path(&path, context)?)?;
+                read_paths.push(path.clone());
+                write_paths.push(path);
+            }
+            PatchOperation::Update { path, move_to, .. } => {
+                let source_path = resolve_tool_path(&path, context)?;
+                let source = normalize_existing_tool_path(&source_path)?;
+                read_paths.push(source.clone());
+                write_paths.push(normalize_write_scope(&source_path)?);
+                if let Some(target) = move_to {
+                    write_paths.push(normalize_write_scope(&resolve_tool_path(
+                        &target, context,
+                    )?)?);
+                }
+            }
+        }
+    }
+    let mut access = Vec::new();
+    if !read_paths.is_empty() {
+        access.push(
+            RequestedFileSystemAccess::new(FileSystemOperation::Read, read_paths)
+                .map_err(|error| TalosError::ToolError(error.to_string()))?,
+        );
+    }
+    if !write_paths.is_empty() {
+        access.push(
+            RequestedFileSystemAccess::new(FileSystemOperation::Write, write_paths)
+                .map_err(|error| TalosError::ToolError(error.to_string()))?,
+        );
+    }
+    Ok(access)
 }
 
 #[derive(Debug, Clone)]
@@ -74,25 +124,34 @@ pub async fn run(
     context: &ToolContext,
 ) -> TalosResult<ApplyPatchResult> {
     let parsed = parse_patch(&request.patch)?;
+    let file_system = context.sandbox_file_system()?;
     let mut changes = Vec::new();
 
     for operation in parsed.operations {
         match operation {
             PatchOperation::Add { path, lines } => {
                 let resolved = resolve_tool_path(&path, context)?;
-                if fs::try_exists(&resolved).await.map_err(inspect_error)? {
+                if file_system
+                    .try_exists(&resolved)
+                    .await
+                    .map_err(map_sandbox_file_error)?
+                {
                     return Err(TalosError::ToolError(format!(
                         "cannot add `{}` because it already exists",
                         resolved.display()
                     )));
                 }
                 if let Some(parent) = resolved.parent() {
-                    fs::create_dir_all(parent).await.map_err(write_error)?;
+                    file_system
+                        .create_directory_all(parent)
+                        .await
+                        .map_err(map_sandbox_file_error)?;
                 }
                 let updated_file = lines.join("\n");
-                fs::write(&resolved, &updated_file)
+                file_system
+                    .write(&resolved, updated_file.as_bytes())
                     .await
-                    .map_err(write_error)?;
+                    .map_err(map_sandbox_file_error)?;
                 context
                     .read_file_state()
                     .record_mutation_content(resolved.clone(), &updated_file);
@@ -106,9 +165,15 @@ pub async fn run(
             }
             PatchOperation::Delete { path } => {
                 let resolved = resolve_tool_path(&path, context)?;
-                let original_file = fs::read_to_string(&resolved).await.map_err(read_error)?;
+                let original_file = file_system
+                    .read_to_string(&resolved)
+                    .await
+                    .map_err(map_sandbox_file_error)?;
                 ensure_read_state_is_fresh(&resolved, &original_file, context)?;
-                fs::remove_file(&resolved).await.map_err(write_error)?;
+                file_system
+                    .remove_file(&resolved)
+                    .await
+                    .map_err(map_sandbox_file_error)?;
                 changes.push(ApplyPatchFileChange {
                     path: resolved.display().to_string(),
                     old_path: None,
@@ -123,7 +188,10 @@ pub async fn run(
                 hunks,
             } => {
                 let source = resolve_tool_path(&path, context)?;
-                let original_file = fs::read_to_string(&source).await.map_err(read_error)?;
+                let original_file = file_system
+                    .read_to_string(&source)
+                    .await
+                    .map_err(map_sandbox_file_error)?;
                 ensure_read_state_is_fresh(&source, &original_file, context)?;
                 let updated_file = apply_hunks(&source, &original_file, &hunks)?;
                 let target = if let Some(raw_target) = move_to.as_deref() {
@@ -131,7 +199,12 @@ pub async fn run(
                 } else {
                     source.clone()
                 };
-                if target != source && fs::try_exists(&target).await.map_err(inspect_error)? {
+                if target != source
+                    && file_system
+                        .try_exists(&target)
+                        .await
+                        .map_err(map_sandbox_file_error)?
+                {
                     return Err(TalosError::ToolError(format!(
                         "cannot move `{}` to `{}` because the target exists",
                         source.display(),
@@ -139,14 +212,21 @@ pub async fn run(
                     )));
                 }
                 if let Some(parent) = target.parent() {
-                    fs::create_dir_all(parent).await.map_err(write_error)?;
+                    file_system
+                        .create_directory_all(parent)
+                        .await
+                        .map_err(map_sandbox_file_error)?;
                 }
                 if target != source {
-                    fs::rename(&source, &target).await.map_err(write_error)?;
+                    file_system
+                        .rename(&source, &target)
+                        .await
+                        .map_err(map_sandbox_file_error)?;
                 }
-                fs::write(&target, &updated_file)
+                file_system
+                    .write(&target, updated_file.as_bytes())
                     .await
-                    .map_err(write_error)?;
+                    .map_err(map_sandbox_file_error)?;
                 context
                     .read_file_state()
                     .record_mutation_content(target.clone(), &updated_file);
@@ -354,18 +434,6 @@ fn hunk_new_text(hunk: &PatchHunk) -> String {
 
 fn patch_syntax_error(line: usize, message: &str) -> TalosError {
     TalosError::ToolError(format!("patch syntax error at line {line}: {message}"))
-}
-
-fn inspect_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to inspect patch path: {err}"))
-}
-
-fn read_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to read patch target: {err}"))
-}
-
-fn write_error(err: std::io::Error) -> TalosError {
-    TalosError::ToolError(format!("failed to write patch target: {err}"))
 }
 
 #[cfg(test)]

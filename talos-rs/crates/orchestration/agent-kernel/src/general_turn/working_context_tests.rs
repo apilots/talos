@@ -64,6 +64,7 @@ fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
         super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
             call_id: "call-old".to_string(),
             tool_name: "MemoryGet".to_string(),
+            arguments: serde_json::json!({"memory_id": "mem-1"}),
             outcome: ToolDispatchOutcome::executed(
                 ToolOutputPayload::success_json(
                     &MemoryGetResponse {
@@ -74,7 +75,8 @@ fn test_working_context_trim_preserves_recent_complete_tool_exchange() {
                 .expect("memory payload"),
             ),
             is_error: false,
-        }]);
+        }])
+        .expect("collect retrieved memory batch");
     state.messages = vec![
         ChatMessage::assistant("old assistant text ".repeat(80)),
         ChatMessage::assistant_with_tool_calls(
@@ -132,12 +134,14 @@ fn test_working_context_trim_skips_failed_memory_get_result() {
         super::tool_batch::collect_general_turn_tool_batch(vec![crate::ToolExecutionOutput {
             call_id: "call-memory".to_string(),
             tool_name: "MemoryGet".to_string(),
+            arguments: serde_json::json!({"memory_id": "missing"}),
             outcome: ToolDispatchOutcome::executed(ToolOutputPayload::failure_structured(
                 "memory was not found ".repeat(20),
                 None,
             )),
             is_error: true,
-        }]);
+        }])
+        .expect("collect failed memory batch");
     state.messages = vec![
         ChatMessage::assistant_with_tool_calls(
             "memory call",

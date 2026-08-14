@@ -1,6 +1,7 @@
 use crate::model::{ModelSelection, TalosConfig};
 use crate::talos;
 use crate::turn_api::TimelineActiveTurnSnapshot;
+use crate::user_action::UserPermissionMode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -90,6 +91,7 @@ pub struct TalosSession {
     #[serde(default)]
     pub current_directory: Option<PathBuf>,
     pub config: TalosConfig,
+    pub effective_user_permission_mode: UserPermissionMode,
     pub state: SessionState,
 }
 
@@ -122,6 +124,7 @@ impl SessionConfigOverridePolicy {
     pub fn single_model_selection_conf(model_selection: &ModelSelection) -> SessionConf {
         SessionConf {
             model_selection: Some(model_selection.clone()),
+            user_permission_mode: None,
         }
     }
 
@@ -131,7 +134,27 @@ impl SessionConfigOverridePolicy {
         if let Some(model_selection) = patch.model_selection.clone() {
             merged.model_selection = Some(model_selection);
         }
+        if let Some(user_permission_mode) = patch.user_permission_mode {
+            merged.user_permission_mode = Some(user_permission_mode);
+        }
         merged
+    }
+
+    /// Resolves the effective product permission mode for a loaded Session.
+    pub fn resolve_user_permission_mode(
+        base_config: &TalosConfig,
+        conf: &SessionConf,
+    ) -> UserPermissionMode {
+        conf.user_permission_mode.unwrap_or_else(|| {
+            UserPermissionMode::from(
+                &base_config
+                    .agent
+                    .kernel
+                    .tools
+                    .sandbox_policy
+                    .user_permission_mode,
+            )
+        })
     }
 
     /// Applies session overrides on top of the current base runtime config.
@@ -198,6 +221,10 @@ pub struct SessionInfo {
     pub provider: talos::TalosProvider,
     #[serde(rename = "modelSelection")]
     pub model_selection: ModelSelection,
+    #[serde(rename = "configuredDefaultMode")]
+    pub configured_default_mode: UserPermissionMode,
+    #[serde(rename = "effectiveMode")]
+    pub effective_mode: UserPermissionMode,
     #[ts(type = "number")]
     pub created_at: u64,
     #[ts(type = "number")]
@@ -227,6 +254,16 @@ impl From<&TalosSession> for SessionInfo {
                 .model_selection
                 .clone()
                 .expect("loaded sessions must have an explicit model selection"),
+            configured_default_mode: UserPermissionMode::from(
+                &session
+                    .config
+                    .agent
+                    .kernel
+                    .tools
+                    .sandbox_policy
+                    .user_permission_mode,
+            ),
+            effective_mode: session.effective_user_permission_mode,
             created_at: session.state.created_at,
             last_activity: session.state.last_activity,
             message_count: session.state.message_count,
@@ -372,6 +409,9 @@ pub struct SessionConf {
     #[serde(default)]
     #[serde(rename = "modelSelection")]
     pub model_selection: Option<ModelSelection>,
+    #[serde(default)]
+    #[serde(rename = "userPermissionMode")]
+    pub user_permission_mode: Option<UserPermissionMode>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]

@@ -20,7 +20,10 @@ async fn execute_payload_returns_file_read_content_item() {
     let payload = tool
         .execute_payload(
             serde_json::json!({"path": file.path(), "offset": 1, "limit": 10}),
-            ToolContext::new("session", "user"),
+            crate::test_support::full_access_file_context(
+                ToolContext::new("session", "user")
+                    .with_project_root(file.path().parent().expect("parent should exist")),
+            ),
         )
         .await
         .expect("read should succeed");

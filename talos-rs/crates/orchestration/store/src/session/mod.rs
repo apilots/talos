@@ -5,22 +5,20 @@ pub mod idempotency;
 mod mock_store;
 mod store;
 mod types;
+pub mod user_action;
 
 #[cfg(test)]
 mod scope_tests;
 
-pub use active_turn::{
-    ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate,
-    PendingDynamicToolResult, PendingUserAction,
-};
+pub use active_turn::{ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate};
 pub use artifacts::{
     FileSessionArtifactStore, RecordHeader, SessionArtifactStore, SessionTranscriptActions,
     SessionTranscriptAuthPayload, SessionTranscriptAuthor, SessionTranscriptBranch,
-    SessionTranscriptCompaction, SessionTranscriptCompactionPayload,
-    SessionTranscriptDynamicToolRequestPayload, SessionTranscriptDynamicToolResponsePayload,
-    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
-    SessionTranscriptRecord, SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
-    SessionTranscriptTransferPayload, SessionTurnWindow, SummaryRecord, TalosTurn,
+    SessionTranscriptCompaction, SessionTranscriptCompactionPayload, SessionTranscriptEventKind,
+    SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
+    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
+    SessionTranscriptUserActionRequestPayload, SessionTranscriptUserActionResponsePayload,
+    SessionTurnWindow, SummaryRecord, TalosTurn,
 };
 pub use events::{TimelineEventId, TimelineEventStore};
 pub use idempotency::{
@@ -33,3 +31,4 @@ pub use types::{
     SessionPageCursor, SessionPatchAck, SessionQuery, SessionRecord, SessionSummary,
     SessionTreeIdentity, SessionTreeScope,
 };
+pub use user_action::{UserActionRecord, UserActionStore};

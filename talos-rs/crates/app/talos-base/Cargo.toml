@@ -36,6 +36,7 @@ talos-skills = { workspace = true }
 talos-storage = { workspace = true }
 talos-mcp = { workspace = true }
 talos-tools = { workspace = true }
+talos-tools-sandbox = { workspace = true }
 talos-types = { workspace = true }
 talos-upgrade = { workspace = true }
 

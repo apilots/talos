@@ -135,11 +135,13 @@ async fn test_handle_request_uses_resume_api_for_resume_context() {
             binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session: test_session("test-session", context.clone()),
             resume_context: Some(AgentDispatchResumeContext {
-                tool_call: Some(AgentDispatchResumeToolCall {
+                pending_call_id: "call-1".to_string(),
+                tool_calls: vec![AgentDispatchResumeToolCall {
                     item_id: "tool-original".to_string(),
                     call_id: "call-1".to_string(),
                     tool_name: "Bash".to_string(),
-                }),
+                }],
+                execution_metrics: Default::default(),
             }),
             input: Vec::new(),
         })
@@ -242,11 +244,13 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
             binding: talos_types::agent_dispatch::DispatchBinding::Routed,
             session,
             resume_context: Some(AgentDispatchResumeContext {
-                tool_call: Some(AgentDispatchResumeToolCall {
+                pending_call_id: "call-1".to_string(),
+                tool_calls: vec![AgentDispatchResumeToolCall {
                     item_id: "tool-original".to_string(),
                     call_id: "call-1".to_string(),
                     tool_name: "Bash".to_string(),
-                }),
+                }],
+                execution_metrics: Default::default(),
             }),
             input: Vec::new(),
         })

@@ -10,7 +10,9 @@ async fn execute_payload_returns_diff_content_item() {
     let payload = tool
         .execute_payload(
             serde_json::json!({"path": path, "content": "alpha\n"}),
-            ToolContext::new("session", "user"),
+            crate::test_support::full_access_file_context(
+                ToolContext::new("session", "user").with_project_root(dir.path()),
+            ),
         )
         .await
         .expect("write should succeed");

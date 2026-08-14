@@ -4,20 +4,20 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use talos_agent_kernel::{
     EventActions, EventAuthor, EventCompaction, ExecutionBranch, InvocationSession,
-    KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
-    KernelTranscriptDynamicToolRequestPayload, KernelTranscriptDynamicToolResponsePayload,
-    KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
-    KernelTranscriptPayload, KernelTranscriptService, KernelTranscriptTransferPayload,
+    KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload, KernelTranscriptEvent,
+    KernelTranscriptEventKind, KernelTranscriptFilter, KernelTranscriptPayload,
+    KernelTranscriptService, KernelTranscriptTransferPayload,
+    KernelTranscriptUserActionRequestPayload, KernelTranscriptUserActionResponsePayload,
     SessionState, StateDelta, StateNamespace,
 };
 use talos_error::TalosResult;
 use talos_store::session::{
     SessionArtifactStore, SessionTranscriptActions, SessionTranscriptAuthPayload,
     SessionTranscriptAuthor, SessionTranscriptBranch, SessionTranscriptCompaction,
-    SessionTranscriptCompactionPayload, SessionTranscriptDynamicToolRequestPayload,
-    SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
-    SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
-    SessionTranscriptStateDelta, SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
+    SessionTranscriptCompactionPayload, SessionTranscriptEventKind, SessionTranscriptHeader,
+    SessionTranscriptPayload, SessionTranscriptRecord, SessionTranscriptStateDelta,
+    SessionTranscriptStateNamespace, SessionTranscriptTransferPayload,
+    SessionTranscriptUserActionRequestPayload, SessionTranscriptUserActionResponsePayload,
 };
 
 pub(crate) struct SessionStoreKernelTranscriptService {
@@ -179,23 +179,28 @@ impl KernelSessionTranscriptMapper {
                     prompt: payload.prompt.clone(),
                 },
             },
-            KernelTranscriptPayload::DynamicToolRequest { payload } => {
-                SessionTranscriptPayload::DynamicToolRequest {
-                    payload: SessionTranscriptDynamicToolRequestPayload {
+            KernelTranscriptPayload::UserActionRequest { payload } => {
+                SessionTranscriptPayload::UserActionRequest {
+                    payload: SessionTranscriptUserActionRequestPayload {
+                        action_id: payload.action_id.clone(),
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
                         arguments: payload.arguments.clone(),
+                        params: payload.params.clone(),
+                        sandbox_request_fingerprint: payload.sandbox_request_fingerprint.clone(),
                         reasoning_continuation: payload.reasoning_continuation.clone(),
+                        tool_calls: payload.tool_calls.clone(),
+                        tool_messages: payload.tool_messages.clone(),
+                        deferred_tool_calls: payload.deferred_tool_calls.clone(),
                     },
                 }
             }
-            KernelTranscriptPayload::DynamicToolResponse { payload } => {
-                SessionTranscriptPayload::DynamicToolResponse {
-                    payload: SessionTranscriptDynamicToolResponsePayload {
+            KernelTranscriptPayload::UserActionResponse { payload } => {
+                SessionTranscriptPayload::UserActionResponse {
+                    payload: SessionTranscriptUserActionResponsePayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
-                        output: payload.output.clone(),
-                        success: payload.success,
+                        response: payload.response.clone(),
                     },
                 }
             }
@@ -226,23 +231,28 @@ impl KernelSessionTranscriptMapper {
                     prompt: payload.prompt,
                 },
             },
-            SessionTranscriptPayload::DynamicToolRequest { payload } => {
-                KernelTranscriptPayload::DynamicToolRequest {
-                    payload: KernelTranscriptDynamicToolRequestPayload {
+            SessionTranscriptPayload::UserActionRequest { payload } => {
+                KernelTranscriptPayload::UserActionRequest {
+                    payload: KernelTranscriptUserActionRequestPayload {
+                        action_id: payload.action_id,
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
                         arguments: payload.arguments,
+                        params: payload.params,
+                        sandbox_request_fingerprint: payload.sandbox_request_fingerprint,
                         reasoning_continuation: payload.reasoning_continuation,
+                        tool_calls: payload.tool_calls,
+                        tool_messages: payload.tool_messages,
+                        deferred_tool_calls: payload.deferred_tool_calls,
                     },
                 }
             }
-            SessionTranscriptPayload::DynamicToolResponse { payload } => {
-                KernelTranscriptPayload::DynamicToolResponse {
-                    payload: KernelTranscriptDynamicToolResponsePayload {
+            SessionTranscriptPayload::UserActionResponse { payload } => {
+                KernelTranscriptPayload::UserActionResponse {
+                    payload: KernelTranscriptUserActionResponsePayload {
                         call_id: payload.call_id,
                         tool_name: payload.tool_name,
-                        output: payload.output,
-                        success: payload.success,
+                        response: payload.response,
                     },
                 }
             }

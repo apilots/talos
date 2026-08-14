@@ -6,6 +6,7 @@ use talos_types::talos::TalosContentItem;
 use crate::runtimes::fs_search::{run, GrepFilesRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::ToolSandboxOperationKind;
 
 pub struct GrepTool;
 
@@ -107,6 +108,10 @@ impl Tool for GrepTool {
             concurrency_safe: true,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::SpawnProcess)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

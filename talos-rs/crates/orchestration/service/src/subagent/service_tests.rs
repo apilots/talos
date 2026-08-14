@@ -26,9 +26,10 @@ use talos_types::talos::{
     TalosTurnStartedEvent, TokenUsage,
 };
 use talos_types::{
-    AgentCaller, AgentTarget, AgentTurnRef, FollowUpSubagentRequest, InterruptSubagentRequest,
-    ListSubagentsRequest, ModelRef, ModelSelection, SendSubagentMessageRequest, SessionConf,
-    SpawnSubagentRequest, SubagentOutcome, SubagentRef, TalosConfig, WaitSubagentRequest,
+    AgentCaller, AgentTarget, AgentTurnRef, DynamicToolResultParams, FollowUpSubagentRequest,
+    InterruptSubagentRequest, ListSubagentsRequest, ModelRef, ModelSelection, PendingUserAction,
+    SendSubagentMessageRequest, SessionConf, SpawnSubagentRequest, SubagentOutcome, SubagentRef,
+    TalosConfig, TimelineUserActionEvent, UserActionParams, UserActionState, WaitSubagentRequest,
 };
 use tokio::sync::mpsc;
 
@@ -167,10 +168,20 @@ impl TurnExecutor for RecordingTurnExecutor {
                     request_id: "request-child".to_string(),
                     turn_id: request.turn_id,
                     item_id: "item-tool".to_string(),
-                    delta: TalosTimelineDelta::ToolDynamicRequest {
-                        call_id: "call-1".to_string(),
-                        tool_name: "ask_user".to_string(),
-                        arguments: serde_json::json!({}).into(),
+                    delta: TalosTimelineDelta::UserAction {
+                        event: TimelineUserActionEvent::Requested {
+                            action: PendingUserAction {
+                                action_id: "ua-child".to_string(),
+                                call_id: "call-1".to_string(),
+                                item_id: Some("item-tool".to_string()),
+                                state: UserActionState::Pending,
+                                params: UserActionParams::DynamicToolResult(
+                                    DynamicToolResultParams {
+                                        tool_name: "ask_user".to_string(),
+                                    },
+                                ),
+                            },
+                        },
                     },
                 }),
             })
@@ -262,6 +273,7 @@ async fn test_services_uninitialized() -> TestServices {
     let event_service = Arc::new(TimelineEventService::new(
         store.clone() as Arc<dyn TimelineEventStore>,
         store.clone() as Arc<dyn ActiveTurnStore>,
+        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
         TimelineEventRetentionConfig::default(),
     ));
     let executor = Arc::new(RecordingTurnExecutor::default());
@@ -375,7 +387,7 @@ async fn create_parent_with_agent(
             message_id: Some("message-parent".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1,
         })
         .await
@@ -657,7 +669,7 @@ async fn spawn_supports_recursive_child_parent() {
             message_id: Some("message-child".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 2,
         })
         .await

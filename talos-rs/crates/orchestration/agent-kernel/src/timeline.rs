@@ -235,6 +235,12 @@ impl TimelineBuilder {
         arguments: impl Into<String>,
     ) {
         let item_id = item_id.into();
+        if let Some(index) = item_id
+            .rsplit_once('-')
+            .and_then(|(_, index)| index.parse::<u64>().ok())
+        {
+            self.next_item_index = self.next_item_index.max(index);
+        }
         let item = TalosTimelineItem {
             item_id: item_id.clone(),
             parent_item_id: None,
@@ -358,6 +364,46 @@ impl TimelineBuilder {
             .collect()
     }
 
+    /// Close active narrative and system items without changing tool truth.
+    pub fn close_active_non_tool_items(
+        &mut self,
+        status: TalosTimelineItemStatus,
+    ) -> TalosResult<Vec<AgentEvent>> {
+        let item_ids = self
+            .items
+            .iter()
+            .filter(|&(_item_id, state)| {
+                state.item.kind != TalosTimelineItemKind::ToolCall
+                    && should_close_item(state.item.status, status)
+            })
+            .map(|(item_id, _state)| item_id.clone())
+            .collect::<Vec<_>>();
+        item_ids
+            .into_iter()
+            .map(|item_id| self.complete_item(&item_id, status, None))
+            .collect()
+    }
+
+    /// Return tool items that still require an explicit tool lifecycle event.
+    pub fn active_tool_item_ids(&self) -> Vec<String> {
+        let mut item_ids = self
+            .items
+            .iter()
+            .filter(|&(_item_id, state)| {
+                state.item.kind == TalosTimelineItemKind::ToolCall
+                    && matches!(
+                        state.item.status,
+                        TalosTimelineItemStatus::Queued
+                            | TalosTimelineItemStatus::Running
+                            | TalosTimelineItemStatus::WaitingUserAction
+                    )
+            })
+            .map(|(item_id, _state)| item_id.clone())
+            .collect::<Vec<_>>();
+        item_ids.sort();
+        item_ids
+    }
+
     pub fn item(&self, item_id: &str) -> Option<&TalosTimelineItem> {
         self.items.get(item_id).map(|state| &state.item)
     }
@@ -376,8 +422,13 @@ impl TimelineBuilder {
             TalosTimelineDelta::ToolResult { content, is_error } => {
                 set_tool_result(&mut state.item.content, content.clone(), *is_error)
             }
-            TalosTimelineDelta::ToolDynamicRequest { .. } => {
-                state.item.status = TalosTimelineItemStatus::WaitingDynamicInput;
+            TalosTimelineDelta::UserAction { event } => {
+                if matches!(
+                    event,
+                    talos_types::TimelineUserActionEvent::Requested { .. }
+                ) {
+                    state.item.status = TalosTimelineItemStatus::WaitingUserAction;
+                }
                 Ok(())
             }
             TalosTimelineDelta::ContextCompaction {
@@ -451,7 +502,7 @@ fn should_close_item(current: TalosTimelineItemStatus, terminal: TalosTimelineIt
     match current {
         TalosTimelineItemStatus::Queued => true,
         TalosTimelineItemStatus::Running => true,
-        TalosTimelineItemStatus::WaitingDynamicInput => {
+        TalosTimelineItemStatus::WaitingUserAction => {
             terminal != TalosTimelineItemStatus::Completed
         }
         TalosTimelineItemStatus::Completed

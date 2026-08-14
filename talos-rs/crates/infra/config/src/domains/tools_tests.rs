@@ -1,9 +1,69 @@
-use super::{ToolsRuntimeConfig, WebSearchProviderConfig};
+use super::{
+    ToolSandboxModeConfig, ToolSandboxNetworkConfig, ToolUserPermissionModeConfig,
+    ToolsRuntimeConfig, WebSearchProviderConfig,
+};
 
 #[test]
 fn collaboration_tools_are_enabled_by_default() {
     let config = ToolsRuntimeConfig::default();
     assert!(config.enable_collaboration_tools);
+}
+
+#[test]
+fn sandbox_defaults_preserve_full_access_runtime_behavior() {
+    let policy = ToolsRuntimeConfig::default().sandbox_policy;
+
+    assert_eq!(
+        policy.user_permission_mode,
+        ToolUserPermissionModeConfig::FullAccess
+    );
+    assert_eq!(policy.default_mode, ToolSandboxModeConfig::UseDefault);
+    assert_eq!(policy.network, ToolSandboxNetworkConfig::UseDefault);
+    assert!(policy.platform.linux_helper_executable.is_none());
+}
+
+#[test]
+fn sandbox_policy_deserializes_all_product_modes() {
+    for (value, expected) in [
+        (
+            "ask_for_approval",
+            ToolUserPermissionModeConfig::AskForApproval,
+        ),
+        ("approve_for_me", ToolUserPermissionModeConfig::ApproveForMe),
+        ("full_access", ToolUserPermissionModeConfig::FullAccess),
+    ] {
+        let config: ToolsRuntimeConfig = serde_json::from_value(serde_json::json!({
+            "sandbox_policy": {
+                "user_permission_mode": value,
+                "default_mode": "workspace_write",
+                "network": "restricted",
+                "platform": {
+                    "linux_helper_executable": "/usr/libexec/talos-linux-sandbox-launcher"
+                }
+            }
+        }))
+        .expect("sandbox config should deserialize");
+
+        assert_eq!(config.sandbox_policy.user_permission_mode, expected);
+        assert_eq!(
+            config.sandbox_policy.default_mode,
+            ToolSandboxModeConfig::WorkspaceWrite
+        );
+        assert_eq!(
+            config.sandbox_policy.network,
+            ToolSandboxNetworkConfig::Restricted
+        );
+        assert_eq!(
+            config
+                .sandbox_policy
+                .platform
+                .linux_helper_executable
+                .as_deref(),
+            Some(std::path::Path::new(
+                "/usr/libexec/talos-linux-sandbox-launcher"
+            ))
+        );
+    }
 }
 
 #[test]

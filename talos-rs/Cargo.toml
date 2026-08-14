@@ -30,6 +30,10 @@ members = [
     "crates/action/tools",
     "crates/action/tools-policy",
     "crates/action/tools-sandbox",
+    "crates/action/sandbox-spi",
+    "crates/action/macos-sandbox",
+    "crates/action/linux-sandbox",
+    "crates/action/windows-sandbox",
     # Orchestration
     "crates/orchestration/agent-kernel",
     "crates/orchestration/agent",
@@ -69,6 +73,8 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 async-trait = "0.1"
 bytes = "1"
+libc = "0.2.182"
+seccompiler = "0.5.0"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -128,6 +134,10 @@ talos-skills = { path = "crates/action/skills" }
 talos-tools = { path = "crates/action/tools" }
 talos-tools-policy = { path = "crates/action/tools-policy" }
 talos-tools-sandbox = { path = "crates/action/tools-sandbox" }
+talos-sandbox-spi = { path = "crates/action/sandbox-spi" }
+talos-macos-sandbox = { path = "crates/action/macos-sandbox" }
+talos-linux-sandbox = { path = "crates/action/linux-sandbox" }
+talos-windows-sandbox = { path = "crates/action/windows-sandbox" }
 talos-memory = { path = "crates/cognition/memory" }
 talos-auth = { path = "crates/infra/auth" }
 talos-automation = { path = "crates/infra/automation" }

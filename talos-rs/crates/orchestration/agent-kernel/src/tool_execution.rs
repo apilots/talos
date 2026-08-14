@@ -4,19 +4,21 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_memory::MemoryScope;
 use talos_tools::{
-    ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolProgressEmitter,
-    ToolProgressEvent,
+    AbsolutePathBuf, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolProgressEmitter,
+    ToolProgressEvent, ToolSandboxEnvironment,
 };
+use talos_types::UserActionResponse;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolExecutionContext {
     pub session_id: String,
     pub turn_id: String,
@@ -25,6 +27,26 @@ pub struct ToolExecutionContext {
     pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
     pub dynamic_tool_results: HashMap<String, ReplayDynamicToolResult>,
+    pub user_action_responses: HashMap<String, UserActionResponse>,
+    pub sandbox_approval_fingerprints: HashMap<String, String>,
+    pub command_risk_assessor: Option<Arc<dyn talos_tools::CommandRiskAssessor>>,
+}
+
+impl fmt::Debug for ToolExecutionContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ToolExecutionContext")
+            .field("session_id", &self.session_id)
+            .field("turn_id", &self.turn_id)
+            .field("agent_id", &self.agent_id)
+            .field("user_id", &self.user_id)
+            .field("project_root", &self.project_root)
+            .field(
+                "has_command_risk_assessor",
+                &self.command_risk_assessor.is_some(),
+            )
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +61,8 @@ pub struct ToolExecutionInput {
 pub struct ToolExecutionOutput {
     pub call_id: String,
     pub tool_name: String,
+    #[serde(default)]
+    pub arguments: Value,
     pub outcome: ToolDispatchOutcome,
     #[serde(default)]
     pub is_error: bool,
@@ -65,7 +89,25 @@ fn build_tool_context(
     registry: &dyn ToolExecutorPort,
     call_id: &str,
     progress_emitter: Option<ToolProgressEmitter>,
-) -> talos_tools::ToolContext {
+) -> TalosResult<talos_tools::ToolContext> {
+    let mut workspace_roots = vec![PathBuf::from(
+        &execution_context.kernel_config.workspace_dir,
+    )];
+    if let Some(project_root) = &execution_context.project_root {
+        workspace_roots.push(project_root.clone());
+    }
+    let workspace_roots = workspace_roots
+        .into_iter()
+        .map(|root| {
+            let root = std::fs::canonicalize(&root).map_err(|error| {
+                TalosError::ToolError(format!("resolve sandbox root {}: {error}", root.display()))
+            })?;
+            AbsolutePathBuf::new(root)
+                .map_err(|error| TalosError::ToolError(format!("resolve sandbox root: {error}")))
+        })
+        .collect::<TalosResult<Vec<_>>>()?;
+    let sandbox_environment = ToolSandboxEnvironment::local(workspace_roots, Vec::new())
+        .map_err(|error| TalosError::ToolError(format!("resolve sandbox environment: {error}")))?;
     let ctx = registry
         .build_context(
             execution_context.session_id.clone(),
@@ -73,7 +115,8 @@ fn build_tool_context(
             Some(execution_context.kernel_config.clone()),
         )
         .with_turn_id(execution_context.turn_id.clone())
-        .with_agent_id(execution_context.agent_id.clone());
+        .with_agent_id(execution_context.agent_id.clone())
+        .with_sandbox_environment(sandbox_environment);
     let ctx = if let Some(project_root) = execution_context.project_root.clone() {
         ctx.with_project_root(project_root)
     } else {
@@ -83,6 +126,11 @@ fn build_tool_context(
         user_id: execution_context.user_id.clone(),
         workspace_root: execution_context.kernel_config.workspace_dir.clone().into(),
     });
+    let ctx = if let Some(assessor) = execution_context.command_risk_assessor.clone() {
+        ctx.with_command_risk_assessor(assessor)
+    } else {
+        ctx
+    };
     if let Some(result) = execution_context.dynamic_tool_results.get(call_id) {
         ctx.set_dynamic_tool_result(
             call_id.to_string(),
@@ -92,10 +140,16 @@ fn build_tool_context(
             },
         );
     }
+    if let Some(response) = execution_context.user_action_responses.get(call_id) {
+        ctx.set_user_action_response(call_id.to_string(), response.clone());
+    }
+    if let Some(fingerprint) = execution_context.sandbox_approval_fingerprints.get(call_id) {
+        ctx.set_sandbox_approval_fingerprint(call_id.to_string(), fingerprint.clone());
+    }
     if let Some(emitter) = progress_emitter {
-        ctx.with_progress_emitter(emitter)
+        Ok(ctx.with_progress_emitter(emitter))
     } else {
-        ctx
+        Ok(ctx)
     }
 }
 
@@ -111,18 +165,22 @@ async fn execute_single_tool_call(
         &call.call_id,
         progress_emitter,
     );
-    let result = match call.build_invocation(registry.as_ref()) {
-        Ok(invocation) => {
-            registry
-                .execute_invocation_with_context(invocation, tool_context)
-                .await
-        }
+    let result = match tool_context {
+        Ok(tool_context) => match call.build_invocation(registry.as_ref()) {
+            Ok(invocation) => {
+                registry
+                    .execute_invocation_with_context(invocation, tool_context)
+                    .await
+            }
+            Err(error) => Err(error),
+        },
         Err(error) => Err(error),
     };
     match result {
         Ok(payload) => ToolExecutionOutput {
             call_id: call.call_id,
             tool_name: call.tool_name,
+            arguments: call.arguments,
             is_error: payload
                 .payload()
                 .map(|item| item.is_error())
@@ -141,6 +199,7 @@ async fn execute_single_tool_call(
             ToolExecutionOutput {
                 call_id: call.call_id,
                 tool_name: call.tool_name,
+                arguments: call.arguments,
                 outcome: tool_error_outcome(error),
                 is_error: true,
             }
@@ -196,10 +255,14 @@ impl ToolExecutor for SequentialToolExecutor {
     ) -> TalosResult<Vec<ToolExecutionOutput>> {
         let mut outputs = Vec::with_capacity(calls.len());
         for call in calls {
-            outputs.push(
+            let output =
                 execute_single_tool_call(registry.clone(), execution_context, call.clone(), None)
-                    .await,
-            );
+                    .await;
+            let is_pending = output.outcome.pending().is_some();
+            outputs.push(output);
+            if is_pending {
+                break;
+            }
         }
         Ok(outputs)
     }
@@ -246,18 +309,22 @@ impl ToolExecutor for ParallelToolExecutor {
             let session_id = execution_context.session_id.clone();
             let turn_id = execution_context.turn_id.clone();
             join_set.spawn(async move {
-                let result = match call.build_invocation(registry.as_ref()) {
-                    Ok(invocation) => {
-                        registry
-                            .execute_invocation_with_context(invocation, tool_context)
-                            .await
-                    }
+                let result = match tool_context {
+                    Ok(tool_context) => match call.build_invocation(registry.as_ref()) {
+                        Ok(invocation) => {
+                            registry
+                                .execute_invocation_with_context(invocation, tool_context)
+                                .await
+                        }
+                        Err(error) => Err(error),
+                    },
                     Err(error) => Err(error),
                 };
                 let output = match result {
                     Ok(payload) => ToolExecutionOutput {
                         call_id: call.call_id,
                         tool_name: call.tool_name,
+                        arguments: call.arguments,
                         is_error: payload
                             .payload()
                             .map(|item| item.is_error())
@@ -276,6 +343,7 @@ impl ToolExecutor for ParallelToolExecutor {
                         ToolExecutionOutput {
                             call_id: call.call_id,
                             tool_name: call.tool_name,
+                            arguments: call.arguments,
                             outcome: tool_error_outcome(error),
                             is_error: true,
                         }
@@ -365,6 +433,7 @@ pub struct StreamingToolScheduler {
     running_tasks: JoinSet<(RunningStreamingToolCall, ToolExecutionOutput)>,
     parallel_running: usize,
     serial_running: bool,
+    halted: bool,
 }
 
 impl StreamingToolScheduler {
@@ -389,6 +458,7 @@ impl StreamingToolScheduler {
             running_tasks: JoinSet::new(),
             parallel_running: 0,
             serial_running: false,
+            halted: false,
         }
     }
 
@@ -401,6 +471,9 @@ impl StreamingToolScheduler {
         stream_key: crate::ToolStreamKey,
         input: ToolExecutionInput,
     ) -> TalosResult<()> {
+        if self.halted {
+            return Ok(());
+        }
         let scheduled = ScheduledStreamingToolCall {
             stream_key: stream_key.clone(),
             scheduling_class: self.classify_call(&input.tool_name),
@@ -419,6 +492,7 @@ impl StreamingToolScheduler {
                 TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
             })?;
             self.mark_completed(&running_call);
+            self.halt_if_pending(&output);
             completed.push(StreamingToolExecutionOutput {
                 stream_key: running_call.stream_key,
                 output,
@@ -438,7 +512,10 @@ impl StreamingToolScheduler {
             TalosError::InternalError(format!("streaming tool execution task failed: {error}"))
         })?;
         self.mark_completed(&running_call);
-        self.schedule_ready_calls().await;
+        self.halt_if_pending(&output);
+        if !self.halted {
+            self.schedule_ready_calls().await;
+        }
         Ok(Some(StreamingToolExecutionOutput {
             stream_key: running_call.stream_key,
             output,
@@ -448,7 +525,10 @@ impl StreamingToolScheduler {
     pub async fn finish(&mut self) -> TalosResult<Vec<StreamingToolExecutionOutput>> {
         let mut completed = self.drain_completed().await?;
         loop {
-            if self.pending_calls.is_empty() && self.parallel_running == 0 && !self.serial_running {
+            if (self.halted || self.pending_calls.is_empty())
+                && self.parallel_running == 0
+                && !self.serial_running
+            {
                 break;
             }
             if self.parallel_running == 0 && !self.serial_running {
@@ -478,6 +558,9 @@ impl StreamingToolScheduler {
     }
 
     async fn schedule_ready_calls(&mut self) {
+        if self.halted {
+            return;
+        }
         loop {
             if self.serial_running {
                 return;
@@ -576,6 +659,12 @@ impl StreamingToolScheduler {
             StreamingToolSchedulingClass::SerialOnly => {
                 self.serial_running = false;
             }
+        }
+    }
+
+    fn halt_if_pending(&mut self, output: &ToolExecutionOutput) {
+        if output.outcome.pending().is_some() {
+            self.halted = true;
         }
     }
 

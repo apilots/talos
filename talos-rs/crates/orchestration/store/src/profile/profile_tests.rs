@@ -59,7 +59,7 @@ async fn waiting_usage_is_hidden_until_the_turn_finalizes() {
     store
         .record_turn_usage(update(
             "request-1",
-            StopReason::WaitingDynamicInput,
+            StopReason::WaitingUserAction,
             usage(10, 2),
         ))
         .await
@@ -96,7 +96,7 @@ async fn waiting_usage_is_hidden_until_the_turn_finalizes() {
 #[tokio::test]
 async fn duplicate_execution_segment_is_not_counted_twice() {
     let store = store().await;
-    let waiting = update("request-1", StopReason::WaitingDynamicInput, usage(10, 2));
+    let waiting = update("request-1", StopReason::WaitingUserAction, usage(10, 2));
 
     store.record_turn_usage(waiting.clone()).await.unwrap();
     store.record_turn_usage(waiting).await.unwrap();
@@ -193,7 +193,7 @@ async fn deletion_keeps_recent_and_unfinished_usage() {
     recent.completed_at_ms = 300;
     store.record_turn_usage(recent).await.unwrap();
 
-    let mut unfinished = update("request-4", StopReason::WaitingDynamicInput, usage(40, 5));
+    let mut unfinished = update("request-4", StopReason::WaitingUserAction, usage(40, 5));
     unfinished.session_id = "session-4".to_string();
     unfinished.turn_id = "turn-4".to_string();
     unfinished.completed_at_ms = 50;

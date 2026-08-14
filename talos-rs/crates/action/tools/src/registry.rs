@@ -1,20 +1,7 @@
-use async_trait::async_trait;
-use dashmap::DashMap;
-use serde_json::Value;
-use std::collections::BTreeSet;
-use std::sync::Arc;
-use talos_config::AgentKernelConfig;
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
-use talos_llm_provider::ToolDefinition;
-use talos_memory::MemoryReader;
-use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
-use talos_tools_sandbox::{ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandboxMode};
-use tracing::warn;
-
 use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
-use crate::orchestrator::RegistryOrchestrator;
+use crate::orchestrator::{RegistryOrchestrator, ToolPreparation};
 use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
 use crate::r#trait::Tool;
 use crate::router::ToolRouter;
@@ -25,11 +12,25 @@ use crate::spec::{
 use crate::state::{get_session_tool_state, PermissionMode};
 use crate::AgentControl;
 use crate::ToolContext;
+use async_trait::async_trait;
+use dashmap::DashMap;
+use serde_json::Value;
+use std::collections::BTreeSet;
+use std::sync::Arc;
+use talos_config::AgentKernelConfig;
+use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_llm_provider::ToolDefinition;
+use talos_memory::MemoryReader;
+use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
+use talos_tools_sandbox::{
+    ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandbox, ToolSandboxMode,
+};
+use tracing::warn;
 
-const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 64 * 1024;
-const TOOL_OUTPUT_TRUNCATED_SUFFIX: &str = "\n...[truncated]";
 const GATE_SOURCE_ALLOW_LIST: &str = "allow_list";
 const GATE_SOURCE_TOOL_SEMANTIC: &str = "tool_semantic";
+
+mod output_limits;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolPromptEntry {
@@ -127,6 +128,7 @@ pub struct ToolRegistry {
     policy_checker: ToolPolicyChecker,
     agent_control: DashMap<&'static str, Arc<dyn AgentControl>>,
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
+    sandbox: ToolSandbox,
 }
 
 impl ToolRegistry {
@@ -138,42 +140,6 @@ impl ToolRegistry {
             "Bash" => 3,
             _ => 100,
         }
-    }
-
-    fn resolve_max_output_bytes(context: &ToolContext) -> usize {
-        context
-            .kernel_config()
-            .map(|config| config.tool_result_max_bytes)
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_TOOL_OUTPUT_MAX_BYTES)
-    }
-
-    fn truncate_text(input: &str, max_bytes: usize) -> (String, bool, usize, usize) {
-        let raw_size = input.len();
-        if raw_size <= max_bytes {
-            return (input.to_string(), false, raw_size, raw_size);
-        }
-
-        if max_bytes == 0 {
-            return (String::new(), true, raw_size, 0);
-        }
-
-        if max_bytes <= TOOL_OUTPUT_TRUNCATED_SUFFIX.len() {
-            let suffix = &TOOL_OUTPUT_TRUNCATED_SUFFIX[..max_bytes];
-            return (suffix.to_string(), true, raw_size, suffix.len());
-        }
-
-        let mut cutoff = max_bytes - TOOL_OUTPUT_TRUNCATED_SUFFIX.len();
-        while cutoff > 0 && !input.is_char_boundary(cutoff) {
-            cutoff -= 1;
-        }
-
-        let mut output = String::with_capacity(max_bytes);
-        output.push_str(&input[..cutoff]);
-        output.push_str(TOOL_OUTPUT_TRUNCATED_SUFFIX);
-        let returned_size = output.len();
-
-        (output, true, raw_size, returned_size)
     }
 
     fn annotate_policy_error(error: TalosError) -> TalosError {
@@ -220,90 +186,20 @@ impl ToolRegistry {
         spec
     }
 
-    fn truncate_structured_error(
-        value: &mut Option<Value>,
-        max_output_bytes: usize,
-    ) -> Option<(usize, usize)> {
-        let payload = value.as_mut()?;
-        let object = payload.as_object_mut()?;
-        let error_value = object.get_mut("error")?;
-        let error_text = error_value.as_str()?;
-
-        let (limited, truncated, raw_size, returned_size) =
-            Self::truncate_text(error_text, max_output_bytes);
-        if truncated {
-            *error_value = Value::String(limited);
-            Some((raw_size, returned_size))
-        } else {
-            None
-        }
-    }
-
-    fn enforce_output_limits(
-        tool_name: &str,
-        mut result: ToolDispatchOutcome,
-        max_output_bytes: usize,
-    ) -> ToolDispatchOutcome {
-        let Some(payload) = (match &mut result {
-            ToolDispatchOutcome::Executed { payload } => Some(payload),
-            ToolDispatchOutcome::Pending { .. } => None,
-        }) else {
-            return result;
-        };
-        let (content_truncated, content_raw_size, content_returned_size) = match payload {
-            ToolOutputPayload::Function { content, .. }
-            | ToolOutputPayload::Resource { content, .. }
-            | ToolOutputPayload::Mcp { content, .. } => {
-                let (limited, truncated, raw_size, returned_size) =
-                    Self::truncate_text(content, max_output_bytes);
-                *content = limited;
-                (truncated, raw_size, returned_size)
-            }
-        };
-        let mut error_raw_size = 0;
-        let mut error_returned_size = 0;
-        let mut error_truncated = false;
-
-        if let ToolOutputPayload::Function {
-            structured_content, ..
-        } = payload
-        {
-            if let Some((raw_size, returned_size)) =
-                Self::truncate_structured_error(structured_content, max_output_bytes)
-            {
-                error_truncated = true;
-                error_raw_size = raw_size;
-                error_returned_size = returned_size;
-            }
-        }
-
-        if content_truncated || error_truncated {
-            warn!(
-                tool_name = tool_name,
-                max_output_bytes = max_output_bytes,
-                output_raw_size = content_raw_size,
-                output_returned_size = content_returned_size,
-                error_raw_size = error_raw_size,
-                error_returned_size = error_returned_size,
-                "tool result exceeded size limit and was truncated"
-            );
-        }
-
-        result
-    }
-
     fn register_local_tool(&self, tool: Arc<dyn Tool>) {
         let tool_name = tool.internal_name().to_string();
         let mutating = tool.mutating();
         let source = tool.source();
+        let sandbox_operation = tool.sandbox_operation();
         let spec = RegisteredToolSpec::new(
             ToolDefinition::new(tool.name(), tool.description(), tool.parameters_schema()),
             source,
             tool.payload_kind(),
             tool.parallelism(),
             mutating,
-            Self::default_governance(tool.internal_name(), source),
+            Self::default_governance(tool.internal_name(), source, sandbox_operation),
         )
+        .with_optional_sandbox_operation(sandbox_operation)
         .with_internal_name(tool.internal_name())
         .with_aliases(tool.aliases().iter().copied())
         .with_visibility(tool.visibility())
@@ -317,12 +213,21 @@ impl ToolRegistry {
         );
     }
 
-    fn default_governance(name: &str, source: ToolSource) -> ToolGovernanceSpec {
+    fn default_governance(
+        name: &str,
+        source: ToolSource,
+        sandbox_operation: Option<talos_tools_sandbox::ToolSandboxOperationKind>,
+    ) -> ToolGovernanceSpec {
         match name {
             "bash" => ToolGovernanceSpec {
                 preferred_sandbox: ToolSandboxMode::UseDefault,
                 argument_override: ToolGovernanceArgumentOverride::BashCommandPermissions,
-                retry_without_sandbox: true,
+                escalation: talos_tools_sandbox::ToolEscalationPolicy::RequiresApproval,
+            },
+            _ if sandbox_operation.is_some() => ToolGovernanceSpec {
+                preferred_sandbox: ToolSandboxMode::UseDefault,
+                argument_override: ToolGovernanceArgumentOverride::None,
+                escalation: talos_tools_sandbox::ToolEscalationPolicy::RequiresApproval,
             },
             _ => default_governance_for_source(source),
         }
@@ -451,6 +356,19 @@ impl ToolRegistry {
 
     /// Create a new registry with a custom policy.
     pub fn new_with_policy(policy: ToolPolicy) -> Self {
+        Self::new_with_policy_and_sandbox(policy, ToolSandbox::new())
+    }
+
+    /// Creates a registry with the default tool policy and an assembled sandbox facade.
+    pub fn new_with_sandbox(sandbox: ToolSandbox) -> Self {
+        Self::new_with_policy_and_sandbox(ToolPolicy::default(), sandbox)
+    }
+
+    /// Creates a registry with an explicitly assembled sandbox facade.
+    ///
+    /// Runtime composition owns provider selection; tool handlers only receive
+    /// invocation-bound permits produced by this facade.
+    pub fn new_with_policy_and_sandbox(policy: ToolPolicy, sandbox: ToolSandbox) -> Self {
         Self {
             specs: DashMap::new(),
             handlers: DashMap::new(),
@@ -458,6 +376,7 @@ impl ToolRegistry {
             policy_checker: ToolPolicyChecker::new(policy),
             agent_control: DashMap::new(),
             memory_reader: DashMap::new(),
+            sandbox,
         }
     }
 
@@ -571,12 +490,12 @@ impl ToolRegistry {
         invocation: ToolInvocation,
         context: ToolContext,
     ) -> TalosResult<ToolDispatchOutcome> {
-        let max_output_bytes = Self::resolve_max_output_bytes(&context);
+        let max_output_bytes = output_limits::resolve_max_output_bytes(&context);
         let tool_name = invocation.tool_name.clone();
         let result = self
             .dispatch(invocation, ToolDispatchContext::new(context))
             .await?;
-        Ok(Self::enforce_output_limits(
+        Ok(output_limits::enforce_output_limits(
             tool_name.as_str(),
             result,
             max_output_bytes,
@@ -586,15 +505,14 @@ impl ToolRegistry {
     pub async fn dispatch(
         &self,
         invocation: ToolInvocation,
-        context: ToolDispatchContext,
+        mut context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         let catalog = self.tool_catalog();
         let invocation = self.router.normalize(invocation, &catalog)?;
+        context
+            .tool_context_mut()
+            .bind_current_call_id(invocation.call_id.clone());
         let spec = catalog.find(invocation.tool_name.as_str()).cloned();
-        let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
-        if let Some(pending) = orchestrator.resolve_pending(&invocation, &context, spec.as_ref())? {
-            return Ok(pending);
-        }
         let Some(handler) = spec.as_ref().and_then(|item| {
             self.handlers
                 .get(item.internal_name.as_str())
@@ -615,6 +533,44 @@ impl ToolRegistry {
             .pre_execute(&invocation, &context)
             .await
             .map_err(Self::annotate_pre_execute_error)?;
+        let file_system_access = handler
+            .requested_file_system_access(&invocation, &context)
+            .map_err(Self::annotate_pre_execute_error)?;
+        let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
+        match orchestrator
+            .prepare_execution(
+                &invocation,
+                &mut context,
+                spec.as_ref(),
+                file_system_access,
+                &self.sandbox,
+            )
+            .await?
+        {
+            ToolPreparation::Ready => {}
+            ToolPreparation::RequiresApproval {
+                params,
+                request_fingerprint,
+            } => {
+                return Ok(ToolDispatchOutcome::pending_sandbox_approval(
+                    invocation.tool_name,
+                    params,
+                    request_fingerprint,
+                ));
+            }
+            ToolPreparation::Rejected => {
+                return Ok(ToolDispatchOutcome::executed(
+                    ToolOutputPayload::failure_structured(
+                        "sandbox approval denied",
+                        Some(serde_json::json!({
+                            "error": "sandbox approval denied",
+                            "error_kind": TalosToolErrorKind::PermissionRejection,
+                            "gate_source": "sandbox_policy"
+                        })),
+                    ),
+                ));
+            }
+        }
         handler.handle(invocation, context).await
     }
 

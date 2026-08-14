@@ -9,7 +9,9 @@ async fn glob_returns_sorted_paginated_search_results() {
     tokio::fs::write(dir.path().join("a.rs"), "")
         .await
         .expect("write should succeed");
-    let context = crate::ToolContext::new("session", "user").with_project_root(dir.path());
+    let context = crate::test_support::full_access_file_context(
+        crate::ToolContext::new("session", "user").with_project_root(dir.path()),
+    );
 
     let result = run(
         &GlobFilesRequest {

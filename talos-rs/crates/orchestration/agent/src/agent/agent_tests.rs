@@ -9,16 +9,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_agent_kernel::{
     AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextPhase,
-    AssistantTextStartedStreamData, ContextCompactionStreamData, DynamicToolRequestStreamData,
-    ExecutionSummaryStreamData, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData,
-    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey,
+    AssistantTextStartedStreamData, ContextCompactionStreamData, ExecutionSummaryStreamData,
+    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
+    KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData, ToolArgsDeltaStreamData,
+    ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey, UserActionRequestStreamData,
 };
 use talos_config::{AgentKernelConfig, ProviderModelConfig};
 use talos_llm_provider::{
-    ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ModelBlockCompleted,
-    ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelOutputPhase,
-    ReasoningContinuation, ReasoningOutput, Role, ToolDefinition, Usage,
+    ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter,
+    ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
+    ModelBlockStreamEvent, ModelOutputPhase, ReasoningContinuation, ReasoningOutput, Role,
+    ToolDefinition, Usage,
 };
 use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_store::session::{self as session_artifacts, FileSessionArtifactStore};
@@ -38,6 +39,8 @@ use talos_types::talos::{
 
 #[path = "message_input_tests.rs"]
 mod message_input_tests;
+#[path = "resume_tests.rs"]
+mod resume_tests;
 #[path = "run_validation_tests.rs"]
 mod run_validation_tests;
 use talos_types::{
@@ -222,14 +225,26 @@ async fn submit_dynamic_tool_result(
         .submit_input(AgentInputParams {
             session,
             turn_id: "turn-input".to_string(),
-            input: AgentInput::DynamicToolResult {
+            input: AgentInput::UserActionResponse {
                 call_id: call_id.to_string(),
                 tool_name: tool_name.to_string(),
-                output: output.to_string(),
-                success,
+                response: dynamic_user_action_response(output, success),
             },
         })
         .await
+}
+
+fn dynamic_user_action_params(tool_name: &str) -> talos_types::UserActionParams {
+    talos_types::UserActionParams::DynamicToolResult(talos_types::DynamicToolResultParams {
+        tool_name: tool_name.to_string(),
+    })
+}
+
+fn dynamic_user_action_response(output: &str, success: bool) -> talos_types::UserActionResponse {
+    talos_types::UserActionResponse::DynamicToolResult(talos_types::DynamicToolResult {
+        output: output.to_string(),
+        success,
+    })
 }
 
 async fn interrupt_session(
@@ -603,6 +618,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
         user_id: "talos-test-local-user".to_string(),
         conf: SessionConf {
             model_selection: Some(model_selection("gpt-4o")),
+            ..SessionConf::default()
         },
         project_id: None,
         current_directory: None,
@@ -622,6 +638,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             environment: None,
         },
         config,
+        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 1,
             last_activity: 1,
@@ -629,6 +646,17 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             usage: TokenUsage::default(),
         },
     }
+}
+
+#[test]
+fn agent_run_config_carries_resolved_permission_mode() {
+    let mut session = build_test_session("session-mode", "workspace-mode");
+    session.effective_user_permission_mode = talos_types::UserPermissionMode::AskForApproval;
+
+    assert_eq!(
+        AgentRunConfig::from_session(&session).user_permission_mode,
+        talos_types::UserPermissionMode::AskForApproval
+    );
 }
 
 fn agent_run_params(
@@ -655,6 +683,7 @@ fn agent_run_config_resolves_deepseek_provider_config() {
             provider: "deepseek".to_string(),
             id: "deepseek-v4-pro".to_string(),
         }),
+        user_permission_mode: talos_types::UserPermissionMode::FullAccess,
     };
 
     assert_eq!(
@@ -835,11 +864,14 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
         &mut timeline,
         &mut state,
         KernelStreamEvent::new(
-            KernelStreamEventType::DynamicToolRequest,
-            KernelStreamEventData::DynamicToolRequest(DynamicToolRequestStreamData {
+            KernelStreamEventType::UserActionRequest,
+            KernelStreamEventData::UserActionRequest(UserActionRequestStreamData {
+                action_id: "ua-dynamic".to_string(),
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_test".to_string(),
                 arguments: json!({"message": "ping"}),
+                params: dynamic_user_action_params("echo_test"),
+                sandbox_request_fingerprint: None,
             }),
         ),
     )
@@ -851,7 +883,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
                 && matches!(
                     payload.delta,
                     TalosTimelineDelta::Status {
-                        status: TalosTimelineItemStatus::WaitingDynamicInput
+                        status: TalosTimelineItemStatus::WaitingUserAction
                     }
                 )
         }
@@ -860,7 +892,12 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
     assert!(dynamic_events.iter().any(|event| match &event.payload {
         AgentEventPayload::ItemDelta(payload) => {
             payload.item_id == tool_item_id
-                && matches!(payload.delta, TalosTimelineDelta::ToolDynamicRequest { .. })
+                && matches!(
+                    payload.delta,
+                    TalosTimelineDelta::UserAction {
+                        event: talos_types::TimelineUserActionEvent::Requested { .. }
+                    }
+                )
         }
         _ => false,
     }));
@@ -869,7 +906,7 @@ fn test_dynamic_request_marks_timeline_item_waiting_dynamic_input() {
             .item(&tool_item_id)
             .expect("tool item should exist")
             .status,
-        TalosTimelineItemStatus::WaitingDynamicInput
+        TalosTimelineItemStatus::WaitingUserAction
     );
 }
 
@@ -1311,161 +1348,56 @@ async fn test_run_generates_title_update_for_first_turn() {
 }
 
 #[tokio::test]
-async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
-    let temp_dir = tempfile::tempdir().expect("temp dir should be created");
-    let provider = Arc::new(DynamicResumeAgentProvider {
-        calls: AtomicUsize::new(0),
-    });
-    let registry = Arc::new(ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec![
-        "echo_dynamic",
-    ])));
-    registry.register_external_dynamic_tool(RegisteredToolSpec::new(
-        ToolDefinition::new(
-            "echo_dynamic",
-            "External dynamic echo tool",
-            Some(json!({
-                "type": "object",
-                "properties": {
-                    "message": { "type": "string" }
-                }
-            })),
-        ),
-        ToolSource::Dynamic,
-        ToolPayloadKind::Function,
-        ToolParallelism::ParallelSafe,
-        false,
-        default_governance_for_source(ToolSource::Dynamic),
-    ));
-    let mut kernel_config = AgentKernelConfig::default();
-    kernel_config.prompt.bootstrap.enabled = false;
-    kernel_config.workspace_dir = temp_dir.path().display().to_string();
+async fn title_generation_accepts_user_input_before_final_assistant_output() {
+    let agent = build_test_agent();
+    let mut session = build_test_session("session-title-waiting", "workspace-1");
+    session.state.message_count = 0;
+    session.title = DEFAULT_SESSION_TITLE.to_string();
+    let session_state = AgentRunSessionState::from_session(&session);
+    let run_config = AgentRunConfig::from_session(&session);
+
+    let title = agent
+        .generate_session_title(
+            &session_state,
+            &run_config,
+            "Analyze ADK code and build a mock demo",
+            "",
+        )
+        .await;
+
+    assert_eq!(title.as_deref(), Some("Test response"));
+}
+
+#[tokio::test]
+async fn title_generation_falls_back_when_provider_is_unavailable() {
     let agent = test_agent_harness(
         "test_agent".to_string(),
         "Test Agent".to_string(),
         "An agent for testing".to_string(),
-        static_router(provider.clone()),
-        model_selection("mock-model"),
-        registry,
-        kernel_config,
+        static_router(Arc::new(FailingTitleLlmProvider)),
+        model_selection("gpt-4o"),
+        Arc::new(ToolRegistry::new()),
+        Default::default(),
     )
     .expect("agent harness should build");
-    let session_id = "session-dynamic-main-resume";
-    let mut session = build_test_session(session_id, "workspace-1");
-    session.config.agent.kernel.prompt.bootstrap.enabled = false;
-    session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
-    session.config.agent.kernel.output.max_tokens = 256;
-    let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
-        .expect("session workspace should resolve");
-    let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
-    let request_record = session_artifacts::SessionTranscriptRecord {
-        header: session_artifacts::SessionTranscriptHeader {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session_id.to_string(),
-            invocation_id: "turn-original".to_string(),
-            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
-            timestamp: Utc::now(),
-        },
-        author: session_artifacts::SessionTranscriptAuthor::System,
-        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
-            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
-                call_id: "call-dynamic".to_string(),
-                tool_name: "echo_dynamic".to_string(),
-                arguments: json!({ "message": "ping" }).into(),
-                reasoning_continuation: Some(ReasoningContinuation::Text(
-                    "dynamic provider continuation".to_string(),
-                )),
-            },
-        },
-        actions: session_artifacts::SessionTranscriptActions::default(),
-        partial: false,
-    };
-    let response_record = session_artifacts::SessionTranscriptRecord {
-        header: session_artifacts::SessionTranscriptHeader {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session_id.to_string(),
-            invocation_id: "turn-original".to_string(),
-            branch: session_artifacts::SessionTranscriptBranch::ReactiveLoop,
-            timestamp: Utc::now(),
-        },
-        author: session_artifacts::SessionTranscriptAuthor::System,
-        kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
-            payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
-                call_id: "call-dynamic".to_string(),
-                tool_name: "echo_dynamic".to_string(),
-                output: "dynamic pong".to_string(),
-                success: true,
-            },
-        },
-        actions: session_artifacts::SessionTranscriptActions::default(),
-        partial: false,
-    };
-    append_transcript_record(&workspace_root, &request_record)
-        .await
-        .expect("dynamic request record should append");
-    append_transcript_record(&workspace_root, &response_record)
-        .await
-        .expect("dynamic response record should append");
+    let mut session = build_test_session("session-title-fallback", "workspace-1");
+    session.title = DEFAULT_SESSION_TITLE.to_string();
+    let session_state = AgentRunSessionState::from_session(&session);
+    let run_config = AgentRunConfig::from_session(&session);
 
-    let mut request = agent_run_params(session, "turn-original", Vec::new());
-    request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
-            item_id: "tool-item-original".to_string(),
-            call_id: "call-dynamic".to_string(),
-            tool_name: "echo_dynamic".to_string(),
-        }),
-    });
-    let mut stream = agent
-        .resume_streamed(AgentResumeParams::new(request))
-        .await
-        .expect("resume stream should start");
+    let title = agent
+        .generate_session_title(
+            &session_state,
+            &run_config,
+            "Analyze ADK code and build a mock demo.",
+            "",
+        )
+        .await;
 
-    let mut saw_tool_result = false;
-    let mut saw_final_answer = false;
-    while let Some(event) = stream.recv().await {
-        match event.payload {
-            AgentEventPayload::ItemDelta(payload) => match payload.delta {
-                talos_types::talos::TalosTimelineDelta::ToolResult { content, .. } => {
-                    saw_tool_result = content.iter().any(|item| {
-                        matches!(
-                            item,
-                            TalosContentItem::Text { text }
-                                if text.contains("dynamic pong")
-                        ) || matches!(
-                            item,
-                            TalosContentItem::Json { value }
-                                if value.to_string().contains("dynamic pong")
-                        )
-                    });
-                }
-                talos_types::talos::TalosTimelineDelta::Text { text }
-                    if text.contains("Final answer after dynamic pong.") =>
-                {
-                    saw_final_answer = true;
-                }
-                _ => {}
-            },
-            AgentEventPayload::TurnCompleted(payload) => {
-                assert_eq!(payload.stop_reason, TalosStopReason::EndTurn);
-                break;
-            }
-            AgentEventPayload::TurnError(payload) => {
-                panic!("resume stream failed: {}", payload.error);
-            }
-            _ => {}
-        }
-    }
-
-    assert!(
-        saw_tool_result,
-        "dynamic resume should emit replayed tool result"
+    assert_eq!(
+        title.as_deref(),
+        Some("Analyze ADK code and build a mock demo")
     );
-    assert!(
-        saw_final_answer,
-        "model loop should continue after dynamic replay"
-    );
-    assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -1539,12 +1471,22 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
         },
         author: session_artifacts::SessionTranscriptAuthor::System,
         kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
-            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
+        payload: session_artifacts::SessionTranscriptPayload::UserActionRequest {
+            payload: session_artifacts::SessionTranscriptUserActionRequestPayload {
+                action_id: "ua-call-1".to_string(),
                 call_id: "call-1".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({ "name": "Talos" }).into(),
+                params: dynamic_user_action_params("skill_greet"),
+                sandbox_request_fingerprint: None,
                 reasoning_continuation: None,
+                tool_calls: vec![FunctionCall::new(
+                    "call-1",
+                    "skill_greet",
+                    json!({ "name": "Talos" }),
+                )],
+                tool_messages: Vec::new(),
+                deferred_tool_calls: Vec::new(),
             },
         },
         actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1606,12 +1548,18 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
         },
         author: session_artifacts::SessionTranscriptAuthor::System,
         kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
-            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
+        payload: session_artifacts::SessionTranscriptPayload::UserActionRequest {
+            payload: session_artifacts::SessionTranscriptUserActionRequestPayload {
+                action_id: "ua-timeout".to_string(),
                 call_id: "call-timeout".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
+                params: dynamic_user_action_params("skill_greet"),
+                sandbox_request_fingerprint: None,
                 reasoning_continuation: None,
+                tool_calls: vec![FunctionCall::new("call-timeout", "skill_greet", json!({}))],
+                tool_messages: Vec::new(),
+                deferred_tool_calls: Vec::new(),
             },
         },
         actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1648,12 +1596,22 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
         },
         author: session_artifacts::SessionTranscriptAuthor::System,
         kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
-            payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
+        payload: session_artifacts::SessionTranscriptPayload::UserActionRequest {
+            payload: session_artifacts::SessionTranscriptUserActionRequestPayload {
+                action_id: "ua-wrong-turn".to_string(),
                 call_id: "call-wrong-turn".to_string(),
                 tool_name: "skill_greet".to_string(),
                 arguments: json!({}).into(),
+                params: dynamic_user_action_params("skill_greet"),
+                sandbox_request_fingerprint: None,
                 reasoning_continuation: None,
+                tool_calls: vec![FunctionCall::new(
+                    "call-wrong-turn",
+                    "skill_greet",
+                    json!({}),
+                )],
+                tool_messages: Vec::new(),
+                deferred_tool_calls: Vec::new(),
             },
         },
         actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1667,11 +1625,10 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
         .submit_input(AgentInputParams {
             session: session.clone(),
             turn_id: "turn-other".to_string(),
-            input: AgentInput::DynamicToolResult {
+            input: AgentInput::UserActionResponse {
                 call_id: "call-wrong-turn".to_string(),
                 tool_name: "skill_greet".to_string(),
-                output: "wrong turn output".to_string(),
-                success: true,
+                response: dynamic_user_action_response("wrong turn output", true),
             },
         })
         .await
@@ -1691,7 +1648,7 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
     assert!(records.iter().all(|record| {
         !matches!(
             record.payload,
-            session_artifacts::SessionTranscriptPayload::DynamicToolResponse { .. }
+            session_artifacts::SessionTranscriptPayload::UserActionResponse { .. }
         )
     }));
 }
@@ -1734,12 +1691,22 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
             },
             author: session_artifacts::SessionTranscriptAuthor::System,
             kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-            payload: session_artifacts::SessionTranscriptPayload::DynamicToolRequest {
-                payload: session_artifacts::SessionTranscriptDynamicToolRequestPayload {
+            payload: session_artifacts::SessionTranscriptPayload::UserActionRequest {
+                payload: session_artifacts::SessionTranscriptUserActionRequestPayload {
+                    action_id: "ua-dynamic".to_string(),
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
                     arguments: json!({ "message": "ping" }).into(),
+                    params: dynamic_user_action_params("echo_dynamic"),
+                    sandbox_request_fingerprint: None,
                     reasoning_continuation: None,
+                    tool_calls: vec![FunctionCall::new(
+                        "call-dynamic",
+                        "echo_dynamic",
+                        json!({ "message": "ping" }),
+                    )],
+                    tool_messages: Vec::new(),
+                    deferred_tool_calls: Vec::new(),
                 },
             },
             actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1755,12 +1722,11 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
             },
             author: session_artifacts::SessionTranscriptAuthor::System,
             kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-            payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
-                payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
+            payload: session_artifacts::SessionTranscriptPayload::UserActionResponse {
+                payload: session_artifacts::SessionTranscriptUserActionResponsePayload {
                     call_id: "call-dynamic".to_string(),
                     tool_name: "echo_dynamic".to_string(),
-                    output: "dynamic pong".to_string(),
-                    success: true,
+                    response: dynamic_user_action_response("dynamic pong", true),
                 },
             },
             actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1774,11 +1740,13 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
 
     let mut request = agent_run_params(session, "turn-other", Vec::new());
     request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
+        pending_call_id: "call-dynamic".to_string(),
+        tool_calls: vec![AgentDispatchResumeToolCall {
             item_id: "tool-item-original".to_string(),
             call_id: "call-dynamic".to_string(),
             tool_name: "echo_dynamic".to_string(),
-        }),
+        }],
+        execution_metrics: Default::default(),
     });
     let mut stream = agent
         .resume_streamed(AgentResumeParams::new(request))
@@ -1822,7 +1790,11 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
 
     let mut request = agent_run_params(session, "turn-missing-tool-call", Vec::new());
-    request.resume_context = Some(AgentDispatchResumeContext { tool_call: None });
+    request.resume_context = Some(AgentDispatchResumeContext {
+        pending_call_id: "call-dynamic".to_string(),
+        tool_calls: Vec::new(),
+        execution_metrics: Default::default(),
+    });
     let mut stream = agent
         .resume_streamed(AgentResumeParams::new(request))
         .await
@@ -1834,7 +1806,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         .expect("missing tool call should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("missing tool call metadata"));
+            assert!(payload.error.contains("missing pending tool call"));
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -1862,11 +1834,13 @@ async fn test_run_streamed_rejects_resume_context() {
     let session = build_test_session("session-stream-with-resume-context", "workspace-1");
     let mut request = agent_run_params(session, "turn-stream-with-resume-context", Vec::new());
     request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
+        pending_call_id: "call-dynamic".to_string(),
+        tool_calls: vec![AgentDispatchResumeToolCall {
             item_id: "tool-item-original".to_string(),
             call_id: "call-dynamic".to_string(),
             tool_name: "echo_dynamic".to_string(),
-        }),
+        }],
+        execution_metrics: Default::default(),
     });
 
     let error = match agent.run_streamed(request).await {
@@ -1916,12 +1890,11 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
         },
         author: session_artifacts::SessionTranscriptAuthor::System,
         kind: session_artifacts::SessionTranscriptEventKind::SystemMessage,
-        payload: session_artifacts::SessionTranscriptPayload::DynamicToolResponse {
-            payload: session_artifacts::SessionTranscriptDynamicToolResponsePayload {
+        payload: session_artifacts::SessionTranscriptPayload::UserActionResponse {
+            payload: session_artifacts::SessionTranscriptUserActionResponsePayload {
                 call_id: "call-dynamic".to_string(),
                 tool_name: "echo_dynamic".to_string(),
-                output: "dynamic pong".to_string(),
-                success: true,
+                response: dynamic_user_action_response("dynamic pong", true),
             },
         },
         actions: session_artifacts::SessionTranscriptActions::default(),
@@ -1933,11 +1906,13 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
 
     let mut request = agent_run_params(session, "turn-original", Vec::new());
     request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
+        pending_call_id: "call-dynamic".to_string(),
+        tool_calls: vec![AgentDispatchResumeToolCall {
             item_id: "tool-item-original".to_string(),
             call_id: "call-dynamic".to_string(),
             tool_name: "echo_dynamic".to_string(),
-        }),
+        }],
+        execution_metrics: Default::default(),
     });
     let mut stream = agent
         .resume_streamed(AgentResumeParams::new(request))
@@ -2378,6 +2353,38 @@ async fn test_run_rejects_second_active_turn_for_same_session() {
 }
 
 struct MockLlmProvider;
+
+struct FailingTitleLlmProvider;
+
+#[async_trait::async_trait]
+impl LlmProvider for FailingTitleLlmProvider {
+    fn name(&self) -> &str {
+        "failing-title"
+    }
+
+    fn default_model(&self) -> String {
+        "mock-model".to_string()
+    }
+
+    async fn chat(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
+        Err(TalosError::InternalError(
+            "title provider unavailable".to_string(),
+        ))
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        drop(tx);
+        Ok(ChatStream { rx })
+    }
+
+    async fn stream_model_blocks(
+        &self,
+        _request: ChatRequest,
+    ) -> talos_error::TalosResult<ModelBlockStream> {
+        Ok(single_text_block_stream("unused"))
+    }
+}
 
 #[async_trait::async_trait]
 impl LlmProvider for MockLlmProvider {

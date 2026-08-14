@@ -188,7 +188,7 @@ pub enum KernelStreamEventType {
     ToolProgressDelta,
     ToolResult,
     PromptWarning,
-    DynamicToolRequest,
+    UserActionRequest,
     ContextCompaction,
 }
 
@@ -226,7 +226,7 @@ pub enum KernelStreamEventData {
     ToolProgressDelta(ToolProgressDeltaStreamData),
     ToolResult(ToolResultStreamData),
     PromptWarning(PromptWarningEventData),
-    DynamicToolRequest(DynamicToolRequestStreamData),
+    UserActionRequest(UserActionRequestStreamData),
     ContextCompaction(ContextCompactionStreamData),
 }
 
@@ -287,10 +287,13 @@ pub struct ToolStreamKey {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DynamicToolRequestStreamData {
+pub struct UserActionRequestStreamData {
+    pub action_id: String,
     pub call_id: String,
     pub tool_name: String,
     pub arguments: Value,
+    pub params: talos_types::UserActionParams,
+    pub sandbox_request_fingerprint: Option<String>,
 }
 
 /// Kernel stream payload for run-internal context compaction lifecycle updates.
@@ -405,7 +408,7 @@ pub enum KernelThinkingStage {
 pub enum StopReason {
     EndTurn,
     ModelOutputLimit,
-    WaitingDynamicInput,
+    WaitingUserAction,
     TransferUnresolved,
 }
 
@@ -595,10 +598,17 @@ impl TryFrom<&talos_config::AgentKernelConfig> for KernelExecutionSettings {
 
     fn try_from(config: &talos_config::AgentKernelConfig) -> TalosResult<Self> {
         let planner_kind = config.planner_mode;
-        let tool_execution_mode = if config.tool_parallelism > 1 {
-            ToolExecutionMode::Parallel
-        } else {
-            ToolExecutionMode::Sequential
+        let tool_execution_mode = match config.tools.sandbox_policy.user_permission_mode {
+            talos_config::ToolUserPermissionModeConfig::FullAccess
+                if config.tool_parallelism > 1 =>
+            {
+                ToolExecutionMode::Parallel
+            }
+            talos_config::ToolUserPermissionModeConfig::AskForApproval
+            | talos_config::ToolUserPermissionModeConfig::ApproveForMe
+            | talos_config::ToolUserPermissionModeConfig::FullAccess => {
+                ToolExecutionMode::Sequential
+            }
         };
 
         Ok(Self {

@@ -15,6 +15,17 @@ struct DynamicResumeProvider {
     round: AtomicUsize,
 }
 
+#[derive(Clone, Copy)]
+enum QuestionProviderMode {
+    Initial,
+    Resume,
+}
+
+struct QuestionProvider {
+    mode: QuestionProviderMode,
+    round: AtomicUsize,
+}
+
 #[derive(Default)]
 struct ToolSearchActivationProvider {
     round: AtomicUsize,
@@ -139,6 +150,113 @@ impl LlmProvider for DynamicResumeProvider {
 
     fn default_model(&self) -> String {
         "dynamic-resume".to_string()
+    }
+}
+
+#[async_trait]
+impl LlmProvider for QuestionProvider {
+    fn name(&self) -> &str {
+        "question"
+    }
+
+    async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        self.chat_with_tools(request).await
+    }
+
+    async fn chat_with_tools(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
+        assert_eq!(self.round.fetch_add(1, Ordering::SeqCst), 0);
+        match self.mode {
+            QuestionProviderMode::Initial => Ok(ChatResponse {
+                content: String::new(),
+                reasoning: ReasoningOutput {
+                    display_text: vec!["ask for execution mode".to_string()],
+                    continuation: Some(ReasoningContinuation::Text(
+                        "question continuation".to_string(),
+                    )),
+                },
+                model: request.model,
+                usage: Usage::default(),
+                finish_reason: Some("tool_calls".to_string()),
+                tool_calls: Some(vec![FunctionCall::new(
+                    "call-question",
+                    "AskUserQuestion",
+                    json!({
+                        "header": "Execution Mode",
+                        "question": "How should the agent proceed?",
+                        "options": [
+                            {"id": "plan", "label": "Plan", "description": "Think first"},
+                            {"id": "direct", "label": "Direct", "description": "Act now"}
+                        ]
+                    }),
+                )]),
+            }),
+            QuestionProviderMode::Resume => {
+                let tool_messages = request
+                    .messages
+                    .iter()
+                    .filter(|message| {
+                        message.role == talos_llm_provider::Role::Tool
+                            && message.name.as_deref() == Some("AskUserQuestion")
+                    })
+                    .collect::<Vec<_>>();
+                assert_eq!(tool_messages.len(), 3);
+                assert_eq!(
+                    tool_messages
+                        .iter()
+                        .filter_map(|message| message.tool_call_id.as_deref())
+                        .collect::<Vec<_>>(),
+                    vec!["call-question", "call-question-2", "call-question-3"]
+                );
+                assert!(tool_messages.iter().all(|message| {
+                    message.content.contains("selectedOption")
+                        && message.content.contains("plan")
+                        && message.content.contains("How should the agent proceed?")
+                }));
+                let assistant_message = request
+                    .messages
+                    .iter()
+                    .find(|message| {
+                        message.role == talos_llm_provider::Role::Assistant
+                            && message.tool_calls.as_ref().is_some_and(|calls| {
+                                calls.iter().any(|call| call.name == "AskUserQuestion")
+                            })
+                    })
+                    .expect("question resume should preserve its assistant tool call");
+                assert_eq!(
+                    assistant_message
+                        .tool_calls
+                        .as_ref()
+                        .expect("assistant tool calls")
+                        .iter()
+                        .map(|call| call.id.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["call-question", "call-question-2", "call-question-3"]
+                );
+                assert_eq!(
+                    assistant_message.reasoning_continuation,
+                    Some(ReasoningContinuation::Text(
+                        "question continuation".to_string()
+                    ))
+                );
+                Ok(ChatResponse {
+                    content: "Proceeding with a plan.".to_string(),
+                    reasoning: ReasoningOutput::default(),
+                    model: request.model,
+                    usage: Usage::default(),
+                    finish_reason: Some("stop".to_string()),
+                    tool_calls: None,
+                })
+            }
+        }
+    }
+
+    async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
+        let (_tx, rx) = mpsc::channel::<TalosResult<ChatChunk>>(1);
+        Ok(ChatStream::new(rx))
+    }
+
+    fn default_model(&self) -> String {
+        "question".to_string()
     }
 }
 
@@ -400,6 +518,9 @@ async fn test_run_general_turn_bash_completes_directly() {
     .expect("general turn should succeed");
 
     assert!(result.output_text.contains("done:ok"));
+    assert_eq!(result.metrics.tool_calls, 1);
+    assert_eq!(result.metrics.tool_successes, 1);
+    assert_eq!(result.metrics.tool_errors, 0);
     assert!(result
         .output_items
         .iter()
@@ -503,10 +624,14 @@ async fn test_run_general_turn_stops_on_pending_dynamic_tool_result() {
     .expect("general turn should succeed");
 
     assert!(result.output_text.is_empty());
-    assert_eq!(result.stop_reason, StopReason::WaitingDynamicInput);
+    assert_eq!(result.stop_reason, StopReason::WaitingUserAction);
+    assert_eq!(result.metrics.tool_calls, 1);
+    assert_eq!(result.metrics.tool_successes, 0);
+    assert_eq!(result.metrics.tool_errors, 0);
+    assert_eq!(result.metrics.model_rounds, 1);
     let GeneralTurnOutcome::Waiting {
-        pending_action: PendingGeneralTurnAction::DynamicToolResult(pending),
-        stop_reason: StopReason::WaitingDynamicInput,
+        pending_action: PendingGeneralTurnAction::UserAction(pending),
+        stop_reason: StopReason::WaitingUserAction,
         ..
     } = result.outcome
     else {
@@ -713,11 +838,16 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         stream_tx: None,
         message_rx: None,
     };
-    let resume = GeneralTurnResume::DynamicToolResult(DynamicToolResultResume {
+    let resume = GeneralTurnResume::UserAction(UserActionResume {
         call_id: "call_dynamic".to_string(),
         tool_name: "echo_test".to_string(),
-        output: "dynamic pong".to_string(),
-        success: true,
+        response: talos_types::UserActionResponse::DynamicToolResult(
+            talos_types::DynamicToolResult {
+                output: "dynamic pong".to_string(),
+                success: true,
+            },
+        ),
+        sandbox_request_fingerprint: None,
         original_call: Some(ResumeToolCall {
             item_id: None,
             call_id: "call_dynamic".to_string(),
@@ -727,7 +857,20 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
                 "dynamic provider continuation".to_string(),
             )),
         }),
+        tool_calls: vec![FunctionCall::new(
+            "call_dynamic",
+            "echo_test",
+            json!({ "message": "ping" }),
+        )],
+        tool_messages: Vec::new(),
+        deferred_tool_calls: Vec::new(),
         replay_dynamic_tool_results: HashMap::new(),
+        execution_metrics: TurnExecutionMetrics {
+            model_rounds: 1,
+            tool_calls: 1,
+            stop_reason: talos_types::talos::StopReason::WaitingUserAction,
+            ..TurnExecutionMetrics::default()
+        },
     });
 
     let result = execute_general_turn_loop_with_resume(
@@ -742,10 +885,225 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
 
     assert_eq!(result.output_text, "Final answer after dynamic pong.");
     assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert_eq!(result.metrics.tool_calls, 1);
+    assert_eq!(result.metrics.tool_successes, 1);
+    assert_eq!(result.metrics.tool_errors, 0);
+    assert_eq!(result.metrics.model_rounds, 2);
     assert!(result.output_items.iter().any(|item| matches!(
         item,
         talos_types::talos::RunItem::ToolResult { call_id, tool_name, .. }
             if call_id == "call_dynamic" && tool_name == "echo_test"
     )));
     assert_eq!(provider.round.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn question_pending_and_resume_continue_the_original_tool_call() {
+    let tool_registry = Arc::new(ToolRegistry::new());
+    talos_tools::register_core_local_tools(tool_registry.as_ref());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let mut config = AgentKernelConfig::default();
+    config.prompt.bootstrap.enabled = false;
+    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    configure_test_skill_root(&mut config, &workspace_dir);
+    let mut ctx = build_ctx_with_stream_for_session("question-pending", None);
+
+    let initial = run_general_turn(
+        &mut ctx,
+        "talos",
+        "assistant",
+        "Ask a question before proceeding.",
+        Arc::new(QuestionProvider {
+            mode: QuestionProviderMode::Initial,
+            round: AtomicUsize::new(0),
+        }),
+        tool_registry.clone(),
+        tool_registry.clone(),
+        memory_store,
+        &config,
+        skill_options_from_config(&workspace_dir, &config),
+    )
+    .await
+    .expect("question should suspend the turn");
+    let mut initial_metrics = initial.metrics.clone();
+    let GeneralTurnOutcome::Waiting {
+        pending_action: PendingGeneralTurnAction::UserAction(mut pending),
+        ..
+    } = initial.outcome
+    else {
+        panic!("question should produce one pending user action");
+    };
+    assert!(matches!(
+        pending.params,
+        talos_types::UserActionParams::Question(ref params)
+            if params.options.len() == 2 && params.question == "How should the agent proceed?"
+    ));
+
+    let prepared = PreparedGeneralTurn {
+        session_id: "s-question".to_string(),
+        user_id: "u1".to_string(),
+        message_id: "msg-question".to_string(),
+        invocation_id: "turn-question".to_string(),
+        agent_id: "a1".to_string(),
+        project_root: None,
+        selected_model: "mock-model".to_string(),
+        max_output_tokens: None,
+        reasoning_effort: None,
+        speed: Default::default(),
+        attachment_tokens: 0,
+        prompt_prefix_messages: Vec::new(),
+        messages: vec![ChatMessage::user("Continue after the answer.")],
+        maintenance_usage: TokenUsage::default(),
+        tool_definitions: tool_registry.get_tool_definitions(),
+        tool_selection_request: talos_tools::ToolSelectionRequest::default()
+            .with_session_id("s-question"),
+        prompt_diagnostics: PromptDiagnostics {
+            mode: talos_prompt::PromptMode::Full,
+            included_sections: Vec::new(),
+            dropped_sections: Vec::new(),
+            bootstrap_files: Vec::new(),
+            total_estimated_tokens: 0,
+            static_estimated_tokens: 0,
+            dynamic_estimated_tokens: 0,
+            window_usage: talos_prompt::PromptWindowUsage::default(),
+            session_history_compaction: None,
+        },
+        warnings: Vec::new(),
+        prompt_warning_state: None,
+        stream_tx: None,
+        message_rx: None,
+    };
+    let deferred_calls = ["call-question-2", "call-question-3"]
+        .into_iter()
+        .map(|call_id| {
+            FunctionCall::new(
+                call_id,
+                "AskUserQuestion",
+                json!({
+                    "header": "Execution Mode",
+                    "question": "How should the agent proceed?",
+                    "options": [
+                        {"id": "plan", "label": "Plan", "description": "Think first"},
+                        {"id": "direct", "label": "Direct", "description": "Act now"}
+                    ]
+                }),
+            )
+        })
+        .collect::<Vec<_>>();
+    let second_call = deferred_calls[0].clone();
+    let third_call = deferred_calls[1].clone();
+    pending.tool_calls.extend(deferred_calls.clone());
+    pending.deferred_tool_calls = deferred_calls;
+    initial_metrics.tool_calls = 3;
+    let result = execute_general_turn_loop_with_resume(
+        prepared.clone(),
+        Arc::new(NoopLlmProvider),
+        tool_registry,
+        &config,
+        Some(question_resume(pending, initial_metrics)),
+    )
+    .await
+    .expect("first answer should advance to the second question");
+    assert_eq!(result.stop_reason, StopReason::WaitingUserAction);
+    let pending = result
+        .pending_user_action
+        .expect("second question should remain pending");
+    assert_eq!(pending.call_id, second_call.id);
+    assert_eq!(pending.deferred_tool_calls, vec![third_call.clone()]);
+    assert_eq!(
+        pending.reasoning_continuation,
+        Some(ReasoningContinuation::Text(
+            "question continuation".to_string()
+        ))
+    );
+    let first_resume_metrics = result.metrics.clone();
+
+    let result = execute_general_turn_loop_with_resume(
+        prepared.clone(),
+        Arc::new(NoopLlmProvider),
+        Arc::new({
+            let registry = ToolRegistry::new();
+            talos_tools::register_core_local_tools(&registry);
+            registry
+        }),
+        &config,
+        Some(question_resume(pending, first_resume_metrics)),
+    )
+    .await
+    .expect("second answer should advance to the third question");
+    assert_eq!(result.stop_reason, StopReason::WaitingUserAction);
+    let pending = result
+        .pending_user_action
+        .expect("third question should remain pending");
+    assert_eq!(pending.call_id, third_call.id);
+    assert!(pending.deferred_tool_calls.is_empty());
+    assert_eq!(
+        pending.reasoning_continuation,
+        Some(ReasoningContinuation::Text(
+            "question continuation".to_string()
+        ))
+    );
+    let second_resume_metrics = result.metrics.clone();
+
+    let registry = Arc::new(ToolRegistry::new());
+    talos_tools::register_core_local_tools(registry.as_ref());
+    let result = execute_general_turn_loop_with_resume(
+        prepared,
+        Arc::new(QuestionProvider {
+            mode: QuestionProviderMode::Resume,
+            round: AtomicUsize::new(0),
+        }),
+        registry,
+        &config,
+        Some(question_resume(pending, second_resume_metrics)),
+    )
+    .await
+    .expect("third answer should continue the turn");
+    assert_eq!(result.output_text, "Proceeding with a plan.");
+    assert_eq!(result.stop_reason, StopReason::EndTurn);
+    assert_eq!(result.metrics.tool_calls, 3);
+    assert_eq!(result.metrics.tool_successes, 3);
+    assert_eq!(result.metrics.tool_errors, 0);
+    assert_eq!(result.metrics.model_rounds, 2);
+}
+
+fn question_resume(
+    pending: PendingUserActionRequest,
+    execution_metrics: TurnExecutionMetrics,
+) -> GeneralTurnResume {
+    let PendingUserActionRequest {
+        call_id,
+        tool_name,
+        arguments,
+        sandbox_request_fingerprint,
+        reasoning_continuation,
+        tool_calls,
+        tool_messages,
+        deferred_tool_calls,
+        ..
+    } = pending;
+    GeneralTurnResume::UserAction(UserActionResume {
+        call_id: call_id.clone(),
+        tool_name: tool_name.clone(),
+        response: talos_types::UserActionResponse::Question(
+            talos_types::QuestionAnswer::SelectedOption {
+                option_id: "plan".to_string(),
+            },
+        ),
+        sandbox_request_fingerprint,
+        original_call: Some(ResumeToolCall {
+            item_id: None,
+            call_id,
+            tool_name,
+            arguments: arguments.into(),
+            reasoning_continuation,
+        }),
+        tool_calls,
+        tool_messages,
+        deferred_tool_calls,
+        replay_dynamic_tool_results: HashMap::new(),
+        execution_metrics,
+    })
 }

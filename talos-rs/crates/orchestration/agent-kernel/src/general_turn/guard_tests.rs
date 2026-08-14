@@ -32,7 +32,7 @@ fn tool_failure_recovery_nudge_rejects_repeating_failed_targets() {
     let batch = GeneralTurnToolBatch {
         output_items: Vec::new(),
         tool_messages: Vec::new(),
-        pending_dynamic_requests: Vec::new(),
+        pending_user_action: None,
         logs: vec![ToolResultLog {
             call_id: "call-1".to_string(),
             tool: "Bash".to_string(),

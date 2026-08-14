@@ -38,7 +38,7 @@ pub enum StopReason {
     #[default]
     EndTurn,
     ModelOutputLimit,
-    WaitingDynamicInput,
+    WaitingUserAction,
     TransferUnresolved,
     Cancelled,
 }
@@ -657,7 +657,7 @@ pub enum TalosTimelinePhase {
 pub enum TalosTimelineItemStatus {
     Queued,
     Running,
-    WaitingDynamicInput,
+    WaitingUserAction,
     Completed,
     Failed,
     Cancelled,
@@ -748,10 +748,8 @@ pub enum TalosTimelineDelta {
         content: Vec<TalosContentItem>,
         is_error: bool,
     },
-    ToolDynamicRequest {
-        call_id: String,
-        tool_name: String,
-        arguments: DynamicToolArguments,
+    UserAction {
+        event: crate::TimelineUserActionEvent,
     },
     ContextCompaction {
         #[serde(default)]

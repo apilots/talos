@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use talos_llm_provider::ToolDefinition;
-use talos_tools_sandbox::ToolGovernanceSpec;
+use talos_tools_sandbox::{ToolGovernanceSpec, ToolSandboxOperationKind};
 
 use crate::state::PermissionMode;
 
@@ -78,6 +78,7 @@ pub struct RegisteredToolSpec {
     pub parallelism: ToolParallelism,
     pub mutating: bool,
     pub governance: ToolGovernanceSpec,
+    pub sandbox_operation: Option<ToolSandboxOperationKind>,
     pub internal_name: String,
     pub aliases: Vec<String>,
     pub visibility: ToolVisibility,
@@ -113,6 +114,7 @@ impl RegisteredToolSpec {
             parallelism,
             mutating,
             governance,
+            sandbox_operation: None,
             behavior_flags,
         }
     }
@@ -134,6 +136,19 @@ impl RegisteredToolSpec {
 
     pub fn with_governance(mut self, governance: ToolGovernanceSpec) -> Self {
         self.governance = governance;
+        self
+    }
+
+    pub fn with_sandbox_operation(mut self, operation: ToolSandboxOperationKind) -> Self {
+        self.sandbox_operation = Some(operation);
+        self
+    }
+
+    pub fn with_optional_sandbox_operation(
+        mut self,
+        operation: Option<ToolSandboxOperationKind>,
+    ) -> Self {
+        self.sandbox_operation = operation;
         self
     }
 

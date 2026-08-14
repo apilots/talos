@@ -2,9 +2,10 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use talos_error::TalosResult;
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 use crate::context::ToolContext;
-use crate::output::ToolOutputPayload;
+use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
 use crate::spec::{
     ToolBehaviorFlags, ToolParallelism, ToolPayloadKind, ToolResultPolicy, ToolSource,
     ToolVisibility,
@@ -61,6 +62,20 @@ pub trait Tool: Send + Sync {
         ToolVisibility::DefaultVisible
     }
 
+    /// Declares the sandbox operation enforced before this local tool executes.
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        None
+    }
+
+    /// Returns normalized filesystem facts for a filesystem-enforced invocation.
+    fn requested_file_system_access(
+        &self,
+        _input: &Value,
+        _context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        Ok(Vec::new())
+    }
+
     fn parallelism(&self) -> ToolParallelism {
         if self.behavior_flags().concurrency_safe {
             ToolParallelism::ParallelSafe
@@ -92,6 +107,17 @@ pub trait Tool: Send + Sync {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload>;
+
+    /// Execute the tool or suspend it until typed user input is available.
+    async fn execute_outcome(
+        &self,
+        input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolDispatchOutcome> {
+        self.execute_payload(input, context)
+            .await
+            .map(ToolDispatchOutcome::executed)
+    }
 }
 
 pub fn decode_tool_input<T>(input: Value, tool_name: &str) -> TalosResult<T>

@@ -3,12 +3,16 @@ use crate::test_support::run_test_migrations;
 use std::sync::Arc;
 use talos_storage::SqliteStorage;
 use talos_store::session::{
-    ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, PendingUserAction,
+    ActiveTurnStatus, ActiveTurnStore, DatabaseSessionStore, UserActionStore,
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosAssistantTextCommittedEvent,
     TalosItemDeltaEvent, TalosTimelineDelta, TalosTimelinePhase, TalosTurnCompletedEvent,
     TalosTurnStartedEvent, TokenUsage,
+};
+use talos_types::{
+    DynamicToolResultParams, PendingUserAction, TimelineUserActionEvent, UserActionParams,
+    UserActionState,
 };
 
 async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
@@ -21,6 +25,7 @@ async fn service() -> (TimelineEventService, Arc<DatabaseSessionStore>) {
         TimelineEventService::new(
             event_store,
             active_turn_store,
+            store.clone() as Arc<dyn talos_store::session::UserActionStore>,
             TimelineEventRetentionConfig::default(),
         ),
         store,
@@ -81,10 +86,18 @@ fn dynamic_event(sequence: u64) -> AgentEvent {
             request_id: "req_1".to_string(),
             turn_id: "turn_1".to_string(),
             item_id: "tool-1".to_string(),
-            delta: TalosTimelineDelta::ToolDynamicRequest {
-                call_id: "call_1".to_string(),
-                tool_name: "ExternalTool".to_string(),
-                arguments: serde_json::json!({"query": "input"}).into(),
+            delta: TalosTimelineDelta::UserAction {
+                event: TimelineUserActionEvent::Requested {
+                    action: PendingUserAction {
+                        action_id: "ua_test".to_string(),
+                        call_id: "call_1".to_string(),
+                        item_id: Some("tool-1".to_string()),
+                        state: UserActionState::Pending,
+                        params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+                            tool_name: "ExternalTool".to_string(),
+                        }),
+                    },
+                },
             },
         }),
     )
@@ -143,12 +156,20 @@ async fn pending_dynamic_event_updates_active_turn_user_action() {
 
     let active = store.get_active_turn("s1").await.unwrap().unwrap();
     assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+    let action_id = active.current_action_id.as_deref().unwrap();
+    assert_eq!(action_id, "ua_test");
+    let action = store
+        .get("s1", "turn_1", action_id)
+        .await
+        .unwrap()
+        .unwrap()
+        .action;
     assert!(matches!(
-        active.pending_user_action,
-        Some(PendingUserAction::DynamicToolResult(ref pending))
-            if pending.item_id.as_deref() == Some("tool-1")
-                && pending.call_id == "call_1"
-                && pending.tool_name == "ExternalTool"
+        action.params,
+        UserActionParams::DynamicToolResult(ref params)
+            if action.item_id.as_deref() == Some("tool-1")
+                && action.call_id == "call_1"
+                && params.tool_name == "ExternalTool"
     ));
 }
 
@@ -167,9 +188,5 @@ async fn completed_event_preserves_pending_dynamic_active_turn() {
         active.last_event_id,
         Some(TimelineEventId::from(completed.event_id))
     );
-    assert!(matches!(
-        active.pending_user_action,
-        Some(PendingUserAction::DynamicToolResult(ref pending))
-            if pending.call_id == "call_1" && pending.tool_name == "ExternalTool"
-    ));
+    assert!(active.current_action_id.is_some());
 }

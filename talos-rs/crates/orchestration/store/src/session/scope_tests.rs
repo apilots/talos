@@ -96,6 +96,7 @@ async fn test_insert_and_get_session_record_roundtrip() {
             },
             reasoning_effort: None,
         }),
+        ..SessionConf::default()
     };
 
     store.insert_session_record(&record, "api").await.unwrap();

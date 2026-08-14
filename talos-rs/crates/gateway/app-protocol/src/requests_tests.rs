@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::json;
 use talos_types::talos::TalosInputItem;
+use talos_types::{QuestionAnswer, SubmitUserActionRequest, UserActionResponse};
 
 #[test]
 fn method_parses_dot_name() {
@@ -23,6 +24,35 @@ fn decodes_typed_request_params() {
         request.params,
         ClientRequestParams::SessionGet(SessionGetRequest { .. })
     ));
+}
+
+#[test]
+fn decodes_canonical_user_action_submission() {
+    let request = ClientRequest::decode(
+        "userAction/submit",
+        Some(json!({
+            "sessionId": "s1",
+            "turnId": "turn-1",
+            "actionId": "action-1",
+            "response": {
+                "type": "question",
+                "response": { "type": "selectedOption", "optionId": "continue" }
+            }
+        })),
+    )
+    .expect("user action submission should decode");
+
+    assert_eq!(
+        request.params,
+        ClientRequestParams::UserActionSubmit(SubmitUserActionRequest {
+            session_id: "s1".to_string(),
+            turn_id: "turn-1".to_string(),
+            action_id: "action-1".to_string(),
+            response: UserActionResponse::Question(QuestionAnswer::SelectedOption {
+                option_id: "continue".to_string(),
+            }),
+        })
+    );
 }
 
 #[test]
@@ -102,6 +132,10 @@ fn client_method_parser_accepts_current_methods() {
     assert_eq!(
         ClientMethod::from_str("tool.dynamic_result.submit").unwrap(),
         ClientMethod::ToolDynamicResultSubmit
+    );
+    assert_eq!(
+        ClientMethod::from_str("userAction/submit").unwrap(),
+        ClientMethod::UserActionSubmit
     );
     assert_eq!(
         ClientMethod::from_str("session.close").unwrap(),

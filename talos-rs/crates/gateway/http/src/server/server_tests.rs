@@ -20,8 +20,8 @@ use talos_store::project::MockProjectStore;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
     IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
-    PendingDynamicToolResult, PendingUserAction, SessionPatchAck, SessionQuery, SessionRecord,
-    SessionStore, SessionSummary, TimelineEventId, TimelineEventStore,
+    SessionPatchAck, SessionQuery, SessionRecord, SessionStore, SessionSummary, TimelineEventId,
+    TimelineEventStore, UserActionRecord, UserActionStore,
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosContext, TalosItemDeltaEvent,
@@ -29,7 +29,10 @@ use talos_types::talos::{
     TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
     TalosTurnCompletedEvent, TalosTurnStartedEvent, TokenUsage,
 };
-use talos_types::{ModelInfo, SessionListRequest, TalosSession};
+use talos_types::{
+    DynamicToolResultParams, ModelInfo, PendingUserAction, SessionListRequest, TalosSession,
+    UserActionParams, UserActionState,
+};
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
@@ -245,10 +248,11 @@ async fn test_state_with_config(
 
 fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEventService> {
     let event_store: Arc<dyn TimelineEventStore> = store.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store;
+    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
     Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store,
+        store as Arc<dyn talos_store::session::UserActionStore>,
         TimelineEventRetentionConfig::default(),
     ))
 }
@@ -479,6 +483,94 @@ struct RecordingEventStore {
     active_turns: std::sync::Mutex<std::collections::HashMap<String, ActiveTurnRecord>>,
     idempotency_records:
         std::sync::Mutex<std::collections::HashMap<(String, String), IdempotencyRecord>>,
+    user_actions:
+        std::sync::Mutex<std::collections::HashMap<(String, String, String), UserActionRecord>>,
+}
+
+fn pending_dynamic_record(
+    session_id: &str,
+    turn_id: &str,
+    action_id: &str,
+    item_id: Option<&str>,
+    call_id: &str,
+    tool_name: &str,
+) -> UserActionRecord {
+    UserActionRecord {
+        session_id: session_id.to_string(),
+        turn_id: turn_id.to_string(),
+        action: PendingUserAction {
+            action_id: action_id.to_string(),
+            call_id: call_id.to_string(),
+            item_id: item_id.map(str::to_string),
+            state: UserActionState::Pending,
+            params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+                tool_name: tool_name.to_string(),
+            }),
+        },
+        response: None,
+        version: 0,
+        updated_at: 125,
+    }
+}
+
+#[async_trait]
+impl UserActionStore for RecordingEventStore {
+    async fn create(&self, record: UserActionRecord) -> TalosResult<UserActionRecord> {
+        let key = (
+            record.session_id.clone(),
+            record.turn_id.clone(),
+            record.action.action_id.clone(),
+        );
+        let mut actions = self.user_actions.lock().unwrap();
+        match actions.get(&key) {
+            Some(current) if current == &record => Ok(current.clone()),
+            Some(_) => Err(TalosError::Conflict(
+                "user action already exists".to_string(),
+            )),
+            None => {
+                actions.insert(key, record.clone());
+                Ok(record)
+            }
+        }
+    }
+
+    async fn get(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        action_id: &str,
+    ) -> TalosResult<Option<UserActionRecord>> {
+        Ok(self
+            .user_actions
+            .lock()
+            .unwrap()
+            .get(&(
+                session_id.to_string(),
+                turn_id.to_string(),
+                action_id.to_string(),
+            ))
+            .cloned())
+    }
+
+    async fn compare_and_set(
+        &self,
+        expected: &UserActionRecord,
+        next: UserActionRecord,
+    ) -> TalosResult<UserActionRecord> {
+        let key = (
+            expected.session_id.clone(),
+            expected.turn_id.clone(),
+            expected.action.action_id.clone(),
+        );
+        let mut actions = self.user_actions.lock().unwrap();
+        if actions.get(&key) != Some(expected) {
+            return Err(TalosError::Conflict(
+                "user action state or version changed".to_string(),
+            ));
+        }
+        actions.insert(key, next.clone());
+        Ok(next)
+    }
 }
 
 #[async_trait::async_trait]
@@ -587,7 +679,7 @@ impl ActiveTurnStore for RecordingEventStore {
                 message_id: update.message_id,
                 status: update.status,
                 last_event_id: update.last_event_id,
-                pending_user_action: update.pending_user_action,
+                current_action_id: update.current_action_id,
                 updated_at: update.updated_at,
             },
         );

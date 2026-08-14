@@ -4,6 +4,7 @@ mod mcp;
 
 use async_trait::async_trait;
 use talos_error::TalosResult;
+use talos_tools_sandbox::RequestedFileSystemAccess;
 
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::output::ToolDispatchOutcome;
@@ -29,6 +30,14 @@ pub trait ToolHandler: Send + Sync {
 
     async fn is_mutating(&self, _invocation: &ToolInvocation) -> bool {
         false
+    }
+
+    fn requested_file_system_access(
+        &self,
+        _invocation: &ToolInvocation,
+        _context: &ToolDispatchContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        Ok(Vec::new())
     }
 
     async fn handle(

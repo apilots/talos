@@ -35,11 +35,11 @@ use talos_types::{
     SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
     SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
     StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
+    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 #[async_trait]
@@ -75,6 +75,12 @@ pub trait Gateway: Send + Sync {
         actor: &Actor,
         request: SubmitDynamicToolResultRequest,
     ) -> TalosResult<SubmitDynamicToolResultResponse>;
+
+    async fn submit_user_action(
+        &self,
+        actor: &Actor,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse>;
 
     async fn subscribe_timeline(
         &self,

@@ -38,6 +38,10 @@ agent:
     default_workspace_id: default
     tools:
       enable_collaboration_tools: true
+      sandbox_policy:
+        user_permission_mode: "full_access"
+        default_mode: "use_default"
+        network: "use_default"
       web_search:
         provider: firecrawl
         firecrawl:

@@ -257,6 +257,7 @@ impl SessionService for MockSessionService {
                         id: "qwen-plus".to_string(),
                     },
                 )),
+                ..talos_types::SessionConf::default()
             },
             project_id: None,
             current_directory: None,
@@ -265,6 +266,7 @@ impl SessionService for MockSessionService {
                 config.llm.model = "qwen-plus".to_string();
                 config
             },
+            effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
             state: talos_types::SessionState {
                 created_at: 0,
                 last_activity: 0,

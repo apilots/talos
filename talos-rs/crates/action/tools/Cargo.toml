@@ -35,7 +35,6 @@ sha2 = "0.10"
 globset = "0.4"
 regex = "1"
 html2text = "0.12"
-walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3.8"

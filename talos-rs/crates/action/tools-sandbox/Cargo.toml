@@ -9,6 +9,22 @@ repository.workspace = true
 
 [dependencies]
 serde.workspace = true
+sha2.workspace = true
+talos-sandbox-spi.workspace = true
+talos-types.workspace = true
+tempfile = "3"
 thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+talos-macos-sandbox.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+talos-linux-sandbox.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+talos-windows-sandbox.workspace = true

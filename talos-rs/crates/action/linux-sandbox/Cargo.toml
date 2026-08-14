@@ -1,0 +1,26 @@
+[package]
+name = "talos-linux-sandbox"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos Linux sandbox provider"
+repository.workspace = true
+publish = false
+
+[dependencies]
+talos-sandbox-spi.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+seccompiler.workspace = true
+
+[dev-dependencies]
+talos-sandbox-spi = { workspace = true, features = ["provider-contract-tests"] }
+tempfile = "3"
+
+[[bin]]
+name = "talos-linux-sandbox-launcher"
+path = "src/main.rs"

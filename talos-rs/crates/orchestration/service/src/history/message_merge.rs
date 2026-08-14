@@ -18,7 +18,8 @@ pub(crate) fn merge_completed_timeline_message(
         .iter()
         .position(|message| message.message_id == timeline_message.message_id)
     {
-        messages[index] = timeline_message;
+        messages.retain(|message| message.message_id != timeline_message.message_id);
+        messages.insert(index.min(messages.len()), timeline_message);
         return;
     }
 
@@ -107,15 +108,19 @@ fn history_message_from_completed_turn_events(
 
     for event in events {
         match event.payload {
+            AgentEventPayload::TurnStarted(_) => {
+                completed = false;
+            }
             AgentEventPayload::TurnCompleted(turn_completed) => {
                 usage = turn_completed.usage;
                 metrics = turn_completed.metrics;
                 stop_reason = turn_completed.stop_reason;
-                completed = true;
+                completed = stop_reason != StopReason::WaitingUserAction;
             }
-            AgentEventPayload::TurnStarted(_)
-            | AgentEventPayload::TurnMetrics(_)
-            | AgentEventPayload::TurnError(_)
+            AgentEventPayload::TurnError(_) => {
+                completed = false;
+            }
+            AgentEventPayload::TurnMetrics(_)
             | AgentEventPayload::ItemStarted(_)
             | AgentEventPayload::ItemDelta(_)
             | AgentEventPayload::ItemCompleted(_)
@@ -123,7 +128,17 @@ fn history_message_from_completed_turn_events(
         }
     }
 
-    if !completed || items.is_empty() {
+    if !completed
+        || items.is_empty()
+        || items.iter().any(|item| {
+            matches!(
+                item.status,
+                TalosTimelineItemStatus::Queued
+                    | TalosTimelineItemStatus::Running
+                    | TalosTimelineItemStatus::WaitingUserAction
+            )
+        })
+    {
         return None;
     }
 
@@ -145,13 +160,18 @@ pub(crate) fn timeline_items_from_events(events: &[AgentEvent]) -> Vec<TalosTime
                 items.push(started.item.clone());
             }
             AgentEventPayload::ItemDelta(delta) => {
-                if let Some(item) = items.iter_mut().find(|item| item.item_id == delta.item_id) {
+                if let Some(item) = items
+                    .iter_mut()
+                    .rev()
+                    .find(|item| item.item_id == delta.item_id)
+                {
                     apply_history_delta(item, delta.delta.clone());
                 }
             }
             AgentEventPayload::ItemCompleted(item_completed) => {
                 if let Some(item) = items
                     .iter_mut()
+                    .rev()
                     .find(|item| item.item_id == item_completed.item_id)
                 {
                     item.status = item_completed.status;
@@ -164,6 +184,7 @@ pub(crate) fn timeline_items_from_events(events: &[AgentEvent]) -> Vec<TalosTime
             AgentEventPayload::AssistantTextCommitted(committed) => {
                 if let Some(item) = items
                     .iter_mut()
+                    .rev()
                     .find(|item| item.item_id == committed.item_id)
                 {
                     item.phase = committed.phase;
@@ -213,8 +234,13 @@ fn apply_history_delta(item: &mut TalosTimelineItem, delta: TalosTimelineDelta) 
                 *result = Some(TalosToolResult { content, is_error });
             }
         }
-        TalosTimelineDelta::ToolDynamicRequest { .. } => {
-            item.status = TalosTimelineItemStatus::WaitingDynamicInput;
+        TalosTimelineDelta::UserAction { event } => {
+            if matches!(
+                event,
+                talos_types::TimelineUserActionEvent::Requested { .. }
+            ) {
+                item.status = TalosTimelineItemStatus::WaitingUserAction;
+            }
         }
         TalosTimelineDelta::ContextCompaction {
             stage,

@@ -6,7 +6,9 @@ async fn execute_payload_returns_search_results_content_item() {
     tokio::fs::write(dir.path().join("demo.rs"), "fn alpha() {}\n")
         .await
         .expect("write should succeed");
-    let context = ToolContext::new("session", "user").with_project_root(dir.path());
+    let context = crate::test_support::full_access_process_context(
+        ToolContext::new("session", "user").with_project_root(dir.path()),
+    );
 
     let payload = GrepTool
         .execute_payload(

@@ -459,6 +459,7 @@ fn build_request(input: &str) -> AgentRunParams {
                 provider: "openai".to_string(),
                 id: "mock-model".to_string(),
             })),
+            ..talos_types::SessionConf::default()
         },
         project_id: None,
         current_directory: None,
@@ -478,6 +479,7 @@ fn build_request(input: &str) -> AgentRunParams {
             environment: None,
         },
         config,
+        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState::default(),
     };
     let context = AgentRunContext::from_session(&session, turn_id, "integration_agent".to_string());

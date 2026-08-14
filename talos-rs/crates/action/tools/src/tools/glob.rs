@@ -3,9 +3,10 @@ use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosContentItem;
 
-use crate::runtimes::fs_glob::{run, GlobFilesRequest};
+use crate::runtimes::fs_glob::{requested_file_system_access, run, GlobFilesRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 pub struct GlobTool;
 
@@ -43,6 +44,21 @@ impl Tool for GlobTool {
             concurrency_safe: true,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::FileSystem)
+    }
+
+    fn requested_file_system_access(
+        &self,
+        input: &Value,
+        context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        let request: GlobFilesRequest = serde_json::from_value(input.clone()).map_err(|error| {
+            TalosError::ValidationError(format!("invalid Glob arguments: {error}"))
+        })?;
+        requested_file_system_access(&request, context)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

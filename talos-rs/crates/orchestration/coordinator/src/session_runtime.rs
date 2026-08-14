@@ -37,4 +37,9 @@ pub trait SessionRuntime: Send + Sync {
 
     /// Cancel the active Agent turn associated with a product session.
     async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()>;
+
+    /// Return whether the selected runtime still owns an active in-process turn.
+    async fn has_active_turn(&self, _session: &TalosSession) -> TalosResult<bool> {
+        Ok(false)
+    }
 }

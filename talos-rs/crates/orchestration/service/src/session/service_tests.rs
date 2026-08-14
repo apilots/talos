@@ -9,7 +9,7 @@ use talos_store::session::{
     SessionTreeIdentity,
 };
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{ModelRef, ModelSelection, SessionConf};
+use talos_types::{ModelRef, ModelSelection, SessionConf, SessionInfo, UserPermissionMode};
 
 use super::{CreateSessionParams, SessionService};
 
@@ -249,6 +249,83 @@ async fn create_session_persists_configured_default_reasoning_effort() {
 }
 
 #[tokio::test]
+async fn create_session_resolves_configured_permission_mode() {
+    let mut config = config_with_model("anthropic", "default-model");
+    config
+        .agent
+        .kernel
+        .tools
+        .sandbox_policy
+        .user_permission_mode = talos_config::ToolUserPermissionModeConfig::ApproveForMe;
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
+
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .expect("session should be created");
+    let info = SessionInfo::from(&session);
+
+    assert_eq!(
+        (
+            session.effective_user_permission_mode,
+            info.configured_default_mode,
+            info.effective_mode,
+        ),
+        (
+            UserPermissionMode::ApproveForMe,
+            UserPermissionMode::ApproveForMe,
+            UserPermissionMode::ApproveForMe,
+        )
+    );
+}
+
+#[tokio::test]
+async fn create_session_permission_override_wins_over_configured_default() {
+    let mut config = config_with_model("anthropic", "default-model");
+    config
+        .agent
+        .kernel
+        .tools
+        .sandbox_policy
+        .user_permission_mode = talos_config::ToolUserPermissionModeConfig::ApproveForMe;
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
+    );
+    let mut params = create_session_params(context(), "default", None);
+    params.conf = Some(SessionConf {
+        model_selection: None,
+        user_permission_mode: Some(UserPermissionMode::AskForApproval),
+    });
+
+    let session = service
+        .create_session(params)
+        .await
+        .expect("session should be created");
+    let info = SessionInfo::from(&session);
+
+    assert_eq!(
+        (
+            session.conf.user_permission_mode,
+            session.effective_user_permission_mode,
+            info.configured_default_mode,
+            info.effective_mode,
+        ),
+        (
+            Some(UserPermissionMode::AskForApproval),
+            UserPermissionMode::AskForApproval,
+            UserPermissionMode::ApproveForMe,
+            UserPermissionMode::AskForApproval,
+        )
+    );
+}
+
+#[tokio::test]
 async fn update_base_llm_changes_new_session_default_model() {
     let base_config = config_with_model("anthropic", "old-model");
     let service = SessionService::new(
@@ -330,6 +407,7 @@ async fn create_session_conf_model_selection_matches_stored_model() {
             provider: "openai".to_string(),
             id: "conf-model".to_string(),
         })),
+        ..SessionConf::default()
     });
 
     let session = service

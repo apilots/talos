@@ -135,11 +135,11 @@ pub enum SessionTranscriptPayload {
     Auth {
         payload: SessionTranscriptAuthPayload,
     },
-    DynamicToolRequest {
-        payload: SessionTranscriptDynamicToolRequestPayload,
+    UserActionRequest {
+        payload: SessionTranscriptUserActionRequestPayload,
     },
-    DynamicToolResponse {
-        payload: SessionTranscriptDynamicToolResponsePayload,
+    UserActionResponse {
+        payload: SessionTranscriptUserActionResponsePayload,
     },
     Compaction {
         payload: SessionTranscriptCompactionPayload,
@@ -158,19 +158,24 @@ pub struct SessionTranscriptAuthPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SessionTranscriptDynamicToolRequestPayload {
+pub struct SessionTranscriptUserActionRequestPayload {
+    pub action_id: String,
     pub call_id: String,
     pub tool_name: String,
     pub arguments: DynamicToolArguments,
+    pub params: talos_types::UserActionParams,
+    pub sandbox_request_fingerprint: Option<String>,
     pub reasoning_continuation: Option<ReasoningContinuation>,
+    pub tool_calls: Vec<talos_llm_provider::FunctionCall>,
+    pub tool_messages: Vec<ChatMessage>,
+    pub deferred_tool_calls: Vec<talos_llm_provider::FunctionCall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SessionTranscriptDynamicToolResponsePayload {
+pub struct SessionTranscriptUserActionResponsePayload {
     pub call_id: String,
     pub tool_name: String,
-    pub output: String,
-    pub success: bool,
+    pub response: talos_types::UserActionResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -41,10 +41,10 @@ pub async fn persist_general_turn_artifacts(
         .await?;
 
     let Some(transcript_service) = transcript_service else {
-        if !executed.pending_dynamic_requests.is_empty() {
+        if executed.pending_user_action.is_some() {
             warn!(
                 session_id = %prepared.session_id,
-                "pending dynamic transcript was not persisted because no session port is configured"
+                "pending user action transcript was not persisted because no session port is configured"
             );
         }
         return Ok(seq);
@@ -53,19 +53,25 @@ pub async fn persist_general_turn_artifacts(
         session_id: prepared.session_id.clone(),
         ..InvocationSession::default()
     };
-    for pending in &executed.pending_dynamic_requests {
+    if let Some(pending) = &executed.pending_user_action {
         let event = KernelTranscriptEvent::new(
             prepared.session_id.clone(),
             prepared.invocation_id.clone(),
             ExecutionBranch::ReactiveLoop,
             EventAuthor::System,
             KernelTranscriptEventKind::SystemMessage,
-            KernelTranscriptPayload::DynamicToolRequest {
-                payload: crate::session::KernelTranscriptDynamicToolRequestPayload {
+            KernelTranscriptPayload::UserActionRequest {
+                payload: crate::session::KernelTranscriptUserActionRequestPayload {
+                    action_id: pending.action_id.clone(),
                     call_id: pending.call_id.clone(),
                     tool_name: pending.tool_name.clone(),
                     arguments: pending.arguments.clone().into(),
+                    params: pending.params.clone(),
+                    sandbox_request_fingerprint: pending.sandbox_request_fingerprint.clone(),
                     reasoning_continuation: pending.reasoning_continuation.clone(),
+                    tool_calls: pending.tool_calls.clone(),
+                    tool_messages: pending.tool_messages.clone(),
+                    deferred_tool_calls: pending.deferred_tool_calls.clone(),
                 },
             },
         );
@@ -74,7 +80,7 @@ pub async fn persist_general_turn_artifacts(
                 session_id = %prepared.session_id,
                 call_id = %pending.call_id,
                 error = %err,
-                "failed to append pending dynamic tool transcript"
+                "failed to append pending user action transcript"
             );
         }
     }

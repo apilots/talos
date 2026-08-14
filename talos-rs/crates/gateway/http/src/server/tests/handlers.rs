@@ -263,7 +263,7 @@ async fn test_compact_session_handler_maps_active_turn_to_conflict() {
             message_id: Some("msg-running".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1,
         })
         .await

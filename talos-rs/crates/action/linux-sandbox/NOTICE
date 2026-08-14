@@ -1,0 +1,16 @@
+This crate selectively adapts Linux sandbox mechanisms from OpenAI Codex,
+licensed under Apache-2.0, at commit:
+
+  a26bc337cf61cbca9cd9ac25b25c88c32186eb20
+
+Reviewed source paths:
+
+  codex-rs/linux-sandbox/src/bwrap.rs
+  codex-rs/linux-sandbox/src/launcher.rs
+  codex-rs/linux-sandbox/src/landlock.rs
+  codex-rs/linux-sandbox/src/linux_run_main.rs
+
+Adapted mechanisms are limited to the outer helper -> bubblewrap -> inner
+helper execution sequence, no_new_privs, and restricted-network seccomp rules.
+Codex DTOs, Landlock, bundled bubblewrap, proxy routing, glob expansion, and
+synthetic/protected-create mount machinery are not included.

@@ -21,11 +21,13 @@ async fn run_rejects_resume_context() {
     let session = build_test_session("session-run-with-resume-context", "workspace-1");
     let mut request = agent_run_params(session, "turn-run-with-resume-context", Vec::new());
     request.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
+        pending_call_id: "call-dynamic".to_string(),
+        tool_calls: vec![AgentDispatchResumeToolCall {
             item_id: "tool-item-original".to_string(),
             call_id: "call-dynamic".to_string(),
             tool_name: "echo_dynamic".to_string(),
-        }),
+        }],
+        execution_metrics: Default::default(),
     });
 
     let error = match agent.run(request).await {

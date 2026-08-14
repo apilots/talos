@@ -22,6 +22,7 @@ use talos_store::session::{
 use talos_tools::{
     register_core_local_tools, register_network_tools, register_subagent_tools, ToolRegistry,
 };
+use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
 use talos_types::{resolve_default_model_selection, resolve_model_catalog, AgentDispatchRuntime};
 use tracing::error;
 
@@ -50,10 +51,13 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     file_service.reconcile_incomplete().await?;
     let event_store: Arc<dyn TimelineEventStore> = session_store_impl.clone();
     let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
+    let user_action_store: Arc<dyn talos_store::session::UserActionStore> =
+        session_store_impl.clone();
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
     let event_service = Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store.clone(),
+        user_action_store,
         TimelineEventRetentionConfig {
             retention_hours: config.agent.kernel.timeline_events.retention_hours,
             max_events_per_session: config.agent.kernel.timeline_events.max_events_per_session,
@@ -98,7 +102,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         },
     )));
     let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
-    let tool_registry = Arc::new(ToolRegistry::new());
+    let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
+    let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
     register_core_local_tools(tool_registry.as_ref());
     register_network_tools(tool_registry.as_ref());
     let plugin_manager_service = PluginManagerService::new(
@@ -230,4 +235,24 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         tool_registry,
         automation,
     })
+}
+
+fn sandbox_runtime_paths(config: &Config) -> SandboxRuntimePaths {
+    let configured = config
+        .agent
+        .kernel
+        .tools
+        .sandbox_policy
+        .platform
+        .linux_helper_executable
+        .clone();
+    let linux_helper_executable = configured.or_else(|| {
+        let mut candidate = std::env::current_exe().ok()?;
+        candidate.set_file_name("talos-linux-sandbox-launcher");
+        candidate.is_file().then_some(candidate)
+    });
+    SandboxRuntimePaths {
+        macos_sandbox_executable: None,
+        linux_helper_executable,
+    }
 }

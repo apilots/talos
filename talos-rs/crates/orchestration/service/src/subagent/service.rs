@@ -98,6 +98,7 @@ impl SubagentService {
                     workspace_id: None,
                     context: None,
                     model_selection: None,
+                    user_permission_mode: None,
                     project_id: None,
                     current_directory: None,
                     client_request_id: None,

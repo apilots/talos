@@ -12,11 +12,16 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
+    UserActionRecord, UserActionStore,
 };
 use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosTurnCompletedEvent,
-    TalosTurnMetricsEvent, TalosTurnStartedEvent, TimelineEventEnvelope, TokenUsage,
-    TurnExecutionMetrics,
+    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosItemDeltaEvent,
+    TalosTimelineDelta, TalosTurnCompletedEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent,
+    TimelineEventEnvelope, TokenUsage, TurnExecutionMetrics,
+};
+use talos_types::{
+    PendingUserAction, QuestionOption, QuestionParams, TimelineUserActionEvent, UserActionParams,
+    UserActionState,
 };
 use tokio::sync::mpsc;
 
@@ -134,6 +139,7 @@ fn service() -> (TimelineEventService, Arc<MockStore>) {
         TimelineEventService::new(
             event_store,
             active_turn_store,
+            store.clone() as Arc<dyn talos_store::session::UserActionStore>,
             TimelineEventRetentionConfig::default(),
         ),
         store,
@@ -432,10 +438,107 @@ async fn recover_timeline_returns_active_turn_snapshot() {
     assert_eq!(snapshot.active_turn.turn_id.as_deref(), Some("turn-1"));
 }
 
+#[tokio::test]
+async fn recover_timeline_returns_the_canonical_question_action() {
+    let (timeline, _store) = service();
+    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
+    let action = PendingUserAction {
+        action_id: "action-question".to_string(),
+        call_id: "call-question".to_string(),
+        item_id: Some("item-question".to_string()),
+        state: UserActionState::Pending,
+        params: UserActionParams::Question(QuestionParams {
+            header: "Execution".to_string(),
+            question: "How should Talos proceed?".to_string(),
+            options: vec![
+                QuestionOption {
+                    id: "plan".to_string(),
+                    label: "Plan".to_string(),
+                    description: "Think first".to_string(),
+                },
+                QuestionOption {
+                    id: "direct".to_string(),
+                    label: "Direct".to_string(),
+                    description: "Act now".to_string(),
+                },
+            ],
+        }),
+    };
+    timeline
+        .record_talos_event(AgentEvent {
+            event_seq: None,
+            event_id: None,
+            created_at_ms: Some(101),
+            event_type: AgentEventType::ItemDelta,
+            turn_id: "turn-1".to_string(),
+            message_id: "msg-1".to_string(),
+            session_id: "s1".to_string(),
+            sequence: 1,
+            payload: AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
+                request_id: "req-1".to_string(),
+                turn_id: "turn-1".to_string(),
+                item_id: "item-question".to_string(),
+                delta: TalosTimelineDelta::UserAction {
+                    event: TimelineUserActionEvent::Requested {
+                        action: action.clone(),
+                    },
+                },
+            }),
+        })
+        .await
+        .unwrap();
+
+    let snapshot = events.recover_timeline("s1", None, 32).await.unwrap();
+
+    assert_eq!(snapshot.active_turn.pending_user_action, Some(action));
+}
+
 #[derive(Default)]
 struct MockStore {
     events: Mutex<Vec<AgentEvent>>,
     active_turn: Mutex<Option<ActiveTurnRecord>>,
+    user_action: Mutex<Option<UserActionRecord>>,
+}
+
+#[async_trait]
+impl UserActionStore for MockStore {
+    async fn create(&self, record: UserActionRecord) -> talos_error::TalosResult<UserActionRecord> {
+        self.user_action
+            .lock()
+            .expect("user action lock")
+            .replace(record.clone());
+        Ok(record)
+    }
+
+    async fn get(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        action_id: &str,
+    ) -> talos_error::TalosResult<Option<UserActionRecord>> {
+        Ok(self
+            .user_action
+            .lock()
+            .expect("user action lock")
+            .clone()
+            .filter(|record| {
+                record.session_id == session_id
+                    && record.turn_id == turn_id
+                    && record.action.action_id == action_id
+            }))
+    }
+
+    async fn compare_and_set(
+        &self,
+        _expected: &UserActionRecord,
+        next: UserActionRecord,
+    ) -> talos_error::TalosResult<UserActionRecord> {
+        self.user_action
+            .lock()
+            .expect("user action lock")
+            .replace(next.clone());
+        Ok(next)
+    }
 }
 
 #[async_trait]
@@ -548,7 +651,7 @@ impl ActiveTurnStore for MockStore {
             message_id: update.message_id,
             status: update.status,
             last_event_id: update.last_event_id,
-            pending_user_action: update.pending_user_action,
+            current_action_id: update.current_action_id,
             updated_at: update.updated_at,
         });
         Ok(())

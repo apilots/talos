@@ -1,5 +1,214 @@
 use super::*;
 
+#[test]
+fn user_permission_mode_uses_product_wire_values() {
+    assert_eq!(
+        serde_json::to_value([
+            UserPermissionMode::AskForApproval,
+            UserPermissionMode::ApproveForMe,
+            UserPermissionMode::FullAccess,
+        ])
+        .unwrap(),
+        serde_json::json!(["askForApproval", "approveForMe", "fullAccess"])
+    );
+}
+
+#[test]
+fn pending_user_action_serializes_canonical_question_shape() {
+    let action = PendingUserAction {
+        action_id: "action-1".to_string(),
+        call_id: "call-1".to_string(),
+        item_id: Some("item-1".to_string()),
+        state: UserActionState::Pending,
+        params: UserActionParams::Question(QuestionParams {
+            header: "Release".to_string(),
+            question: "Publish now?".to_string(),
+            options: vec![QuestionOption {
+                id: "publish".to_string(),
+                label: "Publish now".to_string(),
+                description: "Publish the completed work.".to_string(),
+            }],
+        }),
+    };
+
+    assert_eq!(
+        serde_json::to_value(action).unwrap(),
+        serde_json::json!({
+            "actionId": "action-1",
+            "callId": "call-1",
+            "itemId": "item-1",
+            "state": "pending",
+            "params": {
+                "type": "question",
+                "params": {
+                    "header": "Release",
+                    "question": "Publish now?",
+                    "options": [{
+                        "id": "publish",
+                        "label": "Publish now",
+                        "description": "Publish the completed work."
+                    }]
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn user_action_response_preserves_variant_specific_data() {
+    let responses = [
+        UserActionResponse::DynamicToolResult(DynamicToolResult {
+            output: "completed".to_string(),
+            success: true,
+        }),
+        UserActionResponse::Question(QuestionAnswer::SelectedOption {
+            option_id: "publish".to_string(),
+        }),
+        UserActionResponse::Question(QuestionAnswer::FreeForm {
+            text: "Publish after review".to_string(),
+        }),
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::Deny),
+    ];
+
+    assert_eq!(
+        serde_json::to_value(responses).unwrap(),
+        serde_json::json!([
+            {
+                "type": "dynamicToolResult",
+                "response": {
+                    "output": "completed",
+                    "success": true
+                }
+            },
+            {
+                "type": "question",
+                "response": {
+                    "type": "selectedOption",
+                    "optionId": "publish"
+                }
+            },
+            {
+                "type": "question",
+                "response": {
+                    "type": "freeForm",
+                    "text": "Publish after review"
+                }
+            },
+            {
+                "type": "sandboxApproval",
+                "response": "deny"
+            }
+        ])
+    );
+}
+
+#[test]
+fn submit_user_action_uses_one_canonical_request_and_response_shape() {
+    let request = SubmitUserActionRequest {
+        session_id: "session-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        action_id: "action-1".to_string(),
+        response: UserActionResponse::Question(QuestionAnswer::FreeForm {
+            text: "Continue tomorrow".to_string(),
+        }),
+    };
+    let response = SubmitUserActionResponse {
+        action_id: "action-1".to_string(),
+        state: UserActionState::ResponseAccepted,
+    };
+
+    assert_eq!(
+        serde_json::to_value((request, response)).unwrap(),
+        serde_json::json!([{
+            "sessionId": "session-1",
+            "turnId": "turn-1",
+            "actionId": "action-1",
+            "response": {
+                "type": "question",
+                "response": { "type": "freeForm", "text": "Continue tomorrow" }
+            }
+        }, {
+            "actionId": "action-1",
+            "state": "responseAccepted"
+        }])
+    );
+}
+
+#[test]
+fn user_action_params_preserve_all_variant_shapes() {
+    let params = [
+        UserActionParams::DynamicToolResult(DynamicToolResultParams {
+            tool_name: "external-tool".to_string(),
+        }),
+        UserActionParams::SandboxApproval(SandboxApprovalParams {
+            tool_name: "bash".to_string(),
+            reason: SandboxApprovalReason::RiskyCommand,
+            presentation: SandboxApprovalPresentation::Command {
+                command: "rm build.log".to_string(),
+                cwd: "/workspace".to_string(),
+                risk_summary: Some("Deletes a file".to_string()),
+            },
+            available_decisions: vec![
+                SandboxApprovalDecision::AllowOnce,
+                SandboxApprovalDecision::Deny,
+                SandboxApprovalDecision::Cancel,
+            ],
+        }),
+    ];
+
+    assert_eq!(
+        serde_json::to_value(params).unwrap(),
+        serde_json::json!([
+            {
+                "type": "dynamicToolResult",
+                "params": { "toolName": "external-tool" }
+            },
+            {
+                "type": "sandboxApproval",
+                "params": {
+                    "toolName": "bash",
+                    "reason": "riskyCommand",
+                    "presentation": {
+                        "type": "command",
+                        "command": "rm build.log",
+                        "cwd": "/workspace",
+                        "riskSummary": "Deletes a file"
+                    },
+                    "availableDecisions": ["allowOnce", "deny", "cancel"]
+                }
+            }
+        ])
+    );
+}
+
+#[test]
+fn sandbox_approval_presentations_use_stable_tagged_shapes() {
+    let presentations = [
+        SandboxApprovalPresentation::FileSystem {
+            operation: SandboxFileOperation::Write,
+            paths: vec!["/tmp/output".to_string()],
+        },
+        SandboxApprovalPresentation::Network {
+            scope: "internet".to_string(),
+        },
+    ];
+
+    assert_eq!(
+        serde_json::to_value(presentations).unwrap(),
+        serde_json::json!([
+            {
+                "type": "fileSystem",
+                "operation": "write",
+                "paths": ["/tmp/output"]
+            },
+            {
+                "type": "network",
+                "scope": "internet"
+            }
+        ])
+    );
+}
+
 fn model_info(provider: &str, id: &str, name: &str, reasoning: bool) -> ModelInfo {
     ModelInfo::from_provider_model(
         provider,
@@ -177,6 +386,7 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
         project_id: Some("project-1".to_string()),
         current_directory: Some(std::path::PathBuf::from("/repo")),
         config: TalosConfig::default(),
+        effective_user_permission_mode: UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 100,
             last_activity: 200,
@@ -222,6 +432,7 @@ fn test_session_override_policy_accepts_model_selection() {
             },
             reasoning_effort: None,
         }),
+        ..SessionConf::default()
     };
     SessionConfigOverridePolicy::validate_conf(&conf)
         .expect("known strong typed conf should be accepted");
@@ -398,6 +609,7 @@ fn test_resolve_effective_project_root_prefers_project_directory() {
         project_id: Some("project-1".to_string()),
         current_directory: Some(std::path::PathBuf::from("/current")),
         config: TalosConfig::default(),
+        effective_user_permission_mode: UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 100,
             last_activity: 200,
@@ -442,6 +654,7 @@ fn test_resolve_effective_project_root_uses_embedded_current_directory() {
         project_id: None,
         current_directory: Some(std::path::PathBuf::from("/current")),
         config: TalosConfig::default(),
+        effective_user_permission_mode: UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 100,
             last_activity: 200,
@@ -483,6 +696,7 @@ fn test_resolve_effective_project_root_uses_workspace_root() {
         project_id: None,
         current_directory: None,
         config: TalosConfig::default(),
+        effective_user_permission_mode: UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 100,
             last_activity: 200,

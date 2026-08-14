@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 034 |
+| `feat` | 037 |
 | `fix` | 005 |
 | `refactor` | 040 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-036 | `feat-036-unified-tool-sandbox` | draft |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |
 | feat-032 | `feat-032-session-subagent` | active |
 | refactor-039 | `refactor-039-memory-storage-retrieval` | draft |

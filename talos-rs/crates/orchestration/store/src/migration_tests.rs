@@ -1,7 +1,86 @@
 use sqlx::Row;
+use std::sync::Arc;
 use talos_storage::SqliteStorage;
 
 use super::{run_migrations, test_migrations_dir};
+
+#[tokio::test]
+async fn migration_replaces_legacy_pending_actions_with_user_action_store() {
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .unwrap(),
+    );
+    let pool = storage.pool().clone();
+    sqlx::raw_sql(
+        r#"
+        CREATE TABLE active_turns (
+            session_id TEXT PRIMARY KEY,
+            turn_id TEXT NOT NULL,
+            message_id TEXT,
+            status TEXT NOT NULL,
+            last_event_seq INTEGER,
+            pending_user_action_json TEXT,
+            updated_at INTEGER NOT NULL
+        );
+        INSERT INTO active_turns VALUES (
+            'waiting-session', 'turn-1', 'message-1', 'waiting_user_action', 1,
+            '{"type":"dynamic_tool_result"}', 10
+        );
+        INSERT INTO active_turns VALUES (
+            'running-session', 'turn-2', 'message-2', 'running', 2, NULL, 11
+        );
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+
+    let columns = sqlx::query("PRAGMA table_info(active_turns)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    assert!(columns.contains("current_action_id"));
+    assert!(!columns.contains("pending_user_action_json"));
+    let active_sessions =
+        sqlx::query_scalar::<_, String>("SELECT session_id FROM active_turns ORDER BY session_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(active_sessions, vec!["running-session".to_string()]);
+
+    use crate::session::{DatabaseSessionStore, UserActionRecord, UserActionStore};
+    use talos_types::{
+        DynamicToolResultParams, PendingUserAction, UserActionParams, UserActionState,
+    };
+    let store = DatabaseSessionStore::new(storage).await.unwrap();
+    let record = UserActionRecord {
+        session_id: "session-1".to_string(),
+        turn_id: "turn-1".to_string(),
+        action: PendingUserAction {
+            action_id: "action-1".to_string(),
+            call_id: "call-1".to_string(),
+            item_id: None,
+            state: UserActionState::Pending,
+            params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+                tool_name: "external-tool".to_string(),
+            }),
+        },
+        response: None,
+        version: 0,
+        updated_at: 12,
+    };
+    assert_eq!(store.create(record.clone()).await.unwrap(), record);
+    assert_eq!(
+        store.get("session-1", "turn-1", "action-1").await.unwrap(),
+        Some(record)
+    );
+}
 
 #[tokio::test]
 async fn migration_initializes_base_schema_once() {
@@ -14,7 +93,7 @@ async fn migration_initializes_base_schema_once() {
     run_migrations(&pool, &test_migrations_dir()).await.unwrap();
 
     let tables = sqlx::query_scalar::<_, String>(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'bindings', 'projects', 'users', 'user_tokens', 'timeline_events', 'active_turns', 'message_idempotency_keys') ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('sessions', 'bindings', 'projects', 'users', 'user_tokens', 'timeline_events', 'active_turns', 'message_idempotency_keys', 'user_actions') ORDER BY name",
     )
     .fetch_all(&pool)
     .await
@@ -28,6 +107,7 @@ async fn migration_initializes_base_schema_once() {
             "projects".to_string(),
             "sessions".to_string(),
             "timeline_events".to_string(),
+            "user_actions".to_string(),
             "user_tokens".to_string(),
             "users".to_string(),
         ]

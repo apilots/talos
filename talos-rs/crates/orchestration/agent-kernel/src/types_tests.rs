@@ -64,3 +64,55 @@ fn test_invocation_context_state_write_scopes() {
     assert!(ctx.set_user_state("k3", json!("v3")).is_err());
     assert!(ctx.set_workspace_state("k4", json!("v4")).is_err());
 }
+
+#[test]
+fn kernel_execution_settings_follow_effective_permission_mode() {
+    let mut config = talos_config::AgentKernelConfig {
+        tool_parallelism: 4,
+        ..talos_config::AgentKernelConfig::default()
+    };
+
+    config.tools.sandbox_policy.user_permission_mode =
+        talos_config::ToolUserPermissionModeConfig::FullAccess;
+    assert_eq!(
+        KernelExecutionSettings::try_from(&config)
+            .expect("full access settings")
+            .tool_execution_mode,
+        ToolExecutionMode::Parallel
+    );
+
+    config.tools.sandbox_policy.user_permission_mode =
+        talos_config::ToolUserPermissionModeConfig::AskForApproval;
+    assert_eq!(
+        KernelExecutionSettings::try_from(&config)
+            .expect("ask for approval settings")
+            .tool_execution_mode,
+        ToolExecutionMode::Sequential
+    );
+
+    config.tools.sandbox_policy.user_permission_mode =
+        talos_config::ToolUserPermissionModeConfig::ApproveForMe;
+    assert_eq!(
+        KernelExecutionSettings::try_from(&config)
+            .expect("approve for me settings")
+            .tool_execution_mode,
+        ToolExecutionMode::Sequential
+    );
+}
+
+#[test]
+fn full_access_respects_the_configured_parallelism_limit() {
+    let mut config = talos_config::AgentKernelConfig {
+        tool_parallelism: 1,
+        ..talos_config::AgentKernelConfig::default()
+    };
+    config.tools.sandbox_policy.user_permission_mode =
+        talos_config::ToolUserPermissionModeConfig::FullAccess;
+
+    assert_eq!(
+        KernelExecutionSettings::try_from(&config)
+            .expect("sequential full access settings")
+            .tool_execution_mode,
+        ToolExecutionMode::Sequential
+    );
+}

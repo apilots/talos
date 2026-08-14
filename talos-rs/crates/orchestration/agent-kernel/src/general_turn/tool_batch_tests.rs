@@ -5,6 +5,7 @@ fn reduce_tool_execution_output_includes_next_turn_failure_payload() {
     let output = ToolExecutionOutput {
         call_id: "call-1".to_string(),
         tool_name: "Read".to_string(),
+        arguments: serde_json::json!({"path": "missing"}),
         outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
             content: String::new(),
             success: false,
@@ -49,6 +50,7 @@ async fn emit_tool_result_stream_event_includes_envelope_and_semantic_events() {
     let output = ToolExecutionOutput {
         call_id: "call-2".to_string(),
         tool_name: "Bash".to_string(),
+        arguments: serde_json::json!({"command": "false"}),
         outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
             content: String::new(),
             success: false,
@@ -98,6 +100,7 @@ fn reduce_tool_execution_output_uses_canonical_success_payload() {
     let output = ToolExecutionOutput {
         call_id: "call-3".to_string(),
         tool_name: "Read".to_string(),
+        arguments: serde_json::json!({"path": "README.md"}),
         outcome: ToolDispatchOutcome::executed(ToolOutputPayload::success_text(
             "plain text result",
         )),
@@ -135,15 +138,18 @@ fn memory_get_keeps_the_full_tool_result() {
         tool_result_log: Vec::new(),
         retrieved_memories: Vec::new(),
         tool_call_count: 0,
+        tool_result_count: 0,
         tool_error_count: 0,
-        pending_dynamic_requests: Vec::new(),
+        pending_user_action: None,
         final_answer_streamed: false,
         execution_summary_streamed: false,
+        elapsed_duration_ms: 0,
     };
     let body = "x".repeat(1_500);
     let output = ToolExecutionOutput {
         call_id: "call-memory".to_string(),
         tool_name: "MemoryGet".to_string(),
+        arguments: serde_json::json!({"memory_id": "mem-1"}),
         outcome: ToolDispatchOutcome::executed(
             ToolOutputPayload::success_json(
                 &MemoryGetResponse {
@@ -168,7 +174,7 @@ fn memory_get_keeps_the_full_tool_result() {
         ),
         is_error: false,
     };
-    let batch = collect_general_turn_tool_batch(vec![output]);
+    let batch = collect_general_turn_tool_batch(vec![output]).expect("collect memory batch");
     let mut config = AgentKernelConfig::default();
     config.compaction.retrieved_memory_max_chars = 2_000;
 
@@ -190,6 +196,7 @@ fn reduce_tool_execution_output_rejects_structured_only_success_payload() {
     let output = ToolExecutionOutput {
         call_id: "call-4".to_string(),
         tool_name: "BadTool".to_string(),
+        arguments: serde_json::json!({}),
         outcome: ToolDispatchOutcome::executed(ToolOutputPayload::Function {
             content: "{}".to_string(),
             success: true,
@@ -212,4 +219,116 @@ fn reduce_tool_execution_output_rejects_structured_only_success_payload() {
         serde_json::json!({"result": "hidden"}),
         "model projection must not use structured_content as the primary payload"
     );
+}
+
+#[test]
+fn repeated_approvals_preserve_only_the_unexecuted_tool_suffix() {
+    let arguments = serde_json::json!({
+        "command": "printf approved > marker",
+        "timeout": 3000
+    });
+    let output = ToolExecutionOutput {
+        call_id: "call-approval".to_string(),
+        tool_name: "Bash".to_string(),
+        arguments: arguments.clone(),
+        outcome: ToolDispatchOutcome::pending_sandbox_approval(
+            "Bash",
+            talos_types::SandboxApprovalParams {
+                tool_name: "Bash".to_string(),
+                reason: talos_types::SandboxApprovalReason::RiskyCommand,
+                presentation: talos_types::SandboxApprovalPresentation::Command {
+                    command: "printf approved > marker".to_string(),
+                    cwd: "/workspace".to_string(),
+                    risk_summary: None,
+                },
+                available_decisions: vec![talos_types::SandboxApprovalDecision::AllowOnce],
+            },
+            "sar_scope".to_string(),
+        ),
+        is_error: false,
+    };
+
+    let calls = vec![
+        FunctionCall::new("call-approval", "Bash", arguments.clone()),
+        FunctionCall::new(
+            "call-after-approval",
+            "Bash",
+            serde_json::json!({"command": "printf second"}),
+        ),
+        FunctionCall::new(
+            "call-after-second-approval",
+            "Read",
+            serde_json::json!({"path": "README.md"}),
+        ),
+    ];
+    let batch = collect_general_turn_tool_batch_for_calls(vec![output], &calls)
+        .expect("collect first approval");
+
+    let pending = batch
+        .pending_user_action
+        .expect("first approval should be pending");
+    assert_eq!(pending.arguments, arguments);
+    assert_eq!(
+        pending.deferred_tool_calls,
+        vec![calls[1].clone(), calls[2].clone()]
+    );
+
+    let resumed_outputs = vec![
+        ToolExecutionOutput {
+            call_id: calls[0].id.clone(),
+            tool_name: calls[0].name.clone(),
+            arguments: calls[0].arguments.clone(),
+            outcome: ToolDispatchOutcome::executed(ToolOutputPayload::success_text("first")),
+            is_error: false,
+        },
+        ToolExecutionOutput {
+            call_id: calls[1].id.clone(),
+            tool_name: calls[1].name.clone(),
+            arguments: calls[1].arguments.clone(),
+            outcome: ToolDispatchOutcome::pending_sandbox_approval(
+                "Bash",
+                talos_types::SandboxApprovalParams {
+                    tool_name: "Bash".to_string(),
+                    reason: talos_types::SandboxApprovalReason::RiskyCommand,
+                    presentation: talos_types::SandboxApprovalPresentation::Command {
+                        command: "printf second".to_string(),
+                        cwd: "/workspace".to_string(),
+                        risk_summary: None,
+                    },
+                    available_decisions: vec![talos_types::SandboxApprovalDecision::AllowOnce],
+                },
+                "sar_scope_second".to_string(),
+            ),
+            is_error: false,
+        },
+    ];
+    let resumed_batch = collect_general_turn_tool_batch_for_calls(resumed_outputs, &calls)
+        .expect("collect second approval");
+
+    let pending = resumed_batch
+        .pending_user_action
+        .expect("second approval should be pending");
+    assert_eq!(pending.deferred_tool_calls, vec![calls[2].clone()]);
+}
+
+#[test]
+fn tool_batch_never_exposes_multiple_pending_user_actions() {
+    let outputs = ["call-first", "call-second"]
+        .into_iter()
+        .map(|call_id| ToolExecutionOutput {
+            call_id: call_id.to_string(),
+            tool_name: "AskUserQuestion".to_string(),
+            arguments: serde_json::json!({"question": call_id}),
+            outcome: ToolDispatchOutcome::pending_dynamic(
+                "AskUserQuestion",
+                serde_json::json!({"question": call_id}),
+            ),
+            is_error: false,
+        })
+        .collect();
+
+    let error = collect_general_turn_tool_batch(outputs)
+        .expect_err("multiple pending actions must fail the tool batch");
+
+    assert!(error.to_string().contains("multiple pending user actions"));
 }

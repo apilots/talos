@@ -24,6 +24,7 @@ pub mod subagent;
 pub mod talos;
 mod talos_content_display;
 pub mod turn_api;
+pub mod user_action;
 
 pub use agent_dispatch::*;
 pub use auth_api::*;
@@ -42,6 +43,7 @@ pub use skills::*;
 pub use subagent::*;
 pub use talos::*;
 pub use turn_api::*;
+pub use user_action::*;
 
 #[cfg(test)]
 #[path = "types_tests.rs"]

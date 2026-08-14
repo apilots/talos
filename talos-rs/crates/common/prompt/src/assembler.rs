@@ -1,3 +1,4 @@
+use crate::sandbox_labels::{sandbox_mode_label, user_permission_mode_label};
 use crate::{
     bootstrap, budget, diagnostics, regions, BootstrapFileDiagnostic, ContinuityAnswerMode,
     ContinuityToolOutcome, DynamicTrimPolicy, PromptAssembly, PromptBuilder, PromptCacheState,
@@ -476,8 +477,12 @@ fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> 
         }
     ));
     lines.push(format!(
-        "- sandbox_mode: {}",
+        "- configured_sandbox_request: {}",
         sandbox_mode_label(&builder.config.tools.sandbox_policy.default_mode)
+    ));
+    lines.push(format!(
+        "- configured_user_permission_mode: {}",
+        user_permission_mode_label(&builder.config.tools.sandbox_policy.user_permission_mode)
     ));
 
     if let Some(environment) = builder.session_environment.as_ref() {
@@ -557,15 +562,6 @@ fn git_stdout(project_root: &Path, args: &[&str]) -> Option<String> {
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!value.is_empty()).then_some(value)
-}
-
-fn sandbox_mode_label(mode: &talos_config::ToolSandboxModeConfig) -> &'static str {
-    match mode {
-        talos_config::ToolSandboxModeConfig::UseDefault => "use_default",
-        talos_config::ToolSandboxModeConfig::ReadOnly => "read_only",
-        talos_config::ToolSandboxModeConfig::WorkspaceWrite => "workspace_write",
-        talos_config::ToolSandboxModeConfig::DangerFullAccess => "danger_full_access",
-    }
 }
 
 fn build_prepended_user_context_message(builder: &PromptBuilder<'_>) -> TalosResult<String> {

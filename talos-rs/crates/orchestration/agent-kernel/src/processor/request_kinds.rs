@@ -119,7 +119,12 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
         let latest_dynamic_request = latest_branch_event(ctx, request.branch, |event| {
             matches!(
                 event.payload,
-                KernelTranscriptPayload::DynamicToolRequest { .. }
+                KernelTranscriptPayload::UserActionRequest {
+                    payload: crate::KernelTranscriptUserActionRequestPayload {
+                        params: talos_types::UserActionParams::DynamicToolResult(_),
+                        ..
+                    }
+                }
             )
         });
 
@@ -127,7 +132,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
             return Ok(RequestProcessorOutput::default());
         };
 
-        let KernelTranscriptPayload::DynamicToolRequest {
+        let KernelTranscriptPayload::UserActionRequest {
             payload: dynamic_request,
         } = &dynamic_request_event.payload
         else {
@@ -135,8 +140,12 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
         };
 
         let latest_dynamic_response = latest_branch_event(ctx, request.branch, |event| {
-            if let KernelTranscriptPayload::DynamicToolResponse { payload } = &event.payload {
+            if let KernelTranscriptPayload::UserActionResponse { payload } = &event.payload {
                 payload.call_id == dynamic_request.call_id
+                    && matches!(
+                        payload.response,
+                        talos_types::UserActionResponse::DynamicToolResult(_)
+                    )
             } else {
                 false
             }
@@ -144,7 +153,7 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
 
         match latest_dynamic_response {
             Some(response_event) if response_event.timestamp > dynamic_request_event.timestamp => {
-                let KernelTranscriptPayload::DynamicToolResponse { payload } =
+                let KernelTranscriptPayload::UserActionResponse { payload } =
                     &response_event.payload
                 else {
                     return Ok(RequestProcessorOutput::default());
@@ -154,13 +163,17 @@ impl RequestProcessor for DynamicToolReplayRequestProcessor {
                     tool_name: payload.tool_name.clone(),
                     arguments: dynamic_request.arguments.clone().into(),
                 });
-                request.replay_dynamic_tool_results.insert(
-                    payload.call_id.clone(),
-                    ReplayDynamicToolResult {
-                        output: payload.output.clone(),
-                        success: payload.success,
-                    },
-                );
+                if let talos_types::UserActionResponse::DynamicToolResult(result) =
+                    &payload.response
+                {
+                    request.replay_dynamic_tool_results.insert(
+                        payload.call_id.clone(),
+                        ReplayDynamicToolResult {
+                            output: result.output.clone(),
+                            success: result.success,
+                        },
+                    );
+                }
             }
             _ => {
                 let timeout_ms = ctx.limits.dynamic_tool_timeout_ms;

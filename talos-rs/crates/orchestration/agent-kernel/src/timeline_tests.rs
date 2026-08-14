@@ -114,6 +114,16 @@ fn timeline_builder_preserves_structured_user_input() {
 }
 
 #[test]
+fn timeline_builder_continues_item_ids_after_tracking_a_resumed_tool() {
+    let mut builder = TimelineBuilder::new("request-2", "turn-1", "message-1", "session-1");
+    builder.track_existing_tool_call("tool-3", "call-1", "Bash", "{}");
+
+    let reasoning = builder.start_reasoning();
+
+    assert_eq!(item_id(&reasoning), "reasoning-4");
+}
+
+#[test]
 fn timeline_builder_rejects_delta_without_active_item() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
     let err = builder
@@ -183,6 +193,31 @@ fn timeline_builder_closes_running_items_before_turn_terminal() {
     assert!(completions
         .iter()
         .all(|event| matches!(event.payload, AgentEventPayload::ItemCompleted(_))));
+}
+
+#[test]
+fn successful_closure_does_not_complete_active_tool_items() {
+    let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
+    let reasoning_id = item_id(&builder.start_reasoning());
+    let tool_id = item_id(&builder.start_tool_call("call-1", "Bash", "{}"));
+
+    let completions = builder
+        .close_active_non_tool_items(TalosTimelineItemStatus::Completed)
+        .expect("non-tool items should close");
+
+    assert_eq!(completions.len(), 1);
+    assert_eq!(
+        builder
+            .item(&reasoning_id)
+            .expect("reasoning exists")
+            .status,
+        TalosTimelineItemStatus::Completed
+    );
+    assert_eq!(
+        builder.item(&tool_id).expect("tool exists").status,
+        TalosTimelineItemStatus::Running
+    );
+    assert_eq!(builder.active_tool_item_ids(), vec![tool_id]);
 }
 
 #[test]

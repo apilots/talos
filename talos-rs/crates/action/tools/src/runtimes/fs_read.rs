@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
+use talos_tools_sandbox::ToolFileSystemHandle;
+use talos_tools_sandbox::{AbsolutePathBuf, FileSystemOperation, RequestedFileSystemAccess};
 
-use crate::runtimes::resolve_base_dir;
+use crate::runtimes::{map_sandbox_file_error, resolve_base_dir};
 use crate::state::{sha256_hex, ReadFileStateSource};
 use crate::ToolContext;
 
@@ -51,10 +52,12 @@ pub async fn read_text_file(
     context: &ToolContext,
 ) -> TalosResult<(PathBuf, String)> {
     let path = resolve_requested_path(request, context)?;
-    ensure_readable_regular_file(&path).await?;
-    let bytes = fs::read(&path)
+    let file_system = context.sandbox_file_system()?;
+    ensure_readable_regular_file(&path, &file_system).await?;
+    let bytes = file_system
+        .read(&path)
         .await
-        .map_err(|err| TalosError::ToolError(format!("failed to read file: {}", err)))?;
+        .map_err(map_sandbox_file_error)?;
     if !looks_like_text(&bytes) {
         return Err(TalosError::ToolError(format!(
             "file `{}` is not a supported text file",
@@ -115,6 +118,44 @@ pub fn resolve_requested_path(
     resolve_tool_path(raw_path, context)
 }
 
+pub fn requested_file_system_access(
+    request: &ReadFileRequest,
+    context: &ToolContext,
+) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+    let path = resolve_requested_path(request, context)?;
+    let path = normalize_existing_tool_path(&path)?;
+    Ok(vec![RequestedFileSystemAccess::new(
+        FileSystemOperation::Read,
+        vec![path],
+    )
+    .map_err(|error| TalosError::ToolError(error.to_string()))?])
+}
+
+pub fn normalize_existing_tool_path(path: &Path) -> TalosResult<AbsolutePathBuf> {
+    let path = std::fs::canonicalize(path).map_err(|error| {
+        TalosError::ToolError(format!("failed to resolve `{}`: {error}", path.display()))
+    })?;
+    AbsolutePathBuf::new(path).map_err(|error| TalosError::ToolError(error.to_string()))
+}
+
+pub fn normalize_write_scope(path: &Path) -> TalosResult<AbsolutePathBuf> {
+    let mut existing = path.parent().ok_or_else(|| {
+        TalosError::ToolError(format!(
+            "filesystem path has no parent directory: {}",
+            path.display()
+        ))
+    })?;
+    while !existing.exists() {
+        existing = existing.parent().ok_or_else(|| {
+            TalosError::ToolError(format!(
+                "filesystem path has no existing ancestor: {}",
+                path.display()
+            ))
+        })?;
+    }
+    normalize_existing_tool_path(existing)
+}
+
 pub fn resolve_tool_path(raw_path: &str, context: &ToolContext) -> TalosResult<PathBuf> {
     let path = PathBuf::from(raw_path);
     let resolved = if path.is_absolute() {
@@ -125,32 +166,43 @@ pub fn resolve_tool_path(raw_path: &str, context: &ToolContext) -> TalosResult<P
     Ok(resolved)
 }
 
-async fn ensure_readable_regular_file(path: &Path) -> TalosResult<()> {
-    let metadata = fs::metadata(path).await.map_err(|err| {
-        TalosError::ToolError(format!(
-            "failed to inspect file `{}`: {}{}",
-            path.display(),
-            err,
-            path_hint(path)
-        ))
-    })?;
-    if metadata.is_dir() {
+async fn ensure_readable_regular_file(
+    path: &Path,
+    file_system: &ToolFileSystemHandle,
+) -> TalosResult<()> {
+    let metadata = match file_system.metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(error @ talos_tools_sandbox::TalosSandboxError::FileSystemAccessDenied { .. })
+        | Err(error @ talos_tools_sandbox::TalosSandboxError::SandboxBypassDenied) => {
+            return Err(map_sandbox_file_error(error));
+        }
+        Err(error) => {
+            let hint = path_hint(path, file_system).await;
+            return Err(TalosError::ToolError(format!(
+                "failed to inspect file `{}`: {}{}",
+                path.display(),
+                error,
+                hint
+            )));
+        }
+    };
+    if metadata.is_directory {
         return Err(TalosError::ToolError(format!(
             "`{}` is a directory; use Glob to inspect directory contents",
             path.display()
         )));
     }
-    if !metadata.is_file() {
+    if !metadata.is_file {
         return Err(TalosError::ToolError(format!(
             "`{}` is not a regular file and cannot be read by this tool",
             path.display()
         )));
     }
-    if metadata.len() > MAX_FILE_BYTES {
+    if metadata.len > MAX_FILE_BYTES {
         return Err(TalosError::ToolError(format!(
             "`{}` is too large to read inline ({} bytes, max {} bytes)",
             path.display(),
-            metadata.len(),
+            metadata.len,
             MAX_FILE_BYTES
         )));
     }
@@ -166,19 +218,19 @@ fn is_unchanged_read(path: &Path, content: &str, context: &ToolContext) -> bool 
         && entry.size_bytes == content.len() as u64
 }
 
-fn path_hint(path: &Path) -> String {
+async fn path_hint(path: &Path, file_system: &ToolFileSystemHandle) -> String {
     let Some(parent) = path.parent() else {
         return String::new();
     };
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
         return String::new();
     };
-    let Ok(entries) = std::fs::read_dir(parent) else {
+    let Ok(entries) = file_system.read_directory(parent).await else {
         return String::new();
     };
     let suggestions = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| entry.file_name().into_string().ok())
+        .into_iter()
+        .filter_map(|entry| entry.file_name.into_string().ok())
         .filter(|candidate| candidate.contains(name) || name.contains(candidate))
         .take(3)
         .collect::<Vec<_>>();

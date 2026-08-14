@@ -284,6 +284,7 @@ fn record_for(
             provider: "anthropic".to_string(),
             id: "default".to_string(),
         })),
+        ..SessionConf::default()
     };
     SessionRecord {
         id: session_id.to_string(),
@@ -434,6 +435,7 @@ async fn creating_session_uses_actor_user_id() {
                 session_id: "session-created".to_string(),
                 context,
                 model_selection: None,
+                user_permission_mode: None,
                 workspace_id: None,
                 project_id: None,
                 current_directory: None,

@@ -5,19 +5,21 @@ use serde_json::{json, Value};
 use talos_sdk::{
     canonical_method, AgentEventPayload, AgentEventType, AppServerClient, AppServerClientConfig,
     ConfigGetRequest, ExpectedFileVersion, GatewayClient, MemoryFileListRequest,
-    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ModelRef, ModelSelection,
-    ProjectDeleteRequest, ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest,
-    SessionGetRequest, StartTurnRequest, SubmitDynamicToolResultRequest, SubscribeTimelineRequest,
-    TalosContext, TalosError, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItemKind, TimelineEventEnvelope, WorkspaceDocKind,
-    WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
+    MemoryFileReadRequest, MemoryFileWriteRequest, ModelListRequest, ProjectDeleteRequest,
+    ProjectListRequest, ProjectReadRequest, RecoverTimelineRequest, SessionGetRequest,
+    SubmitDynamicToolResultRequest, SubscribeTimelineRequest, TalosContext, TalosError,
+    TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineDelta,
+    TalosTimelineItemKind, TimelineEventEnvelope, WorkspaceDocKind, WorkspaceDocListRequest,
+    WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 mod mcp_e2e;
+mod request;
 mod skills_e2e;
 use mcp_e2e::{mcp_e2e, prepare_mcp_fixture};
+use request::{start_turn_request, test_model_ref};
 use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
@@ -577,35 +579,6 @@ async fn start_turn(client: &mut AppServerClient, session_id: &str) -> Result<()
         ))
         .await?;
     Ok(())
-}
-
-fn start_turn_request(
-    session_id: &str,
-    text: &str,
-    client_request_id: Option<String>,
-) -> StartTurnRequest {
-    StartTurnRequest {
-        session_id: session_id.to_string(),
-        input: vec![TalosInputItem::Text {
-            text: text.to_string(),
-        }],
-        workspace_id: None,
-        context: Some(test_talos_context()),
-        model_selection: test_model_ref().map(ModelSelection::without_reasoning),
-        project_id: None,
-        current_directory: None,
-        client_request_id,
-    }
-}
-
-fn test_model_ref() -> Option<ModelRef> {
-    let provider = std::env::var("TALOS_APP_SERVER_TEST_PROVIDER")
-        .ok()
-        .filter(|value| !value.trim().is_empty())?;
-    let id = std::env::var("TALOS_APP_SERVER_TEST_MODEL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())?;
-    Some(ModelRef { provider, id })
 }
 
 async fn collect_until_terminal(

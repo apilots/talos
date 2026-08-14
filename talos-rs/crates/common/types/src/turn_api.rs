@@ -1,5 +1,6 @@
 use crate::model::ModelSelection;
 use crate::talos::{TalosContext, TalosInputItem, TimelineEventEnvelope};
+use crate::UserPermissionMode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -22,6 +23,11 @@ pub struct StartTurnRequest {
     /// Explicit model selection for this turn; absent means use the session or configured default.
     #[serde(rename = "modelSelection")]
     pub model_selection: Option<ModelSelection>,
+    #[serde(default)]
+    #[ts(optional)]
+    /// Permission override used only when this request creates a missing session.
+    #[serde(rename = "userPermissionMode")]
+    pub user_permission_mode: Option<UserPermissionMode>,
     #[serde(default)]
     #[ts(optional)]
     pub project_id: Option<String>,
@@ -139,7 +145,7 @@ pub struct TimelineActiveTurnSnapshot {
     #[serde(default)]
     pub last_event_id: Option<String>,
     #[serde(default)]
-    pub pending_user_action: Option<TimelinePendingUserAction>,
+    pub pending_user_action: Option<crate::PendingUserAction>,
     #[ts(type = "number")]
     pub updated_at: i64,
 }
@@ -152,21 +158,6 @@ pub enum TimelineActiveTurnStatus {
     Cancelling,
     Completed,
     Failed,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TimelinePendingUserAction {
-    DynamicToolResult(TimelinePendingDynamicToolResult),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct TimelinePendingDynamicToolResult {
-    #[serde(default)]
-    #[ts(optional)]
-    pub item_id: Option<String>,
-    pub call_id: String,
-    pub tool_name: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

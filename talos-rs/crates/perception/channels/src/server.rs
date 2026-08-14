@@ -349,6 +349,7 @@ fn build_start_turn_request(
         input,
         context: Some(context),
         model_selection: None,
+        user_permission_mode: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,

@@ -3,10 +3,11 @@ use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosContentItem;
 
-use crate::runtimes::fs_apply_patch::{run, ApplyPatchRequest};
+use crate::runtimes::fs_apply_patch::{requested_file_system_access, run, ApplyPatchRequest};
 use crate::runtimes::fs_diff::{build_file_diff_item, FileDiffInput};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 pub struct ApplyPatchTool;
 
@@ -44,6 +45,18 @@ impl Tool for ApplyPatchTool {
             concurrency_safe: false,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::FileSystem)
+    }
+
+    fn requested_file_system_access(
+        &self,
+        input: &Value,
+        context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        requested_file_system_access(&parse_apply_patch_request(input)?, context)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

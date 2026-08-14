@@ -163,6 +163,7 @@ fn test_session(user_id: &str) -> TalosSession {
         project_id: None,
         current_directory: None,
         config: test_config(),
+        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState::default(),
     }
 }

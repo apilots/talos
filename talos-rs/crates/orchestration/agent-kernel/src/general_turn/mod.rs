@@ -2,13 +2,13 @@ use crate::tool_execution::ToolExecutionContext;
 use crate::{
     warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextPhase, AssistantTextStartedStreamData,
-    DynamicToolRequestStreamData, InvocationContext, KernelEvent, KernelEventData,
-    KernelEventLabel, KernelEventType, KernelModelCallMode, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource,
-    KernelThinkingStage, KernelWarning, PromptWarningEventData, SessionPromptContextConfig,
-    SessionPromptRecentWindow, SessionToolExchangeOutcome, StopReason, TalosMessageRole,
-    ThinkingDeltaStreamData, ToolCallStartStreamData, ToolExecutionInput, ToolExecutor,
-    ToolResultStreamData, UserInput,
+    InvocationContext, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
+    KernelModelCallMode, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, KernelWarning,
+    PromptWarningEventData, SessionPromptContextConfig, SessionPromptRecentWindow,
+    SessionToolExchangeOutcome, StopReason, TalosMessageRole, ThinkingDeltaStreamData,
+    ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
+    UserActionRequestStreamData, UserInput,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -123,14 +123,15 @@ pub use step_request::build_general_turn_step_request;
 pub(crate) use tool_batch::parse_retrieved_memory_items;
 pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_batch};
 pub use types::{
-    BuiltInGeneralTurnPolicy, DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState,
-    GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult,
-    GeneralTurnResume, GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
+    BuiltInGeneralTurnPolicy, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
+    GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
+    GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
     GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction,
     PreparedGeneralTurn, ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    UserActionResume,
 };
 pub(crate) use types::{
-    ForcedFinalizationCause, PendingDynamicToolRequest, ReadOnlyRoundFingerprint,
+    ForcedFinalizationCause, PendingUserActionRequest, ReadOnlyRoundFingerprint,
     ToolCallFingerprint, ToolLoopGuardState, ToolResultLog,
 };
 pub(crate) use working_context::enforce_working_context_budget;

@@ -326,6 +326,7 @@ impl TalosService {
                             session_id: session_id.clone(),
                             context,
                             model_selection: request.model_selection.clone(),
+                            user_permission_mode: request.user_permission_mode,
                             workspace_id: request.workspace_id.clone(),
                             project_id: request.project_id.clone(),
                             current_directory: request.current_directory.clone(),
@@ -656,6 +657,27 @@ impl TalosService {
         Ok(SubmitDynamicToolResultResponse { success: true })
     }
 
+    pub async fn submit_user_action(
+        &self,
+        actor: &Actor,
+        request: talos_types::SubmitUserActionRequest,
+    ) -> ServiceResult<talos_types::SubmitUserActionResponse> {
+        let session = self.access.get_session(actor, &request.session_id).await?;
+        let state = self
+            .turns
+            .submit_user_action(
+                session,
+                &request.turn_id,
+                &request.action_id,
+                request.response,
+            )
+            .await?;
+        Ok(talos_types::SubmitUserActionResponse {
+            action_id: request.action_id,
+            state,
+        })
+    }
+
     pub async fn subscribe_timeline(
         &self,
         actor: &Actor,
@@ -670,7 +692,12 @@ impl TalosService {
         actor: &Actor,
         request: SubscribeTimelineRequest,
     ) -> ServiceResult<TimelineSubscriptionSource> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let session = self.access.get_session(actor, &request.session_id).await?;
+        if !self.access.has_active_runtime_turn(&session).await? {
+            if let Some(active) = self.events.get_active_turn(&request.session_id).await? {
+                self.turns.recover_user_action(session, active).await?;
+            }
+        }
         let session_id = request.session_id.clone();
         let after_event_id = parse_timeline_event_id(request.since_event_id)?;
         let subscription = self
@@ -703,7 +730,12 @@ impl TalosService {
         actor: &Actor,
         request: RecoverTimelineRequest,
     ) -> ServiceResult<talos_types::TimelineRecoveryResponse> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let session = self.access.get_session(actor, &request.session_id).await?;
+        if !self.access.has_active_runtime_turn(&session).await? {
+            if let Some(active) = self.events.get_active_turn(&request.session_id).await? {
+                self.turns.recover_user_action(session, active).await?;
+            }
+        }
         let after_event_id = parse_timeline_event_id(request.after_event_id)?;
         let recovery = self
             .events

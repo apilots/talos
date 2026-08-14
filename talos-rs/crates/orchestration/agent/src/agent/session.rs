@@ -7,9 +7,9 @@ use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
-    SessionTranscriptDynamicToolResponsePayload, SessionTranscriptEventKind,
-    SessionTranscriptHeader, SessionTranscriptPayload, SessionTranscriptRecord,
-    SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
+    SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
+    SessionTranscriptRecord, SessionTranscriptStateDelta, SessionTranscriptStateNamespace,
+    SessionTranscriptUserActionResponsePayload,
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, ContextCompactionMetrics, ContextCompactionOutcome,
@@ -30,13 +30,14 @@ impl AgentHarnessImpl {
         Ok(model.to_string())
     }
 
-    pub(crate) async fn validate_dynamic_tool_submission(
+    pub(crate) async fn validate_user_action_submission(
         &self,
         kernel_config: &AgentKernelConfig,
         session_id: &str,
         turn_id: &str,
         call_id: &str,
         tool_name: &str,
+        response: &talos_types::UserActionResponse,
     ) -> TalosResult<()> {
         let records = self
             .session_artifact_store
@@ -50,17 +51,19 @@ impl AgentHarnessImpl {
 
         let mut latest_request_timestamp = None;
         let mut latest_request_tool_name = None;
+        let mut latest_request_params = None;
         let mut latest_response_timestamp = None;
 
         for record in records {
             match record.payload {
-                SessionTranscriptPayload::DynamicToolRequest { payload }
+                SessionTranscriptPayload::UserActionRequest { payload }
                     if record.header.invocation_id == turn_id && payload.call_id == call_id =>
                 {
                     latest_request_timestamp = Some(record.header.timestamp);
                     latest_request_tool_name = Some(payload.tool_name);
+                    latest_request_params = Some(payload.params);
                 }
-                SessionTranscriptPayload::DynamicToolResponse { payload }
+                SessionTranscriptPayload::UserActionResponse { payload }
                     if record.header.invocation_id == turn_id && payload.call_id == call_id =>
                 {
                     latest_response_timestamp = Some(record.header.timestamp);
@@ -71,25 +74,49 @@ impl AgentHarnessImpl {
 
         let Some(request_timestamp) = latest_request_timestamp else {
             return Err(talos_error::TalosError::ToolError(format!(
-                "dynamic tool call `{call_id}` is not pending for session `{session_id}` turn `{turn_id}`"
+                "user action call `{call_id}` is not pending for session `{session_id}` turn `{turn_id}`"
             )));
         };
 
         if latest_request_tool_name.as_deref() != Some(tool_name) {
             return Err(talos_error::TalosError::ToolError(format!(
-                "dynamic tool call `{call_id}` belongs to `{}` not `{tool_name}`",
+                "user action call `{call_id}` belongs to `{}` not `{tool_name}`",
                 latest_request_tool_name.unwrap_or_else(|| "unknown".to_string())
             )));
         }
 
         if latest_response_timestamp.is_some_and(|ts| ts > request_timestamp) {
             return Err(talos_error::TalosError::ToolError(format!(
-                "dynamic tool call `{call_id}` has already been resolved"
+                "user action call `{call_id}` has already been resolved"
+            )));
+        }
+
+        let params = latest_request_params.ok_or_else(|| {
+            TalosError::ValidationError(format!(
+                "user action call `{call_id}` is missing typed parameters"
+            ))
+        })?;
+        let variants_match = matches!(
+            (&params, response),
+            (
+                talos_types::UserActionParams::DynamicToolResult(_),
+                talos_types::UserActionResponse::DynamicToolResult(_)
+            ) | (
+                talos_types::UserActionParams::Question(_),
+                talos_types::UserActionResponse::Question(_)
+            ) | (
+                talos_types::UserActionParams::SandboxApproval(_),
+                talos_types::UserActionResponse::SandboxApproval(_)
+            )
+        );
+        if !variants_match {
+            return Err(TalosError::ValidationError(format!(
+                "user action call `{call_id}` received a mismatched response"
             )));
         }
 
         let timeout_ms = kernel_config.tools.dynamic.response_timeout_ms;
-        if timeout_ms > 0 {
+        if matches!(params, talos_types::UserActionParams::DynamicToolResult(_)) && timeout_ms > 0 {
             let elapsed_ms = Utc::now()
                 .signed_duration_since(request_timestamp)
                 .num_milliseconds()
@@ -104,23 +131,23 @@ impl AgentHarnessImpl {
         Ok(())
     }
 
-    pub(crate) async fn submit_dynamic_tool_result(
+    pub(crate) async fn submit_user_action_response(
         &self,
         session: TalosSession,
         turn_id: &str,
         call_id: &str,
         tool_name: &str,
-        output: String,
-        success: bool,
+        response: talos_types::UserActionResponse,
     ) -> TalosResult<()> {
         let session_id = session.context.session_id.clone();
         let kernel_config = self.runtime_kernel_config_for_session(&session)?;
-        self.validate_dynamic_tool_submission(
+        self.validate_user_action_submission(
             &kernel_config,
             &session_id,
             turn_id,
             call_id,
             tool_name,
+            &response,
         )
         .await?;
         let record = SessionTranscriptRecord {
@@ -133,12 +160,11 @@ impl AgentHarnessImpl {
             },
             author: SessionTranscriptAuthor::System,
             kind: SessionTranscriptEventKind::SystemMessage,
-            payload: SessionTranscriptPayload::DynamicToolResponse {
-                payload: SessionTranscriptDynamicToolResponsePayload {
+            payload: SessionTranscriptPayload::UserActionResponse {
+                payload: SessionTranscriptUserActionResponsePayload {
                     call_id: call_id.to_string(),
                     tool_name: tool_name.to_string(),
-                    output,
-                    success,
+                    response,
                 },
             },
             actions: SessionTranscriptActions::default(),

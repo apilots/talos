@@ -63,9 +63,13 @@ impl TimelineSubscriptionService {
     ) -> TalosResult<TimelineRecoveryState> {
         let replay = self.replay_after(session_id, after_event_id, limit).await?;
         let active_turn = self.get_active_turn(session_id).await?;
+        let pending_user_action = match active_turn.as_ref() {
+            Some(active) => self.inner_talos()?.get_current_user_action(active).await?,
+            None => None,
+        };
         Ok(TimelineRecoveryState {
             replay,
-            active_turn: map_active_turn_snapshot(session_id, active_turn),
+            active_turn: map_active_turn_snapshot(session_id, active_turn, pending_user_action),
         })
     }
 }

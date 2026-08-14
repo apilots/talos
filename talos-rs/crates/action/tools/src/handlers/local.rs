@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
+use talos_tools_sandbox::RequestedFileSystemAccess;
 
 use crate::handlers::ToolHandler;
 use crate::invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
@@ -52,6 +53,21 @@ impl ToolHandler for LocalToolHandler {
         self.mutating
     }
 
+    fn requested_file_system_access(
+        &self,
+        invocation: &ToolInvocation,
+        context: &ToolDispatchContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        let ToolCallPayload::Function { arguments } = &invocation.payload else {
+            return Err(TalosError::ToolError(format!(
+                "Local tool '{}' requires function payload",
+                invocation.tool_name
+            )));
+        };
+        self.tool
+            .requested_file_system_access(arguments, context.tool_context())
+    }
+
     async fn handle(
         &self,
         invocation: ToolInvocation,
@@ -64,11 +80,9 @@ impl ToolHandler for LocalToolHandler {
             )));
         };
 
-        let output = self
-            .tool
-            .execute_payload(arguments, context.into_tool_context())
-            .await?;
-        Ok(ToolDispatchOutcome::executed(output))
+        self.tool
+            .execute_outcome(arguments, context.into_tool_context())
+            .await
     }
 }
 

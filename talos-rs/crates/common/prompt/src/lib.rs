@@ -12,6 +12,7 @@ mod manager;
 pub mod presets;
 mod regions;
 mod renderer;
+mod sandbox_labels;
 mod template;
 mod types;
 

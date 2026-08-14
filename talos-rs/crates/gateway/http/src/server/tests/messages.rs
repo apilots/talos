@@ -297,7 +297,7 @@ async fn test_retry_turn_rejects_running_active_turn() {
             message_id: Some("msg-running".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: Some(TimelineEventId::from_seq(3)),
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 123,
         },
     );
@@ -347,7 +347,7 @@ async fn test_retry_turn_rejects_completed_active_turn() {
             message_id: Some("msg-completed".to_string()),
             status: ActiveTurnStatus::Completed,
             last_event_id: Some(TimelineEventId::from_seq(4)),
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 124,
         },
     );
@@ -397,7 +397,7 @@ async fn test_retry_turn_allows_failed_active_turn() {
             message_id: Some("msg-failed".to_string()),
             status: ActiveTurnStatus::Failed,
             last_event_id: Some(TimelineEventId::from_seq(5)),
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 125,
         },
     );
@@ -464,6 +464,22 @@ async fn test_retry_turn_allows_failed_active_turn() {
 #[tokio::test]
 async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
     let event_store = Arc::new(RecordingEventStore::default());
+    let action = pending_dynamic_record(
+        "mock-session",
+        "turn-dynamic",
+        "action-dynamic",
+        Some("tool-dynamic"),
+        "call-1",
+        "Tool",
+    );
+    event_store.user_actions.lock().unwrap().insert(
+        (
+            "mock-session".to_string(),
+            "turn-dynamic".to_string(),
+            "action-dynamic".to_string(),
+        ),
+        action,
+    );
     event_store.active_turns.lock().unwrap().insert(
         "mock-session".to_string(),
         ActiveTurnRecord {
@@ -472,13 +488,7 @@ async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
             message_id: Some("msg-dynamic".to_string()),
             status: ActiveTurnStatus::WaitingUserAction,
             last_event_id: Some(TimelineEventId::from_seq(9)),
-            pending_user_action: Some(PendingUserAction::DynamicToolResult(
-                PendingDynamicToolResult {
-                    item_id: Some("tool-dynamic".to_string()),
-                    call_id: "call-1".to_string(),
-                    tool_name: "Tool".to_string(),
-                },
-            )),
+            current_action_id: Some("action-dynamic".to_string()),
             updated_at: 125,
         },
     );
@@ -518,4 +528,73 @@ async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
         .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
     assert_eq!(payload["success"], true);
+}
+
+#[tokio::test]
+async fn submit_user_action_handler_accepts_the_canonical_response() {
+    let event_store = Arc::new(RecordingEventStore::default());
+    let action = pending_dynamic_record(
+        "mock-session",
+        "turn-dynamic",
+        "action-dynamic",
+        Some("tool-dynamic"),
+        "call-1",
+        "Tool",
+    );
+    event_store.user_actions.lock().unwrap().insert(
+        (
+            "mock-session".to_string(),
+            "turn-dynamic".to_string(),
+            "action-dynamic".to_string(),
+        ),
+        action,
+    );
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-dynamic".to_string(),
+            message_id: Some("msg-dynamic".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(TimelineEventId::from_seq(9)),
+            current_action_id: Some("action-dynamic".to_string()),
+            updated_at: 125,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store).await;
+    let app = Router::new()
+        .route("/v1/user-actions/submit", post(submit_user_action_handler))
+        .layer(axum::Extension(test_auth()))
+        .with_state(state);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/v1/user-actions/submit")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "sessionId": "mock-session",
+                        "turnId": "turn-dynamic",
+                        "actionId": "action-dynamic",
+                        "response": {
+                            "type": "dynamicToolResult",
+                            "response": { "output": "done", "success": true }
+                        }
+                    })
+                    .to_string(),
+                ))
+                .expect("request should build"),
+        )
+        .await
+        .expect("request should succeed");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body should be readable");
+    let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
+    assert_eq!(payload["actionId"], "action-dynamic");
+    assert_eq!(payload["state"], "resuming");
 }

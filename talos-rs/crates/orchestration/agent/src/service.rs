@@ -10,7 +10,7 @@ use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     RunItem, StopReason, TalosInputItem, TalosReasoning, TalosSessionEnvironment, TokenUsage,
 };
-use talos_types::{ModelSelection, TalosSession, DEFAULT_SESSION_TITLE};
+use talos_types::{ModelSelection, TalosSession, UserPermissionMode, DEFAULT_SESSION_TITLE};
 use tokio::sync::mpsc;
 
 use crate::{
@@ -105,6 +105,8 @@ pub struct AgentRunConfig {
     pub llm: LlmConfig,
     /// Model and reasoning policy selected for this run.
     pub model_selection: ModelSelection,
+    /// Service-resolved Session permission mode used by local tools.
+    pub user_permission_mode: UserPermissionMode,
 }
 
 impl AgentRunConfig {
@@ -119,6 +121,7 @@ impl AgentRunConfig {
             agent: session.config.agent.clone(),
             llm: session.config.llm.clone(),
             model_selection,
+            user_permission_mode: session.effective_user_permission_mode,
         }
     }
 
@@ -151,8 +154,6 @@ impl AgentRunConfig {
 pub struct AgentRunSessionState {
     /// Current product session title before the run starts.
     pub title: String,
-    /// Product message count before the run starts.
-    pub message_count: u64,
 }
 
 impl AgentRunSessionState {
@@ -160,7 +161,6 @@ impl AgentRunSessionState {
     pub fn from_session(session: &TalosSession) -> Self {
         Self {
             title: session.title.clone(),
-            message_count: session.state.message_count,
         }
     }
 
@@ -353,12 +353,11 @@ pub struct AgentInputParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentInput {
-    /// Result for a pending dynamic tool call validated by Service.
-    DynamicToolResult {
+    /// Typed response for a pending user action validated by Service.
+    UserActionResponse {
         call_id: String,
         tool_name: String,
-        output: String,
-        success: bool,
+        response: talos_types::UserActionResponse,
     },
     /// Message for the exact currently running Agent turn.
     Message { message: String },

@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::process::Stdio;
+use std::path::Path;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -8,11 +7,17 @@ use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::{Child, Command};
+#[cfg(not(unix))]
+use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 
-use crate::runtimes::{resolve_base_dir, resolve_path, truncate_prefix};
+use crate::runtimes::{
+    process_environment, resolve_base_dir, resolve_executable, resolve_path, truncate_prefix,
+};
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
+use talos_tools_sandbox::{
+    RunningToolProcess, SandboxStdin, ToolProcessCommand, ToolProcessTerminationTarget,
+};
 
 const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024;
@@ -115,7 +120,7 @@ pub struct BashSessionResponse {
 struct BashSession {
     session_id: i64,
     max_output_bytes: usize,
-    process_id: Option<u32>,
+    termination_target: Option<ToolProcessTerminationTarget>,
     state: Mutex<BashSessionState>,
     notify: Notify,
     started_at: Instant,
@@ -170,16 +175,17 @@ impl BashSessionManager {
             .map(|path| resolve_path(&base_dir, path))
             .unwrap_or(base_dir);
 
-        let mut command = build_command(request, &workdir)?;
-        let mut child = command
-            .spawn()
-            .map_err(|err| TalosError::ToolError(format!("failed to execute command: {}", err)))?;
+        let command = build_command(request, &workdir)?;
+        let mut child = context
+            .sandbox_permit()?
+            .spawn(command)
+            .await
+            .map_err(|error| TalosError::ToolError(error.to_string()))?;
 
         let session_id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let process_id = child.id();
-        child.stdin.take();
-        let stdout = child.stdout.take();
-        let stderr = child.stderr.take();
+        let termination_target = child.termination_target();
+        let stdout = child.take_stdout();
+        let stderr = child.take_stderr();
         let (command_kind, risk) = classify_command(&request.cmd);
 
         let session = Arc::new(BashSession {
@@ -189,7 +195,7 @@ impl BashSessionManager {
                 .map(|config| config.tools.local_exec.max_output_bytes)
                 .unwrap_or(DEFAULT_MAX_OUTPUT_BYTES)
                 .max(DEFAULT_MAX_OUTPUT_BYTES),
-            process_id,
+            termination_target,
             state: Mutex::new(BashSessionState::default()),
             notify: Notify::new(),
             started_at: Instant::now(),
@@ -314,7 +320,7 @@ pub async fn run_bash_command(
         .await
 }
 
-fn build_command(request: &BashCommandRequest, workdir: &PathBuf) -> TalosResult<Command> {
+fn build_command(request: &BashCommandRequest, workdir: &Path) -> TalosResult<ToolProcessCommand> {
     let shell = request
         .shell
         .clone()
@@ -322,29 +328,27 @@ fn build_command(request: &BashCommandRequest, workdir: &PathBuf) -> TalosResult
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "sh".to_string());
 
-    let mut command = Command::new(shell);
-    command
-        .current_dir(workdir)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut args = Vec::new();
 
     if request.login {
-        command.arg("-lc");
+        args.push("-lc".to_string());
     } else {
-        command.arg("-c");
+        args.push("-c".to_string());
     }
-    command.arg(&request.cmd);
+    args.push(request.cmd.clone());
 
+    let mut env = process_environment();
     if request.tty {
-        command.env("TERM", "xterm-256color");
-    }
-    #[cfg(unix)]
-    {
-        command.process_group(0);
+        env.insert("TERM".to_string(), "xterm-256color".to_string());
     }
 
-    Ok(command)
+    Ok(ToolProcessCommand {
+        program: resolve_executable(&shell)?,
+        args,
+        env,
+        cwd: workdir.to_path_buf(),
+        stdin: SandboxStdin::Closed,
+    })
 }
 
 fn spawn_reader<R>(reader: R, session: Arc<BashSession>, stream_kind: OutputStreamKind)
@@ -395,47 +399,12 @@ fn elapsed_ms(session: &BashSession) -> u64 {
 }
 
 fn classify_command(command: &str) -> (BashCommandKind, BashCommandRisk) {
-    let normalized = command.trim().to_lowercase();
-    let first = normalized
-        .split_whitespace()
-        .next()
-        .unwrap_or_default()
-        .trim_matches([';', '&', '|']);
-    if normalized.contains("rm -rf")
-        || normalized.contains("mkfs")
-        || normalized.contains("dd if=")
-        || normalized.contains(":(){")
-    {
-        return (BashCommandKind::Destructive, BashCommandRisk::High);
-    }
-    if matches!(first, "kill" | "pkill" | "killall") {
-        return (BashCommandKind::ProcessControl, BashCommandRisk::High);
-    }
-    if normalized.contains(">")
-        || normalized.contains("tee ")
-        || matches!(first, "mv" | "cp" | "touch" | "mkdir" | "rmdir")
-    {
-        return (BashCommandKind::FilesystemWrite, BashCommandRisk::Medium);
-    }
-    if matches!(first, "curl" | "wget" | "ssh" | "scp" | "rsync" | "nc") {
-        return (BashCommandKind::Network, BashCommandRisk::Medium);
-    }
-    if matches!(
-        first,
-        "cargo" | "pnpm" | "npm" | "yarn" | "make" | "just" | "pytest" | "go" | "mvn" | "gradle"
-    ) {
-        return (BashCommandKind::BuildOrTest, BashCommandRisk::Medium);
-    }
-    if matches!(
-        first,
-        "ls" | "pwd" | "date" | "git" | "sed" | "awk" | "head" | "tail" | "wc" | "find" | "rg"
-    ) {
-        return (BashCommandKind::ReadOnly, BashCommandRisk::Low);
-    }
-    (BashCommandKind::Unknown, BashCommandRisk::Medium)
+    let facts = crate::command_risk::classify_bash_command(command);
+    let risk = crate::command_risk::display_bash_risk(facts.risk);
+    (facts.kind, risk)
 }
 
-fn spawn_waiter(mut child: Child, session: Arc<BashSession>) {
+fn spawn_waiter(mut child: RunningToolProcess, session: Arc<BashSession>) {
     tokio::spawn(async move {
         let exit_code = child.wait().await.ok().and_then(|status| status.code());
         {
@@ -457,8 +426,8 @@ fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) {
                 return;
             }
         }
-        if let Some(process_id) = session.process_id {
-            terminate_process(process_id).await;
+        if let Some(termination_target) = session.termination_target {
+            terminate_process(termination_target).await;
         }
         {
             let mut state = session.state.lock().await;
@@ -472,23 +441,17 @@ fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) {
 }
 
 #[cfg(unix)]
-async fn terminate_process(process_id: u32) {
-    let process_group = format!("-{process_id}");
-    let _ = Command::new("kill")
-        .arg("-TERM")
-        .arg(&process_group)
-        .status()
-        .await;
+async fn terminate_process(termination_target: ToolProcessTerminationTarget) {
+    let _ = termination_target.terminate();
     tokio::time::sleep(Duration::from_millis(PROCESS_TERMINATE_GRACE_MS)).await;
-    let _ = Command::new("kill")
-        .arg("-KILL")
-        .arg(process_group)
-        .status()
-        .await;
+    let _ = termination_target.kill();
 }
 
 #[cfg(not(unix))]
-async fn terminate_process(process_id: u32) {
+async fn terminate_process(termination_target: ToolProcessTerminationTarget) {
+    let ToolProcessTerminationTarget::Process(process_id) = termination_target else {
+        return;
+    };
     let _ = Command::new("kill")
         .arg("-TERM")
         .arg(process_id.to_string())

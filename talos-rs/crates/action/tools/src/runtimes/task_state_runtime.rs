@@ -1,19 +1,13 @@
 use std::sync::{Arc, OnceLock, RwLock};
 
+use crate::runtimes::task_state_types::{TodoItem, TodoListSnapshot, TodoStatus};
+use crate::state::{get_session_tool_state, PermissionMode, TaskStateEntry};
 use dashmap::DashMap;
 use talos_error::{TalosError, TalosResult};
-use uuid::Uuid;
-
-use crate::runtimes::task_state_types::{
-    StructuredQuestionAnswer, StructuredQuestionOption, StructuredQuestionRecord,
-    StructuredQuestionRequest, StructuredQuestionStatus, TodoItem, TodoListSnapshot, TodoStatus,
-};
-use crate::state::{get_session_tool_state, PermissionMode, TaskStateEntry};
 
 #[derive(Debug, Default)]
 struct SessionTaskState {
     todos: RwLock<Vec<TodoItem>>,
-    latest_question: RwLock<Option<StructuredQuestionRecord>>,
 }
 
 #[derive(Debug, Default)]
@@ -79,107 +73,6 @@ impl TaskStateRuntime {
         get_session_tool_state(session_id).permissions.mode()
     }
 
-    pub fn ask_question(
-        &self,
-        session_id: &str,
-        header: String,
-        question: String,
-        options: Vec<StructuredQuestionOption>,
-        allows_free_form: bool,
-    ) -> TalosResult<StructuredQuestionRecord> {
-        validate_question(&header, &question, &options)?;
-        let session = self.session_state(session_id);
-        let record = StructuredQuestionRecord {
-            request: StructuredQuestionRequest {
-                question_id: Uuid::new_v4().to_string(),
-                header,
-                question,
-                options,
-                allows_free_form,
-            },
-            status: StructuredQuestionStatus::Pending,
-            answer: None,
-        };
-
-        {
-            let mut guard = session
-                .latest_question
-                .write()
-                .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))?;
-            *guard = Some(record.clone());
-        }
-
-        // Host responders are not connected here; AskUserQuestion currently records
-        // the pending structured question in-process, and completion resumes only
-        // after a caller invokes `submit_question_answer`.
-
-        Ok(record)
-    }
-
-    pub fn latest_question(
-        &self,
-        session_id: &str,
-    ) -> TalosResult<Option<StructuredQuestionRecord>> {
-        let session = self.session_state(session_id);
-        session
-            .latest_question
-            .read()
-            .map(|guard| guard.clone())
-            .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))
-    }
-
-    pub fn submit_question_answer(
-        &self,
-        session_id: &str,
-        answer: StructuredQuestionAnswer,
-    ) -> TalosResult<StructuredQuestionRecord> {
-        let session = self.session_state(session_id);
-        let mut guard = session
-            .latest_question
-            .write()
-            .map_err(|_| TalosError::ToolError("question state lock poisoned".to_string()))?;
-        let record = guard
-            .as_mut()
-            .ok_or_else(|| TalosError::ResourceNotFound("pending question".to_string()))?;
-        if record.request.question_id != answer.question_id {
-            return Err(TalosError::ValidationError(format!(
-                "question `{}` is not pending in session `{session_id}`",
-                answer.question_id
-            )));
-        }
-
-        if let Some(selected_option_id) = answer.selected_option_id.as_deref() {
-            let option_exists = record
-                .request
-                .options
-                .iter()
-                .any(|option| option.id == selected_option_id);
-            if !option_exists {
-                return Err(TalosError::ValidationError(format!(
-                    "option `{selected_option_id}` does not exist for question `{}`",
-                    answer.question_id
-                )));
-            }
-        }
-
-        if answer.selected_option_id.is_none()
-            && answer
-                .free_form_text
-                .as_deref()
-                .map(str::trim)
-                .unwrap_or_default()
-                .is_empty()
-        {
-            return Err(TalosError::ValidationError(
-                "answer must contain either a selected option or free-form text".to_string(),
-            ));
-        }
-
-        record.status = StructuredQuestionStatus::Answered;
-        record.answer = Some(answer);
-        Ok(record.clone())
-    }
-
     fn session_state(&self, session_id: &str) -> Arc<SessionTaskState> {
         self.sessions
             .entry(session_id.to_string())
@@ -228,55 +121,6 @@ fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
             )));
         }
     }
-    Ok(())
-}
-
-fn validate_question(
-    header: &str,
-    question: &str,
-    options: &[StructuredQuestionOption],
-) -> TalosResult<()> {
-    if header.trim().is_empty() {
-        return Err(TalosError::ValidationError(
-            "header cannot be empty".to_string(),
-        ));
-    }
-    if question.trim().is_empty() {
-        return Err(TalosError::ValidationError(
-            "question cannot be empty".to_string(),
-        ));
-    }
-    if !(2..=3).contains(&options.len()) {
-        return Err(TalosError::ValidationError(
-            "options must contain 2 or 3 entries".to_string(),
-        ));
-    }
-
-    let mut seen = std::collections::BTreeSet::new();
-    for option in options {
-        if option.id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "option id cannot be empty".to_string(),
-            ));
-        }
-        if option.label.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "option label cannot be empty".to_string(),
-            ));
-        }
-        if option.description.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "option description cannot be empty".to_string(),
-            ));
-        }
-        if !seen.insert(option.id.clone()) {
-            return Err(TalosError::ValidationError(format!(
-                "duplicate option id `{}`",
-                option.id
-            )));
-        }
-    }
-
     Ok(())
 }
 

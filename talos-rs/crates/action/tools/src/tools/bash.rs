@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
+use talos_tools_sandbox::{SandboxCapability, ToolSandboxOperationKind};
 use talos_types::talos::{TalosContentItem, TalosToolTaskStatus};
 
 use crate::runtimes::bash::{
@@ -46,6 +47,10 @@ impl Tool for BashTool {
         ToolVisibility::DefaultVisible
     }
 
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::SpawnProcess)
+    }
+
     fn parameters_schema(&self) -> Option<Value> {
         Some(serde_json::json!({
             "type": "object",
@@ -82,14 +87,6 @@ impl Tool for BashTool {
         Ok(())
     }
 
-    fn check_permissions(&self, input: &Value, _context: &ToolContext) -> TalosResult<()> {
-        let input = parse_bash_input(input)?;
-        if input.dangerously_disable_sandbox {
-            return Err(TalosError::AuthorizationDenied);
-        }
-        Ok(())
-    }
-
     async fn execute_payload(
         &self,
         input: Value,
@@ -97,11 +94,13 @@ impl Tool for BashTool {
     ) -> TalosResult<ToolOutputPayload> {
         let input = parse_bash_input(&input)?;
         let timeout_ms = input.timeout.unwrap_or(DEFAULT_BASH_TIMEOUT_MS);
+        let sandbox_enabled =
+            context.sandbox_permit()?.effective_policy().sandbox == SandboxCapability::Enabled;
         let request = BashCommandRequest {
             cmd: input.command,
             workdir: input.workdir,
-            shell: None,
-            login: true,
+            shell: sandbox_enabled.then(|| "/bin/sh".to_string()),
+            login: !sandbox_enabled,
             tty: false,
             yield_time_ms: timeout_ms.saturating_add(BASH_TIMEOUT_RESULT_GRACE_MS),
             timeout_ms: Some(timeout_ms),
@@ -129,18 +128,26 @@ impl Tool for BashTool {
             }
         };
         let (stdout, stderr) = bash_output_chunk(&response);
-        Ok(ToolOutputPayload::success_with_content_items(
-            structured,
-            vec![TalosContentItem::BashOutput {
-                session_id: response.session_id,
-                status,
-                exit_code: response.exit_code,
-                stdout,
-                stderr,
-                truncated: response.truncated,
-                elapsed_ms: Some(response.elapsed_ms),
-            }],
-        ))
+        let content_items = vec![TalosContentItem::BashOutput {
+            session_id: response.session_id,
+            status,
+            exit_code: response.exit_code,
+            stdout,
+            stderr,
+            truncated: response.truncated,
+            elapsed_ms: Some(response.elapsed_ms),
+        }];
+        if status == TalosToolTaskStatus::Completed {
+            Ok(ToolOutputPayload::success_with_content_items(
+                structured,
+                content_items,
+            ))
+        } else {
+            Ok(ToolOutputPayload::failure_with_content_items(
+                structured,
+                content_items,
+            ))
+        }
     }
 }
 

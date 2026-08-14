@@ -101,10 +101,12 @@ fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
                 provider: config.llm.provider.clone(),
                 id: config.llm.model.clone(),
             })),
+            ..SessionConf::default()
         },
         project_id: None,
         current_directory: None,
         config,
+        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState {
             created_at: 0,
             last_activity: 0,
@@ -347,11 +349,13 @@ async fn handle_stream_rejects_resume_context_without_dynamic_input_capability()
 
     let mut params = test_dispatch_params("session-no-resume", "turn-no-resume");
     params.resume_context = Some(AgentDispatchResumeContext {
-        tool_call: Some(AgentDispatchResumeToolCall {
+        pending_call_id: "call-1".to_string(),
+        tool_calls: vec![AgentDispatchResumeToolCall {
             item_id: "item-1".to_string(),
             call_id: "call-1".to_string(),
             tool_name: "Tool".to_string(),
-        }),
+        }],
+        execution_metrics: Default::default(),
     });
     let error = match talos_types::AgentDispatchRuntime::handle_stream(&coordinator, params).await {
         Ok(_) => panic!("resume stream dispatch should fail before reaching agent"),
@@ -418,11 +422,15 @@ async fn submit_dynamic_tool_result_rejects_agent_without_dynamic_input_capabili
             binding: DispatchBinding::Routed,
             session,
             turn_id: "turn-no-input".to_string(),
-            input: AgentDispatchInput::DynamicToolResult {
+            input: AgentDispatchInput::UserActionResponse {
                 call_id: "call-1".to_string(),
                 tool_name: "Tool".to_string(),
-                output: "output".to_string(),
-                success: true,
+                response: talos_types::UserActionResponse::DynamicToolResult(
+                    talos_types::DynamicToolResult {
+                        output: "output".to_string(),
+                        success: true,
+                    },
+                ),
             },
         },
     )
@@ -468,11 +476,15 @@ async fn exact_agent_binding_bypasses_mutable_router_for_all_runtime_operations(
             },
             session: session.clone(),
             turn_id: "turn-1".to_string(),
-            input: AgentDispatchInput::DynamicToolResult {
+            input: AgentDispatchInput::UserActionResponse {
                 call_id: "call-1".to_string(),
                 tool_name: "approval".to_string(),
-                output: "approved".to_string(),
-                success: true,
+                response: talos_types::UserActionResponse::DynamicToolResult(
+                    talos_types::DynamicToolResult {
+                        output: "approved".to_string(),
+                        success: true,
+                    },
+                ),
             },
         },
     )

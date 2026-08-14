@@ -30,6 +30,8 @@ pub struct AppProtocolSchemaRoot {
     pub interrupt_turn_response: talos_types::InterruptTurnResponse,
     pub submit_dynamic_tool_result_request: talos_types::SubmitDynamicToolResultRequest,
     pub submit_dynamic_tool_result_response: talos_types::SubmitDynamicToolResultResponse,
+    pub submit_user_action_request: talos_types::SubmitUserActionRequest,
+    pub submit_user_action_response: talos_types::SubmitUserActionResponse,
     pub subscribe_timeline_request: talos_types::SubscribeTimelineRequest,
     pub subscribe_timeline_response: talos_types::SubscribeTimelineResponse,
     pub recover_timeline_request: talos_types::RecoverTimelineRequest,
@@ -39,6 +41,7 @@ pub struct AppProtocolSchemaRoot {
     pub initialize_response: InitializeResponse,
     pub turn_start_response: talos_types::StartTurnResponse,
     pub session_history_response: talos_types::SessionHistoryResponse,
+    pub pending_user_action: talos_types::PendingUserAction,
     pub timeline_recovery_response: talos_types::TimelineRecoveryResponse,
     pub event_unsubscribe_response: talos_types::EventUnsubscribeResponse,
     pub auth_logout_response: talos_types::AuthLogoutResponse,
@@ -97,6 +100,22 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::SessionClearRequest>());
     output.push_str(&export::<talos_types::SessionClearResponse>());
     output.push_str(&export::<talos_types::SessionInfo>());
+    output.push_str(&export::<talos_types::UserPermissionMode>());
+    output.push_str(&export::<talos_types::PendingUserAction>());
+    output.push_str(&export::<talos_types::UserActionParams>());
+    output.push_str(&export::<talos_types::UserActionResponse>());
+    output.push_str(&export::<talos_types::UserActionState>());
+    output.push_str(&export::<talos_types::TimelineUserActionEvent>());
+    output.push_str(&export::<talos_types::DynamicToolResultParams>());
+    output.push_str(&export::<talos_types::DynamicToolResult>());
+    output.push_str(&export::<talos_types::QuestionParams>());
+    output.push_str(&export::<talos_types::QuestionOption>());
+    output.push_str(&export::<talos_types::QuestionAnswer>());
+    output.push_str(&export::<talos_types::SandboxApprovalParams>());
+    output.push_str(&export::<talos_types::SandboxApprovalReason>());
+    output.push_str(&export::<talos_types::SandboxApprovalPresentation>());
+    output.push_str(&export::<talos_types::SandboxFileOperation>());
+    output.push_str(&export::<talos_types::SandboxApprovalDecision>());
     output.push_str(&export::<talos_types::SessionActiveTurnRequest>());
     output.push_str(&export::<talos_types::SessionActiveTurnResponse>());
     output.push_str(&export::<talos_types::SessionHistoryRequest>());
@@ -109,8 +128,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::TimelineCursorStatus>());
     output.push_str(&export::<talos_types::TimelineActiveTurnSnapshot>());
     output.push_str(&export::<talos_types::TimelineActiveTurnStatus>());
-    output.push_str(&export::<talos_types::TimelinePendingUserAction>());
-    output.push_str(&export::<talos_types::TimelinePendingDynamicToolResult>());
     output.push_str(&export::<talos_types::ProjectCreateRequest>());
     output.push_str(&export::<talos_types::ProjectCreateResponse>());
     output.push_str(&export::<talos_types::ProjectListRequest>());
@@ -141,6 +158,8 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::InterruptTurnResponse>());
     output.push_str(&export::<talos_types::SubmitDynamicToolResultRequest>());
     output.push_str(&export::<talos_types::SubmitDynamicToolResultResponse>());
+    output.push_str(&export::<talos_types::SubmitUserActionRequest>());
+    output.push_str(&export::<talos_types::SubmitUserActionResponse>());
     output.push_str(&export::<talos_types::SubscribeTimelineRequest>());
     output.push_str(&export::<talos_types::SubscribeTimelineResponse>());
     output.push_str(&export::<talos_types::RecoverTimelineRequest>());

@@ -3,6 +3,7 @@ use serde_json::json;
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_types::talos::{JsonContentValue, TalosContentItem};
+use talos_types::{QuestionParams, SandboxApprovalParams};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -84,7 +85,16 @@ pub struct ToolResultEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ToolPending {
-    Dynamic { arguments: Value },
+    Dynamic {
+        arguments: Value,
+    },
+    Question {
+        params: QuestionParams,
+    },
+    SandboxApproval {
+        params: SandboxApprovalParams,
+        request_fingerprint: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -164,6 +174,15 @@ impl ToolOutputPayload {
         Self::Function {
             content: value.to_string(),
             success: true,
+            structured_content: Some(value),
+            content_items,
+        }
+    }
+
+    pub fn failure_with_content_items(value: Value, content_items: Vec<TalosContentItem>) -> Self {
+        Self::Function {
+            content: value.to_string(),
+            success: false,
             structured_content: Some(value),
             content_items,
         }
@@ -425,6 +444,27 @@ impl ToolDispatchOutcome {
         }
     }
 
+    pub fn pending_question(tool_name: impl Into<String>, params: QuestionParams) -> Self {
+        Self::Pending {
+            tool_name: tool_name.into(),
+            pending: ToolPending::Question { params },
+        }
+    }
+
+    pub fn pending_sandbox_approval(
+        tool_name: impl Into<String>,
+        params: SandboxApprovalParams,
+        request_fingerprint: String,
+    ) -> Self {
+        Self::Pending {
+            tool_name: tool_name.into(),
+            pending: ToolPending::SandboxApproval {
+                params,
+                request_fingerprint,
+            },
+        }
+    }
+
     pub fn payload(&self) -> Option<&ToolOutputPayload> {
         match self {
             Self::Executed { payload } => Some(payload),
@@ -459,6 +499,20 @@ impl ToolDispatchOutcome {
             } => Some(ToolRenderMessage {
                 kind: ToolRenderKind::Progress,
                 text: format!("{tool_name}: waiting for dynamic tool result"),
+            }),
+            Self::Pending {
+                pending: ToolPending::Question { .. },
+                ..
+            } => Some(ToolRenderMessage {
+                kind: ToolRenderKind::Progress,
+                text: format!("{tool_name}: waiting for input"),
+            }),
+            Self::Pending {
+                pending: ToolPending::SandboxApproval { .. },
+                ..
+            } => Some(ToolRenderMessage {
+                kind: ToolRenderKind::Progress,
+                text: format!("{tool_name}: waiting for sandbox approval"),
             }),
             Self::Executed { .. } => None,
         }
@@ -517,6 +571,16 @@ impl ToolDispatchOutcome {
                         pending_kind: "dynamic".to_string(),
                         prompt: None,
                         arguments: Some(arguments.clone()),
+                    },
+                    ToolPending::Question { params } => ToolResultPendingMeta {
+                        pending_kind: "question".to_string(),
+                        prompt: Some(params.question.clone()),
+                        arguments: serde_json::to_value(params).ok(),
+                    },
+                    ToolPending::SandboxApproval { params, .. } => ToolResultPendingMeta {
+                        pending_kind: "sandbox_approval".to_string(),
+                        prompt: Some("sandbox approval required".to_string()),
+                        arguments: serde_json::to_value(params).ok(),
                     },
                 };
                 ToolResultEnvelope {

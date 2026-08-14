@@ -143,6 +143,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 provider: "openai".to_string(),
                 id: "demo-model".to_string(),
             })),
+            ..talos_types::SessionConf::default()
         },
         project_id: None,
         current_directory: None,
@@ -162,6 +163,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             environment: None,
         },
         config,
+        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState::default(),
     };
     match agent

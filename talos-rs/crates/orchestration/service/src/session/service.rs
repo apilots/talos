@@ -115,10 +115,10 @@ impl SessionService {
         record: &SessionRecord,
         workspace_id: Option<String>,
     ) -> TalosResult<TalosSession> {
-        let config = SessionConfigOverridePolicy::apply_to_config(
-            &self.base_config_snapshot(),
-            &record.conf,
-        )?;
+        let base_config = self.base_config_snapshot();
+        let effective_user_permission_mode =
+            SessionConfigOverridePolicy::resolve_user_permission_mode(&base_config, &record.conf);
+        let config = SessionConfigOverridePolicy::apply_to_config(&base_config, &record.conf)?;
         Ok(TalosSession {
             title: record.title.clone(),
             user_id: record.user_id.clone(),
@@ -141,6 +141,7 @@ impl SessionService {
             project_id: record.project_id.clone(),
             current_directory: record.current_directory.clone(),
             config,
+            effective_user_permission_mode,
             state: SessionState {
                 created_at: record.created_at,
                 last_activity: record.last_activity,

@@ -32,8 +32,8 @@ impl ContentsBuilder {
                 KernelTranscriptPayload::StateOnly
                 | KernelTranscriptPayload::Transfer { .. }
                 | KernelTranscriptPayload::Auth { .. }
-                | KernelTranscriptPayload::DynamicToolRequest { .. }
-                | KernelTranscriptPayload::DynamicToolResponse { .. } => None,
+                | KernelTranscriptPayload::UserActionRequest { .. }
+                | KernelTranscriptPayload::UserActionResponse { .. } => None,
             })
             .collect()
     }

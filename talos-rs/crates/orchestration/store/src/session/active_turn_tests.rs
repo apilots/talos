@@ -12,7 +12,7 @@ async fn store() -> DatabaseSessionStore {
 }
 
 #[tokio::test]
-async fn cancelling_clears_pending_user_action() {
+async fn cancelling_clears_current_action_id() {
     let store = store().await;
     store
         .upsert_active_turn(ActiveTurnUpdate {
@@ -21,13 +21,7 @@ async fn cancelling_clears_pending_user_action() {
             message_id: Some("m1".to_string()),
             status: ActiveTurnStatus::Cancelling,
             last_event_id: Some(TimelineEventId::from_seq(3)),
-            pending_user_action: Some(PendingUserAction::DynamicToolResult(
-                PendingDynamicToolResult {
-                    item_id: Some("tool-1".to_string()),
-                    call_id: "c1".to_string(),
-                    tool_name: "tool".to_string(),
-                },
-            )),
+            current_action_id: Some("action-1".to_string()),
             updated_at: 10,
         })
         .await
@@ -35,5 +29,26 @@ async fn cancelling_clears_pending_user_action() {
 
     let record = store.get_active_turn("s1").await.unwrap().unwrap();
     assert_eq!(record.status, ActiveTurnStatus::Cancelling);
-    assert_eq!(record.pending_user_action, None);
+    assert_eq!(record.current_action_id, None);
+}
+
+#[tokio::test]
+async fn waiting_user_action_persists_only_current_action_id() {
+    let store = store().await;
+    store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "s1".to_string(),
+            turn_id: "t1".to_string(),
+            message_id: Some("m1".to_string()),
+            status: ActiveTurnStatus::WaitingUserAction,
+            last_event_id: Some(TimelineEventId::from_seq(3)),
+            current_action_id: Some("action-1".to_string()),
+            updated_at: 10,
+        })
+        .await
+        .unwrap();
+
+    let record = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(record.status, ActiveTurnStatus::WaitingUserAction);
+    assert_eq!(record.current_action_id.as_deref(), Some("action-1"));
 }

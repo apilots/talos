@@ -3,9 +3,10 @@ use serde_json::Value;
 use talos_error::TalosResult;
 
 use crate::runtimes::fs_diff::{build_file_diff_item, FileDiffInput};
-use crate::runtimes::fs_write::{run, WriteFileRequest};
+use crate::runtimes::fs_write::{requested_file_system_access, run, WriteFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 /// Tool for writing content to a file
 pub struct WriteTool;
@@ -56,6 +57,21 @@ impl Tool for WriteTool {
             concurrency_safe: false,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::FileSystem)
+    }
+
+    fn requested_file_system_access(
+        &self,
+        input: &Value,
+        context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        let request: WriteFileRequest = serde_json::from_value(input.clone()).map_err(|error| {
+            talos_error::TalosError::ValidationError(format!("invalid write arguments: {error}"))
+        })?;
+        requested_file_system_access(&request, context)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

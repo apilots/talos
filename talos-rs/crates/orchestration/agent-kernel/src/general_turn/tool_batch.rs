@@ -2,6 +2,7 @@ use super::*;
 use crate::execution::ReplayDynamicToolResult;
 use crate::ToolExecutionOutput;
 use talos_tools::ToolResultEnvelope;
+use talos_types::{DynamicToolResultParams, UserActionParams};
 
 pub(crate) fn parse_retrieved_memory_items(
     tool_name: &str,
@@ -70,6 +71,8 @@ fn build_tool_result_payload(
         ToolDispatchOutcome::Pending { pending, .. } => {
             let error = match pending {
                 ToolPending::Dynamic { .. } => "dynamic tool response is pending".to_string(),
+                ToolPending::Question { .. } => "question response is pending".to_string(),
+                ToolPending::SandboxApproval { .. } => "sandbox approval is pending".to_string(),
             };
             (
                 serde_json::json!({
@@ -191,7 +194,6 @@ struct ReducedToolExecutionOutput {
     payload: Value,
     content_items: Vec<TalosContentItem>,
     is_error: bool,
-    pending_arguments: Option<Value>,
     envelope: ToolResultEnvelope,
     semantic_events: Vec<String>,
     next_turn_failure: Option<Value>,
@@ -199,7 +201,7 @@ struct ReducedToolExecutionOutput {
 
 fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExecutionOutput {
     let envelope = output.outcome.envelope();
-    let (payload, content_items, is_error, pending_arguments) =
+    let (payload, content_items, is_error, _) =
         build_tool_result_payload(&output.tool_name, &output.outcome);
     let semantic_events = envelope
         .semantic_events()
@@ -213,7 +215,6 @@ fn reduce_tool_execution_output(output: &ToolExecutionOutput) -> ReducedToolExec
         payload,
         content_items,
         is_error,
-        pending_arguments,
         envelope,
         semantic_events,
         next_turn_failure,
@@ -245,28 +246,70 @@ pub(crate) async fn emit_tool_result_stream_event(
     .await;
 }
 
+#[cfg(test)]
 pub(crate) fn collect_general_turn_tool_batch(
     outputs: Vec<ToolExecutionOutput>,
-) -> GeneralTurnToolBatch {
+) -> TalosResult<GeneralTurnToolBatch> {
+    collect_general_turn_tool_batch_for_calls(outputs, &[])
+}
+
+pub(crate) fn collect_general_turn_tool_batch_for_calls(
+    outputs: Vec<ToolExecutionOutput>,
+    calls: &[FunctionCall],
+) -> TalosResult<GeneralTurnToolBatch> {
+    let completed_call_ids = outputs
+        .iter()
+        .map(|output| output.call_id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    let deferred_tool_calls = calls
+        .iter()
+        .filter(|call| !completed_call_ids.contains(call.id.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
     let mut output_items = Vec::new();
     let mut tool_messages = Vec::new();
-    let mut pending_dynamic_requests = Vec::new();
+    let mut pending_user_action = None;
     let mut logs = Vec::new();
     let mut error_count = 0_usize;
 
     for output in outputs {
         let reduced = reduce_tool_execution_output(&output);
-        if let ToolDispatchOutcome::Pending {
-            pending: ToolPending::Dynamic { .. },
-            ..
-        } = &output.outcome
-        {
-            pending_dynamic_requests.push(PendingDynamicToolRequest {
+        if let ToolDispatchOutcome::Pending { pending, .. } = &output.outcome {
+            let params = match pending {
+                ToolPending::Dynamic { .. } => {
+                    UserActionParams::DynamicToolResult(DynamicToolResultParams {
+                        tool_name: output.tool_name.clone(),
+                    })
+                }
+                ToolPending::Question { params } => UserActionParams::Question(params.clone()),
+                ToolPending::SandboxApproval { params, .. } => {
+                    UserActionParams::SandboxApproval(params.clone())
+                }
+            };
+            let sandbox_request_fingerprint = match pending {
+                ToolPending::SandboxApproval {
+                    request_fingerprint,
+                    ..
+                } => Some(request_fingerprint.clone()),
+                ToolPending::Dynamic { .. } | ToolPending::Question { .. } => None,
+            };
+            let action = PendingUserActionRequest {
+                action_id: format!("ua_{}", uuid::Uuid::now_v7().simple()),
                 tool_name: output.tool_name.clone(),
                 call_id: output.call_id.clone(),
-                arguments: reduced.pending_arguments.unwrap_or(Value::Null),
+                arguments: output.arguments.clone(),
+                params,
+                sandbox_request_fingerprint,
                 reasoning_continuation: None,
-            });
+                tool_calls: calls.to_vec(),
+                tool_messages: Vec::new(),
+                deferred_tool_calls: deferred_tool_calls.clone(),
+            };
+            if pending_user_action.replace(action).is_some() {
+                return Err(TalosError::InternalError(
+                    "tool batch produced multiple pending user actions".to_string(),
+                ));
+            }
             continue;
         }
 
@@ -292,13 +335,17 @@ pub(crate) fn collect_general_turn_tool_batch(
         ));
     }
 
-    GeneralTurnToolBatch {
+    if let Some(pending) = &mut pending_user_action {
+        pending.tool_messages = tool_messages.clone();
+    }
+
+    Ok(GeneralTurnToolBatch {
         output_items,
         tool_messages,
-        pending_dynamic_requests,
+        pending_user_action,
         logs,
         error_count,
-    }
+    })
 }
 
 fn model_payload_from_envelope(envelope: &ToolResultEnvelope) -> Value {
@@ -330,6 +377,7 @@ fn build_model_tool_result_text(reduced: &ReducedToolExecutionOutput) -> String 
     model_payload_from_envelope(&reduced.envelope).to_string()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn execute_general_turn_tool_batch(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
@@ -338,6 +386,9 @@ pub async fn execute_general_turn_tool_batch(
     user_id: &str,
     tool_calls: &[FunctionCall],
     replay_dynamic_tool_results: std::collections::HashMap<String, ReplayDynamicToolResult>,
+    user_action_responses: std::collections::HashMap<String, talos_types::UserActionResponse>,
+    sandbox_approval_fingerprints: std::collections::HashMap<String, String>,
+    command_risk_assessor: Arc<dyn talos_tools::CommandRiskAssessor>,
     stream_tx: Option<&mpsc::Sender<KernelStreamEvent>>,
 ) -> TalosResult<GeneralTurnToolBatch> {
     let execution_context = ToolExecutionContext {
@@ -348,6 +399,9 @@ pub async fn execute_general_turn_tool_batch(
         project_root: prepared.project_root.clone(),
         kernel_config,
         dynamic_tool_results: replay_dynamic_tool_results,
+        user_action_responses,
+        sandbox_approval_fingerprints,
+        command_risk_assessor: Some(command_risk_assessor),
     };
     let inputs = tool_calls
         .iter()
@@ -365,7 +419,7 @@ pub async fn execute_general_turn_tool_batch(
         emit_tool_result_stream_event(stream_tx, output).await;
     }
 
-    Ok(collect_general_turn_tool_batch(outputs))
+    collect_general_turn_tool_batch_for_calls(outputs, tool_calls)
 }
 
 pub fn apply_general_turn_tool_batch(
@@ -376,8 +430,9 @@ pub fn apply_general_turn_tool_batch(
     state.messages.extend(batch.tool_messages.clone());
     state.output_items.extend(batch.output_items.clone());
     state.tool_result_log.extend(batch.logs.clone());
+    state.tool_result_count += batch.logs.len();
     state.tool_error_count += batch.error_count;
-    state.pending_dynamic_requests = batch.pending_dynamic_requests.clone();
+    state.pending_user_action = batch.pending_user_action.clone();
     state.round += 1;
 }
 

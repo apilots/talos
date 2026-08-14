@@ -27,6 +27,11 @@ verify_server_config_template() {
     echo "Missing server binary in ${archive_path}" >&2
     exit 1
   fi
+  if [[ "$(basename "${archive_path}")" == *linux* ]] \
+    && ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?bin/talos-linux-sandbox-launcher$'; then
+    echo "Missing Linux sandbox launcher in ${archive_path}" >&2
+    exit 1
+  fi
   if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/talos.yaml$'; then
     echo "Missing server config template in ${archive_path}" >&2
     exit 1
@@ -102,7 +107,34 @@ verify_macos_app_server() {
 }
 
 verify_linux_app_server() {
-  echo "Skipping Linux AppImage app-server inspection."
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    echo "Skipping Linux AppImage app-server inspection on non-Linux host."
+    return
+  fi
+
+  local app_image
+  app_image="$(find "${PRODUCT_DIR}/desktop-linux" -maxdepth 1 -name 'Talos-*.AppImage' | head -n 1)"
+  local extract_dir
+  extract_dir="$(mktemp -d "${TMPDIR:-/tmp}/talos-appimage.XXXXXX")"
+  (
+    cd "${extract_dir}"
+    "${app_image}" --appimage-extract >/dev/null
+  )
+  trap 'rm -rf "${extract_dir}"' RETURN
+
+  local app_server="${extract_dir}/squashfs-root/resources/app-server/app-server"
+  local launcher="${extract_dir}/squashfs-root/resources/app-server/talos-linux-sandbox-launcher"
+  if [[ ! -x "${app_server}" ]]; then
+    echo "Missing packaged Linux app-server binary: ${app_server}" >&2
+    exit 1
+  fi
+  if [[ ! -x "${launcher}" ]]; then
+    echo "Missing packaged Linux sandbox launcher: ${launcher}" >&2
+    exit 1
+  fi
+
+  rm -rf "${extract_dir}"
+  trap - RETURN
 }
 
 (

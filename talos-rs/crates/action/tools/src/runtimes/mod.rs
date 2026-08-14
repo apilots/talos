@@ -13,9 +13,11 @@ pub mod web_fetch;
 pub mod web_search;
 
 use std::path::{Path, PathBuf};
+use std::{collections::BTreeMap, env};
 
 use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
+use talos_tools_sandbox::TalosSandboxError;
 
 use crate::ToolContext;
 
@@ -46,6 +48,38 @@ pub(crate) fn resolve_path(base_dir: &Path, raw_path: &str) -> PathBuf {
         path
     } else {
         base_dir.join(path)
+    }
+}
+
+pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
+    let path = PathBuf::from(program);
+    if path.components().count() > 1 {
+        return std::fs::canonicalize(&path).map_err(|error| {
+            TalosError::ToolError(format!("resolve executable {}: {error}", path.display()))
+        });
+    }
+    let paths = env::var_os("PATH")
+        .ok_or_else(|| TalosError::ToolError("PATH is unavailable".to_string()))?;
+    env::split_paths(&paths)
+        .map(|directory| directory.join(&path))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| std::fs::canonicalize(candidate).ok())
+        .ok_or_else(|| TalosError::ToolError(format!("executable not found on PATH: {program}")))
+}
+
+pub(crate) fn process_environment() -> BTreeMap<String, String> {
+    env::vars().collect()
+}
+
+pub(crate) fn map_sandbox_file_error(error: TalosSandboxError) -> TalosError {
+    match error {
+        TalosSandboxError::FileSystemAccessDenied { .. }
+        | TalosSandboxError::SandboxBypassDenied => TalosError::ToolFailure {
+            kind: talos_error::TalosToolErrorKind::PermissionRejection,
+            message: error.to_string(),
+            gate_source: Some("sandbox_policy".to_string()),
+        },
+        other => TalosError::ToolError(other.to_string()),
     }
 }
 

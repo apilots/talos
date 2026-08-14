@@ -37,11 +37,11 @@ use talos_types::{
     SessionUpdateResponse, SkillsListRequest, SkillsListResponse, SkillsReadRequest,
     SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse,
     SkillsSuggestRequest, SkillsSuggestResponse, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    TurnCommandStatus, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineResponse, TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest,
+    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -187,6 +187,14 @@ impl Gateway for MockGateway {
         _request: SubmitDynamicToolResultRequest,
     ) -> TalosResult<SubmitDynamicToolResultResponse> {
         unreachable!("submit_dynamic_tool_result is not used by channel tests")
+    }
+
+    async fn submit_user_action(
+        &self,
+        _actor: &Actor,
+        _request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse> {
+        unreachable!("submit_user_action is not used by channel tests")
     }
 
     async fn subscribe_timeline(

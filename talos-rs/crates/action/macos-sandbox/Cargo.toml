@@ -1,0 +1,16 @@
+[package]
+name = "talos-macos-sandbox"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos macOS sandbox provider"
+repository.workspace = true
+publish = false
+
+[dependencies]
+talos-sandbox-spi.workspace = true
+
+[dev-dependencies]
+talos-sandbox-spi = { workspace = true, features = ["provider-contract-tests"] }
+tempfile = "3"

@@ -1,5 +1,38 @@
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
+
+mod audit;
+mod facade;
+mod file_system;
+mod manager;
+mod permission;
+mod process;
+mod risk;
+
+pub use facade::{
+    SandboxRuntimePaths, TalosSandboxError, TalosSandboxErrorCategory, ToolSandbox,
+    ToolSandboxDiagnostics, ToolSandboxEnforcement, ToolSandboxProviderDiagnostic,
+    ToolSandboxProviderStatus,
+};
+pub use file_system::{ToolDirectoryEntry, ToolFileMetadata, ToolFileSystemHandle};
+pub use process::{
+    RunningToolProcess, ToolExecutionFuture, ToolProcessCommand, ToolProcessTerminationTarget,
+};
+pub use risk::{CommandRisk, CommandRiskAssessment, CommandRiskCategory, CommandRiskVerdict};
+
+pub use permission::{
+    ApprovalPolicy, EffectiveToolPermissionPolicy, ExternalSandboxEnforcement,
+    ExternalSandboxEnforcementSource, FileSystemOperation, FileSystemPermissionLevel,
+    FileSystemSandboxPolicy, FileSystemScope, NetworkSandboxPolicy, PolicyPrecheck,
+    RequestedFileSystemAccess, RequestedToolPermissions, SandboxCapability, ToolApprovalGrant,
+    ToolApprovalRequest, ToolEscalationPolicy, ToolExecutionLocation, ToolGovernanceConstraints,
+    ToolInvocationIdentity, ToolPermissionError, ToolPermissionProfile, ToolSandboxDecision,
+    ToolSandboxDenial, ToolSandboxEnvironment, ToolSandboxOperationKind, ToolSandboxPermit,
+    ToolSandboxRequest, WorkspaceWritePolicy,
+};
+
+pub use talos_sandbox_spi::{
+    AbsolutePathBuf, SandboxIsolationCapability, SandboxProviderPlatform, SandboxStdin,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -23,7 +56,7 @@ pub enum ToolGovernanceArgumentOverride {
 pub struct ToolGovernanceSpec {
     pub preferred_sandbox: ToolSandboxMode,
     pub argument_override: ToolGovernanceArgumentOverride,
-    pub retry_without_sandbox: bool,
+    pub escalation: ToolEscalationPolicy,
 }
 
 impl Default for ToolGovernanceSpec {
@@ -31,7 +64,7 @@ impl Default for ToolGovernanceSpec {
         Self {
             preferred_sandbox: ToolSandboxMode::UseDefault,
             argument_override: ToolGovernanceArgumentOverride::None,
-            retry_without_sandbox: false,
+            escalation: ToolEscalationPolicy::Forbidden,
         }
     }
 }
@@ -39,7 +72,7 @@ impl Default for ToolGovernanceSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionPlan {
     pub sandbox_mode: ToolSandboxMode,
-    pub retry_without_sandbox: bool,
+    pub escalation: ToolEscalationPolicy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,62 +104,6 @@ pub trait GovernanceEventSink: Send + Sync {
     fn on_decision(&self, decision: &ToolGovernanceDecision);
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolOrchestratorConfig {
-    pub default_sandbox_mode: ToolSandboxMode,
-}
-
-impl Default for ToolOrchestratorConfig {
-    fn default() -> Self {
-        Self {
-            default_sandbox_mode: ToolSandboxMode::UseDefault,
-        }
-    }
-}
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum ToolPlanError {
-    #[error("tool execution is forbidden: {reason}")]
-    Forbidden { reason: String },
-}
-
-pub trait SandboxAwareTool<Request> {
-    fn sandbox_mode(&self, request: &Request, config: &ToolOrchestratorConfig) -> ToolSandboxMode;
-
-    fn retry_without_sandbox(&self) -> bool {
-        false
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct ToolOrchestrator {
-    config: ToolOrchestratorConfig,
-}
-
-impl ToolOrchestrator {
-    pub fn new(config: ToolOrchestratorConfig) -> Self {
-        Self { config }
-    }
-
-    pub fn config(&self) -> &ToolOrchestratorConfig {
-        &self.config
-    }
-
-    pub fn plan<Request, Tool>(
-        &self,
-        tool: &Tool,
-        request: &Request,
-    ) -> Result<ToolExecutionPlan, ToolPlanError>
-    where
-        Tool: SandboxAwareTool<Request>,
-    {
-        Ok(ToolExecutionPlan {
-            sandbox_mode: tool.sandbox_mode(request, &self.config),
-            retry_without_sandbox: tool.retry_without_sandbox(),
-        })
-    }
-}
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;
+pub use audit::{
+    ToolSandboxAuditEvent, ToolSandboxAuditOutcome, ToolSandboxAuditSink, ToolSandboxAuditStage,
+};

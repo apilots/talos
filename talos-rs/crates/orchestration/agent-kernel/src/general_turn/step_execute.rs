@@ -171,6 +171,7 @@ pub(crate) async fn stream_round(
     let mut completed_reasoning: Option<ReasoningOutput> = None;
     let mut finish_reason = None;
     let mut pending_calls: BTreeMap<usize, PendingToolCall> = BTreeMap::new();
+    let mut next_tool_index_to_schedule = 0_usize;
     let mut active_blocks = BTreeMap::<String, ActiveModelBlock>::new();
     let mut completed_blocks = BTreeSet::<String>::new();
     let mut streamed_tool_outputs = Vec::new();
@@ -495,21 +496,6 @@ pub(crate) async fn stream_round(
                             }),
                         )
                         .await;
-                        if let Some(scheduler) = scheduler.as_mut() {
-                            scheduler
-                                .push_call(
-                                    ToolStreamKey { round, index },
-                                    ToolExecutionInput {
-                                        call_id: stable_call_id,
-                                        tool_name: entry
-                                            .name
-                                            .clone()
-                                            .unwrap_or_else(|| "unknown".to_string()),
-                                        arguments,
-                                    },
-                                )
-                                .await?;
-                        }
                     }
                 }
             }
@@ -539,6 +525,27 @@ pub(crate) async fn stream_round(
         }
 
         if let Some(scheduler) = scheduler.as_mut() {
+            while let Some(entry) = pending_calls.get(&next_tool_index_to_schedule) {
+                let Some(arguments) = entry.final_arguments.clone() else {
+                    break;
+                };
+                let call_id =
+                    normalized_tool_call_id(round, next_tool_index_to_schedule, entry.id.clone());
+                scheduler
+                    .push_call(
+                        ToolStreamKey {
+                            round,
+                            index: next_tool_index_to_schedule,
+                        },
+                        ToolExecutionInput {
+                            call_id,
+                            tool_name: entry.name.clone().unwrap_or_else(|| "unknown".to_string()),
+                            arguments,
+                        },
+                    )
+                    .await?;
+                next_tool_index_to_schedule += 1;
+            }
             for completed in scheduler.drain_completed().await? {
                 super::tool_batch::emit_tool_result_stream_event(stream_tx, &completed.output)
                     .await;

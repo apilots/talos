@@ -261,6 +261,7 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
                 provider: "test".to_string(),
                 id: "test-model".to_string(),
             })),
+            ..SessionConf::default()
         },
         project_id: None,
         current_directory: None,

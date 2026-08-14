@@ -185,16 +185,14 @@ impl CoordinatorImpl {
             .resolve_bound_agent(&params.binding, &params.session)
             .await?;
         let input = match params.input {
-            AgentDispatchInput::DynamicToolResult {
+            AgentDispatchInput::UserActionResponse {
                 call_id,
                 tool_name,
-                output,
-                success,
-            } => AgentInput::DynamicToolResult {
+                response,
+            } => AgentInput::UserActionResponse {
                 call_id,
                 tool_name,
-                output,
-                success,
+                response,
             },
             AgentDispatchInput::Message { message } => AgentInput::Message { message },
         };
@@ -340,5 +338,11 @@ impl SessionRuntime for CoordinatorImpl {
 
     async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
         self.cancel_active_turn_for_session(params).await
+    }
+
+    async fn has_active_turn(&self, session: &TalosSession) -> TalosResult<bool> {
+        let session_id = session.context.session_id.as_str();
+        let (_agent_id, agent) = self.resolve_session_agent(session).await?;
+        Ok(agent.has_active_turn(session_id))
     }
 }

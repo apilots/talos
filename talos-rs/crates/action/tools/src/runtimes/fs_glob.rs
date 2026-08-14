@@ -1,14 +1,19 @@
 use globset::Glob;
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::ffi::OsStr;
 use talos_error::{TalosError, TalosResult};
+use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 use talos_types::talos::TalosToolSearchMatch;
-use walkdir::{DirEntry, WalkDir};
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
+use crate::runtimes::map_sandbox_file_error;
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 200;
 const MAX_LIMIT: usize = 2_000;
+const MAX_WALK_ENTRIES: usize = 100_000;
+const MAX_WALK_DIRECTORIES: usize = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobFilesRequest {
@@ -32,6 +37,23 @@ pub struct GlobFilesResponse {
     pub partial: bool,
 }
 
+pub fn requested_file_system_access(
+    request: &GlobFilesRequest,
+    context: &ToolContext,
+) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+    let base = if let Some(path) = request.path.as_deref() {
+        resolve_tool_path(path, context)?
+    } else {
+        crate::runtimes::resolve_base_dir(context)?
+    };
+    let base = normalize_existing_tool_path(&base)?;
+    Ok(vec![RequestedFileSystemAccess::new(
+        FileSystemOperation::Read,
+        vec![base],
+    )
+    .map_err(|error| TalosError::ToolError(error.to_string()))?])
+}
+
 pub async fn run(
     request: &GlobFilesRequest,
     context: &ToolContext,
@@ -52,18 +74,52 @@ pub async fn run(
     let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAX_LIMIT);
     let offset = request.offset.unwrap_or(0);
     let mut paths = Vec::new();
+    let mut queue = VecDeque::from([base.clone()]);
+    let mut visited_entries = 0usize;
+    let mut visited_directories = 1usize;
+    let mut partial = false;
+    let file_system = context.sandbox_file_system()?;
 
-    for entry in WalkDir::new(&base)
-        .into_iter()
-        .filter_entry(should_descend)
-        .filter_map(Result::ok)
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let relative = entry.path().strip_prefix(&base).unwrap_or(entry.path());
-        if matcher.is_match(relative) || matcher.is_match(entry.path()) {
-            paths.push(relative.display().to_string());
+    while let Some(directory) = queue.pop_front() {
+        let entries = match file_system.read_directory(&directory).await {
+            Ok(entries) => entries,
+            Err(error) if directory == base => {
+                return Err(map_sandbox_file_error(error));
+            }
+            Err(_) => continue,
+        };
+        for entry in entries {
+            if visited_entries == MAX_WALK_ENTRIES {
+                partial = true;
+                queue.clear();
+                break;
+            }
+            visited_entries += 1;
+            let metadata = match file_system.metadata(&entry.path).await {
+                Ok(metadata) => metadata,
+                Err(_) => continue,
+            };
+            if metadata.is_symlink {
+                continue;
+            }
+            if metadata.is_directory {
+                if should_descend(&entry.file_name) {
+                    if visited_directories == MAX_WALK_DIRECTORIES {
+                        partial = true;
+                    } else {
+                        visited_directories += 1;
+                        queue.push_back(entry.path);
+                    }
+                }
+                continue;
+            }
+            if !metadata.is_file {
+                continue;
+            }
+            let relative = entry.path.strip_prefix(&base).unwrap_or(&entry.path);
+            if matcher.is_match(relative) || matcher.is_match(&entry.path) {
+                paths.push(relative.display().to_string());
+            }
         }
     }
 
@@ -91,12 +147,12 @@ pub async fn run(
         limit,
         total_matches,
         more_available,
-        partial: false,
+        partial,
     })
 }
 
-fn should_descend(entry: &DirEntry) -> bool {
-    let name = entry.file_name().to_string_lossy();
+fn should_descend(file_name: &OsStr) -> bool {
+    let name = file_name.to_string_lossy();
     !matches!(
         name.as_ref(),
         ".git"

@@ -67,6 +67,10 @@ impl ToolDispatchContext {
         &self.tool_context
     }
 
+    pub(crate) fn tool_context_mut(&mut self) -> &mut ToolContext {
+        &mut self.tool_context
+    }
+
     pub fn into_tool_context(self) -> ToolContext {
         self.tool_context
     }

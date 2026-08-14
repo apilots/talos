@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use self::resume::build_general_turn_resume;
 use super::kernel;
 use super::lifecycle::AgentRuntimeAbortHandle;
 use super::request::{agent_run_params_to_kernel_params, AgentKernelParams};
@@ -17,22 +18,20 @@ use crate::{
 };
 use talos_agent_kernel::{
     run_general_turn_with_resume, AssistantTextPhase, AttachmentReader, ContextStateBags,
-    DynamicToolResultResume, GeneralTurnOutcome, GeneralTurnResult, GeneralTurnResume,
-    GeneralTurnSkillOptions, InvocationContext, InvocationExecutionState, InvocationLimits,
-    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
-    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, ResumeToolCall,
-    StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind, ToolStreamKey,
-    TurnFileScope, UserInput, UserInputEventData,
+    GeneralTurnOutcome, GeneralTurnResult, GeneralTurnSkillOptions, InvocationContext,
+    InvocationExecutionState, InvocationLimits, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    KernelStreamItemKey, StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind,
+    ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
 };
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
+    ToolUserPermissionModeConfig,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
 use talos_memory::MemoryWriter;
-use talos_store::session::{
-    SessionArtifactStore, SessionStore, SessionTranscriptBranch, SessionTranscriptPayload,
-};
+use talos_store::session::{SessionArtifactStore, SessionStore};
 
 use talos_tools::ToolRegistry;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
@@ -41,7 +40,9 @@ use talos_types::talos::{
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
     TalosTimelinePhase, TalosToolProgressKind, TokenUsage, TurnExecutionMetrics,
 };
-use talos_types::ModelInfo;
+use talos_types::{ModelInfo, PendingUserAction, TimelineUserActionEvent, UserActionState};
+
+mod resume;
 
 /// Internal SPI implemented by concrete agent backends attached to AgentHarness.
 ///
@@ -145,17 +146,30 @@ impl KernelAgent {
         self.kernel_config = kernel_config;
     }
 
-    fn kernel_config_for_run(&self, context: &AgentRunContext) -> TalosResult<AgentKernelConfig> {
+    fn kernel_config_for_run(
+        &self,
+        context: &AgentRunContext,
+        user_permission_mode: talos_types::UserPermissionMode,
+    ) -> TalosResult<AgentKernelConfig> {
         let execution_user_id = context
             .user_id
             .as_deref()
             .unwrap_or(context.owner_user_id.as_str());
         validate_session_workspace_user(&context.owner_user_id, execution_user_id)?;
         let kernel_config = kernel::normalized_kernel_config(self.kernel_config.clone());
-        Ok(
+        let mut kernel_config =
             resolve_effective_kernel_workspace(&kernel_config, &context.owner_user_id)?
-                .kernel_config,
-        )
+                .kernel_config;
+        kernel_config.tools.sandbox_policy.user_permission_mode = match user_permission_mode {
+            talos_types::UserPermissionMode::AskForApproval => {
+                ToolUserPermissionModeConfig::AskForApproval
+            }
+            talos_types::UserPermissionMode::ApproveForMe => {
+                ToolUserPermissionModeConfig::ApproveForMe
+            }
+            talos_types::UserPermissionMode::FullAccess => ToolUserPermissionModeConfig::FullAccess,
+        };
+        Ok(kernel_config)
     }
 
     fn llm_provider_for_run(&self, config: &AgentRunConfig) -> TalosResult<Arc<dyn LlmProvider>> {
@@ -257,91 +271,6 @@ impl KernelAgent {
         })
     }
 
-    async fn build_general_turn_resume(
-        session_artifact_store: &dyn SessionArtifactStore,
-        workspace_root: &std::path::Path,
-        session_id: &str,
-        turn_id: &str,
-        resume_context: Option<AgentDispatchResumeContext>,
-    ) -> TalosResult<Option<GeneralTurnResume>> {
-        let Some(resume_context) = resume_context else {
-            return Ok(None);
-        };
-        let Some(tool_call) = resume_context.tool_call else {
-            return Err(TalosError::ValidationError(format!(
-                "dynamic resume context for session `{session_id}` turn `{turn_id}` is missing tool call metadata"
-            )));
-        };
-
-        let records = session_artifact_store
-            .load_transcript_records(
-                workspace_root,
-                session_id,
-                None,
-                Some(SessionTranscriptBranch::ReactiveLoop),
-            )
-            .await?;
-        let mut request = None;
-        let mut response = None;
-        for record in records {
-            match record.payload {
-                SessionTranscriptPayload::DynamicToolRequest { payload }
-                    if record.header.invocation_id.as_str() == turn_id
-                        && payload.call_id.as_str() == tool_call.call_id.as_str()
-                        && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
-                {
-                    if request
-                        .as_ref()
-                        .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp)
-                    {
-                        request = Some((record.header.timestamp, payload));
-                    }
-                }
-                SessionTranscriptPayload::DynamicToolResponse { payload }
-                    if record.header.invocation_id.as_str() == turn_id
-                        && payload.call_id.as_str() == tool_call.call_id.as_str()
-                        && payload.tool_name.as_str() == tool_call.tool_name.as_str()
-                        && response
-                            .as_ref()
-                            .is_none_or(|(timestamp, _)| record.header.timestamp > *timestamp) =>
-                {
-                    response = Some((record.header.timestamp, payload));
-                }
-                _ => {}
-            }
-        }
-        let request = request.map(|(_, payload)| payload).ok_or_else(|| {
-            TalosError::ToolError(format!(
-                "dynamic tool call `{}` has no pending request for session `{}` turn `{}`",
-                tool_call.call_id, session_id, turn_id
-            ))
-        })?;
-        let response = response.map(|(_, payload)| payload).ok_or_else(|| {
-            TalosError::ToolError(format!(
-                "dynamic tool call `{}` has no submitted result for session `{}` turn `{}`",
-                tool_call.call_id, session_id, turn_id
-            ))
-        })?;
-        let original_arguments = request.arguments;
-
-        Ok(Some(GeneralTurnResume::DynamicToolResult(
-            DynamicToolResultResume {
-                call_id: tool_call.call_id.clone(),
-                tool_name: tool_call.tool_name.clone(),
-                output: response.output,
-                success: response.success,
-                original_call: Some(ResumeToolCall {
-                    item_id: Some(tool_call.item_id),
-                    call_id: tool_call.call_id,
-                    tool_name: tool_call.tool_name,
-                    arguments: original_arguments,
-                    reasoning_continuation: request.reasoning_continuation,
-                }),
-                replay_dynamic_tool_results: HashMap::new(),
-            },
-        )))
-    }
-
     fn build_skill_options(
         &self,
         input: &[TalosInputItem],
@@ -385,9 +314,12 @@ impl KernelAgent {
         let input = AgentKernelParams::extract_user_input(&agent_request.input)?;
         let invocation_id = turn_id.clone();
         let session_id = agent_request.context.session_id.clone();
-        let kernel_config = self.kernel_config_for_run(&agent_request.context)?;
+        let kernel_config = self.kernel_config_for_run(
+            &agent_request.context,
+            agent_request.config.user_permission_mode,
+        )?;
         let skill_options = self.build_skill_options(&agent_request.input, &kernel_config)?;
-        let resume = Self::build_general_turn_resume(
+        let resume = build_general_turn_resume(
             self.session_artifact_store.as_ref(),
             std::path::Path::new(&kernel_config.workspace_dir),
             &session_id,
@@ -460,7 +392,10 @@ impl KernelAgent {
                     return Err(err.into());
                 }
             };
-            let kernel_config = match this.kernel_config_for_run(&agent_request.context) {
+            let kernel_config = match this.kernel_config_for_run(
+                &agent_request.context,
+                agent_request.config.user_permission_mode,
+            ) {
                 Ok(value) => value,
                 Err(err) => {
                     let _ = tx.send(timeline.fail_turn(&err)).await;
@@ -484,7 +419,7 @@ impl KernelAgent {
                     return Err(err.into());
                 }
             };
-            let resume = match Self::build_general_turn_resume(
+            let resume = match build_general_turn_resume(
                 this.session_artifact_store.as_ref(),
                 std::path::Path::new(&kernel_config.workspace_dir),
                 &session_id,
@@ -501,9 +436,11 @@ impl KernelAgent {
             };
 
             let _ = tx.send(timeline.start_turn()).await;
-            let _ = tx
-                .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
-                .await;
+            if resume.is_none() {
+                let _ = tx
+                    .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
+                    .await;
+            }
             if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
                 match emit_user_input_item(&mut timeline, &input) {
                     Ok(events) => {
@@ -605,12 +542,22 @@ impl KernelAgent {
                         result.outcome,
                         talos_agent_kernel::GeneralTurnOutcome::Completed { .. }
                     ) {
-                        emit_terminal_item_closures(
-                            &mut timeline,
-                            &tx,
-                            TalosTimelineItemStatus::Completed,
-                        )
-                        .await;
+                        let active_tool_item_ids = timeline.active_tool_item_ids();
+                        if !active_tool_item_ids.is_empty() {
+                            let err = TalosError::InternalError(format!(
+                                "completed turn has active tool items: {}",
+                                active_tool_item_ids.join(", ")
+                            ));
+                            emit_terminal_item_closures(
+                                &mut timeline,
+                                &tx,
+                                TalosTimelineItemStatus::Failed,
+                            )
+                            .await;
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
+                            return Err(err.into());
+                        }
+                        emit_success_item_closures(&mut timeline, &tx).await;
                     }
                     let _ = tx
                         .send(timeline.turn_metrics(outcome_metrics(&result.outcome)))
@@ -737,6 +684,19 @@ async fn emit_terminal_item_closures(
     }
 }
 
+async fn emit_success_item_closures(timeline: &mut TimelineBuilder, tx: &mpsc::Sender<AgentEvent>) {
+    match timeline.close_active_non_tool_items(TalosTimelineItemStatus::Completed) {
+        Ok(events) => {
+            for event in events {
+                let _ = tx.send(event).await;
+            }
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "failed to close active non-tool timeline items");
+        }
+    }
+}
+
 /// State used while normalizing Kernel stream events into Agent events.
 ///
 /// This is runtime-private bookkeeping for event ordering and item identity.
@@ -810,21 +770,23 @@ fn seed_resume_context(
     state: &mut KernelTimelineState,
     resume_context: Option<AgentDispatchResumeContext>,
 ) {
-    let Some(tool_call) = resume_context.and_then(|context| context.tool_call) else {
+    let Some(context) = resume_context else {
         return;
     };
-    timeline.track_existing_tool_call(
-        tool_call.item_id.clone(),
-        tool_call.call_id.clone(),
-        tool_call.tool_name,
-        String::new(),
-    );
-    state
-        .tool_item_by_call_id
-        .insert(tool_call.call_id.clone(), tool_call.item_id.clone());
-    state
-        .active_tool_items
-        .insert(tool_call.call_id, tool_call.item_id);
+    for tool_call in context.tool_calls {
+        timeline.track_existing_tool_call(
+            tool_call.item_id.clone(),
+            tool_call.call_id.clone(),
+            tool_call.tool_name,
+            String::new(),
+        );
+        state
+            .tool_item_by_call_id
+            .insert(tool_call.call_id.clone(), tool_call.item_id.clone());
+        state
+            .active_tool_items
+            .insert(tool_call.call_id, tool_call.item_id);
+    }
 }
 
 /// Convert one Kernel stream event into standardized Agent timeline events.
@@ -1130,10 +1092,10 @@ pub(crate) fn emit_kernel_timeline_events(
             Ok(events)
         }
         (
-            KernelStreamEventType::DynamicToolRequest,
-            KernelStreamEventData::DynamicToolRequest(data),
+            KernelStreamEventType::UserActionRequest,
+            KernelStreamEventData::UserActionRequest(data),
         ) => {
-            reject_after_final_answer(state, "dynamic tool request")?;
+            reject_after_final_answer(state, "user action request")?;
             let mut events = close_active_reasoning_item(timeline, state)?;
             let item_id = state
                 .tool_item_by_call_id
@@ -1141,20 +1103,26 @@ pub(crate) fn emit_kernel_timeline_events(
                 .cloned()
                 .ok_or_else(|| {
                     TalosError::ValidationError(format!(
-                        "timeline tool item not found for dynamic result: {}",
+                        "timeline tool item not found for user action: {}",
                         data.call_id
                     ))
                 })?;
             events.push(
                 timeline
-                    .append_status_delta(&item_id, TalosTimelineItemStatus::WaitingDynamicInput)?,
+                    .append_status_delta(&item_id, TalosTimelineItemStatus::WaitingUserAction)?,
             );
             events.push(timeline.append_delta(
                 &item_id,
-                TalosTimelineDelta::ToolDynamicRequest {
-                    call_id: data.call_id,
-                    tool_name: data.tool_name,
-                    arguments: data.arguments.into(),
+                TalosTimelineDelta::UserAction {
+                    event: TimelineUserActionEvent::Requested {
+                        action: PendingUserAction {
+                            action_id: data.action_id,
+                            call_id: data.call_id,
+                            item_id: Some(item_id.clone()),
+                            state: UserActionState::Pending,
+                            params: data.params,
+                        },
+                    },
                 },
             )?);
             Ok(events)

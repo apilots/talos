@@ -8,8 +8,8 @@ use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    CancelActiveTurnParams, ModelSelection, OptionalProjectIdPatch, ProjectPatch,
-    SessionListRequest, SessionPatch, TalosSession,
+    CancelActiveTurnParams, ModelSelection, OptionalProjectIdPatch, ProjectPatch, SessionConf,
+    SessionListRequest, SessionPatch, TalosSession, UserPermissionMode,
 };
 
 use super::types::Actor;
@@ -28,6 +28,7 @@ pub struct CreateSessionRequest {
     pub session_id: String,
     pub context: talos_types::talos::TalosContext,
     pub model_selection: Option<ModelSelection>,
+    pub user_permission_mode: Option<UserPermissionMode>,
     pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub current_directory: Option<PathBuf>,
@@ -74,7 +75,12 @@ impl ResourceAccessService {
                 context,
                 target_agent,
                 model_selection: params.model_selection,
-                conf: None,
+                conf: params
+                    .user_permission_mode
+                    .map(|user_permission_mode| SessionConf {
+                        user_permission_mode: Some(user_permission_mode),
+                        ..Default::default()
+                    }),
                 workspace_id: params.workspace_id,
                 project_id: params.project_id,
                 current_directory: params.current_directory,
@@ -400,6 +406,13 @@ impl ResourceAccessService {
 
     async fn cancel_runtime_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
         self.session_runtime.cancel_active_turn(params).await
+    }
+
+    pub(crate) async fn has_active_runtime_turn(
+        &self,
+        session: &TalosSession,
+    ) -> TalosResult<bool> {
+        self.session_runtime.has_active_turn(session).await
     }
 }
 

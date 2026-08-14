@@ -37,11 +37,11 @@ pub enum KernelTranscriptPayload {
     Auth {
         payload: KernelTranscriptAuthPayload,
     },
-    DynamicToolRequest {
-        payload: KernelTranscriptDynamicToolRequestPayload,
+    UserActionRequest {
+        payload: KernelTranscriptUserActionRequestPayload,
     },
-    DynamicToolResponse {
-        payload: KernelTranscriptDynamicToolResponsePayload,
+    UserActionResponse {
+        payload: KernelTranscriptUserActionResponsePayload,
     },
     Compaction {
         payload: KernelTranscriptCompactionPayload,
@@ -55,8 +55,8 @@ impl KernelTranscriptPayload {
             Self::Compaction { payload } => Some(&payload.summary_message),
             Self::Transfer { .. }
             | Self::Auth { .. }
-            | Self::DynamicToolRequest { .. }
-            | Self::DynamicToolResponse { .. }
+            | Self::UserActionRequest { .. }
+            | Self::UserActionResponse { .. }
             | Self::StateOnly => None,
         }
     }
@@ -74,19 +74,24 @@ pub struct KernelTranscriptAuthPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct KernelTranscriptDynamicToolRequestPayload {
+pub struct KernelTranscriptUserActionRequestPayload {
+    pub action_id: String,
     pub call_id: String,
     pub tool_name: String,
     pub arguments: DynamicToolArguments,
+    pub params: talos_types::UserActionParams,
+    pub sandbox_request_fingerprint: Option<String>,
     pub reasoning_continuation: Option<ReasoningContinuation>,
+    pub tool_calls: Vec<FunctionCall>,
+    pub tool_messages: Vec<ChatMessage>,
+    pub deferred_tool_calls: Vec<FunctionCall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct KernelTranscriptDynamicToolResponsePayload {
+pub struct KernelTranscriptUserActionResponsePayload {
     pub call_id: String,
     pub tool_name: String,
-    pub output: String,
-    pub success: bool,
+    pub response: talos_types::UserActionResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -183,22 +188,40 @@ impl KernelTranscriptEvent {
                 },
             },
             EventPayload::DynamicToolRequest { payload } => {
-                KernelTranscriptPayload::DynamicToolRequest {
-                    payload: KernelTranscriptDynamicToolRequestPayload {
+                KernelTranscriptPayload::UserActionRequest {
+                    payload: KernelTranscriptUserActionRequestPayload {
+                        action_id: format!("ua_{}", Uuid::now_v7().simple()),
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
                         arguments: payload.arguments.clone().into(),
+                        params: talos_types::UserActionParams::DynamicToolResult(
+                            talos_types::DynamicToolResultParams {
+                                tool_name: payload.tool_name.clone(),
+                            },
+                        ),
+                        sandbox_request_fingerprint: None,
                         reasoning_continuation: None,
+                        tool_calls: vec![FunctionCall::new(
+                            payload.call_id.clone(),
+                            payload.tool_name.clone(),
+                            payload.arguments.clone(),
+                        )],
+                        tool_messages: Vec::new(),
+                        deferred_tool_calls: Vec::new(),
                     },
                 }
             }
             EventPayload::DynamicToolResponse { payload } => {
-                KernelTranscriptPayload::DynamicToolResponse {
-                    payload: KernelTranscriptDynamicToolResponsePayload {
+                KernelTranscriptPayload::UserActionResponse {
+                    payload: KernelTranscriptUserActionResponsePayload {
                         call_id: payload.call_id.clone(),
                         tool_name: payload.tool_name.clone(),
-                        output: payload.output.clone(),
-                        success: payload.success,
+                        response: talos_types::UserActionResponse::DynamicToolResult(
+                            talos_types::DynamicToolResult {
+                                output: payload.output.clone(),
+                                success: payload.success,
+                            },
+                        ),
                     },
                 }
             }

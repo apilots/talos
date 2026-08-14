@@ -1,14 +1,20 @@
 use super::*;
 use crate::register_core_local_tools;
 use crate::trait_impl::EchoTestTool;
-use crate::{MemoryGetTool, MemorySearchTool, ToolSearchTool};
+use crate::{
+    AbsolutePathBuf, MemoryGetTool, MemorySearchTool, ToolPending, ToolSandboxEnvironment,
+    ToolSearchTool,
+};
 use async_trait::async_trait;
 use serde_json::json;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, ToolSandboxModeConfig};
 use talos_error::{TalosError, TalosToolErrorKind};
 use talos_tools_policy::ToolPolicy;
+use talos_types::{
+    SandboxApprovalDecision, SandboxApprovalPresentation, SandboxFileOperation, UserActionResponse,
+};
 
 struct LargeErrorTool;
 struct ValidationGateTool {
@@ -47,6 +53,38 @@ fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> 
         tool_result_max_bytes: limit,
         ..Default::default()
     })
+}
+
+fn full_access_kernel_config() -> Arc<AgentKernelConfig> {
+    let mut config = AgentKernelConfig::default();
+    config.tools.sandbox_policy.default_mode = ToolSandboxModeConfig::DangerFullAccess;
+    Arc::new(config)
+}
+
+fn workspace_write_kernel_config() -> Arc<AgentKernelConfig> {
+    let mut config = AgentKernelConfig::default();
+    config.tools.sandbox_policy.user_permission_mode =
+        talos_config::ToolUserPermissionModeConfig::AskForApproval;
+    config.tools.sandbox_policy.default_mode = ToolSandboxModeConfig::WorkspaceWrite;
+    Arc::new(config)
+}
+
+fn local_tool_context(
+    session_id: &str,
+    user_id: &str,
+    config: Arc<AgentKernelConfig>,
+    root: &std::path::Path,
+) -> ToolContext {
+    let root = root
+        .canonicalize()
+        .expect("sandbox root should canonicalize");
+    let root = AbsolutePathBuf::new(root).expect("sandbox root should be absolute");
+    let project_root = root.as_path().to_path_buf();
+    let environment = ToolSandboxEnvironment::local(vec![root], Vec::new())
+        .expect("sandbox environment should be valid");
+    ToolContext::new_with_kernel_config(session_id, user_id, Some(config))
+        .with_project_root(project_root)
+        .with_sandbox_environment(environment)
 }
 
 #[async_trait]
@@ -409,37 +447,411 @@ async fn test_edit_tool_validation_returns_structured_failure() {
 }
 
 #[tokio::test]
-async fn test_bash_tool_semantic_permission_returns_structured_failure() {
-    let policy = ToolPolicy::allow_list(vec!["Bash"]);
-    let registry = ToolRegistry::new_with_policy(policy);
+async fn sandbox_approval_allow_once_replays_the_same_bash_invocation_once() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    let workspace_path = std::fs::canonicalize(workspace.path()).expect("workspace should resolve");
+    let marker = workspace_path.join("approval-marker");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
     register_core_local_tools(&registry);
-
     let invocation = registry
         .build_function_invocation(
-            "call-bash-semantic-permission",
+            "call-bash-approval",
             "Bash",
             serde_json::json!({
-                "command": "echo hi",
+                "command": format!("printf x >> '{}'", marker.display())
+            }),
+        )
+        .expect("Bash invocation should build");
+    let context = local_tool_context(
+        "session-bash-approval",
+        "user-bash-approval",
+        workspace_write_kernel_config(),
+        &workspace_path,
+    );
+
+    let pending = registry
+        .execute_invocation_with_context(invocation.clone(), context.clone())
+        .await
+        .expect("approval should become pending");
+    let ToolDispatchOutcome::Pending {
+        pending:
+            ToolPending::SandboxApproval {
+                params,
+                request_fingerprint,
+            },
+        ..
+    } = pending
+    else {
+        panic!("Bash escalation should request sandbox approval");
+    };
+    assert_eq!(
+        params.available_decisions,
+        vec![
+            SandboxApprovalDecision::AllowOnce,
+            SandboxApprovalDecision::Deny,
+            SandboxApprovalDecision::Cancel,
+        ]
+    );
+    assert!(!marker.exists());
+
+    context.set_sandbox_approval_fingerprint("call-bash-approval", request_fingerprint);
+    context.set_user_action_response(
+        "call-bash-approval",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::AllowOnce),
+    );
+    let outcome = registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("matching one-time approval should execute");
+
+    let ToolDispatchOutcome::Executed { payload } = outcome else {
+        panic!("approved Bash invocation should execute");
+    };
+    assert!(
+        matches!(&payload, ToolOutputPayload::Function { success: true, .. }),
+        "approved Bash invocation failed: {payload:?}"
+    );
+    assert!(
+        marker.exists(),
+        "approved Bash side effect is missing: {payload:?}"
+    );
+    assert_eq!(std::fs::read_to_string(marker).unwrap(), "x");
+}
+
+#[tokio::test]
+async fn sandbox_approval_rejects_a_changed_scope_without_side_effect() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    let marker = workspace.path().join("must-not-exist");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-bash-scope",
+            "Bash",
+            serde_json::json!({
+                "command": format!("touch '{}'", marker.display()),
                 "dangerously_disable_sandbox": true
             }),
         )
-        .unwrap();
+        .expect("Bash invocation should build");
+    let context = local_tool_context(
+        "session-bash-scope",
+        "user-bash-scope",
+        workspace_write_kernel_config(),
+        workspace.path(),
+    );
+    context.set_sandbox_approval_fingerprint("call-bash-scope", "sar_wrong_scope");
+    context.set_user_action_response(
+        "call-bash-scope",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::AllowOnce),
+    );
 
     let error = registry
-        .execute_invocation_with_context(invocation, ToolContext::default())
+        .execute_invocation_with_context(invocation, context)
         .await
-        .unwrap_err();
+        .expect_err("changed approval scope should fail closed");
 
     assert_tool_failure(
         error,
         TalosToolErrorKind::PermissionRejection,
-        GATE_SOURCE_TOOL_SEMANTIC,
-        "authorization denied",
+        "sandbox_policy",
+        "scope does not match",
+    );
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn sandbox_approval_deny_returns_a_tool_failure_without_execution() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    let marker = workspace.path().join("must-not-exist");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-bash-deny",
+            "Bash",
+            serde_json::json!({
+                "command": format!("touch '{}'", marker.display()),
+                "dangerously_disable_sandbox": true
+            }),
+        )
+        .expect("Bash invocation should build");
+    let context = local_tool_context(
+        "session-bash-deny",
+        "user-bash-deny",
+        workspace_write_kernel_config(),
+        workspace.path(),
+    );
+    context.set_user_action_response(
+        "call-bash-deny",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::Deny),
+    );
+
+    let outcome = registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("denial should be returned to the model as a tool result");
+    let ToolDispatchOutcome::Executed {
+        payload: ToolOutputPayload::Function { success, .. },
+    } = outcome
+    else {
+        panic!("denial should produce a function tool result");
+    };
+    assert!(!success);
+    assert!(!marker.exists());
+}
+
+#[tokio::test]
+async fn test_registry_binds_full_access_permit_for_bash() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-bash-sandbox-permit",
+            "Bash",
+            serde_json::json!({"command": "printf sandbox-permit-bound"}),
+        )
+        .expect("Bash invocation should build");
+    let context = local_tool_context(
+        "session-bash-sandbox",
+        "user-bash-sandbox",
+        full_access_kernel_config(),
+        workspace.path(),
+    );
+
+    let outcome = registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("Bash should execute through the bound permit");
+    let ToolDispatchOutcome::Executed { payload } = outcome else {
+        panic!("Bash should execute synchronously");
+    };
+    assert!(payload.content().contains("sandbox-permit-bound"));
+}
+
+#[tokio::test]
+async fn test_registry_binds_full_access_permit_for_grep() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    std::fs::write(workspace.path().join("sample.txt"), "sandbox grep target\n")
+        .expect("fixture should write");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Grep"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-grep-sandbox-permit",
+            "Grep",
+            serde_json::json!({
+                "pattern": "sandbox grep target",
+                "path": ".",
+                "output_mode": "content"
+            }),
+        )
+        .expect("Grep invocation should build");
+    let context = local_tool_context(
+        "session-grep-sandbox",
+        "user-grep-sandbox",
+        full_access_kernel_config(),
+        workspace.path(),
+    );
+
+    let outcome = registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("Grep should execute through the bound permit");
+    let ToolDispatchOutcome::Executed { payload } = outcome else {
+        panic!("Grep should execute synchronously");
+    };
+    assert!(payload.content().contains("sandbox grep target"));
+}
+
+#[tokio::test]
+async fn test_registry_binds_workspace_write_permit_for_file_tool() {
+    let workspace = tempfile::tempdir().expect("temp dir should create");
+    let target = workspace.path().join("nested/output.txt");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Write"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-write-sandbox-permit",
+            "Write",
+            serde_json::json!({"path": target, "content": "workspace write"}),
+        )
+        .expect("Write invocation should build");
+    let context = local_tool_context(
+        "session-write-sandbox",
+        "user-write-sandbox",
+        workspace_write_kernel_config(),
+        workspace.path(),
+    );
+
+    registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("workspace Write should execute through the bound permit");
+    assert_eq!(
+        std::fs::read_to_string(target).expect("workspace output should exist"),
+        "workspace write"
     );
 }
 
 #[tokio::test]
-async fn test_outer_allow_list_and_semantic_gate_sources_are_distinguishable() {
+async fn test_registry_approves_file_write_outside_workspace_before_side_effect() {
+    let parent = tempfile::tempdir().expect("temp dir should create");
+    let workspace = parent.path().join("workspace");
+    std::fs::create_dir(&workspace).expect("workspace should create");
+    let marker = parent.path().join("must-not-exist");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Write"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-write-outside-workspace",
+            "Write",
+            serde_json::json!({"path": marker, "content": "denied"}),
+        )
+        .expect("Write invocation should build");
+    let context = local_tool_context(
+        "session-write-denied",
+        "user-write-denied",
+        workspace_write_kernel_config(),
+        &workspace,
+    );
+
+    let pending = registry
+        .execute_invocation_with_context(invocation.clone(), context.clone())
+        .await
+        .expect("outside write should request approval");
+    let ToolDispatchOutcome::Pending {
+        pending:
+            ToolPending::SandboxApproval {
+                params,
+                request_fingerprint,
+            },
+        ..
+    } = pending
+    else {
+        panic!("outside write should request sandbox approval");
+    };
+    assert_eq!(
+        params.presentation,
+        SandboxApprovalPresentation::FileSystem {
+            operation: SandboxFileOperation::Write,
+            paths: vec![std::fs::canonicalize(parent.path())
+                .expect("outside parent should resolve")
+                .display()
+                .to_string()],
+        }
+    );
+    assert!(!marker.exists());
+
+    context.set_sandbox_approval_fingerprint(
+        "call-write-outside-workspace",
+        request_fingerprint.clone(),
+    );
+    context.set_user_action_response(
+        "call-write-outside-workspace",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::Cancel),
+    );
+    let cancelled = registry
+        .execute_invocation_with_context(invocation.clone(), context.clone())
+        .await
+        .expect_err("cancelled outside write should stop execution");
+    assert!(cancelled.to_string().contains("approval was cancelled"));
+    assert!(!marker.exists());
+
+    context.set_sandbox_approval_fingerprint(
+        "call-write-outside-workspace",
+        request_fingerprint.clone(),
+    );
+    context.set_user_action_response(
+        "call-write-outside-workspace",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::Deny),
+    );
+    let denied = registry
+        .execute_invocation_with_context(invocation.clone(), context.clone())
+        .await
+        .expect("denied outside write should return a tool result");
+    assert!(matches!(denied, ToolDispatchOutcome::Executed { .. }));
+    assert!(!marker.exists());
+
+    context.set_sandbox_approval_fingerprint("call-write-outside-workspace", request_fingerprint);
+    context.set_user_action_response(
+        "call-write-outside-workspace",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::AllowOnce),
+    );
+    registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("approved outside write should execute");
+    assert_eq!(
+        std::fs::read_to_string(marker).expect("approved marker should exist"),
+        "denied"
+    );
+}
+
+#[tokio::test]
+async fn test_registry_requests_scoped_approval_for_file_read_outside_workspace() {
+    let parent = tempfile::tempdir().expect("temp dir should create");
+    let workspace = parent.path().join("workspace");
+    std::fs::create_dir(&workspace).expect("workspace should create");
+    let outside = parent.path().join("outside.txt");
+    std::fs::write(&outside, "outside").expect("fixture should write");
+    let registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Read"]));
+    register_core_local_tools(&registry);
+    let invocation = registry
+        .build_function_invocation(
+            "call-read-outside-workspace",
+            "Read",
+            serde_json::json!({"path": outside}),
+        )
+        .expect("Read invocation should build");
+    let context = local_tool_context(
+        "session-read-denied",
+        "user-read-denied",
+        workspace_write_kernel_config(),
+        &workspace,
+    );
+
+    let outcome = registry
+        .execute_invocation_with_context(invocation.clone(), context.clone())
+        .await
+        .expect("outside read should request approval");
+    let ToolDispatchOutcome::Pending {
+        pending:
+            ToolPending::SandboxApproval {
+                params,
+                request_fingerprint,
+            },
+        ..
+    } = outcome
+    else {
+        panic!("outside read should request sandbox approval");
+    };
+    assert_eq!(
+        params.presentation,
+        SandboxApprovalPresentation::FileSystem {
+            operation: SandboxFileOperation::Read,
+            paths: vec![std::fs::canonicalize(outside)
+                .expect("outside file should resolve")
+                .display()
+                .to_string()],
+        }
+    );
+
+    context.set_sandbox_approval_fingerprint("call-read-outside-workspace", request_fingerprint);
+    context.set_user_action_response(
+        "call-read-outside-workspace",
+        UserActionResponse::SandboxApproval(SandboxApprovalDecision::AllowOnce),
+    );
+    let approved = registry
+        .execute_invocation_with_context(invocation, context)
+        .await
+        .expect("approved outside read should execute");
+    assert!(matches!(approved, ToolDispatchOutcome::Executed { .. }));
+}
+
+#[tokio::test]
+async fn test_outer_allow_list_rejects_before_tool_dispatch() {
     let allow_list_registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Read"]));
     register_core_local_tools(&allow_list_registry);
     let allow_list_invocation = allow_list_registry
@@ -458,30 +870,6 @@ async fn test_outer_allow_list_and_semantic_gate_sources_are_distinguishable() {
         allow_list_error,
         TalosToolErrorKind::PermissionRejection,
         GATE_SOURCE_ALLOW_LIST,
-        "authorization denied",
-    );
-
-    let semantic_registry = ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec!["Bash"]));
-    register_core_local_tools(&semantic_registry);
-    let semantic_invocation = semantic_registry
-        .build_function_invocation(
-            "call-bash-semantic",
-            "Bash",
-            serde_json::json!({
-                "command": "echo hi",
-                "dangerously_disable_sandbox": true
-            }),
-        )
-        .unwrap();
-
-    let semantic_error = semantic_registry
-        .execute_invocation_with_context(semantic_invocation, ToolContext::default())
-        .await
-        .unwrap_err();
-    assert_tool_failure(
-        semantic_error,
-        TalosToolErrorKind::PermissionRejection,
-        GATE_SOURCE_TOOL_SEMANTIC,
         "authorization denied",
     );
 }
@@ -558,6 +946,53 @@ fn test_tool_catalog_tracks_parallel_metadata() {
 
     assert!(registry.tool_supports_parallel("MemorySearch"));
     assert!(!registry.tool_supports_parallel("exec"));
+}
+
+#[test]
+fn core_local_tools_declare_explicit_sandbox_operations() {
+    let registry = ToolRegistry::new();
+    register_core_local_tools(&registry);
+    let catalog = registry.tool_catalog();
+
+    for (name, operation) in [
+        (
+            "Bash",
+            talos_tools_sandbox::ToolSandboxOperationKind::SpawnProcess,
+        ),
+        (
+            "Grep",
+            talos_tools_sandbox::ToolSandboxOperationKind::SpawnProcess,
+        ),
+        (
+            "Read",
+            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
+        ),
+        (
+            "Write",
+            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
+        ),
+        (
+            "Edit",
+            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
+        ),
+        (
+            "ApplyPatch",
+            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
+        ),
+        (
+            "Glob",
+            talos_tools_sandbox::ToolSandboxOperationKind::FileSystem,
+        ),
+    ] {
+        assert_eq!(
+            catalog
+                .find(name)
+                .expect("core tool should be registered")
+                .sandbox_operation,
+            Some(operation),
+            "{name} must declare its sandbox operation"
+        );
+    }
 }
 
 #[test]

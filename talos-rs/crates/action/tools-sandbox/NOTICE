@@ -1,0 +1,14 @@
+This crate contains a path-resolution helper adapted from OpenAI Codex.
+
+Source repository: https://github.com/openai/codex
+Source commit: a26bc337cf61cbca9cd9ac25b25c88c32186eb20
+Source path:
+- codex-rs/exec-server/src/local_file_system.rs
+
+Target path:
+- src/file_system/authorization.rs
+
+The source material is licensed under Apache License 2.0. Talos adapts only
+the nearest-existing-ancestor path resolution algorithm and adds fail-closed
+broken-symlink handling. Codex PathUri, remote filesystem, fs helper protocol,
+copy implementation, and executor DTOs are not included.

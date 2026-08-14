@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_read::{normalize_write_scope, resolve_tool_path};
+use crate::runtimes::map_sandbox_file_error;
 use crate::state::sha256_hex;
 use crate::ToolContext;
+use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WriteFileRequest {
@@ -31,6 +32,24 @@ pub struct WriteFileResult {
     pub structured_patch: String,
 }
 
+pub fn requested_file_system_access(
+    request: &WriteFileRequest,
+    context: &ToolContext,
+) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+    let raw_path = request
+        .path
+        .as_deref()
+        .or(request.file_path.as_deref())
+        .ok_or_else(|| TalosError::ToolError("path is required".to_string()))?;
+    let path = resolve_tool_path(raw_path, context)?;
+    let scope = normalize_write_scope(&path)?;
+    Ok(vec![RequestedFileSystemAccess::new(
+        FileSystemOperation::Write,
+        vec![scope],
+    )
+    .map_err(|error| TalosError::ToolError(error.to_string()))?])
+}
+
 pub async fn run(
     request: &WriteFileRequest,
     context: &ToolContext,
@@ -41,21 +60,24 @@ pub async fn run(
         .or(request.file_path.as_deref())
         .ok_or_else(|| TalosError::ToolError("path is required".to_string()))?;
     let path = resolve_tool_path(raw_path, context)?;
-    let original_file = fs::read_to_string(&path).await.ok();
+    let file_system = context.sandbox_file_system()?;
+    let original_file = file_system.read_to_string(&path).await.ok();
 
     if let Some(existing) = original_file.as_ref() {
         ensure_read_state_is_fresh(&path, existing, context)?;
     }
 
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).await.map_err(|err| {
-            TalosError::ToolError(format!("failed to create parent dir: {}", err))
-        })?;
+        file_system
+            .create_directory_all(parent)
+            .await
+            .map_err(map_sandbox_file_error)?;
     }
 
-    fs::write(&path, &request.content)
+    file_system
+        .write(&path, request.content.as_bytes())
         .await
-        .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
+        .map_err(map_sandbox_file_error)?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &request.content);

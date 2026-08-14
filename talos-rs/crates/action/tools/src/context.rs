@@ -4,6 +4,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_memory::{MemoryReader, MemoryScope};
+use talos_tools_sandbox::{ToolFileSystemHandle, ToolSandboxEnvironment, ToolSandboxPermit};
+use talos_types::{UserActionResponse, UserPermissionMode};
 
 use crate::handlers::dynamic::StoredDynamicToolResult;
 use crate::state::{
@@ -12,6 +14,7 @@ use crate::state::{
     ToolCatalogState, ToolPermissionContext, ToolResultBudgetState,
 };
 use crate::AgentControl;
+use crate::CommandRiskAssessor;
 
 /// Classifies best-effort progress emitted while a tool is still running.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,12 +64,19 @@ pub struct ToolContext {
     user_id: String,
     project_root: Option<PathBuf>,
     dynamic_tool_results: Arc<DashMap<String, StoredDynamicToolResult>>,
+    user_action_responses: Arc<DashMap<String, UserActionResponse>>,
+    sandbox_approval_fingerprints: Arc<DashMap<String, String>>,
+    current_call_id: Option<String>,
     kernel_config: Option<Arc<AgentKernelConfig>>,
     agent_control: Option<Arc<dyn AgentControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
     memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
     progress_emitter: Option<ToolProgressEmitter>,
+    sandbox_user_permission_mode: UserPermissionMode,
+    sandbox_environment: Option<ToolSandboxEnvironment>,
+    sandbox_permit: Option<ToolSandboxPermit>,
+    command_risk_assessor: Option<Arc<dyn CommandRiskAssessor>>,
 }
 
 impl ToolContext {
@@ -80,6 +90,12 @@ impl ToolContext {
         kernel_config: Option<Arc<AgentKernelConfig>>,
     ) -> Self {
         let session_id = session_id.into();
+        let sandbox_user_permission_mode = kernel_config
+            .as_ref()
+            .map(|config| {
+                UserPermissionMode::from(&config.tools.sandbox_policy.user_permission_mode)
+            })
+            .unwrap_or_default();
         Self {
             session_id: session_id.clone(),
             turn_id: None,
@@ -87,12 +103,19 @@ impl ToolContext {
             user_id: user_id.into(),
             project_root: None,
             dynamic_tool_results: Arc::new(DashMap::new()),
+            user_action_responses: Arc::new(DashMap::new()),
+            sandbox_approval_fingerprints: Arc::new(DashMap::new()),
+            current_call_id: None,
             kernel_config,
             agent_control: None,
             memory_reader: None,
             memory_scope: None,
             session_state: get_session_tool_state(&session_id),
             progress_emitter: None,
+            sandbox_user_permission_mode,
+            sandbox_environment: None,
+            sandbox_permit: None,
+            command_risk_assessor: None,
         }
     }
 
@@ -131,6 +154,32 @@ impl ToolContext {
     pub fn with_progress_emitter(mut self, emitter: ToolProgressEmitter) -> Self {
         self.progress_emitter = Some(emitter);
         self
+    }
+
+    /// Overrides the configured sandbox permission mode for this tool invocation context.
+    pub fn with_sandbox_user_permission_mode(mut self, mode: UserPermissionMode) -> Self {
+        self.sandbox_user_permission_mode = mode;
+        self
+    }
+
+    /// Attaches the Runtime-resolved filesystem and execution boundary for Sandbox policy.
+    pub fn with_sandbox_environment(mut self, environment: ToolSandboxEnvironment) -> Self {
+        self.sandbox_environment = Some(environment);
+        self
+    }
+
+    /// Returns the Runtime-resolved Sandbox boundary without deriving paths locally.
+    pub fn sandbox_environment(&self) -> Option<&ToolSandboxEnvironment> {
+        self.sandbox_environment.as_ref()
+    }
+
+    pub fn with_command_risk_assessor(mut self, assessor: Arc<dyn CommandRiskAssessor>) -> Self {
+        self.command_risk_assessor = Some(assessor);
+        self
+    }
+
+    pub fn command_risk_assessor(&self) -> Option<Arc<dyn CommandRiskAssessor>> {
+        self.command_risk_assessor.clone()
     }
 
     pub fn with_catalog_snapshot(self, entries: Vec<CatalogToolEntry>) -> Self {
@@ -194,6 +243,43 @@ impl ToolContext {
             .map(|result| result.value().clone())
     }
 
+    pub fn set_user_action_response(
+        &self,
+        call_id: impl Into<String>,
+        response: UserActionResponse,
+    ) {
+        self.user_action_responses.insert(call_id.into(), response);
+    }
+
+    pub fn get_user_action_response(&self, call_id: &str) -> Option<UserActionResponse> {
+        self.user_action_responses
+            .get(call_id)
+            .map(|response| response.value().clone())
+    }
+
+    pub fn set_sandbox_approval_fingerprint(
+        &self,
+        call_id: impl Into<String>,
+        fingerprint: impl Into<String>,
+    ) {
+        self.sandbox_approval_fingerprints
+            .insert(call_id.into(), fingerprint.into());
+    }
+
+    pub fn get_sandbox_approval_fingerprint(&self, call_id: &str) -> Option<String> {
+        self.sandbox_approval_fingerprints
+            .get(call_id)
+            .map(|fingerprint| fingerprint.value().clone())
+    }
+
+    pub fn current_call_id(&self) -> Option<&str> {
+        self.current_call_id.as_deref()
+    }
+
+    pub(crate) fn bind_current_call_id(&mut self, call_id: impl Into<String>) {
+        self.current_call_id = Some(call_id.into());
+    }
+
     pub fn read_file_state(&self) -> &ReadFileStateStore {
         &self.session_state.read_files
     }
@@ -226,6 +312,10 @@ impl ToolContext {
         self.permission_context().mode()
     }
 
+    pub fn sandbox_user_permission_mode(&self) -> UserPermissionMode {
+        self.sandbox_user_permission_mode
+    }
+
     pub fn set_permission_mode(&self, mode: PermissionMode) {
         self.permission_context().set_mode(mode);
     }
@@ -247,6 +337,24 @@ impl ToolContext {
     /// Returns the optional progress emitter attached by the execution runtime.
     pub fn progress_emitter(&self) -> Option<ToolProgressEmitter> {
         self.progress_emitter.clone()
+    }
+
+    pub(crate) fn bind_sandbox_permit(&mut self, permit: ToolSandboxPermit) {
+        self.sandbox_permit = Some(permit);
+    }
+
+    pub(crate) fn sandbox_permit(&self) -> talos_error::TalosResult<&ToolSandboxPermit> {
+        self.sandbox_permit.as_ref().ok_or_else(|| {
+            talos_error::TalosError::ToolError(
+                "tool runtime requires an invocation-bound sandbox permit".to_string(),
+            )
+        })
+    }
+
+    pub(crate) fn sandbox_file_system(&self) -> talos_error::TalosResult<ToolFileSystemHandle> {
+        self.sandbox_permit()?
+            .file_system()
+            .map_err(|error| talos_error::TalosError::ToolError(error.to_string()))
     }
 }
 

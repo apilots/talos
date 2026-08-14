@@ -6,6 +6,7 @@ use crate::runtimes::fs_diff::{build_file_diff_item, FileDiffInput};
 use crate::runtimes::fs_edit::{run, EditFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 /// Tool for editing file content with exact replacement semantics.
 pub struct EditTool;
@@ -72,6 +73,18 @@ impl Tool for EditTool {
             concurrency_safe: false,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::FileSystem)
+    }
+
+    fn requested_file_system_access(
+        &self,
+        input: &Value,
+        context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        crate::runtimes::fs_edit::requested_file_system_access(&parse_edit_request(input)?, context)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

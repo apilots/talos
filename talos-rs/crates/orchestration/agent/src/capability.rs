@@ -106,7 +106,7 @@ impl<'a> AgentCapabilityValidator<'a> {
     /// Validate input bridge payloads before they reach Harness lifecycle code.
     pub fn validate_input(&self, params: &AgentInputParams) -> AgentResult<()> {
         match &params.input {
-            AgentInput::DynamicToolResult { .. } => self.require(AgentCapability::DynamicInput),
+            AgentInput::UserActionResponse { .. } => self.require(AgentCapability::DynamicInput),
             AgentInput::Message { .. } => Ok(()),
         }
     }

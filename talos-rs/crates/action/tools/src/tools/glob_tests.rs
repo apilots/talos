@@ -6,7 +6,9 @@ async fn execute_payload_returns_search_results_content_item() {
     tokio::fs::write(dir.path().join("demo.rs"), "")
         .await
         .expect("write should succeed");
-    let context = ToolContext::new("session", "user").with_project_root(dir.path());
+    let context = crate::test_support::full_access_file_context(
+        ToolContext::new("session", "user").with_project_root(dir.path()),
+    );
 
     let payload = GlobTool
         .execute_payload(serde_json::json!({"pattern": "*.rs"}), context)

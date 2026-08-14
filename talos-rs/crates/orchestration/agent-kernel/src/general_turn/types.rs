@@ -5,6 +5,7 @@ use std::fmt;
 use std::path::PathBuf;
 use talos_skills::{SkillRoots, SkillSelector};
 use talos_types::talos::ToolArguments;
+use talos_types::{UserActionParams, UserActionResponse};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallRecord {
@@ -131,7 +132,7 @@ pub struct ExecutedTurnArtifacts {
     pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
-    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
+    pub pending_user_action: Option<PendingUserActionRequest>,
     pub final_answer_streamed: bool,
     pub execution_summary_streamed: bool,
 }
@@ -156,23 +157,27 @@ pub enum GeneralTurnOutcome {
 
 #[derive(Debug, Clone)]
 pub enum PendingGeneralTurnAction {
-    DynamicToolResult(PendingDynamicToolRequest),
+    UserAction(PendingUserActionRequest),
 }
 
 #[derive(Debug, Clone)]
 pub enum GeneralTurnResume {
-    DynamicToolResult(DynamicToolResultResume),
+    UserAction(UserActionResume),
 }
 
 #[derive(Debug, Clone)]
-pub struct DynamicToolResultResume {
+pub struct UserActionResume {
     pub call_id: String,
     pub tool_name: String,
-    pub output: String,
-    pub success: bool,
+    pub response: UserActionResponse,
+    pub sandbox_request_fingerprint: Option<String>,
     pub original_call: Option<ResumeToolCall>,
+    pub tool_calls: Vec<FunctionCall>,
+    pub tool_messages: Vec<ChatMessage>,
+    pub deferred_tool_calls: Vec<FunctionCall>,
     pub replay_dynamic_tool_results:
         std::collections::HashMap<String, crate::execution::ReplayDynamicToolResult>,
+    pub execution_metrics: TurnExecutionMetrics,
 }
 
 #[derive(Debug, Clone)]
@@ -212,7 +217,7 @@ pub trait GeneralTurnPolicy: Send + Sync {
         GeneralTurnPolicyFinalAcceptance::Accept
     }
 
-    fn before_dynamic_resume(&self, _resume: &mut DynamicToolResultResume) -> TalosResult<()> {
+    fn before_user_action_resume(&self, _resume: &mut UserActionResume) -> TalosResult<()> {
         Ok(())
     }
 
@@ -269,10 +274,12 @@ pub struct GeneralTurnLoopState {
     pub tool_result_log: Vec<ToolResultLog>,
     pub(crate) retrieved_memories: Vec<talos_types::MemoryInfo>,
     pub tool_call_count: usize,
+    pub tool_result_count: usize,
     pub tool_error_count: usize,
-    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
+    pub pending_user_action: Option<PendingUserActionRequest>,
     pub final_answer_streamed: bool,
     pub execution_summary_streamed: bool,
+    pub elapsed_duration_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,11 +318,23 @@ impl GeneralTurnLoopState {
             tool_result_log: Vec::new(),
             retrieved_memories: Vec::new(),
             tool_call_count: 0,
+            tool_result_count: 0,
             tool_error_count: 0,
-            pending_dynamic_requests: Vec::new(),
+            pending_user_action: None,
             final_answer_streamed: false,
             execution_summary_streamed: false,
+            elapsed_duration_ms: 0,
         }
+    }
+
+    pub fn restore_execution_metrics(&mut self, metrics: &TurnExecutionMetrics) {
+        self.round = metrics.model_rounds.saturating_sub(1);
+        self.tool_call_count = metrics.tool_calls as usize;
+        self.tool_result_count =
+            metrics.tool_successes.saturating_add(metrics.tool_errors) as usize;
+        self.tool_error_count = metrics.tool_errors as usize;
+        self.usage = metrics.usage.clone();
+        self.elapsed_duration_ms = metrics.duration_ms.unwrap_or_default();
     }
 }
 
@@ -403,17 +422,23 @@ impl fmt::Debug for StreamingToolExecutionConfig {
 pub struct GeneralTurnToolBatch {
     pub output_items: Vec<RunItem>,
     pub tool_messages: Vec<ChatMessage>,
-    pub pending_dynamic_requests: Vec<PendingDynamicToolRequest>,
+    pub pending_user_action: Option<PendingUserActionRequest>,
     pub logs: Vec<ToolResultLog>,
     pub error_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct PendingDynamicToolRequest {
+pub struct PendingUserActionRequest {
+    pub action_id: String,
     pub tool_name: String,
     pub call_id: String,
     pub arguments: Value,
+    pub params: UserActionParams,
+    pub sandbox_request_fingerprint: Option<String>,
     pub reasoning_continuation: Option<ReasoningContinuation>,
+    pub tool_calls: Vec<FunctionCall>,
+    pub tool_messages: Vec<ChatMessage>,
+    pub deferred_tool_calls: Vec<FunctionCall>,
 }
 
 #[derive(Debug, Clone)]

@@ -910,6 +910,81 @@ async fn test_stream_round_normalizes_empty_tool_call_id_before_emitting_start_e
 }
 
 #[tokio::test]
+async fn streamed_tool_blocks_execute_in_model_index_order() {
+    let question_arguments = serde_json::json!({
+        "header": "Order",
+        "question": "Which option?",
+        "options": [
+            {"id": "first", "label": "First", "description": "Choose first"},
+            {"id": "second", "label": "Second", "description": "Choose second"}
+        ]
+    })
+    .to_string();
+    let mut events = Vec::new();
+    for index in 0..3 {
+        events.push(ModelBlockStreamEvent::BlockStarted(
+            ModelBlockStarted::tool_call(
+                index,
+                Some(format!("call-{index}")),
+                Some("AskUserQuestion".to_string()),
+            ),
+        ));
+        events.push(ModelBlockStreamEvent::BlockDelta {
+            model_item_id: format!("tool_call_{index}"),
+            delta: ModelBlockDelta::ToolArguments {
+                delta: question_arguments.clone(),
+            },
+        });
+    }
+    for index in [2, 1, 0] {
+        events.push(block_completed(&format!("tool_call_{index}")));
+    }
+    events.push(ModelBlockStreamEvent::Done {
+        finish_reason: Some("tool_calls".to_string()),
+        usage: None,
+    });
+    let provider = Arc::new(ScriptedModelBlockProvider::new(
+        "reverse-tool-completion",
+        events,
+    ));
+    let registry = Arc::new(ToolRegistry::new());
+    talos_tools::register_core_local_tools(registry.as_ref());
+    let config = Arc::new(AgentKernelConfig::default());
+
+    let result = stream_round(
+        provider,
+        ChatRequest::new_user("test", "test-model"),
+        0,
+        KernelModelCallMode::WorkingLoop,
+        None,
+        None,
+        Some(StreamingToolExecutionConfig {
+            execution_mode: ToolExecutionMode::Sequential,
+            max_parallelism: 1,
+            execution_context: ToolExecutionContext {
+                session_id: "ordered-stream".to_string(),
+                turn_id: "turn-ordered-stream".to_string(),
+                agent_id: "agent-1".to_string(),
+                user_id: "user-1".to_string(),
+                project_root: None,
+                kernel_config: config,
+                dynamic_tool_results: HashMap::new(),
+                user_action_responses: HashMap::new(),
+                sandbox_approval_fingerprints: HashMap::new(),
+                command_risk_assessor: None,
+            },
+            tool_registry: registry,
+        }),
+    )
+    .await
+    .expect("streamed tools should execute");
+
+    assert_eq!(result.streamed_tool_outputs.len(), 1);
+    assert_eq!(result.streamed_tool_outputs[0].call_id, "call-0");
+    assert!(result.streamed_tool_outputs[0].outcome.pending().is_some());
+}
+
+#[tokio::test]
 async fn test_execute_step_streams_tool_preface_as_commentary() {
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
@@ -1149,6 +1224,9 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
         dynamic_tool_results: std::collections::HashMap::new(),
+        user_action_responses: std::collections::HashMap::new(),
+        sandbox_approval_fingerprints: std::collections::HashMap::new(),
+        command_risk_assessor: None,
     };
     let (tx, mut rx) = mpsc::channel(16);
 

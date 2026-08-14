@@ -641,6 +641,7 @@
         "event.subscribe",
         "event.unsubscribe",
         "tool.dynamic_result.submit",
+        "userAction/submit",
         "model.list",
         "config.get",
         "config.update",
@@ -1146,6 +1147,24 @@
             },
             "params": {
               "$ref": "#/definitions/SubmitDynamicToolResultRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "userAction/submit"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SubmitUserActionRequest"
             }
           },
           "required": [
@@ -2409,14 +2428,31 @@
       ],
       "type": "string"
     },
-    "DynamicToolArguments": {
+    "DynamicToolResult": {
+      "description": "Result submitted by an external Dynamic Tool consumer.",
       "properties": {
-        "value": {
-          "type": "object"
+        "output": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
         }
       },
       "required": [
-        "value"
+        "output",
+        "success"
+      ],
+      "type": "object"
+    },
+    "DynamicToolResultParams": {
+      "description": "Parameters for an existing Dynamic Tool result request.",
+      "properties": {
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolName"
       ],
       "type": "object"
     },
@@ -3432,6 +3468,37 @@
         }
       ]
     },
+    "PendingUserAction": {
+      "description": "Current user action exposed across Service, protocol, SDK, and client boundaries.",
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "itemId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "params": {
+          "$ref": "#/definitions/UserActionParams"
+        },
+        "state": {
+          "$ref": "#/definitions/UserActionState"
+        }
+      },
+      "required": [
+        "actionId",
+        "callId",
+        "params",
+        "state"
+      ],
+      "type": "object"
+    },
     "PluginDisableRequest": {
       "properties": {
         "install_id": {
@@ -4033,6 +4100,90 @@
       ],
       "type": "object"
     },
+    "QuestionAnswer": {
+      "description": "Selected or free-form answer to a semantic question.",
+      "oneOf": [
+        {
+          "properties": {
+            "option_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "selectedOption"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "option_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "freeForm"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "QuestionOption": {
+      "description": "One mutually exclusive answer offered by a semantic question.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "id",
+        "label"
+      ],
+      "type": "object"
+    },
+    "QuestionParams": {
+      "description": "Model-authored semantic question shown to the user.",
+      "properties": {
+        "header": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/definitions/QuestionOption"
+          },
+          "type": "array"
+        },
+        "question": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "header",
+        "options",
+        "question"
+      ],
+      "type": "object"
+    },
     "ReasoningEffort": {
       "enum": [
         "light",
@@ -4153,6 +4304,137 @@
         "turn_id"
       ],
       "type": "object"
+    },
+    "SandboxApprovalDecision": {
+      "description": "Fixed decision accepted for a sandbox approval.",
+      "enum": [
+        "allowOnce",
+        "deny",
+        "cancel"
+      ],
+      "type": "string"
+    },
+    "SandboxApprovalParams": {
+      "description": "Server-authored sandbox approval presented to the user.",
+      "properties": {
+        "availableDecisions": {
+          "items": {
+            "$ref": "#/definitions/SandboxApprovalDecision"
+          },
+          "type": "array"
+        },
+        "presentation": {
+          "$ref": "#/definitions/SandboxApprovalPresentation"
+        },
+        "reason": {
+          "$ref": "#/definitions/SandboxApprovalReason"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "availableDecisions",
+        "presentation",
+        "reason",
+        "toolName"
+      ],
+      "type": "object"
+    },
+    "SandboxApprovalPresentation": {
+      "description": "Bounded user-facing facts for the requested sandbox capability.",
+      "oneOf": [
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": "string"
+            },
+            "risk_summary": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "command"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "command",
+            "cwd",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "operation": {
+              "$ref": "#/definitions/SandboxFileOperation"
+            },
+            "paths": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": {
+              "enum": [
+                "fileSystem"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "paths",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "scope": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "network"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "SandboxApprovalReason": {
+      "description": "Stable reason category for a sandbox approval.",
+      "enum": [
+        "networkAccess",
+        "fileSystemAccessOutsideWorkspace",
+        "sandboxBypass",
+        "riskyCommand"
+      ],
+      "type": "string"
+    },
+    "SandboxFileOperation": {
+      "description": "Filesystem operation displayed by a sandbox approval.",
+      "enum": [
+        "read",
+        "write"
+      ],
+      "type": "string"
     },
     "SendMessageResult": {
       "description": "Accepted message delivery to one exact running child Turn.",
@@ -4461,6 +4743,17 @@
           "anyOf": [
             {
               "$ref": "#/definitions/ModelSelection"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "userPermissionMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UserPermissionMode"
             },
             {
               "type": "null"
@@ -4793,6 +5086,18 @@
         "session_id": {
           "type": "string"
         },
+        "userPermissionMode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UserPermissionMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Permission override used only when this request creates a missing session."
+        },
         "workspace_id": {
           "default": null,
           "type": [
@@ -4841,7 +5146,7 @@
       "enum": [
         "end_turn",
         "model_output_limit",
-        "waiting_dynamic_input",
+        "waiting_user_action",
         "transfer_unresolved",
         "cancelled"
       ],
@@ -5109,6 +5414,47 @@
       },
       "required": [
         "success"
+      ],
+      "type": "object"
+    },
+    "SubmitUserActionRequest": {
+      "additionalProperties": false,
+      "description": "Request accepted by the application service to answer one pending user action.",
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "response": {
+          "$ref": "#/definitions/UserActionResponse"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "actionId",
+        "response",
+        "sessionId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "SubmitUserActionResponse": {
+      "description": "Current durable state returned after a user-action response is submitted.",
+      "properties": {
+        "actionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/UserActionState"
+        }
+      },
+      "required": [
+        "actionId",
+        "state"
       ],
       "type": "object"
     },
@@ -6158,26 +6504,18 @@
         },
         {
           "properties": {
-            "arguments": {
-              "$ref": "#/definitions/DynamicToolArguments"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "tool_name": {
-              "type": "string"
+            "event": {
+              "$ref": "#/definitions/TimelineUserActionEvent"
             },
             "type": {
               "enum": [
-                "tool_dynamic_request"
+                "user_action"
               ],
               "type": "string"
             }
           },
           "required": [
-            "arguments",
-            "call_id",
-            "tool_name",
+            "event",
             "type"
           ],
           "type": "object"
@@ -6329,7 +6667,7 @@
       "enum": [
         "queued",
         "running",
-        "waiting_dynamic_input",
+        "waiting_user_action",
         "completed",
         "failed",
         "cancelled"
@@ -6615,7 +6953,7 @@
         "pending_user_action": {
           "anyOf": [
             {
-              "$ref": "#/definitions/TimelinePendingUserAction"
+              "$ref": "#/definitions/PendingUserAction"
             },
             {
               "type": "null"
@@ -6703,39 +7041,6 @@
       ],
       "type": "object"
     },
-    "TimelinePendingUserAction": {
-      "oneOf": [
-        {
-          "properties": {
-            "call_id": {
-              "type": "string"
-            },
-            "item_id": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tool_name": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "dynamic_tool_result"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "call_id",
-            "tool_name",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TimelineRecoveryResponse": {
       "properties": {
         "snapshot": {
@@ -6806,6 +7111,62 @@
         "subscription_id"
       ],
       "type": "object"
+    },
+    "TimelineUserActionEvent": {
+      "description": "Durable Timeline projection for a requested or finished user action.",
+      "oneOf": [
+        {
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/PendingUserAction"
+            },
+            "type": {
+              "enum": [
+                "requested"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "response": {
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/UserActionResponse"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "state": {
+              "$ref": "#/definitions/UserActionState"
+            },
+            "type": {
+              "enum": [
+                "finished"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action_id",
+            "state",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "TokenUsage": {
       "description": "Token usage values shared by runs, sessions, history, and metrics.",
@@ -6909,6 +7270,137 @@
       ],
       "type": "object"
     },
+    "UserActionParams": {
+      "description": "Typed parameters needed to render and resume a user action.",
+      "oneOf": [
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/DynamicToolResultParams"
+            },
+            "type": {
+              "enum": [
+                "dynamicToolResult"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/QuestionParams"
+            },
+            "type": {
+              "enum": [
+                "question"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "params": {
+              "$ref": "#/definitions/SandboxApprovalParams"
+            },
+            "type": {
+              "enum": [
+                "sandboxApproval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "params",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "UserActionResponse": {
+      "description": "Typed response accepted by the user-action service.",
+      "oneOf": [
+        {
+          "properties": {
+            "response": {
+              "$ref": "#/definitions/DynamicToolResult"
+            },
+            "type": {
+              "enum": [
+                "dynamicToolResult"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "response",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "response": {
+              "$ref": "#/definitions/QuestionAnswer"
+            },
+            "type": {
+              "enum": [
+                "question"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "response",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "response": {
+              "$ref": "#/definitions/SandboxApprovalDecision"
+            },
+            "type": {
+              "enum": [
+                "sandboxApproval"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "response",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "UserActionState": {
+      "description": "Durable lifecycle state of a user action.",
+      "enum": [
+        "pending",
+        "responseAccepted",
+        "resuming",
+        "resumeFailed",
+        "executionUnknown",
+        "resolved",
+        "cancelled"
+      ],
+      "type": "string"
+    },
     "UserCurrentRequest": {
       "type": "object"
     },
@@ -6965,6 +7457,15 @@
         "username"
       ],
       "type": "object"
+    },
+    "UserPermissionMode": {
+      "description": "Product permission mode selected for a Session.",
+      "enum": [
+        "askForApproval",
+        "approveForMe",
+        "fullAccess"
+      ],
+      "type": "string"
     },
     "UserRole": {
       "enum": [
@@ -7093,6 +7594,9 @@
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
     },
+    "pending_user_action": {
+      "$ref": "#/definitions/PendingUserAction"
+    },
     "profile_read_response": {
       "$ref": "#/definitions/ProfileReadResponse"
     },
@@ -7125,6 +7629,12 @@
     },
     "submit_dynamic_tool_result_response": {
       "$ref": "#/definitions/SubmitDynamicToolResultResponse"
+    },
+    "submit_user_action_request": {
+      "$ref": "#/definitions/SubmitUserActionRequest"
+    },
+    "submit_user_action_response": {
+      "$ref": "#/definitions/SubmitUserActionResponse"
     },
     "subscribe_timeline_request": {
       "$ref": "#/definitions/SubscribeTimelineRequest"
@@ -7169,6 +7679,7 @@
     "interrupt_turn_request",
     "interrupt_turn_response",
     "jsonrpc_message",
+    "pending_user_action",
     "profile_read_response",
     "recover_timeline_request",
     "retry_turn_request",
@@ -7180,6 +7691,8 @@
     "start_turn_response",
     "submit_dynamic_tool_result_request",
     "submit_dynamic_tool_result_response",
+    "submit_user_action_request",
+    "submit_user_action_response",
     "subscribe_timeline_request",
     "subscribe_timeline_response",
     "timeline_event",

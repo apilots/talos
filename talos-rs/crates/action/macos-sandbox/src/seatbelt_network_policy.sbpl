@@ -1,0 +1,20 @@
+; Adapted from OpenAI Codex at commit a26bc337cf61cbca9cd9ac25b25c88c32186eb20.
+; Source: codex-rs/sandboxing/src/seatbelt_network_policy.sbpl (Apache-2.0).
+
+(allow system-socket
+  (require-all
+    (socket-domain AF_SYSTEM)
+    (socket-protocol 2)))
+
+(allow mach-lookup
+  (global-name "com.apple.bsd.dirhelper")
+  (global-name "com.apple.system.opendirectoryd.membership")
+  (global-name "com.apple.SecurityServer")
+  (global-name "com.apple.networkd")
+  (global-name "com.apple.ocspd")
+  (global-name "com.apple.trustd.agent")
+  (global-name "com.apple.SystemConfiguration.DNSConfiguration")
+  (global-name "com.apple.SystemConfiguration.configd"))
+
+(allow sysctl-read
+  (sysctl-name-regex #"^net.routetable"))

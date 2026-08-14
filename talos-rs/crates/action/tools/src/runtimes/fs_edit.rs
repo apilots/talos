@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosResult};
-use tokio::fs;
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
 use crate::runtimes::fs_write::ensure_read_state_is_fresh;
+use crate::runtimes::map_sandbox_file_error;
 use crate::ToolContext;
+use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditFileRequest {
@@ -33,6 +34,23 @@ pub struct EditFileResult {
     pub structured_patch: String,
 }
 
+pub fn requested_file_system_access(
+    request: &EditFileRequest,
+    context: &ToolContext,
+) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+    let raw_path = request
+        .path
+        .as_deref()
+        .or(request.file_path.as_deref())
+        .ok_or_else(|| TalosError::ToolError("path is required".to_string()))?;
+    let path = normalize_existing_tool_path(&resolve_tool_path(raw_path, context)?)?;
+    Ok(vec![RequestedFileSystemAccess::new(
+        FileSystemOperation::Write,
+        vec![path],
+    )
+    .map_err(|error| TalosError::ToolError(error.to_string()))?])
+}
+
 pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResult<EditFileResult> {
     let raw_path = request
         .path
@@ -57,9 +75,11 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
     }
 
     let path = resolve_tool_path(raw_path, context)?;
-    let original_file = fs::read_to_string(&path)
+    let file_system = context.sandbox_file_system()?;
+    let original_file = file_system
+        .read_to_string(&path)
         .await
-        .map_err(|err| TalosError::ToolError(format!("failed to read file: {}", err)))?;
+        .map_err(map_sandbox_file_error)?;
     ensure_read_state_is_fresh(&path, &original_file, context)?;
 
     let replacements = original_file.matches(old_string).count();
@@ -83,9 +103,10 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         original_file.replacen(old_string, new_string, 1)
     };
 
-    fs::write(&path, &updated)
+    file_system
+        .write(&path, updated.as_bytes())
         .await
-        .map_err(|err| TalosError::ToolError(format!("failed to write file: {}", err)))?;
+        .map_err(map_sandbox_file_error)?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &updated);

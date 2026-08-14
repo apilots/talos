@@ -29,12 +29,12 @@ pub use general_turn::{
     execute_general_turn_step, execute_general_turn_tool_batch, finalize_general_turn_artifacts,
     form_daily_session_memory, persist_general_turn_artifacts, prepare_general_turn,
     run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
-    DynamicToolResultResume, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
-    GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
-    GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, MemoryCompactionPolicy, MemoryFormationParams,
-    MemoryFormationReport, ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn,
-    ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome, GeneralTurnPolicy,
+    GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions,
+    GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
+    GeneralTurnToolBatch, MemoryCompactionPolicy, MemoryFormationParams, MemoryFormationReport,
+    ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn, ResumeToolCall,
+    SessionCompactionState, StreamingToolExecutionConfig, UserActionResume,
     SESSION_COMPACTION_STATE_KEY,
 };
 pub use input::{
@@ -50,9 +50,9 @@ pub use processor::{
 };
 pub use session::{
     InvocationSession, KernelTranscriptAuthPayload, KernelTranscriptCompactionPayload,
-    KernelTranscriptDynamicToolRequestPayload, KernelTranscriptDynamicToolResponsePayload,
     KernelTranscriptEvent, KernelTranscriptEventKind, KernelTranscriptFilter,
     KernelTranscriptPayload, KernelTranscriptService, KernelTranscriptTransferPayload,
+    KernelTranscriptUserActionRequestPayload, KernelTranscriptUserActionResponsePayload,
     SessionState,
 };
 pub use session_context::{
@@ -70,17 +70,17 @@ pub use traits::Planner;
 pub use types::{
     AssistantTextCommittedStreamData, AssistantTextCompletedStreamData,
     AssistantTextDeltaStreamData, AssistantTextPhase, AssistantTextStartedStreamData,
-    ContextCompactionStreamData, ContextStateBags, DynamicToolRequestStreamData,
-    ExecutionSummaryStreamData, FinalResponseEventData, FlowProfile, InvocationContext,
-    InvocationExecutionState, InvocationLimits, IterationEventData, KernelEvent, KernelEventData,
-    KernelEventLabel, KernelEventType, KernelExecutionSettings, KernelModelCallMode,
-    KernelStreamEvent, KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey,
-    KernelThinkingSource, KernelThinkingStage, PlannerKind, PromptWarningEventData, StopReason,
-    TaskCompletedEventData, TaskKind, TaskResult, TaskStatus, ThinkingDeltaStreamData,
-    ToolArgsDeltaStreamData, ToolCallStartStreamData, ToolExecutingStreamData, ToolExecutionMode,
+    ContextCompactionStreamData, ContextStateBags, ExecutionSummaryStreamData,
+    FinalResponseEventData, FlowProfile, InvocationContext, InvocationExecutionState,
+    InvocationLimits, IterationEventData, KernelEvent, KernelEventData, KernelEventLabel,
+    KernelEventType, KernelExecutionSettings, KernelModelCallMode, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, KernelThinkingSource,
+    KernelThinkingStage, PlannerKind, PromptWarningEventData, StopReason, TaskCompletedEventData,
+    TaskKind, TaskResult, TaskStatus, ThinkingDeltaStreamData, ToolArgsDeltaStreamData,
+    ToolCallStartStreamData, ToolExecutingStreamData, ToolExecutionMode,
     ToolProgressDeltaStreamData, ToolProgressKind, ToolQueuedStreamData, ToolResultStreamData,
     ToolStreamKey, TransferRequestedEventData, TurnMetricsStreamData, TurnPhase,
-    UserInputEventData,
+    UserActionRequestStreamData, UserInputEventData,
 };
 pub use warnings::{
     KernelWarning, PromptBootstrapDropReason, PromptBootstrapFileDroppedWarning,

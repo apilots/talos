@@ -3,8 +3,8 @@ use talos_service::Actor;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineRequest, RetryTurnRequest,
     RetryTurnResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse,
+    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
+    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
 };
 use tracing::info;
 
@@ -51,6 +51,14 @@ impl ServiceGateway {
         self.service
             .submit_dynamic_tool_result(actor, request)
             .await
+    }
+
+    pub(crate) async fn submit_user_action(
+        &self,
+        actor: &Actor,
+        request: SubmitUserActionRequest,
+    ) -> TalosResult<SubmitUserActionResponse> {
+        self.service.submit_user_action(actor, request).await
     }
 
     pub(crate) async fn subscribe_timeline(

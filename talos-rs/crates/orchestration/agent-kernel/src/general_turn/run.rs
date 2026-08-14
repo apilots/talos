@@ -175,11 +175,11 @@ pub async fn run_general_turn_with_resume(
 pub(crate) fn general_turn_outcome_from_artifacts(
     executed: &ExecutedTurnArtifacts,
 ) -> GeneralTurnOutcome {
-    if matches!(executed.stop_reason, StopReason::WaitingDynamicInput) {
-        if let Some(pending) = executed.pending_dynamic_requests.first().cloned() {
+    if matches!(executed.stop_reason, StopReason::WaitingUserAction) {
+        if let Some(pending) = executed.pending_user_action.clone() {
             return GeneralTurnOutcome::Waiting {
                 output_items: executed.output_items.clone(),
-                pending_action: PendingGeneralTurnAction::DynamicToolResult(pending),
+                pending_action: PendingGeneralTurnAction::UserAction(pending),
                 stop_reason: executed.stop_reason,
                 usage: executed.usage.clone(),
                 metrics: executed.metrics.clone(),

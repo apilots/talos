@@ -255,6 +255,12 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(AppServerErrorBody::from_talos_error)?,
             ),
+            ClientRequestParams::UserActionSubmit(params) => to_value(
+                self.gateway
+                    .submit_user_action(actor, params)
+                    .await
+                    .map_err(AppServerErrorBody::from_talos_error)?,
+            ),
             ClientRequestParams::ModelList(_) => {
                 let models = self
                     .gateway

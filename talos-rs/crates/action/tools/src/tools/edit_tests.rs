@@ -17,7 +17,10 @@ async fn execute_payload_returns_diff_content_item() {
     tokio::fs::write(file.path(), "alpha\n")
         .await
         .expect("write should succeed");
-    let context = ToolContext::new("session", "user");
+    let context = crate::test_support::full_access_file_context(
+        ToolContext::new("session", "user")
+            .with_project_root(file.path().parent().expect("parent should exist")),
+    );
     context
         .read_file_state()
         .record_content(file.path().to_path_buf(), "alpha\n");

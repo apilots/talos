@@ -1,0 +1,62 @@
+; Talos fixed runtime defaults. These paths enable process startup but do not
+; add arbitrary user-data roots or general temporary-directory writes.
+
+(allow file-read* file-test-existence
+  (literal "/")
+  (subpath "/System")
+  (subpath "/Library/Apple")
+  (literal "/Library/Developer/CommandLineTools")
+  (subpath "/Library/Developer/CommandLineTools")
+  (subpath "/Library/Filesystems")
+  (subpath "/Library/Preferences")
+  (subpath "/Applications")
+  (subpath "/bin")
+  (subpath "/sbin")
+  (subpath "/usr")
+  (subpath "/private/etc")
+  (subpath "/private/var/db")
+  (literal "/private/var/select/sh")
+  (subpath "/opt/homebrew/Cellar")
+  (subpath "/opt/homebrew/lib")
+  (subpath "/opt/homebrew/opt")
+  (subpath "/usr/local/Cellar")
+  (subpath "/usr/local/opt")
+  (subpath "/usr/local/lib"))
+
+(allow file-map-executable
+  (subpath "/System/Library")
+  (subpath "/Library/Apple")
+  (subpath "/Library/Developer/CommandLineTools")
+  (subpath "/usr/lib"))
+
+(allow file-read-metadata file-test-existence
+  (literal "/etc")
+  (literal "/Library")
+  (literal "/Library/Developer")
+  (literal "/tmp")
+  (literal "/var")
+  (literal "/private/etc/localtime"))
+
+(allow file-read* file-test-existence file-write-data
+  (literal "/dev/null")
+  (literal "/dev/zero"))
+(allow file-read* file-test-existence
+  (literal "/dev/random")
+  (literal "/dev/urandom"))
+(allow file-read-data file-test-existence file-write-data
+  (subpath "/dev/fd"))
+
+(allow system-mac-syscall (mac-policy-name "vnguard"))
+(allow system-mac-syscall
+  (require-all
+    (mac-policy-name "Sandbox")
+    (mac-syscall-number 67)))
+
+(allow mach-lookup
+  (global-name "com.apple.bsd.dirhelper")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.secinitd")
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.system.opendirectoryd.membership")
+  (global-name "com.apple.trustd")
+  (global-name "com.apple.trustd.agent"))

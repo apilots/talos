@@ -3,9 +3,10 @@ use serde_json::Value;
 use talos_error::{TalosError, TalosResult};
 use talos_types::talos::TalosContentItem;
 
-use crate::runtimes::fs_read::{run, ReadFileRequest};
+use crate::runtimes::fs_read::{requested_file_system_access, run, ReadFileRequest};
 use crate::spec::{ToolBehaviorFlags, ToolResultPolicy};
 use crate::{Tool, ToolContext, ToolOutputPayload};
+use talos_tools_sandbox::{RequestedFileSystemAccess, ToolSandboxOperationKind};
 
 pub struct ReadTool;
 
@@ -61,6 +62,18 @@ impl Tool for ReadTool {
             concurrency_safe: true,
             requires_user_interaction: false,
         }
+    }
+
+    fn sandbox_operation(&self) -> Option<ToolSandboxOperationKind> {
+        Some(ToolSandboxOperationKind::FileSystem)
+    }
+
+    fn requested_file_system_access(
+        &self,
+        input: &Value,
+        context: &ToolContext,
+    ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
+        requested_file_system_access(&parse_read_request(input)?, context)
     }
 
     fn result_policy(&self) -> ToolResultPolicy {

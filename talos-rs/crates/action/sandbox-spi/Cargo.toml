@@ -1,0 +1,16 @@
+[package]
+name = "talos-sandbox-spi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos workspace-internal sandbox provider interface"
+repository.workspace = true
+publish = false
+
+[features]
+provider-contract-tests = []
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true

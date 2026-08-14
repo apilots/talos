@@ -2,8 +2,10 @@ use super::*;
 
 #[tokio::test]
 async fn test_short_bash_command_exits_without_running_session() {
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
     let result = run_bash_command(
         &BashCommandRequest {
             cmd: "printf 'done\\n'".to_string(),
@@ -31,8 +33,10 @@ async fn test_short_bash_command_exits_without_running_session() {
 
 #[tokio::test]
 async fn test_completed_truncated_bash_output_does_not_keep_session() {
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
     let result = run_bash_command(
         &BashCommandRequest {
             cmd: "python3 -c \"print('x' * 20000)\"".to_string(),
@@ -61,8 +65,10 @@ async fn test_completed_truncated_bash_output_does_not_keep_session() {
 
 #[tokio::test]
 async fn test_bash_command_uses_own_timeout() {
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
     let result = run_bash_command(
         &BashCommandRequest {
             cmd: "sleep 5".to_string(),
@@ -95,8 +101,10 @@ async fn test_bash_timeout_terminates_process_group() {
         "trap '' TERM; (sleep 1; printf done > '{}') & wait",
         marker.display()
     );
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
 
     let result = run_bash_command(
         &BashCommandRequest {
@@ -127,8 +135,10 @@ async fn test_bash_timeout_terminates_process_group() {
 
 #[tokio::test]
 async fn test_bash_runtime_allows_escalated_command_when_called_directly() {
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
     let result = run_bash_command(
         &BashCommandRequest {
             cmd: "echo hi".to_string(),
@@ -153,8 +163,10 @@ async fn test_bash_runtime_allows_escalated_command_when_called_directly() {
 
 #[tokio::test]
 async fn test_bash_runtime_separates_stdout_stderr_and_classifies_command() {
-    let context = crate::ToolContext::default()
-        .with_project_root(std::env::current_dir().expect("cwd should exist"));
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist")),
+    );
     let result = run_bash_command(
         &BashCommandRequest {
             cmd: "printf out; printf err >&2".to_string(),

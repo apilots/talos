@@ -1,0 +1,15 @@
+[package]
+name = "talos-windows-sandbox"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos Windows sandbox provider placeholder"
+repository.workspace = true
+publish = false
+
+[dependencies]
+talos-sandbox-spi.workspace = true
+
+[dev-dependencies]
+talos-sandbox-spi = { workspace = true, features = ["provider-contract-tests"] }

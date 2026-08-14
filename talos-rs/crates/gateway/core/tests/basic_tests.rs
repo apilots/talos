@@ -184,6 +184,7 @@ async fn test_gateway() -> ServiceGateway {
     let event_service = Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store,
+        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
         TimelineEventRetentionConfig::default(),
     ));
     let handler = Arc::new(RecordingHandler);
@@ -267,6 +268,7 @@ async fn gateway_start_turn_delegates_to_service() {
                 workspace_id: None,
                 context: Some(request_context()),
                 model_selection: None,
+                user_permission_mode: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: Some("client-1".to_string()),
@@ -292,6 +294,7 @@ async fn gateway_start_turn_rejects_invalid_request() {
                 workspace_id: None,
                 context: Some(request_context()),
                 model_selection: None,
+                user_permission_mode: None,
                 project_id: None,
                 current_directory: None,
                 client_request_id: None,

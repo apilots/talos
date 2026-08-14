@@ -270,6 +270,7 @@ async fn run_selected_skill_turn(
             workspace_id: None,
             context: Some(super::test_talos_context()),
             model_selection: super::test_model_ref().map(ModelSelection::without_reasoning),
+            user_permission_mode: None,
             project_id: None,
             current_directory: None,
             client_request_id: Some(format!(

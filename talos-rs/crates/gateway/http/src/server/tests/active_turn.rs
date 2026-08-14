@@ -11,7 +11,7 @@ async fn test_get_active_turn_handler_returns_active_state() {
             message_id: Some("msg-1".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: Some(TimelineEventId::from_seq(7)),
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 123,
         },
     );
@@ -50,6 +50,22 @@ async fn test_get_active_turn_handler_returns_active_state() {
 #[tokio::test]
 async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
     let event_store = Arc::new(RecordingEventStore::default());
+    let action = pending_dynamic_record(
+        "mock-session",
+        "turn-dynamic",
+        "action-dynamic",
+        Some("tool-dynamic"),
+        "call-dynamic",
+        "ExternalTool",
+    );
+    event_store.user_actions.lock().unwrap().insert(
+        (
+            "mock-session".to_string(),
+            "turn-dynamic".to_string(),
+            "action-dynamic".to_string(),
+        ),
+        action,
+    );
     event_store.active_turns.lock().unwrap().insert(
         "mock-session".to_string(),
         ActiveTurnRecord {
@@ -58,13 +74,7 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
             message_id: Some("msg-dynamic".to_string()),
             status: ActiveTurnStatus::WaitingUserAction,
             last_event_id: Some(TimelineEventId::from_seq(9)),
-            pending_user_action: Some(PendingUserAction::DynamicToolResult(
-                PendingDynamicToolResult {
-                    item_id: Some("tool-dynamic".to_string()),
-                    call_id: "call-dynamic".to_string(),
-                    tool_name: "ExternalTool".to_string(),
-                },
-            )),
+            current_action_id: Some("action-dynamic".to_string()),
             updated_at: 125,
         },
     );
@@ -94,16 +104,17 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
     assert_eq!(payload["active_turn"]["status"], "waiting_user_action");
     assert_eq!(
-        payload["active_turn"]["pending_user_action"]["type"],
-        "dynamic_tool_result"
-    );
-    assert_eq!(
-        payload["active_turn"]["pending_user_action"]["call_id"],
-        "call-dynamic"
-    );
-    assert_eq!(
-        payload["active_turn"]["pending_user_action"]["tool_name"],
-        "ExternalTool"
+        payload["active_turn"]["pending_user_action"],
+        serde_json::json!({
+            "actionId": "action-dynamic",
+            "callId": "call-dynamic",
+            "itemId": "tool-dynamic",
+            "state": "pending",
+            "params": {
+                "type": "dynamicToolResult",
+                "params": { "toolName": "ExternalTool" }
+            }
+        })
     );
 }
 

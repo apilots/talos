@@ -50,10 +50,14 @@ pub async fn execute_general_turn_loop_with_policy(
     policy: Arc<dyn GeneralTurnPolicy>,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     let mut state = GeneralTurnLoopState::new(&prepared);
-    let execution_settings =
-        crate::KernelExecutionSettings::try_from(kernel_config).unwrap_or_default();
+    let execution_settings = crate::KernelExecutionSettings::try_from(kernel_config)?;
     let tool_executor = crate::ToolExecutorFactory::build(execution_settings.tool_execution_mode);
     let kernel_config = Arc::new(kernel_config.clone());
+    let command_risk_assessor: Arc<dyn talos_tools::CommandRiskAssessor> =
+        Arc::new(talos_tools::LlmCommandRiskAssessor::new(
+            llm_provider.clone(),
+            prepared.selected_model.clone(),
+        ));
     let mut tool_loop_guard = ToolLoopGuardState::default();
 
     if let Some(resume) = resume {
@@ -65,8 +69,20 @@ pub async fn execute_general_turn_loop_with_policy(
             &mut state,
             resume,
             policy.clone(),
+            command_risk_assessor.clone(),
         )
         .await?;
+        let stop_reason = if state.pending_user_action.is_some() {
+            StopReason::WaitingUserAction
+        } else {
+            StopReason::EndTurn
+        };
+        emit_turn_metrics_after_tool_batch(&prepared, &state, stop_reason).await;
+        if state.pending_user_action.is_some() {
+            let executed = finalize_general_turn_artifacts(state, String::new(), stop_reason);
+            emit_general_turn_finalization_stream(&prepared, &executed).await;
+            return Ok(executed);
+        }
     }
 
     let (final_text, stop_reason) = loop {
@@ -95,6 +111,9 @@ pub async fn execute_general_turn_loop_with_policy(
                     project_root: prepared.project_root.clone(),
                     kernel_config: kernel_config.clone(),
                     dynamic_tool_results: std::collections::HashMap::new(),
+                    user_action_responses: std::collections::HashMap::new(),
+                    sandbox_approval_fingerprints: std::collections::HashMap::new(),
+                    command_risk_assessor: Some(command_risk_assessor.clone()),
                 },
                 tool_registry: tool_executor_port.clone(),
             });
@@ -170,7 +189,10 @@ pub async fn execute_general_turn_loop_with_policy(
         }
 
         let mut tool_batch = if prepared.stream_tx.is_some() {
-            super::tool_batch::collect_general_turn_tool_batch(step.streamed_tool_outputs.clone())
+            super::tool_batch::collect_general_turn_tool_batch_for_calls(
+                step.streamed_tool_outputs.clone(),
+                &step.tool_calls,
+            )?
         } else {
             execute_general_turn_tool_batch(
                 &prepared,
@@ -180,17 +202,25 @@ pub async fn execute_general_turn_loop_with_policy(
                 &prepared.user_id,
                 &step.tool_calls,
                 std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+                std::collections::HashMap::new(),
+                command_risk_assessor.clone(),
                 prepared.stream_tx.as_ref(),
             )
             .await?
         };
-        for pending in &mut tool_batch.pending_dynamic_requests {
+        if let Some(pending) = &mut tool_batch.pending_user_action {
             pending.reasoning_continuation = step.reasoning.continuation.clone();
         }
         let policy_stop = policy.after_tool_batch(&mut tool_batch)?;
         emit_pending_user_action_stream_events(&prepared, &tool_batch).await;
         apply_general_turn_tool_batch(&mut state, &tool_batch, kernel_config.as_ref());
-        emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
+        let tool_batch_stop_reason = if tool_batch.pending_user_action.is_some() {
+            StopReason::WaitingUserAction
+        } else {
+            StopReason::EndTurn
+        };
+        emit_turn_metrics_after_tool_batch(&prepared, &state, tool_batch_stop_reason).await;
         if let Some(message) = build_tool_failure_recovery_nudge_message(&tool_batch) {
             state.messages.push(message);
         }
@@ -205,8 +235,8 @@ pub async fn execute_general_turn_loop_with_policy(
             break (policy_stop.output_text, policy_stop.stop_reason);
         }
 
-        if !tool_batch.pending_dynamic_requests.is_empty() {
-            break (String::new(), StopReason::WaitingDynamicInput);
+        if tool_batch.pending_user_action.is_some() {
+            break (String::new(), StopReason::WaitingUserAction);
         }
         if received_messages {
             continue;
@@ -257,6 +287,22 @@ async fn emit_turn_metrics_stream_event(
     .await;
 }
 
+async fn emit_turn_metrics_after_tool_batch(
+    prepared: &PreparedGeneralTurn,
+    state: &GeneralTurnLoopState,
+    stop_reason: StopReason,
+) {
+    let mut metrics = build_turn_execution_metrics(state, stop_reason);
+    metrics.model_rounds = state.round;
+    emit_stream_event(
+        prepared.stream_tx.as_ref(),
+        KernelStreamEventType::TurnMetrics,
+        KernelStreamEventData::TurnMetrics(crate::TurnMetricsStreamData { metrics }),
+    )
+    .await;
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn apply_general_turn_resume(
     prepared: &PreparedGeneralTurn,
     tool_executor: Arc<dyn ToolExecutor>,
@@ -265,9 +311,11 @@ async fn apply_general_turn_resume(
     state: &mut GeneralTurnLoopState,
     resume: GeneralTurnResume,
     policy: Arc<dyn GeneralTurnPolicy>,
+    command_risk_assessor: Arc<dyn talos_tools::CommandRiskAssessor>,
 ) -> TalosResult<()> {
-    let GeneralTurnResume::DynamicToolResult(mut resume) = resume;
-    policy.before_dynamic_resume(&mut resume)?;
+    let GeneralTurnResume::UserAction(mut resume) = resume;
+    state.restore_execution_metrics(&resume.execution_metrics);
+    policy.before_user_action_resume(&mut resume)?;
     let original_call = resume.original_call.unwrap_or_else(|| ResumeToolCall {
         item_id: None,
         call_id: resume.call_id.clone(),
@@ -276,35 +324,62 @@ async fn apply_general_turn_resume(
         reasoning_continuation: None,
     });
     let mut replay_dynamic_tool_results = resume.replay_dynamic_tool_results;
-    replay_dynamic_tool_results.insert(
-        resume.call_id.clone(),
-        crate::execution::ReplayDynamicToolResult {
-            output: resume.output,
-            success: resume.success,
-        },
-    );
-    let tool_calls = vec![FunctionCall::new(
+    let mut user_action_responses = std::collections::HashMap::new();
+    match &resume.response {
+        talos_types::UserActionResponse::DynamicToolResult(result) => {
+            replay_dynamic_tool_results.insert(
+                resume.call_id.clone(),
+                crate::execution::ReplayDynamicToolResult {
+                    output: result.output.clone(),
+                    success: result.success,
+                },
+            );
+        }
+        talos_types::UserActionResponse::Question(_) => {
+            user_action_responses.insert(resume.call_id.clone(), resume.response);
+        }
+        talos_types::UserActionResponse::SandboxApproval(_) => {
+            user_action_responses.insert(resume.call_id.clone(), resume.response.clone());
+        }
+    }
+    let mut remaining_tool_calls = vec![FunctionCall::new(
         original_call.call_id,
         original_call.tool_name,
         Value::from(original_call.arguments),
     )];
+    remaining_tool_calls.extend(resume.deferred_tool_calls);
     let reasoning_continuation = original_call.reasoning_continuation;
-    let mut assistant_message = ChatMessage::assistant_with_tool_calls("", tool_calls.clone());
-    if let Some(continuation) = reasoning_continuation {
+    let mut assistant_message =
+        ChatMessage::assistant_with_tool_calls("", resume.tool_calls.clone());
+    if let Some(continuation) = reasoning_continuation.clone() {
         assistant_message = assistant_message.with_reasoning_continuation(continuation);
     }
     state.messages.push(assistant_message);
-    let replay_batch = execute_general_turn_tool_batch(
+    state.messages.extend(resume.tool_messages.clone());
+    let mut replay_batch = execute_general_turn_tool_batch(
         prepared,
         tool_executor,
         tool_executor_port,
         kernel_config.clone(),
         &prepared.user_id,
-        &tool_calls,
+        &remaining_tool_calls,
         replay_dynamic_tool_results,
+        user_action_responses,
+        resume
+            .sandbox_request_fingerprint
+            .map(|fingerprint| std::collections::HashMap::from([(resume.call_id, fingerprint)]))
+            .unwrap_or_default(),
+        command_risk_assessor,
         prepared.stream_tx.as_ref(),
     )
     .await?;
+    if let Some(pending) = &mut replay_batch.pending_user_action {
+        pending.reasoning_continuation = reasoning_continuation;
+        pending.tool_calls = resume.tool_calls;
+        let mut tool_messages = resume.tool_messages;
+        tool_messages.extend(replay_batch.tool_messages.clone());
+        pending.tool_messages = tool_messages;
+    }
     emit_pending_user_action_stream_events(prepared, &replay_batch).await;
     apply_general_turn_tool_batch(state, &replay_batch, kernel_config.as_ref());
     Ok(())
@@ -317,14 +392,17 @@ async fn emit_pending_user_action_stream_events(
     let Some(tx) = prepared.stream_tx.as_ref() else {
         return;
     };
-    for dynamic_request in &tool_batch.pending_dynamic_requests {
+    if let Some(action) = &tool_batch.pending_user_action {
         let _ = tx
             .send(KernelStreamEvent::new(
-                KernelStreamEventType::DynamicToolRequest,
-                KernelStreamEventData::DynamicToolRequest(DynamicToolRequestStreamData {
-                    call_id: dynamic_request.call_id.clone(),
-                    tool_name: dynamic_request.tool_name.clone(),
-                    arguments: dynamic_request.arguments.clone(),
+                KernelStreamEventType::UserActionRequest,
+                KernelStreamEventData::UserActionRequest(UserActionRequestStreamData {
+                    action_id: action.action_id.clone(),
+                    call_id: action.call_id.clone(),
+                    tool_name: action.tool_name.clone(),
+                    arguments: action.arguments.clone(),
+                    params: action.params.clone(),
+                    sandbox_request_fingerprint: action.sandbox_request_fingerprint.clone(),
                 }),
             ))
             .await;

@@ -106,6 +106,9 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),
         dynamic_tool_results: std::collections::HashMap::new(),
+        user_action_responses: std::collections::HashMap::new(),
+        sandbox_approval_fingerprints: std::collections::HashMap::new(),
+        command_risk_assessor: None,
     };
     let (tx, mut rx) = mpsc::channel(16);
 

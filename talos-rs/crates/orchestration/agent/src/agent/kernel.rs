@@ -116,7 +116,7 @@ pub(crate) fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
     match stop_reason {
         StopReason::EndTurn => TalosStopReason::EndTurn,
         StopReason::ModelOutputLimit => TalosStopReason::ModelOutputLimit,
-        StopReason::WaitingDynamicInput => TalosStopReason::WaitingDynamicInput,
+        StopReason::WaitingUserAction => TalosStopReason::WaitingUserAction,
         StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
     }
 }

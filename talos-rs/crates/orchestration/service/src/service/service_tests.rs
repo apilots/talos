@@ -33,6 +33,7 @@ use talos_types::talos::{
 };
 
 enum TestTurnExecutorMode {
+    Accepted,
     Timeout,
     Closed,
 }
@@ -146,10 +147,34 @@ impl TurnExecutor for TestTurnExecutor {
 
     async fn start_turn_stream(
         &self,
-        _request: AgentDispatchParams,
+        request: AgentDispatchParams,
     ) -> TalosResult<tokio::sync::mpsc::Receiver<AgentEvent>> {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         match self.mode {
+            TestTurnExecutorMode::Accepted => {
+                tokio::spawn(async move {
+                    tx.send(AgentEvent {
+                        event_seq: None,
+                        event_id: None,
+                        created_at_ms: None,
+                        event_type: talos_types::talos::AgentEventType::TurnStarted,
+                        turn_id: request.turn_id.clone(),
+                        message_id: request.session.context.message_id.clone(),
+                        session_id: request.session.context.session_id.clone(),
+                        sequence: 0,
+                        payload: AgentEventPayload::TurnStarted(
+                            talos_types::talos::TalosTurnStartedEvent {
+                                request_id: "request-test".to_string(),
+                                turn_id: request.turn_id,
+                                started_at_ms: 1,
+                            },
+                        ),
+                    })
+                    .await
+                    .expect("started event receiver should remain open");
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                });
+            }
             TestTurnExecutorMode::Timeout => {
                 tokio::spawn(async move {
                     tokio::time::sleep(Duration::from_secs(60)).await;
@@ -351,6 +376,7 @@ async fn test_application_with_runtime_and_event_failure(
     let event_service = Arc::new(TimelineEventService::new(
         event_store,
         active_turn_store,
+        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
         TimelineEventRetentionConfig::default(),
     ));
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
@@ -408,10 +434,45 @@ fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
         workspace_id: None,
         context: Some(request_context()),
         model_selection: None,
+        user_permission_mode: None,
         project_id: None,
         current_directory: None,
         client_request_id: None,
     }
+}
+
+#[tokio::test]
+async fn first_turn_persists_selected_permission_mode() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Accepted,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    let mut request = start_turn_request("session-initial-permission", "hello");
+    request.user_permission_mode = Some(talos_types::UserPermissionMode::AskForApproval);
+
+    service
+        .start_turn(&actor, request, None)
+        .await
+        .expect("first turn should create the session");
+
+    let session = service
+        .get_session(&actor, "session-initial-permission")
+        .await
+        .expect("created session should be readable");
+    assert_eq!(
+        (
+            session.conf.user_permission_mode,
+            session.effective_user_permission_mode,
+        ),
+        (
+            Some(talos_types::UserPermissionMode::AskForApproval),
+            talos_types::UserPermissionMode::AskForApproval,
+        )
+    );
 }
 
 fn create_session_params(
@@ -423,6 +484,7 @@ fn create_session_params(
         session_id: session_id.to_string(),
         context,
         model_selection: None,
+        user_permission_mode: None,
         workspace_id: None,
         project_id: None,
         current_directory,
@@ -530,6 +592,41 @@ async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
         .expect("session should still be readable");
     assert_eq!(session.config.llm.provider, "anthropic");
     assert_eq!(session.config.llm.model, "turn-model");
+}
+
+#[tokio::test]
+async fn existing_session_start_turn_does_not_change_permission_mode() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-existing-permission", request_context(), None),
+        )
+        .await
+        .expect("session should be created");
+
+    let mut request = start_turn_request("session-existing-permission", "hello");
+    request.user_permission_mode = Some(talos_types::UserPermissionMode::AskForApproval);
+    let _ = service.start_turn(&actor, request, None).await;
+
+    let session = service
+        .get_session(&actor, "session-existing-permission")
+        .await
+        .expect("session should remain readable");
+    assert_eq!(
+        (
+            session.conf.user_permission_mode,
+            session.effective_user_permission_mode,
+        ),
+        (None, talos_types::UserPermissionMode::FullAccess)
+    );
 }
 
 #[tokio::test]
@@ -806,7 +903,7 @@ async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
             message_id: None,
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1,
         })
         .await
@@ -822,6 +919,54 @@ async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
 
     assert!(result.is_err());
     assert_session_creation_rolled_back(&service, &store, "session-active-conflict", None).await;
+}
+
+#[tokio::test]
+async fn patch_session_updates_permission_mode_when_idle() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-patch-permission", request_context(), None),
+        )
+        .await
+        .expect("session should be created");
+
+    let ack = service
+        .patch_session(
+            &actor,
+            "session-patch-permission",
+            SessionPatch {
+                conf: Some(talos_types::SessionConf {
+                    user_permission_mode: Some(talos_types::UserPermissionMode::AskForApproval),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("idle session patch should succeed");
+
+    assert!(ack.success);
+    let session = service
+        .get_session(&actor, "session-patch-permission")
+        .await
+        .expect("patched session should be readable");
+    assert_eq!(
+        session.conf.user_permission_mode,
+        Some(talos_types::UserPermissionMode::AskForApproval)
+    );
+    assert_eq!(
+        session.effective_user_permission_mode,
+        talos_types::UserPermissionMode::AskForApproval
+    );
 }
 
 #[tokio::test]
@@ -848,7 +993,7 @@ async fn patch_session_rejects_running_active_turn() {
             message_id: None,
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1,
         })
         .await
@@ -953,7 +1098,7 @@ async fn interrupt_turn_finalizes_orphaned_active_turn() {
             message_id: Some("msg-existing".to_string()),
             status: ActiveTurnStatus::Running,
             last_event_id: None,
-            pending_user_action: None,
+            current_action_id: None,
             updated_at: 1,
         })
         .await

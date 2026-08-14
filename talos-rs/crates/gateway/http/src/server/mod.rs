@@ -49,7 +49,7 @@ use self::memory_files::{
 };
 use self::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
-    submit_dynamic_tool_result_handler,
+    submit_dynamic_tool_result_handler, submit_user_action_handler,
 };
 use self::misc::{
     get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
@@ -288,6 +288,7 @@ impl HttpServer {
                 "/v1/tools/dynamic-results/submit",
                 post(submit_dynamic_tool_result_handler),
             )
+            .route("/v1/user-actions/submit", post(submit_user_action_handler))
             .with_state(state.clone())
             .layer(middleware::from_fn_with_state(
                 state.clone(),

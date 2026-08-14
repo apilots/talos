@@ -27,6 +27,7 @@ COPY talos/talos-rs ./talos/talos-rs
 COPY talos-cloud ./talos-cloud
 
 RUN cargo build --manifest-path talos/talos-rs/Cargo.toml -p talos-server --bin talos-server --release
+RUN cargo build --manifest-path talos/talos-rs/Cargo.toml -p talos-linux-sandbox --bin talos-linux-sandbox-launcher --release
 
 FROM ${RUNTIME_IMAGE} AS runtime
 
@@ -42,6 +43,7 @@ LABEL org.opencontainers.image.title="Talos Server" \
 
 RUN TZ=Etc/UTC apt-get update && TZ=Etc/UTC apt-get install -y --no-install-recommends \
     bash \
+    bubblewrap \
     ca-certificates \
     curl \
     git \
@@ -57,12 +59,15 @@ RUN groupadd --gid 10001 talos \
   && install -d -o talos -g talos /opt/talos/bin /opt/talos/conf /opt/talos/webui /home/talos/.talos
 
 COPY --from=rust-builder /workspace/talos/talos-rs/target/release/talos-server /opt/talos/bin/talos-server
+COPY --from=rust-builder /workspace/talos/talos-rs/target/release/talos-linux-sandbox-launcher /opt/talos/bin/talos-linux-sandbox-launcher
 COPY --from=web-builder /workspace/talos/talos-app/web/dist/ /opt/talos/webui/
 COPY talos/conf/talos-prod.yaml /opt/talos/conf/talos.yaml
 COPY talos/conf/migrations /opt/talos/conf/migrations
 
-RUN chmod 755 /opt/talos/bin/talos-server \
+RUN chmod 755 /opt/talos/bin/talos-server /opt/talos/bin/talos-linux-sandbox-launcher \
   && chown -R talos:talos /home/talos \
+  && /opt/talos/bin/talos-linux-sandbox-launcher --probe-seccomp \
+  && bwrap --version \
   && /opt/talos/bin/talos-server --version
 
 ENV HOME=/home/talos \

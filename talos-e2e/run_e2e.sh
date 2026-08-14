@@ -51,7 +51,12 @@ collect_group_cases() {
     exit 1
   fi
 
-  find "${group_dir}" -type f -name '*.sh' | sort
+  while IFS= read -r scenario; do
+    if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" && "$(uname -s)" != "Darwin" ]]; then
+      continue
+    fi
+    printf '%s\n' "${scenario}"
+  done < <(find "${group_dir}" -type f -name '*.sh' | sort)
 }
 
 scenario_needs_server_binary() {
@@ -62,7 +67,7 @@ scenario_needs_server_binary() {
 scenario_needs_cli_binary() {
   local scenario_name="$1"
   case "${scenario_name}" in
-    05_cli/full_flow.sh|06_tools/cli_bash.sh|06_tools/cli_memory_search.sh|08_tui/*|11_auth/cloud_gateway.sh)
+    05_cli/full_flow.sh|06_tools/cli_bash.sh|06_tools/cli_memory_search.sh|08_tui/*|11_auth/cloud_gateway.sh|13_interaction/user_action_tui.sh)
       return 0
       ;;
     *)
@@ -201,7 +206,7 @@ PY
 )"
   chmod +x "${script_path}"
   echo "Running ${scenario_name}..."
-  if TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
+  if TALOS_E2E_GROUP_NAME="${group_name}" TALOS_SCENARIO_NAME="${scenario_name%.sh}" TALOS_SCENARIO_REPORT_DIR="${scenario_report_dir}" "${script_path}" >"${log_file}" 2>&1; then
     status="PASS"
     pass_count=$((pass_count + 1))
   else

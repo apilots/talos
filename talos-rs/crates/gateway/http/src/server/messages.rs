@@ -6,7 +6,8 @@ use axum::response::{IntoResponse, Json, Response};
 use talos_auth::RequestIdentity;
 use talos_types::{
     InterruptTurnRequest, InterruptTurnResponse, RetryTurnRequest, StartTurnRequest,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
+    SubmitUserActionResponse,
 };
 
 use super::access::shared_actor;
@@ -107,6 +108,19 @@ pub(super) async fn submit_dynamic_tool_result_handler(
     state
         .gateway
         .submit_dynamic_tool_result(&shared_actor(&actor.0), request)
+        .await
+        .map(Json)
+        .map_err(map_turn_submit_error)
+}
+
+pub(super) async fn submit_user_action_handler(
+    State(state): State<Arc<HttpApiState>>,
+    actor: axum::extract::Extension<RequestIdentity>,
+    Json(request): Json<SubmitUserActionRequest>,
+) -> Result<Json<SubmitUserActionResponse>, ApiError> {
+    state
+        .gateway
+        .submit_user_action(&shared_actor(&actor.0), request)
         .await
         .map(Json)
         .map_err(map_turn_submit_error)

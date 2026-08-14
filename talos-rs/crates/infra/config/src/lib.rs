@@ -77,8 +77,9 @@ pub use domains::storage::{
 pub use domains::tools::{
     AgentKernelMcpConfig, DynamicToolConfig, DynamicToolTimeoutBehavior, FileToolConfig,
     LocalExecToolConfig, McpServerConfig, McpToolConfig, McpTransportConfig, ToolSandboxModeConfig,
-    ToolSandboxPolicy, ToolsRuntimeConfig, WebSearchProviderConfig, WebSearchProviderRuntimeConfig,
-    WebSearchToolConfig,
+    ToolSandboxNetworkConfig, ToolSandboxPlatformConfig, ToolSandboxPolicy,
+    ToolUserPermissionModeConfig, ToolsRuntimeConfig, WebSearchProviderConfig,
+    WebSearchProviderRuntimeConfig, WebSearchToolConfig,
 };
 pub use env::{EnvSecretStore, RuntimeEnv};
 pub use loader::{install_database_migrations, DatabaseMigrationsInstallReport};

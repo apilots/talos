@@ -29,27 +29,13 @@ impl ActiveTurnStatus {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum PendingUserAction {
-    DynamicToolResult(PendingDynamicToolResult),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PendingDynamicToolResult {
-    #[serde(default)]
-    pub item_id: Option<String>,
-    pub call_id: String,
-    pub tool_name: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActiveTurnRecord {
     pub session_id: String,
     pub turn_id: String,
     pub message_id: Option<String>,
     pub status: ActiveTurnStatus,
     pub last_event_id: Option<TimelineEventId>,
-    pub pending_user_action: Option<PendingUserAction>,
+    pub current_action_id: Option<String>,
     pub updated_at: i64,
 }
 
@@ -60,7 +46,7 @@ pub struct ActiveTurnUpdate {
     pub message_id: Option<String>,
     pub status: ActiveTurnStatus,
     pub last_event_id: Option<TimelineEventId>,
-    pub pending_user_action: Option<PendingUserAction>,
+    pub current_action_id: Option<String>,
     pub updated_at: i64,
 }
 
@@ -86,46 +72,31 @@ fn parse_status(raw: &str) -> TalosResult<ActiveTurnStatus> {
     }
 }
 
-fn pending_json(
+fn current_action_id(
     status: ActiveTurnStatus,
-    pending: Option<PendingUserAction>,
+    current_action_id: Option<String>,
 ) -> TalosResult<Option<String>> {
     match status {
-        ActiveTurnStatus::WaitingUserAction => pending
-            .map(|value| {
-                serde_json::to_string(&value)
-                    .map_err(|err| TalosError::SerializationError(err.to_string()))
-            })
-            .transpose()?
+        ActiveTurnStatus::WaitingUserAction => current_action_id
+            .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| {
                 TalosError::ValidationError(
-                    "waiting_user_action requires pending_user_action".to_string(),
+                    "waiting_user_action requires current_action_id".to_string(),
                 )
             })
             .map(Some),
-        ActiveTurnStatus::Cancelling | ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => {
-            Ok(None)
-        }
-        ActiveTurnStatus::Running => Ok(pending
-            .map(|value| {
-                serde_json::to_string(&value)
-                    .map_err(|err| TalosError::SerializationError(err.to_string()))
-            })
-            .transpose()?),
+        ActiveTurnStatus::Running
+        | ActiveTurnStatus::Cancelling
+        | ActiveTurnStatus::Completed
+        | ActiveTurnStatus::Failed => Ok(None),
     }
 }
 
 fn parse_active_turn_row(row: &Row) -> TalosResult<ActiveTurnRecord> {
     let status = parse_status(row.get_string("status").unwrap_or_default().as_str())?;
-    let pending_user_action = row
-        .get_string("pending_user_action_json")
-        .filter(|value| !value.trim().is_empty())
-        .map(|raw| {
-            serde_json::from_str::<PendingUserAction>(&raw).map_err(|err| {
-                TalosError::SerializationError(format!("parse pending user action: {}", err))
-            })
-        })
-        .transpose()?;
+    let current_action_id = row
+        .get_string("current_action_id")
+        .filter(|value| !value.trim().is_empty());
     let last_event_id = row
         .get_i64("last_event_seq")
         .filter(|value| *value > 0)
@@ -138,7 +109,7 @@ fn parse_active_turn_row(row: &Row) -> TalosResult<ActiveTurnRecord> {
             .filter(|value| !value.trim().is_empty()),
         status,
         last_event_id,
-        pending_user_action,
+        current_action_id,
         updated_at: row.get_i64("updated_at").unwrap_or_default(),
     })
 }
@@ -146,7 +117,7 @@ fn parse_active_turn_row(row: &Row) -> TalosResult<ActiveTurnRecord> {
 #[async_trait]
 impl ActiveTurnStore for DatabaseSessionStore {
     async fn upsert_active_turn(&self, update: ActiveTurnUpdate) -> TalosResult<()> {
-        let pending = pending_json(update.status, update.pending_user_action)?;
+        let current_action_id = current_action_id(update.status, update.current_action_id)?;
         let last_event_seq = update
             .last_event_id
             .as_ref()
@@ -156,12 +127,12 @@ impl ActiveTurnStore for DatabaseSessionStore {
             .to_string();
         let updated_at = update.updated_at.to_string();
         let message_id = update.message_id.unwrap_or_default();
-        let pending = pending.unwrap_or_default();
+        let current_action_id = current_action_id.unwrap_or_default();
         self.storage
             .execute(
                 r#"
                 INSERT INTO active_turns (
-                    session_id, turn_id, message_id, status, last_event_seq, pending_user_action_json, updated_at
+                    session_id, turn_id, message_id, status, last_event_seq, current_action_id, updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
@@ -169,7 +140,7 @@ impl ActiveTurnStore for DatabaseSessionStore {
                     message_id = excluded.message_id,
                     status = excluded.status,
                     last_event_seq = excluded.last_event_seq,
-                    pending_user_action_json = excluded.pending_user_action_json,
+                    current_action_id = excluded.current_action_id,
                     updated_at = excluded.updated_at
                 "#,
                 &[
@@ -178,7 +149,7 @@ impl ActiveTurnStore for DatabaseSessionStore {
                     message_id.as_str(),
                     update.status.as_str(),
                     last_event_seq.as_str(),
-                    pending.as_str(),
+                    current_action_id.as_str(),
                     updated_at.as_str(),
                 ],
             )
@@ -190,7 +161,7 @@ impl ActiveTurnStore for DatabaseSessionStore {
         let rows = self
             .storage
             .query(
-                "SELECT session_id, turn_id, message_id, status, last_event_seq, pending_user_action_json, updated_at FROM active_turns WHERE session_id = ?",
+                "SELECT session_id, turn_id, message_id, status, last_event_seq, current_action_id, updated_at FROM active_turns WHERE session_id = ?",
                 &[session_id],
             )
             .await?;

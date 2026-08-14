@@ -1,15 +1,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeSet;
-use std::path::PathBuf;
-use std::process::Stdio;
+use std::path::Path;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
+use talos_tools_sandbox::{SandboxStdin, ToolProcessCommand};
 use talos_types::talos::TalosToolSearchMatch;
 use tokio::io::AsyncReadExt;
-use tokio::process::Command;
 
 use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::{process_environment, resolve_executable};
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 100;
@@ -105,7 +105,7 @@ pub async fn run(
         .context
         .max(request.before_context.unwrap_or(0))
         .max(request.after_context.unwrap_or(0));
-    let rg_output = run_rg(request, pattern, &search_path, context_lines).await?;
+    let rg_output = run_rg(request, pattern, &search_path, context_lines, context).await?;
     let all_matches = parse_rg_json(&rg_output.stdout)?;
     let total_matches = all_matches.len();
     let offset = request.offset.min(total_matches);
@@ -138,53 +138,69 @@ struct RgOutput {
 async fn run_rg(
     request: &GrepFilesRequest,
     pattern: &str,
-    search_path: &PathBuf,
+    search_path: &Path,
     context_lines: usize,
+    context: &ToolContext,
 ) -> TalosResult<RgOutput> {
-    let mut command = Command::new("rg");
-    command
-        .arg("--json")
-        .arg("--line-number")
-        .arg("--column")
-        .arg("--with-filename")
-        .arg("--color")
-        .arg("never")
-        .arg("--no-heading")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let mut args = vec![
+        "--json".to_string(),
+        "--line-number".to_string(),
+        "--column".to_string(),
+        "--with-filename".to_string(),
+        "--color".to_string(),
+        "never".to_string(),
+        "--no-heading".to_string(),
+    ];
 
     if context_lines > 0 {
-        command.arg("-C").arg(context_lines.to_string());
+        args.extend(["-C".to_string(), context_lines.to_string()]);
     }
     if request.multiline {
-        command.arg("--multiline");
+        args.push("--multiline".to_string());
     }
     if request.case_insensitive {
-        command.arg("--ignore-case");
+        args.push("--ignore-case".to_string());
     }
     if let Some(glob) = request.glob.as_deref().or(request.include.as_deref()) {
         if !glob.trim().is_empty() {
-            command.arg("--glob").arg(glob);
+            args.extend(["--glob".to_string(), glob.to_string()]);
         }
     }
     if let Some(kind) = request.r#type.as_deref() {
         if !kind.trim().is_empty() {
-            command.arg("--type").arg(kind);
+            args.extend(["--type".to_string(), kind.to_string()]);
         }
     }
-    command.arg(pattern).arg(search_path);
+    args.push(pattern.to_string());
+    args.push(search_path.to_string_lossy().into_owned());
+    let cwd = if search_path.is_dir() {
+        search_path
+    } else {
+        search_path.parent().ok_or_else(|| {
+            TalosError::ToolError(format!(
+                "search path has no parent directory: {}",
+                search_path.display()
+            ))
+        })?
+    };
 
-    let mut child = command
-        .spawn()
-        .map_err(|err| TalosError::ToolError(format!("failed to execute rg: {err}")))?;
+    let command = ToolProcessCommand {
+        program: resolve_executable("rg")?,
+        args,
+        env: process_environment(),
+        cwd: cwd.to_path_buf(),
+        stdin: SandboxStdin::Closed,
+    };
+    let mut child = context
+        .sandbox_permit()?
+        .spawn(command)
+        .await
+        .map_err(|error| TalosError::ToolError(error.to_string()))?;
     let mut stdout = child
-        .stdout
-        .take()
+        .take_stdout()
         .ok_or_else(|| TalosError::ToolError("failed to capture rg stdout".to_string()))?;
     let mut stderr = child
-        .stderr
-        .take()
+        .take_stderr()
         .ok_or_else(|| TalosError::ToolError("failed to capture rg stderr".to_string()))?;
 
     let stdout_task = tokio::spawn(async move {

@@ -40,7 +40,7 @@ use talos_memory::MemoryWriter;
 use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
 use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
-use talos_types::{normalize_session_title, ModelSelection};
+use talos_types::{deterministic_session_title, session_title_or_fallback, ModelSelection};
 use tracing::warn;
 
 const ACTIVE_TURN_MESSAGE_CAPACITY: usize = 16;
@@ -219,11 +219,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
         first_user_text: &str,
         first_assistant_text: &str,
     ) -> Option<String> {
-        if session_state.has_real_title()
-            || session_state.message_count != 0
-            || first_user_text.trim().is_empty()
-            || first_assistant_text.trim().is_empty()
-        {
+        if session_state.has_real_title() || first_user_text.trim().is_empty() {
             return None;
         }
 
@@ -249,15 +245,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     ?error,
                     "failed to resolve provider for session title generation"
                 );
-                return None;
+                return Some(deterministic_session_title(first_user_text));
             }
         };
 
         match llm_provider.chat(request).await {
-            Ok(response) => normalize_session_title(&response.content),
+            Ok(response) => Some(session_title_or_fallback(response.content, first_user_text)),
             Err(error) => {
                 warn!(?error, "failed to generate session title");
-                None
+                Some(deterministic_session_title(first_user_text))
             }
         }
     }
@@ -590,19 +586,17 @@ impl AgentHarness for AgentHarnessImpl {
     async fn submit_input(&self, params: AgentInputParams) -> AgentResult<AgentInputResult> {
         self.validate_input_request(&params)?;
         match params.input {
-            AgentInput::DynamicToolResult {
+            AgentInput::UserActionResponse {
                 call_id,
                 tool_name,
-                output,
-                success,
+                response,
             } => {
-                self.submit_dynamic_tool_result(
+                self.submit_user_action_response(
                     params.session,
                     &params.turn_id,
                     &call_id,
                     &tool_name,
-                    output,
-                    success,
+                    response,
                 )
                 .await
                 .map_err(Self::map_dynamic_input_error)?;

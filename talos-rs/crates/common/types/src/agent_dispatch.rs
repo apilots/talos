@@ -52,12 +52,11 @@ pub struct AgentDispatchInputParams {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentDispatchInput {
-    /// Result for a pending dynamic tool call validated by TalosService.
-    DynamicToolResult {
+    /// Typed response for a pending user action validated by TalosService.
+    UserActionResponse {
         call_id: String,
         tool_name: String,
-        output: String,
-        success: bool,
+        response: crate::UserActionResponse,
     },
     /// Message delivered to the exact currently running Agent turn.
     Message { message: String },
@@ -65,21 +64,25 @@ pub enum AgentDispatchInput {
 
 /// Internal continuation context passed from Service to Coordinator/Harness.
 ///
-/// This context is for resuming a validated pending dynamic tool result within
+/// This context is for resuming a validated pending user action within
 /// the same Talos turn. It is not a backend continuation token, attach handle,
 /// or Gateway/SDK public recovery DTO.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentDispatchResumeContext {
-    #[serde(default)]
-    pub tool_call: Option<AgentDispatchResumeToolCall>,
+    /// Call id of the user action that was accepted and must be resumed.
+    pub pending_call_id: String,
+    /// Nonterminal Timeline tool calls restored for item identity continuity.
+    pub tool_calls: Vec<AgentDispatchResumeToolCall>,
+    /// Cumulative execution metrics persisted before this continuation.
+    pub execution_metrics: crate::talos::TurnExecutionMetrics,
 }
 
-/// Dynamic tool call identity restored from Service pending action state.
+/// Tool call identity restored from Service pending action state.
 ///
 /// The fields identify the existing timeline item and tool call for the same
 /// Talos turn. Runtime-private task or thread identifiers must not be stored
 /// in this object.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentDispatchResumeToolCall {
     pub item_id: String,
     pub call_id: String,

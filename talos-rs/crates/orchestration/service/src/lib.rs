@@ -15,6 +15,7 @@ mod skills;
 mod subagent;
 mod timeline;
 pub mod turn;
+pub mod user_action;
 mod workspace;
 mod workspace_docs;
 

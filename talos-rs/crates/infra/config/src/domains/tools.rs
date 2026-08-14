@@ -112,15 +112,33 @@ impl Default for WebSearchProviderRuntimeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSandboxPolicy {
     #[serde(default)]
+    pub user_permission_mode: ToolUserPermissionModeConfig,
+    #[serde(default)]
     pub default_mode: ToolSandboxModeConfig,
+    #[serde(default)]
+    pub network: ToolSandboxNetworkConfig,
+    #[serde(default)]
+    pub platform: ToolSandboxPlatformConfig,
 }
 
 impl Default for ToolSandboxPolicy {
     fn default() -> Self {
         Self {
+            user_permission_mode: ToolUserPermissionModeConfig::default(),
             default_mode: ToolSandboxModeConfig::UseDefault,
+            network: ToolSandboxNetworkConfig::default(),
+            platform: ToolSandboxPlatformConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolUserPermissionModeConfig {
+    AskForApproval,
+    ApproveForMe,
+    #[default]
+    FullAccess,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -131,6 +149,21 @@ pub enum ToolSandboxModeConfig {
     ReadOnly,
     WorkspaceWrite,
     DangerFullAccess,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSandboxNetworkConfig {
+    #[default]
+    UseDefault,
+    Restricted,
+    Enabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct ToolSandboxPlatformConfig {
+    #[serde(default)]
+    pub linux_helper_executable: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
