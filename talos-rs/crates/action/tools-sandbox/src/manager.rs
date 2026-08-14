@@ -309,24 +309,13 @@ impl SandboxExecutionCompiler {
             .map_err(|error| TalosSandboxError::SandboxSetupFailed {
                 reason: format!("failed to create private temporary directory: {error}"),
             })?;
-        let private_home_path = private_tmp.path().join("home");
         let private_tmp_path = private_tmp.path().join("tmp");
-        fs::create_dir_all(&private_home_path).map_err(|error| {
-            TalosSandboxError::SandboxSetupFailed {
-                reason: format!("failed to create private home directory: {error}"),
-            }
-        })?;
         fs::create_dir_all(&private_tmp_path).map_err(|error| {
             TalosSandboxError::SandboxSetupFailed {
                 reason: format!("failed to create private temporary directory: {error}"),
             }
         })?;
-        let private_home_root = canonical_existing_directory(&private_home_path)?;
         let private_tmp_root = canonical_existing_directory(&private_tmp_path)?;
-        command.env.insert(
-            "HOME".to_string(),
-            private_home_root.as_path().to_string_lossy().into_owned(),
-        );
         command.env.insert(
             "TMPDIR".to_string(),
             private_tmp_root.as_path().to_string_lossy().into_owned(),
@@ -337,7 +326,7 @@ impl SandboxExecutionCompiler {
                 .insert("xcrun_nocache".to_string(), "1".to_string());
         }
         let command = compile_command(command)?;
-        let runtime_writable_roots = vec![private_home_root, private_tmp_root];
+        let runtime_writable_roots = vec![private_tmp_root];
         let file_system = compile_file_system(
             &context.effective_policy,
             command.cwd(),

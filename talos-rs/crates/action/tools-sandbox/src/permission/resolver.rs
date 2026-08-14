@@ -188,7 +188,7 @@ fn build_permission_profile(
         FileSystemPermissionLevel::ReadOnly => FileSystemSandboxPolicy::ReadOnly(FileSystemScope {
             readable_roots: compact_paths(
                 environment
-                    .workspace_roots
+                    .readable_roots
                     .iter()
                     .cloned()
                     .chain(additional_readable)
@@ -200,7 +200,7 @@ fn build_permission_profile(
             FileSystemSandboxPolicy::WorkspaceWrite(WorkspaceWritePolicy {
                 readable_roots: compact_paths(
                     environment
-                        .workspace_roots
+                        .readable_roots
                         .iter()
                         .cloned()
                         .chain(additional_readable)

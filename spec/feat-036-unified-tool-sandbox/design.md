@@ -774,7 +774,7 @@ pub trait SandboxProvider: Send + Sync {
 
 路径和 root 规则固定如下：
 
-1. Empty readable/writable roots 是合法的 default-deny policy；command 所需的固定 runtime roots 由 compiler/provider defaults 单独加入，不能隐式扩大 user-data roots。
+1. Empty readable/writable roots 是合法的 default-deny policy。Talos restricted runtime 默认把 host file-system roots 显式编译为 readable roots，把 workspace/project roots 编译为 writable roots；denied roots 用于收窄 read access。Compiler/provider 只补充平台固定 runtime roots，不能自行扩大 user-data write access。
 2. 所有 path 必须绝对化并执行 lexical normalization；存在的路径解析 symlink，尚不存在的 write target 使用 nearest existing ancestor 的 canonical path 加 unresolved suffix。文件操作前 authorizer 必须再次解析 parent，拒绝 symlink escape。
 3. 同权限的重复 root 和被父 root 完全覆盖的 child root 去重；不同权限的父子 root 保留，以表达 carve-out。
 4. Effective precedence 固定为 denied > writable > readable；writable 隐含 readable。任何与 denied root 相同或位于其下的访问都拒绝。
@@ -1061,7 +1061,7 @@ pub(crate) enum LocalSandboxTarget {
 
 每个 allowed local decision 内部都必须携带一个 validated `ToolSandboxContext`，并由 `ToolSandboxPermit` 封装。Full Access 也生成 permit，只是 target 为 `LocalSandboxTarget::Noop`；不使用 `Option` 或“缺少 context”隐式表达权限。
 
-`SandboxExecutionCompiler` 负责生成运行目标命令所必需的标准 runtime requirements，例如 sandbox-private temporary directory，并把 helper invocation 也视为普通 `ToolProcessCommand` 编译。provider 可以添加平台固定的系统 executable/library roots 和 `/dev/null` 等运行条件，但不得增加任意 user data roots。两类隐式访问都必须集中定义并接受 contract test，不能由具体工具自行追加。`SandboxExecutionCommand.env` 表示经过 allowlist 构造的完整环境，不默认继承 Talos 进程中的全部变量；program 和 cwd 在进入 SPI 前必须解析为绝对路径。
+`SandboxExecutionCompiler` 负责生成运行目标命令所必需的标准 runtime requirements，例如 sandbox-private temporary directory，并把 helper invocation 也视为普通 `ToolProcessCommand` 编译。Talos runtime 负责把 host file-system roots 编译为显式 readable roots；workspace/project roots 仍是产品拥有的 writable roots。该规则不枚举 HOME 子目录、Cargo、Rustup、Python、Node、package manager prefix 或隐藏目录，并由 denied roots 收窄敏感 read access。provider 可以添加平台固定的系统 executable/library roots 和 `/dev/null` 等运行条件，但不得增加任意 user data write access。两类隐式访问都必须集中定义并接受 contract test，不能由具体工具自行追加。`SandboxExecutionCommand.env` 表示经过 allowlist 构造的完整环境，不默认继承 Talos 进程中的全部变量；program 和 cwd 在进入 SPI 前必须解析为绝对路径。
 
 ### Platform SPI execution contract
 
@@ -1222,9 +1222,14 @@ Bash runtime 只负责 shell 参数、TTY、输出截断、session lifecycle 和
 Restricted local sandbox execution uses a non-login shell. It must rely on the
 sanitized inherited environment and must not source user startup files outside
 the effective readable roots. Full Access keeps the existing login-shell
-behavior. Platform providers may grant narrowly scoped read access to immutable
-OS shell runtime files, such as macOS `/private/var/select/sh`, but must not
-grant the user home directory to make shell startup succeed.
+behavior. Restricted execution preserves the host HOME value and grants host
+file systems read-only access so user-installed toolchains can load transitive
+runtime files; only a sandbox-private TMPDIR and workspace/project roots are
+writable. Hidden directories have no special policy and follow the same root
+rules. Platform
+providers may grant narrowly scoped read access to immutable OS shell runtime
+files, such as macOS `/private/var/select/sh`, but must not add tool-specific
+user directories.
 
 ### File tool
 
@@ -1549,12 +1554,13 @@ macOS cases 使用本机构建的 Talos binary 和 `/usr/bin/sandbox-exec`。Lin
 `14_sandbox` group 至少包含以下 cases：
 
 1. `provider_preflight`: facade selection, helper discovery, provider capability report and enforcement source are correct。
-2. `process_filesystem`: workspace read succeeds; read-only write fails; workspace-write succeeds inside writable roots and fails outside them。
-3. `escape_attempts`: `..`, symlink traversal and a nested child process cannot write outside effective writable roots。
-4. `network_policy`: a deterministic local TCP endpoint is reachable with network enabled and unreachable with network restricted。
-5. `file_tools`: `Read`、`Write`、`Edit`、`ApplyPatch` and `Glob` are exercised through real tool dispatch and `ToolFileSystemHandle`；outside writes fail under the authorizer。
-6. `full_access_control`: Full Access performs an operation denied by the restricted profile and audit reports `NoopBackend` / enforcement source `none`。
-7. `no_silent_fallback`: a valid Sandbox context deliberately points at an unavailable trusted provider/helper executable；provider preflight fails without executing the original command, switching to Noop or creating the sentinel output file。
+2. `process_runtime`: private TMPDIR is writable and user-installed tools execute with host-wide read access and no tool-specific allowlists。
+3. `process_filesystem`: workspace read succeeds; read-only write fails; workspace-write succeeds inside writable roots and fails outside them。
+4. `escape_attempts`: `..`, symlink traversal and a nested child process cannot write outside effective writable roots。
+5. `network_policy`: a deterministic local TCP endpoint is reachable with network enabled and unreachable with network restricted。
+6. `file_tools`: `Read`、`Write`、`Edit`、`ApplyPatch` and `Glob` are exercised through real tool dispatch and `ToolFileSystemHandle`；outside writes fail under the authorizer。
+7. `full_access_control`: Full Access performs an operation denied by the restricted profile and audit reports `NoopBackend` / enforcement source `none`。
+8. `no_silent_fallback`: a valid Sandbox context deliberately points at an unavailable trusted provider/helper executable；provider preflight fails without executing the original command, switching to Noop or creating the sentinel output file。
 
 E2E assertions 必须同时验证 result/error categories 和外部副作用。正常的 shell positive control 还必须验证 stdout/stderr，禁止把 shell startup 阶段的 sandbox denial 当作成功结果。只有 target 保持不变，并且 audit/diagnostics 能识别 enforcing provider 时，denied operation 才算通过。测试必须包含 positive controls，避免把 host permission、缺少 command 或 container configuration 造成的失败误判为 sandbox 生效。
 
@@ -1564,7 +1570,7 @@ Ubuntu fixture 必须定义准确的 image、architecture policy、system `bwrap
 
 手工验证：
 
-- 在 macOS 下执行只读命令读取 workspace 文件、尝试写 workspace 外文件。
+- 在 macOS 下执行 HOME/PATH 中的用户工具、读取 workspace 文件、写 workspace 文件并尝试写 workspace 外文件。
 - 在本地 Ubuntu Docker 中执行同等命令，并确认 denial 来自 Talos Linux provider 而不是 Docker 外层限制。
 - 在 Windows 下请求 read-only/workspace-write，确认返回明确 unsupported，而不是直接执行。
 - 对 `Read`、`Write`、`Edit`、`apply_patch` 走真实用户路径验证权限表现。

@@ -142,6 +142,7 @@ fn request(
         approval_grant: None,
         command_risk_assessment: None,
         environment: ToolSandboxEnvironment {
+            readable_roots: vec![workspace.clone()],
             workspace_roots: vec![workspace],
             denied_roots: vec![denied],
             location: ToolExecutionLocation::Local,
@@ -178,9 +179,14 @@ async fn evaluate_spawn_uses_provider_and_cached_probe_snapshot() {
         panic!("request must be allowed");
     };
     let mut command = process_command(root.path());
+    let host_home = root.path().join("host-home");
+    std::fs::create_dir(&host_home).expect("host HOME must be created");
     command
         .env
         .insert("PATH".to_string(), "/usr/bin".to_string());
+    command
+        .env
+        .insert("HOME".to_string(), host_home.to_string_lossy().into_owned());
     command
         .env
         .insert("SECRET_SENTINEL".to_string(), "hidden".to_string());
@@ -218,12 +224,12 @@ async fn evaluate_spawn_uses_provider_and_cached_probe_snapshot() {
             .get("TMPDIR")
             .expect("enforcing command must receive a private TMPDIR"),
     );
-    let private_home = PathBuf::from(
+    let prepared_home = PathBuf::from(
         prepared
             .command()
             .env()
             .get("HOME")
-            .expect("enforcing command must receive a private HOME"),
+            .expect("enforcing command must retain HOME"),
     );
     assert_eq!(
         prepared.command().env().get("PATH").map(String::as_str),
@@ -239,8 +245,7 @@ async fn evaluate_spawn_uses_provider_and_cached_probe_snapshot() {
     );
     assert!(!prepared.command().env().contains_key("SECRET_SENTINEL"));
     assert!(prepared.runtime().private_tmp);
-    assert_ne!(private_home, private_tmp);
-    assert_eq!(private_home.parent(), private_tmp.parent());
+    assert_eq!(prepared_home, host_home);
     assert_eq!(
         prepared.file_system().access_for(
             &AbsolutePathBuf::new(private_tmp.clone()).expect("private TMPDIR must be absolute")
@@ -271,10 +276,8 @@ async fn evaluate_spawn_uses_provider_and_cached_probe_snapshot() {
     assert_eq!(prepared.command().cwd(), &expected_root);
     assert_eq!(prepared.network(), NetworkIsolationSpec::Restricted);
     assert!(private_tmp.is_dir());
-    assert!(private_home.is_dir());
     drop(process);
     assert!(!private_tmp.exists());
-    assert!(!private_home.exists());
 }
 
 #[tokio::test]

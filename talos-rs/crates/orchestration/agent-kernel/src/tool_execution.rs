@@ -3,7 +3,7 @@ use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -106,8 +106,10 @@ fn build_tool_context(
                 .map_err(|error| TalosError::ToolError(format!("resolve sandbox root: {error}")))
         })
         .collect::<TalosResult<Vec<_>>>()?;
+    let readable_roots = resolve_runtime_readable_roots(&workspace_roots);
     let sandbox_environment = ToolSandboxEnvironment::local(workspace_roots, Vec::new())
-        .map_err(|error| TalosError::ToolError(format!("resolve sandbox environment: {error}")))?;
+        .map_err(|error| TalosError::ToolError(format!("resolve sandbox environment: {error}")))?
+        .with_readable_roots(readable_roots);
     let ctx = registry
         .build_context(
             execution_context.session_id.clone(),
@@ -151,6 +153,16 @@ fn build_tool_context(
     } else {
         Ok(ctx)
     }
+}
+
+fn resolve_runtime_readable_roots(workspace_roots: &[AbsolutePathBuf]) -> Vec<AbsolutePathBuf> {
+    workspace_roots
+        .iter()
+        .filter_map(|path| path.as_path().ancestors().last())
+        .filter_map(|path| AbsolutePathBuf::new(path.to_path_buf()).ok())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 async fn execute_single_tool_call(

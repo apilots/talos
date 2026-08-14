@@ -324,6 +324,7 @@ pub enum ToolExecutionLocation {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ToolSandboxEnvironment {
+    pub readable_roots: Vec<AbsolutePathBuf>,
     pub workspace_roots: Vec<AbsolutePathBuf>,
     pub denied_roots: Vec<AbsolutePathBuf>,
     pub location: ToolExecutionLocation,
@@ -337,11 +338,24 @@ impl ToolSandboxEnvironment {
         if workspace_roots.is_empty() {
             return Err(ToolPermissionError::MissingWorkspaceRoot);
         }
+        let workspace_roots = compact_paths(workspace_roots);
         Ok(Self {
-            workspace_roots: compact_paths(workspace_roots),
+            readable_roots: workspace_roots.clone(),
+            workspace_roots,
             denied_roots: compact_paths(denied_roots),
             location: ToolExecutionLocation::Local,
         })
+    }
+
+    /// Adds host paths that sandboxed processes may read but not write by default.
+    pub fn with_readable_roots(mut self, readable_roots: Vec<AbsolutePathBuf>) -> Self {
+        self.readable_roots = compact_paths(
+            self.readable_roots
+                .into_iter()
+                .chain(readable_roots)
+                .collect(),
+        );
+        self
     }
 }
 
@@ -503,6 +517,9 @@ fn request_fingerprint(request: &ToolSandboxRequest) -> String {
     }
     for root in &request.environment.workspace_roots {
         let _ = write!(scope, "|workspace={}", root.as_path().display());
+    }
+    for root in &request.environment.readable_roots {
+        let _ = write!(scope, "|readable={}", root.as_path().display());
     }
     for root in &request.environment.denied_roots {
         let _ = write!(scope, "|denied={}", root.as_path().display());

@@ -106,6 +106,30 @@ fn user_modes_map_to_expected_effective_policies() {
 }
 
 #[test]
+fn workspace_write_keeps_runtime_roots_read_only() {
+    let resolver = EffectiveToolPermissionPolicyResolver;
+    let mut runtime_request = request(
+        "runtime-roots",
+        UserPermissionMode::ApproveForMe,
+        FileSystemPermissionLevel::WorkspaceWrite,
+        NetworkSandboxPolicy::Enabled,
+    );
+    runtime_request.environment = runtime_request
+        .environment
+        .with_readable_roots(vec![root("home"), root("toolchain")]);
+
+    let policy = allowed_policy(resolver.resolve(runtime_request));
+    assert_eq!(
+        policy.permissions.file_system,
+        FileSystemSandboxPolicy::WorkspaceWrite(WorkspaceWritePolicy {
+            readable_roots: vec![root("home"), root("toolchain"), root("workspace")],
+            writable_roots: vec![root("workspace")],
+            denied_roots: vec![root("denied")],
+        })
+    );
+}
+
+#[test]
 fn ask_mode_requires_matching_approval_for_network() {
     let resolver = EffectiveToolPermissionPolicyResolver;
     let mut pending = request(

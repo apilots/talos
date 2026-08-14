@@ -361,25 +361,65 @@ fn runtime_carries_session_workspace_and_project_into_sandbox_environment() {
         .sandbox_environment()
         .expect("sandbox environment should be attached");
 
-    let expected = talos_tools::ToolSandboxEnvironment::local(
-        vec![
-            talos_tools::AbsolutePathBuf::new(
-                session_workspace
-                    .canonicalize()
-                    .expect("session workspace should canonicalize"),
-            )
-            .expect("session workspace should be absolute"),
-            talos_tools::AbsolutePathBuf::new(
-                project
-                    .canonicalize()
-                    .expect("project root should canonicalize"),
-            )
-            .expect("project root should be absolute"),
-        ],
-        Vec::new(),
+    let expected_workspace_roots = [
+        talos_tools::AbsolutePathBuf::new(
+            session_workspace
+                .canonicalize()
+                .expect("session workspace should canonicalize"),
+        )
+        .expect("session workspace should be absolute"),
+        talos_tools::AbsolutePathBuf::new(
+            project
+                .canonicalize()
+                .expect("project root should canonicalize"),
+        )
+        .expect("project root should be absolute"),
+    ]
+    .into_iter()
+    .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        environment
+            .workspace_roots
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
+        expected_workspace_roots
+    );
+    assert!(environment.workspace_roots.iter().all(|workspace_root| {
+        environment.readable_roots.iter().any(|readable_root| {
+            workspace_root
+                .as_path()
+                .starts_with(readable_root.as_path())
+        })
+    }));
+    assert!(environment.denied_roots.is_empty());
+    std::fs::remove_dir_all(root).expect("sandbox fixtures should be removed");
+}
+
+#[test]
+fn runtime_readable_roots_cover_the_host_file_system() {
+    let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
+    let workspace = root.join("workspace");
+    std::fs::create_dir_all(&workspace).expect("runtime root should be created");
+    let workspace = talos_tools::AbsolutePathBuf::new(
+        workspace
+            .canonicalize()
+            .expect("workspace should canonicalize"),
     )
-    .expect("expected sandbox environment should be valid");
-    assert_eq!(environment, &expected);
+    .expect("workspace should be absolute");
+
+    let roots = resolve_runtime_readable_roots(std::slice::from_ref(&workspace));
+    let expected = talos_tools::AbsolutePathBuf::new(
+        workspace
+            .as_path()
+            .ancestors()
+            .last()
+            .expect("workspace must have a file-system root")
+            .to_path_buf(),
+    )
+    .expect("file-system root should be absolute");
+
+    assert_eq!(roots, vec![expected]);
     std::fs::remove_dir_all(root).expect("sandbox fixtures should be removed");
 }
 

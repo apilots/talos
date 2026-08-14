@@ -89,11 +89,19 @@ fn context(
     let root = root
         .canonicalize()
         .expect("sandbox root should canonicalize");
+    let readable_root = AbsolutePathBuf::new(
+        root.ancestors()
+            .last()
+            .expect("workspace must have a file-system root")
+            .to_path_buf(),
+    )
+    .expect("file-system root should be absolute");
     let environment = ToolSandboxEnvironment::local(
         vec![AbsolutePathBuf::new(root.clone()).expect("sandbox root should be absolute")],
         Vec::new(),
     )
-    .expect("sandbox environment should be valid");
+    .expect("sandbox environment should be valid")
+    .with_readable_roots(vec![readable_root]);
     ToolContext::new_with_kernel_config("sandbox-e2e", "sandbox-e2e", Some(Arc::new(config)))
         .with_project_root(root)
         .with_sandbox_environment(environment)
@@ -283,21 +291,28 @@ async fn process_runtime() {
         "process-runtime",
         "Bash",
         json!({
-            "command": "printf runtime > \"$TMPDIR/talos-runtime-marker\" && /usr/bin/python3 --version",
+            "command": "printf runtime > \"$TMPDIR/talos-runtime-marker\" && cargo --version && if command -v node >/dev/null 2>&1; then node --version; fi && if command -v python3 >/dev/null 2>&1; then python3 --version; fi",
             "timeout": 5000
         }),
     )
     .await
-    .expect("sandboxed system Python must return a tool result");
+    .expect("sandboxed development tools must return a tool result");
     assert!(
         !result.is_error(),
-        "system Python result must be successful: {result:?}"
+        "development tool result must be successful: {result:?}"
     );
     let structured = result
         .payload()
         .and_then(crate::ToolOutputPayload::structured_content)
-        .expect("system Python must return structured Bash output");
+        .expect("development tools must return structured Bash output");
     assert_eq!(structured["exit_code"], 0, "{structured}");
+    assert!(
+        structured["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("cargo"),
+        "{structured}"
+    );
     let stderr = structured["stderr"].as_str().unwrap_or_default();
     assert!(!stderr.contains("Operation not permitted"), "{stderr}");
     assert!(!stderr.contains("couldn't create cache file"), "{stderr}");
@@ -372,11 +387,19 @@ async fn bash_terminal_status() {
 async fn process_filesystem() {
     let workspace = tempfile::tempdir().expect("workspace must be created");
     let outside = outside_process_root();
+    let home_marker = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .expect("HOME must be available")
+        .join(format!(
+            ".talos-sandbox-write-probe-{}",
+            uuid::Uuid::new_v4()
+        ));
     let (sandbox, sink) = sandbox();
     let registry = registry(sandbox);
     let command = format!(
-        "printf allowed > inside; printf denied > '{}/sentinel' && exit 97; exit 69",
-        outside.path().display()
+        "printf allowed > inside; (printf denied > '{}/sentinel') 2>/dev/null && exit 97; (printf denied > '{}') 2>/dev/null && exit 98; exit 69",
+        outside.path().display(),
+        home_marker.display()
     );
     let result = dispatch_allow_once(
         &registry,
@@ -399,6 +422,11 @@ async fn process_filesystem() {
         "allowed"
     );
     assert!(!outside.path().join("sentinel").exists());
+    let home_write_succeeded = home_marker.exists();
+    if home_write_succeeded {
+        std::fs::remove_file(&home_marker).expect("HOME probe must be removed");
+    }
+    assert!(!home_write_succeeded, "HOME must remain read-only");
     assert_local_os_event(&sink);
 }
 
