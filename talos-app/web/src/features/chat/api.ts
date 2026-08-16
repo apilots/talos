@@ -1,4 +1,4 @@
-import { TalosHttpError } from "@talos/sdk-browser";
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
   ModelSelection,
@@ -21,18 +21,11 @@ import { getTalosClient } from "@/shared/api/client";
 import { isUnboundProject } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
 
-const APP_SERVER_ACTIVE_TURN_RUNNING = -32013;
+const ACTIVE_TURN_RUNNING_CODE = AppProtocol.ErrorCode.ActiveTurnRunning;
+const PROJECT_DELETE_CONFLICT_CODE = AppProtocol.ErrorCode.Conflict;
 
 export function isActiveTurnRunningError(error: unknown) {
-  if (error instanceof TalosHttpError) {
-    return error.status === 409;
-  }
-  return Boolean(
-    error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === APP_SERVER_ACTIVE_TURN_RUNNING,
-  );
+  return error instanceof TalosApiError && error.code === ACTIVE_TURN_RUNNING_CODE;
 }
 
 function createContext(userId: string): TalosContext {
@@ -156,7 +149,7 @@ export async function deleteProject(projectId: string) {
   try {
     await getTalosClient().projects.delete({ project_id: projectId });
   } catch (error) {
-    if (error instanceof TalosHttpError && error.status === 409) {
+    if (error instanceof TalosApiError && error.code === PROJECT_DELETE_CONFLICT_CODE) {
       throw new Error("PROJECT_DELETE_CONFLICT");
     }
     throw error;

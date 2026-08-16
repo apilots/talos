@@ -38,8 +38,7 @@ pub trait UserActionStore: Send + Sync {
 }
 
 fn serialize<T: serde::Serialize>(value: &T, context: &str) -> TalosResult<String> {
-    serde_json::to_string(value)
-        .map_err(|error| TalosError::SerializationError(format!("{context}: {error}")))
+    serde_json::to_string(value).map_err(|error| TalosError::internal_with_source(context, error))
 }
 
 fn state_string(state: UserActionState) -> TalosResult<String> {
@@ -48,24 +47,22 @@ fn state_string(state: UserActionState) -> TalosResult<String> {
 }
 
 fn parse_state(raw: &str) -> TalosResult<UserActionState> {
-    serde_json::from_str(&format!("\"{raw}\"")).map_err(|error| {
-        TalosError::SerializationError(format!("parse user action state: {error}"))
-    })
+    serde_json::from_str(&format!("\"{raw}\""))
+        .map_err(|error| TalosError::internal_with_source("parse user action state", error))
 }
 
 fn parse_record(row: &Row) -> TalosResult<UserActionRecord> {
     let action = row
         .get_string("action_json")
-        .ok_or_else(|| TalosError::SerializationError("user action missing action_json".into()))
+        .ok_or_else(|| TalosError::internal("user action missing action_json"))
         .and_then(|raw| {
-            serde_json::from_str::<PendingUserAction>(&raw).map_err(|error| {
-                TalosError::SerializationError(format!("parse user action: {error}"))
-            })
+            serde_json::from_str::<PendingUserAction>(&raw)
+                .map_err(|error| TalosError::internal_with_source("parse user action", error))
         })?;
     let stored_state = parse_state(row.get_string("state").unwrap_or_default().as_str())?;
     if action.state != stored_state {
-        return Err(TalosError::SerializationError(
-            "user action state does not match action payload".to_string(),
+        return Err(TalosError::internal(
+            "user action state does not match action payload",
         ));
     }
     let response = row
@@ -73,7 +70,7 @@ fn parse_record(row: &Row) -> TalosResult<UserActionRecord> {
         .filter(|raw| !raw.trim().is_empty())
         .map(|raw| {
             serde_json::from_str::<UserActionResponse>(&raw).map_err(|error| {
-                TalosError::SerializationError(format!("parse user action response: {error}"))
+                TalosError::internal_with_source("parse user action response", error)
             })
         })
         .transpose()?;
@@ -81,7 +78,7 @@ fn parse_record(row: &Row) -> TalosResult<UserActionRecord> {
         .get_i64("version")
         .unwrap_or_default()
         .try_into()
-        .map_err(|_| TalosError::SerializationError("negative user action version".to_string()))?;
+        .map_err(|_| TalosError::internal("negative user action version"))?;
     Ok(UserActionRecord {
         session_id: row.get_string("session_id").unwrap_or_default(),
         turn_id: row.get_string("turn_id").unwrap_or_default(),
@@ -97,8 +94,8 @@ fn validate_identity(record: &UserActionRecord) -> TalosResult<()> {
         || record.turn_id.trim().is_empty()
         || record.action.action_id.trim().is_empty()
     {
-        return Err(TalosError::ValidationError(
-            "user action identity must not be empty".to_string(),
+        return Err(TalosError::internal(
+            "user action identity must not be empty",
         ));
     }
     Ok(())
@@ -146,16 +143,17 @@ impl UserActionStore for DatabaseSessionStore {
                 &record.action.action_id,
             )
             .await?
-            .ok_or_else(|| {
-                TalosError::StorageError("user action create returned no record".to_string())
-            })?;
+            .ok_or_else(|| TalosError::internal("user action create returned no record"))?;
         if stored == record {
             return Ok(stored);
         }
-        Err(TalosError::Conflict(format!(
-            "user action '{}' already exists with different content",
-            record.action.action_id
-        )))
+        Err(TalosError::public(
+            talos_error::ErrorCode::Conflict,
+            format!(
+                "user action '{}' already exists with different content",
+                record.action.action_id
+            ),
+        ))
     }
 
     async fn get(
@@ -190,13 +188,13 @@ impl UserActionStore for DatabaseSessionStore {
             || expected.turn_id != next.turn_id
             || expected.action.action_id != next.action.action_id
         {
-            return Err(TalosError::ValidationError(
-                "user action compare-and-set identity must not change".to_string(),
+            return Err(TalosError::internal(
+                "user action compare-and-set identity must not change",
             ));
         }
         if next.version != expected.version.saturating_add(1) {
-            return Err(TalosError::ValidationError(
-                "user action compare-and-set must increment version by one".to_string(),
+            return Err(TalosError::internal(
+                "user action compare-and-set must increment version by one",
             ));
         }
         let action_json = serialize(&next.action, "serialize user action")?;
@@ -235,18 +233,17 @@ impl UserActionStore for DatabaseSessionStore {
             )
             .await?;
         if affected == 0 {
-            return Err(TalosError::Conflict(format!(
-                "user action '{}' state or version changed",
-                next.action.action_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
+                    "user action '{}' state or version changed",
+                    next.action.action_id
+                ),
+            ));
         }
         self.get(&next.session_id, &next.turn_id, &next.action.action_id)
             .await?
-            .ok_or_else(|| {
-                TalosError::StorageError(
-                    "user action compare-and-set returned no record".to_string(),
-                )
-            })
+            .ok_or_else(|| TalosError::internal("user action compare-and-set returned no record"))
     }
 }
 

@@ -122,7 +122,7 @@ async fn test_compact_session_rejects_an_existing_session_reservation() {
         .await
         .expect_err("compaction must share the session lifecycle reservation");
 
-    assert!(matches!(error, TalosError::ActiveTurnRunning(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ActiveTurnRunning));
 }
 
 #[tokio::test]
@@ -284,7 +284,7 @@ async fn explicit_compaction_can_be_interrupted_through_the_existing_turn_lifecy
         }
     }
 
-    assert!(matches!(error, TalosError::Cancelled(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Cancelled));
     assert_eq!(
         (item_status, stop_reason, agent.has_active_turn(session_id)),
         (

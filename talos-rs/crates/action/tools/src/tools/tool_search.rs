@@ -89,16 +89,21 @@ impl Tool for ToolSearchTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let request: ToolSearchRequest = serde_json::from_value(input).map_err(|err| {
-            TalosError::ToolError(format!("invalid tool_search arguments: {err}"))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("invalid tool_search arguments: {err}"),
+            )
         })?;
         let query = request.query.trim().to_ascii_lowercase();
         if query.is_empty() {
-            return Err(TalosError::ToolError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
                 "tool_search query must not be empty".to_string(),
             ));
         }
         if request.limit == 0 {
-            return Err(TalosError::ToolError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
                 "tool_search limit must be greater than zero".to_string(),
             ));
         }

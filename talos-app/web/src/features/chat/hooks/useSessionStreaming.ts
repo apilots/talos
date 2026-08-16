@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { cancelActiveTurn, isActiveTurnRunningError } from "../api";
 import { useSessionMessageStream } from "./useSessionMessageStream";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
 import type { ChatUserInput } from "@/shared/types/ui";
 import type { StartTurnRequest } from "@talos/sdk-browser";
@@ -49,7 +50,7 @@ export function useSessionStreaming(
     onError: (error) => {
       useAppStore.getState().setStreamError(
         sessionId,
-        error instanceof Error ? error.message : "Failed to stop response.",
+        userVisibleErrorMessage(error, "Failed to stop response."),
       );
       useAppStore.getState().setSessionStatus(sessionId, "error");
       useAppStore.getState().setStreamMeta(sessionId, {
@@ -137,7 +138,7 @@ export function useSessionStreaming(
       useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
-        error instanceof Error ? error.message : "Failed to stream message.",
+        userVisibleErrorMessage(error, "Failed to stream message."),
       );
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,
@@ -198,7 +199,7 @@ export function useSessionStreaming(
       useAppStore.getState().setPendingInput(sessionId, undefined);
       useAppStore.getState().setStreamError(
         sessionId,
-        error instanceof Error ? error.message : "Failed to retry response.",
+        userVisibleErrorMessage(error, "Failed to retry response."),
       );
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: false,

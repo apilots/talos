@@ -96,9 +96,9 @@ impl FsService {
     fn picker_root(&self) -> TalosResult<PathBuf> {
         match self.config.root {
             DirectoryPickerRoot::Home => {
-                let home = std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .ok_or_else(|| TalosError::InvalidConfiguration("HOME is not set".into()))?;
+                let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+                    TalosError::public(talos_error::ErrorCode::InvalidRequest, "HOME is not set")
+                })?;
                 talos_fs::canonicalize_path(&home)
             }
         }
@@ -166,7 +166,7 @@ fn ensure_directory(path: &Path) -> TalosResult<()> {
 }
 
 fn ensure_readable(path: &Path) -> TalosResult<()> {
-    talos_fs::read_directory(path).map_err(|_| TalosError::AuthorizationDenied)?;
+    talos_fs::read_directory(path).map_err(|_| TalosError::authorization_denied())?;
     Ok(())
 }
 
@@ -174,7 +174,7 @@ fn ensure_writable(path: &Path) -> TalosResult<()> {
     if is_writable_directory(path) {
         return Ok(());
     }
-    Err(TalosError::AuthorizationDenied)
+    Err(TalosError::authorization_denied())
 }
 
 fn is_writable_directory(path: &Path) -> bool {
@@ -258,10 +258,7 @@ fn path_metadata_required(path: &Path) -> TalosResult<talos_fs::FileMetadata> {
 }
 
 fn fs_error(kind: TalosFsErrorKind, message: impl Into<String>) -> TalosError {
-    TalosError::FsError {
-        kind,
-        message: message.into(),
-    }
+    TalosError::fs_error(kind, message)
 }
 
 #[cfg(test)]

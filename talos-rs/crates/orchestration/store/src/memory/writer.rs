@@ -32,7 +32,12 @@ impl MemoryStore {
         let timestamp = Utc
             .timestamp_opt(batch.occurred_at, 0)
             .single()
-            .ok_or_else(|| TalosError::ValidationError("invalid memory occurred_at".to_string()))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "invalid memory occurred_at".to_string(),
+                )
+            })?;
         let source_date = timestamp
             .with_timezone(&timezone)
             .format("%Y-%m-%d")
@@ -72,7 +77,8 @@ impl MemoryStore {
                     && !(parsed.record.source_from_seq == Some(batch.source_from_seq)
                         && parsed.record.source_until_seq == Some(batch.source_until_seq))
             }) {
-                return Err(TalosError::Conflict(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
                     "memory write batch overlaps an existing session range".to_string(),
                 ));
             }
@@ -116,7 +122,8 @@ fn validate_batch(user_id: &str, batch: &MemoryWriteBatch) -> TalosResult<()> {
                 || body.chars().count() > 1_000
         })
     {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "invalid memory write batch".to_string(),
         ));
     }
@@ -141,9 +148,8 @@ fn expected_records(
                 source_until_seq: batch.source_until_seq,
                 candidate_ordinal: ordinal,
             };
-            let bytes = serde_json::to_vec(&key).map_err(|error| {
-                TalosError::SerializationError(format!("serialize memory id: {error}"))
-            })?;
+            let bytes = serde_json::to_vec(&key)
+                .map_err(|error| TalosError::internal(format!("serialize memory id: {error}")))?;
             Ok(MemoryRecord {
                 memory_id: format!("mem_{}", &sha256_hex(&bytes)[..32]),
                 title: normalize_text(&candidate.title),
@@ -164,7 +170,12 @@ fn render_record(record: &MemoryRecord, timezone: Tz) -> TalosResult<String> {
     let timestamp = Utc
         .timestamp_opt(record.occurred_at, 0)
         .single()
-        .ok_or_else(|| TalosError::ValidationError("invalid memory occurred_at".to_string()))?;
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "invalid memory occurred_at".to_string(),
+            )
+        })?;
     Ok(format!(
         "## [{}] {}\nmemory_id: {}\noccurred_at: {}\nsession: {}\nkind: {}\nimportance: {}\nsource_from_seq: {}\nsource_until_seq: {}\n\n{}\n\n",
         timestamp.with_timezone(&timezone).format("%H:%M"),

@@ -120,7 +120,7 @@ pub async fn create_storage(config: &StorageConfig) -> TalosResult<SqliteStorage
             )
             .await
         }
-        DatabaseType::Postgres => Err(TalosError::StorageError(format!(
+        DatabaseType::Postgres => Err(TalosError::internal(format!(
             "Unsupported database type: {}",
             config.database_type
         ))),

@@ -11,9 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{
-    resolve_effective_kernel_workspace, InMemoryLlmConfigStore, LlmConfigManager, LlmConfigService,
-};
+use talos_config::{resolve_effective_kernel_workspace, ConfigStore, InMemoryLlmConfigStore};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
@@ -66,7 +64,7 @@ impl TimelineEventStore for FailOnceTimelineEventStore {
     async fn append_event(&self, event: AgentEvent) -> TalosResult<AgentEvent> {
         let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
         if call == self.fail_on_call {
-            return Err(TalosError::StorageError(
+            return Err(TalosError::internal(
                 "injected compaction event persistence failure".to_string(),
             ));
         }
@@ -274,7 +272,8 @@ impl SessionRuntime for TestSessionRuntime {
         self.cancelled_turn_ids.lock().unwrap().push(params.turn_id);
         match self.cancel_mode {
             TestCancelMode::Ok => Ok(()),
-            TestCancelMode::MissingRuntimeTurn => Err(TalosError::ResourceNotFound(
+            TestCancelMode::MissingRuntimeTurn => Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
                 "active turn for session session-interrupt-runtime-missing".to_string(),
             )),
         }
@@ -380,9 +379,8 @@ async fn test_application_with_runtime_and_event_failure(
         TimelineEventRetentionConfig::default(),
     ));
     let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
-    let llm_config_service: Arc<dyn LlmConfigService> = Arc::new(LlmConfigManager::new(Arc::new(
-        InMemoryLlmConfigStore::new(config.llm.clone()),
-    )));
+    let config_store: Arc<dyn ConfigStore> =
+        Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
     let auth_service: Arc<dyn AuthService> = auth.clone();
     let user_service: Arc<dyn UserService> = auth;
@@ -403,7 +401,7 @@ async fn test_application_with_runtime_and_event_failure(
         idempotency_store,
         config,
         memory,
-        llm_config_service,
+        config_store,
         Vec::new(),
         auth_service,
         user_service,
@@ -723,11 +721,11 @@ async fn explicit_compaction_records_terminal_after_an_intermediate_event_failur
         .await
         .expect_err("the first persistence error should be returned");
 
-    assert!(matches!(
-        error,
-        TalosError::StorageError(message)
-            if message == "injected compaction event persistence failure"
-    ));
+    assert!(error.is_internal());
+    assert_eq!(
+        error.diagnostic_message(),
+        "injected compaction event persistence failure"
+    );
     assert_eq!(
         store
             .get_active_turn(session_id)
@@ -877,7 +875,9 @@ async fn first_turn_idempotency_conflict_does_not_leave_session_record() {
         )
         .await;
 
-    assert!(matches!(result, Err(TalosError::IdempotencyConflict(_))));
+    assert!(result
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::IdempotencyConflict)));
     assert_session_creation_rolled_back(
         &service,
         &store,
@@ -1004,7 +1004,7 @@ async fn patch_session_rejects_running_active_turn() {
         .await
         .expect_err("active session patch should be rejected");
 
-    assert!(matches!(error, TalosError::ActiveTurnRunning(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ActiveTurnRunning));
 }
 
 #[tokio::test]
@@ -1066,7 +1066,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
         .await
         .expect_err("unknown session should be rejected");
 
-    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -1132,7 +1132,7 @@ async fn interrupt_turn_finalizes_orphaned_active_turn() {
     assert!(matches!(
         events.last().map(|event| &event.payload),
         Some(AgentEventPayload::TurnError(error))
-            if error.error.contains("server restarted before the turn completed")
+            if error.error.code == talos_error::ErrorCode::InternalError
     ));
 }
 
@@ -1178,7 +1178,7 @@ async fn project_delete_is_blocked_until_owned_files_are_removed() {
         .delete_project(&actor, &project.project_id)
         .await
         .unwrap_err();
-    assert!(matches!(conflict, TalosError::Conflict(_)));
+    assert!(conflict.is_code(talos_error::ErrorCode::Conflict));
 
     service
         .files

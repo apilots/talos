@@ -143,29 +143,30 @@ impl ToolRegistry {
     }
 
     fn annotate_policy_error(error: TalosError) -> TalosError {
-        match error {
-            TalosError::AuthorizationDenied => TalosError::ToolFailure {
-                kind: TalosToolErrorKind::PermissionRejection,
-                message: "authorization denied".to_string(),
-                gate_source: Some(GATE_SOURCE_ALLOW_LIST.to_string()),
-            },
-            other => other,
+        if error.is_code(talos_error::ErrorCode::PermissionDenied) {
+            TalosError::tool_failure(
+                TalosToolErrorKind::PermissionRejection,
+                "authorization denied",
+                Some(GATE_SOURCE_ALLOW_LIST.to_string()),
+            )
+        } else {
+            error
         }
     }
 
     fn annotate_pre_execute_error(error: TalosError) -> TalosError {
-        match error {
-            TalosError::ValidationError(message) => TalosError::ToolFailure {
-                kind: TalosToolErrorKind::ValidationFailure,
-                message,
-                gate_source: Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
-            },
-            TalosError::AuthorizationDenied => TalosError::ToolFailure {
-                kind: TalosToolErrorKind::PermissionRejection,
-                message: "authorization denied".to_string(),
-                gate_source: Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
-            },
-            other => other,
+        match error.error_code() {
+            talos_error::ErrorCode::InvalidRequest => TalosError::tool_failure(
+                TalosToolErrorKind::ValidationFailure,
+                error.diagnostic_message(),
+                Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+            ),
+            talos_error::ErrorCode::PermissionDenied => TalosError::tool_failure(
+                TalosToolErrorKind::PermissionRejection,
+                "authorization denied",
+                Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+            ),
+            _ => error,
         }
     }
 
@@ -511,16 +512,19 @@ impl ToolRegistry {
                 .get(item.internal_name.as_str())
                 .map(|entry| entry.value().clone())
         }) else {
-            return Err(TalosError::ToolError(format!(
-                "Tool '{}' not found",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("Tool '{}' not found", invocation.tool_name),
+            ));
         };
         if !handler.matches(&invocation) {
-            return Err(TalosError::ToolError(format!(
-                "Tool '{}' invoked with incompatible payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Tool '{}' invoked with incompatible payload",
+                    invocation.tool_name
+                ),
+            ));
         }
         handler
             .pre_execute(&invocation, &context)

@@ -176,7 +176,12 @@ impl RegistryOrchestrator {
             BTreeSet::from([operation]),
         )
         .and_then(|permissions| permissions.with_file_system_access(file_system_access))
-        .map_err(|error| TalosError::ToolError(error.to_string()))?;
+        .map_err(|error| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                error.to_string(),
+            )
+        })?;
         let mut request = ToolSandboxRequest {
             invocation: ToolInvocationIdentity::new(&invocation.call_id, &invocation.tool_name)
                 .with_scope_digest(invocation_scope_digest(invocation)?),
@@ -221,9 +226,12 @@ impl RegistryOrchestrator {
         }
 
         let mut risk_summary = None;
-        let mut decision = sandbox
-            .evaluate(request.clone())
-            .map_err(|error| TalosError::ToolError(error.to_string()))?;
+        let mut decision = sandbox.evaluate(request.clone()).map_err(|error| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                error.to_string(),
+            )
+        })?;
         if decision == ToolSandboxDecision::NeedsRiskAssessment {
             let assessment = match (
                 context.tool_context().command_risk_assessor(),
@@ -248,9 +256,12 @@ impl RegistryOrchestrator {
             risk_summary = Some(assessment.summary.clone());
             let mut assessed_request = request;
             assessed_request.command_risk_assessment = Some(assessment);
-            decision = sandbox
-                .evaluate(assessed_request)
-                .map_err(|error| TalosError::ToolError(error.to_string()))?;
+            decision = sandbox.evaluate(assessed_request).map_err(|error| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    error.to_string(),
+                )
+            })?;
         }
 
         match decision {
@@ -299,7 +310,8 @@ impl RegistryOrchestrator {
             ToolGovernanceArgumentOverride::None => {}
             ToolGovernanceArgumentOverride::BashCommandPermissions => {
                 let ToolCallPayload::Function { arguments } = &invocation.payload else {
-                    return Err(TalosError::ToolError(
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::ToolExecutionFailed,
                         "shell tool requires function payload".to_string(),
                     ));
                 };
@@ -419,29 +431,35 @@ fn bash_command<'a>(
         return Ok(None);
     }
     let ToolCallPayload::Function { arguments } = &invocation.payload else {
-        return Err(TalosError::ToolError(
-            "shell tool requires function payload".to_string(),
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "shell tool requires function payload",
         ));
     };
     arguments
         .get("command")
         .and_then(Value::as_str)
         .map(Some)
-        .ok_or_else(|| TalosError::ToolError("shell tool requires command".to_string()))
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "shell tool requires command",
+            )
+        })
 }
 
 fn invocation_scope_digest(invocation: &ToolInvocation) -> TalosResult<String> {
     let encoded = serde_json::to_vec(&invocation.payload)
-        .map_err(|error| TalosError::ToolError(format!("encode tool approval scope: {error}")))?;
+        .map_err(|error| TalosError::internal(format!("encode tool approval scope: {error}")))?;
     Ok(format!("tis_{:x}", Sha256::digest(encoded)))
 }
 
 fn sandbox_permission_failure(message: impl Into<String>) -> TalosError {
-    TalosError::ToolFailure {
-        kind: TalosToolErrorKind::PermissionRejection,
-        message: message.into(),
-        gate_source: Some("sandbox_policy".to_string()),
-    }
+    TalosError::tool_failure(
+        TalosToolErrorKind::PermissionRejection,
+        message,
+        Some("sandbox_policy".to_string()),
+    )
 }
 
 fn map_sandbox_mode(mode: &ToolSandboxModeConfig) -> ToolSandboxMode {

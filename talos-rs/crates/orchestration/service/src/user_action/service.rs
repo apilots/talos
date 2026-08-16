@@ -43,14 +43,20 @@ impl UserActionService {
             .store
             .get(session_id, turn_id, action_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("user action {action_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("user action {action_id}"),
+                )
+            })?;
         validate_response(&record.action.params, &response)?;
 
         if let Some(existing) = &record.response {
             if existing != &response {
-                return Err(TalosError::Conflict(format!(
-                    "user action `{action_id}` already has a different response"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("user action `{action_id}` already has a different response"),
+                ));
             }
             return Ok(AcceptedUserAction {
                 should_resume: false,
@@ -58,9 +64,10 @@ impl UserActionService {
             });
         }
         if record.action.state != UserActionState::Pending {
-            return Err(TalosError::Conflict(format!(
-                "user action `{action_id}` is not pending"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("user action `{action_id}` is not pending"),
+            ));
         }
         match self
             .transition(
@@ -74,13 +81,16 @@ impl UserActionService {
                 record: accepted,
                 should_resume: true,
             }),
-            Err(TalosError::Conflict(_)) => {
+            Err(error) if error.is_code(talos_error::ErrorCode::Conflict) => {
                 let current = self
                     .store
                     .get(session_id, turn_id, action_id)
                     .await?
                     .ok_or_else(|| {
-                        TalosError::ResourceNotFound(format!("user action {action_id}"))
+                        TalosError::public(
+                            talos_error::ErrorCode::ResourceNotFound,
+                            format!("user action {action_id}"),
+                        )
                     })?;
                 if current.response.as_ref() == Some(&response) {
                     Ok(AcceptedUserAction {
@@ -88,9 +98,10 @@ impl UserActionService {
                         should_resume: false,
                     })
                 } else {
-                    Err(TalosError::Conflict(format!(
-                        "user action `{action_id}` was answered concurrently"
-                    )))
+                    Err(TalosError::public(
+                        talos_error::ErrorCode::Conflict,
+                        format!("user action `{action_id}` was answered concurrently"),
+                    ))
                 }
             }
             Err(error) => Err(error),
@@ -160,10 +171,13 @@ impl UserActionService {
         response: Option<UserActionResponse>,
     ) -> TalosResult<UserActionRecord> {
         validate_transition(current.action.state, next_state).map_err(|error| {
-            TalosError::Conflict(format!(
-                "invalid user action transition {:?} -> {:?}",
-                error.current, error.next
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
+                    "invalid user action transition {:?} -> {:?}",
+                    error.current, error.next
+                ),
+            )
         })?;
         let mut next = current.clone();
         next.action.state = next_state;
@@ -189,15 +203,17 @@ fn validate_response(params: &UserActionParams, response: &UserActionResponse) -
             match answer {
                 QuestionAnswer::SelectedOption { option_id } => {
                     if !params.options.iter().any(|option| option.id == *option_id) {
-                        return Err(TalosError::ValidationError(format!(
-                            "question option `{option_id}` does not exist"
-                        )));
+                        return Err(TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
+                            format!("question option `{option_id}` does not exist"),
+                        ));
                     }
                 }
                 QuestionAnswer::FreeForm { text } => {
                     if text.trim().is_empty() || text.len() > 4096 {
-                        return Err(TalosError::ValidationError(
-                            "question free-form answer must contain 1 to 4096 bytes".to_string(),
+                        return Err(TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
+                            "question free-form answer must contain 1 to 4096 bytes",
                         ));
                     }
                 }
@@ -209,14 +225,16 @@ fn validate_response(params: &UserActionParams, response: &UserActionResponse) -
             UserActionResponse::SandboxApproval(decision),
         ) => {
             if !params.available_decisions.contains(decision) {
-                return Err(TalosError::ValidationError(format!(
-                    "sandbox approval decision `{decision:?}` is not available"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("sandbox approval decision `{decision:?}` is not available"),
+                ));
             }
             Ok(())
         }
-        _ => Err(TalosError::ValidationError(
-            "user action response variant does not match its parameters".to_string(),
+        _ => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "user action response variant does not match its parameters",
         )),
     }
 }

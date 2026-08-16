@@ -13,6 +13,7 @@ void i18n.use(initReactI18next).init({
   defaultNS: "common",
   ns: [
     "common",
+    "errors",
     "sidebar",
     "chat",
     "memory",

@@ -40,7 +40,7 @@ impl OutboundAdapter for TelegramOutboundAdapter {
         let bots = self.bots.read().await;
         let bot = bots
             .get(&ctx.target.account_id)
-            .ok_or_else(|| talos_error::TalosError::InternalError("Bot not found".to_string()))?;
+            .ok_or_else(|| talos_error::TalosError::internal("Bot not found".to_string()))?;
 
         let chat_id = Self::parse_chat_id(&ctx.target.chat_id);
 
@@ -59,7 +59,7 @@ impl OutboundAdapter for TelegramOutboundAdapter {
         }
 
         let sent = request.await.map_err(|e| {
-            talos_error::TalosError::InternalError(format!("Failed to send message: {}", e))
+            talos_error::TalosError::internal(format!("Failed to send message: {}", e))
         })?;
 
         Ok(DeliveryResult {
@@ -75,7 +75,7 @@ impl OutboundAdapter for TelegramOutboundAdapter {
         let bots = self.bots.read().await;
         let bot = bots
             .get(&ctx.target.account_id)
-            .ok_or_else(|| talos_error::TalosError::InternalError("Bot not found".to_string()))?;
+            .ok_or_else(|| talos_error::TalosError::internal("Bot not found".to_string()))?;
 
         let chat_id = Self::parse_chat_id(&ctx.target.chat_id);
         let sent = match media.kind {
@@ -132,9 +132,7 @@ impl OutboundAdapter for TelegramOutboundAdapter {
                 request.await
             }
         }
-        .map_err(|e| {
-            talos_error::TalosError::InternalError(format!("Failed to send media: {}", e))
-        })?;
+        .map_err(|e| talos_error::TalosError::internal(format!("Failed to send media: {}", e)))?;
 
         Ok(DeliveryResult {
             message_id: sent.id.0.to_string(),

@@ -76,7 +76,10 @@ impl UserActionStore for MemoryUserActionStore {
     ) -> TalosResult<UserActionRecord> {
         let mut current = self.record.lock().expect("store lock");
         if current.as_ref() != Some(expected) {
-            return Err(TalosError::Conflict("stale user action".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "stale user action",
+            ));
         }
         *current = Some(next.clone());
         Ok(next)
@@ -176,7 +179,7 @@ async fn duplicate_response_is_idempotent_and_conflicting_response_fails() {
             }),
         )
         .await;
-    assert!(matches!(conflict, Err(TalosError::Conflict(_))));
+    assert!(matches!(conflict, Err(error) if error.is_code(talos_error::ErrorCode::Conflict)));
 }
 
 #[tokio::test]

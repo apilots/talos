@@ -144,16 +144,19 @@ impl FileStorageConfig {
     /// Validates backend identities, credentials, limits, and accepted media types.
     pub(crate) fn validate(&self) -> TalosResult<()> {
         if self.default.trim().is_empty() || self.default.trim() != self.default {
-            return Err(TalosError::InvalidConfiguration(
+            return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest,
                 "storage.files.default must be a non-empty backend id without surrounding whitespace"
                     .to_string(),
             ));
         }
         if !self.backends.contains_key(&self.default) {
-            return Err(TalosError::InvalidConfiguration(format!(
-                "storage.files.default references unknown backend: {}",
-                self.default
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "storage.files.default references unknown backend: {}",
+                    self.default
+                ),
+            ));
         }
 
         for (storage_id, backend) in &self.backends {
@@ -169,9 +172,12 @@ impl FileStorageConfig {
                         "application/msword" | "application/vnd.ms-excel" | "text/csv"
                     ))
             {
-                return Err(TalosError::InvalidConfiguration(format!(
-                    "storage.files.allowed_mime_types contains unsupported MIME: {mime_type}"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!(
+                        "storage.files.allowed_mime_types contains unsupported MIME: {mime_type}"
+                    ),
+                ));
             }
         }
 
@@ -181,7 +187,8 @@ impl FileStorageConfig {
 
 fn validate_file_backend(storage_id: &str, backend: &FileStorageBackendConfig) -> TalosResult<()> {
     if storage_id.trim().is_empty() || storage_id.trim() != storage_id {
-        return Err(TalosError::InvalidConfiguration(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "storage.files.backends keys must be non-empty without surrounding whitespace"
                 .to_string(),
         ));
@@ -190,9 +197,10 @@ fn validate_file_backend(storage_id: &str, backend: &FileStorageBackendConfig) -
         FileStorageBackendConfig::Fs(file_system) => {
             let root = file_system.root.to_string_lossy();
             if root.trim().is_empty() || root.contains("${") {
-                return Err(TalosError::InvalidConfiguration(format!(
-                    "storage.files.backends.{storage_id}.root is empty or unresolved"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("storage.files.backends.{storage_id}.root is empty or unresolved"),
+                ));
             }
         }
         FileStorageBackendConfig::S3(s3) => validate_s3_backend(storage_id, s3)?,
@@ -202,20 +210,25 @@ fn validate_file_backend(storage_id: &str, backend: &FileStorageBackendConfig) -
 
 fn validate_s3_backend(storage_id: &str, s3: &S3FileStorageConfig) -> TalosResult<()> {
     if invalid_file_config_value(&s3.bucket) {
-        return Err(TalosError::InvalidConfiguration(format!(
-            "storage.files.backends.{storage_id}.bucket is empty or unresolved"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("storage.files.backends.{storage_id}.bucket is empty or unresolved"),
+        ));
     }
     if let Some(root) = s3.root.as_deref() {
         if invalid_file_config_value(root) {
-            return Err(TalosError::InvalidConfiguration(format!(
-                "storage.files.backends.{storage_id}.root is empty or unresolved"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("storage.files.backends.{storage_id}.root is empty or unresolved"),
+            ));
         }
         if root.split('/').any(|segment| matches!(segment, "." | "..")) {
-            return Err(TalosError::InvalidConfiguration(format!(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
                 "storage.files.backends.{storage_id}.root must not contain `.` or `..` segments"
-            )));
+            ),
+            ));
         }
     }
     for (field, value) in [
@@ -223,9 +236,10 @@ fn validate_s3_backend(storage_id: &str, s3: &S3FileStorageConfig) -> TalosResul
         ("endpoint", s3.endpoint.as_deref()),
     ] {
         if value.is_some_and(invalid_file_config_value) {
-            return Err(TalosError::InvalidConfiguration(format!(
-                "storage.files.backends.{storage_id}.{field} is empty or unresolved"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("storage.files.backends.{storage_id}.{field} is empty or unresolved"),
+            ));
         }
     }
     match (s3.access_key_id.as_deref(), s3.secret_access_key.as_deref()) {
@@ -236,10 +250,10 @@ fn validate_s3_backend(storage_id: &str, s3: &S3FileStorageConfig) -> TalosResul
         {
             Ok(())
         }
-        (Some(_), Some(_)) => Err(TalosError::InvalidConfiguration(format!(
+        (Some(_), Some(_)) => Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
             "storage.files.backends.{storage_id} credentials are empty or unresolved"
         ))),
-        _ => Err(TalosError::InvalidConfiguration(format!(
+        _ => Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
             "storage.files.backends.{storage_id}.access_key_id and secret_access_key must be configured together"
         ))),
     }
@@ -268,13 +282,15 @@ fn validate_file_limits(limits: &FileStorageLimits) -> TalosResult<()> {
         ("max_metadata_bytes", limits.max_metadata_bytes as u128),
     ] {
         if value == 0 {
-            return Err(TalosError::InvalidConfiguration(format!(
-                "storage.files.limits.{name} must be > 0"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("storage.files.limits.{name} must be > 0"),
+            ));
         }
     }
     if limits.max_metadata_value_bytes > limits.max_metadata_bytes {
-        return Err(TalosError::InvalidConfiguration(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "storage.files.limits.max_metadata_value_bytes must be <= max_metadata_bytes"
                 .to_string(),
         ));

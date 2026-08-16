@@ -9,7 +9,7 @@ use talos_types::talos::TalosToolSearchMatch;
 use tokio::io::AsyncReadExt;
 
 use crate::runtimes::fs_read::resolve_tool_path;
-use crate::runtimes::{process_environment, resolve_executable};
+use crate::runtimes::{map_sandbox_process_error, process_environment, resolve_executable};
 use crate::ToolContext;
 
 const DEFAULT_LIMIT: usize = 100;
@@ -85,12 +85,14 @@ pub async fn run(
 ) -> TalosResult<GrepFilesResponse> {
     let pattern = request.pattern.trim();
     if pattern.is_empty() {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "pattern must not be empty".to_string(),
         ));
     }
     if request.limit == 0 {
-        return Err(TalosError::ToolError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "limit must be greater than zero".to_string(),
         ));
     }
@@ -177,10 +179,13 @@ async fn run_rg(
         search_path
     } else {
         search_path.parent().ok_or_else(|| {
-            TalosError::ToolError(format!(
-                "search path has no parent directory: {}",
-                search_path.display()
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "search path has no parent directory: {}",
+                    search_path.display()
+                ),
+            )
         })?
     };
 
@@ -195,13 +200,19 @@ async fn run_rg(
         .sandbox_permit()?
         .spawn(command)
         .await
-        .map_err(|error| TalosError::ToolError(error.to_string()))?;
-    let mut stdout = child
-        .take_stdout()
-        .ok_or_else(|| TalosError::ToolError("failed to capture rg stdout".to_string()))?;
-    let mut stderr = child
-        .take_stderr()
-        .ok_or_else(|| TalosError::ToolError("failed to capture rg stderr".to_string()))?;
+        .map_err(map_sandbox_process_error)?;
+    let mut stdout = child.take_stdout().ok_or_else(|| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "failed to capture rg stdout".to_string(),
+        )
+    })?;
+    let mut stderr = child.take_stderr().ok_or_else(|| {
+        TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "failed to capture rg stderr".to_string(),
+        )
+    })?;
 
     let stdout_task = tokio::spawn(async move {
         let mut output = String::new();
@@ -217,14 +228,18 @@ async fn run_rg(
     let timeout = Duration::from_millis(request.timeout_ms.max(1));
     let timed_out = match tokio::time::timeout(timeout, child.wait()).await {
         Ok(status) => {
-            let status = status
-                .map_err(|err| TalosError::ToolError(format!("failed to wait for rg: {err}")))?;
+            let status = status.map_err(|err| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("failed to wait for rg: {err}"),
+                )
+            })?;
             if !status.success() && status.code() != Some(1) {
                 let stderr = stderr_task.await.unwrap_or_default();
-                return Err(TalosError::ToolError(format!(
-                    "rg failed with status {status}: {}",
-                    stderr.trim()
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("rg failed with status {status}: {}", stderr.trim()),
+                ));
             }
             false
         }
@@ -247,8 +262,12 @@ fn parse_rg_json(stdout: &str) -> TalosResult<Vec<TalosToolSearchMatch>> {
     let mut last_match_index: Option<usize> = None;
 
     for raw_line in stdout.lines() {
-        let event: Value = serde_json::from_str(raw_line)
-            .map_err(|err| TalosError::ToolError(format!("invalid rg json output: {err}")))?;
+        let event: Value = serde_json::from_str(raw_line).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("invalid rg json output: {err}"),
+            )
+        })?;
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             continue;
         };

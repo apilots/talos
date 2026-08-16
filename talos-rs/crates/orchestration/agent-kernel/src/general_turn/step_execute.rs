@@ -106,7 +106,7 @@ fn resolve_assistant_text_phase(
 }
 
 fn provider_protocol_violation(message: impl Into<String>) -> TalosError {
-    TalosError::InternalError(format!("provider protocol violation: {}", message.into()))
+    TalosError::internal(format!("provider protocol violation: {}", message.into()))
 }
 
 fn ensure_not_after_final(final_answer_started: bool, event: &str) -> TalosResult<()> {
@@ -566,7 +566,7 @@ pub(crate) async fn stream_round(
     }
 
     if finish_reason.is_none() {
-        return Err(TalosError::InternalError(
+        return Err(TalosError::internal(
             "LLM stream ended before a terminal provider event".to_string(),
         ));
     }

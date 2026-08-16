@@ -32,15 +32,19 @@ impl FileService {
         let configured_ids = config.backends.keys().cloned().collect::<Vec<_>>();
         let operator_ids = operators.keys().cloned().collect::<Vec<_>>();
         if configured_ids != operator_ids {
-            return Err(TalosError::InvalidConfiguration(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "storage.files backend operators do not match configured backend ids".to_string(),
             ));
         }
         if !operators.contains_key(&config.default) {
-            return Err(TalosError::InvalidConfiguration(format!(
-                "storage.files.default has no OpenDAL operator: {}",
-                config.default
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "storage.files.default has no OpenDAL operator: {}",
+                    config.default
+                ),
+            ));
         }
         Ok(Self {
             store,
@@ -67,9 +71,10 @@ impl FileService {
             .map(|limit| limit as usize)
             .unwrap_or(DEFAULT_LIST_LIMIT);
         if limit == 0 || limit > MAX_LIST_LIMIT {
-            return Err(TalosError::ValidationError(format!(
-                "file list limit must be between 1 and {MAX_LIST_LIMIT}"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("file list limit must be between 1 and {MAX_LIST_LIMIT}"),
+            ));
         }
         if let Some(scope) = request.scope.as_ref() {
             self.ensure_scope_access(actor, scope).await?;
@@ -77,7 +82,8 @@ impl FileService {
         let tags = match request.tags {
             None => Vec::new(),
             Some(tags) if tags.is_empty() => {
-                return Err(TalosError::ValidationError(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
                     "file tag filter must not be empty when present".to_string(),
                 ))
             }
@@ -132,7 +138,8 @@ impl FileService {
         request: FileUpdateRequest,
     ) -> TalosResult<FileUpdateResponse> {
         if request.tags.is_none() && request.metadata.is_none() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "file update must include tags or metadata".to_string(),
             ));
         }
@@ -203,9 +210,10 @@ impl FileService {
     /// Rejects project deletion while any file record still references it.
     pub async fn ensure_project_has_no_files(&self, project_id: &str) -> TalosResult<()> {
         if self.store.count_by_project(project_id).await? != 0 {
-            return Err(TalosError::Conflict(format!(
-                "project {project_id} still has files"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("project {project_id} still has files"),
+            ));
         }
         Ok(())
     }
@@ -223,12 +231,18 @@ impl FileService {
             .await?
             .filter(|project| project.user_id == actor.user_id)
             .map(|_| ())
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("project {project_id}")))
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("project {project_id}"),
+                )
+            })
     }
 
     pub(super) fn operator(&self, storage_id: &str) -> TalosResult<&Operator> {
         self.operators.get(storage_id).ok_or_else(|| {
-            TalosError::InvalidConfiguration(
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "file record references an unconfigured storage backend".to_string(),
             )
         })
@@ -267,21 +281,24 @@ fn owner_key(actor: &Actor, file_id: &str) -> FileOwnerKey {
 }
 
 pub(super) fn file_not_found(file_id: &str) -> TalosError {
-    TalosError::ResourceNotFound(format!("file {file_id}"))
+    TalosError::public(
+        talos_error::ErrorCode::ResourceNotFound,
+        format!("file {file_id}"),
+    )
 }
 
 pub(super) fn file_info(record: FileRecord) -> TalosResult<FileInfo> {
     if record.status != FileStatus::Ready {
-        return Err(TalosError::StorageError(format!(
+        return Err(TalosError::internal(format!(
             "file {} is not ready",
             record.file_id
         )));
     }
     let mime_type = record.mime_type.ok_or_else(|| {
-        TalosError::StorageError(format!("ready file {} has no MIME type", record.file_id))
+        TalosError::internal(format!("ready file {} has no MIME type", record.file_id))
     })?;
     let size_bytes = record.size_bytes.ok_or_else(|| {
-        TalosError::StorageError(format!("ready file {} has no size", record.file_id))
+        TalosError::internal(format!("ready file {} has no size", record.file_id))
     })?;
     Ok(FileInfo {
         file_id: record.file_id,
@@ -300,5 +317,5 @@ pub(super) fn file_info(record: FileRecord) -> TalosResult<FileInfo> {
 }
 
 pub(super) fn opendal_error(context: &str, error: &opendal::Error) -> TalosError {
-    TalosError::StorageError(format!("{context} failed: {:?}", error.kind()))
+    TalosError::internal(format!("{context} failed: {:?}", error.kind()))
 }

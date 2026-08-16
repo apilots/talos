@@ -1,5 +1,4 @@
 use super::*;
-use talos_types::talos::TalosRunErrorCode;
 
 fn item_id(event: &AgentEvent) -> String {
     match &event.payload {
@@ -224,47 +223,54 @@ fn successful_closure_does_not_complete_active_tool_items() {
 fn timeline_builder_uses_structured_context_budget_turn_errors() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
-    let event = builder.fail_turn(&TalosError::ContextWindowExceeded(
+    let event = builder.fail_turn(&TalosError::public(
+        talos_error::ErrorCode::ContextWindowExceeded,
         "estimated_tokens=100, effective_prompt_budget=80".to_string(),
     ));
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            let error_info = payload.error_info.expect("error info should be classified");
-            assert_eq!(error_info.code, TalosRunErrorCode::ContextWindowExceeded);
-            assert!(!error_info.message.trim().is_empty());
+            assert_eq!(
+                payload.error.code,
+                talos_error::ErrorCode::ContextWindowExceeded
+            );
+            assert_eq!(payload.error.message, "Context window exceeded");
         }
         _ => panic!("expected turn error payload"),
     }
 }
 
 #[test]
-fn timeline_builder_uses_structured_compaction_blocked_turn_errors() {
+fn timeline_builder_uses_api_error_for_compaction_blocked_turn_errors() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
-    let event = builder.fail_turn(&TalosError::ContextCompactionFailed(
+    let event = builder.fail_turn(&TalosError::public(
+        talos_error::ErrorCode::ContextCompactionFailed,
         "session `session-1` remains blocked after compaction".to_string(),
     ));
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            let error_info = payload.error_info.expect("error info should be classified");
-            assert_eq!(error_info.code, TalosRunErrorCode::ContextCompactionFailed);
-            assert!(!error_info.message.trim().is_empty());
+            assert_eq!(
+                payload.error.code,
+                talos_error::ErrorCode::ContextCompactionFailed
+            );
+            assert_eq!(payload.error.message, "Context compaction failed");
         }
         _ => panic!("expected turn error payload"),
     }
 }
 
 #[test]
-fn timeline_builder_leaves_unknown_turn_errors_unclassified() {
+fn timeline_builder_maps_unknown_message_turn_errors_to_internal_error() {
     let mut builder = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
 
     let event = builder.fail_turn_message("provider returned a transient unknown failure");
 
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error_info.is_none());
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InternalError);
+            assert_eq!(payload.error.message, "An internal error occurred");
         }
         _ => panic!("expected turn error payload"),
     }

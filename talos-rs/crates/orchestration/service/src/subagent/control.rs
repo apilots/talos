@@ -32,9 +32,10 @@ impl SubagentService {
         request: SendSubagentMessageRequest,
     ) -> TalosResult<SendMessageResult> {
         if request.message.trim().is_empty() || request.message.len() > MAX_MESSAGE_BYTES {
-            return Err(TalosError::ValidationError(format!(
-                "message must contain 1 to {MAX_MESSAGE_BYTES} bytes"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("message must contain 1 to {MAX_MESSAGE_BYTES} bytes"),
+            ));
         }
         let caller = self.authorize_caller(&request.caller).await?;
         let (child, subagent, agent_id) = self.resolve_target(&caller, &request.target).await?;
@@ -43,16 +44,16 @@ impl SubagentService {
             .get_active_turn(&subagent.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::Conflict(format!(
-                    "subagent '{}' has no active turn",
-                    subagent.session_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("subagent '{}' has no active turn", subagent.session_id),
+                )
             })?;
         if active.status != ActiveTurnStatus::Running {
-            return Err(TalosError::Conflict(format!(
-                "subagent '{}' is not running",
-                subagent.session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("subagent '{}' is not running", subagent.session_id),
+            ));
         }
         self.turns
             .submit_subagent_message(
@@ -105,12 +106,13 @@ impl SubagentService {
                     if Self::is_terminal(&snapshot.outcome) {
                         return Ok(snapshot);
                     }
-                    return Err(TalosError::Conflict(
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::Conflict,
                         "subagent event stream lagged; retry wait from durable state".to_string(),
                     ));
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    return Err(TalosError::InternalError(
+                    return Err(TalosError::internal(
                         "subagent event stream closed".to_string(),
                     ));
                 }
@@ -129,10 +131,10 @@ impl SubagentService {
             .get_active_turn(&subagent.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::Conflict(format!(
-                    "subagent '{}' has no turn state",
-                    subagent.session_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("subagent '{}' has no turn state", subagent.session_id),
+                )
             })?;
         match active.status {
             ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => self.snapshot(subagent).await,
@@ -151,9 +153,10 @@ impl SubagentService {
         request: FollowUpSubagentRequest,
     ) -> TalosResult<SubagentSnapshot> {
         if request.prompt.trim().is_empty() || request.prompt.len() > MAX_FOLLOW_UP_PROMPT_BYTES {
-            return Err(TalosError::ValidationError(format!(
-                "follow-up prompt must contain 1 to {MAX_FOLLOW_UP_PROMPT_BYTES} bytes"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("follow-up prompt must contain 1 to {MAX_FOLLOW_UP_PROMPT_BYTES} bytes"),
+            ));
         }
         let caller = self.authorize_caller(&request.caller).await?;
         let (child, subagent, agent_id) = self.resolve_target(&caller, &request.target).await?;
@@ -164,10 +167,13 @@ impl SubagentService {
                     | ActiveTurnStatus::WaitingUserAction
                     | ActiveTurnStatus::Cancelling
             ) {
-                return Err(TalosError::ActiveTurnRunning(format!(
-                    "subagent '{}' already has an active turn",
-                    subagent.session_id
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::ActiveTurnRunning,
+                    format!(
+                        "subagent '{}' already has an active turn",
+                        subagent.session_id
+                    ),
+                ));
             }
         }
         let result = self
@@ -214,7 +220,7 @@ impl SubagentService {
         let mut data = Vec::with_capacity(records.len());
         for record in records {
             let SessionTreeIdentity::Subagent { parent, path, .. } = record.tree_identity else {
-                return Err(TalosError::SerializationError(format!(
+                return Err(TalosError::internal(format!(
                     "subagent tree contains Primary Session '{}'",
                     record.id
                 )));
@@ -235,18 +241,17 @@ impl SubagentService {
             );
         }
         if data.len() > MAX_AGENT_TREE_NODES {
-            return Err(TalosError::ValidationError(format!(
-                "agent tree exceeds the {MAX_AGENT_TREE_NODES} node read limit"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent tree exceeds the {MAX_AGENT_TREE_NODES} node read limit"),
+            ));
         }
         let tree = Self::build_agent_tree(data, &visible_root)?;
         let encoded = serde_json::to_vec(&tree).map_err(|error| {
-            TalosError::SerializationError(format!(
-                "failed to serialize agent tree snapshot: {error}"
-            ))
+            TalosError::internal(format!("failed to serialize agent tree snapshot: {error}"))
         })?;
         if encoded.len() > MAX_AGENT_TREE_RESPONSE_BYTES {
-            return Err(TalosError::ValidationError(format!(
+            return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
                 "agent tree snapshot exceeds the {MAX_AGENT_TREE_RESPONSE_BYTES} byte response limit"
             )));
         }
@@ -261,7 +266,8 @@ impl SubagentService {
             || caller.turn_id.trim().is_empty()
             || caller.agent_id.trim().is_empty()
         {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "a trusted caller session, turn, and agent are required".to_string(),
             ));
         }
@@ -270,29 +276,38 @@ impl SubagentService {
             .get_session_record(&caller.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::ResourceNotFound(format!("caller session {}", caller.session_id))
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("caller session {}", caller.session_id),
+                )
             })?;
         let active = self
             .timeline
             .get_active_turn(&caller.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::ValidationError(format!(
-                    "caller session '{}' has no active turn",
-                    caller.session_id
-                ))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("caller session '{}' has no active turn", caller.session_id),
+                )
             })?;
         if active.turn_id != caller.turn_id || active.status != ActiveTurnStatus::Running {
-            return Err(TalosError::ValidationError(format!(
-                "turn '{}' is not the active running turn for caller session '{}'",
-                caller.turn_id, caller.session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "turn '{}' is not the active running turn for caller session '{}'",
+                    caller.turn_id, caller.session_id
+                ),
+            ));
         }
         if record.agent_id != caller.agent_id {
-            return Err(TalosError::ValidationError(format!(
-                "caller agent '{}' does not own session '{}'",
-                caller.agent_id, caller.session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "caller agent '{}' does not own session '{}'",
+                    caller.agent_id, caller.session_id
+                ),
+            ));
         }
         match record.tree_identity {
             SessionTreeIdentity::Primary => Ok(AuthorizedCaller {
@@ -317,16 +332,24 @@ impl SubagentService {
         caller: &AuthorizedCaller,
         target: &AgentTarget,
     ) -> TalosResult<(talos_types::TalosSession, SubagentRef, String)> {
-        let path = target
-            .resolve_descendant(&caller.path)?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("subagent {}", target.as_str())))?;
+        let path = target.resolve_descendant(&caller.path)?.ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("subagent {}", target.as_str()),
+            )
+        })?;
         let record = self
             .sessions
             .get_subagent_record(&caller.tree_root_session_id, &path)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("subagent {}", target.as_str())))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("subagent {}", target.as_str()),
+                )
+            })?;
         let SessionTreeIdentity::Subagent { parent, .. } = record.tree_identity else {
-            return Err(TalosError::SerializationError(format!(
+            return Err(TalosError::internal(format!(
                 "resolved subagent '{}' has Primary identity",
                 record.id
             )));
@@ -335,7 +358,12 @@ impl SubagentService {
             .sessions
             .get_session(&record.id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("subagent {}", target.as_str())))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("subagent {}", target.as_str()),
+                )
+            })?;
         let agent_id = record.agent_id.clone();
         Ok((
             session,
@@ -350,7 +378,8 @@ impl SubagentService {
 
     fn validate_wait_request(request: &WaitSubagentRequest) -> TalosResult<()> {
         if Duration::from_millis(request.timeout_ms) > MAX_WAIT_DURATION {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "wait timeout exceeds 60000 milliseconds".to_string(),
             ));
         }
@@ -382,14 +411,14 @@ impl SubagentService {
                 Some(parent) if parent == *visible_root => root_children.push(node),
                 Some(parent) => pending_children.entry(parent).or_default().push(node),
                 None => {
-                    return Err(TalosError::SerializationError(
+                    return Err(TalosError::internal(
                         "subagent tree unexpectedly contains the root path".to_string(),
                     ));
                 }
             }
         }
         if let Some((missing_parent, _)) = pending_children.into_iter().next() {
-            return Err(TalosError::SerializationError(format!(
+            return Err(TalosError::internal(format!(
                 "subagent tree is missing parent path '{missing_parent}'"
             )));
         }

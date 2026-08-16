@@ -19,7 +19,7 @@ pub(crate) fn estimate_text_tokens(text: &str) -> usize {
     if chars == 0 {
         0
     } else {
-        (chars + 3) / 4
+        chars.div_ceil(4)
     }
 }
 

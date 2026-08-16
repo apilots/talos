@@ -5,18 +5,22 @@ import type {
   LlmProtocol,
   ProviderConfig,
   ProviderProtocolCapabilities,
-  ConfigUpdateResponse,
 } from "@talos/sdk-browser";
 import { useTranslation } from "react-i18next";
 import { Brain, Pencil, Plus, Trash2 } from "lucide-react";
 
-import { updateLlmConfig } from "@/features/settings/api";
+import { updateLlmConfig, type LlmConfigResponse } from "@/features/settings/api";
 import { llmConfigKey, useLlmConfigQuery } from "@/features/settings/hooks/useLlmConfigQuery";
 import { useConnectionKey } from "@/features/chat";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
 import { Panel } from "@/shared/ui/Panel";
 import { SettingsModelModal } from "./SettingsModelModal";
+import {
+  SettingsConfigSaveFooter,
+  SettingsProviderKeyField,
+  SettingsProviderTabs,
+} from "../provider-config/SettingsProviderConfigPrimitives";
 import {
   INPUT_KIND_ICONS,
   INPUT_KINDS,
@@ -122,21 +126,14 @@ function ProviderTab({ config, capabilities, keyConfigured, onChange }: Provider
           )}
         </div>
 
-        {/* API Key */}
-        <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
-          <span className="w-24 shrink-0 text-sm text-muted">{t("modelsPanel.apiKey")}</span>
-          <Input
-            type="password"
-            value={config.api_key ?? ""}
-            onChange={(e) => onChange({ api_key: e.target.value })}
-            className="flex-1 text-sm font-mono"
-          />
-          {keyConfigured && (
-            <Button variant="ghost" onClick={() => onChange({ api_key: "" })} type="button">
-              {t("modelsPanel.clearApiKey")}
-            </Button>
-          )}
-        </div>
+        <SettingsProviderKeyField
+          clearLabel={t("modelsPanel.clearApiKey")}
+          configured={keyConfigured}
+          label={t("modelsPanel.apiKey")}
+          onChange={(value) => onChange({ api_key: value })}
+          onClear={() => onChange({ api_key: "" })}
+          value={config.api_key ?? ""}
+        />
 
         {/* Base URL */}
         <div className="flex items-center gap-4 rounded-[1.2rem] border border-border/70 bg-background/40 px-4 py-3">
@@ -216,7 +213,7 @@ function ProviderTab({ config, capabilities, keyConfigured, onChange }: Provider
 
 // ─── Main section ─────────────────────────────────────────────────────────────
 
-export function SettingsModelsEditor() {
+export function SettingsLlmConfigEditor() {
   const { t } = useTranslation("settings");
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
@@ -233,7 +230,7 @@ export function SettingsModelsEditor() {
 
   const mutation = useMutation({
     mutationFn: updateLlmConfig,
-    onSuccess: (updated: ConfigUpdateResponse) => {
+    onSuccess: (updated: LlmConfigResponse) => {
       queryClient.setQueryData(llmConfigKey(connectionKey), updated);
       setDraft(updated.config);
     },
@@ -254,7 +251,7 @@ export function SettingsModelsEditor() {
     setDraft({ ...draft, model: modelId });
   }
 
-  const isDirty = draft && serverConfig && JSON.stringify(draft) !== JSON.stringify(serverConfig);
+  const isDirty = draft && serverConfig ? JSON.stringify(draft) !== JSON.stringify(serverConfig) : false;
 
   if (error) {
     return (
@@ -322,25 +319,11 @@ export function SettingsModelsEditor() {
         </div>
       </div>
 
-      {/* Provider tabs */}
-      <div className="mb-5 flex gap-1 rounded-[1rem] border border-border/70 bg-background/40 p-1">
-        {PROVIDERS.map(({ key, label }) => {
-          const isActive = activeProvider === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActiveProvider(key)}
-              className={[
-                "flex flex-1 items-center justify-center gap-1.5 rounded-[0.75rem] px-3 py-2 text-sm font-medium transition",
-                isActive ? "bg-card shadow-sm text-ink" : "text-muted hover:text-ink",
-              ].join(" ")}
-            >
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      <SettingsProviderTabs
+        activeProvider={activeProvider}
+        onChange={setActiveProvider}
+        providers={PROVIDERS}
+      />
 
       {/* Active provider panel — key resets local modal/edit state on tab switch */}
       <ProviderTab
@@ -351,23 +334,16 @@ export function SettingsModelsEditor() {
         onChange={(patch) => updateProvider(activeProvider, patch)}
       />
 
-      {/* Footer: Save Changes */}
-      <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
-        {mutation.isError && (
-          <span className="text-sm text-danger">{parseErrorMessage(mutation.error)}</span>
-        )}
-        {!mutation.isError && isDirty && (
-          <span className="text-sm text-muted">{t("modelsPanel.unsavedChanges")}</span>
-        )}
-        {!mutation.isError && !isDirty && <span />}
-        <Button
-          onClick={() => draft && mutation.mutate(draft)}
-          disabled={mutation.isPending || !isDirty}
-          type="button"
-        >
-          {mutation.isPending ? t("modelsPanel.saving") : t("modelsPanel.saveChanges")}
-        </Button>
-      </div>
+      <SettingsConfigSaveFooter
+        dirty={isDirty}
+        error={mutation.isError ? mutation.error : null}
+        onSave={() => draft && mutation.mutate(draft)}
+        parseError={parseErrorMessage}
+        pending={mutation.isPending}
+        saveLabel={t("modelsPanel.saveChanges")}
+        savingLabel={t("modelsPanel.saving")}
+        unsavedLabel={t("modelsPanel.unsavedChanges")}
+      />
     </Panel>
   );
 }

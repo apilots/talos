@@ -12,7 +12,8 @@ use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
 
 use crate::runtimes::{
-    process_environment, resolve_base_dir, resolve_executable, resolve_path, truncate_prefix,
+    map_sandbox_process_error, process_environment, resolve_base_dir, resolve_executable,
+    resolve_path, truncate_prefix,
 };
 use crate::{ToolContext, ToolProgressEmitter, ToolProgressKind};
 use talos_tools_sandbox::{
@@ -165,7 +166,10 @@ impl BashSessionManager {
         context: &ToolContext,
     ) -> TalosResult<BashSessionResponse> {
         if request.cmd.trim().is_empty() {
-            return Err(TalosError::ToolError("cmd cannot be empty".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                "cmd cannot be empty".to_string(),
+            ));
         }
 
         let base_dir = resolve_base_dir(context)?;
@@ -180,7 +184,7 @@ impl BashSessionManager {
             .sandbox_permit()?
             .spawn(command)
             .await
-            .map_err(|error| TalosError::ToolError(error.to_string()))?;
+            .map_err(map_sandbox_process_error)?;
 
         let session_id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let termination_target = child.termination_target();
@@ -236,7 +240,12 @@ impl BashSessionManager {
             .sessions
             .get(&session_id)
             .map(|entry| entry.value().clone())
-            .ok_or_else(|| TalosError::ToolError(format!("session {} not found", session_id)))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    format!("session {} not found", session_id),
+                )
+            })?;
 
         if yield_time_ms > 0 {
             let deadline = Instant::now() + Duration::from_millis(yield_time_ms);

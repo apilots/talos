@@ -35,10 +35,10 @@ impl PromptManager {
     ) -> TalosResult<String> {
         match self.get_template(name) {
             Some(template) => template.render(context),
-            None => Err(TalosError::ValidationError(format!(
-                "Template '{}' not found",
-                name
-            ))),
+            None => Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("Template '{}' not found", name),
+            )),
         }
     }
 

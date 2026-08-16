@@ -60,9 +60,8 @@ pub(crate) async fn state_for_event(
                 if action.state != UserActionState::Pending
                     || action.item_id.as_deref() != Some(payload.item_id.as_str())
                 {
-                    return Err(talos_error::TalosError::ValidationError(
-                        "requested user action must be pending and bound to its timeline item"
-                            .to_string(),
+                    return Err(talos_error::TalosError::internal(
+                        "requested user action must be pending and bound to its timeline item",
                     ));
                 }
                 Some(ActiveTurnState {

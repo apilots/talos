@@ -98,8 +98,12 @@ pub fn init_with_config(config: LoggingConfig) -> TalosResult<LogGuard> {
     let configured_file = config.file.clone();
     let level = config.level.clone();
     let (dispatch, guard) = build_dispatch(&config)?;
-    tracing::dispatcher::set_global_default(dispatch)
-        .map_err(|e| TalosError::InvalidConfiguration(format!("initialize logging: {}", e)))?;
+    tracing::dispatcher::set_global_default(dispatch).map_err(|e| {
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("initialize logging: {}", e),
+        )
+    })?;
 
     if let Some(path) = configured_file {
         tracing::info!("Log file configured: {}", path);
@@ -176,7 +180,8 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
     use talos_error::TalosError;
 
     if !config.stdout && config.file.is_none() {
-        return Err(TalosError::InvalidConfiguration(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "logging requires at least one output: enable logging.stdout or set logging.file"
                 .to_string(),
         ));
@@ -188,8 +193,12 @@ fn build_dispatch(config: &LoggingConfig) -> TalosResult<(Dispatch, LogGuard)> {
         .filter(|s| !s.is_empty() && *s != "UTC")
         .and_then(|s| s.parse::<Tz>().ok());
 
-    let filter = EnvFilter::try_new(&config.level)
-        .map_err(|e| TalosError::InvalidConfiguration(format!("invalid logging.level: {}", e)))?;
+    let filter = EnvFilter::try_new(&config.level).map_err(|e| {
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid logging.level: {}", e),
+        )
+    })?;
     let (writer, guard) = build_writer(config)?;
     let enable_ansi = config.stdout && config.file.is_none() && config.format != "json";
 
@@ -256,13 +265,16 @@ fn create_file_writer(path: &str) -> TalosResult<(NonBlocking, WorkerGuard)> {
     let file_path = PathBuf::from(path);
     if let Some(parent) = file_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| {
-            TalosError::StorageError(format!("create log dir {}: {}", parent.display(), err))
+            TalosError::internal(format!("create log dir {}: {}", parent.display(), err))
         })?;
     }
 
     let directory = file_path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = file_path.file_name().ok_or_else(|| {
-        TalosError::InvalidConfiguration(format!("invalid logging.file path: {}", path))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid logging.file path: {}", path),
+        )
     })?;
     let appender = tracing_appender::rolling::never(directory, file_name);
     Ok(tracing_appender::non_blocking(appender))

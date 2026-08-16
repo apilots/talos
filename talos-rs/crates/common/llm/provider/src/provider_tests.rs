@@ -1,6 +1,6 @@
 use super::*;
 use bytes::Bytes;
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{TalosFileErrorKind, TalosResult};
 
 struct DefaultAttachmentProvider;
 
@@ -79,13 +79,7 @@ fn provider_default_rejects_non_empty_attachments() {
         .validate_attachments("default", &[png_attachment()])
         .expect_err("default provider must reject attachments");
 
-    assert!(matches!(
-        error,
-        TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedAttachment,
-            ..
-        }
-    ));
+    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedAttachment));
 }
 
 #[test]
@@ -107,38 +101,29 @@ fn inline_validation_reserves_the_per_item_context_allowance() {
         }
     )
     .is_err());
-    assert!(matches!(
-        validate_attachment_usage(
-            1,
-            &AttachmentUsage {
-                item_tokens: Vec::new(),
-            },
-        ),
-        Err(TalosError::InternalError(_))
-    ));
+    assert!(validate_attachment_usage(
+        1,
+        &AttachmentUsage {
+            item_tokens: Vec::new(),
+        },
+    )
+    .is_err_and(|error| error.is_internal()));
 }
 
 #[test]
 fn inline_validation_applies_provider_media_and_common_byte_limits() {
     let mut wrong_kind = png_attachment();
     wrong_kind.kind = AttachmentKind::File;
-    assert!(matches!(
-        validate_inline_attachments(&[wrong_kind], |attachment| {
-            attachment.kind == AttachmentKind::Image
-        }),
-        Err(TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedMediaType,
-            ..
-        })
-    ));
+    assert!(validate_inline_attachments(&[wrong_kind], |attachment| {
+        attachment.kind == AttachmentKind::Image
+    })
+    .is_err_and(|error| error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType)));
 
-    assert!(matches!(
-        validate_inline_attachments(&vec![png_attachment(); 6], |_| true),
-        Err(TalosError::FileError {
-            kind: TalosFileErrorKind::AttachmentLimitExceeded,
-            ..
+    assert!(
+        validate_inline_attachments(&vec![png_attachment(); 6], |_| true).is_err_and(|error| {
+            error.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded)
         })
-    ));
+    );
 
     let shared = Bytes::from(vec![0_u8; 11 * 1024 * 1024]);
     let oversized_total = [
@@ -151,13 +136,11 @@ fn inline_validation_applies_provider_media_and_common_byte_limits() {
             ..png_attachment()
         },
     ];
-    assert!(matches!(
-        validate_inline_attachments(&oversized_total, |_| true),
-        Err(TalosError::FileError {
-            kind: TalosFileErrorKind::AttachmentLimitExceeded,
-            ..
+    assert!(
+        validate_inline_attachments(&oversized_total, |_| true).is_err_and(|error| {
+            error.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded)
         })
-    ));
+    );
 }
 
 #[test]

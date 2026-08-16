@@ -8,13 +8,13 @@ pub fn load_skill_state(path: &Path) -> TalosResult<SkillState> {
         return Ok(SkillState::default());
     }
     let contents = fs::read_to_string(path).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to read skills state `{}`: {err}",
             path.display()
         ))
     })?;
     serde_json::from_str(&contents).map_err(|err| {
-        TalosError::SerializationError(format!(
+        TalosError::internal(format!(
             "failed to parse skills state `{}`: {err}",
             path.display()
         ))

@@ -243,7 +243,8 @@ fn reasoning_blocks(continuation: Option<ReasoningContinuation>) -> TalosResult<
                     "type": "redacted_thinking",
                     "data": block.data,
                 })),
-                ReasoningBlock::Summary(_) => Err(TalosError::ValidationError(
+                ReasoningBlock::Summary(_) => Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
                     "Messages protocol cannot replay a reasoning summary block".to_string(),
                 )),
             })
@@ -369,7 +370,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} stream invalid SSE JSON: {error}"
                                     ))))
                                     .await;
@@ -382,7 +383,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             "error" => {
                                 let msg = stream_error_message(&event);
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} stream error: {msg}"
                                     ))))
                                     .await;
@@ -430,9 +431,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }
@@ -483,7 +482,7 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} model block stream invalid SSE JSON: {error}"
                                     ))))
                                     .await;
@@ -496,7 +495,7 @@ pub fn model_blocks(
                             "error" => {
                                 let msg = stream_error_message(&event);
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} stream error: {msg}"
                                     ))))
                                     .await;
@@ -558,7 +557,7 @@ pub fn model_blocks(
                             "message_stop" => {
                                 if !active_blocks.is_empty() {
                                     let _ = tx
-                                        .send(Err(TalosError::InternalError(format!(
+                                        .send(Err(TalosError::internal(format!(
                                             "{provider_name} stream stopped with active content blocks"
                                         ))))
                                         .await;
@@ -624,9 +623,7 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }

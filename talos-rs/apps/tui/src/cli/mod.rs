@@ -321,8 +321,8 @@ fn render_event(
             }
         }
         AgentEventPayload::TurnError(payload) => {
-            error!("TURN_ERROR {}", payload.error);
-            return Err(payload.error.clone().into());
+            error!("TURN_ERROR {}", payload.error.message);
+            return Err(payload.error.message.clone().into());
         }
         AgentEventPayload::TurnCompleted(_) => {
             return Ok(true);

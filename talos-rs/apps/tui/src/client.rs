@@ -297,7 +297,8 @@ where
         .await?
         .active_turn;
         let Some(turn_id) = active_turn.turn_id else {
-            return Err(TalosError::Conflict(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
                 "No active turn stream is available for this session.".to_string(),
             ));
         };

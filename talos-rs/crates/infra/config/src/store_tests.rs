@@ -1,7 +1,11 @@
 use super::*;
-use crate::ProviderModelConfig;
+use crate::{
+    ProviderModelConfig, WebSearchProviderConfig, WebSearchProviderRuntimeConfig,
+    WebSearchToolConfig,
+};
 use std::io::Write;
-use tempfile::NamedTempFile;
+use std::sync::Arc;
+use tempfile::{NamedTempFile, TempDir};
 
 fn write_yaml(content: &str) -> NamedTempFile {
     let mut f = NamedTempFile::new().unwrap();
@@ -43,8 +47,50 @@ llm:
     )
 }
 
-fn store_for(file: &NamedTempFile) -> YamlLlmConfigStore {
-    YamlLlmConfigStore::with_env_path(file.path().to_path_buf(), file.path().with_extension("env"))
+fn minimal_yaml_with_llm_and_web_search(web_search_api_key: &str) -> String {
+    format!(
+        r#"gateway:
+  port: 8080
+agent:
+  name: talos
+  kernel:
+    tools:
+      web_search:
+        provider: brave
+        firecrawl:
+          api_key: {web_search_api_key}
+          base_url: https://firecrawl.example
+          timeout_ms: 11000
+        brave:
+          api_key: ${{TALOS_WEB_SEARCH_BRAVE_API_KEY}}
+          base_url: https://brave.example
+          timeout_ms: 12000
+        tavily:
+          api_key: ${{TALOS_WEB_SEARCH_TAVILY_API_KEY}}
+          base_url: https://tavily.example
+          timeout_ms: 13000
+llm:
+  provider: anthropic
+  model: claude-3-5-sonnet
+  anthropic:
+    api_key: ${{TALOS_LLM_ANTHROPIC_API_KEY}}
+    models: []
+  openai:
+    models: []
+  bailian:
+    models: []
+  deepseek:
+    models: []
+  ollama:
+    models: []
+  openrouter:
+    models: []
+"#
+    )
+}
+
+fn store_for(file: &NamedTempFile) -> YamlConfigStore {
+    YamlConfigStore::with_env_path(file.path().to_path_buf(), file.path().with_extension("env"))
 }
 
 #[test]
@@ -236,12 +282,193 @@ fn test_save_redacted_api_key_keeps_existing_env_secret() {
 }
 
 #[test]
+fn test_load_web_search_read_reports_configured_placeholder_secret() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let env_path = file.path().with_extension("env");
+    std::fs::write(
+        &env_path,
+        "TALOS_WEB_SEARCH_FIRECRAWL_API_KEY=firecrawl-secret\n",
+    )
+    .unwrap();
+    let store = YamlConfigStore::with_env_path(file.path().to_path_buf(), env_path);
+
+    let read = store.load_web_search_read().unwrap();
+
+    assert_eq!(read.provider, WebSearchProviderConfig::Brave);
+    assert_eq!(read.firecrawl.api_key.as_deref(), Some(REDACTED_API_KEY));
+    assert_eq!(read.brave.api_key.as_deref(), None);
+    assert_eq!(
+        read.firecrawl.base_url.as_deref(),
+        Some("https://firecrawl.example")
+    );
+}
+
+#[test]
+fn test_save_web_search_writes_provider_keys_to_env_and_yaml_placeholders() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let env_path = file.path().with_extension("env");
+    let store = YamlConfigStore::with_env_path(file.path().to_path_buf(), env_path.clone());
+    let mut web_search = store.load_web_search_read().unwrap();
+    web_search.firecrawl.api_key = Some("firecrawl-new".to_string());
+    web_search.brave.api_key = Some("brave-new".to_string());
+    web_search.tavily.api_key = Some("tavily-new".to_string());
+
+    let saved = store.save_web_search(&web_search).unwrap();
+
+    assert_eq!(saved.firecrawl.api_key.as_deref(), Some(REDACTED_API_KEY));
+    assert_eq!(saved.brave.api_key.as_deref(), Some(REDACTED_API_KEY));
+    assert_eq!(saved.tavily.api_key.as_deref(), Some(REDACTED_API_KEY));
+    let env = std::fs::read_to_string(&env_path).unwrap();
+    assert!(env.contains("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY=firecrawl-new"));
+    assert!(env.contains("TALOS_WEB_SEARCH_BRAVE_API_KEY=brave-new"));
+    assert!(env.contains("TALOS_WEB_SEARCH_TAVILY_API_KEY=tavily-new"));
+    let raw: crate::Config =
+        serde_yaml::from_str(&std::fs::read_to_string(file.path()).unwrap()).unwrap();
+    assert_eq!(
+        raw.agent
+            .kernel
+            .tools
+            .web_search
+            .firecrawl
+            .api_key
+            .as_deref(),
+        Some("${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}")
+    );
+    assert_eq!(
+        raw.agent.kernel.tools.web_search.brave.api_key.as_deref(),
+        Some("${TALOS_WEB_SEARCH_BRAVE_API_KEY}")
+    );
+    assert_eq!(
+        raw.agent.kernel.tools.web_search.tavily.api_key.as_deref(),
+        Some("${TALOS_WEB_SEARCH_TAVILY_API_KEY}")
+    );
+}
+
+#[test]
+fn test_save_web_search_redacted_keeps_and_empty_clears_env_secret() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let env_path = file.path().with_extension("env");
+    std::fs::write(
+        &env_path,
+        "TALOS_WEB_SEARCH_FIRECRAWL_API_KEY=firecrawl-secret\nTALOS_WEB_SEARCH_BRAVE_API_KEY=brave-secret\n",
+    )
+    .unwrap();
+    let store = YamlConfigStore::with_env_path(file.path().to_path_buf(), env_path.clone());
+    let mut web_search = store.load_web_search_read().unwrap();
+    web_search.brave.api_key = Some(String::new());
+
+    store.save_web_search(&web_search).unwrap();
+
+    let env = std::fs::read_to_string(&env_path).unwrap();
+    assert!(env.contains("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY=firecrawl-secret"));
+    assert!(!env.contains("TALOS_WEB_SEARCH_BRAVE_API_KEY="));
+}
+
+#[test]
+fn test_save_web_search_migrates_existing_plaintext_api_key_when_ui_omits_secret() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search("firecrawl-existing"));
+    let env_path = file.path().with_extension("env");
+    let store = YamlConfigStore::with_env_path(file.path().to_path_buf(), env_path.clone());
+    let mut web_search = store.load_web_search_read().unwrap();
+    web_search.firecrawl.timeout_ms = 21000;
+
+    store.save_web_search(&web_search).unwrap();
+
+    let env = std::fs::read_to_string(&env_path).unwrap();
+    assert!(env.contains("TALOS_WEB_SEARCH_FIRECRAWL_API_KEY=firecrawl-existing"));
+    let yaml = std::fs::read_to_string(file.path()).unwrap();
+    assert!(!yaml.contains("firecrawl-existing"));
+    assert!(yaml.contains("timeout_ms: 21000"));
+}
+
+#[test]
+fn test_save_web_search_only_replaces_nested_section() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let store = store_for(&file);
+    let mut web_search = store.load_web_search_read().unwrap();
+    web_search.provider = WebSearchProviderConfig::Tavily;
+    web_search.tavily.base_url = Some("https://new-tavily.example".to_string());
+
+    store.save_web_search(&web_search).unwrap();
+
+    let yaml = std::fs::read_to_string(file.path()).unwrap();
+    assert!(yaml.contains("gateway:"));
+    assert!(yaml.contains("port: 8080"));
+    assert!(yaml.contains("llm:"));
+    assert!(yaml.contains("provider: tavily"));
+    assert!(yaml.contains("https://new-tavily.example"));
+}
+
+#[test]
+fn test_models_and_web_search_updates_do_not_drop_each_other() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let store = Arc::new(store_for(&file));
+
+    let llm_store = store.clone();
+    let llm_thread = std::thread::spawn(move || {
+        let mut llm = llm_store.load_llm_raw().unwrap();
+        llm.model = "updated-model".to_string();
+        llm_store.save_llm(&llm).unwrap();
+    });
+
+    let web_store = store.clone();
+    let web_thread = std::thread::spawn(move || {
+        let mut web_search = web_store.load_web_search_read().unwrap();
+        web_search.brave.api_key = Some("brave-thread-secret".to_string());
+        web_store.save_web_search(&web_search).unwrap();
+    });
+
+    llm_thread.join().unwrap();
+    web_thread.join().unwrap();
+
+    let yaml = std::fs::read_to_string(file.path()).unwrap();
+    assert!(yaml.contains("updated-model"));
+    assert!(yaml.contains("web_search:"));
+    let env = std::fs::read_to_string(file.path().with_extension("env")).unwrap();
+    assert!(env.contains("TALOS_WEB_SEARCH_BRAVE_API_KEY=brave-thread-secret"));
+}
+
+#[test]
+fn test_save_web_search_rolls_back_yaml_when_env_write_fails() {
+    let file = write_yaml(&minimal_yaml_with_llm_and_web_search(
+        "${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}",
+    ));
+    let original_yaml = std::fs::read_to_string(file.path()).unwrap();
+    let env_dir = TempDir::new().unwrap();
+    let store = YamlConfigStore::with_env_path(file.path().to_path_buf(), env_dir.path().into());
+    let web_search = WebSearchToolConfig {
+        firecrawl: WebSearchProviderRuntimeConfig {
+            api_key: Some("firecrawl-new".to_string()),
+            ..WebSearchProviderRuntimeConfig::default()
+        },
+        ..WebSearchToolConfig::default()
+    };
+
+    let error = store
+        .save_web_search(&web_search)
+        .expect_err("env write failure must be returned");
+
+    assert!(error.is_code(talos_error::ErrorCode::InternalError));
+    assert_eq!(std::fs::read_to_string(file.path()).unwrap(), original_yaml);
+}
+
+#[test]
 fn test_in_memory_store_roundtrip() {
     let initial = LlmConfig::default();
     let store = InMemoryLlmConfigStore::new(initial.clone());
-    let mut llm = store.load_raw().unwrap();
+    let mut llm = store.load_llm_raw().unwrap();
     llm.model = "custom-model".to_string();
-    store.save(&llm).unwrap();
-    let loaded = store.load_raw().unwrap();
+    store.save_llm(&llm).unwrap();
+    let loaded = store.load_llm_raw().unwrap();
     assert_eq!(loaded.model, "custom-model");
 }

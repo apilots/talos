@@ -61,8 +61,16 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
     let second_payload: Value =
         serde_json::from_slice(&second_body).expect("second payload should be json");
 
-    assert_eq!(first_payload["turn_id"], second_payload["turn_id"]);
-    assert_eq!(first_payload["message_id"], second_payload["message_id"]);
+    assert_eq!(first_payload["status"], "success");
+    assert_eq!(second_payload["status"], "success");
+    assert_eq!(
+        first_payload["data"]["turn_id"],
+        second_payload["data"]["turn_id"]
+    );
+    assert_eq!(
+        first_payload["data"]["message_id"],
+        second_payload["data"]["message_id"]
+    );
     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     assert_eq!(event_store.events.lock().unwrap().len(), recorded_before);
 }
@@ -104,8 +112,9 @@ async fn test_start_turn_handler_accepts_shared_request() {
         .await
         .expect("body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be json");
-    assert_eq!(payload["session_id"], "mock-session");
-    assert_eq!(payload["message_id"], "msg_mock");
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["session_id"], "mock-session");
+    assert_eq!(payload["data"]["message_id"], "msg_mock");
 
     let recorded = event_store.events.lock().unwrap().clone();
     assert!(!recorded.is_empty());
@@ -156,9 +165,8 @@ async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
         .await
         .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&response_body).expect("body should be json");
-    assert!(payload
-        .to_string()
-        .contains("input must include non-empty text or files"));
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "invalidRequest");
 }
 
 #[tokio::test]
@@ -282,8 +290,9 @@ async fn test_start_turn_handler_timeout_stores_failed_idempotency() {
         .expect("retry body should be readable");
     let retry_payload: Value =
         serde_json::from_slice(&retry_body).expect("retry payload should be json");
-    assert_eq!(retry_payload["status"], "failed_no_first_event");
-    assert!(retry_payload["message_id"].is_string());
+    assert_eq!(retry_payload["status"], "success");
+    assert_eq!(retry_payload["data"]["status"], "failed_no_first_event");
+    assert!(retry_payload["data"]["message_id"].is_string());
 }
 
 #[tokio::test]
@@ -333,7 +342,8 @@ async fn test_retry_turn_rejects_running_active_turn() {
         .await
         .expect("error body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["code"], "retry_active_turn_running");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "activeTurnRunning");
 }
 
 #[tokio::test]
@@ -383,7 +393,8 @@ async fn test_retry_turn_rejects_completed_active_turn() {
         .await
         .expect("error body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["code"], "retry_source_completed");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["error"]["code"], "retrySourceCompleted");
 }
 
 #[tokio::test]
@@ -435,8 +446,9 @@ async fn test_retry_turn_allows_failed_active_turn() {
         .await
         .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["message_id"], "msg_mock");
-    assert_eq!(payload["status"], "accepted");
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["message_id"], "msg_mock");
+    assert_eq!(payload["data"]["status"], "accepted");
 
     let retry_resp = app
         .oneshot(
@@ -457,8 +469,12 @@ async fn test_retry_turn_allows_failed_active_turn() {
         .expect("retry response body should be readable");
     let retry_payload: Value =
         serde_json::from_slice(&retry_body).expect("retry payload should be valid json");
-    assert_eq!(retry_payload["turn_id"], payload["turn_id"]);
-    assert_eq!(retry_payload["message_id"], payload["message_id"]);
+    assert_eq!(retry_payload["status"], "success");
+    assert_eq!(retry_payload["data"]["turn_id"], payload["data"]["turn_id"]);
+    assert_eq!(
+        retry_payload["data"]["message_id"],
+        payload["data"]["message_id"]
+    );
 }
 
 #[tokio::test]
@@ -492,6 +508,16 @@ async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
             updated_at: 125,
         },
     );
+    record_pending_tool_events(
+        event_store.as_ref(),
+        "mock-session",
+        "turn-dynamic",
+        "msg-dynamic",
+        "tool-dynamic",
+        "call-1",
+        "Tool",
+    )
+    .await;
     let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route(
@@ -527,7 +553,8 @@ async fn test_submit_dynamic_tool_result_handler_accepts_shared_request() {
         .await
         .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["success"], true);
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["success"], true);
 }
 
 #[tokio::test]
@@ -561,6 +588,16 @@ async fn submit_user_action_handler_accepts_the_canonical_response() {
             updated_at: 125,
         },
     );
+    record_pending_tool_events(
+        event_store.as_ref(),
+        "mock-session",
+        "turn-dynamic",
+        "msg-dynamic",
+        "tool-dynamic",
+        "call-1",
+        "Tool",
+    )
+    .await;
     let state = test_state_with_event_store(false, event_store).await;
     let app = Router::new()
         .route("/v1/user-actions/submit", post(submit_user_action_handler))
@@ -595,6 +632,7 @@ async fn submit_user_action_handler_accepts_the_canonical_response() {
         .await
         .expect("response body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["actionId"], "action-dynamic");
-    assert_eq!(payload["state"], "resuming");
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["actionId"], "action-dynamic");
+    assert_eq!(payload["data"]["state"], "resuming");
 }

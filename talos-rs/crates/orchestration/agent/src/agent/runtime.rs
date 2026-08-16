@@ -6,6 +6,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use self::outcome::{
+    execution_from_general_turn_result, outcome_metrics, outcome_stop_reason, outcome_usage,
+    seed_resume_context,
+};
 use self::resume::build_general_turn_resume;
 use super::kernel;
 use super::lifecycle::AgentRuntimeAbortHandle;
@@ -18,23 +22,21 @@ use crate::{
 };
 use talos_agent_kernel::{
     run_general_turn_with_resume, AssistantTextPhase, AttachmentReader, ContextStateBags,
-    GeneralTurnOutcome, GeneralTurnResult, GeneralTurnSkillOptions, InvocationContext,
-    InvocationExecutionState, InvocationLimits, KernelEvent, KernelEventData, KernelEventLabel,
-    KernelEventType, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
-    KernelStreamItemKey, StopReason as KernelStopReason, TimelineBuilder, ToolProgressKind,
-    ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
+    GeneralTurnSkillOptions, InvocationContext, InvocationExecutionState, InvocationLimits,
+    KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
+    KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, TimelineBuilder,
+    ToolProgressKind, ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
 };
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
     ToolUserPermissionModeConfig,
 };
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
 use talos_memory::MemoryWriter;
 use talos_store::session::{SessionArtifactStore, SessionStore};
 
 use talos_tools::ToolRegistry;
-use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
@@ -42,6 +44,7 @@ use talos_types::talos::{
 };
 use talos_types::{ModelInfo, PendingUserAction, TimelineUserActionEvent, UserActionState};
 
+mod outcome;
 mod resume;
 
 /// Internal SPI implemented by concrete agent backends attached to AgentHarness.
@@ -190,7 +193,10 @@ impl KernelAgent {
                     .find(|model| model.id == selected_model)
             })
             .ok_or_else(|| {
-                TalosError::UnsupportedModel(format!("{provider_name}:{selected_model}"))
+                TalosError::public(
+                    ErrorCode::ProviderUnavailable,
+                    format!("{provider_name}:{selected_model}"),
+                )
             })?;
 
         Ok(ModelInfo::from_provider_model(provider_name, model.clone()))
@@ -544,7 +550,7 @@ impl KernelAgent {
                     ) {
                         let active_tool_item_ids = timeline.active_tool_item_ids();
                         if !active_tool_item_ids.is_empty() {
-                            let err = TalosError::InternalError(format!(
+                            let err = TalosError::internal(format!(
                                 "completed turn has active tool items: {}",
                                 active_tool_item_ids.join(", ")
                             ));
@@ -713,82 +719,6 @@ pub(crate) struct KernelTimelineState {
     pub(crate) context_compaction_item_id: Option<String>,
 }
 
-fn execution_from_general_turn_result(
-    result: &GeneralTurnResult,
-) -> (String, Vec<RunItem>, TalosStopReason, TokenUsage) {
-    match &result.outcome {
-        GeneralTurnOutcome::Completed {
-            output_text,
-            output_items,
-            stop_reason,
-            usage,
-            ..
-        } => (
-            output_text.clone(),
-            output_items.clone(),
-            kernel::map_stop_reason(*stop_reason),
-            usage.clone(),
-        ),
-        GeneralTurnOutcome::Waiting {
-            output_items,
-            stop_reason,
-            usage,
-            ..
-        } => (
-            String::new(),
-            output_items.clone(),
-            kernel::map_stop_reason(*stop_reason),
-            usage.clone(),
-        ),
-    }
-}
-
-fn outcome_stop_reason(outcome: &GeneralTurnOutcome) -> KernelStopReason {
-    match outcome {
-        GeneralTurnOutcome::Completed { stop_reason, .. }
-        | GeneralTurnOutcome::Waiting { stop_reason, .. } => *stop_reason,
-    }
-}
-
-fn outcome_usage(outcome: &GeneralTurnOutcome) -> TokenUsage {
-    match outcome {
-        GeneralTurnOutcome::Completed { usage, .. } | GeneralTurnOutcome::Waiting { usage, .. } => {
-            usage.clone()
-        }
-    }
-}
-
-fn outcome_metrics(outcome: &GeneralTurnOutcome) -> TurnExecutionMetrics {
-    match outcome {
-        GeneralTurnOutcome::Completed { metrics, .. }
-        | GeneralTurnOutcome::Waiting { metrics, .. } => metrics.clone(),
-    }
-}
-
-fn seed_resume_context(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    resume_context: Option<AgentDispatchResumeContext>,
-) {
-    let Some(context) = resume_context else {
-        return;
-    };
-    for tool_call in context.tool_calls {
-        timeline.track_existing_tool_call(
-            tool_call.item_id.clone(),
-            tool_call.call_id.clone(),
-            tool_call.tool_name,
-            String::new(),
-        );
-        state
-            .tool_item_by_call_id
-            .insert(tool_call.call_id.clone(), tool_call.item_id.clone());
-        state
-            .active_tool_items
-            .insert(tool_call.call_id, tool_call.item_id);
-    }
-}
-
 /// Convert one Kernel stream event into standardized Agent timeline events.
 ///
 /// This function is the Kernel runtime's event normalization boundary. It must
@@ -812,16 +742,20 @@ pub(crate) fn emit_kernel_timeline_events(
             KernelStreamEventData::AssistantTextStarted(data),
         ) => {
             if state.assistant_text_items.contains_key(&data.item_key) {
-                return Err(TalosError::ValidationError(format!(
-                    "timeline assistant text item already started: {:?}",
-                    data.item_key
-                )));
+                return Err(TalosError::public(
+                    ErrorCode::InvalidRequest,
+                    format!(
+                        "timeline assistant text item already started: {:?}",
+                        data.item_key
+                    ),
+                ));
             }
             state.completed_assistant_text_items.remove(&data.item_key);
             if matches!(data.phase, AssistantTextPhase::FinalAnswer)
                 && state.final_answer_item_id.is_some()
             {
-                return Err(TalosError::ValidationError(
+                return Err(TalosError::public(
+                    ErrorCode::InvalidRequest,
                     "timeline final answer item already started".to_string(),
                 ));
             }
@@ -852,10 +786,13 @@ pub(crate) fn emit_kernel_timeline_events(
                 .get(&data.item_key)
                 .cloned()
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "timeline assistant text item not found for delta: {:?}",
-                        data.item_key
-                    ))
+                    TalosError::public(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "timeline assistant text item not found for delta: {:?}",
+                            data.item_key
+                        ),
+                    )
                 })?;
             Ok(vec![timeline.append_delta(
                 &item_id,
@@ -870,10 +807,13 @@ pub(crate) fn emit_kernel_timeline_events(
                 .assistant_text_items
                 .remove(&data.item_key)
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "timeline assistant text item not found for completion: {:?}",
-                        data.item_key
-                    ))
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "timeline assistant text item not found for completion: {:?}",
+                            data.item_key
+                        ),
+                    )
                 })?;
             Ok(vec![timeline.complete_item(
                 &item_id,
@@ -891,7 +831,8 @@ pub(crate) fn emit_kernel_timeline_events(
             KernelStreamEventData::AssistantTextCommitted(data),
         ) => {
             if matches!(data.phase, AssistantTextPhase::Unknown) {
-                return Err(TalosError::ValidationError(
+                return Err(TalosError::public(
+                    ErrorCode::InvalidRequest,
                     "timeline assistant text commit phase cannot be unknown".to_string(),
                 ));
             }
@@ -901,10 +842,13 @@ pub(crate) fn emit_kernel_timeline_events(
                 .or_else(|| state.completed_assistant_text_items.get(&data.item_key))
                 .cloned()
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "timeline assistant text item not found for commit: {:?}",
-                        data.item_key
-                    ))
+                    TalosError::public(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "timeline assistant text item not found for commit: {:?}",
+                            data.item_key
+                        ),
+                    )
                 })?;
             let phase = match data.phase {
                 AssistantTextPhase::Unknown => unreachable!(),
@@ -918,7 +862,8 @@ pub(crate) fn emit_kernel_timeline_events(
                         .as_ref()
                         .is_some_and(|existing| existing != &item_id)
                     {
-                        return Err(TalosError::ValidationError(
+                        return Err(TalosError::public(
+                            ErrorCode::InvalidRequest,
                             "timeline final answer item already started".to_string(),
                         ));
                     }
@@ -1102,7 +1047,7 @@ pub(crate) fn emit_kernel_timeline_events(
                 .get(&data.call_id)
                 .cloned()
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
+                    TalosError::internal(format!(
                         "timeline tool item not found for user action: {}",
                         data.call_id
                     ))
@@ -1139,9 +1084,10 @@ pub(super) fn reject_after_final_answer(
     event_name: &str,
 ) -> TalosResult<()> {
     if state.final_answer_item_id.is_some() {
-        return Err(TalosError::ValidationError(format!(
-            "timeline event after final answer is not allowed: {event_name}"
-        )));
+        return Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            format!("timeline event after final answer is not allowed: {event_name}"),
+        ));
     }
     Ok(())
 }
@@ -1250,7 +1196,7 @@ fn emit_missing_tool_items_from_result(
 pub(super) fn item_id_from_started(event: &AgentEvent) -> TalosResult<String> {
     match &event.payload {
         AgentEventPayload::ItemStarted(payload) => Ok(payload.item.item_id.clone()),
-        _ => Err(TalosError::InternalError(
+        _ => Err(TalosError::internal(
             "expected item started timeline event".to_string(),
         )),
     }
@@ -1271,10 +1217,13 @@ fn tool_item_id(
         .get(&stream_key_key(&stream_key))
         .cloned()
         .ok_or_else(|| {
-            TalosError::ValidationError(format!(
-                "timeline tool item not found for stream key round={} index={}",
-                stream_key.round, stream_key.index
-            ))
+            TalosError::public(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "timeline tool item not found for stream key round={} index={}",
+                    stream_key.round, stream_key.index
+                ),
+            )
         })
 }
 

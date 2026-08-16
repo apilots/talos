@@ -7,8 +7,9 @@ use axum::response::{IntoResponse, Response};
 
 use talos_auth::RequestIdentity;
 
-use super::errors::{ApiError, HttpApiErrorCode};
+use super::errors::ApiError;
 use super::state::HttpApiState;
+use talos_error::ErrorCode;
 
 pub(super) async fn lifecycle_gate_middleware(
     State(state): State<Arc<HttpApiState>>,
@@ -20,12 +21,7 @@ pub(super) async fn lifecycle_gate_middleware(
     }
 
     if state.lifecycle.is_quiescing_or_later() {
-        return Ok(ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            HttpApiErrorCode::ServerShuttingDown,
-            "server is shutting down",
-        )
-        .into_response());
+        return Ok(ApiError::new(ErrorCode::ServiceUnavailable).into_response());
     }
 
     Ok(next.run(req).await)
@@ -54,12 +50,16 @@ pub(super) async fn auth_middleware(
         .and_then(|value| value.to_str().ok())
     {
         Some(value) if value.starts_with("Bearer ") => value[7..].to_string(),
-        _ => return Err(StatusCode::UNAUTHORIZED),
+        _ => {
+            return Ok(ApiError::new(ErrorCode::Unauthenticated).into_response());
+        }
     };
 
     let auth_result = match state.auth_service.verify_access_token(&token).await {
         Ok(identity) => identity,
-        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        Err(_) => {
+            return Ok(ApiError::new(ErrorCode::Unauthenticated).into_response());
+        }
     };
 
     req.extensions_mut().insert(auth_result);

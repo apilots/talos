@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 
-use talos_config::FileStorageLimits;
-use talos_error::TalosError;
-
 use super::{filename, metadata, normalized_suffix, tags};
+use talos_config::FileStorageLimits;
+
+fn is_invalid_request<T>(result: talos_error::TalosResult<T>) -> bool {
+    result.is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest))
+}
 
 fn tight_limits() -> FileStorageLimits {
     FileStorageLimits {
@@ -25,56 +27,38 @@ fn file_metadata_limits_have_one_deterministic_validation_boundary() {
     let limits = tight_limits();
 
     assert_eq!(filename(" ok ".to_string(), &limits).unwrap(), "ok");
-    assert!(matches!(
-        filename("toolong".to_string(), &limits),
-        Err(TalosError::ValidationError(_))
-    ));
-    assert!(matches!(
-        filename("a/b".to_string(), &limits),
-        Err(TalosError::ValidationError(_))
-    ));
+    assert!(is_invalid_request(filename("toolong".to_string(), &limits)));
+    assert!(is_invalid_request(filename("a/b".to_string(), &limits)));
     assert_eq!(tags(vec![" a ".to_string()], &limits).unwrap(), vec!["a"]);
-    assert!(matches!(
-        tags(vec!["a".to_string(), "b".to_string()], &limits),
-        Err(TalosError::ValidationError(_))
-    ));
-    assert!(matches!(
-        tags(
-            vec!["a".to_string(), " a ".to_string()],
-            &FileStorageLimits::default()
-        ),
-        Err(TalosError::ValidationError(_))
-    ));
+    assert!(is_invalid_request(tags(
+        vec!["a".to_string(), "b".to_string()],
+        &limits
+    )));
+    assert!(is_invalid_request(tags(
+        vec!["a".to_string(), " a ".to_string()],
+        &FileStorageLimits::default()
+    )));
     assert!(metadata(
         &BTreeMap::from([("key".to_string(), "val".to_string())]),
         &limits
     )
     .is_ok());
-    assert!(matches!(
-        metadata(
-            &BTreeMap::from([(" key".to_string(), "v".to_string())]),
-            &limits
-        ),
-        Err(TalosError::ValidationError(_))
-    ));
-    assert!(matches!(
-        metadata(
-            &BTreeMap::from([("key".to_string(), "long".to_string())]),
-            &limits
-        ),
-        Err(TalosError::ValidationError(_))
-    ));
+    assert!(is_invalid_request(metadata(
+        &BTreeMap::from([(" key".to_string(), "v".to_string())]),
+        &limits
+    )));
+    assert!(is_invalid_request(metadata(
+        &BTreeMap::from([("key".to_string(), "long".to_string())]),
+        &limits
+    )));
     let total_limit = FileStorageLimits {
         max_metadata_bytes: 5,
         ..limits
     };
-    assert!(matches!(
-        metadata(
-            &BTreeMap::from([("k".to_string(), "v".to_string())]),
-            &total_limit
-        ),
-        Err(TalosError::ValidationError(_))
-    ));
+    assert!(is_invalid_request(metadata(
+        &BTreeMap::from([("k".to_string(), "v".to_string())]),
+        &total_limit
+    )));
 }
 
 #[test]

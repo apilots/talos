@@ -173,7 +173,7 @@ impl RenderRuntimeEngine {
                     TranscriptBlockKind::SystemNotice,
                     vec![StyledLine::plain(format!(
                         "Stream error: {}",
-                        payload.error
+                        payload.error.message
                     ))],
                 ));
                 self.timeline_items.clear();
@@ -563,8 +563,10 @@ mod tests {
         engine.apply_agent_event_payload(AgentEventPayload::TurnError(TalosTurnErrorEvent {
             request_id: "request-1".to_string(),
             turn_id: "turn-1".to_string(),
-            error: "boom".to_string(),
-            error_info: None,
+            error: talos_error::ApiError {
+                code: talos_error::ErrorCode::InternalError,
+                message: "boom".to_string(),
+            },
             failed_at_ms: 2,
         }));
 

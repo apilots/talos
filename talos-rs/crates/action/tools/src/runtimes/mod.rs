@@ -36,7 +36,8 @@ pub(crate) fn resolve_base_dir(context: &ToolContext) -> TalosResult<PathBuf> {
         }
     }
 
-    Err(TalosError::ToolError(
+    Err(TalosError::public(
+        talos_error::ErrorCode::ToolExecutionFailed,
         "no project root is configured for this tool invocation".to_string(),
     ))
 }
@@ -54,16 +55,23 @@ pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
     let path = PathBuf::from(program);
     if path.components().count() > 1 {
         return std::fs::canonicalize(&path).map_err(|error| {
-            TalosError::ToolError(format!("resolve executable {}: {error}", path.display()))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("resolve executable {}: {error}", path.display()),
+            )
         });
     }
-    let paths = env::var_os("PATH")
-        .ok_or_else(|| TalosError::ToolError("PATH is unavailable".to_string()))?;
+    let paths = env::var_os("PATH").ok_or_else(|| TalosError::internal("PATH is unavailable"))?;
     env::split_paths(&paths)
         .map(|directory| directory.join(&path))
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
-        .ok_or_else(|| TalosError::ToolError(format!("executable not found on PATH: {program}")))
+        .ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("executable not found on PATH: {program}"),
+            )
+        })
 }
 
 pub(crate) fn process_environment() -> BTreeMap<String, String> {
@@ -73,12 +81,32 @@ pub(crate) fn process_environment() -> BTreeMap<String, String> {
 pub(crate) fn map_sandbox_file_error(error: TalosSandboxError) -> TalosError {
     match error {
         TalosSandboxError::FileSystemAccessDenied { .. }
-        | TalosSandboxError::SandboxBypassDenied => TalosError::ToolFailure {
-            kind: talos_error::TalosToolErrorKind::PermissionRejection,
-            message: error.to_string(),
-            gate_source: Some("sandbox_policy".to_string()),
-        },
-        other => TalosError::ToolError(other.to_string()),
+        | TalosSandboxError::SandboxBypassDenied => TalosError::tool_failure(
+            talos_error::TalosToolErrorKind::PermissionRejection,
+            error.to_string(),
+            Some("sandbox_policy".to_string()),
+        ),
+        other => TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            other.to_string(),
+        ),
+    }
+}
+
+pub(crate) fn map_sandbox_process_error(error: TalosSandboxError) -> TalosError {
+    match error {
+        error @ (TalosSandboxError::SandboxBypassDenied | TalosSandboxError::Permission(_)) => {
+            TalosError::tool_failure(
+                talos_error::TalosToolErrorKind::PermissionRejection,
+                error.to_string(),
+                Some("sandbox_policy".to_string()),
+            )
+        }
+        other => TalosError::tool_failure(
+            talos_error::TalosToolErrorKind::RuntimeFailure,
+            other.to_string(),
+            Some("sandbox_runtime".to_string()),
+        ),
     }
 }
 

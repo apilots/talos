@@ -1,3 +1,10 @@
+import {
+  ErrorCode,
+  type ApiError,
+  type ApiResponse,
+  type ErrorCode as ErrorCodeType,
+} from "./generated/app-protocol";
+
 export type HttpMethod = "GET" | "POST" | "PATCH" | "DELETE" | "PUT";
 
 export interface FileUploadProgress {
@@ -43,10 +50,7 @@ export interface TalosHttpErrorPayload {
   method: string;
 }
 
-export interface TalosApiErrorBody {
-  code: string;
-  message: string;
-}
+const ERROR_CODE_VALUES = new Set<string>(Object.values(ErrorCode));
 
 export class TalosHttpError extends Error {
   public readonly status: number;
@@ -54,38 +58,76 @@ export class TalosHttpError extends Error {
   public readonly body: string;
   public readonly url: string;
   public readonly method: string;
-  public readonly code: string | null;
-  public readonly responseMessage: string | null;
 
   constructor(payload: TalosHttpErrorPayload) {
-    const apiError = parseTalosApiErrorBody(payload.body);
-    super(apiError?.message ?? `Request failed with ${payload.status} ${payload.statusText}`);
+    super(`Request failed with ${payload.status} ${payload.statusText}`);
     this.name = "TalosHttpError";
     this.status = payload.status;
     this.statusText = payload.statusText;
     this.body = payload.body;
     this.url = payload.url;
     this.method = payload.method;
-    this.code = apiError?.code ?? null;
-    this.responseMessage = apiError?.message ?? null;
   }
 }
 
-export function parseTalosApiErrorBody(body: string): TalosApiErrorBody | null {
+export class TalosApiError extends Error {
+  public readonly code: ErrorCodeType;
+  public readonly apiError: ApiError;
+
+  constructor(error: ApiError) {
+    super(error.message);
+    this.name = "TalosApiError";
+    this.code = error.code;
+    this.apiError = error;
+  }
+}
+
+export function parseTalosApiErrorBody(body: string): ApiError | null {
+  let value: unknown;
   try {
-    const value = JSON.parse(body) as unknown;
-    if (!value || typeof value !== "object") {
-      return null;
-    }
-    const candidate = value as Record<string, unknown>;
-    if (typeof candidate.code !== "string" || typeof candidate.message !== "string") {
-      return null;
-    }
-    return {
-      code: candidate.code,
-      message: candidate.message,
-    };
+    value = JSON.parse(body) as unknown;
   } catch {
     return null;
   }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (candidate.status !== "error") {
+    return null;
+  }
+  return decodeApiError(candidate.error);
+}
+
+export function unwrapTalosApiResponse<T>(value: unknown): T {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid Talos API response.");
+  }
+  const candidate = value as Record<string, unknown>;
+  const response = candidate as ApiResponse<T>;
+  if (response.status === "success") {
+    return response.data;
+  }
+  if (response.status === "error") {
+    throw new TalosApiError(decodeApiError(response.error));
+  }
+  throw new Error("Invalid Talos API response.");
+}
+
+function decodeApiError(value: unknown): ApiError {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid Talos API response.");
+  }
+  const error = value as Record<string, unknown>;
+  if (
+    typeof error.code !== "string" ||
+    !ERROR_CODE_VALUES.has(error.code) ||
+    typeof error.message !== "string"
+  ) {
+    throw new Error("Invalid Talos API response.");
+  }
+  return {
+    code: error.code as ErrorCodeType,
+    message: error.message,
+  };
 }

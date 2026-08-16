@@ -1,6 +1,5 @@
 use super::WorkspaceDocService;
 use crate::access::Actor;
-use talos_error::TalosError;
 use talos_types::{DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocKind};
 
 fn test_service() -> (WorkspaceDocService, std::path::PathBuf) {
@@ -63,7 +62,7 @@ async fn put_doc_rejects_stale_version() {
         .await
         .expect_err("stale version should be rejected");
 
-    assert!(matches!(error, TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
     let _ = talos_fs::remove_directory(&workspace_dir).await;
 }
 
@@ -118,6 +117,6 @@ async fn put_doc_rejects_oversized_memory() {
         .await
         .expect_err("oversized memory should be rejected");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     let _ = talos_fs::remove_directory(&workspace_dir).await;
 }

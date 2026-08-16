@@ -68,9 +68,14 @@ describe("desktop IPC guard", () => {
   it("allows llm config methods", () => {
     expect(isDesktopRendererMethod("config.get")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);
+    expect(() => assertDesktopRendererInvoke("config.get", {
+      path: "webSearch",
+    })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("config.update", {
-      path: "llm",
       value: { type: "llm", value: {} },
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("config.update", {
+      value: { type: "webSearch", value: {} },
     })).not.toThrow();
     expect(() => assertDesktopRendererInvoke("config.delete", {
       path: "llm",
@@ -124,8 +129,10 @@ describe("desktop IPC guard", () => {
   it("rejects initialize and unsupported config writes from renderer", () => {
     expect(isDesktopRendererMethod("initialize")).toBe(false);
     expect(() => assertDesktopRendererInvoke("config.update", {
-      path: "storage",
       value: { type: "llm", value: {} },
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("config.update", {
+      value: { type: "storage", value: {} },
     })).toThrow("Invalid desktop renderer params for method: config.update");
   });
 

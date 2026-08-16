@@ -64,9 +64,10 @@ impl ServiceGateway {
 
 pub(crate) fn require_non_empty(value: &str, field: &str) -> TalosResult<()> {
     if value.trim().is_empty() {
-        return Err(talos_error::TalosError::ValidationError(format!(
-            "{field} is required"
-        )));
+        return Err(talos_error::TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("{field} is required"),
+        ));
     }
     Ok(())
 }

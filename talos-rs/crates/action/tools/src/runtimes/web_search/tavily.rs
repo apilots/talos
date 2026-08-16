@@ -28,7 +28,10 @@ impl TavilySearchProvider {
             .timeout(Duration::from_millis(config.timeout_ms.max(1)))
             .build()
             .map_err(|err| {
-                TalosError::InvalidConfiguration(format!("build Tavily search client: {err}"))
+                TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("build Tavily search client: {err}"),
+                )
             })?;
         Ok(Self { api_key, client })
     }
@@ -48,11 +51,12 @@ impl SearchProvider for TavilySearchProvider {
             search = search.exclude_domains(request.blocked_domains.clone());
         }
 
-        let response = self
-            .client
-            .call(&search)
-            .await
-            .map_err(|err| TalosError::ToolError(format!("Tavily search failed: {err}")))?;
+        let response = self.client.call(&search).await.map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("Tavily search failed: {err}"),
+            )
+        })?;
         Ok(response
             .results
             .into_iter()

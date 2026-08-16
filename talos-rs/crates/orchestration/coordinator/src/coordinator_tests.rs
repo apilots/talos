@@ -6,7 +6,7 @@ use talos_agent::{
     AgentInterruptResult, AgentKind, AgentResult, AgentResumeParams, AgentRunParams,
     AgentRunResult, AgentStatus,
 };
-use talos_error::{TalosError, TalosResult};
+use talos_error::TalosResult;
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResumeContext,
     AgentDispatchResumeToolCall, DispatchBinding,
@@ -327,7 +327,7 @@ async fn handle_stream_rejects_agent_without_streaming_capability() {
         Err(error) => error,
     };
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(error.to_string().contains("streaming"));
     assert!(stream_requests.lock().unwrap().is_empty());
 }
@@ -362,7 +362,7 @@ async fn handle_stream_rejects_resume_context_without_dynamic_input_capability()
         Err(error) => error,
     };
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(error.to_string().contains("dynamic_input"));
     assert!(stream_requests.lock().unwrap().is_empty());
     assert!(resume_stream_requests.lock().unwrap().is_empty());
@@ -395,7 +395,7 @@ async fn cancel_active_turn_rejects_agent_without_interrupt_capability() {
     .await
     .expect_err("cancel should fail before reaching agent");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(error.to_string().contains("interrupt"));
     assert!(interrupt_requests.lock().unwrap().is_empty());
 }
@@ -437,7 +437,7 @@ async fn submit_dynamic_tool_result_rejects_agent_without_dynamic_input_capabili
     .await
     .expect_err("input should fail before reaching agent");
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(error.to_string().contains("dynamic_input"));
     assert!(input_requests.lock().unwrap().is_empty());
 }

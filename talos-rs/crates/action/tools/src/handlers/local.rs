@@ -37,10 +37,13 @@ impl ToolHandler for LocalToolHandler {
         context: &ToolDispatchContext,
     ) -> TalosResult<()> {
         let ToolCallPayload::Function { arguments } = &invocation.payload else {
-            return Err(TalosError::ToolError(format!(
-                "Local tool '{}' requires function payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Local tool '{}' requires function payload",
+                    invocation.tool_name
+                ),
+            ));
         };
 
         self.tool.validate_input(arguments)?;
@@ -59,10 +62,13 @@ impl ToolHandler for LocalToolHandler {
         context: &ToolDispatchContext,
     ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
         let ToolCallPayload::Function { arguments } = &invocation.payload else {
-            return Err(TalosError::ToolError(format!(
-                "Local tool '{}' requires function payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Local tool '{}' requires function payload",
+                    invocation.tool_name
+                ),
+            ));
         };
         self.tool
             .requested_file_system_access(arguments, context.tool_context())
@@ -74,10 +80,13 @@ impl ToolHandler for LocalToolHandler {
         context: ToolDispatchContext,
     ) -> TalosResult<ToolDispatchOutcome> {
         let ToolCallPayload::Function { arguments } = invocation.payload else {
-            return Err(TalosError::ToolError(format!(
-                "Local tool '{}' requires function payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Local tool '{}' requires function payload",
+                    invocation.tool_name
+                ),
+            ));
         };
 
         self.tool

@@ -26,10 +26,16 @@ impl TimelineEventId {
 
     pub fn event_seq(&self) -> TalosResult<i64> {
         let raw = self.0.strip_prefix(EVENT_ID_PREFIX).ok_or_else(|| {
-            TalosError::ValidationError(format!("invalid timeline event id: {}", self.0))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid timeline event id: {}", self.0),
+            )
         })?;
         raw.parse::<i64>().map_err(|err| {
-            TalosError::ValidationError(format!("invalid timeline event id {}: {}", self.0, err))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid timeline event id {}: {}", self.0, err),
+            )
         })
     }
 }
@@ -91,22 +97,20 @@ pub trait TimelineEventStore: Send + Sync {
 pub(crate) fn parse_event_row(row: &Row) -> TalosResult<AgentEvent> {
     let event_seq = row
         .get_i64("event_seq")
-        .ok_or_else(|| TalosError::SerializationError("timeline event missing event_seq".into()))?;
+        .ok_or_else(|| TalosError::internal("timeline event missing event_seq"))?;
     let event_type = row
         .get_string("event_type")
-        .ok_or_else(|| TalosError::SerializationError("timeline event missing event_type".into()))
+        .ok_or_else(|| TalosError::internal("timeline event missing event_type"))
         .and_then(|raw| {
-            serde_json::from_str::<AgentEventType>(&format!("\"{raw}\"")).map_err(|err| {
-                TalosError::SerializationError(format!("parse agent event type: {}", err))
-            })
+            serde_json::from_str::<AgentEventType>(&format!("\"{raw}\""))
+                .map_err(|err| TalosError::internal(format!("parse agent event type: {}", err)))
         })?;
     let payload = row
         .get_string("payload_json")
-        .ok_or_else(|| TalosError::SerializationError("timeline event missing payload".into()))
+        .ok_or_else(|| TalosError::internal("timeline event missing payload"))
         .and_then(|raw| {
-            serde_json::from_str::<AgentEventPayload>(&raw).map_err(|err| {
-                TalosError::SerializationError(format!("parse agent event payload: {}", err))
-            })
+            serde_json::from_str::<AgentEventPayload>(&raw)
+                .map_err(|err| TalosError::internal(format!("parse agent event payload: {}", err)))
         })?;
     let sequence = row
         .get_i64("sequence")
@@ -130,12 +134,12 @@ pub(crate) fn parse_event_row(row: &Row) -> TalosResult<AgentEvent> {
 impl TimelineEventStore for DatabaseSessionStore {
     async fn append_event(&self, event: AgentEvent) -> TalosResult<AgentEvent> {
         let event_type = serde_json::to_value(event.event_type)
-            .map_err(|err| TalosError::SerializationError(err.to_string()))?
+            .map_err(|err| TalosError::internal(err.to_string()))?
             .as_str()
-            .ok_or_else(|| TalosError::SerializationError("event type is not a string".into()))?
+            .ok_or_else(|| TalosError::internal("event type is not a string"))?
             .to_string();
         let payload_json = serde_json::to_string(&event.payload)
-            .map_err(|err| TalosError::SerializationError(err.to_string()))?;
+            .map_err(|err| TalosError::internal(err.to_string()))?;
         let sequence = event.sequence.to_string();
         let created_at_ms = event
             .created_at_ms
@@ -164,7 +168,7 @@ impl TimelineEventStore for DatabaseSessionStore {
             )
             .await?;
         let row = rows.into_iter().next().ok_or_else(|| {
-            TalosError::StorageError("append timeline event returned no row".to_string())
+            TalosError::internal("append timeline event returned no row".to_string())
         })?;
         parse_event_row(&row)
     }

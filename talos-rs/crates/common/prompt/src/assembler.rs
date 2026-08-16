@@ -6,11 +6,14 @@ use crate::{
     PromptWindowUsage, RequestContextInjection, WorkspaceBootstrapFile,
 };
 use chrono::Utc;
-use std::path::Path;
-use std::process::Command;
 use talos_config::parse_timezone;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_skills::{SkillPromptContext, SkillPromptInjection};
+
+#[path = "assembler/git_repository_state.rs"]
+mod git_repository_state;
+
+use git_repository_state::inspect_git_repository_state;
 
 fn section(kind: PromptSectionKind, payload: impl Into<String>) -> PromptSection {
     PromptSection {
@@ -447,15 +450,15 @@ fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> 
 
     if let Some(project_root) = builder.project_root.as_ref() {
         lines.push(format!("- project_root: {}", project_root.display()));
-        if let Some(git_context) = inspect_git_context(project_root) {
-            lines.push(format!("- git_branch: {}", git_context.branch));
+        if let Some(repository_state) = inspect_git_repository_state(project_root) {
+            lines.push(format!("- git_branch: {}", repository_state.branch));
             lines.push(format!(
                 "- git_status_summary: {}",
-                git_context.status_summary
+                repository_state.status_summary
             ));
             lines.push(format!(
                 "- has_uncommitted_changes: {}",
-                git_context.has_uncommitted_changes
+                repository_state.has_uncommitted_changes
             ));
         }
     }
@@ -507,61 +510,6 @@ fn build_appended_system_context(builder: &PromptBuilder<'_>) -> Option<String> 
         "[AppendedSystemContext]\nSystem runtime context for the current request:\n{}",
         lines.join("\n")
     ))
-}
-
-struct GitContext {
-    branch: String,
-    status_summary: String,
-    has_uncommitted_changes: bool,
-}
-
-fn inspect_git_context(project_root: &Path) -> Option<GitContext> {
-    let branch = git_stdout(
-        project_root,
-        &["symbolic-ref", "--quiet", "--short", "HEAD"],
-    )
-    .or_else(|| git_stdout(project_root, &["rev-parse", "--abbrev-ref", "HEAD"]))?;
-
-    let status_output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(["status", "--short"])
-        .output()
-        .ok()?;
-    if !status_output.status.success() {
-        return None;
-    }
-
-    let entries = String::from_utf8_lossy(&status_output.stdout)
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .count();
-    let has_uncommitted_changes = entries > 0;
-    let status_summary = if has_uncommitted_changes {
-        format!("modified {} file(s)", entries)
-    } else {
-        "clean".to_string()
-    };
-
-    Some(GitContext {
-        branch,
-        status_summary,
-        has_uncommitted_changes,
-    })
-}
-
-fn git_stdout(project_root: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(project_root)
-        .args(args)
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!value.is_empty()).then_some(value)
 }
 
 fn build_prepended_user_context_message(builder: &PromptBuilder<'_>) -> TalosResult<String> {
@@ -620,10 +568,13 @@ fn build_static_prefix_sections(
                     .map(|content| content.chars().count())
                     .unwrap_or(0);
                 if raw_chars > talos_types::MEMORY_FILE_MAX_CHARS {
-                    return Err(TalosError::ValidationError(format!(
-                        "MEMORY.md exceeds the {} character limit",
-                        talos_types::MEMORY_FILE_MAX_CHARS
-                    )));
+                    return Err(TalosError::public(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "MEMORY.md exceeds the {} character limit",
+                            talos_types::MEMORY_FILE_MAX_CHARS
+                        ),
+                    ));
                 }
                 talos_types::MEMORY_FILE_MAX_CHARS
             } else {
@@ -812,12 +763,12 @@ fn build_cache_state(
 ) -> PromptCacheState {
     let static_parts = static_prefix_sections
         .iter()
-        .map(|section| render_plain_section(section))
+        .map(render_plain_section)
         .collect::<Vec<_>>();
     let bootstrap_parts = static_prefix_sections
         .iter()
         .filter(|section| section.kind.stable_bootstrap_kind().is_some())
-        .map(|section| render_plain_section(section))
+        .map(render_plain_section)
         .collect::<Vec<_>>();
     let tool_catalog_fingerprint = dynamic_suffix_sections
         .iter()
@@ -881,7 +832,10 @@ fn build_diagnostics(
 
 pub(crate) async fn assemble(builder: &PromptBuilder<'_>) -> TalosResult<PromptAssembly> {
     let user_input = builder.user_input.clone().ok_or_else(|| {
-        TalosError::ValidationError("PromptBuilder requires user input".to_string())
+        TalosError::public(
+            ErrorCode::InvalidRequest,
+            "PromptBuilder requires user input".to_string(),
+        )
     })?;
 
     let mut bootstrap_files = builder.load_workspace_bootstrap_files().await?;

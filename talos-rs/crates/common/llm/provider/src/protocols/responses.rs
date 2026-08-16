@@ -348,7 +348,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{provider_name} responses stream invalid SSE JSON: {error}"
                                     ))))
                                     .await;
@@ -358,7 +358,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
 
                         if let Some(error) = stream_error(&event) {
                             let _ = tx
-                                .send(Err(TalosError::InternalError(format!(
+                                .send(Err(TalosError::internal(format!(
                                     "{provider_name} responses stream error: {error}"
                                 ))))
                                 .await;
@@ -397,9 +397,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }
@@ -464,7 +462,7 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::InternalError(format!(
+                                    .send(Err(TalosError::internal(format!(
                                         "{} responses model block stream invalid SSE JSON: {error}",
                                         options.provider_name
                                     ))))
@@ -475,7 +473,7 @@ pub fn model_blocks(
 
                         if let Some(error) = stream_error(&event) {
                             let _ = tx
-                                .send(Err(TalosError::InternalError(format!(
+                                .send(Err(TalosError::internal(format!(
                                     "{} responses stream error: {error}",
                                     options.provider_name
                                 ))))
@@ -574,9 +572,7 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::InternalError(format!(
-                            "Stream error: {error}"
-                        ))))
+                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
                         .await;
                     return;
                 }

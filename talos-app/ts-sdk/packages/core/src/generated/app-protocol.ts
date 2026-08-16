@@ -4,7 +4,18 @@ export type ProtocolVersion = { major: number, minor: number, };
 
 export type RequestId = string | number;
 
-export type AppServerErrorBody = { code: number, message: string, };
+export type AppServerErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002;
+export const AppServerErrorCode = {
+  ParseError: -32700,
+  InvalidRequest: -32600,
+  MethodNotFound: -32601,
+  InvalidParams: -32602,
+  InternalError: -32603,
+  NotInitialized: -32001,
+  AlreadyInitialized: -32002,
+} as const satisfies Record<string, AppServerErrorCode>;
+
+export type AppServerErrorBody = { code: AppServerErrorCode, message: string, };
 
 export type ClientMethod = "initialize" | "profile/read" | "session.list" | "session.get" | "session.patch" | "session.delete" | "session.close" | "session.compact" | "session.clear" | "session.active_turn" | "session.history" | "timeline.recover" | "project.create" | "project.list" | "project.read" | "project.patch" | "project.delete" | "fs.directory.read" | "fs.directory.create" | "turn.start" | "turn.interrupt" | "turn.retry" | "event.subscribe" | "event.unsubscribe" | "tool.dynamic_result.submit" | "userAction/submit" | "model.list" | "config.get" | "config.update" | "config.delete" | "config.reload" | "file/upload" | "file/list" | "file/read" | "file/update" | "file/delete" | "memory.file.list" | "memory.file.read" | "memory.file.write" | "workspace.doc.list" | "workspace.doc.read" | "workspace.doc.write" | "workspace.info" | "skills.list" | "skills.refresh" | "skills.suggest" | "skills.read" | "skills.resolve" | "plugin.source.list" | "plugin.source.add" | "plugin.source.refresh" | "plugin.source.remove" | "plugin.search" | "plugin.list" | "plugin.read" | "plugin.install" | "plugin.update" | "plugin.uninstall" | "plugin.enable" | "plugin.disable" | "auth.logout" | "auth.login.start" | "auth.login.status" | "auth.login.cancel" | "auth.session.read" | "auth.session.clear" | "user.current" | "memory/search" | "memory/get";
 
@@ -296,13 +307,23 @@ export type ModelInputKind = "text" | "image" | "audio" | "video" | "file";
 
 export type ModelCostConfig = { input: number, output: number, cache_read: number, cache_write: number, };
 
-export type ConfigGetRequest = { path?: string, };
+export type WebSearchToolConfig = { provider: WebSearchProviderConfig, firecrawl: WebSearchProviderRuntimeConfig, brave: WebSearchProviderRuntimeConfig, tavily: WebSearchProviderRuntimeConfig, };
 
-export type ConfigGetResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
+export type WebSearchProviderConfig = "firecrawl" | "brave" | "tavily";
 
-export type ConfigUpdateRequest = { path: string, value: ConfigValue, };
+export type WebSearchProviderRuntimeConfig = { api_key?: string, base_url?: string, timeout_ms: number, };
 
-export type ConfigUpdateResponse = { config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, };
+export type ConfigPath = "llm" | "webSearch";
+
+export type ConfigGetRequest = { path: ConfigPath, };
+
+export type ConfigUpdateRequest = { value: ConfigValue, };
+
+export type ConfigResponse = { "type": "llm", config: LlmConfig, model_readiness: ModelReadiness, provider_keys: { [key in string]?: ProviderKeyStatus }, provider_capabilities: { [key in string]?: ProviderProtocolCapabilities }, } | { "type": "webSearch", config: WebSearchToolConfig, };
+
+export type ConfigGetResponse = ConfigResponse;
+
+export type ConfigUpdateResponse = ConfigResponse;
 
 export type ConfigDeleteRequest = { path: string, };
 
@@ -312,7 +333,7 @@ export type ConfigReloadRequest = Record<string, never>;
 
 export type ConfigReloadResponse = { success: boolean, };
 
-export type ConfigValue = { "type": "llm", "value": LlmConfig };
+export type ConfigValue = { "type": "llm", "value": LlmConfig } | { "type": "webSearch", "value": WebSearchToolConfig };
 
 export type ModelReadiness = { ready: boolean, provider: string, model: string, issues: Array<string>, };
 
@@ -692,11 +713,53 @@ export type TalosTurnMetricsEvent = { request_id: string, turn_id: string, metri
 
 export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TokenUsage, metrics: TurnExecutionMetrics | null, };
 
-export type TalosRunErrorCode = "context_window_exceeded" | "session_budget_exceeded" | "usage_limit_exceeded" | "context_compaction_failed" | "provider_unavailable" | "permission_denied" | "tool_failure" | "file_input_rejected" | "internal_error";
+export type ErrorCode = "invalidRequest" | "invalidRetryRequest" | "unauthenticated" | "permissionDenied" | "resourceNotFound" | "sessionNotFound" | "resourceExpired" | "conflict" | "activeTurnRunning" | "retrySourceCompleted" | "retrySourceMismatch" | "idempotencyConflict" | "invalidCursor" | "eventCursorExpired" | "fsDisabled" | "invalidPath" | "pathOutsideRoot" | "symlinkNotSupported" | "pathNotFound" | "notDirectory" | "invalidName" | "alreadyExists" | "uploadTooLarge" | "unsupportedMediaType" | "attachmentLimitExceeded" | "unsupportedAttachment" | "fileInputRejected" | "contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "contextCompactionFailed" | "providerUnavailable" | "toolExecutionFailed" | "timeout" | "cancelled" | "serviceUnavailable" | "internalError";
 
-export type TalosRunErrorInfo = { code: TalosRunErrorCode, message: string, };
+export const ErrorCode = {
+  InvalidRequest: "invalidRequest",
+  InvalidRetryRequest: "invalidRetryRequest",
+  Unauthenticated: "unauthenticated",
+  PermissionDenied: "permissionDenied",
+  ResourceNotFound: "resourceNotFound",
+  SessionNotFound: "sessionNotFound",
+  ResourceExpired: "resourceExpired",
+  Conflict: "conflict",
+  ActiveTurnRunning: "activeTurnRunning",
+  RetrySourceCompleted: "retrySourceCompleted",
+  RetrySourceMismatch: "retrySourceMismatch",
+  IdempotencyConflict: "idempotencyConflict",
+  InvalidCursor: "invalidCursor",
+  EventCursorExpired: "eventCursorExpired",
+  FsDisabled: "fsDisabled",
+  InvalidPath: "invalidPath",
+  PathOutsideRoot: "pathOutsideRoot",
+  SymlinkNotSupported: "symlinkNotSupported",
+  PathNotFound: "pathNotFound",
+  NotDirectory: "notDirectory",
+  InvalidName: "invalidName",
+  AlreadyExists: "alreadyExists",
+  UploadTooLarge: "uploadTooLarge",
+  UnsupportedMediaType: "unsupportedMediaType",
+  AttachmentLimitExceeded: "attachmentLimitExceeded",
+  UnsupportedAttachment: "unsupportedAttachment",
+  FileInputRejected: "fileInputRejected",
+  ContextWindowExceeded: "contextWindowExceeded",
+  SessionBudgetExceeded: "sessionBudgetExceeded",
+  UsageLimitExceeded: "usageLimitExceeded",
+  ContextCompactionFailed: "contextCompactionFailed",
+  ProviderUnavailable: "providerUnavailable",
+  ToolExecutionFailed: "toolExecutionFailed",
+  Timeout: "timeout",
+  Cancelled: "cancelled",
+  ServiceUnavailable: "serviceUnavailable",
+  InternalError: "internalError",
+} as const satisfies Record<string, ErrorCode>;
 
-export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: string, error_info: TalosRunErrorInfo | null, failed_at_ms: number, };
+export type ApiError = { code: ErrorCode, message: string, };
+
+export type ApiResponse<T> = { "status": "success", data: T, } | { "status": "error", error: ApiError, };
+
+export type TalosTurnErrorEvent = { request_id: string, turn_id: string, error: ApiError, failed_at_ms: number, };
 
 export type AgentPath = string;
 

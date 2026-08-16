@@ -23,7 +23,8 @@ impl AgentHarnessImpl {
     fn session_model(session: &TalosSession) -> TalosResult<String> {
         let model = session.config.llm.model.trim();
         if model.is_empty() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "session llm model is required".to_string(),
             ));
         }
@@ -73,26 +74,33 @@ impl AgentHarnessImpl {
         }
 
         let Some(request_timestamp) = latest_request_timestamp else {
-            return Err(talos_error::TalosError::ToolError(format!(
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
                 "user action call `{call_id}` is not pending for session `{session_id}` turn `{turn_id}`"
-            )));
+                ),
+            ));
         };
 
         if latest_request_tool_name.as_deref() != Some(tool_name) {
-            return Err(talos_error::TalosError::ToolError(format!(
-                "user action call `{call_id}` belongs to `{}` not `{tool_name}`",
-                latest_request_tool_name.unwrap_or_else(|| "unknown".to_string())
-            )));
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!(
+                    "user action call `{call_id}` belongs to `{}` not `{tool_name}`",
+                    latest_request_tool_name.unwrap_or_else(|| "unknown".to_string())
+                ),
+            ));
         }
 
         if latest_response_timestamp.is_some_and(|ts| ts > request_timestamp) {
-            return Err(talos_error::TalosError::ToolError(format!(
-                "user action call `{call_id}` has already been resolved"
-            )));
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("user action call `{call_id}` has already been resolved"),
+            ));
         }
 
         let params = latest_request_params.ok_or_else(|| {
-            TalosError::ValidationError(format!(
+            TalosError::internal(format!(
                 "user action call `{call_id}` is missing typed parameters"
             ))
         })?;
@@ -110,9 +118,10 @@ impl AgentHarnessImpl {
             )
         );
         if !variants_match {
-            return Err(TalosError::ValidationError(format!(
-                "user action call `{call_id}` received a mismatched response"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("user action call `{call_id}` received a mismatched response"),
+            ));
         }
 
         let timeout_ms = kernel_config.tools.dynamic.response_timeout_ms;
@@ -122,9 +131,10 @@ impl AgentHarnessImpl {
                 .num_milliseconds()
                 .max(0) as u64;
             if elapsed_ms >= timeout_ms {
-                return Err(talos_error::TalosError::Timeout(format!(
-                    "dynamic tool call `{call_id}` timed out after {timeout_ms} ms"
-                )));
+                return Err(talos_error::TalosError::public(
+                    talos_error::ErrorCode::Timeout,
+                    format!("dynamic tool call `{call_id}` timed out after {timeout_ms} ms"),
+                ));
             }
         }
 
@@ -201,7 +211,8 @@ impl AgentHarnessImpl {
             let (start_tx, start_rx) = tokio::sync::oneshot::channel();
             let task = tokio::spawn(async move {
                 start_rx.await.map_err(|_| {
-                    TalosError::Cancelled(
+                    TalosError::public(
+                        talos_error::ErrorCode::Cancelled,
                         "session context compaction was cancelled before start".to_string(),
                     )
                 })?;
@@ -226,7 +237,7 @@ impl AgentHarnessImpl {
                         key: SESSION_COMPACTION_STATE_KEY.to_string(),
                         value: serde_json::to_value(SessionCompactionState::recovery())
                             .map_err(|error| {
-                                TalosError::SerializationError(format!(
+                                TalosError::internal(format!(
                                     "serialize session compaction recovery state: {error}"
                                 ))
                             })?
@@ -281,7 +292,7 @@ impl AgentHarnessImpl {
                 let item_id = match &started.payload {
                     AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
                     _ => {
-                        return Err(TalosError::InternalError(
+                        return Err(TalosError::internal(
                             "context compaction did not create a timeline item".to_string(),
                         ));
                     }
@@ -342,25 +353,60 @@ impl AgentHarnessImpl {
                         ),
                     )
                     .await?;
-                    return Err(TalosError::Cancelled(
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::Cancelled,
                         "session context compaction was cancelled".to_string(),
                     ));
                 }
-                Err(error) => Err(TalosError::InternalError(format!(
+                Err(error) => Err(TalosError::internal(format!(
                     "session context compaction task failed: {error}"
                 ))),
             };
             let report = match report {
                 Ok(report) => report,
                 Err(error) => {
-                    let outcome = match &error {
-                        TalosError::NetworkError(_)
-                        | TalosError::RuntimeUnavailable(_)
-                        | TalosError::TransportUnavailable(_)
-                        | TalosError::UnsupportedModel(_)
-                        | TalosError::Timeout(_)
-                        | TalosError::ToolError(_) => ContextCompactionOutcome::FailedProviderError,
-                        _ => ContextCompactionOutcome::FailedInternalError,
+                    let outcome = match error.error_code() {
+                        talos_error::ErrorCode::ServiceUnavailable
+                        | talos_error::ErrorCode::ProviderUnavailable
+                        | talos_error::ErrorCode::Timeout
+                        | talos_error::ErrorCode::ToolExecutionFailed => {
+                            ContextCompactionOutcome::FailedProviderError
+                        }
+                        talos_error::ErrorCode::InvalidRequest
+                        | talos_error::ErrorCode::InvalidRetryRequest
+                        | talos_error::ErrorCode::Unauthenticated
+                        | talos_error::ErrorCode::PermissionDenied
+                        | talos_error::ErrorCode::ResourceNotFound
+                        | talos_error::ErrorCode::SessionNotFound
+                        | talos_error::ErrorCode::ResourceExpired
+                        | talos_error::ErrorCode::Conflict
+                        | talos_error::ErrorCode::ActiveTurnRunning
+                        | talos_error::ErrorCode::RetrySourceCompleted
+                        | talos_error::ErrorCode::RetrySourceMismatch
+                        | talos_error::ErrorCode::IdempotencyConflict
+                        | talos_error::ErrorCode::InvalidCursor
+                        | talos_error::ErrorCode::EventCursorExpired
+                        | talos_error::ErrorCode::FsDisabled
+                        | talos_error::ErrorCode::InvalidPath
+                        | talos_error::ErrorCode::PathOutsideRoot
+                        | talos_error::ErrorCode::SymlinkNotSupported
+                        | talos_error::ErrorCode::PathNotFound
+                        | talos_error::ErrorCode::NotDirectory
+                        | talos_error::ErrorCode::InvalidName
+                        | talos_error::ErrorCode::AlreadyExists
+                        | talos_error::ErrorCode::UploadTooLarge
+                        | talos_error::ErrorCode::UnsupportedMediaType
+                        | talos_error::ErrorCode::AttachmentLimitExceeded
+                        | talos_error::ErrorCode::UnsupportedAttachment
+                        | talos_error::ErrorCode::FileInputRejected
+                        | talos_error::ErrorCode::ContextWindowExceeded
+                        | talos_error::ErrorCode::SessionBudgetExceeded
+                        | talos_error::ErrorCode::UsageLimitExceeded
+                        | talos_error::ErrorCode::ContextCompactionFailed
+                        | talos_error::ErrorCode::Cancelled
+                        | talos_error::ErrorCode::InternalError => {
+                            ContextCompactionOutcome::FailedInternalError
+                        }
                     };
                     let message = error.to_string();
                     let failed_content = TalosTimelineContent::ContextCompaction {
@@ -477,7 +523,9 @@ impl AgentHarnessImpl {
                 .session_store
                 .get_session_record(&session_id)
                 .await?
-                .ok_or_else(|| TalosError::ResourceNotFound(session_id.clone()))?;
+                .ok_or_else(|| {
+                    TalosError::public(talos_error::ErrorCode::ResourceNotFound, session_id.clone())
+                })?;
             if latest_seq > session_record.memory_processed_until_seq {
                 self.session_store
                     .advance_memory_processed_until_seq(
@@ -509,6 +557,6 @@ async fn send_compaction_event(
     event: AgentEvent,
 ) -> TalosResult<()> {
     event_tx.send(event).await.map_err(|_| {
-        TalosError::InternalError("session compaction event receiver was closed".to_string())
+        TalosError::internal("session compaction event receiver was closed".to_string())
     })
 }

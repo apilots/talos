@@ -1517,7 +1517,7 @@ async fn test_submit_dynamic_tool_result_rejects_replay() {
     )
     .await
     .expect_err("second submission should be rejected");
-    assert_eq!(error.kind, crate::AgentErrorKind::InputRejected);
+    assert_eq!(error.kind, crate::AgentErrorKind::RunConflict);
     assert!(error.to_string().contains("already been resolved"));
 }
 
@@ -1634,7 +1634,7 @@ async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_resp
         .await
         .expect_err("wrong turn id should be rejected");
 
-    assert_eq!(error.kind, crate::AgentErrorKind::InputRejected);
+    assert_eq!(error.kind, crate::AgentErrorKind::RunConflict);
     assert!(error.to_string().contains("turn-other"));
 
     let records = load_transcript_records(
@@ -1759,7 +1759,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
         .expect("wrong-turn resume should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("turn-other"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InvalidRequest);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -1806,7 +1806,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         .expect("missing tool call should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("missing pending tool call"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InvalidRequest);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -1925,7 +1925,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
         .expect("missing request should emit an error event");
     match event.payload {
         AgentEventPayload::TurnError(payload) => {
-            assert!(payload.error.contains("no pending request"));
+            assert_eq!(payload.error.code, talos_error::ErrorCode::InternalError);
         }
         other => panic!("expected TurnError, got {other:?}"),
     }
@@ -2367,9 +2367,7 @@ impl LlmProvider for FailingTitleLlmProvider {
     }
 
     async fn chat(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatResponse> {
-        Err(TalosError::InternalError(
-            "title provider unavailable".to_string(),
-        ))
+        Err(TalosError::internal("title provider unavailable"))
     }
 
     async fn stream(&self, _request: ChatRequest) -> talos_error::TalosResult<ChatStream> {

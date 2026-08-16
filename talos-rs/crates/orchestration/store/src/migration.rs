@@ -11,7 +11,7 @@ pub async fn run_migrations(pool: &SqlitePool, migration_dir: &Path) -> TalosRes
     let migrator = sqlx::migrate::Migrator::new(migration_dir)
         .await
         .map_err(|error| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "load store migrations from {}: {error}",
                 migration_dir.display()
             ))
@@ -19,7 +19,7 @@ pub async fn run_migrations(pool: &SqlitePool, migration_dir: &Path) -> TalosRes
     migrator
         .run(pool)
         .await
-        .map_err(|error| TalosError::StorageError(format!("apply store migrations: {error}")))
+        .map_err(|error| TalosError::internal(format!("apply store migrations: {error}")))
 }
 
 #[cfg(test)]

@@ -1,0 +1,36 @@
+export const settingsResources = {
+  en: {
+    webSearchPanel: {
+      title: "Web Search",
+      detail: "Configure search providers used by the web_search tool.",
+      loading: "Loading web search configuration…",
+      saving: "Saving…",
+      saveChanges: "Save Changes",
+      unsavedChanges: "You have unsaved changes",
+      activeProvider: "Active Provider",
+      apiKey: "API Key",
+      clearApiKey: "Clear",
+      baseUrl: "Base URL",
+      timeout: "Timeout",
+      milliseconds: "ms",
+      nextTurn: "Changes apply to new turns.",
+    },
+  },
+  zh: {
+    webSearchPanel: {
+      title: "Web Search",
+      detail: "配置 web_search 工具使用的搜索 Provider。",
+      loading: "正在加载 Web Search 配置…",
+      saving: "保存中…",
+      saveChanges: "保存更改",
+      unsavedChanges: "有未保存的更改",
+      activeProvider: "当前 Provider",
+      apiKey: "API Key",
+      clearApiKey: "清除",
+      baseUrl: "Base URL",
+      timeout: "Timeout",
+      milliseconds: "ms",
+      nextTurn: "更改会从新 Turn 生效。",
+    },
+  },
+} as const;

@@ -37,7 +37,7 @@ impl CoordinatorImpl {
             let remaining = deadline
                 .checked_duration_since(std::time::Instant::now())
                 .ok_or_else(|| {
-                    TalosError::InternalError(
+                    TalosError::internal(
                         "drain_active_turns timed out before all agents were drained".to_string(),
                     )
                 })?;

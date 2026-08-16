@@ -31,21 +31,19 @@ fn assert_tool_failure(
     expected_gate_source: &str,
     expected_fragment: &str,
 ) {
-    match error {
-        TalosError::ToolFailure {
-            kind,
-            message,
-            gate_source,
-        } => {
-            assert_eq!(kind, expected_kind);
-            assert_eq!(gate_source.as_deref(), Some(expected_gate_source));
-            assert!(
-                message.contains(expected_fragment),
-                "missing expected fragment '{expected_fragment}': {message}"
-            );
-        }
-        other => panic!("expected ToolFailure, got {other:?}"),
-    }
+    let diagnostic = error
+        .tool_failure_diagnostic()
+        .expect("expected tool failure diagnostic");
+    assert_eq!(diagnostic.kind, expected_kind);
+    assert_eq!(
+        diagnostic.gate_source.as_deref(),
+        Some(expected_gate_source)
+    );
+    let message = error.diagnostic_message();
+    assert!(
+        message.contains(expected_fragment),
+        "missing expected fragment '{expected_fragment}': {message}"
+    );
 }
 
 fn test_kernel_config_with_output_limit(limit: usize) -> Arc<AgentKernelConfig> {
@@ -120,7 +118,8 @@ impl Tool for ValidationGateTool {
     }
 
     fn validate_input(&self, _input: &Value) -> TalosResult<()> {
-        Err(TalosError::ValidationError(
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "validation gate rejected input".to_string(),
         ))
     }
@@ -146,7 +145,7 @@ impl Tool for PermissionGateTool {
     }
 
     fn check_permissions(&self, _input: &Value, _context: &ToolContext) -> TalosResult<()> {
-        Err(TalosError::AuthorizationDenied)
+        Err(TalosError::authorization_denied())
     }
 
     async fn execute_payload(
@@ -912,7 +911,7 @@ async fn test_default_registry_allows_memory_search() {
         .await
         .expect_err("MemorySearch should fail without injected memory store");
 
-    assert!(matches!(error, talos_error::TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
 }
 
 #[test]

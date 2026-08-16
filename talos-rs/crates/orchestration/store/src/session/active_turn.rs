@@ -66,7 +66,7 @@ fn parse_status(raw: &str) -> TalosResult<ActiveTurnStatus> {
         "cancelling" => Ok(ActiveTurnStatus::Cancelling),
         "completed" => Ok(ActiveTurnStatus::Completed),
         "failed" => Ok(ActiveTurnStatus::Failed),
-        _ => Err(TalosError::SerializationError(format!(
+        _ => Err(TalosError::internal(format!(
             "unknown active turn status: {raw}"
         ))),
     }
@@ -79,11 +79,7 @@ fn current_action_id(
     match status {
         ActiveTurnStatus::WaitingUserAction => current_action_id
             .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| {
-                TalosError::ValidationError(
-                    "waiting_user_action requires current_action_id".to_string(),
-                )
-            })
+            .ok_or_else(|| TalosError::internal("waiting_user_action requires current_action_id"))
             .map(Some),
         ActiveTurnStatus::Running
         | ActiveTurnStatus::Cancelling

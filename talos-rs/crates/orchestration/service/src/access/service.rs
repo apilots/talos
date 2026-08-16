@@ -54,13 +54,14 @@ impl ResourceAccessService {
     ) -> TalosResult<TalosSession> {
         match self.get_session(actor, &params.session_id).await {
             Ok(session) => return Ok(session),
-            Err(TalosError::ResourceNotFound(_)) => {}
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {}
             Err(error) => return Err(error),
         }
 
         let mut context = params.context;
         if context.project_root.is_some() {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "context.project_root is not supported".to_string(),
             ));
         }
@@ -118,14 +119,20 @@ impl ResourceAccessService {
             .sessions
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("session {session_id}"),
+                )
+            })?;
         if matches!(
             record.tree_identity,
             talos_store::session::SessionTreeIdentity::Subagent { .. }
         ) {
-            return Err(TalosError::ValidationError(format!(
-                "session '{session_id}' is controlled by its parent agent"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("session '{session_id}' is controlled by its parent agent"),
+            ));
         }
         Ok(session)
     }
@@ -142,10 +149,10 @@ impl ResourceAccessService {
         }
         let ack = self.sessions.patch_session(session_id, patch).await?;
         if !ack.success {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         }
         self.invalidate_cached_session(session_id).await?;
         Ok(ack)
@@ -182,10 +189,10 @@ impl ResourceAccessService {
         self.clear_runtime_session(session).await?;
         let ack = self.sessions.reset_session(session_id).await?;
         if !ack.success {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         }
         self.invalidate_cached_session(session_id).await?;
         self.get_session(actor, session_id).await
@@ -205,10 +212,10 @@ impl ResourceAccessService {
         self.prepare_runtime_delete_session(session).await?;
         let ack = self.sessions.delete_session(session_id).await?;
         if !ack.success {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         }
         self.invalidate_cached_session(session_id).await?;
         Ok(ack)
@@ -222,10 +229,10 @@ impl ResourceAccessService {
         let _session = self.get_session(actor, session_id).await?;
         let ack = self.sessions.delete_session(session_id).await?;
         if !ack.success {
-            return Err(TalosError::ResourceNotFound(format!(
-                "session {}",
-                session_id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            ));
         }
         self.invalidate_cached_session(session_id).await?;
         Ok(ack)
@@ -242,7 +249,12 @@ impl ResourceAccessService {
             .sessions
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("session {session_id}"),
+                )
+            })?;
         self.cancel_runtime_turn(CancelActiveTurnParams {
             binding: talos_types::agent_dispatch::DispatchBinding::Exact {
                 agent_id: record.agent_id,
@@ -290,7 +302,12 @@ impl ResourceAccessService {
             .projects
             .patch_project(project_id, patch)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("project {}", project_id),
+                )
+            })?;
         self.invalidate_project_sessions(project_id).await?;
         Ok(project)
     }
@@ -319,20 +336,20 @@ impl ResourceAccessService {
         if session.user_id == actor.user_id {
             return Ok(());
         }
-        Err(TalosError::ResourceNotFound(format!(
-            "session {}",
-            session.context.session_id
-        )))
+        Err(TalosError::public(
+            talos_error::ErrorCode::ResourceNotFound,
+            format!("session {}", session.context.session_id),
+        ))
     }
 
     fn ensure_project_visibility(&self, actor: &Actor, project: &ProjectRecord) -> TalosResult<()> {
         if project.user_id == actor.user_id {
             return Ok(());
         }
-        Err(TalosError::ResourceNotFound(format!(
-            "project {}",
-            project.project_id
-        )))
+        Err(TalosError::public(
+            talos_error::ErrorCode::ResourceNotFound,
+            format!("project {}", project.project_id),
+        ))
     }
 
     async fn ensure_project_access(
@@ -346,17 +363,21 @@ impl ResourceAccessService {
     }
 
     async fn get_session_record(&self, session_id: &str) -> TalosResult<TalosSession> {
-        self.sessions
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {}", session_id)))
+        self.sessions.get_session(session_id).await?.ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("session {}", session_id),
+            )
+        })
     }
 
     async fn get_project_record(&self, project_id: &str) -> TalosResult<ProjectRecord> {
-        self.projects
-            .get_project(project_id)
-            .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("project {}", project_id)))
+        self.projects.get_project(project_id).await?.ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("project {}", project_id),
+            )
+        })
     }
 
     async fn invalidate_project_sessions(&self, project_id: &str) -> TalosResult<()> {

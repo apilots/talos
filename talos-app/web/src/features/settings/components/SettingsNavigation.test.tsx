@@ -42,7 +42,7 @@ describe("SettingsNavigation", () => {
 
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canOpenAccount />
+        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount />
       </MemoryRouter>,
     );
 
@@ -61,7 +61,7 @@ describe("SettingsNavigation", () => {
   it("keeps the account entry disabled for open mode", () => {
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canOpenAccount={false} />
+        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount={false} />
       </MemoryRouter>,
     );
 
@@ -81,7 +81,7 @@ describe("SettingsNavigation", () => {
 
     render(
       <MemoryRouter>
-        <SettingsNavigation activeSection="profile" canOpenAccount />
+        <SettingsNavigation activeSection="profile" canManageConfig canOpenAccount />
       </MemoryRouter>,
     );
 
@@ -92,5 +92,16 @@ describe("SettingsNavigation", () => {
     );
     expect(closePreparedExternalWindowMock).toHaveBeenCalledWith(preparedWindow);
     expect(redirectToExternalUrlMock).not.toHaveBeenCalled();
+  });
+
+  it("hides config management entries for regular users", () => {
+    render(
+      <MemoryRouter>
+        <SettingsNavigation activeSection="profile" canManageConfig={false} canOpenAccount />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole("link", { name: "Models" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Web Search" })).toBeNull();
   });
 });

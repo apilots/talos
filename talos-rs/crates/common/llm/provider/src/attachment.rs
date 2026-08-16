@@ -78,13 +78,13 @@ pub fn validate_inline_attachments(
             .checked_add(attachment.bytes.len())
             .ok_or_else(|| limit_error("attachment byte count overflow".to_string()))?;
         if !supports_media_type(attachment) {
-            return Err(TalosError::FileError {
-                kind: TalosFileErrorKind::UnsupportedMediaType,
-                message: format!(
+            return Err(TalosError::file_error(
+                TalosFileErrorKind::UnsupportedMediaType,
+                format!(
                     "attachment MIME type {} is unsupported for {:?}",
                     attachment.media_type, attachment.kind
                 ),
-            });
+            ));
         }
         item_tokens.push(MAX_ATTACHMENT_TOKENS);
     }
@@ -102,7 +102,7 @@ pub fn validate_attachment_usage(
     usage: &AttachmentUsage,
 ) -> TalosResult<usize> {
     if usage.item_tokens.len() != attachment_count {
-        return Err(TalosError::InternalError(format!(
+        return Err(TalosError::internal(format!(
             "provider returned {} attachment estimates for {attachment_count} attachments",
             usage.item_tokens.len()
         )));
@@ -112,16 +112,14 @@ pub fn validate_attachment_usage(
         .iter()
         .any(|tokens| *tokens > MAX_ATTACHMENT_TOKENS)
     {
-        return Err(TalosError::ContextWindowExceeded(format!(
-            "one attachment exceeds the {MAX_ATTACHMENT_TOKENS} token input cap"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ContextWindowExceeded,
+            format!("one attachment exceeds the {MAX_ATTACHMENT_TOKENS} token input cap"),
+        ));
     }
     Ok(usage.item_tokens.iter().copied().sum())
 }
 
 fn limit_error(message: String) -> TalosError {
-    TalosError::FileError {
-        kind: TalosFileErrorKind::AttachmentLimitExceeded,
-        message,
-    }
+    TalosError::file_error(TalosFileErrorKind::AttachmentLimitExceeded, message)
 }

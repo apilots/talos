@@ -35,11 +35,14 @@ impl Tool for CustomGuardTool {
     }
 
     fn validate_input(&self, _input: &Value) -> TalosResult<()> {
-        Err(TalosError::ValidationError("input rejected".to_string()))
+        Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "input rejected".to_string(),
+        ))
     }
 
     fn check_permissions(&self, _input: &Value, _context: &ToolContext) -> TalosResult<()> {
-        Err(TalosError::AuthorizationDenied)
+        Err(TalosError::authorization_denied())
     }
 
     async fn execute_payload(
@@ -68,10 +71,10 @@ fn custom_guards_can_override_validation_and_permissions() {
     let context = ToolContext::anonymous();
 
     let validation_error = tool.validate_input(&input).unwrap_err();
-    assert!(matches!(validation_error, TalosError::ValidationError(_)));
+    assert!(validation_error.is_code(talos_error::ErrorCode::InvalidRequest));
 
     let permission_error = tool.check_permissions(&input, &context).unwrap_err();
-    assert!(matches!(permission_error, TalosError::AuthorizationDenied));
+    assert!(permission_error.is_code(talos_error::ErrorCode::PermissionDenied));
 }
 
 #[tokio::test]

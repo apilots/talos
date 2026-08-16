@@ -6,4 +6,5 @@ export { SettingsModelsSection } from "./SettingsModelsSection";
 export { SettingsProfileSection } from "./SettingsProfileSection";
 export { SettingsServerConnectionPanel } from "./SettingsServerConnectionPanel";
 export { SettingsServerSection } from "./SettingsServerSection";
+export { SettingsWebSearchSection } from "./SettingsWebSearchSection";
 export { SettingsNavigation, settingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";

@@ -47,7 +47,12 @@ pub async fn form_daily_session_memory(
     let memory_processed_until_seq = session_store
         .get_session_record(session_id)
         .await?
-        .ok_or_else(|| talos_error::TalosError::ResourceNotFound(session_id.to_string()))?
+        .ok_or_else(|| {
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                session_id.to_string(),
+            )
+        })?
         .memory_processed_until_seq;
     let turn_limit = kernel_config
         .compaction
@@ -114,10 +119,13 @@ pub async fn form_daily_session_memory(
         .get(&coverage.covers_until_seq)
         .copied()
         .ok_or_else(|| {
-            talos_error::TalosError::ValidationError(format!(
-                "missing persisted timestamp for daily memory session seq {}",
-                coverage.covers_until_seq
-            ))
+            talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "missing persisted timestamp for daily memory session seq {}",
+                    coverage.covers_until_seq
+                ),
+            )
         })?;
     let model = kernel_config
         .compaction
@@ -137,10 +145,10 @@ pub async fn form_daily_session_memory(
         .await?;
     let output =
         serde_json::from_str::<DailyMemoryOutput>(response.content.trim()).map_err(|error| {
-            talos_error::TalosError::MemoryError {
-                kind: talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-                message: format!("parse daily memory json for session '{session_id}': {error}"),
-            }
+            talos_error::TalosError::memory_error(
+                talos_error::TalosMemoryErrorKind::SummaryParseFailed,
+                format!("parse daily memory json for session '{session_id}': {error}"),
+            )
         })?;
     validate_memory_candidates(&output.memory_candidates)?;
     memory_writer

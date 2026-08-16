@@ -174,7 +174,7 @@ impl AccountService {
     ) -> TalosResult<std::sync::RwLockReadGuard<'_, CloudSessionServices>> {
         self.cloud_session
             .read()
-            .map_err(|_| TalosError::InternalError("cloud session service lock poisoned".into()))
+            .map_err(|_| TalosError::internal("cloud session service lock poisoned"))
     }
 
     fn cloud_session_write(
@@ -182,7 +182,7 @@ impl AccountService {
     ) -> TalosResult<std::sync::RwLockWriteGuard<'_, CloudSessionServices>> {
         self.cloud_session
             .write()
-            .map_err(|_| TalosError::InternalError("cloud session service lock poisoned".into()))
+            .map_err(|_| TalosError::internal("cloud session service lock poisoned"))
     }
 }
 

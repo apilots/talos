@@ -128,15 +128,16 @@ impl Tool for AskUserQuestionTool {
         let request: AskUserQuestionRequest = decode_tool_input(input, self.name())?;
         let params = question_params(request);
         validate_question(&params)?;
-        let call_id = context.current_call_id().ok_or_else(|| {
-            TalosError::ToolError("AskUserQuestion is missing its tool call id".to_string())
-        })?;
+        let call_id = context
+            .current_call_id()
+            .ok_or_else(|| TalosError::internal("AskUserQuestion is missing its tool call id"))?;
         let response = context.get_user_action_response(call_id).ok_or_else(|| {
-            TalosError::ToolError("AskUserQuestion is missing its accepted answer".to_string())
+            TalosError::internal("AskUserQuestion is missing its accepted answer")
         })?;
         let UserActionResponse::Question(answer) = response else {
-            return Err(TalosError::ValidationError(
-                "AskUserQuestion received a mismatched user action response".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "AskUserQuestion received a mismatched user action response",
             ));
         };
         let result = question_tool_result(&params, answer)?;
@@ -151,9 +152,9 @@ impl Tool for AskUserQuestionTool {
         let request: AskUserQuestionRequest = decode_tool_input(input.clone(), self.name())?;
         let params = question_params(request);
         validate_question(&params)?;
-        let call_id = context.current_call_id().ok_or_else(|| {
-            TalosError::ToolError("AskUserQuestion is missing its tool call id".to_string())
-        })?;
+        let call_id = context
+            .current_call_id()
+            .ok_or_else(|| TalosError::internal("AskUserQuestion is missing its tool call id"))?;
         if context.get_user_action_response(call_id).is_none() {
             return Ok(ToolDispatchOutcome::pending_question(self.name(), params));
         }
@@ -181,13 +182,15 @@ fn question_params(request: AskUserQuestionRequest) -> QuestionParams {
 
 fn validate_question(params: &QuestionParams) -> TalosResult<()> {
     if params.header.trim().is_empty() || params.question.trim().is_empty() {
-        return Err(TalosError::ValidationError(
-            "question header and text cannot be empty".to_string(),
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "question header and text cannot be empty",
         ));
     }
     if !(2..=3).contains(&params.options.len()) {
-        return Err(TalosError::ValidationError(
-            "question options must contain 2 or 3 entries".to_string(),
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "question options must contain 2 or 3 entries",
         ));
     }
     let mut ids = std::collections::BTreeSet::new();
@@ -196,15 +199,16 @@ fn validate_question(params: &QuestionParams) -> TalosResult<()> {
             || option.label.trim().is_empty()
             || option.description.trim().is_empty()
         {
-            return Err(TalosError::ValidationError(
-                "question option id, label, and description cannot be empty".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "question option id, label, and description cannot be empty",
             ));
         }
         if !ids.insert(option.id.as_str()) {
-            return Err(TalosError::ValidationError(format!(
-                "duplicate question option id `{}`",
-                option.id
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("duplicate question option id `{}`", option.id),
+            ));
         }
     }
     Ok(())
@@ -221,9 +225,10 @@ fn question_tool_result(
                 .iter()
                 .find(|option| option.id == option_id)
                 .ok_or_else(|| {
-                    TalosError::ValidationError(format!(
-                        "question option `{option_id}` does not exist"
-                    ))
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("question option `{option_id}` does not exist"),
+                    )
                 })?;
             QuestionToolResultAnswer::SelectedOption {
                 option_id,
@@ -233,13 +238,15 @@ fn question_tool_result(
         QuestionAnswer::FreeForm { text } => {
             let text = text.trim().to_string();
             if text.is_empty() {
-                return Err(TalosError::ValidationError(
-                    "question free-form answer cannot be empty".to_string(),
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "question free-form answer cannot be empty",
                 ));
             }
             if text.len() > 4096 {
-                return Err(TalosError::ValidationError(
-                    "question free-form answer exceeds 4096 bytes".to_string(),
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    "question free-form answer exceeds 4096 bytes",
                 ));
             }
             QuestionToolResultAnswer::FreeForm { text }

@@ -130,13 +130,13 @@ impl TimelineEventService {
                 | UserActionState::ExecutionUnknown
                 | UserActionState::Cancelled
         ) {
-            return Err(talos_error::TalosError::ValidationError(
-                "only a terminal failed user action can finish an active turn".to_string(),
+            return Err(talos_error::TalosError::internal(
+                "only a terminal failed user action can finish an active turn",
             ));
         }
         let item_id = record.action.item_id.clone().ok_or_else(|| {
-            talos_error::TalosError::ValidationError(
-                "recovered user action is missing its timeline item id".to_string(),
+            talos_error::TalosError::internal(
+                "recovered user action is missing its timeline item id",
             )
         })?;
         let previous = self
@@ -179,8 +179,8 @@ impl TimelineEventService {
         };
         let persisted = self.event_store.append_event(event).await?;
         let envelope = TimelineEventEnvelope::from_persisted_event(persisted).ok_or_else(|| {
-            talos_error::TalosError::SerializationError(
-                "persisted terminal user action event is missing envelope metadata".to_string(),
+            talos_error::TalosError::internal(
+                "persisted terminal user action event is missing envelope metadata",
             )
         })?;
         self.active_turn_store
@@ -235,7 +235,7 @@ impl TimelineEventService {
         }
         let record = self.event_store.append_event(event).await?;
         let envelope = TimelineEventEnvelope::from_persisted_event(record).ok_or_else(|| {
-            talos_error::TalosError::SerializationError(
+            talos_error::TalosError::internal(
                 "persisted timeline event is missing envelope metadata".to_string(),
             )
         })?;
@@ -335,8 +335,8 @@ impl TimelineEventService {
         let persisted = self.event_store.append_event(finished_event).await?;
         let finished_envelope =
             TimelineEventEnvelope::from_persisted_event(persisted).ok_or_else(|| {
-                talos_error::TalosError::SerializationError(
-                    "persisted user action event is missing envelope metadata".to_string(),
+                talos_error::TalosError::internal(
+                    "persisted user action event is missing envelope metadata",
                 )
             })?;
         self.active_turn_store

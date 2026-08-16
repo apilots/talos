@@ -55,7 +55,7 @@ pub(crate) fn plugin_from_mcp_manifest(
     let path_in_source = manifest_path
         .parent()
         .ok_or_else(|| {
-            TalosError::InternalError(format!(
+            TalosError::internal(format!(
                 "MCP manifest `{}` has no parent directory",
                 manifest_path.display()
             ))
@@ -75,7 +75,7 @@ pub(crate) fn plugin_from_mcp_manifest(
         license: None,
     };
     let plugin_dir = manifest_path.parent().ok_or_else(|| {
-        TalosError::InternalError(format!(
+        TalosError::internal(format!(
             "MCP manifest `{}` has no parent directory",
             manifest_path.display()
         ))
@@ -121,16 +121,19 @@ pub(crate) fn server_from_installed_mcp_manifest(
 
 fn read_mcp_manifest(manifest_path: &Path) -> TalosResult<McpManifest> {
     let contents = fs::read_to_string(manifest_path).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to read MCP manifest `{}`: {err}",
             manifest_path.display()
         ))
     })?;
     serde_json::from_str(&contents).map_err(|err| {
-        TalosError::ValidationError(format!(
-            "failed to parse MCP manifest `{}`: {err}",
-            manifest_path.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "failed to parse MCP manifest `{}`: {err}",
+                manifest_path.display()
+            ),
+        )
     })
 }
 
@@ -146,7 +149,8 @@ fn transport_from_manifest(
             cwd,
         } => {
             if command.trim().is_empty() {
-                return Err(TalosError::ValidationError(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
                     "MCP stdio command must not be empty".to_string(),
                 ));
             }
@@ -169,21 +173,24 @@ fn transport_from_manifest(
         McpManifestTransport::StreamableHttp { url, headers }
         | McpManifestTransport::Http { url, headers } => {
             if !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(TalosError::ValidationError(format!(
-                    "MCP streamable HTTP URL `{url}` must use http or https"
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
+                    format!("MCP streamable HTTP URL `{url}` must use http or https"),
+                ));
             }
             if headers
                 .keys()
                 .any(|key| key.eq_ignore_ascii_case("authorization"))
             {
-                return Err(TalosError::ValidationError(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::InvalidRequest,
                     "MCP manifest must not contain inline authorization headers".to_string(),
                 ));
             }
             Ok(McpTransportDefinition::StreamableHttp { url, headers })
         }
-        McpManifestTransport::Sse => Err(TalosError::ValidationError(
+        McpManifestTransport::Sse => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "MCP SSE transport is not supported".to_string(),
         )),
     }
@@ -195,9 +202,10 @@ fn validate_mcp_name(name: &str) -> TalosResult<()> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(TalosError::ValidationError(format!(
-            "invalid MCP server name `{name}`"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid MCP server name `{name}`"),
+        ));
     }
     Ok(())
 }

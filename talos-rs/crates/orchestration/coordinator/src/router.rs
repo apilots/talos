@@ -174,9 +174,10 @@ impl AgentRouter {
                 AgentError::new(AgentErrorKind::AgentNotFound, agent_name.to_string())
                     .into_talos_error(),
             ),
-            _ => Err(TalosError::ValidationError(format!(
-                "agent name `{agent_name}` matches multiple registered agents"
-            ))),
+            _ => Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("agent name `{agent_name}` matches multiple registered agents"),
+            )),
         }
     }
 }

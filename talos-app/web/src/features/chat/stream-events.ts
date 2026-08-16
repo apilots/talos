@@ -10,6 +10,7 @@ import {
   type TimelineRecoverySnapshot,
 } from "@talos/sdk-core";
 
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
 import { outputContentToText } from "@/shared/types/domain";
 import type {
@@ -255,7 +256,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEventEnvel
       state.setTimelineLive(sessionId, false);
       state.setPendingUserAction(sessionId, undefined);
       state.setSessionStatus(sessionId, "error");
-      state.setStreamError(sessionId, event.payload.error || "Unknown stream error.");
+      state.setStreamError(sessionId, apiErrorMessage(event.payload.error));
       state.setStreamMeta(sessionId, {
         isStreaming: false,
         connectionState: "idle",

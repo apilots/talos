@@ -114,13 +114,14 @@ fn test_prompt_warning_key_includes_dynamic_dropped_sections() {
 #[test]
 fn test_context_compaction_failure_outcome_separates_provider_and_internal_errors() {
     assert_eq!(
-        context_compaction_failure_outcome(&TalosError::ToolError(
+        context_compaction_failure_outcome(&TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
             "parse summary json after retries".to_string()
         )),
         ContextCompactionOutcome::FailedProviderError
     );
     assert_eq!(
-        context_compaction_failure_outcome(&TalosError::StorageError("save summary".to_string())),
+        context_compaction_failure_outcome(&TalosError::internal("save summary".to_string())),
         ContextCompactionOutcome::FailedInternalError
     );
 }

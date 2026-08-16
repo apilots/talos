@@ -31,7 +31,8 @@ impl RouterImpl {
                     if let Some(value) = binding_config.rule_value {
                         MatchRule::Peer(value)
                     } else {
-                        return Err(talos_error::TalosError::InvalidConfiguration(
+                        return Err(talos_error::TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
                             "Peer rule requires rule_value".to_string(),
                         ));
                     }
@@ -40,17 +41,18 @@ impl RouterImpl {
                     if let Some(value) = binding_config.rule_value {
                         MatchRule::Channel(value)
                     } else {
-                        return Err(talos_error::TalosError::InvalidConfiguration(
+                        return Err(talos_error::TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
                             "Channel rule requires rule_value".to_string(),
                         ));
                     }
                 }
                 "default" => MatchRule::Default,
                 _ => {
-                    return Err(talos_error::TalosError::InvalidConfiguration(format!(
-                        "Invalid rule type: {}",
-                        binding_config.rule_type
-                    )));
+                    return Err(talos_error::TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!("Invalid rule type: {}", binding_config.rule_type),
+                    ));
                 }
             };
 

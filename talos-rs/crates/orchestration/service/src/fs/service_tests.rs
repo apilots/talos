@@ -46,13 +46,7 @@ async fn read_directory_rejects_path_outside_home_root() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::FsError {
-            kind: TalosFsErrorKind::PathOutsideRoot,
-            ..
-        }
-    ));
+    assert!(error.is_fs_error_kind(TalosFsErrorKind::PathOutsideRoot));
 }
 
 #[tokio::test]
@@ -120,11 +114,5 @@ async fn read_directory_rejects_symlink_directory() {
         .read_directory(&actor(), Some(link))
         .await
         .unwrap_err();
-    assert!(matches!(
-        error,
-        TalosError::FsError {
-            kind: TalosFsErrorKind::SymlinkNotSupported,
-            ..
-        }
-    ));
+    assert!(error.is_fs_error_kind(TalosFsErrorKind::SymlinkNotSupported));
 }

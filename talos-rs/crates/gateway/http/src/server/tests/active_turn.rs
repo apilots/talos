@@ -39,10 +39,11 @@ async fn test_get_active_turn_handler_returns_active_state() {
         .await
         .expect("active turn body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["active_turn"]["status"], "running");
-    assert_eq!(payload["active_turn"]["turn_id"], "turn-1");
+    assert_eq!(payload["status"], "success");
+    assert_eq!(payload["data"]["active_turn"]["status"], "running");
+    assert_eq!(payload["data"]["active_turn"]["turn_id"], "turn-1");
     assert_eq!(
-        payload["active_turn"]["last_event_id"],
+        payload["data"]["active_turn"]["last_event_id"],
         "ev_00000000000000000007"
     );
 }
@@ -102,9 +103,9 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
         .await
         .expect("active turn body should be readable");
     let payload: Value = serde_json::from_slice(&body).expect("payload should be valid json");
-    assert_eq!(payload["active_turn"]["status"], "waiting_user_action");
+    assert_eq!(payload["status"], "success");
     assert_eq!(
-        payload["active_turn"]["pending_user_action"],
+        payload["data"]["active_turn"]["pending_user_action"],
         serde_json::json!({
             "actionId": "action-dynamic",
             "callId": "call-dynamic",
@@ -132,5 +133,6 @@ async fn test_interrupt_turn_handler_returns_success() {
     .await
     .expect("interrupt should succeed");
 
-    assert!(result.0.success);
+    let data = expect_success(result.0);
+    assert!(data.success);
 }

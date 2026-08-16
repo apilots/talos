@@ -15,24 +15,34 @@ impl TurnService {
             .get_active_turn(&session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::Conflict("No pending user action for this session.".into())
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    "No pending user action for this session.",
+                )
             })?;
-        let action_id = active.current_action_id.clone().ok_or_else(|| {
-            TalosError::Conflict("The active turn has no current user action.".into())
-        })?;
+        let action_id = active
+            .current_action_id
+            .clone()
+            .ok_or_else(|| TalosError::internal("active turn has no current user action"))?;
         let action = self
             .user_actions
             .get(&session_id, &active.turn_id, &action_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("user action {action_id}")))?;
+            .ok_or_else(|| {
+                TalosError::internal(format!(
+                    "active turn references missing user action {action_id}"
+                ))
+            })?;
         let UserActionParams::DynamicToolResult(params) = &action.action.params else {
-            return Err(TalosError::Conflict(
-                "The pending user action is not a dynamic tool result.".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "The pending user action is not a dynamic tool result.",
             ));
         };
         if action.action.call_id != call_id || params.tool_name != tool_name {
-            return Err(TalosError::Conflict(
-                "Pending dynamic tool result identity does not match.".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "Pending dynamic tool result identity does not match.",
             ));
         }
         self.submit_user_action(
@@ -60,7 +70,12 @@ impl TurnService {
             .user_actions
             .get(&session_id, turn_id, action_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("user action {action_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("user action {action_id}"),
+                )
+            })?;
         let pending_resume = if current.action.state == UserActionState::Pending {
             Some(
                 self.pending_user_action_resume_context(&session_id, turn_id, action_id)
@@ -106,8 +121,9 @@ impl TurnService {
                 .get_active_turn(&session_id)
                 .await?
                 .ok_or_else(|| {
-                    TalosError::Conflict(
-                        "cancelled user action is missing its active turn".to_string(),
+                    TalosError::public(
+                        talos_error::ErrorCode::Conflict,
+                        "cancelled user action is missing its active turn",
                     )
                 })?;
             let record = self.user_actions.cancel(accepted).await?;
@@ -124,9 +140,10 @@ impl TurnService {
             }
         };
         let tool_name = tool_name_for_action(&accepted.action.params);
-        let response = accepted.response.clone().ok_or_else(|| {
-            TalosError::ValidationError("accepted user action is missing its response".to_string())
-        })?;
+        let response = accepted
+            .response
+            .clone()
+            .ok_or_else(|| TalosError::internal("accepted user action is missing its response"))?;
         let binding = self.session_binding(&session_id).await?;
         let mut record = accepted;
         let mut response_persisted = false;
@@ -171,8 +188,8 @@ impl TurnService {
                 }
             }
         }
-        Err(TalosError::InternalError(
-            "user action resume attempts were exhausted".to_string(),
+        Err(TalosError::internal(
+            "user action resume attempts were exhausted",
         ))
     }
 
@@ -185,15 +202,19 @@ impl TurnService {
             return Ok(());
         }
         let Some(action_id) = active.current_action_id.as_deref() else {
-            return Err(TalosError::ValidationError(
-                "waiting active turn is missing its user action id".to_string(),
+            return Err(TalosError::internal(
+                "waiting active turn is missing its user action id",
             ));
         };
         let record = self
             .user_actions
             .get(&active.session_id, &active.turn_id, action_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("user action {action_id}")))?;
+            .ok_or_else(|| {
+                TalosError::internal(format!(
+                    "waiting active turn references missing user action {action_id}"
+                ))
+            })?;
         let recovered = self.user_actions.recover(record).await?;
         if recovered.should_resume {
             let resume = self
@@ -233,7 +254,10 @@ impl TurnService {
             .get_active_turn(&record.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::Conflict("failed user action is missing its active turn".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    "failed user action is missing its active turn",
+                )
             })?;
         self.event_service
             .finish_terminal_user_action(active, record)
@@ -250,34 +274,36 @@ impl TurnService {
             .event_service
             .get_active_turn(session_id)
             .await
-            .map_err(|err| TalosError::StorageError(format!("active turn lookup failed: {err}")))?
+            .map_err(|err| TalosError::internal(format!("active turn lookup failed: {err}")))?
             .ok_or_else(|| {
-                TalosError::Conflict("No pending user action for this session.".to_string())
+                TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    "No pending user action for this session.",
+                )
             })?;
         if active.status != ActiveTurnStatus::WaitingUserAction {
-            return Err(TalosError::Conflict(
-                "The active turn is not waiting for user action.".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "The active turn is not waiting for user action.",
             ));
         }
         if active.turn_id != turn_id || active.current_action_id.as_deref() != Some(action_id) {
-            return Err(TalosError::Conflict(
-                "The pending user action identity does not match the active turn.".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "The pending user action identity does not match the active turn.",
             ));
         }
         let message_id = active.message_id.clone().ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending user action is missing its original message id.".to_string(),
-            )
+            TalosError::internal("pending user action is missing its original message id")
         })?;
         let Some(pending) = self.event_service.get_current_user_action(&active).await? else {
-            return Err(TalosError::Conflict(
-                "The active turn has no current user action.".to_string(),
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "The active turn has no current user action.",
             ));
         };
         let item_id = pending.item_id.ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending dynamic tool result is missing its original timeline item id.".to_string(),
-            )
+            TalosError::internal("pending user action is missing its original timeline item id")
         })?;
         let events = self
             .event_service
@@ -285,16 +311,14 @@ impl TurnService {
             .await?;
         let tool_calls = nonterminal_resume_tool_calls(&events);
         let execution_metrics = latest_turn_execution_metrics(&events).ok_or_else(|| {
-            TalosError::ValidationError(
-                "Pending user action is missing cumulative turn execution metrics.".to_string(),
-            )
+            TalosError::internal("pending user action is missing cumulative turn execution metrics")
         })?;
         if !tool_calls
             .iter()
             .any(|tool_call| tool_call.item_id == item_id && tool_call.call_id == pending.call_id)
         {
-            return Err(TalosError::ValidationError(
-                "Pending user action timeline item is not active.".to_string(),
+            return Err(TalosError::internal(
+                "pending user action timeline item is not active",
             ));
         }
         Ok(ActiveResumeContext {
@@ -309,7 +333,7 @@ impl TurnService {
     }
 }
 
-pub(super) fn nonterminal_resume_tool_calls(
+pub(crate) fn nonterminal_resume_tool_calls(
     events: &[AgentEvent],
 ) -> Vec<AgentDispatchResumeToolCall> {
     let mut order = Vec::new();

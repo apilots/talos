@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use talos_agent_kernel::{GeneralTurnResume, ResumeToolCall, UserActionResume};
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::session::{
     SessionArtifactStore, SessionTranscriptBranch, SessionTranscriptPayload,
 };
@@ -25,9 +25,12 @@ pub(super) async fn build_general_turn_resume(
         .into_iter()
         .find(|tool_call| tool_call.call_id == pending_call_id)
     else {
-        return Err(TalosError::ValidationError(format!(
-            "dynamic resume context for session `{session_id}` turn `{turn_id}` is missing pending tool call `{pending_call_id}`"
-        )));
+        return Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            format!(
+                "user action resume context for session `{session_id}` turn `{turn_id}` is missing pending tool call `{pending_call_id}`"
+            ),
+        ));
     };
 
     let records = session_artifact_store
@@ -40,8 +43,16 @@ pub(super) async fn build_general_turn_resume(
         .await?;
     let mut request = None;
     let mut response = None;
+    let mut request_belongs_to_another_turn = false;
     for record in records {
         match record.payload {
+            SessionTranscriptPayload::UserActionRequest { ref payload }
+                if record.header.invocation_id.as_str() != turn_id
+                    && payload.call_id.as_str() == tool_call.call_id.as_str()
+                    && payload.tool_name.as_str() == tool_call.tool_name.as_str() =>
+            {
+                request_belongs_to_another_turn = true;
+            }
             SessionTranscriptPayload::UserActionRequest { payload }
                 if record.header.invocation_id.as_str() == turn_id
                     && payload.call_id.as_str() == tool_call.call_id.as_str()
@@ -68,14 +79,19 @@ pub(super) async fn build_general_turn_resume(
         }
     }
     let request = request.map(|(_, payload)| payload).ok_or_else(|| {
-        TalosError::ToolError(format!(
-            "dynamic tool call `{}` has no pending request for session `{}` turn `{}`",
+        let message = format!(
+            "user action call `{}` has no pending request for session `{}` turn `{}`",
             tool_call.call_id, session_id, turn_id
-        ))
+        );
+        if request_belongs_to_another_turn {
+            TalosError::public(ErrorCode::InvalidRequest, message)
+        } else {
+            TalosError::internal(message)
+        }
     })?;
     let response = response.map(|(_, payload)| payload).ok_or_else(|| {
-        TalosError::ToolError(format!(
-            "dynamic tool call `{}` has no submitted result for session `{}` turn `{}`",
+        TalosError::internal(format!(
+            "user action call `{}` has no submitted response for session `{}` turn `{}`",
             tool_call.call_id, session_id, turn_id
         ))
     })?;

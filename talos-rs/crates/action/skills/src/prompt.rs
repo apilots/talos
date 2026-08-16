@@ -142,7 +142,8 @@ fn render_available_summary<'a>(
 
 pub fn ensure_prompt_context(context: SkillPromptContext) -> TalosResult<SkillPromptContext> {
     if context.available_summary.len() > 1024 * 1024 {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "skill prompt context summary is unexpectedly large".to_string(),
         ));
     }

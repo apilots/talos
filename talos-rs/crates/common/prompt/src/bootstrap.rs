@@ -14,10 +14,10 @@ pub(crate) async fn ensure_bootstrap_file(path: &Path, template: &str) -> TalosR
         talos_fs::std_fs().write_file_with(&path, &template, WriteOptions::create_new())
     })
     .await
-    .map_err(|err| TalosError::StorageError(format!("join bootstrap write task: {err}")))?
+    .map_err(|err| TalosError::internal(format!("join bootstrap write task: {err}")))?
     {
         Ok(()) => Ok(()),
-        Err(TalosError::Conflict(_)) => Ok(()),
+        Err(err) if err.is_code(talos_error::ErrorCode::Conflict) => Ok(()),
         Err(err) => Err(err),
     }
 }

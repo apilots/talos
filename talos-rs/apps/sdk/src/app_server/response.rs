@@ -6,7 +6,8 @@ use talos_app_protocol::events::{
     SubscriptionTerminatedEnvelope, TimelineSubscriptionNotification,
 };
 use talos_app_protocol::jsonrpc::JsonRpcNotification;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ApiError, TalosError, TalosResult};
+use talos_types::ApiResponse;
 use tokio::sync::{oneshot, Mutex};
 
 type PendingResponses = Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>;
@@ -22,7 +23,7 @@ pub(super) fn decode_subscription_terminated(
     };
     serde_json::from_value(params)
         .map(Some)
-        .map_err(|error| TalosError::SerializationError(error.to_string()))
+        .map_err(|error| TalosError::internal(error.to_string()))
 }
 
 pub(super) fn decode_event_notification(
@@ -36,32 +37,26 @@ pub(super) fn decode_event_notification(
     }
     serde_json::from_value(params)
         .map(Some)
-        .map_err(|error| TalosError::SerializationError(error.to_string()))
+        .map_err(|error| TalosError::internal(error.to_string()))
 }
 
 pub(super) fn map_app_server_error(
     error: talos_app_protocol::errors::AppServerErrorBody,
 ) -> TalosError {
-    use talos_app_protocol::errors::{
-        ACTIVE_TURN_RUNNING, CANCELLED, CONFLICT, FORBIDDEN, INVALID_PARAMS, NOT_FOUND,
-        REQUEST_TIMEOUT, RESOURCE_EXPIRED, RUNTIME_UNAVAILABLE, TRANSPORT_UNAVAILABLE,
-        UNAUTHORIZED, VALIDATION_FAILED,
-    };
+    TalosError::internal_with_source("app-server JSON-RPC protocol error", error)
+}
 
-    match error.code {
-        UNAUTHORIZED => TalosError::AuthError(error.message),
-        FORBIDDEN => TalosError::AuthorizationDenied,
-        NOT_FOUND => TalosError::ResourceNotFound(error.message),
-        ACTIVE_TURN_RUNNING => TalosError::ActiveTurnRunning(error.message),
-        CONFLICT => TalosError::Conflict(error.message),
-        VALIDATION_FAILED | INVALID_PARAMS => TalosError::ValidationError(error.message),
-        RESOURCE_EXPIRED => TalosError::ResourceExpired(error.message),
-        RUNTIME_UNAVAILABLE => TalosError::RuntimeUnavailable(error.message),
-        TRANSPORT_UNAVAILABLE => TalosError::TransportUnavailable(error.message),
-        REQUEST_TIMEOUT => TalosError::Timeout(error.message),
-        CANCELLED => TalosError::Cancelled(error.message),
-        _ => TalosError::ClientError(error.message),
+pub(super) fn decode_api_response(value: Value) -> TalosResult<Value> {
+    let response: ApiResponse<Value> =
+        serde_json::from_value(value).map_err(|error| TalosError::internal(error.to_string()))?;
+    match response {
+        ApiResponse::Success { data } => Ok(data),
+        ApiResponse::Error { error } => Err(map_api_error(error)),
     }
+}
+
+fn map_api_error(error: ApiError) -> TalosError {
+    TalosError::public(error.code, error.message)
 }
 
 pub(super) async fn fail_pending_responses(pending_responses: &PendingResponses, message: String) {
@@ -70,6 +65,44 @@ pub(super) async fn fail_pending_responses(pending_responses: &PendingResponses,
         std::mem::take(&mut *guard)
     };
     for (_, sender) in pending {
-        let _ = sender.send(Err(TalosError::ClientError(message.clone())));
+        let _ = sender.send(Err(TalosError::internal(message.clone())));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error as _;
+
+    use serde_json::json;
+    use talos_app_protocol::errors::{AppServerErrorBody, INVALID_PARAMS};
+    use talos_error::ErrorCode;
+
+    use super::{decode_api_response, map_app_server_error};
+
+    #[test]
+    fn decode_api_response_preserves_application_error_code() {
+        let error = decode_api_response(json!({
+            "status": "error",
+            "error": {
+                "code": "invalidCursor",
+                "message": "Invalid event cursor"
+            }
+        }))
+        .expect_err("application error should be rejected");
+
+        assert!(error.is_code(ErrorCode::InvalidCursor));
+        assert_eq!(error.diagnostic_message(), "Invalid event cursor");
+    }
+
+    #[test]
+    fn protocol_error_preserves_typed_protocol_source() {
+        let error = map_app_server_error(AppServerErrorBody::new(INVALID_PARAMS, "invalid params"));
+
+        assert!(error.is_internal());
+        let source = error.source().expect("protocol source should be preserved");
+        let protocol = source
+            .downcast_ref::<AppServerErrorBody>()
+            .expect("source should remain a protocol error");
+        assert_eq!(protocol.code, INVALID_PARAMS);
     }
 }

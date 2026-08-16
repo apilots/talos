@@ -32,7 +32,7 @@ fn create_new_rejects_existing_file() {
         .write_file_with(&path, "new", WriteOptions::create_new())
         .expect_err("create-new should reject existing files");
 
-    assert!(matches!(err, TalosError::Conflict(_)));
+    assert!(err.is_code(talos_error::ErrorCode::Conflict));
     assert_eq!(
         std_fs()
             .read_file(&path)

@@ -1,6 +1,8 @@
 export const defaultLocale = "en" as const;
 import { composerResources } from "./composerResources";
+import { errorResources } from "./errorResources";
 import { filesResources } from "./filesResources";
+import { settingsResources } from "./settingsResources";
 
 export const resources = {
   en: {
@@ -33,6 +35,7 @@ export const resources = {
       zhCn: "Chinese (Simplified)",
       en: "English",
     },
+    errors: errorResources.en,
     sidebar: {
       webConsole: "Web console",
       threads: "Chats",
@@ -204,6 +207,7 @@ export const resources = {
         account: "Account",
         appearance: "Appearance",
         "mcp-servers": "MCP servers",
+        "web-search": "Web Search",
         server: "Server",
       },
       navigation: {
@@ -299,6 +303,7 @@ export const resources = {
         caps: "Capabilities",
         capReasoning: "Reasoning",
       },
+      ...settingsResources.en,
       defaultModel: "Default model",
       modelStats: "Context {{contextWindow}} · Max tokens {{tokenCount}}",
       agentWorkspaceTitle: "Agent workspace",
@@ -527,6 +532,7 @@ export const resources = {
       zhCn: "简体中文",
       en: "English",
     },
+    errors: errorResources.zh,
     sidebar: {
       webConsole: "Web 控制台",
       threads: "会话",
@@ -695,6 +701,7 @@ export const resources = {
         account: "账号",
         appearance: "外观",
         "mcp-servers": "MCP servers",
+        "web-search": "Web Search",
         server: "服务端",
       },
       navigation: {
@@ -790,6 +797,7 @@ export const resources = {
         caps: "能力",
         capReasoning: "推理",
       },
+      ...settingsResources.zh,
       defaultModel: "默认模型",
       modelStats: "上下文 {{contextWindow}} · 最大输出 {{tokenCount}}",
       agentWorkspaceTitle: "Agent Workspace",

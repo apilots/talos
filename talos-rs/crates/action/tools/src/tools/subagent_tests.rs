@@ -290,7 +290,7 @@ async fn turn_bound_tools_require_a_trusted_turn() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
     assert!(control.calls.lock().unwrap().is_empty());
 }
 
@@ -312,7 +312,7 @@ async fn turn_bound_tools_require_a_trusted_agent() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
     assert!(control.calls.lock().unwrap().is_empty());
 }
 
@@ -368,7 +368,7 @@ async fn spawn_agent_rejects_model_selected_agent_id() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
     assert!(control.calls.lock().unwrap().is_empty());
 }
 
@@ -388,15 +388,17 @@ async fn send_message_rejects_unknown_fields() {
     .await
     .unwrap_err();
 
-    assert!(matches!(error, TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
     assert!(control.calls.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn send_message_propagates_the_control_error() {
     let control = Arc::new(RecordingControl::default());
-    *control.send_error.lock().unwrap() =
-        Some(TalosError::Conflict("message input closed".to_string()));
+    *control.send_error.lock().unwrap() = Some(TalosError::public(
+        talos_error::ErrorCode::Conflict,
+        "message input closed".to_string(),
+    ));
 
     let error = execute(
         "send_message",
@@ -409,10 +411,8 @@ async fn send_message_propagates_the_control_error() {
     .await
     .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::Conflict(message) if message == "message input closed"
-    ));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
+    assert_eq!(error.diagnostic_message(), "message input closed");
 }
 
 #[test]
@@ -430,5 +430,5 @@ fn collaboration_payload_rejects_the_complete_oversized_result() {
 
     let error = collaboration_payload(result).unwrap_err();
 
-    assert!(matches!(error, TalosError::ToolError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ToolExecutionFailed));
 }

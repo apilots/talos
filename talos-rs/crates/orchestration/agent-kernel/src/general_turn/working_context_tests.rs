@@ -248,5 +248,5 @@ fn test_working_context_trim_rejects_invalid_memory_get_result() {
     )
     .expect_err("invalid MemoryGet result should fail context rebuild");
 
-    assert!(matches!(error, TalosError::SerializationError(_)));
+    assert!(error.is_internal());
 }

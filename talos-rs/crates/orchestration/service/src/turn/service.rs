@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use talos_agent_kernel::TimelineBuilder;
 use talos_coordinator::SessionRuntime;
 use talos_error::{TalosError, TalosResult};
 use talos_store::profile::{ProfileStore, TurnUsageUpdate};
@@ -15,7 +16,7 @@ use talos_types::agent_dispatch::{
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, TalosInputItem, TalosTimelineContent, TalosTimelineDelta,
-    TalosTimelineItemStatus, TalosTurnErrorEvent,
+    TalosTimelineItemStatus,
 };
 use talos_types::{
     ModelRef, SandboxApprovalDecision, StartTurnRequest, TalosConfig, TalosSession,
@@ -39,6 +40,8 @@ use super::{
 mod subagent;
 #[path = "user_action_resume.rs"]
 mod user_action_resume;
+#[cfg(test)]
+pub(super) use user_action_resume::nonterminal_resume_tool_calls;
 
 #[derive(Clone)]
 struct ProfileTurnContext {
@@ -78,7 +81,12 @@ impl TurnService {
             .sessions
             .get_session_record(session_id)
             .await?
-            .ok_or_else(|| TalosError::ResourceNotFound(format!("session {session_id}")))?;
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("session {session_id}"),
+                )
+            })?;
         Ok(DispatchBinding::Exact {
             agent_id: record.agent_id,
         })
@@ -154,7 +162,6 @@ impl TurnService {
                     error!(error = %err, "failed to persist timeline stream event");
                     continue;
                 }
-                log_turn_error_event(&progress_event);
                 if let Some(profile_context) = profile_context.as_ref() {
                     Self::record_profile_turn_usage(
                         profile_store.as_ref(),
@@ -340,12 +347,13 @@ impl TurnService {
                     Some(expires_at),
                 )
                 .await
-                .map_err(|err| TalosError::IdempotencyError(err.to_string()))?
+                .map_err(|err| TalosError::internal(err.to_string()))?
             {
                 IdempotencyReservation::Reserved(_) => {}
                 IdempotencyReservation::Existing(record) => {
                     if record.request_hash != request_hash {
-                        return Err(TalosError::IdempotencyConflict(
+                        return Err(TalosError::public(
+                            talos_error::ErrorCode::IdempotencyConflict,
                             "Idempotency-Key was already used with a different request".to_string(),
                         ));
                     }
@@ -424,8 +432,7 @@ impl TurnService {
         self.event_service
             .record_talos_event(first_event)
             .await
-            .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
-        log_turn_error_event(&progress_event);
+            .map_err(|err| TalosError::internal(format!("event record failed: {err}")))?;
         Self::record_profile_turn_usage(
             self.profile_store.as_ref(),
             &profile_context,
@@ -459,7 +466,7 @@ impl TurnService {
                     chrono::Utc::now().timestamp_millis(),
                 )
                 .await
-                .map_err(|err| TalosError::IdempotencyError(err.to_string()))?;
+                .map_err(|err| TalosError::internal(err.to_string()))?;
         }
 
         Ok(result)
@@ -480,10 +487,11 @@ impl TurnService {
             .idempotency_store
             .get(&session_id, &idempotency_key)
             .await
-            .map_err(|err| TalosError::IdempotencyError(err.to_string()))?
+            .map_err(|err| TalosError::internal(err.to_string()))?
         {
             if record.request_hash != request_hash {
-                return Err(TalosError::IdempotencyConflict(
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::IdempotencyConflict,
                     "Retry attempt was already used with a different request".to_string(),
                 ));
             }
@@ -516,11 +524,11 @@ impl TurnService {
         match active_turn.status {
             ActiveTurnStatus::Running
             | ActiveTurnStatus::WaitingUserAction
-            | ActiveTurnStatus::Cancelling => Err(TalosError::RetryActiveTurnRunning(
+            | ActiveTurnStatus::Cancelling => Err(TalosError::public(talos_error::ErrorCode::ActiveTurnRunning,
                 "The original turn is still active; reconnect to the existing event stream instead."
                     .to_string(),
             )),
-            ActiveTurnStatus::Completed => Err(TalosError::RetrySourceCompleted(
+            ActiveTurnStatus::Completed => Err(TalosError::public(talos_error::ErrorCode::RetrySourceCompleted,
                 "The original turn has already completed; refresh session history instead."
                     .to_string(),
             )),
@@ -528,7 +536,7 @@ impl TurnService {
                 if active_turn.message_id.as_deref() == Some(request.retry_of_message_id.as_str()) {
                     Ok(())
                 } else {
-                    Err(TalosError::RetrySourceMismatch(
+                    Err(TalosError::public(talos_error::ErrorCode::RetrySourceMismatch,
                         "retry_of_message_id does not match the failed active turn.".to_string(),
                     ))
                 }
@@ -543,7 +551,7 @@ impl TurnService {
         match active_turn.status {
             ActiveTurnStatus::Running
             | ActiveTurnStatus::WaitingUserAction
-            | ActiveTurnStatus::Cancelling => Err(TalosError::ActiveTurnRunning(
+            | ActiveTurnStatus::Cancelling => Err(TalosError::public(talos_error::ErrorCode::ActiveTurnRunning,
                 "A turn is already active for this session; reconnect to the existing event stream instead."
                     .to_string(),
             )),
@@ -613,8 +621,7 @@ impl TurnService {
         self.event_service
             .record_talos_event(first_event)
             .await
-            .map_err(|err| TalosError::StorageError(format!("event record failed: {err}")))?;
-        log_turn_error_event(&progress_event);
+            .map_err(|err| TalosError::internal(format!("event record failed: {err}")))?;
         Self::record_profile_turn_usage(
             self.profile_store.as_ref(),
             &profile_context,
@@ -642,23 +649,13 @@ impl TurnService {
         stream_rx: mpsc::Receiver<AgentEvent>,
         message: &str,
     ) -> TalosResult<MessageCommandResult> {
-        let error_event = AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: talos_types::talos::AgentEventType::TurnError,
-            turn_id: turn_id.to_string(),
-            message_id: format!("msg_{}", Uuid::new_v4().simple()),
-            session_id: session_id.to_string(),
-            sequence: 0,
-            payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
-                request_id: request_id.to_string(),
-                turn_id: turn_id.to_string(),
-                error: message.to_string(),
-                error_info: None,
-                failed_at_ms: chrono::Utc::now().timestamp_millis().max(0) as u64,
-            }),
-        };
+        let mut timeline = TimelineBuilder::new(
+            request_id,
+            turn_id,
+            format!("msg_{}", Uuid::new_v4().simple()),
+            session_id,
+        );
+        let error_event = timeline.fail_turn(&TalosError::internal(message));
         let message_id = error_event.message_id.clone();
         if let Err(err) = self
             .event_service
@@ -671,8 +668,6 @@ impl TurnService {
                 error = %err,
                 "failed to persist first-event timeout error event"
             );
-        } else {
-            log_turn_error_event(&error_event);
         }
         if let Err(err) = self
             .profile_store
@@ -718,7 +713,10 @@ impl TurnService {
             }
         }
 
-        Err(TalosError::Timeout(message.to_string()))
+        Err(TalosError::public(
+            talos_error::ErrorCode::Timeout,
+            message.to_string(),
+        ))
     }
 
     async fn record_completed_turn_progress(&self, event: &AgentEvent, assistant_model: &str) {
@@ -730,21 +728,6 @@ impl TurnService {
         )
         .await;
     }
-}
-
-fn log_turn_error_event(event: &AgentEvent) {
-    let AgentEventPayload::TurnError(payload) = &event.payload else {
-        return;
-    };
-    error!(
-        session_id = %event.session_id,
-        turn_id = %event.turn_id,
-        message_id = %event.message_id,
-        request_id = %payload.request_id,
-        error = %payload.error,
-        error_code = ?payload.error_info.as_ref().map(|info| info.code),
-        "turn failed"
-    );
 }
 
 fn usage_is_available(usage: &talos_types::TokenUsage) -> bool {

@@ -29,7 +29,8 @@ impl AgentKernelParams {
             })
             .collect::<Vec<_>>();
         if files.len() > 1 {
-            return Err(TalosError::ValidationError(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "input must include at most one files item".to_string(),
             ));
         }

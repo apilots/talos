@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::access::shared_actor;
-use super::errors::{ApiError, HttpApiErrorCode};
+use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 const METADATA_PART_MAX_BYTES: usize = 64 * 1024;
@@ -73,17 +73,10 @@ impl UploadTransportError {
 
     fn into_api_error(self) -> ApiError {
         match self {
-            Self::Invalid(message) => ApiError::new(
-                axum::http::StatusCode::BAD_REQUEST,
-                HttpApiErrorCode::InvalidRequest,
-                message,
+            Self::Invalid(_) => ApiError::new(talos_error::ErrorCode::InvalidRequest),
+            Self::TooLarge(message) => ApiError::from_talos_error(
+                talos_error::TalosError::file_error(TalosFileErrorKind::UploadTooLarge, message),
             ),
-            Self::TooLarge(message) => {
-                ApiError::from_talos_error(talos_error::TalosError::FileError {
-                    kind: TalosFileErrorKind::UploadTooLarge,
-                    message,
-                })
-            }
         }
     }
 }
@@ -92,7 +85,7 @@ pub(super) async fn upload_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     multipart: Result<Multipart, MultipartRejection>,
-) -> Result<Json<FileUploadResponse>, ApiError> {
+) -> Result<JsonResponse<FileUploadResponse>, ApiError> {
     let mut multipart = multipart.map_err(|error| {
         UploadTransportError::invalid(format!("invalid file upload multipart body: {error}"))
             .into_api_error()
@@ -101,11 +94,9 @@ pub(super) async fn upload_file_handler(
         .next_field()
         .await
         .map_err(multipart_error)?
-        .ok_or_else(|| invalid_request("file upload requires a metadata part"))?;
+        .ok_or_else(invalid_request)?;
     if metadata_field.name() != Some("metadata") {
-        return Err(invalid_request(
-            "file upload metadata part must appear before the file part",
-        ));
+        return Err(invalid_request());
     }
     let request = read_metadata(metadata_field).await?;
 
@@ -142,7 +133,7 @@ pub(super) async fn upload_file_handler(
         return Err(error.into_api_error());
     }
     let response = upload_result.map_err(ApiError::from_talos_error)?;
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 async fn forward_required_file_part(
@@ -206,29 +197,29 @@ pub(super) async fn list_files_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     RawQuery(raw_query): RawQuery,
-) -> Result<Json<FileListResponse>, ApiError> {
+) -> Result<JsonResponse<FileListResponse>, ApiError> {
     let query: FileListHttpQuery = serde_html_form::from_str(raw_query.as_deref().unwrap_or(""))
-        .map_err(|error| invalid_request(format!("invalid file list query: {error}")))?;
+        .map_err(|_| invalid_request())?;
     let request = file_list_request(query)?;
     let response = state
         .gateway
         .list_files(&shared_actor(&auth.0), request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn read_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(file_id): Path<String>,
-) -> Result<Json<FileReadResponse>, ApiError> {
+) -> Result<JsonResponse<FileReadResponse>, ApiError> {
     let response = state
         .gateway
         .read_file(&shared_actor(&auth.0), FileReadRequest { file_id })
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn update_file_handler(
@@ -236,7 +227,7 @@ pub(super) async fn update_file_handler(
     auth: axum::extract::Extension<RequestIdentity>,
     Path(file_id): Path<String>,
     Json(body): Json<FileUpdateBody>,
-) -> Result<Json<FileUpdateResponse>, ApiError> {
+) -> Result<JsonResponse<FileUpdateResponse>, ApiError> {
     let response = state
         .gateway
         .update_file(
@@ -249,32 +240,31 @@ pub(super) async fn update_file_handler(
         )
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn delete_file_handler(
     State(state): State<Arc<HttpApiState>>,
     auth: axum::extract::Extension<RequestIdentity>,
     Path(file_id): Path<String>,
-) -> Result<Json<FileDeleteResponse>, ApiError> {
+) -> Result<JsonResponse<FileDeleteResponse>, ApiError> {
     let response = state
         .gateway
         .delete_file(&shared_actor(&auth.0), FileDeleteRequest { file_id })
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(Json(response))
+    Ok(api_success(response))
 }
 
 async fn read_metadata(mut field: Field<'_>) -> Result<FileUploadRequest, ApiError> {
     let mut data = Vec::new();
     while let Some(chunk) = field.chunk().await.map_err(multipart_error)? {
         if data.len().saturating_add(chunk.len()) > METADATA_PART_MAX_BYTES {
-            return Err(invalid_request("file upload metadata exceeds 65536 bytes"));
+            return Err(invalid_request());
         }
         data.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&data)
-        .map_err(|error| invalid_request(format!("invalid file upload metadata JSON: {error}")))
+    serde_json::from_slice(&data).map_err(|_| invalid_request())
 }
 
 fn file_list_request(query: FileListHttpQuery) -> Result<FileListRequest, ApiError> {
@@ -285,14 +275,10 @@ fn file_list_request(query: FileListHttpQuery) -> Result<FileListRequest, ApiErr
             Some(FileScope::Project { project_id })
         }
         (Some(FileListHttpScope::Project), None) => {
-            return Err(invalid_request(
-                "file list projectId is required when scope=project",
-            ));
+            return Err(invalid_request());
         }
         (None | Some(FileListHttpScope::All | FileListHttpScope::Personal), Some(_)) => {
-            return Err(invalid_request(
-                "file list projectId is only valid when scope=project",
-            ));
+            return Err(invalid_request());
         }
     };
     Ok(FileListRequest {
@@ -303,14 +289,10 @@ fn file_list_request(query: FileListHttpQuery) -> Result<FileListRequest, ApiErr
     })
 }
 
-fn multipart_error(error: axum::extract::multipart::MultipartError) -> ApiError {
-    invalid_request(format!("invalid file upload multipart body: {error}"))
+fn multipart_error(_error: axum::extract::multipart::MultipartError) -> ApiError {
+    invalid_request()
 }
 
-fn invalid_request(message: impl Into<String>) -> ApiError {
-    ApiError::new(
-        axum::http::StatusCode::BAD_REQUEST,
-        HttpApiErrorCode::InvalidRequest,
-        message,
-    )
+fn invalid_request() -> ApiError {
+    ApiError::new(talos_error::ErrorCode::InvalidRequest)
 }

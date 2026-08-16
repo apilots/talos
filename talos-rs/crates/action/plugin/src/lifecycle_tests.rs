@@ -3,7 +3,6 @@ use crate::{
     PluginManager, PluginStateStore,
 };
 use talos_config::SkillsRuntimeConfig;
-use talos_error::TalosError;
 use talos_types::{
     MarketplaceSourceId, MarketplaceSourceInput, PluginDisableRequest, PluginEnableRequest,
     PluginId, PluginInstallConflictPolicy, PluginInstallRequest, PluginInstallResponse,
@@ -316,7 +315,7 @@ Second version.
             conflict_policy: PluginUpdateConflictPolicy::RejectLocalChanges,
         })
         .expect_err("local changes should reject update");
-    assert!(matches!(rejected, TalosError::Conflict(_)));
+    assert!(rejected.is_code(talos_error::ErrorCode::Conflict));
 
     let updated = fixture
         .manager
@@ -374,7 +373,7 @@ Second version.
         })
         .expect_err("update should fail when installs state cannot save");
 
-    assert!(matches!(err, TalosError::StorageError(_)));
+    assert!(err.is_internal());
     assert!(old_path.exists());
     assert!(!new_path.exists());
     let contents =
@@ -521,7 +520,7 @@ Invalid skill.
             })
             .expect_err("invalid skill install name should reject");
 
-        assert!(matches!(err, TalosError::ValidationError(_)));
+        assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
         assert!(!temp.path().join("state").join("escape").exists());
     }
 
@@ -556,7 +555,7 @@ First version.
             })
             .expect_err("replace should fail when new source cannot materialize");
 
-        assert!(matches!(err, TalosError::ResourceNotFound(_)));
+        assert!(err.is_code(talos_error::ErrorCode::ResourceNotFound));
         assert!(installed_skill_md.exists());
         let contents =
             std::fs::read_to_string(installed_skill_md).expect("existing install should remain");
@@ -588,7 +587,7 @@ Installed version.
         })
         .expect_err("uninstall should fail when installs state cannot save");
 
-    assert!(matches!(err, TalosError::StorageError(_)));
+    assert!(err.is_internal());
     assert!(installed.install.installed_path.exists());
     assert!(fixture
         .state

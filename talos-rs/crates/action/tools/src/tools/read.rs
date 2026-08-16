@@ -96,8 +96,12 @@ impl Tool for ReadTool {
     ) -> TalosResult<ToolOutputPayload> {
         let request = parse_read_request(&input)?;
         let result = run(&request, &context).await?;
-        let structured = serde_json::to_value(&result)
-            .map_err(|err| TalosError::ToolError(format!("serialize read response: {}", err)))?;
+        let structured = serde_json::to_value(&result).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize read response: {}", err),
+            )
+        })?;
         Ok(ToolOutputPayload::success_with_content_items(
             structured,
             vec![TalosContentItem::FileRead {
@@ -113,19 +117,28 @@ impl Tool for ReadTool {
 }
 
 fn parse_read_request(input: &Value) -> TalosResult<ReadFileRequest> {
-    let request: ReadFileRequest = serde_json::from_value(input.clone())
-        .map_err(|err| TalosError::ValidationError(format!("invalid read arguments: {err}")))?;
+    let request: ReadFileRequest = serde_json::from_value(input.clone()).map_err(|err| {
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid read arguments: {err}"),
+        )
+    })?;
 
     if request.path.is_none() && request.file_path.is_none() {
-        return Err(TalosError::ValidationError("path is required".to_string()));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "path is required".to_string(),
+        ));
     }
     if request.offset == 0 {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "offset must be a 1-indexed line number".to_string(),
         ));
     }
     if request.limit == 0 {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "limit must be greater than zero".to_string(),
         ));
     }

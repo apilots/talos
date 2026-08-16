@@ -254,7 +254,7 @@ fn take_running_messages(prepared: &PreparedGeneralTurn) -> TalosResult<Vec<Stri
     };
     let mut receiver = receiver
         .lock()
-        .map_err(|_| TalosError::InternalError("active turn message input lock poisoned".into()))?;
+        .map_err(|_| TalosError::internal("active turn message input lock poisoned"))?;
     let mut messages = Vec::new();
     while let Ok(message) = receiver.try_recv() {
         messages.push(message);

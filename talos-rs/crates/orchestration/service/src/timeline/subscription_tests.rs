@@ -36,7 +36,7 @@ fn replay_cursor_rejects_retention_gap() {
     )
     .expect_err("cursor gap should be rejected");
 
-    assert!(matches!(err, talos_error::TalosError::ResourceExpired(_)));
+    assert!(err.is_code(talos_error::ErrorCode::ResourceExpired));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn replay_cursor_rejects_empty_retention_gap() {
     )
     .expect_err("cursor older than oldest retained event should be rejected");
 
-    assert!(matches!(err, talos_error::TalosError::ResourceExpired(_)));
+    assert!(err.is_code(talos_error::ErrorCode::ResourceExpired));
 }
 
 fn event_record(event_seq: i64) -> AgentEvent {

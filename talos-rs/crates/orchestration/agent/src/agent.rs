@@ -272,12 +272,48 @@ After receiving tool outputs, continue reasoning and provide the final response.
     }
 
     fn map_dynamic_input_error(error: TalosError) -> AgentError {
-        match error {
-            TalosError::Timeout(message) => AgentError::new(AgentErrorKind::Timeout, message),
-            TalosError::ToolError(message) | TalosError::ValidationError(message) => {
-                AgentError::input_rejected(message)
+        match error.error_code() {
+            talos_error::ErrorCode::Timeout => {
+                AgentError::new(AgentErrorKind::Timeout, error.diagnostic_message())
             }
-            other => other.into(),
+            talos_error::ErrorCode::ToolExecutionFailed
+            | talos_error::ErrorCode::InvalidRequest => {
+                AgentError::input_rejected(error.diagnostic_message())
+            }
+            talos_error::ErrorCode::InvalidRetryRequest
+            | talos_error::ErrorCode::Unauthenticated
+            | talos_error::ErrorCode::PermissionDenied
+            | talos_error::ErrorCode::ResourceNotFound
+            | talos_error::ErrorCode::SessionNotFound
+            | talos_error::ErrorCode::ResourceExpired
+            | talos_error::ErrorCode::Conflict
+            | talos_error::ErrorCode::ActiveTurnRunning
+            | talos_error::ErrorCode::RetrySourceCompleted
+            | talos_error::ErrorCode::RetrySourceMismatch
+            | talos_error::ErrorCode::IdempotencyConflict
+            | talos_error::ErrorCode::InvalidCursor
+            | talos_error::ErrorCode::EventCursorExpired
+            | talos_error::ErrorCode::FsDisabled
+            | talos_error::ErrorCode::InvalidPath
+            | talos_error::ErrorCode::PathOutsideRoot
+            | talos_error::ErrorCode::SymlinkNotSupported
+            | talos_error::ErrorCode::PathNotFound
+            | talos_error::ErrorCode::NotDirectory
+            | talos_error::ErrorCode::InvalidName
+            | talos_error::ErrorCode::AlreadyExists
+            | talos_error::ErrorCode::UploadTooLarge
+            | talos_error::ErrorCode::UnsupportedMediaType
+            | talos_error::ErrorCode::AttachmentLimitExceeded
+            | talos_error::ErrorCode::UnsupportedAttachment
+            | talos_error::ErrorCode::FileInputRejected
+            | talos_error::ErrorCode::ContextWindowExceeded
+            | talos_error::ErrorCode::SessionBudgetExceeded
+            | talos_error::ErrorCode::UsageLimitExceeded
+            | talos_error::ErrorCode::ContextCompactionFailed
+            | talos_error::ErrorCode::ProviderUnavailable
+            | talos_error::ErrorCode::Cancelled
+            | talos_error::ErrorCode::ServiceUnavailable
+            | talos_error::ErrorCode::InternalError => error.into(),
         }
     }
 

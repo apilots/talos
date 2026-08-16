@@ -183,7 +183,7 @@ impl AnthropicProvider {
             .json(&anthropic_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -192,7 +192,7 @@ impl AnthropicProvider {
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
             error!("Anthropic API error: {} - {}", status, error_text);
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "Anthropic API error: {} - {}",
                 status, error_text
             )));
@@ -201,7 +201,7 @@ impl AnthropicProvider {
         let anthropic_resp: messages_protocol::MessagesResponse = response
             .json()
             .await
-            .map_err(|e| TalosError::InternalError(format!("Failed to parse response: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
 
         messages_protocol::chat_response(anthropic_resp)
     }
@@ -220,7 +220,7 @@ impl AnthropicProvider {
             .json(&anthropic_req)
             .send()
             .await
-            .map_err(|e| TalosError::InternalError(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
 
         let status = response.status();
         if !status.is_success() {
@@ -228,7 +228,7 @@ impl AnthropicProvider {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::InternalError(format!(
+            return Err(TalosError::internal(format!(
                 "Anthropic API error: {} - {}",
                 status, error_text
             )));

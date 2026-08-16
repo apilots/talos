@@ -187,7 +187,7 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
                 break;
             }
             AgentEventPayload::TurnError(payload) => {
-                panic!("resume stream failed: {}", payload.error);
+                panic!("resume stream failed: {:?}", payload.error);
             }
             _ => {}
         }

@@ -45,15 +45,15 @@ agent:
       web_search:
         provider: firecrawl
         firecrawl:
-          api_key_env: TALOS_WEB_SEARCH_FIRECRAWL_API_KEY
+          api_key: ${TALOS_WEB_SEARCH_FIRECRAWL_API_KEY}
           base_url: https://api.firecrawl.dev
           timeout_ms: 15000
         brave:
-          api_key_env: TALOS_WEB_SEARCH_BRAVE_API_KEY
+          api_key: ${TALOS_WEB_SEARCH_BRAVE_API_KEY}
           base_url: https://api.search.brave.com/res/v1/web/search
           timeout_ms: 15000
         tavily:
-          api_key_env: TALOS_WEB_SEARCH_TAVILY_API_KEY
+          api_key: ${TALOS_WEB_SEARCH_TAVILY_API_KEY}
           base_url: https://api.tavily.com
           timeout_ms: 15000
     skills:

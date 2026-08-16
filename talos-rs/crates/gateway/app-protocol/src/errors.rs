@@ -1,35 +1,113 @@
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use talos_error::{TalosError, TalosFileErrorKind, TalosFsErrorKind};
+use schemars::schema::{InstanceType, Schema, SchemaObject, SingleOrVec};
+use schemars::{gen::SchemaGenerator, JsonSchema};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use ts_rs::TS;
 
-pub type AppServerErrorCode = i32;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum AppServerErrorCode {
+    ParseError = -32700,
+    InvalidRequest = -32600,
+    MethodNotFound = -32601,
+    InvalidParams = -32602,
+    InternalError = -32603,
+    NotInitialized = -32001,
+    AlreadyInitialized = -32002,
+}
 
-pub const PARSE_ERROR: AppServerErrorCode = -32700;
-pub const INVALID_REQUEST: AppServerErrorCode = -32600;
-pub const METHOD_NOT_FOUND: AppServerErrorCode = -32601;
-pub const INVALID_PARAMS: AppServerErrorCode = -32602;
-pub const INTERNAL_ERROR: AppServerErrorCode = -32603;
+impl AppServerErrorCode {
+    pub const ALL: [Self; 7] = [
+        Self::ParseError,
+        Self::InvalidRequest,
+        Self::MethodNotFound,
+        Self::InvalidParams,
+        Self::InternalError,
+        Self::NotInitialized,
+        Self::AlreadyInitialized,
+    ];
 
-pub const NOT_INITIALIZED: AppServerErrorCode = -32001;
-pub const ALREADY_INITIALIZED: AppServerErrorCode = -32002;
-pub const UNAUTHORIZED: AppServerErrorCode = -32003;
-pub const FORBIDDEN: AppServerErrorCode = -32004;
-pub const CONFLICT: AppServerErrorCode = -32005;
-pub const NOT_FOUND: AppServerErrorCode = -32006;
-pub const VALIDATION_FAILED: AppServerErrorCode = -32007;
-pub const RESOURCE_EXPIRED: AppServerErrorCode = -32008;
-pub const RUNTIME_UNAVAILABLE: AppServerErrorCode = -32009;
-pub const TRANSPORT_UNAVAILABLE: AppServerErrorCode = -32010;
-pub const REQUEST_TIMEOUT: AppServerErrorCode = -32011;
-pub const CANCELLED: AppServerErrorCode = -32012;
-pub const ACTIVE_TURN_RUNNING: AppServerErrorCode = -32013;
+    pub const fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl TryFrom<i32> for AppServerErrorCode {
+    type Error = &'static str;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            -32700 => Ok(Self::ParseError),
+            -32600 => Ok(Self::InvalidRequest),
+            -32601 => Ok(Self::MethodNotFound),
+            -32602 => Ok(Self::InvalidParams),
+            -32603 => Ok(Self::InternalError),
+            -32001 => Ok(Self::NotInitialized),
+            -32002 => Ok(Self::AlreadyInitialized),
+            _ => Err("unknown JSON-RPC protocol error code"),
+        }
+    }
+}
+
+impl Serialize for AppServerErrorCode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_i32(self.as_i32())
+    }
+}
+
+impl<'de> Deserialize<'de> for AppServerErrorCode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = i32::deserialize(deserializer)?;
+        Self::try_from(value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl JsonSchema for AppServerErrorCode {
+    fn schema_name() -> String {
+        "AppServerErrorCode".to_string()
+    }
+
+    fn json_schema(_generator: &mut SchemaGenerator) -> Schema {
+        Schema::Object(SchemaObject {
+            instance_type: Some(SingleOrVec::Single(Box::new(InstanceType::Integer))),
+            enum_values: Some(
+                Self::ALL
+                    .into_iter()
+                    .map(|code| serde_json::json!(code.as_i32()))
+                    .collect(),
+            ),
+            ..SchemaObject::default()
+        })
+    }
+}
+
+pub const PARSE_ERROR: AppServerErrorCode = AppServerErrorCode::ParseError;
+pub const INVALID_REQUEST: AppServerErrorCode = AppServerErrorCode::InvalidRequest;
+pub const METHOD_NOT_FOUND: AppServerErrorCode = AppServerErrorCode::MethodNotFound;
+pub const INVALID_PARAMS: AppServerErrorCode = AppServerErrorCode::InvalidParams;
+pub const INTERNAL_ERROR: AppServerErrorCode = AppServerErrorCode::InternalError;
+pub const NOT_INITIALIZED: AppServerErrorCode = AppServerErrorCode::NotInitialized;
+pub const ALREADY_INITIALIZED: AppServerErrorCode = AppServerErrorCode::AlreadyInitialized;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct AppServerErrorBody {
+    #[ts(type = "AppServerErrorCode")]
     pub code: AppServerErrorCode,
     pub message: String,
 }
+
+impl std::fmt::Display for AppServerErrorBody {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{} ({})", self.message, self.code.as_i32())
+    }
+}
+
+impl std::error::Error for AppServerErrorBody {}
 
 impl AppServerErrorBody {
     pub fn new(code: AppServerErrorCode, message: impl Into<String>) -> Self {
@@ -58,66 +136,6 @@ impl AppServerErrorBody {
 
     pub fn not_initialized() -> Self {
         Self::new(NOT_INITIALIZED, "app-server is not initialized")
-    }
-
-    pub fn from_talos_error(error: TalosError) -> Self {
-        match error {
-            TalosError::AuthError(message) | TalosError::AuthenticationFailed(message) => {
-                Self::new(UNAUTHORIZED, message)
-            }
-            TalosError::AuthorizationDenied => Self::new(FORBIDDEN, "authorization denied"),
-            TalosError::ResourceNotFound(resource)
-            | TalosError::AgentNotFound(resource)
-            | TalosError::RouteNotFound(resource)
-            | TalosError::ToolNotFound(resource) => {
-                Self::new(NOT_FOUND, format!("resource not found: {resource}"))
-            }
-            TalosError::ActiveTurnRunning(message) => Self::new(ACTIVE_TURN_RUNNING, message),
-            TalosError::Conflict(message)
-            | TalosError::IdempotencyConflict(message)
-            | TalosError::RetryActiveTurnRunning(message) => Self::new(CONFLICT, message),
-            TalosError::ValidationError(message)
-            | TalosError::UnsupportedModel(message)
-            | TalosError::InvalidConfiguration(message)
-            | TalosError::ConfigError(message) => Self::new(VALIDATION_FAILED, message),
-            TalosError::FsError { kind, message } => {
-                Self::new(app_server_code_for_fs(kind), message)
-            }
-            TalosError::FileError { kind, message } => {
-                Self::new(app_server_code_for_file(kind), message)
-            }
-            TalosError::ResourceExpired(message) => Self::new(RESOURCE_EXPIRED, message),
-            TalosError::Timeout(message) => Self::new(REQUEST_TIMEOUT, message),
-            TalosError::RuntimeUnavailable(message) => Self::new(RUNTIME_UNAVAILABLE, message),
-            TalosError::NetworkError(message)
-            | TalosError::ClientError(message)
-            | TalosError::TransportUnavailable(message) => {
-                Self::new(TRANSPORT_UNAVAILABLE, message)
-            }
-            TalosError::Cancelled(message) => Self::new(CANCELLED, message),
-            other => Self::new(INTERNAL_ERROR, other.to_string()),
-        }
-    }
-}
-
-fn app_server_code_for_file(kind: TalosFileErrorKind) -> AppServerErrorCode {
-    match kind {
-        TalosFileErrorKind::UploadTooLarge
-        | TalosFileErrorKind::UnsupportedMediaType
-        | TalosFileErrorKind::AttachmentLimitExceeded
-        | TalosFileErrorKind::UnsupportedAttachment => VALIDATION_FAILED,
-    }
-}
-
-fn app_server_code_for_fs(kind: TalosFsErrorKind) -> AppServerErrorCode {
-    match kind {
-        TalosFsErrorKind::FsDisabled | TalosFsErrorKind::PathOutsideRoot => FORBIDDEN,
-        TalosFsErrorKind::PathNotFound => NOT_FOUND,
-        TalosFsErrorKind::AlreadyExists => CONFLICT,
-        TalosFsErrorKind::InvalidPath
-        | TalosFsErrorKind::SymlinkNotSupported
-        | TalosFsErrorKind::NotDirectory
-        | TalosFsErrorKind::InvalidName => VALIDATION_FAILED,
     }
 }
 

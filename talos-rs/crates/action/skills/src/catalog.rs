@@ -109,11 +109,14 @@ pub fn read_document(roots: &SkillRoots, selector: &SkillSelector) -> TalosResul
         // Ambiguous name selectors are allowed for read after deterministic resolution.
     }
     let contents = read_skill_contents(&summary.path, roots.max_skill_md_bytes).map_err(|err| {
-        TalosError::ResourceNotFound(format!(
-            "failed to read skill `{}` at `{}`: {err}",
-            summary.name,
-            summary.path.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::ResourceNotFound,
+            format!(
+                "failed to read skill `{}` at `{}`: {err}",
+                summary.name,
+                summary.path.display()
+            ),
+        )
     })?;
     Ok(SkillDocument { summary, contents })
 }
@@ -179,9 +182,10 @@ pub(crate) fn select_skill(
         })
         .collect::<Vec<_>>();
     if matches.is_empty() {
-        return Err(TalosError::ResourceNotFound(format!(
-            "skill selector `{selector:?}` did not match any enabled skill"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ResourceNotFound,
+            format!("skill selector `{selector:?}` did not match any enabled skill"),
+        ));
     }
     matches.sort_by(|left, right| {
         left.scope

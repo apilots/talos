@@ -66,14 +66,17 @@ pub fn content_text(
                         text.push_str(&block);
                     }
                     ChatCompletionContentBlock::ImageUrl { .. } => {
-                        return Err(TalosError::ValidationError(format!(
+                        return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
                             "{provider_name} response contains unsupported content block type: image_url"
                         )));
                     }
                     ChatCompletionContentBlock::File { .. } => {
-                        return Err(TalosError::ValidationError(format!(
+                        return Err(TalosError::public(
+                            talos_error::ErrorCode::InvalidRequest,
+                            format!(
                             "{provider_name} response contains unsupported content block type: file"
-                        )));
+                        ),
+                        ));
                     }
                 }
             }

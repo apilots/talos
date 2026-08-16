@@ -1,23 +1,31 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTalosApiErrorBody, TalosHttpError } from "../adapters";
+import {
+  parseTalosApiErrorBody,
+  TalosApiError,
+  TalosHttpError,
+  unwrapTalosApiResponse,
+} from "../adapters";
+import { ErrorCode } from "../generated/app-protocol";
 
 describe("TalosHttpError", () => {
-  it("uses structured API error messages", () => {
+  it("represents non-application HTTP failures", () => {
     const error = new TalosHttpError({
       method: "GET",
       url: "http://localhost:8080/v1/fs/directory?path=%2Fmissing",
       status: 404,
       statusText: "Not Found",
       body: JSON.stringify({
-        code: "path_not_found",
-        message: "path not found: /missing",
+        status: "error",
+        error: {
+          code: ErrorCode.PathNotFound,
+          message: "Path not found",
+        },
       }),
     });
 
-    expect(error.code).toBe("path_not_found");
-    expect(error.responseMessage).toBe("path not found: /missing");
-    expect(error.message).toBe("path not found: /missing");
+    expect(error.status).toBe(404);
+    expect(error.message).toBe("Request failed with 404 Not Found");
   });
 
   it("falls back to status text for non-structured errors", () => {
@@ -29,8 +37,6 @@ describe("TalosHttpError", () => {
       body: "proxy failure",
     });
 
-    expect(error.code).toBeNull();
-    expect(error.responseMessage).toBeNull();
     expect(error.message).toBe("Request failed with 500 Internal Server Error");
   });
 });
@@ -38,6 +44,69 @@ describe("TalosHttpError", () => {
 describe("parseTalosApiErrorBody", () => {
   it("returns null for malformed error bodies", () => {
     expect(parseTalosApiErrorBody("{")).toBeNull();
-    expect(parseTalosApiErrorBody(JSON.stringify({ code: "path_not_found" }))).toBeNull();
+    expect(parseTalosApiErrorBody(JSON.stringify({ code: ErrorCode.PathNotFound }))).toBeNull();
+  });
+
+  it("rejects malformed structured error bodies", () => {
+    expect(() => parseTalosApiErrorBody(JSON.stringify({ status: "error" }))).toThrow(
+      "Invalid Talos API response.",
+    );
+    expect(() =>
+      parseTalosApiErrorBody(
+        JSON.stringify({
+          status: "error",
+          error: { code: "futureCode", message: "Future error" },
+        }),
+      ),
+    ).toThrow("Invalid Talos API response.");
+  });
+});
+
+describe("unwrapTalosApiResponse", () => {
+  it("returns success data", () => {
+    expect(
+      unwrapTalosApiResponse<{ sessionId: string }>({
+        status: "success",
+        data: { sessionId: "session-1" },
+      }),
+    ).toEqual({ sessionId: "session-1" });
+  });
+
+  it("preserves structured application errors", () => {
+    expect(() =>
+      unwrapTalosApiResponse({
+        status: "error",
+        error: {
+          code: ErrorCode.ActiveTurnRunning,
+          message: "Active turn is already running",
+        },
+      }),
+    ).toThrow(TalosApiError);
+
+    try {
+      unwrapTalosApiResponse({
+        status: "error",
+        error: {
+          code: ErrorCode.ActiveTurnRunning,
+          message: "Active turn is already running",
+        },
+      });
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: "TalosApiError",
+        code: ErrorCode.ActiveTurnRunning,
+        message: "Active turn is already running",
+      } satisfies Partial<TalosApiError>);
+    }
+  });
+
+  it("rejects malformed API responses", () => {
+    expect(() => unwrapTalosApiResponse({ data: {} })).toThrow("Invalid Talos API response.");
+    expect(() =>
+      unwrapTalosApiResponse({
+        status: "error",
+        error: { code: "futureCode", message: "Future error" },
+      }),
+    ).toThrow("Invalid Talos API response.");
   });
 });

@@ -45,13 +45,19 @@ impl ToolRouter {
         catalog: &ToolCatalog,
     ) -> TalosResult<ToolInvocation> {
         let spec = catalog.find(&invocation.tool_name).ok_or_else(|| {
-            TalosError::ToolError(format!("Tool '{}' not found", invocation.tool_name))
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("Tool '{}' not found", invocation.tool_name),
+            )
         })?;
         if invocation.payload.kind() != spec.payload_kind {
-            return Err(TalosError::ToolError(format!(
-                "Tool '{}' invoked with incompatible payload",
-                invocation.tool_name
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!(
+                    "Tool '{}' invoked with incompatible payload",
+                    invocation.tool_name
+                ),
+            ));
         }
         invocation.tool_name = spec.definition.name.clone();
         Ok(invocation)

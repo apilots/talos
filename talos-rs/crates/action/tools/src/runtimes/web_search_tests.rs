@@ -64,7 +64,7 @@ fn configured_api_key_reads_loaded_runtime_env() {
     let runtime_env = RuntimeEnv::load_from_iter(&env_file, std::iter::empty::<(&str, &str)>())
         .expect("runtime env should load");
     let config = talos_config::WebSearchProviderRuntimeConfig {
-        api_key_env: Some("TALOS_TEST_WEB_SEARCH_FIRECRAWL_API_KEY".to_string()),
+        api_key: Some("${TALOS_TEST_WEB_SEARCH_FIRECRAWL_API_KEY}".to_string()),
         ..talos_config::WebSearchProviderRuntimeConfig::default()
     };
 

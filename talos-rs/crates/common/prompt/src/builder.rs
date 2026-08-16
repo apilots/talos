@@ -205,7 +205,7 @@ impl<'a> PromptBuilder<'a> {
             Ok(content) => Some(content),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
             Err(err) => {
-                return Err(talos_error::TalosError::StorageError(format!(
+                return Err(talos_error::TalosError::internal(format!(
                     "read bootstrap file {}: {}",
                     path.display(),
                     err
@@ -232,7 +232,7 @@ impl<'a> PromptBuilder<'a> {
         }
         let workspace_dir = bootstrap::expand_workspace_dir(workspace_dir_config);
         fs::create_dir_all(&workspace_dir).await.map_err(|err| {
-            talos_error::TalosError::StorageError(format!(
+            talos_error::TalosError::internal(format!(
                 "create prompt workspace dir {}: {}",
                 workspace_dir.display(),
                 err

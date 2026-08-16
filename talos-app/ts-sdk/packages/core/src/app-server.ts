@@ -27,6 +27,7 @@ import type {
   ConfigGetResponse,
   ConfigReloadResponse,
   ConfigUpdateResponse,
+  ConfigPath,
   ConfigValue,
   LlmConfig,
   ModelListResponse,
@@ -140,20 +141,20 @@ export class AppServerClient {
     return this.transport.request("model.list", {} satisfies AppProtocol.ModelListRequest);
   }
 
-  configGet(): Promise<ConfigGetResponse> {
-    return this.transport.request("config.get", {});
+  configGet(path: ConfigPath = "llm"): Promise<ConfigGetResponse> {
+    return this.transport.request("config.get", { path });
   }
 
-  configUpdate(path: string, value: ConfigValue): Promise<ConfigUpdateResponse> {
-    return this.transport.request("config.update", { path, value });
+  configUpdate(value: ConfigValue): Promise<ConfigUpdateResponse> {
+    return this.transport.request("config.update", { value });
   }
 
   getLlmConfig(): Promise<ConfigGetResponse> {
-    return this.configGet();
+    return this.configGet("llm");
   }
 
   updateLlmConfig(config: LlmConfig): Promise<ConfigUpdateResponse> {
-    return this.configUpdate("llm", { type: "llm", value: config });
+    return this.configUpdate({ type: "llm", value: config });
   }
 
   configReload(): Promise<ConfigReloadResponse> {

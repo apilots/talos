@@ -16,7 +16,7 @@ pub(crate) fn parse_retrieved_memory_items(
                     Ok(vec![response.memory])
                 }
                 Ok(_) => Ok(Vec::new()),
-                Err(error) => Err(TalosError::SerializationError(format!(
+                Err(error) => Err(TalosError::internal(format!(
                     "parse MemoryGet result during context rebuild: {error}"
                 ))),
             }
@@ -306,8 +306,8 @@ pub(crate) fn collect_general_turn_tool_batch_for_calls(
                 deferred_tool_calls: deferred_tool_calls.clone(),
             };
             if pending_user_action.replace(action).is_some() {
-                return Err(TalosError::InternalError(
-                    "tool batch produced multiple pending user actions".to_string(),
+                return Err(TalosError::internal(
+                    "tool batch produced multiple pending user actions",
                 ));
             }
             continue;

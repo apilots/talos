@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use axum::extract::{Json, Query, State};
-use axum::response::Json as JsonResponse;
 use talos_auth::RequestIdentity;
 use talos_types::{
     PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
@@ -14,7 +13,7 @@ use talos_types::{
 };
 
 use super::access::shared_actor;
-use super::errors::ApiError;
+use super::errors::{api_success, ApiError, JsonResponse};
 use super::state::HttpApiState;
 
 pub(super) async fn list_plugin_sources_handler(
@@ -28,7 +27,7 @@ pub(super) async fn list_plugin_sources_handler(
         .list_plugin_sources(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn add_plugin_source_handler(
@@ -42,7 +41,7 @@ pub(super) async fn add_plugin_source_handler(
         .add_plugin_source(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn refresh_plugin_source_handler(
@@ -56,7 +55,7 @@ pub(super) async fn refresh_plugin_source_handler(
         .refresh_plugin_source(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn remove_plugin_source_handler(
@@ -70,7 +69,7 @@ pub(super) async fn remove_plugin_source_handler(
         .remove_plugin_source(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn search_plugins_handler(
@@ -84,7 +83,7 @@ pub(super) async fn search_plugins_handler(
         .search_plugins(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn list_plugins_handler(
@@ -98,7 +97,7 @@ pub(super) async fn list_plugins_handler(
         .list_plugins(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn read_plugin_handler(
@@ -112,7 +111,7 @@ pub(super) async fn read_plugin_handler(
         .read_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn install_plugin_handler(
@@ -126,7 +125,7 @@ pub(super) async fn install_plugin_handler(
         .install_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn update_plugin_handler(
@@ -140,7 +139,7 @@ pub(super) async fn update_plugin_handler(
         .update_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn uninstall_plugin_handler(
@@ -154,7 +153,7 @@ pub(super) async fn uninstall_plugin_handler(
         .uninstall_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn enable_plugin_handler(
@@ -168,7 +167,7 @@ pub(super) async fn enable_plugin_handler(
         .enable_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }
 
 pub(super) async fn disable_plugin_handler(
@@ -182,5 +181,5 @@ pub(super) async fn disable_plugin_handler(
         .disable_plugin(&actor, request)
         .await
         .map_err(ApiError::from_talos_error)?;
-    Ok(JsonResponse(response))
+    Ok(api_success(response))
 }

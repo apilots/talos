@@ -125,7 +125,10 @@ where
     T: DeserializeOwned,
 {
     serde_json::from_value(input).map_err(|err| {
-        talos_error::TalosError::ToolError(format!("invalid {} arguments: {}", tool_name, err))
+        talos_error::TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            format!("invalid {} arguments: {}", tool_name, err),
+        )
     })
 }
 

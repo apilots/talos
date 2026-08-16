@@ -88,8 +88,8 @@ fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
     assert!(provider
         .validate_attachments("qwen3.7-plus", std::slice::from_ref(&image))
         .is_ok());
-    assert!(matches!(
-        provider.validate_attachments(
+    assert!(provider
+        .validate_attachments(
             "qwen3.7-plus",
             &[Attachment {
                 kind: AttachmentKind::File,
@@ -97,12 +97,8 @@ fn test_bailian_attachment_validation_accepts_images_and_rejects_files() {
                 media_type: "application/pdf".to_string(),
                 bytes: vec![1, 2, 3].into(),
             }]
-        ),
-        Err(TalosError::FileError {
-            kind: TalosFileErrorKind::UnsupportedAttachment,
-            ..
-        })
-    ));
+        )
+        .is_err_and(|error| error.is_file_error_kind(TalosFileErrorKind::UnsupportedAttachment)));
 }
 
 #[tokio::test]
@@ -587,5 +583,5 @@ fn test_usage_from_bailian_rejects_conflicting_cache_creation_fields() {
     })
     .expect_err("usage mapping should reject conflicting cache creation fields");
 
-    assert!(matches!(err, TalosError::ValidationError(_)));
+    assert!(err.is_code(talos_error::ErrorCode::InvalidRequest));
 }

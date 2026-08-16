@@ -98,13 +98,13 @@ impl ProjectStore for StorageProjectStore {
             )
             .await?;
         let row = rows.first().ok_or_else(|| {
-            TalosError::StorageError("count projects returned no aggregate row".to_string())
+            TalosError::internal("count projects returned no aggregate row".to_string())
         })?;
         let count = row.get_i64("project_count").ok_or_else(|| {
-            TalosError::StorageError("count projects returned an invalid total".to_string())
+            TalosError::internal("count projects returned an invalid total".to_string())
         })?;
         u64::try_from(count).map_err(|_| {
-            TalosError::StorageError("count projects returned a negative total".to_string())
+            TalosError::internal("count projects returned a negative total".to_string())
         })
     }
 
@@ -179,10 +179,10 @@ impl ProjectStore for StorageProjectStore {
     async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
         let bound_count = self.count_sessions_bound_to_project(project_id).await?;
         if bound_count > 0 {
-            return Err(talos_error::TalosError::ValidationError(format!(
-                "project {} still has bound sessions",
-                project_id
-            )));
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("project {} still has bound sessions", project_id),
+            ));
         }
         let deleted = self
             .storage
@@ -201,9 +201,10 @@ impl ProjectStore for StorageProjectStore {
             )
             .await?;
         if deleted == 0 && self.get_project(project_id).await?.is_some() {
-            return Err(TalosError::Conflict(format!(
-                "project {project_id} still has bound sessions or files"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("project {project_id} still has bound sessions or files"),
+            ));
         }
         Ok(())
     }

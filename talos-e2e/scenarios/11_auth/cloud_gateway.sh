@@ -207,9 +207,9 @@ request_json "${GATEWAY_URL}" GET "/v1/user" 401 "" "invalid-token"
 echo "CASE talos_user_rejects_invalid_cloud_token PASS"
 
 request_json "${GATEWAY_URL}" GET "/v1/user" 200 "" "${CLOUD_TOKEN}"
-talos_user_id="$(json_get "${LAST_BODY}" "user.user_id")"
-talos_user_role="$(json_get "${LAST_BODY}" "user.role")"
-talos_user_type="$(json_get "${LAST_BODY}" "user.type")"
+talos_user_id="$(api_json_get "${LAST_BODY}" "user.user_id")"
+talos_user_role="$(api_json_get "${LAST_BODY}" "user.role")"
+talos_user_type="$(api_json_get "${LAST_BODY}" "user.type")"
 if [[ "${talos_user_id}" != "${CLOUD_USER_ID}" || "${talos_user_role}" != "${CLOUD_ROLE}" || "${talos_user_type}" != "${CLOUD_USER_TYPE}" ]]; then
   fail_case "talos /v1/user mismatch body=${LAST_BODY}"
 fi

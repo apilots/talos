@@ -277,7 +277,7 @@ impl TuiApp {
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
                     update = Some(crate::types::SessionCloseUpdate {
-                        result: Err(TalosError::ClientError(
+                        result: Err(TalosError::internal(
                             "session close channel dropped".to_string(),
                         )),
                         client_shutdown_completed: false,

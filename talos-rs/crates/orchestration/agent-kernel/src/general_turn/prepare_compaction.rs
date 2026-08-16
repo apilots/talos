@@ -82,13 +82,7 @@ pub(super) fn determine_history_compaction_trigger(
 }
 
 pub(super) fn is_recoverable_compaction_parse_error(error: &talos_error::TalosError) -> bool {
-    matches!(
-        error,
-        talos_error::TalosError::MemoryError {
-            kind: talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-            ..
-        }
-    )
+    error.memory_error_kind() == Some(talos_error::TalosMemoryErrorKind::SummaryParseFailed)
 }
 
 pub(super) async fn emit_context_compaction_stream_event(
@@ -142,14 +136,46 @@ pub(super) fn map_context_compaction_outcome(
 }
 
 pub(super) fn context_compaction_failure_outcome(error: &TalosError) -> ContextCompactionOutcome {
-    match error {
-        TalosError::NetworkError(_)
-        | TalosError::RuntimeUnavailable(_)
-        | TalosError::TransportUnavailable(_)
-        | TalosError::UnsupportedModel(_)
-        | TalosError::Timeout(_)
-        | TalosError::ToolError(_) => ContextCompactionOutcome::FailedProviderError,
-        _ => ContextCompactionOutcome::FailedInternalError,
+    match error.error_code() {
+        talos_error::ErrorCode::ServiceUnavailable
+        | talos_error::ErrorCode::ProviderUnavailable
+        | talos_error::ErrorCode::Timeout
+        | talos_error::ErrorCode::ToolExecutionFailed => {
+            ContextCompactionOutcome::FailedProviderError
+        }
+        talos_error::ErrorCode::InvalidRequest
+        | talos_error::ErrorCode::InvalidRetryRequest
+        | talos_error::ErrorCode::Unauthenticated
+        | talos_error::ErrorCode::PermissionDenied
+        | talos_error::ErrorCode::ResourceNotFound
+        | talos_error::ErrorCode::SessionNotFound
+        | talos_error::ErrorCode::ResourceExpired
+        | talos_error::ErrorCode::Conflict
+        | talos_error::ErrorCode::ActiveTurnRunning
+        | talos_error::ErrorCode::RetrySourceCompleted
+        | talos_error::ErrorCode::RetrySourceMismatch
+        | talos_error::ErrorCode::IdempotencyConflict
+        | talos_error::ErrorCode::InvalidCursor
+        | talos_error::ErrorCode::EventCursorExpired
+        | talos_error::ErrorCode::FsDisabled
+        | talos_error::ErrorCode::InvalidPath
+        | talos_error::ErrorCode::PathOutsideRoot
+        | talos_error::ErrorCode::SymlinkNotSupported
+        | talos_error::ErrorCode::PathNotFound
+        | talos_error::ErrorCode::NotDirectory
+        | talos_error::ErrorCode::InvalidName
+        | talos_error::ErrorCode::AlreadyExists
+        | talos_error::ErrorCode::UploadTooLarge
+        | talos_error::ErrorCode::UnsupportedMediaType
+        | talos_error::ErrorCode::AttachmentLimitExceeded
+        | talos_error::ErrorCode::UnsupportedAttachment
+        | talos_error::ErrorCode::FileInputRejected
+        | talos_error::ErrorCode::ContextWindowExceeded
+        | talos_error::ErrorCode::SessionBudgetExceeded
+        | talos_error::ErrorCode::UsageLimitExceeded
+        | talos_error::ErrorCode::ContextCompactionFailed
+        | talos_error::ErrorCode::Cancelled
+        | talos_error::ErrorCode::InternalError => ContextCompactionOutcome::FailedInternalError,
     }
 }
 

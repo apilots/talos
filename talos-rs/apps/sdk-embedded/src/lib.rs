@@ -133,9 +133,10 @@ fn normalize_embedded_start_turn_request(
     let directory = match request.current_directory.clone().or(existing_directory) {
         Some(directory) => directory,
         None => env::current_dir().map_err(|err| {
-            TalosError::ValidationError(format!(
-                "failed to resolve embedded current directory: {err}"
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("failed to resolve embedded current directory: {err}"),
+            )
         })?,
     };
 

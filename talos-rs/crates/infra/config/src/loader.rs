@@ -54,10 +54,10 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     };
 
     if !config_path.exists() {
-        return Err(TalosError::InvalidConfiguration(format!(
-            "no config file found at {}",
-            config_path.display()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("no config file found at {}", config_path.display()),
+        ));
     }
 
     if path.is_some() || std::env::var_os(TALOS_CONFIG_ENV).is_some() {
@@ -65,23 +65,23 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     }
     let runtime_env = RuntimeEnv::load(&paths.env_file)?;
     let raw = std::fs::read_to_string(&config_path).map_err(|err| {
-        TalosError::ConfigError(format!(
+        TalosError::internal(format!(
             "failed to read config file {}: {}",
             config_path.display(),
             err
         ))
     })?;
     let yaml_value: serde_yaml::Value = serde_yaml::from_str(&raw)
-        .map_err(|err| TalosError::ConfigError(format!("failed to parse yaml: {}", err)))?;
+        .map_err(|err| TalosError::internal(format!("failed to parse yaml: {}", err)))?;
     let raw_value: Value = serde_json::to_value(yaml_value)
-        .map_err(|err| TalosError::ConfigError(format!("failed to convert yaml: {}", err)))?;
+        .map_err(|err| TalosError::internal(format!("failed to convert yaml: {}", err)))?;
 
     validate::validate_required_paths(&raw_value)?;
     validate::validate_forbidden_paths(&raw_value)?;
 
     // Deserialize into typed config after strict key presence validation.
     let config: Config =
-        serde_json::from_value(raw_value).map_err(|e| TalosError::ConfigError(e.to_string()))?;
+        serde_json::from_value(raw_value).map_err(|e| TalosError::internal(e.to_string()))?;
     let mut config = resolve_env_placeholders(config, &runtime_env)?;
     config.source_path = Some(config_path);
     config.apply_derived_paths();
@@ -127,13 +127,13 @@ where
             .map(|path| path.display().to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(TalosError::InvalidConfiguration(format!(
+        return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
             "missing default config template: expected {DEFAULT_CONFIG_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV}; searched: {searched}"
         )));
     };
 
     talos_fs::copy_file(template_path, &paths.config_file).map_err(|err| {
-        TalosError::ConfigError(format!(
+        TalosError::internal(format!(
             "failed to copy default config template from {} to {}: {}",
             template_path.display(),
             paths.config_file.display(),
@@ -161,9 +161,12 @@ pub(crate) fn required_resource_dir() -> TalosResult<PathBuf> {
     std::env::var_os(TALOS_RESOURCE_DIR_ENV)
         .map(PathBuf::from)
         .ok_or_else(|| {
-            TalosError::InvalidConfiguration(format!(
-                "{TALOS_RESOURCE_DIR_ENV} must be set to the Talos installation resource root"
-            ))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "{TALOS_RESOURCE_DIR_ENV} must be set to the Talos installation resource root"
+                ),
+            )
         })
 }
 
@@ -184,7 +187,7 @@ where
             .map(|path| path.display().to_string())
             .collect::<Vec<_>>()
             .join(", ");
-        return Err(TalosError::InvalidConfiguration(format!(
+        return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
             "missing database migrations: expected {DEFAULT_MIGRATIONS_RELATIVE_PATH} under {TALOS_RESOURCE_DIR_ENV}; searched: {searched}"
         )));
     };
@@ -197,11 +200,14 @@ where
 
     let backend_dir = paths.database_migrations_dir(database_type);
     if !backend_dir.is_dir() {
-        return Err(TalosError::InvalidConfiguration(format!(
-            "missing {} database migrations at {}",
-            database_type,
-            backend_dir.display()
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "missing {} database migrations at {}",
+                database_type,
+                backend_dir.display()
+            ),
+        ));
     }
     Ok(DatabaseMigrationsInstallReport {
         source_dir: source_dir.clone(),
@@ -216,13 +222,16 @@ fn replace_directory(source: &Path, target: &Path) -> TalosResult<()> {
     use talos_error::TalosError;
 
     let parent = target.parent().ok_or_else(|| {
-        TalosError::InvalidConfiguration(format!(
-            "database migration target has no parent: {}",
-            target.display()
-        ))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "database migration target has no parent: {}",
+                target.display()
+            ),
+        )
     })?;
     std::fs::create_dir_all(parent).map_err(|error| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "create database migration parent {}: {error}",
             parent.display()
         ))
@@ -231,7 +240,7 @@ fn replace_directory(source: &Path, target: &Path) -> TalosResult<()> {
     let staging = parent.join(".migrations-installing");
     if staging.exists() {
         std::fs::remove_dir_all(&staging).map_err(|error| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "remove stale database migration staging directory {}: {error}",
                 staging.display()
             ))
@@ -241,14 +250,14 @@ fn replace_directory(source: &Path, target: &Path) -> TalosResult<()> {
 
     if target.exists() {
         std::fs::remove_dir_all(target).map_err(|error| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "remove existing database migrations {}: {error}",
                 target.display()
             ))
         })?;
     }
     std::fs::rename(&staging, target).map_err(|error| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "install database migrations from {} to {}: {error}",
             source.display(),
             target.display()
@@ -260,19 +269,19 @@ fn copy_directory(source: &Path, target: &Path) -> TalosResult<()> {
     use talos_error::TalosError;
 
     std::fs::create_dir_all(target).map_err(|error| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "create database migration directory {}: {error}",
             target.display()
         ))
     })?;
     for entry in std::fs::read_dir(source).map_err(|error| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "read database migration directory {}: {error}",
             source.display()
         ))
     })? {
         let entry = entry.map_err(|error| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "read database migration entry under {}: {error}",
                 source.display()
             ))
@@ -280,7 +289,7 @@ fn copy_directory(source: &Path, target: &Path) -> TalosResult<()> {
         let source_path = entry.path();
         let target_path = target.join(entry.file_name());
         let file_type = entry.file_type().map_err(|error| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "inspect database migration resource {}: {error}",
                 source_path.display()
             ))
@@ -289,7 +298,7 @@ fn copy_directory(source: &Path, target: &Path) -> TalosResult<()> {
             copy_directory(&source_path, &target_path)?;
         } else if file_type.is_file() {
             std::fs::copy(&source_path, &target_path).map_err(|error| {
-                TalosError::StorageError(format!(
+                TalosError::internal(format!(
                     "copy database migration resource {} to {}: {error}",
                     source_path.display(),
                     target_path.display()
@@ -311,11 +320,11 @@ pub(crate) fn save_config(config: &Config, path: &str) -> TalosResult<()> {
     use talos_error::TalosError;
 
     let yaml = serde_yaml::to_string(config)
-        .map_err(|e| TalosError::ConfigError(format!("Failed to serialize config: {}", e)))?;
+        .map_err(|e| TalosError::internal(format!("Failed to serialize config: {}", e)))?;
 
     talos_fs::std_fs()
         .write_file(Path::new(path), &yaml)
-        .map_err(|e| TalosError::ConfigError(format!("Failed to write config file: {}", e)))?;
+        .map_err(|e| TalosError::internal(format!("Failed to write config file: {}", e)))?;
 
     Ok(())
 }
@@ -331,10 +340,10 @@ pub(crate) fn resolve_env_placeholders(
     use talos_error::TalosError;
 
     let mut value = serde_json::to_value(config)
-        .map_err(|e| TalosError::ConfigError(format!("Failed to encode config: {}", e)))?;
+        .map_err(|e| TalosError::internal(format!("Failed to encode config: {}", e)))?;
     resolve_value_placeholders(&mut value, runtime_env);
     serde_json::from_value(value)
-        .map_err(|e| TalosError::ConfigError(format!("Failed to decode config: {}", e)))
+        .map_err(|e| TalosError::internal(format!("Failed to decode config: {}", e)))
 }
 
 pub(crate) fn resolve_value_placeholders(value: &mut Value, runtime_env: &RuntimeEnv) {

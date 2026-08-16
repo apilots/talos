@@ -36,7 +36,7 @@ impl TimelineSubscriptionService {
             .into_iter()
             .map(|event| {
                 TimelineEventEnvelope::from_persisted_event(event).ok_or_else(|| {
-                    TalosError::SerializationError(
+                    TalosError::internal(
                         "persisted timeline event is missing envelope metadata".to_string(),
                     )
                 })
@@ -82,13 +82,13 @@ pub(crate) fn reject_expired_cursor(
     let Some(after_event_id) = after_event_id else {
         return Ok(());
     };
-    let after_seq = after_event_id
-        .event_seq()
-        .map_err(|err| TalosError::ValidationError(err.to_string()))?;
+    let after_seq = after_event_id.event_seq().map_err(|err| {
+        TalosError::public(talos_error::ErrorCode::InvalidRequest, err.to_string())
+    })?;
     if let Some(oldest_event_id) = oldest_event_id {
-        let oldest_seq = oldest_event_id
-            .event_seq()
-            .map_err(|err| TalosError::ValidationError(err.to_string()))?;
+        let oldest_seq = oldest_event_id.event_seq().map_err(|err| {
+            TalosError::public(talos_error::ErrorCode::InvalidRequest, err.to_string())
+        })?;
         if oldest_seq > after_seq + 1 {
             return Err(expired_cursor_error());
         }
@@ -100,5 +100,8 @@ pub(crate) fn reject_expired_cursor(
 }
 
 fn expired_cursor_error() -> TalosError {
-    TalosError::ResourceExpired("event cursor is older than retained timeline events".to_string())
+    TalosError::public(
+        talos_error::ErrorCode::ResourceExpired,
+        "event cursor is older than retained timeline events".to_string(),
+    )
 }

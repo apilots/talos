@@ -44,12 +44,14 @@ impl ReloadableLlmProviderRouter {
     fn cached_provider_for(&self, model_ref: &ModelRef) -> TalosResult<Arc<dyn LlmProvider>> {
         let provider_name = model_ref.provider.trim().to_ascii_lowercase();
         if provider_name.is_empty() {
-            return Err(TalosError::InvalidConfiguration(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "model_ref.provider must not be empty".to_string(),
             ));
         }
         if model_ref.id.trim().is_empty() {
-            return Err(TalosError::InvalidConfiguration(
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
                 "model_ref.id must not be empty".to_string(),
             ));
         }

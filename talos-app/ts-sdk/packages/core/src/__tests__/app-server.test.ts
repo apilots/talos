@@ -164,11 +164,10 @@ describe("AppServerClient", () => {
         },
       },
       { method: "project.list", params: {} },
-      { method: "config.get", params: {} },
+      { method: "config.get", params: { path: "llm" } },
       {
         method: "config.update",
         params: {
-          path: "llm",
           value: { type: "llm", value: testLlmConfig },
         },
       },

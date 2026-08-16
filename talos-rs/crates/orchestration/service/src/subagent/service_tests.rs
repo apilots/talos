@@ -60,7 +60,10 @@ struct RecordingTurnExecutor {
 impl TurnExecutor for RecordingTurnExecutor {
     async fn validate_agent_id(&self, agent_id: &str) -> TalosResult<()> {
         if self.rejected_agent_id.lock().unwrap().as_deref() == Some(agent_id) {
-            return Err(TalosError::ResourceNotFound(format!("agent {agent_id}")));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                format!("agent {agent_id}"),
+            ));
         }
         Ok(())
     }
@@ -71,7 +74,10 @@ impl TurnExecutor for RecordingTurnExecutor {
     ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.requests.lock().unwrap().push(request.clone());
         if std::mem::take(&mut *self.fail_next.lock().unwrap()) {
-            return Err(TalosError::Conflict("start failed".to_string()));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "start failed".to_string(),
+            ));
         }
         let (tx, rx) = mpsc::channel(2);
         if std::mem::take(&mut *self.silent_next.lock().unwrap()) {
@@ -577,7 +583,7 @@ async fn spawn_rejects_a_caller_agent_that_does_not_own_the_parent_session() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(services.executor.requests.lock().unwrap().is_empty());
 }
 
@@ -600,7 +606,7 @@ async fn spawn_rejects_inactive_or_child_parent() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(services.executor.requests.lock().unwrap().is_empty());
 }
 
@@ -625,7 +631,7 @@ async fn spawn_resolves_the_inherited_agent_before_creating_a_child_session() {
         .await
         .unwrap();
 
-    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
     assert!(children.is_empty());
 }
 
@@ -644,7 +650,7 @@ async fn spawn_rejects_an_initial_prompt_over_the_hard_byte_cap() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[tokio::test]
@@ -719,7 +725,7 @@ async fn spawn_removes_child_when_turn_start_fails() {
         )
         .await
         .unwrap();
-    assert!(matches!(error, TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert!(rows.is_empty());
 }
 
@@ -811,7 +817,7 @@ async fn send_message_rejects_a_non_running_child() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert!(services.executor.inputs.lock().unwrap().is_empty());
 }
 
@@ -820,7 +826,8 @@ async fn send_message_propagates_a_closed_runtime_input() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
     let (child, _turn_id) = create_running_child(&services, parent.clone()).await;
-    *services.executor.input_error.lock().unwrap() = Some(TalosError::ResourceNotFound(
+    *services.executor.input_error.lock().unwrap() = Some(TalosError::public(
+        talos_error::ErrorCode::ResourceNotFound,
         "message input closed".to_string(),
     ));
 
@@ -834,10 +841,8 @@ async fn send_message_propagates_a_closed_runtime_input() {
         .await
         .unwrap_err();
 
-    assert!(matches!(
-        error,
-        TalosError::ResourceNotFound(message) if message == "message input closed"
-    ));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
+    assert_eq!(error.diagnostic_message(), "message input closed");
 }
 
 #[tokio::test]
@@ -948,8 +953,10 @@ async fn failed_outcome_exposes_a_bounded_preview_with_truncation_marker() {
             payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
                 request_id: "request-child".to_string(),
                 turn_id: turn_id.clone(),
-                error: "é".repeat(2_000),
-                error_info: None,
+                error: talos_error::ApiError {
+                    code: talos_error::ErrorCode::InternalError,
+                    message: "failed ".repeat(400),
+                },
                 failed_at_ms: 2,
             }),
         })
@@ -992,7 +999,7 @@ async fn wait_rejects_a_child_owned_by_another_parent() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ResourceNotFound(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -1167,10 +1174,18 @@ async fn every_existing_child_operation_rejects_a_stale_caller_turn() {
         .list(ListSubagentsRequest { caller: parent })
         .await;
 
-    assert!(matches!(wait, Err(TalosError::ValidationError(_))));
-    assert!(matches!(interrupt, Err(TalosError::ValidationError(_))));
-    assert!(matches!(follow_up, Err(TalosError::ValidationError(_))));
-    assert!(matches!(list, Err(TalosError::ValidationError(_))));
+    assert!(wait
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
+    assert!(interrupt
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
+    assert!(follow_up
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
+    assert!(list
+        .as_ref()
+        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
 }
 
 #[tokio::test]
@@ -1234,6 +1249,6 @@ async fn follow_up_rejects_a_running_child() {
         .await
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ActiveTurnRunning(_)));
+    assert!(error.is_code(talos_error::ErrorCode::ActiveTurnRunning));
     assert!(services.executor.requests.lock().unwrap().is_empty());
 }

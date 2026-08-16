@@ -333,16 +333,18 @@ impl ToolContext {
 
     pub(crate) fn sandbox_permit(&self) -> talos_error::TalosResult<&ToolSandboxPermit> {
         self.sandbox_permit.as_ref().ok_or_else(|| {
-            talos_error::TalosError::ToolError(
-                "tool runtime requires an invocation-bound sandbox permit".to_string(),
+            talos_error::TalosError::internal(
+                "tool runtime requires an invocation-bound sandbox permit",
             )
         })
     }
 
     pub(crate) fn sandbox_file_system(&self) -> talos_error::TalosResult<ToolFileSystemHandle> {
-        self.sandbox_permit()?
-            .file_system()
-            .map_err(|error| talos_error::TalosError::ToolError(error.to_string()))
+        self.sandbox_permit()?.file_system().map_err(|error| {
+            talos_error::TalosError::internal(format!(
+                "failed to bind invocation sandbox filesystem: {error}"
+            ))
+        })
     }
 }
 

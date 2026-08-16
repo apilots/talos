@@ -18,6 +18,8 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-037 | `feat-037-tool-permission-user-interaction` | draft |
 | feat-036 | `feat-036-unified-tool-sandbox` | draft |
 | refactor-040 | `refactor-040-agent-runtime-message-event-api` | draft |
+| feat-034 | `feat-034-web-search-settings` | implementing |
+| feat-035 | `feat-035-mcp-server-management-reliability` | draft |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |
 | feat-032 | `feat-032-session-subagent` | active |
 | refactor-039 | `refactor-039-memory-storage-retrieval` | draft |

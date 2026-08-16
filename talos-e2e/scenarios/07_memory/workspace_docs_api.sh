@@ -20,7 +20,7 @@ start_server
 trap cleanup EXIT
 
 workspace_info_json="$(curl -sS "${GATEWAY_URL}/v1/workspace/info")"
-WORKSPACE_DIR="$(json_get "${workspace_info_json}" "user_workspace_dir")"
+WORKSPACE_DIR="$(api_json_get "${workspace_info_json}" "user_workspace_dir")"
 if [[ -z "${WORKSPACE_DIR}" ]]; then
   echo "CASE workspace_info FAIL response=${workspace_info_json}"
   exit 1
@@ -68,7 +68,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE list_workspace_docs FAIL status=${status} body=${body}"
   exit 1
 fi
-workspace_doc_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+workspace_doc_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "$(api_data_json "${body}")")"
 if [[ "${workspace_doc_count}" != "5" ]]; then
   echo "CASE list_workspace_docs FAIL expected=5 actual=${workspace_doc_count}"
   exit 1
@@ -83,9 +83,10 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE get_missing_workspace_doc FAIL status=${status} body=${body}"
   exit 1
 fi
-doc_exists="$(json_get "${body}" "doc.exists")"
+body_data="$(api_data_json "${body}")"
+doc_exists="$(json_get "${body_data}" "doc.exists")"
 doc_exists="$(printf '%s' "${doc_exists}" | tr '[:upper:]' '[:lower:]')"
-doc_content="$(json_get "${body}" "doc.content")"
+doc_content="$(json_get "${body_data}" "doc.content")"
 if [[ "${doc_exists}" != "false" || -n "${doc_content}" ]]; then
   echo "CASE get_missing_workspace_doc FAIL exists=${doc_exists} content=${doc_content}"
   exit 1
@@ -108,8 +109,9 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE create_workspace_doc FAIL status=${status} body=${body}"
   exit 1
 fi
-doc_version_token="$(json_get "${body}" "doc.version_token")"
-doc_exists="$(json_get "${body}" "doc.exists")"
+body_data="$(api_data_json "${body}")"
+doc_version_token="$(json_get "${body_data}" "doc.version_token")"
+doc_exists="$(json_get "${body_data}" "doc.exists")"
 doc_exists="$(printf '%s' "${doc_exists}" | tr '[:upper:]' '[:lower:]')"
 if [[ "${doc_exists}" != "true" || -z "${doc_version_token}" || ! -f "${SOUL_FILE}" ]]; then
   echo "CASE create_workspace_doc FAIL exists=${doc_exists} version=${doc_version_token} path=${SOUL_FILE}"
@@ -147,7 +149,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE list_memory_files_before_write FAIL status=${status} body=${body}"
   exit 1
 fi
-memory_count_before="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+memory_count_before="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "$(api_data_json "${body}")")"
 if [[ "${memory_count_before}" != "0" ]]; then
   echo "CASE list_memory_files_before_write FAIL expected=0 actual=${memory_count_before}"
   exit 1
@@ -170,7 +172,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE create_memory_file FAIL status=${status} body=${body}"
   exit 1
 fi
-memory_version_token="$(json_get "${body}" "file.version_token")"
+memory_version_token="$(api_json_get "${body}" "file.version_token")"
 if [[ -z "${memory_version_token}" || ! -f "${MEMORY_FILE}" ]]; then
   echo "CASE create_memory_file FAIL version=${memory_version_token} path=${MEMORY_FILE}"
   exit 1
@@ -189,7 +191,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE list_memory_files_in_range FAIL status=${status} body=${body}"
   exit 1
 fi
-memory_count_in_range="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+memory_count_in_range="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "$(api_data_json "${body}")")"
 if [[ "${memory_count_in_range}" != "1" ]]; then
   echo "CASE list_memory_files_in_range FAIL expected=1 actual=${memory_count_in_range}"
   exit 1
@@ -204,7 +206,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE list_memory_files_before_date FAIL status=${status} body=${body}"
   exit 1
 fi
-memory_count_before_date="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+memory_count_before_date="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "$(api_data_json "${body}")")"
 if [[ "${memory_count_before_date}" != "0" ]]; then
   echo "CASE list_memory_files_before_date FAIL expected=0 actual=${memory_count_before_date}"
   exit 1
@@ -219,7 +221,7 @@ if [[ "${status}" != "200" ]]; then
   echo "CASE search_memory_files FAIL status=${status} body=${body}"
   exit 1
 fi
-search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "${body}")"
+search_hit_count="$(python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' <<< "$(api_data_json "${body}")")"
 if [[ "${search_hit_count}" -lt "1" ]]; then
   echo "CASE search_memory_files FAIL expected_at_least=1 actual=${search_hit_count}"
   exit 1

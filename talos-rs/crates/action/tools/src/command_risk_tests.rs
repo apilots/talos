@@ -235,7 +235,7 @@ async fn structured_assessor_rejects_text_and_wrong_tool_shapes() {
 #[tokio::test]
 async fn structured_assessor_reports_unavailable_provider_and_timeout() {
     let unavailable = Arc::new(TestProvider::with_responses(vec![Err(
-        TalosError::InternalError("provider unavailable".to_string()),
+        TalosError::internal("provider unavailable"),
     )]));
     let assessor = LlmCommandRiskAssessor::new(unavailable, "risk-model");
     assert!(matches!(

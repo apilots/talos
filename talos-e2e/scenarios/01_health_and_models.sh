@@ -21,11 +21,12 @@ echo "CASE health_check PASS status=${status}"
 
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 log_case_json "models_list" "{}" "${models_json}"
-model_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", payload.get("data", [])); print(len(data))' <<< "${models_json}")"
-first_model_name="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", payload.get("data", [])); print((data[0].get("name") if data else ""))' <<< "${models_json}")"
-first_model_context_window="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", payload.get("data", [])); print((data[0].get("context_window") if data else 0))' <<< "${models_json}")"
-provider_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", payload.get("data", [])); print(len({item.get("provider") for item in data if item.get("provider")}))' <<< "${models_json}")"
-ollama_models="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", payload.get("data", [])); print(",".join(item.get("id", "") for item in data if item.get("provider") == "ollama"))' <<< "${models_json}")"
+models_data_json="$(api_data_json "${models_json}")"
+model_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print(len(data))' <<< "${models_data_json}")"
+first_model_name="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print((data[0].get("name") if data else ""))' <<< "${models_data_json}")"
+first_model_context_window="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print((data[0].get("context_window") if data else 0))' <<< "${models_data_json}")"
+provider_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print(len({item.get("provider") for item in data if item.get("provider")}))' <<< "${models_data_json}")"
+ollama_models="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); data=payload.get("models", []); print(",".join(item.get("id", "") for item in data if item.get("provider") == "ollama"))' <<< "${models_data_json}")"
 if [[ "${model_count}" -lt 1 ]]; then
   echo "CASE models_list FAIL expected=>=1 actual=${model_count}"
   exit 1

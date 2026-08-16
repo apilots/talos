@@ -4,11 +4,14 @@ import {
 } from "@microsoft/fetch-event-source";
 import {
   TalosClient,
+  TalosApiError,
   type HttpAdapter,
   type HttpRequestOptions,
+  parseTalosApiErrorBody,
   TalosHttpError,
   type StreamAdapter,
   type StreamRequestOptions,
+  unwrapTalosApiResponse,
 } from "@talos/sdk-core";
 
 export * from "@talos/sdk-core";
@@ -40,7 +43,7 @@ class BrowserHttpAdapter implements HttpAdapter {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new TalosHttpError({
+      throw httpFailure({
         method: options?.method ?? "GET",
         status: response.status,
         statusText: response.statusText,
@@ -49,11 +52,7 @@ class BrowserHttpAdapter implements HttpAdapter {
       });
     }
 
-    if (response.status === 204) {
-      return undefined as T;
-    }
-
-    return (await response.json()) as T;
+    return unwrapTalosApiResponse<T>(await response.json());
   }
 }
 
@@ -88,23 +87,17 @@ function xhrRequest<T>(
     xhr.onload = () => {
       finish(() => {
         if (xhr.status < 200 || xhr.status >= 300) {
-          reject(
-            new TalosHttpError({
-              method,
-              status: xhr.status,
-              statusText: xhr.statusText,
-              body: xhr.responseText,
-              url,
-            }),
-          );
-          return;
-        }
-        if (xhr.status === 204) {
-          resolve(undefined as T);
+          reject(httpFailure({
+            method,
+            status: xhr.status,
+            statusText: xhr.statusText,
+            body: xhr.responseText,
+            url,
+          }));
           return;
         }
         try {
-          resolve(JSON.parse(xhr.responseText) as T);
+          resolve(unwrapTalosApiResponse<T>(JSON.parse(xhr.responseText) as unknown));
         } catch (error) {
           reject(error);
         }
@@ -154,7 +147,7 @@ class BrowserStreamAdapter implements StreamAdapter {
             return;
           }
           const body = await response.text();
-          throw new TalosHttpError({
+          throw httpFailure({
             method: options.method ?? "GET",
             status: response.status,
             statusText: response.statusText,
@@ -185,4 +178,18 @@ export function createBrowserTalosClient(options: BrowserClientOptions) {
     new BrowserStreamAdapter(options.getToken),
     options.baseUrl,
   );
+}
+
+function httpFailure(payload: {
+  status: number;
+  statusText: string;
+  body: string;
+  url: string;
+  method: string;
+}): Error {
+  const apiError = parseTalosApiErrorBody(payload.body);
+  if (apiError) {
+    return new TalosApiError(apiError);
+  }
+  return new TalosHttpError(payload);
 }

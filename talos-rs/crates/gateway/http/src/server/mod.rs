@@ -23,7 +23,8 @@ use std::sync::Arc;
 
 use axum::extract::DefaultBodyLimit;
 use axum::middleware::{self};
-use axum::routing::{get, post};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{any, get, post, put};
 use axum::Router;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
@@ -52,7 +53,8 @@ use self::messages::{
     submit_dynamic_tool_result_handler, submit_user_action_handler,
 };
 use self::misc::{
-    get_llm_handler, health_handler, list_models_handler, put_llm_handler, shutdown_signal,
+    get_config_handler, get_llm_handler, health_handler, list_models_handler, put_config_handler,
+    put_llm_handler, shutdown_signal,
 };
 use self::plugin::{
     add_plugin_source_handler, disable_plugin_handler, enable_plugin_handler,
@@ -79,8 +81,9 @@ use self::workspace_docs::{
     get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
     put_workspace_doc_handler,
 };
+use errors::ApiError;
 use talos_auth::AuthService;
-use talos_error::TalosResult;
+use talos_error::{ErrorCode, TalosResult};
 use talos_service::TalosService;
 use talos_service::TimelineEventService;
 use talos_types::TalosConfig;
@@ -182,6 +185,8 @@ impl HttpServer {
             .route("/v1/user", get(current_user_handler))
             .route("/v1/profile", get(read_profile_handler))
             .route("/v1/llm", get(get_llm_handler).put(put_llm_handler))
+            .route("/v1/config/:path", get(get_config_handler))
+            .route("/v1/config", put(put_config_handler))
             .route(
                 "/v1/fs/directory",
                 get(read_directory_handler).post(create_directory_handler),
@@ -289,7 +294,10 @@ impl HttpServer {
                 post(submit_dynamic_tool_result_handler),
             )
             .route("/v1/user-actions/submit", post(submit_user_action_handler))
+            .route("/v1/*path", any(api_not_found_handler))
+            .method_not_allowed_fallback(api_method_not_allowed_handler)
             .with_state(state.clone())
+            .layer(middleware::from_fn(errors::normalize_extractor_rejection))
             .layer(middleware::from_fn_with_state(
                 state.clone(),
                 lifecycle_gate_middleware,
@@ -307,7 +315,10 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Failed to bind to {}:{}: {}", self.host, self.port, e);
-                talos_error::TalosError::NetworkError(e.to_string())
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    e.to_string(),
+                )
             })?;
 
         info!("HTTP server listening on {}:{}", self.host, self.port);
@@ -319,7 +330,10 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Server error: {}", e);
-                talos_error::TalosError::NetworkError(e.to_string())
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ServiceUnavailable,
+                    e.to_string(),
+                )
             });
 
         gc_task.abort();
@@ -329,6 +343,14 @@ impl HttpServer {
     fn listen_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
     }
+}
+
+async fn api_not_found_handler() -> Response {
+    ApiError::new(ErrorCode::ResourceNotFound).into_response()
+}
+
+async fn api_method_not_allowed_handler() -> Response {
+    ApiError::new(ErrorCode::InvalidRequest).into_response()
 }
 
 #[cfg(test)]

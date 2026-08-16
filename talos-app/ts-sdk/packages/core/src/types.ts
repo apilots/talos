@@ -15,6 +15,8 @@ import type {
   FileUploadResponse as ProtocolFileUploadResponse,
   MemoryFileDetail as ProtocolMemoryFileDetail,
   MemoryFileSummary as ProtocolMemoryFileSummary,
+  ConfigPath as ProtocolConfigPath,
+  ConfigResponse as ProtocolConfigResponse,
   ConfigGetResponse as ProtocolConfigGetResponse,
   ConfigReloadResponse as ProtocolConfigReloadResponse,
   ConfigUpdateResponse as ProtocolConfigUpdateResponse,
@@ -33,6 +35,9 @@ import type {
   ProviderKeyStatus as ProtocolProviderKeyStatus,
   ProviderModelConfig as ProtocolProviderModelConfig,
   ProviderProtocolCapabilities as ProtocolProviderProtocolCapabilities,
+  WebSearchToolConfig as ProtocolWebSearchToolConfig,
+  WebSearchProviderConfig as ProtocolWebSearchProviderConfig,
+  WebSearchProviderRuntimeConfig as ProtocolWebSearchProviderRuntimeConfig,
   ProfileDailyUsage as ProtocolProfileDailyUsage,
   ProfileModelUsage as ProtocolProfileModelUsage,
   ProfileReadRequest as ProtocolProfileReadRequest,
@@ -432,7 +437,12 @@ export type LlmConfig = ProtocolLlmConfig;
 export type ModelReadiness = ProtocolModelReadiness;
 export type ProviderKeyStatus = ProtocolProviderKeyStatus;
 export type ProviderProtocolCapabilities = ProtocolProviderProtocolCapabilities;
+export type ConfigPath = ProtocolConfigPath;
 export type ConfigValue = ProtocolConfigValue;
+export type ConfigResponse = ProtocolConfigResponse;
 export type ConfigGetResponse = ProtocolConfigGetResponse;
 export type ConfigUpdateResponse = ProtocolConfigUpdateResponse;
 export type ConfigReloadResponse = ProtocolConfigReloadResponse;
+export type WebSearchToolConfig = ProtocolWebSearchToolConfig;
+export type WebSearchProviderConfig = ProtocolWebSearchProviderConfig;
+export type WebSearchProviderRuntimeConfig = ProtocolWebSearchProviderRuntimeConfig;

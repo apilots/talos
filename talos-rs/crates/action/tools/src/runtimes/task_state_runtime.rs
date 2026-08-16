@@ -3,7 +3,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::runtimes::task_state_types::{TodoItem, TodoListSnapshot, TodoStatus};
 use crate::state::{get_session_tool_state, TaskStateEntry};
 use dashmap::DashMap;
-use talos_error::{TalosError, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
 #[derive(Debug, Default)]
 struct SessionTaskState {
@@ -32,7 +32,7 @@ impl TaskStateRuntime {
             let mut guard = session
                 .todos
                 .write()
-                .map_err(|_| TalosError::ToolError("todo state lock poisoned".to_string()))?;
+                .map_err(|_| TalosError::internal("failed to acquire todo state write lock"))?;
             *guard = items.clone();
         }
 
@@ -52,7 +52,7 @@ impl TaskStateRuntime {
         let items = session
             .todos
             .read()
-            .map_err(|_| TalosError::ToolError("todo state lock poisoned".to_string()))?
+            .map_err(|_| TalosError::internal("failed to acquire todo state read lock"))?
             .clone();
         Ok(TodoListSnapshot { items })
     }
@@ -81,28 +81,31 @@ fn todo_status_label(status: TodoStatus) -> &'static str {
 
 fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
     if items.is_empty() {
-        return Err(TalosError::ValidationError(
-            "todos must contain at least one item".to_string(),
+        return Err(TalosError::public(
+            ErrorCode::InvalidRequest,
+            "todos must contain at least one item",
         ));
     }
 
     let mut seen = std::collections::BTreeSet::new();
     for item in items {
         if item.id.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "todo id cannot be empty".to_string(),
+            return Err(TalosError::public(
+                ErrorCode::InvalidRequest,
+                "todo id cannot be empty",
             ));
         }
         if item.content.trim().is_empty() {
-            return Err(TalosError::ValidationError(
-                "todo content cannot be empty".to_string(),
+            return Err(TalosError::public(
+                ErrorCode::InvalidRequest,
+                "todo content cannot be empty",
             ));
         }
         if !seen.insert(item.id.clone()) {
-            return Err(TalosError::ValidationError(format!(
-                "duplicate todo id `{}`",
-                item.id
-            )));
+            return Err(TalosError::public(
+                ErrorCode::InvalidRequest,
+                format!("duplicate todo id `{}`", item.id),
+            ));
         }
     }
     Ok(())

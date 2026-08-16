@@ -7,7 +7,7 @@ fn validate_input_rejects_missing_command() {
         .validate_input(&serde_json::json!({"timeout": 10}))
         .unwrap_err();
 
-    assert!(matches!(error, TalosError::ValidationError(_)));
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
 }
 
 #[tokio::test]

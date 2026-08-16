@@ -2,6 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useChatSession } from "./useChatSession";
 import { useAppStore } from "@/shared/store/app-store";
@@ -25,17 +26,19 @@ const mocks = vi.hoisted(() => ({
     session_id: "session-1",
     input: [{ type: "files", fileIds: ["file-1"] }],
   })),
-  send: vi.fn().mockRejectedValue({ code: -32013 }),
+  send: vi.fn(),
   sessionHistoryRefetch: vi.fn().mockResolvedValue(undefined),
   liveRecoveryQuery: vi.fn(),
   timeline: vi.fn(),
 }));
 
-vi.mock("../api", () => ({
-  createInitialTurnRequest: mocks.createInitialTurnRequest,
-  isActiveTurnRunningError: (error: unknown) =>
-    Boolean(error && typeof error === "object" && "code" in error && error.code === -32013),
-}));
+vi.mock("../api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../api")>();
+  return {
+    ...actual,
+    createInitialTurnRequest: mocks.createInitialTurnRequest,
+  };
+});
 
 vi.mock("./useChatQueries", () => ({
   useActiveTurnQuery: (...args: unknown[]) => {
@@ -83,7 +86,10 @@ vi.mock("./useSessionStreaming", () => ({
 
 describe("useChatSession", () => {
   beforeEach(() => {
-    mocks.send.mockClear();
+    mocks.send.mockReset().mockRejectedValue(new TalosApiError({
+      code: AppProtocol.ErrorCode.ActiveTurnRunning,
+      message: "Active turn is already running",
+    }));
     mocks.createInitialTurnRequest.mockClear();
     mocks.activeTurnRefetch.mockClear();
     mocks.activeTurnQuery.mockClear();

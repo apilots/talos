@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use talos_auth::{AuthService, UserService};
-use talos_config::LlmConfigService;
+use talos_config::{Config, ConfigStore};
 use talos_coordinator::{AgentSessionCompactionIdentity, SessionRuntime};
 use talos_error::TalosError;
 use talos_store::profile::ProfileStore;
@@ -11,17 +11,18 @@ use talos_store::session::{
     SessionArtifactStore, SessionPatchAck, SessionStore, TimelineEventId,
 };
 use talos_types::{
-    AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, InterruptTurnRequest,
-    InterruptTurnResponse, ListSubagentsRequest, ModelInfo, OptionalCurrentDirectoryPatch,
-    ProjectInfo, ProjectPatch, RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest,
-    RetryTurnResponse, SendMessageResult, SendSubagentMessageRequest, SessionConfigOverridePolicy,
-    SessionListRequest, SessionPatch, SpawnSubagentRequest, StartTurnRequest, StartTurnResponse,
-    SubagentSnapshot, SubagentSpawnResult, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubscribeTimelineRequest, TalosConfig, TalosSession,
-    TimelineActiveTurnSnapshot, WaitSubagentRequest,
+    AgentTreeSnapshot, ConfigValue, FollowUpSubagentRequest, InterruptSubagentRequest,
+    InterruptTurnRequest, InterruptTurnResponse, ListSubagentsRequest, ModelInfo,
+    OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
+    RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse, SendMessageResult,
+    SendSubagentMessageRequest, SessionConfigOverridePolicy, SessionListRequest, SessionPatch,
+    SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
+    SubagentSpawnResult, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubscribeTimelineRequest, TalosConfig, TalosSession, TimelineActiveTurnSnapshot,
+    WaitSubagentRequest,
 };
 
-use super::mapping::{map_timeline_cursor_status, project_info_from_record, turn_command_status};
+use super::mapping::{map_timeline_cursor_status, turn_command_status};
 use super::types::ServiceResult;
 use crate::access::{CreateSessionRequest, ResourceAccessService};
 use crate::file::FileService;
@@ -37,6 +38,8 @@ use crate::{
 
 #[path = "orphan_turn_recovery.rs"]
 mod orphan_turn_recovery;
+#[path = "project_fs.rs"]
+mod project_fs;
 
 #[derive(Clone)]
 pub struct TalosService {
@@ -70,7 +73,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -87,7 +90,7 @@ impl TalosService {
             idempotency_store,
             base_config,
             memory,
-            llm_config_service,
+            config_store,
             models,
             auth_service,
             user_service,
@@ -107,7 +110,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -124,12 +127,19 @@ impl TalosService {
         let projects = Arc::new(ProjectService::new(project_store.clone()));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
             let sessions = sessions.clone();
-            Some(Arc::new(move |llm: &talos_config::LlmConfig| {
-                sessions.update_base_llm(llm);
-                if let Some(hook) = &reload_hook {
-                    hook(llm)?;
-                }
-                Ok(())
+            let base_config_state = Arc::new(std::sync::RwLock::new(base_config.clone()));
+            Some(Arc::new(move |value: ConfigValue| {
+                let reloaded_config = if let Some(hook) = &reload_hook {
+                    hook(value.clone())?
+                } else {
+                    let mut base_config = base_config_state
+                        .write()
+                        .expect("service base config write lock");
+                    apply_config_value_to_config(&mut base_config, &value);
+                    base_config.clone()
+                };
+                sessions.update_base_config(reloaded_config.clone());
+                Ok(reloaded_config)
             }))
         };
         let plugins = PluginManagerService::new(
@@ -180,7 +190,7 @@ impl TalosService {
             events: TimelineSubscriptionService::new(event_service.clone()),
             history,
             subagents,
-            config: ConfigService::new_with_reload_hook(llm_config_service, models, reload_hook),
+            config: ConfigService::new_with_reload_hook(config_store, models, reload_hook),
             files,
             fs: FsService::new(base_config.fs.directory_picker.clone()),
             memory,
@@ -202,7 +212,7 @@ impl TalosService {
         idempotency_store: Arc<dyn MessageIdempotencyStore>,
         base_config: TalosConfig,
         memory: MemoryService,
-        llm_config_service: Arc<dyn LlmConfigService>,
+        config_store: Arc<dyn ConfigStore>,
         models: Vec<ModelInfo>,
         auth_service: Arc<dyn AuthService>,
         user_service: Arc<dyn UserService>,
@@ -219,7 +229,7 @@ impl TalosService {
             idempotency_store,
             base_config,
             memory,
-            llm_config_service,
+            config_store,
             models,
             auth_service,
             user_service,
@@ -312,9 +322,10 @@ impl TalosService {
                     .await?;
                 (session, false)
             }
-            Err(talos_error::TalosError::ResourceNotFound(_)) => {
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
                 let context = request.context.clone().ok_or_else(|| {
-                    talos_error::TalosError::ValidationError(
+                    talos_error::TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
                         "message context is required to create session".to_string(),
                     )
                 })?;
@@ -370,12 +381,15 @@ impl TalosService {
         if let Some(current_directory) = request.current_directory.clone() {
             match session.current_directory.as_ref() {
                 Some(bound) if bound != &current_directory => {
-                    return Err(talos_error::TalosError::ValidationError(format!(
-                        "session {} is bound to current_directory {}, but request used {}",
-                        session.context.session_id,
-                        bound.display(),
-                        current_directory.display()
-                    )));
+                    return Err(talos_error::TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "session {} is bound to current_directory {}, but request used {}",
+                            session.context.session_id,
+                            bound.display(),
+                            current_directory.display()
+                        ),
+                    ));
                 }
                 None => {
                     patch.current_directory = Some(OptionalCurrentDirectoryPatch::Set {
@@ -533,7 +547,7 @@ impl TalosService {
             .compact_session(actor, session_id, identity, event_tx)
             .await;
         let event_result = event_task.await.map_err(|error| {
-            TalosError::InternalError(format!("session compaction event task failed: {error}"))
+            TalosError::internal(format!("session compaction event task failed: {error}"))
         })?;
         event_result?;
         result
@@ -578,9 +592,10 @@ impl TalosService {
                     | ActiveTurnStatus::Cancelling
             )
         ) {
-            return Err(TalosError::ActiveTurnRunning(format!(
-                "session `{session_id}` already has an active turn"
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ActiveTurnRunning,
+                format!("session `{session_id}` already has an active turn"),
+            ));
         }
         Ok(())
     }
@@ -602,11 +617,11 @@ impl TalosService {
             .await
         {
             Ok(()) => Ok(()),
-            Err(TalosError::ResourceNotFound(message)) => {
+            Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {
                 tracing::warn!(
                     session_id = %session_id,
                     turn_id = %active_turn.turn_id,
-                    missing_resource = %message,
+                    missing_resource = %error.diagnostic_message(),
                     "finalizing orphaned active turn after interrupt"
                 );
                 self.finalize_orphaned_active_turn(session_id, &active_turn)
@@ -760,69 +775,16 @@ impl TalosService {
             },
         })
     }
+}
 
-    pub async fn list_projects(&self, actor: &Actor) -> ServiceResult<Vec<ProjectInfo>> {
-        let projects = self.access.list_projects(actor).await?;
-        Ok(projects
-            .into_iter()
-            .map(|project| self.project_info_with_status(project))
-            .collect())
-    }
-
-    pub async fn get_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<ProjectInfo> {
-        let project = self.access.get_project(actor, project_id).await?;
-        Ok(self.project_info_with_status(project))
-    }
-
-    pub async fn create_project(
-        &self,
-        actor: &Actor,
-        name: String,
-        directory: std::path::PathBuf,
-    ) -> ServiceResult<ProjectInfo> {
-        let project = self.access.create_project(actor, name, directory).await?;
-        Ok(self.project_info_with_status(project))
-    }
-
-    pub async fn patch_project(
-        &self,
-        actor: &Actor,
-        project_id: &str,
-        patch: ProjectPatch,
-    ) -> ServiceResult<ProjectInfo> {
-        let project = self.access.patch_project(actor, project_id, patch).await?;
-        Ok(self.project_info_with_status(project))
-    }
-
-    pub async fn delete_project(&self, actor: &Actor, project_id: &str) -> ServiceResult<()> {
-        let _project = self.access.get_project(actor, project_id).await?;
-        self.files.ensure_project_has_no_files(project_id).await?;
-        self.access.delete_project(actor, project_id).await
-    }
-
-    fn project_info_with_status(
-        &self,
-        mut project: talos_store::project::ProjectRecord,
-    ) -> ProjectInfo {
-        project.status = self.fs.project_status_for_directory(&project.directory);
-        project_info_from_record(project)
-    }
-
-    pub async fn read_fs_directory(
-        &self,
-        actor: &Actor,
-        path: Option<std::path::PathBuf>,
-    ) -> ServiceResult<talos_types::FsDirectorySnapshot> {
-        self.fs.read_directory(actor, path).await
-    }
-
-    pub async fn create_fs_directory(
-        &self,
-        actor: &Actor,
-        parent: std::path::PathBuf,
-        name: String,
-    ) -> ServiceResult<talos_types::FsDirectoryCreateResponse> {
-        self.fs.create_directory(actor, parent, name).await
+fn apply_config_value_to_config(config: &mut Config, value: &ConfigValue) {
+    match value {
+        ConfigValue::Llm(llm) => {
+            config.llm = (**llm).clone();
+        }
+        ConfigValue::WebSearch(web_search) => {
+            config.agent.kernel.tools.web_search = (**web_search).clone();
+        }
     }
 }
 

@@ -161,8 +161,8 @@ async fn execute_payload_reads_api_key_from_context_runtime_env() {
     let mut kernel_config = AgentKernelConfig::default();
     kernel_config.tools.web_search.provider = WebSearchProviderConfig::Brave;
     kernel_config.tools.web_search.brave.base_url = Some(base_url);
-    kernel_config.tools.web_search.brave.api_key_env =
-        Some("TALOS_TEST_WEB_SEARCH_BRAVE_API_KEY".to_string());
+    kernel_config.tools.web_search.brave.api_key =
+        Some("${TALOS_TEST_WEB_SEARCH_BRAVE_API_KEY}".to_string());
     kernel_config.runtime_env = RuntimeEnv::load_from_iter(
         std::path::Path::new("__talos_missing_env_file__"),
         [("TALOS_TEST_WEB_SEARCH_BRAVE_API_KEY", "brave-key")],

@@ -56,7 +56,10 @@ impl Tool for GlobTool {
         context: &ToolContext,
     ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
         let request: GlobFilesRequest = serde_json::from_value(input.clone()).map_err(|error| {
-            TalosError::ValidationError(format!("invalid Glob arguments: {error}"))
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("invalid Glob arguments: {error}"),
+            )
         })?;
         requested_file_system_access(&request, context)
     }
@@ -74,11 +77,19 @@ impl Tool for GlobTool {
         input: Value,
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        let request: GlobFilesRequest = serde_json::from_value(input)
-            .map_err(|err| TalosError::ToolError(format!("invalid Glob arguments: {}", err)))?;
+        let request: GlobFilesRequest = serde_json::from_value(input).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("invalid Glob arguments: {}", err),
+            )
+        })?;
         let response = run(&request, &context).await?;
-        let structured = serde_json::to_value(&response)
-            .map_err(|err| TalosError::ToolError(format!("serialize Glob response: {}", err)))?;
+        let structured = serde_json::to_value(&response).map_err(|err| {
+            TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                format!("serialize Glob response: {}", err),
+            )
+        })?;
         Ok(ToolOutputPayload::success_with_content_items(
             structured,
             vec![TalosContentItem::SearchResults {

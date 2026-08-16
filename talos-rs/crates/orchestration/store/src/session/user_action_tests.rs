@@ -47,7 +47,7 @@ async fn create_is_idempotent_only_for_identical_content() {
     conflicting.action.call_id = "different-call".to_string();
     assert!(matches!(
         store.create(conflicting).await,
-        Err(talos_error::TalosError::Conflict(_))
+        Err(error) if error.is_code(talos_error::ErrorCode::Conflict)
     ));
 }
 
@@ -89,7 +89,7 @@ async fn compare_and_set_rejects_stale_state_or_version() {
 
     assert!(matches!(
         store.compare_and_set(&current, next).await,
-        Err(talos_error::TalosError::Conflict(_))
+        Err(error) if error.is_code(talos_error::ErrorCode::Conflict)
     ));
 }
 

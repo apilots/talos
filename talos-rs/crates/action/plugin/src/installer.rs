@@ -61,10 +61,10 @@ pub(crate) fn install_plugin(
     let replace_existing = if install_dir.exists() {
         match conflict_policy {
             PluginInstallConflictPolicy::Reject => {
-                return Err(TalosError::Conflict(format!(
-                    "plugin install `{}` already exists",
-                    install_id.0
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("plugin install `{}` already exists", install_id.0),
+                ));
             }
             PluginInstallConflictPolicy::Replace => true,
         }
@@ -90,7 +90,7 @@ pub(crate) fn install_plugin(
         } else {
             Ok(())
         };
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to activate plugin install `{}`: {err}",
             install_dir.display()
         ))
@@ -148,19 +148,22 @@ pub(crate) fn update_plugin(
 ) -> TalosResult<UpdateActivation> {
     ensure_installable_plugin(&candidate.plugin)?;
     if install.kind != candidate.plugin.kind || install.plugin_id != candidate.plugin.id {
-        return Err(TalosError::Conflict(format!(
-            "plugin install `{}` does not match update candidate `{}`",
-            install.id.0, candidate.plugin.id.0
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::Conflict,
+            format!(
+                "plugin install `{}` does not match update candidate `{}`",
+                install.id.0, candidate.plugin.id.0
+            ),
+        ));
     }
     state.cleanup_install_temps()?;
     if has_local_changes(install)? {
         match conflict_policy {
             PluginUpdateConflictPolicy::RejectLocalChanges => {
-                return Err(TalosError::Conflict(format!(
-                    "plugin install `{}` has local changes",
-                    install.id.0
-                )));
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!("plugin install `{}` has local changes", install.id.0),
+                ));
             }
             PluginUpdateConflictPolicy::ReplaceLocalChanges => {}
         }
@@ -197,7 +200,7 @@ pub(crate) fn update_plugin(
         } else {
             Ok(())
         };
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to activate plugin update `{}`: {err}",
             install_dir.display()
         ))
@@ -318,10 +321,10 @@ fn ensure_installable_plugin(plugin: &Plugin) -> TalosResult<()> {
     {
         return Ok(());
     }
-    Err(TalosError::ValidationError(format!(
-        "plugin `{}` is not an installable plugin",
-        plugin.id.0
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::InvalidRequest,
+        format!("plugin `{}` is not an installable plugin", plugin.id.0),
+    ))
 }
 
 fn plugin_source_dir(
@@ -330,7 +333,10 @@ fn plugin_source_dir(
     plugin: &Plugin,
 ) -> TalosResult<PathBuf> {
     let path_in_source = plugin.path_in_source.as_deref().ok_or_else(|| {
-        TalosError::ValidationError(format!("plugin `{}` has no source path", plugin.id.0))
+        TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("plugin `{}` has no source path", plugin.id.0),
+        )
     })?;
     let root = match &source.location {
         MarketplaceSourceLocation::LocalFolder { path } => path.clone(),
@@ -344,30 +350,33 @@ fn plugin_source_dir(
         PluginKind::Skill => "SKILL.md",
         PluginKind::McpServer => "talos-mcp.json",
         PluginKind::Package | PluginKind::Feature => {
-            return Err(TalosError::ValidationError(format!(
-                "plugin `{}` is not installable",
-                plugin.id.0
-            )));
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!("plugin `{}` is not installable", plugin.id.0),
+            ));
         }
     };
     if is_regular_file(&path.join(required_file)) {
         return Ok(path);
     }
-    Err(TalosError::ResourceNotFound(format!(
-        "plugin source path `{}` is not materialized",
-        path.display()
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::ResourceNotFound,
+        format!(
+            "plugin source path `{}` is not materialized",
+            path.display()
+        ),
+    ))
 }
 
 fn ensure_contained_dir(root: &Path, path: &Path) -> TalosResult<()> {
     let root = fs::canonicalize(root).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to canonicalize plugin source root `{}`: {err}",
             root.display()
         ))
     })?;
     let path = fs::canonicalize(path).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to canonicalize plugin source path `{}`: {err}",
             path.display()
         ))
@@ -375,11 +384,14 @@ fn ensure_contained_dir(root: &Path, path: &Path) -> TalosResult<()> {
     if path.is_dir() && path.starts_with(&root) {
         return Ok(());
     }
-    Err(TalosError::ValidationError(format!(
-        "plugin source path `{}` escaped root `{}`",
-        path.display(),
-        root.display()
-    )))
+    Err(TalosError::public(
+        talos_error::ErrorCode::InvalidRequest,
+        format!(
+            "plugin source path `{}` escaped root `{}`",
+            path.display(),
+            root.display()
+        ),
+    ))
 }
 
 fn is_regular_file(path: &Path) -> bool {
@@ -390,13 +402,13 @@ fn is_regular_file(path: &Path) -> bool {
 
 fn remove_plugin_directory(path: &Path, action: &str) -> TalosResult<()> {
     talos_fs::std_fs().remove_directory(path).map_err(|err| {
-        TalosError::StorageError(format!("failed to {action} `{}`: {err}", path.display()))
+        TalosError::internal(format!("failed to {action} `{}`: {err}", path.display()))
     })
 }
 
 fn create_plugin_directory(path: &Path, action: &str) -> TalosResult<()> {
     talos_fs::create_directory(path, true).map_err(|err| {
-        TalosError::StorageError(format!("failed to {action} `{}`: {err}", path.display()))
+        TalosError::internal(format!("failed to {action} `{}`: {err}", path.display()))
     })
 }
 
@@ -405,7 +417,7 @@ fn rename_plugin_path(source: &Path, target: &Path, action: &str) -> TalosResult
         create_plugin_directory(parent, "create plugin transaction parent")?;
     }
     talos_fs::rename(source, target).map_err(|err| {
-        TalosError::StorageError(format!(
+        TalosError::internal(format!(
             "failed to {action} `{}` to `{}`: {err}",
             source.display(),
             target.display()
@@ -417,7 +429,7 @@ fn copy_plugin_file(source: &Path, target: &Path) -> TalosResult<()> {
     talos_fs::copy_file(source, target)
         .map(|_| ())
         .map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to copy `{}` to `{}`: {err}",
                 source.display(),
                 target.display()
@@ -440,7 +452,7 @@ fn materialize_install_dir(
         PluginKind::Package | PluginKind::Feature => unreachable!("kind checked above"),
     };
     if !install_dir.join(required_file).is_file() {
-        return Err(TalosError::StorageError(format!(
+        return Err(TalosError::internal(format!(
             "plugin install `{}` did not materialize {required_file}",
             install_id.0
         )));
@@ -479,9 +491,10 @@ fn final_install_dir(
     match kind {
         PluginKind::Skill => Ok(state.skill_installs_dir().join(name)),
         PluginKind::McpServer => Ok(state.mcp_installs_dir().join(name)),
-        PluginKind::Package | PluginKind::Feature => Err(TalosError::ValidationError(format!(
-            "plugin kind `{kind:?}` is not installable"
-        ))),
+        PluginKind::Package | PluginKind::Feature => Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("plugin kind `{kind:?}` is not installable"),
+        )),
     }
 }
 
@@ -491,9 +504,10 @@ fn validate_install_name(name: &str) -> TalosResult<()> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(TalosError::ValidationError(format!(
-            "invalid plugin install name `{name}`"
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("invalid plugin install name `{name}`"),
+        ));
     }
     Ok(())
 }
@@ -504,23 +518,23 @@ fn copy_dir(source: &Path, target: &Path) -> TalosResult<()> {
 
 fn copy_dir_inner(root: &Path, current: &Path, target_root: &Path) -> TalosResult<()> {
     for entry in fs::read_dir(current).map_err(|err| {
-        TalosError::StorageError(format!("failed to read `{}`: {err}", current.display()))
+        TalosError::internal(format!("failed to read `{}`: {err}", current.display()))
     })? {
         let entry = entry.map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to read `{}` entry: {err}",
                 current.display()
             ))
         })?;
         let source_path = entry.path();
         let file_type = entry.file_type().map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to inspect `{}`: {err}",
                 source_path.display()
             ))
         })?;
         let relative = source_path.strip_prefix(root).map_err(|err| {
-            TalosError::InternalError(format!(
+            TalosError::internal(format!(
                 "failed to build plugin file manifest for `{}`: {err}",
                 source_path.display()
             ))
@@ -573,29 +587,29 @@ fn collect_digest_files(
     files: &mut Vec<DigestFile>,
 ) -> TalosResult<()> {
     for entry in fs::read_dir(current).map_err(|err| {
-        TalosError::StorageError(format!("failed to read `{}`: {err}", current.display()))
+        TalosError::internal(format!("failed to read `{}`: {err}", current.display()))
     })? {
         let entry = entry.map_err(|err| {
-            TalosError::StorageError(format!(
+            TalosError::internal(format!(
                 "failed to read `{}` entry: {err}",
                 current.display()
             ))
         })?;
         let path = entry.path();
         let file_type = entry.file_type().map_err(|err| {
-            TalosError::StorageError(format!("failed to inspect `{}`: {err}", path.display()))
+            TalosError::internal(format!("failed to inspect `{}`: {err}", path.display()))
         })?;
         if file_type.is_dir() {
             collect_digest_files(root, &path, files)?;
         } else if file_type.is_file() {
             let relative = path.strip_prefix(root).map_err(|err| {
-                TalosError::InternalError(format!(
+                TalosError::internal(format!(
                     "failed to build plugin content digest path for `{}`: {err}",
                     path.display()
                 ))
             })?;
             let bytes = fs::read(&path).map_err(|err| {
-                TalosError::StorageError(format!("failed to hash `{}`: {err}", path.display()))
+                TalosError::internal(format!("failed to hash `{}`: {err}", path.display()))
             })?;
             files.push(DigestFile {
                 relative_path: relative.to_string_lossy().replace('\\', "/"),

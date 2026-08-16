@@ -26,9 +26,7 @@ impl AgentHarnessImpl {
         &self,
         session: &TalosSession,
     ) -> TalosResult<AgentKernelConfig> {
-        let mut kernel_config = Self::kernel_config_for_session(session)?;
-        kernel_config.runtime_env = self.kernel_config.runtime_env.clone();
-        Ok(kernel_config)
+        Self::kernel_config_for_session(session)
     }
 
     pub(crate) fn llm_provider_for_session(
@@ -120,3 +118,7 @@ pub(crate) fn map_stop_reason(stop_reason: StopReason) -> TalosStopReason {
         StopReason::TransferUnresolved => TalosStopReason::TransferUnresolved,
     }
 }
+
+#[cfg(test)]
+#[path = "kernel_tests.rs"]
+mod tests;

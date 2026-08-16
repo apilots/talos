@@ -341,7 +341,7 @@ async fn memory_cursor_rejects_non_contiguous_advance() {
         .await
         .expect_err("stale cursor should fail");
 
-    assert!(matches!(error, talos_error::TalosError::Conflict(_)));
+    assert!(error.is_code(talos_error::ErrorCode::Conflict));
 }
 
 #[tokio::test]

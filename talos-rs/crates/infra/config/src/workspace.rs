@@ -15,12 +15,14 @@ pub struct EffectiveKernelWorkspace {
 pub fn validate_user_workspace_segment(user_id: &str) -> TalosResult<&str> {
     let trimmed = user_id.trim();
     if trimmed.is_empty() {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "user_id cannot be empty for workspace resolution".to_string(),
         ));
     }
     if trimmed != user_id {
-        return Err(TalosError::ValidationError(
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
             "user_id must not contain leading or trailing whitespace".to_string(),
         ));
     }
@@ -28,10 +30,10 @@ pub fn validate_user_workspace_segment(user_id: &str) -> TalosResult<&str> {
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(TalosError::ValidationError(format!(
-            "user_id is not path-safe: {}",
-            user_id
-        )));
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("user_id is not path-safe: {}", user_id),
+        ));
     }
     Ok(trimmed)
 }
@@ -41,7 +43,7 @@ pub fn validate_session_workspace_user<'a>(
     context_user_id: &str,
 ) -> TalosResult<&'a str> {
     if session_user_id != context_user_id {
-        return Err(TalosError::InternalError(
+        return Err(TalosError::internal(
             "session user_id does not match session context user_id".to_string(),
         ));
     }
