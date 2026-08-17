@@ -1,6 +1,7 @@
 name: talos-rust
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - "talos-rs/**"
