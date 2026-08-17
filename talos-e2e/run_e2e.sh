@@ -55,6 +55,11 @@ collect_group_cases() {
     if [[ "${group_name}" == "14_sandbox" && "$(basename "${scenario}")" == "99_linux_docker.sh" && "$(uname -s)" != "Darwin" ]]; then
       continue
     fi
+    if [[ "${group_name}" == "15_tui_install" && "$(basename "${scenario}")" == "02_linux_docker.sh" ]]; then
+      if [[ "$(uname -s)" != "Darwin" ]] || ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+        continue
+      fi
+    fi
     printf '%s\n' "${scenario}"
   done < <(find "${group_dir}" -type f -name '*.sh' | sort)
 }
@@ -110,6 +115,20 @@ append_lines_to_array() {
     [[ -n "${line}" ]] || continue
     scenarios+=("${line}")
   done
+}
+
+reset_case_directory() {
+  local root_dir="$1"
+  local case_dir="$2"
+
+  case "${case_dir}" in
+    "${root_dir}/"?*) ;;
+    *)
+      echo "Refusing to reset case directory outside ${root_dir}: ${case_dir}" >&2
+      exit 1
+      ;;
+  esac
+  rm -rf "${case_dir}"
 }
 
 declare -a scenarios=()
@@ -197,8 +216,11 @@ for scenario in "${scenarios[@]}"; do
   script_path="${scenario}"
   scenario_name="${script_path#${SCENARIO_ROOT}/}"
   scenario_report_dir="${REPORT_ROOT}/${scenario_name%.sh}"
+  scenario_home_dir="$(TALOS_SCENARIO_NAME="${scenario_name%.sh}" default_talos_home)"
   log_file="${scenario_report_dir}/scenario.log"
+  reset_case_directory "${REPORT_ROOT}" "${scenario_report_dir}"
   mkdir -p "${scenario_report_dir}"
+  reset_case_directory "${E2E_TMP_ROOT}/homes" "${scenario_home_dir}"
   scenario_started_at="$(python3 - <<'PY'
 import time
 print(time.time())

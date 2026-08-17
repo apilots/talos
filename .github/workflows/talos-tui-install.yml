@@ -1,0 +1,103 @@
+name: talos-tui-install
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/talos-tui-install.yml"
+      - "build.sh"
+      - "build/scripts/verify-release-artifacts.sh"
+      - "conf/**"
+      - "deploy/install/**"
+      - "talos-e2e/**"
+      - "talos-rs/**"
+  push:
+    paths:
+      - ".github/workflows/talos-tui-install.yml"
+      - "build.sh"
+      - "build/scripts/verify-release-artifacts.sh"
+      - "conf/**"
+      - "deploy/install/**"
+      - "talos-e2e/**"
+      - "talos-rs/**"
+
+permissions:
+  contents: read
+
+jobs:
+  installer-tests:
+    name: Installer shell tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Talos
+        uses: actions/checkout@v6
+
+      - name: Check shell syntax
+        run: |
+          sh -n deploy/install/install.sh
+          bash -n deploy/install/tests/*.sh talos-e2e/tests/*.sh talos-e2e/scripts/tui_install.sh talos-e2e/scenarios/15_tui_install/*.sh
+
+      - name: Test installer
+        run: |
+          deploy/install/tests/install_test.sh
+          deploy/install/tests/release_contract_test.sh
+          talos-e2e/tests/tui_install_target_test.sh
+
+  native-install-e2e:
+    name: Install ${{ matrix.platform }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - platform: macos
+            arch: amd64
+            runner: macos-15-intel
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Talos
+        uses: actions/checkout@v6
+
+      - name: Checkout Talos Cloud SDK
+        uses: actions/checkout@v6
+        with:
+          repository: apilots/talos-cloud
+          path: talos-cloud
+          token: ${{ secrets.TALOS_SOURCE_READ_TOKEN || github.token }}
+
+      - name: Link Talos Cloud SDK path dependency
+        run: ln -sfn "${GITHUB_WORKSPACE}/talos-cloud" "${GITHUB_WORKSPACE}/../talos-cloud"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build output
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: talos-rs
+
+      - name: Run native installation E2E case
+        env:
+          TUI_INSTALL_EXPECTED_PLATFORM: ${{ matrix.platform }}
+          TUI_INSTALL_EXPECTED_ARCH: ${{ matrix.arch }}
+        run: talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
+
+      - name: Upload native installation report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: tui-install-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            talos-e2e/reports/e2e_report_*.md
+            talos-e2e/reports/15_tui_install/01_native_install/
+          if-no-files-found: warn
+          retention-days: 7

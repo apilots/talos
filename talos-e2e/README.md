@@ -100,6 +100,16 @@ frontend and SDK mock-flow regression tests that do not start a real gateway.
   - `10_no_silent_fallback.sh`
   - `99_linux_docker.sh` (group-level Linux verification on macOS)
 
+15. `scenarios/15_tui_install/`
+- Scope: release-bundle installation and installed embedded-runtime startup
+- Runs the current platform natively with isolated install, home, and `TALOS_HOME` roots
+- On a macOS host with Docker, also builds and installs the Linux bundle in Ubuntu 24.04
+- The CI matrix runs only `01_native_install.sh` and provides authoritative native Linux/macOS AMD64/ARM64 coverage
+- `02_linux_docker.sh` is a local macOS supplement and validates Linux on the Docker daemon architecture; it is not a macOS or cross-architecture substitute
+- Files:
+  - `01_native_install.sh`
+  - `02_linux_docker.sh`
+
 ## Runner
 
 Use:
@@ -116,6 +126,8 @@ talos-e2e/run_e2e.sh --case 10_talos_app/mock_e2e
 talos-e2e/run_e2e.sh --group 12_files
 talos-e2e/run_e2e.sh --group 13_interaction
 talos-e2e/run_e2e.sh --group 14_sandbox
+talos-e2e/run_e2e.sh --group 15_tui_install
+talos-e2e/run_e2e.sh --case 15_tui_install/01_native_install
 ```
 
 From the repository root, the same runner is also exposed through `just`:
@@ -126,6 +138,7 @@ just e2e-group 09_app_server
 just e2e-case 09_app_server/skills_e2e
 just e2e-group 14_sandbox
 just e2e-case 14_sandbox/01_provider_preflight
+just e2e-group 15_tui_install
 ```
 
 The runner prebuilds only the binaries required by the selected scenario set.
