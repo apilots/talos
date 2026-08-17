@@ -24,11 +24,13 @@ Talos提供了多种用户交互界面：
 
 | 入口 | 说明 |
 |------|------|
-| `talos` | TUI 用户入口；未来 NPM 安装默认只暴露这个命令 |
+| `talos` | TUI 用户入口；通过目标平台对应的 Release bundle 安装 |
 | `app-server` | 本地 JSON-RPC over stdio 协议适配器，供 Desktop 和协议测试使用，不作为独立产品发布 |
 | `talos-server` | HTTP API / WebUI 服务端入口，面向服务端 tar 包部署 |
 
 ### 终端用户界面 (TUI)
+- 使用公开安装脚本安装最新的 macOS/Linux Release bundle：
+  `curl --proto '=https' --tlsv1.2 -fsSL https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh`
 - 使用 `cargo run -p talos-tui --bin talos` 运行
 - 丰富的键盘导航支持
 - 支持多面板视图（聊天、历史、工具、设置）

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PROFILE="${PROFILE:-dev}"
 PRODUCT_DIR="${PRODUCT_DIR:-${REPO_ROOT}/dist/products/${PROFILE}}"
+VERIFY_TARGET="${1:-all}"
 
 require_file() {
   local pattern="$1"
@@ -14,54 +15,55 @@ require_file() {
   fi
 }
 
-require_file "${PRODUCT_DIR}/server/Talos-Server-*.tar.gz"
-require_file "${PRODUCT_DIR}/tui/Talos-TUI-*.tar.gz"
-require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
-require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.AppImage"
-require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
-
 verify_server_config_template() {
   local archive_path
   archive_path="$(find "${PRODUCT_DIR}/server" -maxdepth 1 -name "Talos-Server-*.tar.gz" | head -n 1)"
-  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?bin/talos-server$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^(\./)?bin/talos-server$' >/dev/null; then
     echo "Missing server binary in ${archive_path}" >&2
     exit 1
   fi
   if [[ "$(basename "${archive_path}")" == *linux* ]] \
-    && ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?bin/talos-linux-sandbox-launcher$'; then
+    && ! tar -tzf "${archive_path}" | grep -E '^(\./)?bin/talos-linux-sandbox-launcher$' >/dev/null; then
     echo "Missing Linux sandbox launcher in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/talos.yaml$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^(\./)?conf/talos.yaml$' >/dev/null; then
     echo "Missing server config template in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/migrations/sqlite/.+\.sql$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^(\./)?conf/migrations/sqlite/.+\.sql$' >/dev/null; then
     echo "Missing server SQLite migrations in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^(\./)?conf/migrations/postgres/README.md$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^(\./)?conf/migrations/postgres/README.md$' >/dev/null; then
     echo "Missing server PostgreSQL migration placeholder in ${archive_path}" >&2
     exit 1
   fi
 }
 
+verify_tui_checksums() {
+  (
+    cd "${PRODUCT_DIR}/tui"
+    shasum -a 256 -c SHA256SUMS
+  )
+}
+
 verify_tui() {
   local archive_path
   archive_path="$(find "${PRODUCT_DIR}/tui" -maxdepth 1 -name "Talos-TUI-*.tar.gz" | head -n 1)"
-  if ! tar -tzf "${archive_path}" | grep -Eq '^bin/talos$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^bin/talos$' >/dev/null; then
     echo "Missing TUI binary in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/talos.yaml$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^conf/talos.yaml$' >/dev/null; then
     echo "Missing TUI config template in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/migrations/sqlite/.+\.sql$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^conf/migrations/sqlite/.+\.sql$' >/dev/null; then
     echo "Missing TUI SQLite migrations in ${archive_path}" >&2
     exit 1
   fi
-  if ! tar -tzf "${archive_path}" | grep -Eq '^conf/migrations/postgres/README.md$'; then
+  if ! tar -tzf "${archive_path}" | grep -E '^conf/migrations/postgres/README.md$' >/dev/null; then
     echo "Missing TUI PostgreSQL migration placeholder in ${archive_path}" >&2
     exit 1
   fi
@@ -137,20 +139,40 @@ verify_linux_app_server() {
   trap - RETURN
 }
 
-(
-  cd "${PRODUCT_DIR}/desktop-linux"
-  shasum -a 256 -c SHA256SUMS
-)
+case "${VERIFY_TARGET}" in
+  tui)
+    require_file "${PRODUCT_DIR}/tui/Talos-TUI-*.tar.gz"
+    require_file "${PRODUCT_DIR}/tui/SHA256SUMS"
+    verify_tui
+    verify_tui_checksums
+    ;;
+  all)
+    require_file "${PRODUCT_DIR}/server/Talos-Server-*.tar.gz"
+    require_file "${PRODUCT_DIR}/tui/Talos-TUI-*.tar.gz"
+    require_file "${PRODUCT_DIR}/tui/SHA256SUMS"
+    require_file "${PRODUCT_DIR}/desktop-mac/Talos-*.dmg"
+    require_file "${PRODUCT_DIR}/desktop-linux/Talos-*.AppImage"
+    require_file "${PRODUCT_DIR}/desktop-linux/SHA256SUMS"
+    (
+      cd "${PRODUCT_DIR}/desktop-linux"
+      shasum -a 256 -c SHA256SUMS
+    )
+    verify_server_config_template
+    verify_tui
+    verify_tui_checksums
+    verify_macos_app_server
+    verify_linux_app_server
 
-verify_server_config_template
-verify_tui
-verify_macos_app_server
-verify_linux_app_server
+    if [[ "${TALOS_VERIFY_MAC_SIGNATURE:-0}" == "1" ]]; then
+      dmg_path="$(find "${PRODUCT_DIR}/desktop-mac" -maxdepth 1 -name "Talos-*.dmg" | head -n 1)"
+      spctl -a -t open --context context:primary-signature -v "${dmg_path}"
+      xcrun stapler validate "${dmg_path}"
+    fi
+    ;;
+  *)
+    echo "Unsupported verification target: ${VERIFY_TARGET}" >&2
+    exit 1
+    ;;
+esac
 
-if [[ "${TALOS_VERIFY_MAC_SIGNATURE:-0}" == "1" ]]; then
-  dmg_path="$(find "${PRODUCT_DIR}/desktop-mac" -maxdepth 1 -name "Talos-*.dmg" | head -n 1)"
-  spctl -a -t open --context context:primary-signature -v "${dmg_path}"
-  xcrun stapler validate "${dmg_path}"
-fi
-
-echo "Release artifacts verified: ${PRODUCT_DIR}"
+echo "Release artifacts verified (${VERIFY_TARGET}): ${PRODUCT_DIR}"

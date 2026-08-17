@@ -6,6 +6,16 @@ embedded Talos runtime and Rust SDK adapter.
 
 ## Usage
 
+Install the latest target-specific release bundle:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL \
+  https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh
+```
+
+The installer keeps immutable release resources outside `$TALOS_HOME`. See
+`deploy/install/README.md` for version pinning, paths, and installation E2E coverage.
+
 ```bash
 # Open the interactive TUI. This is the default when no command is provided.
 cargo run -p talos-tui --bin talos

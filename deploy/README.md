@@ -1,5 +1,11 @@
 # Talos deployment notes
 
+## TUI installation
+
+The versioned macOS/Linux TUI bundle installer is documented in
+`deploy/install/README.md`. It installs product resources separately from the user-owned
+`$TALOS_HOME` runtime directory.
+
 ## Reverse proxy requirements for SSE
 
 Talos streams live timeline events through HTTP Server-Sent Events.

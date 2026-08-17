@@ -168,9 +168,21 @@ write_sha256sums() {
   ) >"${checksum_file}"
 }
 
+tui_package_version() {
+  local source_version
+  local version
+  source_version="$(workspace_version)"
+  version="${TUI_PACKAGE_VERSION:-${source_version}}"
+  if [[ "${version}" != "${source_version}" ]]; then
+    echo "TUI package version ${version} does not match Talos binary version ${source_version}." >&2
+    exit 1
+  fi
+  printf '%s\n' "${version}"
+}
+
 create_tui_tarball() {
   local package_dir="$1"
-  local version="${TUI_PACKAGE_VERSION:-$(workspace_version)}"
+  local version="$2"
   local archive_path="${package_dir}/Talos-TUI-${version}-$(package_platform)-$(package_arch).tar.gz"
   tar -czf "${archive_path}" -C "${package_dir}" bin conf
 }
@@ -259,13 +271,15 @@ build_server_product() {
 }
 
 build_tui() {
+  local version
+  version="$(tui_package_version)"
   echo "Building Talos TUI..."
   cargo build --manifest-path "${RUST_DIR}/Cargo.toml" -p talos-tui --bin talos $(cargo_profile_args)
   rm -rf "${PRODUCT_DIR}/tui"
   mkdir -p "${PRODUCT_DIR}/tui"
   copy_rust_binary_as "talos" "${PRODUCT_DIR}/tui/bin/talos"
   copy_conf_resource "${PRODUCT_DIR}/tui"
-  create_tui_tarball "${PRODUCT_DIR}/tui"
+  create_tui_tarball "${PRODUCT_DIR}/tui" "${version}"
   write_sha256sums "${PRODUCT_DIR}/tui"
 }
 
