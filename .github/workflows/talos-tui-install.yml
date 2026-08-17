@@ -1,6 +1,7 @@
 name: talos-tui-install
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - ".github/workflows/talos-tui-install.yml"
