@@ -6,7 +6,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | Type | Next ID |
 | --- | ---: |
-| `feat` | 038 |
+| `feat` | 040 |
 | `fix` | 005 |
 | `refactor` | 041 |
 | `docs` | 001 |
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| feat-039 | `feat-039-tui-release-installer` | active |
 | feat-037 | `feat-037-tool-permission-user-interaction` | draft |
 | feat-036 | `feat-036-unified-tool-sandbox` | draft |
 | refactor-040 | `refactor-040-agent-runtime-message-event-api` | draft |
