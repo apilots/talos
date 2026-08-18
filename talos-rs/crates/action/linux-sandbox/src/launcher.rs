@@ -68,16 +68,12 @@ fn build_bubblewrap_argv(request: &LauncherRequest) -> Result<Vec<String>, Strin
         "--die-with-parent".to_string(),
         "--tmpfs".to_string(),
         "/".to_string(),
-        "--dev".to_string(),
-        "/dev".to_string(),
         "--unshare-user".to_string(),
         "--unshare-pid".to_string(),
     ];
     if request.network == NetworkIsolationSpec::Restricted {
         args.push("--unshare-net".to_string());
     }
-    args.extend(["--proc".to_string(), "/proc".to_string()]);
-
     for root in LINUX_RUNTIME_READ_ROOTS
         .iter()
         .map(Path::new)
@@ -90,6 +86,13 @@ fn build_bubblewrap_argv(request: &LauncherRequest) -> Result<Vec<String>, Strin
     for root in &request.file_system.readable_roots {
         push_mount(&mut args, "--ro-bind", root);
     }
+    // A readable host root must not shadow the private pseudo-filesystems.
+    args.extend([
+        "--dev".to_string(),
+        "/dev".to_string(),
+        "--proc".to_string(),
+        "/proc".to_string(),
+    ]);
     for root in &request.file_system.writable_roots {
         push_mount(&mut args, "--bind", root);
     }
@@ -261,5 +264,50 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|window| window == ["--tmpfs", "/workspace/secret"]));
+    }
+
+    #[test]
+    fn pseudo_filesystems_override_readable_host_root() {
+        let request = LauncherRequest {
+            protocol_version: crate::protocol::PROTOCOL_VERSION,
+            bubblewrap_executable: "/bin/true".into(),
+            helper_executable: "/opt/talos/launcher".into(),
+            command: crate::protocol::LauncherCommand {
+                program: "/opt/talos/program".into(),
+                args: Vec::new(),
+                env: Default::default(),
+                cwd: "/workspace".into(),
+                stdin: SandboxStdin::Closed,
+            },
+            file_system: crate::protocol::LauncherFileSystem {
+                readable_roots: vec!["/".into()],
+                writable_roots: vec!["/workspace".into()],
+                denied_roots: vec!["/workspace/secret".into()],
+            },
+            network: NetworkIsolationSpec::Restricted,
+        };
+
+        let args = build_bubblewrap_argv(&request).expect("mount plan should be built");
+        let root_bind = args
+            .windows(3)
+            .position(|window| window == ["--ro-bind", "/", "/"])
+            .expect("readable host root must be mounted");
+        let dev_mount = args
+            .windows(2)
+            .position(|window| window == ["--dev", "/dev"])
+            .expect("private dev must be mounted");
+        let proc_mount = args
+            .windows(2)
+            .position(|window| window == ["--proc", "/proc"])
+            .expect("private proc must be mounted");
+        let denied_mount = args
+            .windows(2)
+            .position(|window| window == ["--tmpfs", "/workspace/secret"])
+            .expect("denied root must be masked");
+
+        assert!(root_bind < dev_mount);
+        assert!(root_bind < proc_mount);
+        assert!(dev_mount < denied_mount);
+        assert!(proc_mount < denied_mount);
     }
 }
