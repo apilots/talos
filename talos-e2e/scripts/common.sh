@@ -765,6 +765,7 @@ collect_timeline_events() {
 import json
 import os
 import sys
+import time
 import urllib.parse
 import urllib.request
 
@@ -786,6 +787,7 @@ request = urllib.request.Request(
 )
 
 terminal_types = {"turn_completed", "turn_error"}
+deadline = time.monotonic() + 180
 current = {"id": "", "event": "", "data": []}
 
 def timeline_event(record):
@@ -826,6 +828,8 @@ def flush(handle):
 try:
     with urllib.request.urlopen(request, timeout=180) as response, open(output_path, "w", encoding="utf-8") as handle:
         for raw_line in response:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"timed out collecting timeline events for turn {turn_id}")
             line = raw_line.decode("utf-8").rstrip("\r\n")
             if line == "":
                 if flush(handle):

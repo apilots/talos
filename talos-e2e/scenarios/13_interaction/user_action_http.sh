@@ -28,6 +28,27 @@ build_binaries
 start_server
 trap stop_server EXIT
 
+get_active_turn_json() {
+  local response
+  response="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+  api_data_json "${response}"
+}
+
+get_session_history_json() {
+  local response
+  response="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
+  api_data_json "${response}"
+}
+
+submit_user_action_json() {
+  local payload="$1"
+  local response
+  response="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
+    -H "Content-Type: application/json" \
+    -d "${payload}")"
+  api_data_json "${response}"
+}
+
 models_json="$(curl -sS "${GATEWAY_URL}/v1/models")"
 primary_model="$(select_e2e_model_from_json "${models_json}")"
 primary_provider="$(select_e2e_model_provider_from_json "${models_json}" "${primary_model}")"
@@ -169,8 +190,8 @@ assert_terminal_turn() {
   local turn_id="$2"
   local message_id="$3"
   local active_json history_json
-  active_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
-  history_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
+  active_json="$(get_active_turn_json)"
+  history_json="$(get_session_history_json)"
   ACTIVE_JSON="${active_json}" HISTORY_JSON="${history_json}" TURN_ID="${turn_id}" MESSAGE_ID="${message_id}" python3 - <<'PY'
 import json
 import os
@@ -196,6 +217,33 @@ PY
   echo "CASE ${case_name}_terminal_history PASS turn_id=${turn_id}"
 }
 
+wait_for_active_turn_status() {
+  local expected_turn_id="$1"
+  local expected_status="$2"
+  local attempt=0
+  local active_json=""
+  local active_turn_id=""
+  local active_status=""
+
+  while (( attempt < 600 )); do
+    active_json="$(get_active_turn_json)"
+    active_turn_id="$(json_get "${active_json}" "active_turn.turn_id")"
+    active_status="$(json_get "${active_json}" "active_turn.status")"
+    if [[ "${active_turn_id}" == "${expected_turn_id}" && "${active_status}" == "${expected_status}" ]]; then
+      return 0
+    fi
+    if [[ "${active_turn_id}" == "${expected_turn_id}" && "${active_status}" =~ ^(failed|cancelled)$ ]]; then
+      echo "Active turn reached ${active_status} while waiting for ${expected_status}: ${active_json}" >&2
+      return 1
+    fi
+    attempt=$((attempt + 1))
+    sleep 0.25
+  done
+
+  echo "Timed out waiting for active turn ${expected_turn_id} status ${expected_status}: ${active_json}" >&2
+  return 1
+}
+
 session_id="$(new_session_id)"
 remember_session_context "${session_id}" "$(build_session_context)"
 echo "CASE user_action_session_id PASS session_id=${session_id}"
@@ -212,7 +260,8 @@ for mode in askForApproval approveForMe fullAccess; do
   patch_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
     -H "Content-Type: application/json" \
     -d "{\"conf\":{\"userPermissionMode\":\"${mode}\"}}")"
-  actual_mode="$(json_get "${patch_json}" "session.effectiveMode")"
+  patch_data_json="$(api_data_json "${patch_json}")"
+  actual_mode="$(json_get "${patch_data_json}" "session.effectiveMode")"
   if [[ "${actual_mode}" != "${mode}" ]]; then
     echo "CASE session_permission_${mode} FAIL response=${patch_json}"
     exit 1
@@ -243,7 +292,8 @@ done
 approve_for_me_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
   -d '{"conf":{"userPermissionMode":"approveForMe"}}')"
-if [[ "$(json_get "${approve_for_me_json}" "session.effectiveMode")" != "approveForMe" ]]; then
+approve_for_me_data_json="$(api_data_json "${approve_for_me_json}")"
+if [[ "$(json_get "${approve_for_me_data_json}" "session.effectiveMode")" != "approveForMe" ]]; then
   echo "CASE approve_for_me_real_risk_mode FAIL response=${approve_for_me_json}"
   exit 1
 fi
@@ -275,12 +325,13 @@ printf 'must-remain\n' >"${RISK_TARGET}/sentinel"
 risky_command="python3 -c \"import shutil; shutil.rmtree('${RISK_TARGET}')\""
 risky_payload="$(build_approval_payload "${risky_command}" "APPROVE_FOR_ME_MODEL_RISKY_OK")"
 risky_ack_json="$(send_message_ack "${session_id}" "${risky_payload}")"
-risky_turn_id="$(json_get "${risky_ack_json}" "turn_id")"
-risky_message_id="$(json_get "${risky_ack_json}" "message_id")"
+risky_turn_id="$(api_json_get "${risky_ack_json}" "turn_id")"
+risky_message_id="$(api_json_get "${risky_ack_json}" "message_id")"
 risky_events="$(scenario_report_path "approve_for_me_real_risky_initial_events.log")"
+wait_for_active_turn_status "${risky_turn_id}" "waiting_user_action"
 collect_timeline_events "${session_id}" "${risky_turn_id}" "${risky_events}"
 risky_response="$(message_response_from_events "${risky_ack_json}" "${risky_events}")"
-risky_active_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+risky_active_json="$(get_active_turn_json)"
 RISKY_ACTIVE_JSON="${risky_active_json}" RISKY_RESPONSE="${risky_response}" RISKY_TURN_ID="${risky_turn_id}" RISKY_COMMAND="${risky_command}" python3 - <<'PY'
 import json
 import os
@@ -314,9 +365,7 @@ fi
 risky_action_id="$(json_get "${risky_active_json}" "active_turn.pending_user_action.actionId")"
 risky_last_event_id="$(json_get "${risky_active_json}" "active_turn.last_event_id")"
 risky_submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${risky_turn_id}\",\"actionId\":\"${risky_action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"deny\"}}"
-risky_submit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-  -H "Content-Type: application/json" \
-  -d "${risky_submit_payload}")"
+risky_submit_json="$(submit_user_action_json "${risky_submit_payload}")"
 if [[ "$(json_get "${risky_submit_json}" "state")" != "resuming" ]]; then
   echo "CASE approve_for_me_real_risky_submit FAIL response=${risky_submit_json}"
   exit 1
@@ -341,19 +390,20 @@ run_question() {
 
   payload="$(build_turn_payload "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(json_get "${ack_json}" "turn_id")"
-  message_id="$(json_get "${ack_json}" "message_id")"
+  turn_id="$(api_json_get "${ack_json}" "turn_id")"
+  message_id="$(api_json_get "${ack_json}" "message_id")"
   if [[ -z "${turn_id}" || -z "${message_id}" ]]; then
     echo "CASE ${case_name}_start FAIL response=${ack_json}"
     exit 1
   fi
 
   initial_events="$(scenario_report_path "${case_name}_initial_events.log")"
+  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
   collect_timeline_events "${session_id}" "${turn_id}" "${initial_events}"
   initial_response="$(message_response_from_events "${ack_json}" "${initial_events}")"
   log_case_json "${case_name}_waiting" "${payload}" "${initial_response}"
 
-  active_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+  active_json="$(get_active_turn_json)"
   ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" python3 - <<'PY'
 import json
 import os
@@ -371,7 +421,7 @@ assert len(question["options"]) == 2, question
 assert [option["id"] for option in question["options"]] == ["plan", "direct"], question
 PY
 
-  recovery_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")"
+  recovery_json="$(api_data_json "$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/timeline/recovery")")"
   RECOVERY_JSON="${recovery_json}" TURN_ID="${turn_id}" python3 - <<'PY'
 import json
 import os
@@ -394,9 +444,7 @@ PY
     answer_json='{"type":"freeForm","text":"Use a staged rollout"}'
   fi
   submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"question\",\"response\":${answer_json}}}"
-  submit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-    -H "Content-Type: application/json" \
-    -d "${submit_payload}")"
+  submit_json="$(submit_user_action_json "${submit_payload}")"
   if [[ "$(json_get "${submit_json}" "actionId")" != "${action_id}" || "$(json_get "${submit_json}" "state")" != "resuming" ]]; then
     echo "CASE ${case_name}_submit FAIL response=${submit_json}"
     exit 1
@@ -422,7 +470,8 @@ run_question "user_action_question_other" "freeForm" "QUESTION_OTHER_OK"
 approval_mode_json="$(curl -sS -X PATCH "${GATEWAY_URL}/v1/sessions/${session_id}" \
   -H "Content-Type: application/json" \
   -d '{"conf":{"userPermissionMode":"askForApproval"}}')"
-if [[ "$(json_get "${approval_mode_json}" "session.effectiveMode")" != "askForApproval" ]]; then
+approval_mode_data_json="$(api_data_json "${approval_mode_json}")"
+if [[ "$(json_get "${approval_mode_data_json}" "session.effectiveMode")" != "askForApproval" ]]; then
   echo "CASE sandbox_approval_mode FAIL response=${approval_mode_json}"
   exit 1
 fi
@@ -443,18 +492,19 @@ run_sandbox_approval() {
   command="printf '${case_name}' >> '${side_effect}'"
   payload="$(build_approval_payload "${command}" "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(json_get "${ack_json}" "turn_id")"
-  message_id="$(json_get "${ack_json}" "message_id")"
+  turn_id="$(api_json_get "${ack_json}" "turn_id")"
+  message_id="$(api_json_get "${ack_json}" "message_id")"
   if [[ -z "${turn_id}" || -z "${message_id}" ]]; then
     echo "CASE ${case_name}_start FAIL response=${ack_json}"
     exit 1
   fi
 
   initial_events="$(scenario_report_path "${case_name}_initial_events.log")"
+  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
   collect_timeline_events "${session_id}" "${turn_id}" "${initial_events}"
   initial_response="$(message_response_from_events "${ack_json}" "${initial_events}")"
   log_case_json "${case_name}_waiting" "${payload}" "${initial_response}"
-  active_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+  active_json="$(get_active_turn_json)"
   ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" COMMAND="${command}" python3 - <<'PY'
 import json
 import os
@@ -481,13 +531,9 @@ PY
   if [[ "${submission_mode}" == "concurrent" ]]; then
     submit_one_path="$(scenario_report_path "${case_name}_submit_one.json")"
     submit_two_path="$(scenario_report_path "${case_name}_submit_two.json")"
-    curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-      -H "Content-Type: application/json" \
-      -d "${submit_payload}" >"${submit_one_path}" &
+    submit_user_action_json "${submit_payload}" >"${submit_one_path}" &
     submit_one_pid=$!
-    curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-      -H "Content-Type: application/json" \
-      -d "${submit_payload}" >"${submit_two_path}" &
+    submit_user_action_json "${submit_payload}" >"${submit_two_path}" &
     submit_two_pid=$!
     wait "${submit_one_pid}"
     wait "${submit_two_pid}"
@@ -505,9 +551,7 @@ assert "resuming" in states, responses
 PY
     submit_json="${submit_one}"
   else
-    submit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-      -H "Content-Type: application/json" \
-      -d "${submit_payload}")"
+    submit_json="$(submit_user_action_json "${submit_payload}")"
   fi
   expected_state="resuming"
   if [[ "${decision}" == "cancel" ]]; then
@@ -519,7 +563,7 @@ PY
   fi
 
   if [[ "${decision}" == "cancel" ]]; then
-    terminal_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+    terminal_json="$(get_active_turn_json)"
     if [[ "$(json_get "${terminal_json}" "active_turn.status")" != "failed" || -e "${side_effect}" ]]; then
       echo "CASE ${case_name} FAIL active_turn=${terminal_json}"
       exit 1
@@ -547,7 +591,7 @@ PY
     exit 1
   fi
   assert_terminal_turn "${case_name}" "${turn_id}" "${message_id}"
-  history_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
+  history_json="$(get_session_history_json)"
   HISTORY_JSON="${history_json}" CALL_ID="${call_id}" python3 - <<'PY'
 import json
 import os
@@ -590,10 +634,11 @@ run_multi_sandbox_approval() {
   rm -f "${MULTI_APPROVAL_FILE}"
   payload="$(build_multi_approval_payload "${marker}")"
   ack_json="$(send_message_ack "${session_id}" "${payload}")"
-  turn_id="$(json_get "${ack_json}" "turn_id")"
-  message_id="$(json_get "${ack_json}" "message_id")"
+  turn_id="$(api_json_get "${ack_json}" "turn_id")"
+  message_id="$(api_json_get "${ack_json}" "message_id")"
 
   events="$(scenario_report_path "${case_name}_initial_events.log")"
+  wait_for_active_turn_status "${turn_id}" "waiting_user_action"
   collect_timeline_events "${session_id}" "${turn_id}" "${events}"
   response="$(message_response_from_events "${ack_json}" "${events}")"
   RESPONSE="${response}" python3 - <<'PY'
@@ -609,7 +654,7 @@ assert response["metrics"]["tool_calls"] == 3, response["metrics"]
 PY
 
   for step in 1 2 3; do
-    active_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/active-turn")"
+    active_json="$(get_active_turn_json)"
     ACTIVE_JSON="${active_json}" TURN_ID="${turn_id}" python3 - <<'PY'
 import json
 import os
@@ -625,9 +670,7 @@ PY
     action_id="$(json_get "${active_json}" "active_turn.pending_user_action.actionId")"
     last_event_id="$(json_get "${active_json}" "active_turn.last_event_id")"
     submit_payload="{\"sessionId\":\"${session_id}\",\"turnId\":\"${turn_id}\",\"actionId\":\"${action_id}\",\"response\":{\"type\":\"sandboxApproval\",\"response\":\"allowOnce\"}}"
-    submit_json="$(curl -sS -X POST "${GATEWAY_URL}/v1/user-actions/submit" \
-      -H "Content-Type: application/json" \
-      -d "${submit_payload}")"
+    submit_json="$(submit_user_action_json "${submit_payload}")"
     if [[ "$(json_get "${submit_json}" "state")" != "resuming" ]]; then
       echo "CASE ${case_name}_step_${step}_submit FAIL response=${submit_json}"
       exit 1
@@ -652,7 +695,7 @@ PY
   fi
   assert_terminal_turn "${case_name}" "${turn_id}" "${message_id}"
 
-  history_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}/history")"
+  history_json="$(get_session_history_json)"
   HISTORY_JSON="${history_json}" MESSAGE_ID="${message_id}" python3 - <<'PY'
 import json
 import os
