@@ -8,7 +8,9 @@ mod contract;
 mod login;
 
 pub use app_server::{AppServerClient, AppServerClientConfig, AppServerOwnership};
-pub use contract::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
+pub use contract::{
+    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+};
 pub use login::{now_ms, open_external_url};
 pub use talos_app_protocol::events::{canonical_method, ApplicationEvent};
 pub use talos_app_protocol::requests::{TimelineActiveTurnSnapshot, TimelineActiveTurnStatus};
@@ -45,7 +47,10 @@ pub use talos_types::{
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileSummary, MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest,
     MemoryGetResponse, MemoryImportance, MemoryInfo, MemoryKind, MemorySearchHit,
-    MemorySearchRequest, MemorySearchResponse, MemorySourceInfo, ModelCostConfig, ModelInfo,
+    MemorySearchRequest, MemorySearchResponse, MemorySourceInfo, MessageQueue,
+    MessageQueueAddRequest, MessageQueueChangedNotification, MessageQueueDeleteRequest,
+    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
+    MessageQueueSteerRequest, MessageQueueUpdateRequest, ModelCostConfig, ModelInfo,
     ModelInputKind, ModelListRequest, ModelListResponse, ModelReadiness, ModelRef, ModelSelection,
     ModelSpeed, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, PendingUserAction,
     ProfileDailyUsage, ProfileModelUsage, ProfileReadRequest, ProfileReadResponse,
@@ -54,23 +59,23 @@ pub use talos_types::{
     ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, ProjectStatus,
     ProjectStatusState, ProjectUnavailableReason, ProviderConfig, ProviderKeyStatus,
     ProviderModelConfig, ProviderProtocolCapabilities, QuestionAnswer, QuestionOption,
-    QuestionParams, ReasoningEffort, RetryTurnRequest, RetryTurnResponse, SandboxApprovalDecision,
-    SandboxApprovalParams, SandboxApprovalPresentation, SandboxApprovalReason, SendMessageResult,
-    SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse,
-    SessionCloseRequest, SessionCloseResponse, SessionCompactRequest, SessionCompactResponse,
-    SessionConf, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionInfo,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
-    StartTurnRequest, StartTurnResponse, SubagentOutcome, SubagentRef, SubagentSnapshot,
-    SubagentSpawnResult, SubagentUpdate, SubagentUpdateKind, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineCursorStatus,
-    TimelineRecoveryResponse, TimelineReplay, TimelineUserActionEvent, TurnCommandStatus,
-    UserActionParams, UserActionResponse, UserActionState, UserCurrentRequest, UserCurrentResponse,
-    UserPermissionMode, WorkspaceDocInfo, WorkspaceDocKind, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    QuestionParams, QueuedMessage, ReasoningEffort, RetryTurnRequest, RetryTurnResponse,
+    SandboxApprovalDecision, SandboxApprovalParams, SandboxApprovalPresentation,
+    SandboxApprovalReason, SendMessageResult, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
+    SessionCompactRequest, SessionCompactResponse, SessionConf, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionInfo, SessionListRequest, SessionListResponse,
+    SessionPatchRequest, SessionUpdateResponse, StartTurnRequest, StartTurnResponse,
+    SubagentOutcome, SubagentRef, SubagentSnapshot, SubagentSpawnResult, SubagentUpdate,
+    SubagentUpdateKind, SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse,
+    SubmitUserActionRequest, SubmitUserActionResponse, SubscribeTimelineRequest,
+    SubscribeTimelineResponse, TimelineCursorStatus, TimelineRecoveryResponse, TimelineReplay,
+    TimelineUserActionEvent, TurnCommandStatus, UserActionParams, UserActionResponse,
+    UserActionState, UserCurrentRequest, UserCurrentResponse, UserPermissionMode, WorkspaceDocInfo,
+    WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
+    WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,

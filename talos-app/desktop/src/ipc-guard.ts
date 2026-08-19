@@ -93,6 +93,9 @@ const userActionSubmitParams = (params: unknown) =>
   isRecord(params) &&
   isRecord(params.response) &&
   ["question", "sandboxApproval", "dynamicToolResult"].includes(String(params.response.type));
+const messageQueueSessionParams = (params: unknown) => hasString(params, "sessionId");
+const messageQueueMessageParams = (params: unknown) =>
+  messageQueueSessionParams(params) && hasString(params, "messageId");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
   "auth.login.cancel": authLoginSessionParams,
@@ -119,6 +122,16 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "memory.file.write": (params) => hasString(params, "date") && hasString(params, "content"),
   "memory/get": (params) => hasString(params, "memoryId"),
   "memory/search": (params) => hasString(params, "query"),
+  "messageQueue/add": (params) => messageQueueSessionParams(params) && hasArray(params, "input"),
+  "messageQueue/list": messageQueueSessionParams,
+  "messageQueue/update": (params) => messageQueueMessageParams(params) && hasArray(params, "input"),
+  "messageQueue/delete": messageQueueMessageParams,
+  "messageQueue/reorder": (params) => messageQueueSessionParams(params) && hasArray(params, "messageIds"),
+  "messageQueue/start": (params) =>
+    messageQueueSessionParams(params) &&
+    isRecord(params) &&
+    (params.messageId === undefined || params.messageId === null || typeof params.messageId === "string"),
+  "messageQueue/steer": (params) => messageQueueMessageParams(params) && hasString(params, "turnId"),
   "model.list": emptyParams,
   "project.create": (params) => hasString(params, "name") && hasString(params, "directory"),
   "project.delete": projectParams,
@@ -166,7 +179,7 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
     hasString(params, "tool_name") &&
     hasString(params, "output") &&
     hasBoolean(params, "success"),
-  "turn.interrupt": sessionParams,
+  "turn.interrupt": (params) => sessionParams(params) && hasString(params, "turn_id"),
   "turn.retry": (params) =>
     hasString(params, "session_id") &&
     hasArray(params, "input") &&

@@ -284,6 +284,7 @@ fn estimate_working_context_tokens(
 ) -> usize {
     prepared
         .attachment_tokens
+        .saturating_add(state.active_turn_attachment_tokens)
         .saturating_add(estimate_messages_tokens(&combined_messages(
             prepared,
             state,

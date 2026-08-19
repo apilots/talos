@@ -156,6 +156,20 @@ describe("JsonRpcStdioTransport responses", () => {
 });
 
 describe("JsonRpcStdioTransport notifications", () => {
+  it("emits typed message queue change notifications", () => {
+    const transport = createTransportHarness();
+    const changes: unknown[] = [];
+    transport.instance.onMessageQueueChanged((change) => changes.push(change));
+
+    transport.handleLine(JSON.stringify({
+      jsonrpc: "2.0",
+      method: "messageQueue/changed",
+      params: { sessionId: "session-1", revision: 5 },
+    }));
+
+    expect(changes).toEqual([{ sessionId: "session-1", revision: 5 }]);
+  });
+
   it("emits typed subscription termination notifications", () => {
     const transport = createTransportHarness();
     const terminated: unknown[] = [];

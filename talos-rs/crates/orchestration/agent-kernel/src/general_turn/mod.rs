@@ -89,6 +89,8 @@ mod working_context;
 #[cfg(test)]
 mod working_context_tests;
 
+pub use attachments::build_active_turn_input;
+
 pub use daily_memory::form_daily_session_memory;
 pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};

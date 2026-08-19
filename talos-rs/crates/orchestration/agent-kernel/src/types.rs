@@ -174,6 +174,7 @@ pub struct PromptWarningEventData {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum KernelStreamEventType {
+    UserInput,
     ThinkingDelta,
     AssistantTextStarted,
     AssistantTextDelta,
@@ -212,6 +213,7 @@ impl KernelStreamEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum KernelStreamEventData {
+    UserInput(UserInput),
     ThinkingDelta(ThinkingDeltaStreamData),
     AssistantTextStarted(AssistantTextStartedStreamData),
     AssistantTextDelta(AssistantTextDeltaStreamData),

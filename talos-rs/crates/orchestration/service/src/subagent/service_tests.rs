@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::test_support::run_test_migrations;
+use crate::SessionMessageQueueService;
 use async_trait::async_trait;
 use chrono::Utc;
 use talos_coordinator::SessionRuntime;
@@ -298,6 +299,7 @@ async fn test_services_uninitialized() -> TestServices {
         profile_store,
         sessions.clone(),
         runtime.clone(),
+        SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
     ));
     let history = SessionHistoryService::new(
@@ -785,11 +787,13 @@ async fn send_message_dispatches_to_the_exact_running_child_turn() {
         AgentDispatchInputParams {
             binding: DispatchBinding::Exact { agent_id },
             turn_id: dispatched_turn_id,
-            input: AgentDispatchInput::Message { message },
+            input: AgentDispatchInput::Message { input },
             ..
         } if agent_id == "reviewer"
             && dispatched_turn_id == &turn_id
-            && message == "Focus on tests"
+            && input == &vec![TalosInputItem::Text {
+                text: "Focus on tests".to_string(),
+            }]
     ));
 }
 

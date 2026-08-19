@@ -48,7 +48,12 @@ pub trait AppServerApplication: Send + Sync {
         params: SubscribeTimelineRequest,
     ) -> ApplicationResult<SubscriptionSource>;
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()>;
+    async fn cancel_active_turn(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        turn_id: &str,
+    ) -> ApplicationResult<()>;
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
@@ -242,6 +247,48 @@ impl AppServerApplication for TalosApplicationAdapter {
                         .map_err(talos_error_to_api_error)?,
                 )
             }
+            ClientRequestParams::MessageQueueAdd(params) => to_value(
+                self.gateway
+                    .add_queued_message(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueList(params) => to_value(
+                self.gateway
+                    .list_message_queue(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueUpdate(params) => to_value(
+                self.gateway
+                    .update_queued_message(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueDelete(params) => to_value(
+                self.gateway
+                    .delete_queued_message(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueReorder(params) => to_value(
+                self.gateway
+                    .reorder_message_queue(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueStart(params) => to_value(
+                self.gateway
+                    .start_queued_message(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::MessageQueueSteer(params) => to_value(
+                self.gateway
+                    .steer_queued_message(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
             ClientRequestParams::EventSubscribe(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::EventUnsubscribe(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
@@ -550,12 +597,18 @@ impl AppServerApplication for TalosApplicationAdapter {
             .map_err(talos_error_to_api_error)
     }
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        turn_id: &str,
+    ) -> ApplicationResult<()> {
         self.gateway
             .interrupt_turn(
                 actor,
                 talos_types::InterruptTurnRequest {
                     session_id: session_id.to_string(),
+                    turn_id: turn_id.to_string(),
                 },
             )
             .await

@@ -75,6 +75,16 @@ export async function createChatFeatureMock(
       showReconnectControls: false,
       stopResponse: vi.fn(),
       streamError: undefined,
+      messageQueue: {
+        queue: undefined,
+        error: undefined,
+        add: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        reorder: vi.fn(),
+        start: vi.fn(),
+        steer: vi.fn(),
+      },
       sessionHistoryQuery: {
         error: mocks.sessionHistoryError,
         isError: Boolean(mocks.sessionHistoryError),

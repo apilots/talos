@@ -60,6 +60,22 @@ fn validate_user_input(input: &[TalosInputItem]) -> TalosResult<()> {
     }
 }
 
+fn validate_active_turn_input(input: &[TalosInputItem]) -> TalosResult<()> {
+    validate_user_input(input)?;
+    if input.iter().any(|item| {
+        !matches!(
+            item,
+            TalosInputItem::Text { .. } | TalosInputItem::Files { .. }
+        )
+    }) {
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "active turn input supports only text and files",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_retry_request(request: &TurnRetryParams) -> TalosResult<()> {
     if request.client_message_id.trim().is_empty() {
         return Err(TalosError::public(
@@ -97,6 +113,32 @@ fn result_from_idempotency_record(record: IdempotencyRecord) -> TalosResult<Mess
 fn completed_turn_from_event(event: &AgentEvent) -> Option<(String, String)> {
     matches!(event.payload, AgentEventPayload::TurnCompleted(_))
         .then(|| (event.session_id.clone(), event.turn_id.clone()))
+}
+
+fn auto_dispatch_session_from_event(event: &AgentEvent) -> Option<String> {
+    match &event.payload {
+        AgentEventPayload::TurnCompleted(completed)
+            if !stop_reason_blocks_auto_dispatch(&completed.stop_reason) =>
+        {
+            Some(event.session_id.clone())
+        }
+        AgentEventPayload::TurnError(_) => Some(event.session_id.clone()),
+        AgentEventPayload::TurnCompleted(_)
+        | AgentEventPayload::ItemStarted(_)
+        | AgentEventPayload::ItemDelta(_)
+        | AgentEventPayload::ItemCompleted(_)
+        | AgentEventPayload::AssistantTextCommitted(_)
+        | AgentEventPayload::TurnStarted(_)
+        | AgentEventPayload::TurnMetrics(_) => None,
+    }
+}
+
+fn stop_reason_blocks_auto_dispatch(stop_reason: &talos_types::talos::StopReason) -> bool {
+    matches!(
+        stop_reason,
+        talos_types::talos::StopReason::Cancelled
+            | talos_types::talos::StopReason::WaitingUserAction
+    )
 }
 
 async fn record_session_title(

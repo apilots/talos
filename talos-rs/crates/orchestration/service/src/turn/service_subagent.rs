@@ -20,6 +20,7 @@ impl TurnService {
                 binding: DispatchBinding::Exact { agent_id },
             },
             None,
+            None,
         )
         .await
     }
@@ -51,7 +52,9 @@ impl TurnService {
                 binding: DispatchBinding::Exact { agent_id },
                 session,
                 turn_id,
-                input: AgentDispatchInput::Message { message },
+                input: AgentDispatchInput::Message {
+                    input: vec![TalosInputItem::Text { text: message }],
+                },
             })
             .await
     }

@@ -44,6 +44,7 @@ use talos_types::talos::{
 };
 use talos_types::{ModelInfo, PendingUserAction, TimelineUserActionEvent, UserActionState};
 
+mod active_turn_input;
 mod outcome;
 mod resume;
 
@@ -64,28 +65,28 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
     fn run(
         &self,
         params: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Execute a backend run and stream standardized Agent events.
     fn run_streamed(
         &self,
         params: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 
     /// Continue a non-streaming backend run using same-turn Agent parameters.
     fn resume(
         &self,
         params: AgentResumeParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Continue a backend run and stream standardized same-turn Agent events.
     fn resume_streamed(
         &self,
         params: AgentResumeParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 }
 
@@ -311,7 +312,7 @@ impl KernelAgent {
     async fn execute_unary_run(
         &self,
         request: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRunResult> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
@@ -367,7 +368,7 @@ impl KernelAgent {
     async fn start_streamed_run(
         &self,
         request: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRuntimeStream> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
@@ -448,7 +449,7 @@ impl KernelAgent {
                     .await;
             }
             if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
-                match emit_user_input_item(&mut timeline, &input) {
+                match active_turn_input::emit_user_input_item(&mut timeline, &input) {
                     Ok(events) => {
                         for event in events {
                             let _ = tx.send(event).await;
@@ -642,16 +643,6 @@ impl KernelAgent {
     }
 }
 
-fn emit_user_input_item(
-    timeline: &mut TimelineBuilder,
-    input: &UserInput,
-) -> TalosResult<Vec<AgentEvent>> {
-    let started = timeline.start_user_input(input.text.clone(), input.file_ids.clone());
-    let item_id = item_id_from_started(&started)?;
-    let completed = timeline.complete_item(&item_id, TalosTimelineItemStatus::Completed, None)?;
-    Ok(vec![started, completed])
-}
-
 async fn forward_kernel_event(
     timeline: &mut TimelineBuilder,
     state: &mut KernelTimelineState,
@@ -730,6 +721,11 @@ pub(crate) fn emit_kernel_timeline_events(
     event: KernelStreamEvent,
 ) -> TalosResult<Vec<AgentEvent>> {
     match (event.event_type, event.data) {
+        (KernelStreamEventType::UserInput, KernelStreamEventData::UserInput(input)) => {
+            // A same-turn user input opens a new model segment after the prior response.
+            state.final_answer_item_id = None;
+            active_turn_input::emit_user_input_item(timeline, &input)
+        }
         (KernelStreamEventType::TurnMetrics, KernelStreamEventData::TurnMetrics(data)) => {
             Ok(vec![timeline.turn_metrics(data.metrics)])
         }
@@ -1329,7 +1325,7 @@ impl AgentRuntime for KernelAgent {
     async fn run(
         &self,
         params: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRunResult> {
         self.execute_unary_run(params, message_rx).await
     }
@@ -1337,7 +1333,7 @@ impl AgentRuntime for KernelAgent {
     async fn run_streamed(
         &self,
         params: AgentRunParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRuntimeStream> {
         self.start_streamed_run(params, message_rx).await
     }
@@ -1345,7 +1341,7 @@ impl AgentRuntime for KernelAgent {
     async fn resume(
         &self,
         params: AgentResumeParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRunResult> {
         self.execute_unary_run(params.run, message_rx).await
     }
@@ -1353,7 +1349,7 @@ impl AgentRuntime for KernelAgent {
     async fn resume_streamed(
         &self,
         params: AgentResumeParams,
-        message_rx: mpsc::Receiver<String>,
+        message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
     ) -> AgentResult<AgentRuntimeStream> {
         self.start_streamed_run(params.run, message_rx).await
     }

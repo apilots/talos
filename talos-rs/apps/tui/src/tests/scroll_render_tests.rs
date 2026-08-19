@@ -1106,7 +1106,7 @@ fn test_rebuild_chat_render_state_skips_footer_for_non_user_blocks() {
 }
 
 #[tokio::test]
-async fn test_multiple_questions_keep_reply_order() {
+async fn test_multiple_questions_keep_server_queue_order() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
 
@@ -1115,21 +1115,13 @@ async fn test_multiple_questions_keep_reply_order() {
     assert!(app.send_user_message("q3".to_string()).await.unwrap());
     assert!(app.send_user_message("q4".to_string()).await.unwrap());
 
-    for _ in 0..240 {
-        app.on_tick().await;
-        tokio::task::yield_now().await;
-        if !app.in_flight && app.message_queue.is_empty() {
-            break;
-        }
-    }
-
-    let joined = interactive_transcript_text(&app);
-
-    let p1 = joined.find("reply(q1)").unwrap();
-    let p2 = joined.find("reply(q2)").unwrap();
-    let p3 = joined.find("reply(q3)").unwrap();
-    let p4 = joined.find("reply(q4)").unwrap();
-    assert!(p1 < p2 && p2 < p3 && p3 < p4);
+    let queued_text = app
+        .message_queue
+        .messages
+        .iter()
+        .map(crate::message_queue::queued_message_text)
+        .collect::<Vec<_>>();
+    assert_eq!(queued_text, ["q2", "q3", "q4"]);
 }
 
 #[tokio::test]
@@ -1146,7 +1138,7 @@ async fn test_send_is_non_blocking_when_stream_connect_is_slow() {
     assert!(app.pending_stream_connect.is_some());
 
     assert!(app.send_user_message("slow-2".to_string()).await.unwrap());
-    assert_eq!(app.message_queue.len(), 1);
+    assert_eq!(app.message_queue.messages.len(), 1);
 }
 
 #[tokio::test]
@@ -1161,13 +1153,13 @@ async fn test_send_is_non_blocking_for_first_draft_turn() {
     let elapsed = started.elapsed();
 
     assert!(elapsed < Duration::from_millis(150));
-    assert_eq!(app.message_queue.len(), 0);
+    assert_eq!(app.message_queue.messages.len(), 0);
     assert!(app.pending_stream_connect.is_some());
     assert!(interactive_transcript_text(&app).contains("slow-create"));
 }
 
 #[tokio::test]
-async fn test_failed_queued_message_is_dropped_after_one_retry() {
+async fn test_failed_active_turn_does_not_drop_queued_message() {
     let mut app = create_app_server_app_with_stream_failures(2);
     app.initialize_session().await;
 
@@ -1177,19 +1169,16 @@ async fn test_failed_queued_message_is_dropped_after_one_retry() {
     for _ in 0..120 {
         app.on_tick().await;
         tokio::task::yield_now().await;
-        if !app.in_flight && app.message_queue.is_empty() {
+        if !app.in_flight {
             break;
         }
     }
 
-    assert!(app.message_queue.is_empty());
-    let final_answer_text = interactive_transcript_text(&app);
-    assert!(final_answer_text.contains("drop-me"));
-    assert!(final_answer_text.contains("reply(next-one)"));
-    assert!(app
-        .right_panel_events
-        .iter()
-        .any(|line| line.contains("queued dispatch dropped")));
+    assert_eq!(app.message_queue.messages.len(), 1);
+    assert_eq!(
+        crate::message_queue::queued_message_text(&app.message_queue.messages[0]),
+        "next-one"
+    );
 }
 
 #[tokio::test]

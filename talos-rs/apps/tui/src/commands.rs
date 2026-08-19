@@ -10,18 +10,15 @@ use crate::input_history::InputHistoryNavigation;
 use crate::model_picker::{ModelPickerSelection, ModelPickerState};
 use crate::permission_picker::PermissionPickerState;
 use crate::session_picker::SessionPickerState;
-use crate::types::{
-    CommandUpdate, QueuedMessage, SessionCloseUpdate, SessionHistoryLoad, StatusLoad,
-};
-use crate::utils::summarize_for_queue;
-use crate::{TuiApp, MAX_QUEUE_LEN, SESSION_CLOSE_FORCE_TIMEOUT};
+use crate::types::{CommandUpdate, SessionCloseUpdate, SessionHistoryLoad, StatusLoad};
+use crate::{TuiApp, SESSION_CLOSE_FORCE_TIMEOUT};
 use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
 
 mod permission;
 
 impl TuiApp {
     pub(crate) async fn submit_input(&mut self) -> TalosResult<bool> {
-        if !self.has_composer_input() {
+        if !self.has_composer_input() && self.editing_queue_message_id.is_none() {
             self.reset_input();
             return Ok(false);
         }
@@ -29,7 +26,13 @@ impl TuiApp {
             return Ok(false);
         }
 
-        let result = if self.is_command_input() {
+        let result = if self.editing_queue_message_id.is_some() {
+            let user_input = self.compose_user_input_text()?;
+            if self.update_queued_message_text(user_input).await {
+                self.reset_input();
+            }
+            Ok(false)
+        } else if self.is_command_input() {
             let command_line = self.input_buffer.trim().to_string();
             if command_should_enter_transcript(&command_line) {
                 self.render_runtime
@@ -255,96 +258,22 @@ impl TuiApp {
             return Ok(false);
         }
 
-        if self.in_flight || !self.message_queue.is_empty() {
-            if self.message_queue.len() >= MAX_QUEUE_LEN {
-                self.show_status_hint(
-                    format!(
-                        "Queue is full ({}/{}). Wait for current response.",
-                        self.message_queue.len(),
-                        MAX_QUEUE_LEN
-                    ),
-                    Duration::from_secs(2),
-                );
-                self.push_right_event("queue full".to_string());
-                return Ok(false);
+        if self.in_flight || !self.message_queue.messages.is_empty() {
+            let accepted = self
+                .enqueue_message(user_message.clone(), skills, file_ids)
+                .await;
+            if accepted && !user_message.is_empty() {
+                self.add_message_to_history(user_message);
             }
-        } else if self.message_queue.len() >= MAX_QUEUE_LEN {
-            self.show_status_hint(
-                format!(
-                    "Queue is full ({}/{}). Wait for current response.",
-                    self.message_queue.len(),
-                    MAX_QUEUE_LEN
-                ),
-                Duration::from_secs(2),
-            );
-            self.push_right_event("queue full".to_string());
-            return Ok(false);
+            return Ok(accepted);
         }
 
-        let queue_summary = if user_message.is_empty() {
-            format!("{} attachment(s)", file_ids.len())
-        } else {
-            summarize_for_queue(&user_message)
-        };
-        self.message_queue
-            .push_back(QueuedMessage::new(user_message.clone(), skills, file_ids));
+        self.start_stream_for_message_with_skills(user_message.clone(), skills, file_ids)
+            .await?;
         if !user_message.is_empty() {
             self.add_message_to_history(user_message);
         }
-        self.push_right_event(format!(
-            "queued ({}/{}): {}",
-            self.message_queue.len(),
-            MAX_QUEUE_LEN,
-            queue_summary
-        ));
-        self.dispatch_next_queued_message().await;
         Ok(true)
-    }
-
-    pub(crate) async fn dispatch_next_queued_message(&mut self) {
-        if self.in_flight {
-            return;
-        }
-        let Some(next_message) = self.message_queue.front().cloned() else {
-            return;
-        };
-
-        if let Err(err) = self
-            .start_stream_for_message_with_skills(
-                next_message.text.clone(),
-                next_message.skills.clone(),
-                next_message.file_ids.clone(),
-            )
-            .await
-        {
-            if let Some(front) = self.message_queue.front_mut() {
-                front.dispatch_attempts = front.dispatch_attempts.saturating_add(1);
-                if front.dispatch_attempts <= 1 {
-                    self.show_status_hint(
-                        "Queued message dispatch failed. Retrying once...",
-                        Duration::from_secs(3),
-                    );
-                    self.push_right_event("queued dispatch retry".to_string());
-                    return;
-                }
-            }
-
-            let failed = self.message_queue.pop_front();
-            self.push_system_notice(format!("Failed to dispatch queued message: {}", err));
-            if let Some(failed) = failed {
-                self.push_right_event(format!(
-                    "queued dispatch dropped: {}",
-                    summarize_for_queue(&failed.text)
-                ));
-            } else {
-                self.push_right_event("queued dispatch failed".to_string());
-            }
-            return;
-        }
-
-        if self.in_flight {
-            self.message_queue.pop_front();
-        }
     }
 
     pub(crate) async fn refresh_models_from_gateway(&mut self) -> TalosResult<()> {

@@ -87,7 +87,7 @@ pub(crate) enum ActiveTurnHandle {
         /// Abort handle owned by the concrete runtime task.
         execution_task: AgentRuntimeAbortHandle,
         /// Bounded input sender for the exact running turn.
-        message_tx: Option<mpsc::Sender<String>>,
+        message_tx: Option<mpsc::Sender<talos_agent_kernel::ActiveTurnInputDelivery>>,
     },
 }
 
@@ -142,7 +142,7 @@ impl AgentHarnessImpl {
         session_id: &str,
         turn_id: String,
         execution_task: AgentRuntimeAbortHandle,
-        message_tx: Option<mpsc::Sender<String>>,
+        message_tx: Option<mpsc::Sender<talos_agent_kernel::ActiveTurnInputDelivery>>,
     ) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
             Entry::Occupied(mut entry) => {

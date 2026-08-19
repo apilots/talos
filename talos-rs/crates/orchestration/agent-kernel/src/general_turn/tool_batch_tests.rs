@@ -144,6 +144,7 @@ fn memory_get_keeps_the_full_tool_result() {
         final_answer_streamed: false,
         execution_summary_streamed: false,
         elapsed_duration_ms: 0,
+        active_turn_attachment_tokens: 0,
     };
     let body = "x".repeat(1_500);
     let output = ToolExecutionOutput {

@@ -4,6 +4,7 @@ import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionStreaming } from "./useSessionStreaming";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
+import { useSessionMessageQueue } from "./useSessionMessageQueue";
 import {
   useActiveTurnQuery,
   useSessionHistoryQuery,
@@ -16,27 +17,19 @@ import {
   clearInactiveTurnSnapshot,
 } from "../stream-events";
 import { activeContextCompactionStage } from "../timeline-state";
+import { buildQueuedInput, type SendTextOptions } from "../session-input";
+export type { SendTextOptions } from "../session-input";
 import { useAppStore } from "@/shared/store/app-store";
 import type {
   PendingInput,
-  ProjectView,
   SessionInputHistory,
   SessionInputHistoryItem,
 } from "@/shared/types/ui";
-import type { ModelSelection, SkillSuggestion, UserPermissionMode } from "@talos/sdk-browser";
 
 const ACTIVE_TURN_NOT_FOUND_CODES = [
   AppProtocol.ErrorCode.ResourceNotFound,
   AppProtocol.ErrorCode.SessionNotFound,
 ] as const satisfies readonly AppProtocol.ErrorCode[];
-
-export interface SendTextOptions {
-  modelSelection?: ModelSelection;
-  userPermissionMode?: UserPermissionMode;
-  project?: ProjectView;
-  skills?: SkillSuggestion[];
-  fileIds?: string[];
-}
 
 export function useChatSession(
   sessionId: string,
@@ -51,6 +44,12 @@ export function useChatSession(
     sessionAvailable && !streamState?.isStreaming,
   );
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
+  const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable, () => {
+    void Promise.all([
+      sessionHistoryQuery.refetch(),
+      activeTurnQuery.refetch(),
+    ]);
+  });
   const shouldRecoverLiveTail =
     !streamState?.isStreaming &&
     isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
@@ -95,6 +94,11 @@ export function useChatSession(
     () => buildSessionInputHistory(sessionHistoryQuery.data, pendingInput),
     [pendingInput, sessionHistoryQuery.data],
   );
+  const activeTurnId = streamState?.isStreaming
+    ? streamState.activeTurnId
+    : isLiveRecoverableActiveTurn(activeTurnQuery.data?.status)
+      ? activeTurnQuery.data?.turn_id ?? undefined
+      : undefined;
 
   useEffect(() => {
     if (
@@ -178,6 +182,9 @@ export function useChatSession(
     if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
       return Promise.resolve();
     }
+    if (activeTurnId) {
+      return messageQueue.add(buildQueuedInput(content, options)).then(() => undefined);
+    }
     const request = options
       ? createInitialTurnRequest(
           sessionId,
@@ -191,6 +198,15 @@ export function useChatSession(
         )
       : undefined;
     return streamText(content, request);
+  };
+
+  const startQueuedMessage = async (messageId?: string) => {
+    const response = await messageQueue.start(messageId);
+    await Promise.all([
+      sessionHistoryQuery.refetch(),
+      activeTurnQuery.refetch(),
+    ]);
+    return response;
   };
 
   return {
@@ -207,6 +223,11 @@ export function useChatSession(
       }
       if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
         return Promise.resolve();
+      }
+      if (activeTurnId) {
+        return messageQueue.add(buildQueuedInput(text, options)).then(() => {
+          setDraft("");
+        });
       }
       setDraft("");
       const request = options
@@ -232,11 +253,16 @@ export function useChatSession(
     retryStream: retryTimeline,
     retryResponse,
     canRetryResponse,
-    stopResponse,
+    stopResponse: () => activeTurnId ? stopResponse(activeTurnId) : Promise.resolve(),
     isStreaming,
     isCancelling,
     contextCompactionStage,
-    activeTurnId: streamState?.activeTurnId ?? activeTurnQuery.data?.turn_id ?? undefined,
+    activeTurnId,
+    messageQueue: {
+      ...messageQueue,
+      activeTurnId,
+      start: startQueuedMessage,
+    },
     pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",
     showReconnectControls: streamState?.showReconnectControls ?? false,

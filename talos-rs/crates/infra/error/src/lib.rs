@@ -22,6 +22,8 @@ pub enum ErrorCode {
     ResourceExpired,
     Conflict,
     ActiveTurnRunning,
+    MessageQueueFull,
+    MessageQueueBusy,
     RetrySourceCompleted,
     RetrySourceMismatch,
     IdempotencyConflict,
@@ -64,6 +66,8 @@ impl ErrorCode {
             Self::ResourceExpired => "Resource expired",
             Self::Conflict => "Conflict",
             Self::ActiveTurnRunning => "Active turn is already running",
+            Self::MessageQueueFull => "Message queue is full",
+            Self::MessageQueueBusy => "Message queue message is busy",
             Self::RetrySourceCompleted => "Retry source is already completed",
             Self::RetrySourceMismatch => "Retry source does not match",
             Self::IdempotencyConflict => "Idempotency conflict",
@@ -447,6 +451,34 @@ mod tests {
         assert_eq!(value, "\"activeTurnRunning\"");
         let decoded: ErrorCode = serde_json::from_str(&value).unwrap();
         assert_eq!(decoded, ErrorCode::ActiveTurnRunning);
+    }
+
+    #[test]
+    fn message_queue_full_has_stable_wire_value_and_message() {
+        let value = serde_json::to_string(&ErrorCode::MessageQueueFull).unwrap();
+
+        assert_eq!(value, "\"messageQueueFull\"");
+        assert_eq!(
+            ApiError::new(ErrorCode::MessageQueueFull),
+            ApiError {
+                code: ErrorCode::MessageQueueFull,
+                message: "Message queue is full".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn message_queue_busy_has_stable_wire_value_and_message() {
+        let value = serde_json::to_string(&ErrorCode::MessageQueueBusy).unwrap();
+
+        assert_eq!(value, "\"messageQueueBusy\"");
+        assert_eq!(
+            ApiError::new(ErrorCode::MessageQueueBusy),
+            ApiError {
+                code: ErrorCode::MessageQueueBusy,
+                message: "Message queue message is busy".to_string(),
+            }
+        );
     }
 
     #[test]

@@ -1,5 +1,7 @@
 pub(crate) use super::*;
+mod mock_gateway;
 mod render_runtime;
+pub(crate) use mock_gateway::*;
 
 use async_trait::async_trait;
 pub(crate) use bytes::Bytes;
@@ -14,113 +16,16 @@ use talos_error::TalosError;
 pub(crate) use talos_sdk::{
     AgentEvent, AgentEventPayload, AgentEventType, AuthSessionReadResponse, AuthSessionSnapshot,
     AuthSessionUserSnapshot, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger, FileInfo, FileUploadRequest, FileUploadResponse,
-    SessionHistorySnapshot, SessionInfo, SkillSuggestion, StartTurnRequest, StopReason,
-    SubmitUserActionRequest, TalosContentItem, TalosInputItem, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TimelineActiveTurnSnapshot, TimelineActiveTurnStatus, TimelineCursorStatus,
-    TimelineEventEnvelope, TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics,
-    UserPermissionMode, UserRole, WorkspaceInfoResponse,
+    ContextCompactionTrigger, FileInfo, FileUploadRequest, FileUploadResponse, MessageQueue,
+    MessageQueueChangedNotification, QueuedMessage, SessionHistoryMessage, SessionHistorySnapshot,
+    SessionInfo, SkillSuggestion, StartTurnRequest, StopReason, SubmitUserActionRequest,
+    TalosContentItem, TalosInputItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
+    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
+    TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
+    TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics, UserPermissionMode, UserRole,
+    WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
-
-/// Adds test-only convenience operations without expanding the production TUI API.
-pub(crate) trait TestTuiAppExt {
-    fn send_user_message(
-        &mut self,
-        user_message: String,
-    ) -> impl std::future::Future<Output = TalosResult<bool>> + Send;
-}
-
-impl TestTuiAppExt for TuiApp {
-    async fn send_user_message(&mut self, user_message: String) -> TalosResult<bool> {
-        self.send_user_message_with_skills(user_message, Vec::new(), Vec::new())
-            .await
-    }
-}
-
-pub(crate) struct MockGatewayState {
-    pub(crate) models: Vec<ModelInfo>,
-    pub(crate) default_model: talos_sdk::ModelRef,
-    pub(crate) session_id: String,
-    pub(crate) current_model: String,
-    pub(crate) current_reasoning_effort: Option<talos_sdk::ReasoningEffort>,
-    pub(crate) current_permission_mode: UserPermissionMode,
-    pub(crate) submitted_user_actions: Vec<SubmitUserActionRequest>,
-    pub(crate) current_project_root: Option<PathBuf>,
-    pub(crate) auth_email: Option<String>,
-    pub(crate) workspace_root: PathBuf,
-    pub(crate) updated_model: Option<String>,
-    pub(crate) stream_counter: u64,
-    pub(crate) list_models_failures_remaining: u8,
-    pub(crate) connect_delay_ms: u64,
-    pub(crate) stream_failures_remaining: u8,
-    pub(crate) close_session_delay_ms: u64,
-    pub(crate) close_session_failures_remaining: u8,
-    pub(crate) shutdown_calls: usize,
-    pub(crate) cancelled_sessions: Vec<String>,
-    pub(crate) session_usage: talos_types::talos::TokenUsage,
-    pub(crate) compact_calls: usize,
-    pub(crate) compact_failures_remaining: u8,
-    pub(crate) clear_calls: usize,
-    pub(crate) reconnect_calls: usize,
-    pub(crate) reconnect_since_event_ids: Vec<Option<String>>,
-    pub(crate) reconnect_events: Vec<TimelineEventEnvelope>,
-    pub(crate) session_subscription_calls: usize,
-    pub(crate) session_subscription_since_event_ids: Vec<Option<String>>,
-    pub(crate) session_subscription_events: Vec<TimelineEventEnvelope>,
-    pub(crate) timeline_high_water_mark_event_id: Option<String>,
-    pub(crate) sent_requests: Vec<StartTurnRequest>,
-    pub(crate) upload_requests: Vec<(FileUploadRequest, Bytes)>,
-    pub(crate) upload_failure_calls: Vec<usize>,
-}
-
-pub(crate) struct MockGatewayClient {
-    pub(crate) state: Arc<Mutex<MockGatewayState>>,
-}
-
-pub(crate) fn mock_model_info(id: &str, context_window: u32) -> ModelInfo {
-    ModelInfo::from_provider_model(
-        "mock",
-        talos_types::ProviderModelConfig {
-            id: id.to_string(),
-            name: id.to_string(),
-            context_window,
-            reasoning: false,
-            reasoning_effort: Default::default(),
-            speed: Default::default(),
-            input: vec![talos_types::ModelInputKind::Text],
-            cost: talos_types::ModelCostConfig::default(),
-        },
-    )
-}
-
-impl MockGatewayState {
-    fn session_info(&self, message_count: u64) -> SessionInfo {
-        SessionInfo {
-            id: self.session_id.clone(),
-            title: "Untitled Session".to_string(),
-            user_id: "test-user".to_string(),
-            source_type: talos_types::talos::TalosSourceType::Http,
-            provider: talos_types::talos::TalosProvider::Sdk,
-            model_selection: talos_sdk::ModelSelection {
-                model_ref: talos_sdk::ModelRef {
-                    provider: "mock".to_string(),
-                    id: self.current_model.clone(),
-                },
-                reasoning_effort: self.current_reasoning_effort,
-            },
-            configured_default_mode: UserPermissionMode::FullAccess,
-            effective_mode: self.current_permission_mode,
-            created_at: 1,
-            last_activity: 2,
-            message_count,
-            usage: self.session_usage.clone(),
-            project_id: None,
-            current_directory: self.current_project_root.clone(),
-        }
-    }
-}
 
 pub(crate) fn started_event(message_id: impl Into<String>, sequence: u64) -> TimelineEventEnvelope {
     timeline_event(
@@ -713,6 +618,7 @@ impl MockGatewayClient {
                 close_session_failures_remaining: 0,
                 shutdown_calls: 0,
                 cancelled_sessions: Vec::new(),
+                active_turn_id: None,
                 session_usage: talos_types::talos::TokenUsage::default(),
                 compact_calls: 0,
                 compact_failures_remaining: 0,
@@ -727,6 +633,14 @@ impl MockGatewayClient {
                 sent_requests: Vec::new(),
                 upload_requests: Vec::new(),
                 upload_failure_calls: Vec::new(),
+                message_queue: MessageQueue {
+                    revision: 0,
+                    max_messages: 10,
+                    messages: Vec::new(),
+                },
+                session_history_messages: Vec::new(),
+                next_queued_message_id: 0,
+                message_queue_subscribers: Vec::new(),
             })),
         }
     }
@@ -888,13 +802,177 @@ impl GatewayClient for MockGatewayClient {
         Ok(())
     }
 
-    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()> {
+    async fn cancel_active_turn(&self, session_id: &str, _turn_id: &str) -> TalosResult<()> {
         self.state
             .lock()
             .unwrap()
             .cancelled_sessions
             .push(session_id.to_string());
         Ok(())
+    }
+
+    async fn add_queued_message(
+        &self,
+        request: talos_sdk::MessageQueueAddRequest,
+    ) -> TalosResult<MessageQueue> {
+        let mut state = self.state.lock().unwrap();
+        if state.message_queue.messages.len() >= state.message_queue.max_messages as usize {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::MessageQueueFull,
+                "Message queue is full".to_string(),
+            ));
+        }
+        state.next_queued_message_id = state.next_queued_message_id.saturating_add(1);
+        let id = format!("q{}", state.next_queued_message_id);
+        state.message_queue.messages.push(QueuedMessage {
+            id,
+            input: request.input,
+        });
+        state.message_queue.revision = state.message_queue.revision.saturating_add(1);
+        state.publish_message_queue_changed();
+        Ok(state.message_queue.clone())
+    }
+
+    async fn list_message_queue(
+        &self,
+        _request: talos_sdk::MessageQueueListRequest,
+    ) -> TalosResult<MessageQueue> {
+        Ok(self.state.lock().unwrap().message_queue.clone())
+    }
+
+    async fn update_queued_message(
+        &self,
+        request: talos_sdk::MessageQueueUpdateRequest,
+    ) -> TalosResult<MessageQueue> {
+        let mut state = self.state.lock().unwrap();
+        let Some(message) = state
+            .message_queue
+            .messages
+            .iter_mut()
+            .find(|message| message.id == request.message_id)
+        else {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Queued message not found".to_string(),
+            ));
+        };
+        message.input = request.input;
+        state.message_queue.revision = state.message_queue.revision.saturating_add(1);
+        state.publish_message_queue_changed();
+        Ok(state.message_queue.clone())
+    }
+
+    async fn delete_queued_message(
+        &self,
+        request: talos_sdk::MessageQueueDeleteRequest,
+    ) -> TalosResult<MessageQueue> {
+        let mut state = self.state.lock().unwrap();
+        let before = state.message_queue.messages.len();
+        state
+            .message_queue
+            .messages
+            .retain(|message| message.id != request.message_id);
+        if state.message_queue.messages.len() == before {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Queued message not found".to_string(),
+            ));
+        }
+        state.message_queue.revision = state.message_queue.revision.saturating_add(1);
+        state.publish_message_queue_changed();
+        Ok(state.message_queue.clone())
+    }
+
+    async fn reorder_message_queue(
+        &self,
+        request: talos_sdk::MessageQueueReorderRequest,
+    ) -> TalosResult<MessageQueue> {
+        let mut state = self.state.lock().unwrap();
+        let mut reordered = Vec::with_capacity(request.message_ids.len());
+        for message_id in request.message_ids {
+            let Some(message) = state
+                .message_queue
+                .messages
+                .iter()
+                .find(|message| message.id == message_id)
+                .cloned()
+            else {
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    "Queue order is stale".to_string(),
+                ));
+            };
+            reordered.push(message);
+        }
+        if reordered.len() != state.message_queue.messages.len() {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "Queue order is incomplete".to_string(),
+            ));
+        }
+        state.message_queue.messages = reordered;
+        state.message_queue.revision = state.message_queue.revision.saturating_add(1);
+        state.publish_message_queue_changed();
+        Ok(state.message_queue.clone())
+    }
+
+    async fn start_queued_message(
+        &self,
+        request: talos_sdk::MessageQueueStartRequest,
+    ) -> TalosResult<talos_sdk::StartTurnResponse> {
+        let mut state = self.state.lock().unwrap();
+        let index = request
+            .message_id
+            .as_ref()
+            .and_then(|message_id| {
+                state
+                    .message_queue
+                    .messages
+                    .iter()
+                    .position(|message| &message.id == message_id)
+            })
+            .unwrap_or_default();
+        if index >= state.message_queue.messages.len() {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                "Queued message not found".to_string(),
+            ));
+        }
+        state.message_queue.messages.remove(index);
+        state.message_queue.revision = state.message_queue.revision.saturating_add(1);
+        state.active_turn_id = Some("turn-queued".to_string());
+        state.publish_message_queue_changed();
+        Ok(talos_sdk::StartTurnResponse {
+            request_id: "request-queued".to_string(),
+            message_id: Some("message-queued".to_string()),
+            session_id: request.session_id,
+            turn_id: "turn-queued".to_string(),
+            status: talos_sdk::TurnCommandStatus::Accepted,
+        })
+    }
+
+    async fn steer_queued_message(
+        &self,
+        request: talos_sdk::MessageQueueSteerRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.delete_queued_message(talos_sdk::MessageQueueDeleteRequest {
+            session_id: request.session_id,
+            message_id: request.message_id,
+        })
+        .await
+    }
+
+    async fn subscribe_message_queue_changes(
+        &self,
+        _session_id: &str,
+    ) -> TalosResult<crate::client::MessageQueueSubscription> {
+        let (sender, receiver) = mpsc::channel(32);
+        self.state
+            .lock()
+            .unwrap()
+            .message_queue_subscribers
+            .push(sender);
+        Ok(crate::client::MessageQueueSubscription::new(receiver, None))
     }
 
     async fn update_session_model_selection(
@@ -1101,19 +1179,25 @@ impl GatewayClient for MockGatewayClient {
     }
 
     async fn get_session_history(&self, session_id: &str) -> TalosResult<SessionHistorySnapshot> {
+        let messages = self.state.lock().unwrap().session_history_messages.clone();
         Ok(SessionHistorySnapshot {
             session_id: session_id.to_string(),
-            messages: Vec::new(),
+            messages,
             generated_at_ms: 0,
             last_stable_event_id: None,
         })
     }
 
     async fn get_active_turn(&self, session_id: &str) -> TalosResult<TimelineActiveTurnSnapshot> {
+        let active_turn_id = self.state.lock().unwrap().active_turn_id.clone();
         Ok(TimelineActiveTurnSnapshot {
             session_id: session_id.to_string(),
-            status: TimelineActiveTurnStatus::Completed,
-            turn_id: None,
+            status: if active_turn_id.is_some() {
+                TimelineActiveTurnStatus::Running
+            } else {
+                TimelineActiveTurnStatus::Completed
+            },
+            turn_id: active_turn_id,
             message_id: None,
             last_event_id: None,
             pending_user_action: None,
@@ -1158,44 +1242,6 @@ impl GatewayClient for MockGatewayClient {
         state.shutdown_calls = state.shutdown_calls.saturating_add(1);
         Ok(())
     }
-}
-
-pub(crate) fn create_embedded_app() -> TuiApp {
-    let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn create_app_server_app() -> TuiApp {
-    let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::new());
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn create_app_server_app_with_connect_delay(delay_ms: u64) -> TuiApp {
-    let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_connect_delay(delay_ms));
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn create_app_server_app_with_model_list_failures(failures: u8) -> TuiApp {
-    let client: Arc<dyn GatewayClient> =
-        Arc::new(MockGatewayClient::with_list_models_failures(failures));
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn create_app_server_app_with_stream_failures(failures: u8) -> TuiApp {
-    let client: Arc<dyn GatewayClient> =
-        Arc::new(MockGatewayClient::with_stream_failures(failures));
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn create_app_server_app_with_close_delay(delay_ms: u64) -> TuiApp {
-    let client: Arc<dyn GatewayClient> = Arc::new(MockGatewayClient::with_close_delay(delay_ms));
-    TuiApp::new_with_gateway_client(client)
-}
-
-pub(crate) fn set_test_model_info(app: &mut TuiApp, model_id: &str, context_window: u32) {
-    app.available_model_info = vec![mock_model_info(model_id, context_window)];
-    app.available_models = vec![format!("mock:{model_id}")];
-    app.current_model_provider = "mock".to_string();
 }
 
 pub(crate) fn line_plain_text(line: &ratatui::text::Line<'_>) -> String {

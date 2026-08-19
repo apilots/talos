@@ -33,5 +33,11 @@ describe("apiErrorMessage", () => {
         message: "Invalid retry request",
       }),
     ).toBe("重试请求无效");
+    expect(
+      apiErrorMessage({
+        code: AppProtocol.ErrorCode.MessageQueueBusy,
+        message: "Message queue message is busy",
+      }),
+    ).toBe("该等待消息正在提交，请稍候。");
   });
 });

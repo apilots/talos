@@ -7,6 +7,7 @@ mod files;
 mod fs;
 mod lifecycle;
 mod memory_files;
+mod message_queue;
 mod messages;
 mod misc;
 mod plugin;
@@ -47,6 +48,11 @@ pub use self::lifecycle::{ServerLifecycle, ServerLifecycleState};
 use self::memory_files::{
     get_memory_file_handler, get_memory_handler, list_memory_files_handler,
     put_memory_file_handler, search_memory_files_handler,
+};
+use self::message_queue::{
+    add_queued_message_handler, delete_queued_message_handler, list_message_queue_handler,
+    reorder_message_queue_handler, start_queued_message_handler, steer_queued_message_handler,
+    update_queued_message_handler,
 };
 use self::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
@@ -289,6 +295,28 @@ impl HttpServer {
             .route("/v1/turns/start", post(start_turn_handler))
             .route("/v1/turns/retry", post(retry_turn_handler))
             .route("/v1/turns/interrupt", post(interrupt_turn_handler))
+            .route("/v1/message-queue/add", post(add_queued_message_handler))
+            .route("/v1/message-queue/list", post(list_message_queue_handler))
+            .route(
+                "/v1/message-queue/update",
+                post(update_queued_message_handler),
+            )
+            .route(
+                "/v1/message-queue/delete",
+                post(delete_queued_message_handler),
+            )
+            .route(
+                "/v1/message-queue/reorder",
+                post(reorder_message_queue_handler),
+            )
+            .route(
+                "/v1/message-queue/start",
+                post(start_queued_message_handler),
+            )
+            .route(
+                "/v1/message-queue/steer",
+                post(steer_queued_message_handler),
+            )
             .route(
                 "/v1/tools/dynamic-results/submit",
                 post(submit_dynamic_tool_result_handler),

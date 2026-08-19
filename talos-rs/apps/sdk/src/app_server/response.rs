@@ -40,6 +40,20 @@ pub(super) fn decode_event_notification(
         .map_err(|error| TalosError::internal(error.to_string()))
 }
 
+pub(super) fn decode_message_queue_changed(
+    notification: &JsonRpcNotification,
+) -> TalosResult<Option<talos_types::MessageQueueChangedNotification>> {
+    if notification.method != "messageQueue/changed" {
+        return Ok(None);
+    }
+    let Some(params) = notification.params.clone() else {
+        return Ok(None);
+    };
+    serde_json::from_value(params)
+        .map(Some)
+        .map_err(|error| TalosError::internal(error.to_string()))
+}
+
 pub(super) fn map_app_server_error(
     error: talos_app_protocol::errors::AppServerErrorBody,
 ) -> TalosError {

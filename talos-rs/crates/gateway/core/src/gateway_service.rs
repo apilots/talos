@@ -18,25 +18,27 @@ use talos_types::{
     FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse, MemoryFileListRequest,
     MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse, MemoryFileWriteRequest,
     MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse, MemorySearchRequest,
-    MemorySearchResponse, ModelListRequest, ModelListResponse, PluginDisableRequest,
-    PluginDisableResponse, PluginEnableRequest, PluginEnableResponse, PluginInstallRequest,
-    PluginInstallResponse, PluginListRequest, PluginListResponse, PluginReadRequest,
-    PluginReadResponse, PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest,
-    PluginSourceAddResponse, PluginSourceListRequest, PluginSourceListResponse,
-    PluginSourceRefreshRequest, PluginSourceRefreshResponse, PluginSourceRemoveRequest,
-    PluginSourceRemoveResponse, PluginUninstallRequest, PluginUninstallResponse,
-    PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest, ProfileReadResponse,
-    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectListRequest, ProjectListResponse, ProjectPatchRequest, ProjectPatchResponse,
-    ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest, RetryTurnRequest,
-    RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse, SessionClearRequest,
-    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
-    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
-    SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse, SessionListRequest,
-    SessionListResponse, SessionPatchRequest, SessionUpdateResponse, SkillsListRequest,
-    SkillsListResponse, SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest,
-    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
-    StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
+    MemorySearchResponse, MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest,
+    MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
+    MessageQueueSteerRequest, MessageQueueUpdateRequest, ModelListRequest, ModelListResponse,
+    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
+    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
+    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
+    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
+    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
+    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
+    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
+    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
+    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
+    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
+    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
+    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
+    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
+    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
+    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
+    SkillsRefreshRequest, SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest,
+    SkillsSuggestResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
     SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
     SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
     UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
@@ -105,6 +107,62 @@ impl Gateway for ServiceGateway {
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
         ServiceGateway::interrupt_turn(self, actor, request).await
+    }
+
+    async fn add_queued_message(
+        &self,
+        actor: &Actor,
+        request: MessageQueueAddRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::add_queued_message(self, actor, request).await
+    }
+
+    async fn list_message_queue(
+        &self,
+        actor: &Actor,
+        request: MessageQueueListRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::list_message_queue(self, actor, request).await
+    }
+
+    async fn update_queued_message(
+        &self,
+        actor: &Actor,
+        request: MessageQueueUpdateRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::update_queued_message(self, actor, request).await
+    }
+
+    async fn delete_queued_message(
+        &self,
+        actor: &Actor,
+        request: MessageQueueDeleteRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::delete_queued_message(self, actor, request).await
+    }
+
+    async fn reorder_message_queue(
+        &self,
+        actor: &Actor,
+        request: MessageQueueReorderRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::reorder_message_queue(self, actor, request).await
+    }
+
+    async fn start_queued_message(
+        &self,
+        actor: &Actor,
+        request: MessageQueueStartRequest,
+    ) -> TalosResult<StartTurnResponse> {
+        ServiceGateway::start_queued_message(self, actor, request).await
+    }
+
+    async fn steer_queued_message(
+        &self,
+        actor: &Actor,
+        request: MessageQueueSteerRequest,
+    ) -> TalosResult<MessageQueue> {
+        ServiceGateway::steer_queued_message(self, actor, request).await
     }
 
     async fn submit_dynamic_tool_result(

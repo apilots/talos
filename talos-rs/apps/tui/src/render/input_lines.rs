@@ -4,10 +4,8 @@ use ratatui::{
 };
 use std::time::Instant;
 
-use crate::utils::{
-    char_display_width, compact_directory_path, summarize_for_queue, text_display_width,
-};
-use crate::MAX_QUEUE_LEN;
+use crate::message_queue::{queued_message_is_steerable, queued_message_summary};
+use crate::utils::{char_display_width, compact_directory_path, text_display_width};
 use crate::{TuiApp, CHAT_CONTENT_PADDING_LEFT};
 
 impl TuiApp {
@@ -221,34 +219,50 @@ impl TuiApp {
     }
 
     pub(crate) fn queue_panel_lines(&self, max_lines: usize) -> Vec<Line<'static>> {
-        if self.message_queue.is_empty() {
+        if self.message_queue.messages.is_empty() {
             return Vec::new();
         }
 
+        let action_hint = self.selected_queue_message.and_then(|index| {
+            let message = self.message_queue.messages.get(index)?;
+            if self.in_flight && queued_message_is_steerable(message) {
+                Some("Enter Steer  e Edit  d Delete  Ctrl+Up/Down Move  Esc Close")
+            } else if self.in_flight {
+                Some("e Edit  d Delete  Ctrl+Up/Down Move  Esc Close")
+            } else {
+                Some("Enter Start  e Edit  d Delete  Ctrl+Up/Down Move  Esc Close")
+            }
+        });
         let mut preview: Vec<String> = vec![format!(
-            "Queue {}/{}",
-            self.message_queue.len(),
-            MAX_QUEUE_LEN
+            "Waiting messages {}/{}",
+            self.message_queue.messages.len(),
+            self.message_queue.max_messages
         )];
 
-        if self.in_flight {
+        let visible_messages = max_lines.saturating_sub(1 + usize::from(action_hint.is_some()));
+        let start = self
+            .selected_queue_message
+            .unwrap_or_default()
+            .saturating_sub(visible_messages.saturating_sub(1));
+        for (idx, message) in self
+            .message_queue
+            .messages
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(visible_messages)
+        {
+            let selected = self.selected_queue_message == Some(idx);
+            let marker = if selected { "❯" } else { " " };
             preview.push(format!(
-                "├─ [~] {}",
-                self.active_message
-                    .clone()
-                    .unwrap_or_else(|| "waiting for response".to_string())
+                "{marker} {}. {}",
+                idx + 1,
+                queued_message_summary(message)
             ));
         }
 
-        for (idx, msg) in self.message_queue.iter().enumerate() {
-            let is_last = idx + 1 == self.message_queue.len();
-            let branch = if is_last { "└─" } else { "├─" };
-            preview.push(format!(
-                "{} [ ] {}. {}",
-                branch,
-                idx + 1,
-                summarize_for_queue(&msg.text)
-            ));
+        if let Some(action_hint) = action_hint {
+            preview.push(action_hint.to_string());
         }
 
         if preview.len() > max_lines && max_lines > 0 {

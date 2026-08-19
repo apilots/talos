@@ -12,8 +12,10 @@ use talos_store::session::{
 };
 use talos_types::{
     AgentTreeSnapshot, ConfigValue, FollowUpSubagentRequest, InterruptSubagentRequest,
-    InterruptTurnRequest, InterruptTurnResponse, ListSubagentsRequest, ModelInfo,
-    OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
+    InterruptTurnRequest, InterruptTurnResponse, ListSubagentsRequest, MessageQueue,
+    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
+    MessageQueueUpdateRequest, ModelInfo, OptionalCurrentDirectoryPatch, RecoverTimelineRequest,
     RetryTurnRequest as SharedRetryTurnRequest, RetryTurnResponse, SendMessageResult,
     SendSubagentMessageRequest, SessionConfigOverridePolicy, SessionListRequest, SessionPatch,
     SpawnSubagentRequest, StartTurnRequest, StartTurnResponse, SubagentSnapshot,
@@ -31,11 +33,13 @@ use crate::project::ProjectService;
 use crate::subagent::SubagentService;
 use crate::{
     AccountService, Actor, ConfigService, MemoryService, PluginManagerService, ProfileService,
-    RuntimeConfigReloadHook, SessionHistoryService, SessionService, SkillsService,
-    TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
+    RuntimeConfigReloadHook, SessionHistoryService, SessionMessageQueueService, SessionService,
+    SkillsService, TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
     TimelineSubscriptionSource, TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
 };
 
+#[path = "message_queue.rs"]
+mod message_queue;
 #[path = "orphan_turn_recovery.rs"]
 mod orphan_turn_recovery;
 #[path = "project_fs.rs"]
@@ -50,6 +54,7 @@ pub struct TalosService {
     event_log: Arc<TimelineEventService>,
     pub events: TimelineSubscriptionService,
     history: SessionHistoryService,
+    message_queue: SessionMessageQueueService,
     subagents: SubagentService,
     pub config: ConfigService,
     pub files: Arc<FileService>,
@@ -151,6 +156,10 @@ impl TalosService {
             base_config.agent.kernel.plugins.clone(),
         )
         .with_plugin_manager(plugins.clone());
+        let message_queue = SessionMessageQueueService::new(
+            base_config.agent.message_queue.max_messages_per_session,
+        )
+        .expect("message queue config must be validated before service assembly");
         let turns = TurnService::new(
             turn_executor,
             event_service.clone(),
@@ -158,6 +167,7 @@ impl TalosService {
             profile_store.clone(),
             sessions.clone(),
             session_runtime.clone(),
+            message_queue.clone(),
             base_config.clone(),
         );
         let history = SessionHistoryService::new(session_artifact_store, event_service.clone());
@@ -189,6 +199,7 @@ impl TalosService {
             ),
             events: TimelineSubscriptionService::new(event_service.clone()),
             history,
+            message_queue,
             subagents,
             config: ConfigService::new_with_reload_hook(config_store, models, reload_hook),
             files,
@@ -577,7 +588,11 @@ impl TalosService {
         let _session = self.access.get_session(actor, session_id).await?;
         self.ensure_session_write_allowed(session_id).await?;
         self.subagents.ensure_tree_inactive(session_id).await?;
-        self.access.delete_session(actor, session_id).await
+        let ack = self.access.delete_session(actor, session_id).await?;
+        if ack.success {
+            self.message_queue.clear_session(session_id)?;
+        }
+        Ok(ack)
     }
 
     async fn ensure_session_write_allowed(&self, session_id: &str) -> ServiceResult<()> {
@@ -600,17 +615,32 @@ impl TalosService {
         Ok(())
     }
 
-    pub async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ServiceResult<()> {
+    pub async fn cancel_active_turn(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        turn_id: &str,
+    ) -> ServiceResult<()> {
         let _session = self.access.get_session(actor, session_id).await?;
-        let Some(active_turn) = self.events.get_active_turn(session_id).await? else {
-            return Ok(());
-        };
-        match active_turn.status {
-            ActiveTurnStatus::Running
-            | ActiveTurnStatus::WaitingUserAction
-            | ActiveTurnStatus::Cancelling => {}
-            ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => return Ok(()),
-        }
+        let active_turn = self
+            .events
+            .get_active_turn(session_id)
+            .await?
+            .filter(|active| {
+                active.turn_id == turn_id
+                    && matches!(
+                        active.status,
+                        ActiveTurnStatus::Running
+                            | ActiveTurnStatus::WaitingUserAction
+                            | ActiveTurnStatus::Cancelling
+                    )
+            })
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("active turn `{turn_id}` for session `{session_id}`"),
+                )
+            })?;
         match self
             .access
             .cancel_active_turn(actor, session_id, active_turn.turn_id.clone())
@@ -636,7 +666,8 @@ impl TalosService {
         actor: &Actor,
         request: InterruptTurnRequest,
     ) -> ServiceResult<InterruptTurnResponse> {
-        self.cancel_active_turn(actor, &request.session_id).await?;
+        self.cancel_active_turn(actor, &request.session_id, &request.turn_id)
+            .await?;
         Ok(InterruptTurnResponse { success: true })
     }
 
@@ -715,17 +746,21 @@ impl TalosService {
         }
         let session_id = request.session_id.clone();
         let after_event_id = parse_timeline_event_id(request.since_event_id)?;
-        let subscription = self
-            .events
-            .subscribe(TimelineSubscribeCommand {
-                session_id: request.session_id,
-                turn_id: request.turn_id,
-                after_event_id,
-                replay_limit: request.replay_limit.unwrap_or(1).max(1),
-                close_when_idle: request.close_when_idle.unwrap_or(false),
-                close_on_terminal: request.close_on_terminal.unwrap_or(false),
-            })
-            .await?;
+        let command = TimelineSubscribeCommand {
+            session_id: request.session_id,
+            turn_id: request.turn_id.clone(),
+            after_event_id,
+            replay_limit: request.replay_limit.unwrap_or(1).max(1),
+            close_when_idle: request.close_when_idle.unwrap_or(false),
+            close_on_terminal: request.close_on_terminal.unwrap_or(false),
+        };
+        let subscription = if request.turn_id.is_none() {
+            self.events
+                .subscribe_with_queue_changes(command, self.message_queue.subscribe_changed())
+                .await?
+        } else {
+            self.events.subscribe(command).await?
+        };
         let response = talos_types::SubscribeTimelineResponse {
             subscription_id: format!("sub_{}", uuid::Uuid::new_v4().simple()),
             session_id,

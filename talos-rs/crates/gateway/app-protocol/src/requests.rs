@@ -12,17 +12,19 @@ use talos_types::{
     FileDeleteRequest, FileListRequest, FileReadRequest, FileUpdateRequest, FileUploadRequest,
     FsDirectoryCreateRequest, FsDirectoryReadRequest, InterruptTurnRequest, MemoryFileListRequest,
     MemoryFileReadRequest, MemoryFileWriteRequest, MemoryGetRequest, MemorySearchRequest,
-    ModelListRequest, PluginDisableRequest, PluginEnableRequest, PluginInstallRequest,
-    PluginListRequest, PluginReadRequest, PluginSearchRequest, PluginSourceAddRequest,
-    PluginSourceListRequest, PluginSourceRefreshRequest, PluginSourceRemoveRequest,
-    PluginUninstallRequest, PluginUpdateRequest, ProfileReadRequest, ProjectCreateRequest,
-    ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest, ProjectReadRequest,
-    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
-    SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest, SessionGetRequest,
-    SessionHistoryRequest, SessionListRequest, SessionPatchRequest, StartTurnRequest,
-    SubmitDynamicToolResultRequest, SubmitUserActionRequest, SubscribeTimelineRequest,
-    UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest, WorkspaceDocWriteRequest,
-    WorkspaceInfoRequest,
+    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
+    MessageQueueUpdateRequest, ModelListRequest, PluginDisableRequest, PluginEnableRequest,
+    PluginInstallRequest, PluginListRequest, PluginReadRequest, PluginSearchRequest,
+    PluginSourceAddRequest, PluginSourceListRequest, PluginSourceRefreshRequest,
+    PluginSourceRemoveRequest, PluginUninstallRequest, PluginUpdateRequest, ProfileReadRequest,
+    ProjectCreateRequest, ProjectDeleteRequest, ProjectListRequest, ProjectPatchRequest,
+    ProjectReadRequest, RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest,
+    SessionClearRequest, SessionCloseRequest, SessionCompactRequest, SessionDeleteRequest,
+    SessionGetRequest, SessionHistoryRequest, SessionListRequest, SessionPatchRequest,
+    StartTurnRequest, SubmitDynamicToolResultRequest, SubmitUserActionRequest,
+    SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
+    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -86,6 +88,20 @@ pub enum ClientMethod {
     TurnInterrupt,
     #[serde(rename = "turn.retry")]
     TurnRetry,
+    #[serde(rename = "messageQueue/add")]
+    MessageQueueAdd,
+    #[serde(rename = "messageQueue/list")]
+    MessageQueueList,
+    #[serde(rename = "messageQueue/update")]
+    MessageQueueUpdate,
+    #[serde(rename = "messageQueue/delete")]
+    MessageQueueDelete,
+    #[serde(rename = "messageQueue/reorder")]
+    MessageQueueReorder,
+    #[serde(rename = "messageQueue/start")]
+    MessageQueueStart,
+    #[serde(rename = "messageQueue/steer")]
+    MessageQueueSteer,
     #[serde(rename = "event.subscribe")]
     EventSubscribe,
     #[serde(rename = "event.unsubscribe")]
@@ -207,6 +223,13 @@ impl ClientMethod {
             Self::TurnStart => "turn.start",
             Self::TurnInterrupt => "turn.interrupt",
             Self::TurnRetry => "turn.retry",
+            Self::MessageQueueAdd => "messageQueue/add",
+            Self::MessageQueueList => "messageQueue/list",
+            Self::MessageQueueUpdate => "messageQueue/update",
+            Self::MessageQueueDelete => "messageQueue/delete",
+            Self::MessageQueueReorder => "messageQueue/reorder",
+            Self::MessageQueueStart => "messageQueue/start",
+            Self::MessageQueueSteer => "messageQueue/steer",
             Self::EventSubscribe => "event.subscribe",
             Self::EventUnsubscribe => "event.unsubscribe",
             Self::ToolDynamicResultSubmit => "tool.dynamic_result.submit",
@@ -291,6 +314,13 @@ impl FromStr for ClientMethod {
             "turn.start" => Ok(Self::TurnStart),
             "turn.interrupt" => Ok(Self::TurnInterrupt),
             "turn.retry" => Ok(Self::TurnRetry),
+            "messageQueue/add" => Ok(Self::MessageQueueAdd),
+            "messageQueue/list" => Ok(Self::MessageQueueList),
+            "messageQueue/update" => Ok(Self::MessageQueueUpdate),
+            "messageQueue/delete" => Ok(Self::MessageQueueDelete),
+            "messageQueue/reorder" => Ok(Self::MessageQueueReorder),
+            "messageQueue/start" => Ok(Self::MessageQueueStart),
+            "messageQueue/steer" => Ok(Self::MessageQueueSteer),
             "event.subscribe" => Ok(Self::EventSubscribe),
             "event.unsubscribe" => Ok(Self::EventUnsubscribe),
             "tool.dynamic_result.submit" => Ok(Self::ToolDynamicResultSubmit),
@@ -390,6 +420,20 @@ pub enum ClientRequestParams {
     TurnInterrupt(InterruptTurnRequest),
     #[serde(rename = "turn.retry")]
     TurnRetry(RetryTurnRequest),
+    #[serde(rename = "messageQueue/add")]
+    MessageQueueAdd(MessageQueueAddRequest),
+    #[serde(rename = "messageQueue/list")]
+    MessageQueueList(MessageQueueListRequest),
+    #[serde(rename = "messageQueue/update")]
+    MessageQueueUpdate(MessageQueueUpdateRequest),
+    #[serde(rename = "messageQueue/delete")]
+    MessageQueueDelete(MessageQueueDeleteRequest),
+    #[serde(rename = "messageQueue/reorder")]
+    MessageQueueReorder(MessageQueueReorderRequest),
+    #[serde(rename = "messageQueue/start")]
+    MessageQueueStart(MessageQueueStartRequest),
+    #[serde(rename = "messageQueue/steer")]
+    MessageQueueSteer(MessageQueueSteerRequest),
     #[serde(rename = "event.subscribe")]
     EventSubscribe(SubscribeTimelineRequest),
     #[serde(rename = "event.unsubscribe")]
@@ -551,6 +595,27 @@ impl ClientRequest {
                 ClientRequestParams::TurnInterrupt(decode(params_value)?)
             }
             ClientMethod::TurnRetry => ClientRequestParams::TurnRetry(decode(params_value)?),
+            ClientMethod::MessageQueueAdd => {
+                ClientRequestParams::MessageQueueAdd(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueList => {
+                ClientRequestParams::MessageQueueList(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueUpdate => {
+                ClientRequestParams::MessageQueueUpdate(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueDelete => {
+                ClientRequestParams::MessageQueueDelete(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueReorder => {
+                ClientRequestParams::MessageQueueReorder(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueStart => {
+                ClientRequestParams::MessageQueueStart(decode(params_value)?)
+            }
+            ClientMethod::MessageQueueSteer => {
+                ClientRequestParams::MessageQueueSteer(decode(params_value)?)
+            }
             ClientMethod::EventSubscribe => {
                 ClientRequestParams::EventSubscribe(decode(params_value)?)
             }

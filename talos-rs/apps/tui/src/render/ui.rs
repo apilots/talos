@@ -45,7 +45,7 @@ impl TuiApp {
         }
 
         let left_inner = area;
-        let show_queue_panel = !self.message_queue.is_empty();
+        let show_queue_panel = !self.message_queue.messages.is_empty();
         let composer_height = composer::height(self, left_inner.width);
         let transcript_composer_gap_height = self.transcript_composer_gap_height();
         let chat_panel_height = self.inline_chat_panel_height(
@@ -121,7 +121,7 @@ impl TuiApp {
                     composer_height,
                     transcript_composer_gap_height,
                 ))
-                .saturating_add(if self.message_queue.is_empty() {
+                .saturating_add(if self.message_queue.messages.is_empty() {
                     0
                 } else {
                     QUEUE_PANEL_HEIGHT
@@ -184,7 +184,7 @@ impl TuiApp {
             .inline_top_gap_height()
             .saturating_add(composer_height)
             .saturating_add(transcript_composer_gap_height)
-            .saturating_add(if self.message_queue.is_empty() {
+            .saturating_add(if self.message_queue.messages.is_empty() {
                 0
             } else {
                 QUEUE_PANEL_HEIGHT

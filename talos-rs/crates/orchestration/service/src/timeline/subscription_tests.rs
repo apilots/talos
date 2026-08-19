@@ -23,7 +23,7 @@ use talos_types::{
     PendingUserAction, QuestionOption, QuestionParams, TimelineUserActionEvent, UserActionParams,
     UserActionState,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 #[test]
 fn replay_cursor_rejects_retention_gap() {
@@ -373,6 +373,9 @@ async fn lagged_subscription_closes_without_sending_later_events() {
     loop {
         match tokio::time::timeout(Duration::from_secs(1), subscription.events.recv()).await {
             Ok(Some(TimelineSubscriptionMessage::Event(event))) => received.push(event.event_seq),
+            Ok(Some(TimelineSubscriptionMessage::MessageQueueChanged(change))) => {
+                panic!("unexpected message queue change: {change:?}")
+            }
             Ok(Some(TimelineSubscriptionMessage::Closed(closed))) => {
                 assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Lagged);
                 break;
@@ -411,11 +414,63 @@ async fn idle_scoped_subscription_reports_completed_close() {
     assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
 }
 
+#[tokio::test]
+async fn session_subscription_receives_only_live_matching_queue_changes() {
+    let (timeline, _store) = service();
+    let events = TimelineSubscriptionService::new(Arc::new(timeline));
+    let (queue_changes, _) = broadcast::channel(8);
+    let _stale_receiver = queue_changes.subscribe();
+    queue_changes
+        .send(talos_types::MessageQueueChangedNotification {
+            session_id: "s1".to_string(),
+            revision: 1,
+        })
+        .expect("pre-subscription notification");
+
+    let mut subscription = events
+        .subscribe_with_queue_changes(
+            TimelineSubscribeCommand {
+                session_id: "s1".to_string(),
+                turn_id: None,
+                after_event_id: None,
+                replay_limit: 32,
+                close_when_idle: false,
+                close_on_terminal: false,
+            },
+            queue_changes.subscribe(),
+        )
+        .await
+        .unwrap();
+
+    queue_changes
+        .send(talos_types::MessageQueueChangedNotification {
+            session_id: "other".to_string(),
+            revision: 2,
+        })
+        .expect("other session notification");
+    let expected = talos_types::MessageQueueChangedNotification {
+        session_id: "s1".to_string(),
+        revision: 3,
+    };
+    queue_changes
+        .send(expected.clone())
+        .expect("matching notification");
+
+    let message = subscription.events.recv().await.expect("queue change");
+    let TimelineSubscriptionMessage::MessageQueueChanged(actual) = message else {
+        panic!("expected message queue change");
+    };
+    assert_eq!(actual, expected);
+}
+
 async fn recv_event(
     events: &mut mpsc::Receiver<TimelineSubscriptionMessage>,
 ) -> TimelineEventEnvelope {
     match events.recv().await.expect("subscription message") {
         TimelineSubscriptionMessage::Event(event) => event,
+        TimelineSubscriptionMessage::MessageQueueChanged(change) => {
+            panic!("unexpected message queue change: {change:?}")
+        }
         TimelineSubscriptionMessage::Closed(closed) => {
             panic!("unexpected subscription close: {closed:?}")
         }

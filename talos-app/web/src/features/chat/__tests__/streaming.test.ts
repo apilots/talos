@@ -234,7 +234,7 @@ describe("timeline stream events", () => {
     });
 
     expect(blocks.filter((block) => block.kind === "user")).toEqual([
-      expect.objectContaining({ id: "user-msg-1", text: "hello from server" }),
+      expect.objectContaining({ id: "user-msg-1-input-1", text: "hello from server" }),
     ]);
     expect(useAppStore.getState().streams["sess-1"]?.pendingInput?.phase).toBe("completed");
   });

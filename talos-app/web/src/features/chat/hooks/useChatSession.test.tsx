@@ -29,6 +29,8 @@ const mocks = vi.hoisted(() => ({
   send: vi.fn(),
   sessionHistoryRefetch: vi.fn().mockResolvedValue(undefined),
   liveRecoveryQuery: vi.fn(),
+  messageQueueStart: vi.fn(),
+  messageQueueHook: vi.fn(),
   timeline: vi.fn(),
 }));
 
@@ -65,6 +67,22 @@ vi.mock("./useSessionBlocks", () => ({
   useSessionBlocks: () => [],
 }));
 
+vi.mock("./useSessionMessageQueue", () => ({
+  useSessionMessageQueue: (...args: unknown[]) => {
+    mocks.messageQueueHook(...args);
+    return {
+    queue: undefined,
+    error: undefined,
+    add: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+    reorder: vi.fn(),
+    steer: vi.fn(),
+    start: mocks.messageQueueStart,
+    };
+  },
+}));
+
 vi.mock("./useSessionTimelineEvents", () => ({
   useSessionTimelineEvents: (...args: unknown[]) => {
     mocks.timeline(...args);
@@ -95,6 +113,8 @@ describe("useChatSession", () => {
     mocks.activeTurnQuery.mockClear();
     mocks.sessionHistoryRefetch.mockClear();
     mocks.liveRecoveryQuery.mockClear();
+    mocks.messageQueueStart.mockReset().mockResolvedValue(undefined);
+    mocks.messageQueueHook.mockClear();
     mocks.timeline.mockClear();
     mocks.activeTurn = undefined;
     useAppStore.getState().resetStream("session-1");
@@ -207,6 +227,29 @@ describe("useChatSession", () => {
 
     expect(mocks.sessionHistoryRefetch).toHaveBeenCalledTimes(1);
     expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches the active turn after starting a queued message", async () => {
+    const { result } = renderHook(() => useChatSession("session-1", 1));
+
+    await act(() => result.current.messageQueue.start("message-1"));
+
+    expect(mocks.messageQueueStart).toHaveBeenCalledWith("message-1");
+    expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
+    expect(mocks.sessionHistoryRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconciles the active turn and history when the queue changes", async () => {
+    renderHook(() => useChatSession("session-1", 1));
+    const onQueueChanged = mocks.messageQueueHook.mock.lastCall?.[2] as
+      | (() => void)
+      | undefined;
+
+    expect(onQueueChanged).toBeDefined();
+    await act(async () => onQueueChanged?.());
+
+    expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
+    expect(mocks.sessionHistoryRefetch).toHaveBeenCalledTimes(1);
   });
 
   it("allows an attachment-only turn and forwards ordered file ids", async () => {

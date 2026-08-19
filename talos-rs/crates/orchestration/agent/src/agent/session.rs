@@ -381,6 +381,8 @@ impl AgentHarnessImpl {
                         | talos_error::ErrorCode::ResourceExpired
                         | talos_error::ErrorCode::Conflict
                         | talos_error::ErrorCode::ActiveTurnRunning
+                        | talos_error::ErrorCode::MessageQueueFull
+                        | talos_error::ErrorCode::MessageQueueBusy
                         | talos_error::ErrorCode::RetrySourceCompleted
                         | talos_error::ErrorCode::RetrySourceMismatch
                         | talos_error::ErrorCode::IdempotencyConflict

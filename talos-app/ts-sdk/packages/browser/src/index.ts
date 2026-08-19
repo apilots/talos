@@ -127,7 +127,7 @@ class BrowserStreamAdapter implements StreamAdapter {
   async stream(
     url: string,
     options: StreamRequestOptions,
-    onMessage: (data: string) => void,
+    onMessage: (data: string, event?: string) => void,
     onError?: (error: Error) => void,
   ): Promise<void> {
     const token = this.getToken?.();
@@ -144,6 +144,7 @@ class BrowserStreamAdapter implements StreamAdapter {
         async onopen(response) {
           const contentType = response.headers.get("content-type");
           if (response.ok && contentType?.startsWith(EventStreamContentType)) {
+            options.onOpen?.();
             return;
           }
           const body = await response.text();
@@ -157,7 +158,7 @@ class BrowserStreamAdapter implements StreamAdapter {
         },
         onmessage(event) {
           if (event.data) {
-            onMessage(event.data);
+            onMessage(event.data, event.event);
           }
         },
         onerror(error) {

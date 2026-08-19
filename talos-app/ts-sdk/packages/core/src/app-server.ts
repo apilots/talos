@@ -67,6 +67,10 @@ export type AppServerSubscriptionTerminatedHandler = (
   envelope: AppProtocol.SubscriptionTerminatedEnvelope,
 ) => void;
 
+export type AppServerMessageQueueChangedHandler = (
+  notification: AppProtocol.MessageQueueChangedNotification,
+) => void;
+
 export type AppServerErrorHandler = (error: Error) => void;
 
 export interface AppServerRequestOptions {
@@ -80,6 +84,7 @@ export interface AppServerTransport {
     options?: AppServerRequestOptions,
   ): Promise<T>;
   onEvent(handler: AppServerEventHandler): () => void;
+  onMessageQueueChanged?(handler: AppServerMessageQueueChangedHandler): () => void;
   onSubscriptionTerminated?(handler: AppServerSubscriptionTerminatedHandler): () => void;
   onError?(handler: AppServerErrorHandler): () => void;
 }
@@ -89,6 +94,10 @@ export class AppServerClient {
 
   onEvent(handler: AppServerEventHandler): () => void {
     return this.transport.onEvent(handler);
+  }
+
+  onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
+    return this.transport.onMessageQueueChanged?.(handler) ?? (() => undefined);
   }
 
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
@@ -407,9 +416,26 @@ export class AppServerClient {
     return this.transport.request("turn.interrupt", params);
   }
 
-  interruptTurnById(sessionId: string): Promise<AppProtocol.InterruptTurnResponse> {
-    return this.interruptTurn({ session_id: sessionId });
+  interruptTurnById(sessionId: string, turnId: string): Promise<AppProtocol.InterruptTurnResponse> {
+    return this.interruptTurn({ session_id: sessionId, turn_id: turnId });
   }
+
+  messageQueue = {
+    add: (params: AppProtocol.MessageQueueAddRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/add", params),
+    list: (params: AppProtocol.MessageQueueListRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/list", params),
+    update: (params: AppProtocol.MessageQueueUpdateRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/update", params),
+    delete: (params: AppProtocol.MessageQueueDeleteRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/delete", params),
+    reorder: (params: AppProtocol.MessageQueueReorderRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/reorder", params),
+    start: (params: AppProtocol.MessageQueueStartRequest): Promise<AppProtocol.StartTurnResponse> =>
+      this.transport.request("messageQueue/start", params),
+    steer: (params: AppProtocol.MessageQueueSteerRequest): Promise<AppProtocol.MessageQueue> =>
+      this.transport.request("messageQueue/steer", params),
+  };
 
   subscribeEvents(
     params: AppProtocol.SubscribeTimelineRequest,

@@ -253,6 +253,7 @@ async fn submit_channel_turn(
                             return Ok(collector.finish());
                         }
                     }
+                    TimelineSubscriptionMessage::MessageQueueChanged(_) => {}
                     TimelineSubscriptionMessage::Closed(_) => {
                         return Ok(collector.finish());
                     }

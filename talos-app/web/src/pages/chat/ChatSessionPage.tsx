@@ -73,6 +73,7 @@ export function ChatSessionPage() {
     sessionHistoryQuery,
     activeTurnId,
     pendingUserAction,
+    messageQueue,
   } = useChatSession(sessionId, session?.message_count, session?.title);
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
   const updateProject = useUpdateSessionProjectMutation(sessionId);
@@ -208,6 +209,7 @@ export function ChatSessionPage() {
             permissionModeDisabled={permissionMode.disabled}
             models={modelPickerOptions(models)}
             initialAttachments={locationState?.initialAttachments}
+            messageQueue={messageQueue}
             onCancel={() => void stopResponse()}
             onCommand={sessionCommands.execute}
             onDraftChange={setDraft}

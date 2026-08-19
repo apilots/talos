@@ -1,17 +1,18 @@
-use std::{collections::HashMap, env};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use talos_auth::{
     CloudLoginCancelRequest, CloudLoginPersistence, CloudLoginStartRequest,
-    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse, RequestIdentity,
+    CloudLoginStartResponse, CloudLoginStatusRequest, CloudLoginStatusResponse,
 };
 use talos_base::TalosApplicationRuntime;
-use talos_error::{TalosError, TalosResult};
-use talos_sdk::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
+use talos_error::TalosResult;
+use talos_sdk::{
+    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+};
 use talos_service::{Actor, TimelineSubscriptionMessage};
 use talos_types::{
-    talos::{TalosConnectionMode, TalosContext, TalosSessionEnvironment},
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
     ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
@@ -22,30 +23,39 @@ use talos_types::{
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
-    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
-    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
-    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
-    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
-    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
-    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
-    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
-    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
-    SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
+    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
+    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
+    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
+    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::task::JoinHandle;
+
+mod request_context;
+use request_context::{
+    authenticated_actor_from_access_token, normalize_embedded_start_turn_request,
+    resolve_cached_actor,
+};
 
 pub struct EmbeddedServerClient {
     runtime: TalosApplicationRuntime,
@@ -82,74 +92,6 @@ impl EmbeddedServerClient {
             subscriptions: HashMap::new(),
         })
     }
-}
-
-async fn resolve_cached_actor(runtime: &TalosApplicationRuntime) -> TalosResult<Option<Actor>> {
-    let response = runtime
-        .gateway
-        .read_auth_session(&Actor::regular("anonymous"), AuthSessionReadRequest {})
-        .await?;
-    let Some(session) = response.session else {
-        return Ok(None);
-    };
-    let identity = runtime
-        .auth_service
-        .verify_access_token(&session.access_token)
-        .await?;
-    Ok(Some(actor_from_identity(&identity)))
-}
-
-fn actor_from_identity(identity: &RequestIdentity) -> Actor {
-    let actor = Actor::regular(identity.user_id.clone())
-        .with_username(identity.username.clone())
-        .with_role(identity.role);
-    match identity.access_token.clone() {
-        Some(token) => actor.with_access_token(token),
-        None => actor,
-    }
-}
-
-async fn authenticated_actor_from_access_token(
-    runtime: &TalosApplicationRuntime,
-    access_token: &str,
-) -> TalosResult<Actor> {
-    let identity = runtime
-        .auth_service
-        .verify_access_token(access_token)
-        .await?;
-    Ok(actor_from_identity(&identity))
-}
-
-fn normalize_embedded_start_turn_request(
-    mut request: StartTurnRequest,
-) -> TalosResult<StartTurnRequest> {
-    let context = request
-        .context
-        .get_or_insert_with(|| TalosContext::cli("local"));
-    let existing_directory = context
-        .environment
-        .as_ref()
-        .map(|environment| environment.directory.clone());
-    let directory = match request.current_directory.clone().or(existing_directory) {
-        Some(directory) => directory,
-        None => env::current_dir().map_err(|err| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                format!("failed to resolve embedded current directory: {err}"),
-            )
-        })?,
-    };
-
-    context.environment = Some(TalosSessionEnvironment {
-        directory: directory.clone(),
-        connection_mode: TalosConnectionMode::Embedded,
-    });
-
-    if request.current_directory.is_none() {
-        request.current_directory = Some(directory);
-    }
-
-    Ok(request)
 }
 
 #[async_trait]
@@ -432,11 +374,17 @@ impl GatewayClient for EmbeddedServerClient {
         let subscription_id = response.subscription_id.clone();
         let mut events = source.subscription.events;
         let (tx, rx) = tokio::sync::mpsc::channel(256);
+        let (message_queue_tx, message_queue_rx) = tokio::sync::mpsc::channel(256);
         let task = tokio::spawn(async move {
             while let Some(message) = events.recv().await {
                 match message {
                     TimelineSubscriptionMessage::Event(event) => {
                         if tx.send(event).await.is_err() {
+                            return;
+                        }
+                    }
+                    TimelineSubscriptionMessage::MessageQueueChanged(change) => {
+                        if message_queue_tx.send(change).await.is_err() {
                             return;
                         }
                     }
@@ -451,6 +399,7 @@ impl GatewayClient for EmbeddedServerClient {
         Ok(TimelineStreamSubscription {
             response,
             stream: TimelineEventStream::new(rx),
+            message_queue_changes: MessageQueueChangeStream::new(message_queue_rx),
         })
     }
 
@@ -491,6 +440,76 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime
             .gateway
             .interrupt_turn(&self.actor, request)
+            .await
+    }
+
+    async fn add_queued_message(
+        &mut self,
+        request: MessageQueueAddRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .add_queued_message(&self.actor, request)
+            .await
+    }
+
+    async fn list_message_queue(
+        &mut self,
+        request: MessageQueueListRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .list_message_queue(&self.actor, request)
+            .await
+    }
+
+    async fn update_queued_message(
+        &mut self,
+        request: MessageQueueUpdateRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .update_queued_message(&self.actor, request)
+            .await
+    }
+
+    async fn delete_queued_message(
+        &mut self,
+        request: MessageQueueDeleteRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .delete_queued_message(&self.actor, request)
+            .await
+    }
+
+    async fn reorder_message_queue(
+        &mut self,
+        request: MessageQueueReorderRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .reorder_message_queue(&self.actor, request)
+            .await
+    }
+
+    async fn start_queued_message(
+        &mut self,
+        request: MessageQueueStartRequest,
+    ) -> TalosResult<StartTurnResponse> {
+        self.runtime
+            .gateway
+            .start_queued_message(&self.actor, request)
+            .await
+    }
+
+    async fn steer_queued_message(
+        &mut self,
+        request: MessageQueueSteerRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.runtime
+            .gateway
+            .steer_queued_message(&self.actor, request)
             .await
     }
 

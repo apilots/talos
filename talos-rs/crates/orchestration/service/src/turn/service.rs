@@ -22,19 +22,24 @@ use talos_types::{
     ModelRef, SandboxApprovalDecision, StartTurnRequest, TalosConfig, TalosSession,
     UserActionParams, UserActionResponse, UserActionState,
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 use uuid::Uuid;
 
+use crate::message_queue::MessageQueueReservation;
 use crate::session::SessionService;
 use crate::timeline::TimelineEventService;
 use crate::user_action::UserActionService;
+use crate::SessionMessageQueueService;
 
 use super::{
-    completed_turn_from_event, record_completed_turn_progress, record_session_title,
-    result_from_idempotency_record, retry_idempotency_key, turn_submission_hash,
+    auto_dispatch_session_from_event, completed_turn_from_event, record_completed_turn_progress,
+    record_session_title, result_from_idempotency_record, retry_idempotency_key,
+    stop_reason_blocks_auto_dispatch, turn_submission_hash, validate_active_turn_input,
     validate_retry_request, validate_user_input, TurnExecutor, TurnRetryParams,
 };
+
+mod message_queue;
 
 #[path = "service_subagent.rs"]
 mod subagent;
@@ -58,6 +63,7 @@ pub struct TurnService {
     profile_store: Arc<dyn ProfileStore>,
     sessions: Arc<SessionService>,
     session_runtime: Arc<dyn SessionRuntime>,
+    message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
     user_actions: UserActionService,
 }
@@ -99,6 +105,7 @@ impl TurnService {
         profile_store: Arc<dyn ProfileStore>,
         sessions: Arc<SessionService>,
         session_runtime: Arc<dyn SessionRuntime>,
+        message_queue: SessionMessageQueueService,
         base_config: TalosConfig,
     ) -> Self {
         let user_actions = event_service.user_actions();
@@ -109,6 +116,7 @@ impl TurnService {
             profile_store,
             sessions,
             session_runtime,
+            message_queue,
             base_config,
             user_actions,
         }
@@ -147,6 +155,8 @@ impl TurnService {
         assistant_model: String,
         profile_context: Option<ProfileTurnContext>,
         initial_completed_turn: Option<(String, String)>,
+        initial_auto_dispatch_session: Option<String>,
+        auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         mut stream_rx: mpsc::Receiver<AgentEvent>,
     ) {
         let event_service = self.event_service.clone();
@@ -154,8 +164,10 @@ impl TurnService {
         let turn_executor = self.executor.clone();
         let sessions = self.sessions.clone();
         let session_runtime = self.session_runtime.clone();
+        let turn_service = self.clone();
         tokio::spawn(async move {
             let mut completed_turn = initial_completed_turn;
+            let mut auto_dispatch_session = initial_auto_dispatch_session;
             while let Some(event) = stream_rx.recv().await {
                 let progress_event = event.clone();
                 if let Err(err) = event_service.record_talos_event(event).await {
@@ -180,6 +192,9 @@ impl TurnService {
                 if let Some(turn) = completed_turn_from_event(&progress_event) {
                     completed_turn = Some(turn);
                 }
+                if let Some(session_id) = auto_dispatch_session_from_event(&progress_event) {
+                    auto_dispatch_session = Some(session_id);
+                }
             }
 
             if let Some((session_id, turn_id)) = completed_turn {
@@ -194,6 +209,22 @@ impl TurnService {
                         &title,
                     )
                     .await;
+                }
+            }
+            let auto_dispatch_ready = match auto_dispatch_ready {
+                Some(receiver) => receiver.await.is_ok(),
+                None => true,
+            };
+            let auto_dispatch_session = auto_dispatch_ready
+                .then_some(auto_dispatch_session)
+                .flatten();
+            if let Some(session_id) = auto_dispatch_session {
+                if let Err(error) = turn_service.try_dispatch_next(&session_id).await {
+                    error!(
+                        session_id = %session_id,
+                        error = %error,
+                        "failed to dispatch the next queued message"
+                    );
                 }
             }
         });
@@ -306,6 +337,7 @@ impl TurnService {
                 binding,
             },
             idempotency_key,
+            None,
         )
         .await
     }
@@ -315,6 +347,7 @@ impl TurnService {
         session: TalosSession,
         submission: TurnSubmission,
         idempotency_key: Option<String>,
+        auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<MessageCommandResult> {
         validate_user_input(&submission.input)?;
         let session_id = session.context.session_id.clone();
@@ -382,6 +415,7 @@ impl TurnService {
                 .first_event_timeout_ms
                 .max(1),
         );
+        let mut auto_dispatch_ready = auto_dispatch_ready;
         let first_event = match tokio::time::timeout(first_event_timeout, stream_rx.recv()).await {
             Ok(Some(event)) => event,
             Ok(None) => {
@@ -392,6 +426,7 @@ impl TurnService {
                         &request_id,
                         idempotency_key.as_deref(),
                         &assistant_model,
+                        auto_dispatch_ready.take(),
                         stream_rx,
                         "message stream closed before first event",
                     )
@@ -421,6 +456,7 @@ impl TurnService {
                         &request_id,
                         idempotency_key.as_deref(),
                         &assistant_model,
+                        auto_dispatch_ready.take(),
                         stream_rx,
                         "timed out waiting for first timeline event",
                     )
@@ -445,6 +481,8 @@ impl TurnService {
             assistant_model,
             Some(profile_context),
             completed_turn_from_event(&progress_event),
+            auto_dispatch_session_from_event(&progress_event),
+            auto_dispatch_ready,
             stream_rx,
         );
 
@@ -508,6 +546,7 @@ impl TurnService {
                 binding,
             },
             Some(idempotency_key),
+            None,
         )
         .await
     }
@@ -596,6 +635,7 @@ impl TurnService {
                         &request_id,
                         None,
                         &assistant_model,
+                        None,
                         stream_rx,
                         "message stream closed before first event",
                     )
@@ -610,6 +650,7 @@ impl TurnService {
                         &request_id,
                         None,
                         &assistant_model,
+                        None,
                         stream_rx,
                         "timed out waiting for first timeline event",
                     )
@@ -634,6 +675,8 @@ impl TurnService {
             assistant_model,
             Some(profile_context),
             completed_turn_from_event(&progress_event),
+            auto_dispatch_session_from_event(&progress_event),
+            None,
             stream_rx,
         );
         Ok(())
@@ -646,6 +689,7 @@ impl TurnService {
         request_id: &str,
         idempotency_key: Option<&str>,
         assistant_model: &str,
+        auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         stream_rx: mpsc::Receiver<AgentEvent>,
         message: &str,
     ) -> TalosResult<MessageCommandResult> {
@@ -681,7 +725,14 @@ impl TurnService {
                 "failed to discard unfinished profile turn usage"
             );
         }
-        self.spawn_event_forwarder(assistant_model.to_string(), None, None, stream_rx);
+        self.spawn_event_forwarder(
+            assistant_model.to_string(),
+            None,
+            None,
+            auto_dispatch_session_from_event(&error_event),
+            auto_dispatch_ready,
+            stream_rx,
+        );
 
         let result = MessageCommandResult {
             request_id: request_id.to_string(),

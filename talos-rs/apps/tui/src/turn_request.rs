@@ -16,23 +16,7 @@ pub struct TerminalTurnRequest {
 
 impl TerminalTurnRequest {
     pub fn build(self) -> StartTurnRequest {
-        let mut input = Vec::new();
-        if !self.message.is_empty() {
-            input.push(TalosInputItem::Text { text: self.message });
-        }
-        if !self.file_ids.is_empty() {
-            input.push(TalosInputItem::Files {
-                file_ids: self.file_ids,
-            });
-        }
-        input.extend(
-            self.skills
-                .iter()
-                .map(|skill| TalosInputItem::SkillSelection {
-                    name: skill.name.clone(),
-                    path: skill.path.to_string_lossy().to_string(),
-                }),
-        );
+        let input = build_terminal_input(self.message, &self.skills, self.file_ids);
 
         StartTurnRequest {
             session_id: self.session_id,
@@ -48,4 +32,23 @@ impl TerminalTurnRequest {
             client_request_id: self.client_request_id,
         }
     }
+}
+
+pub(crate) fn build_terminal_input(
+    message: String,
+    skills: &[SkillSuggestion],
+    file_ids: Vec<String>,
+) -> Vec<TalosInputItem> {
+    let mut input = Vec::new();
+    if !message.is_empty() {
+        input.push(TalosInputItem::Text { text: message });
+    }
+    if !file_ids.is_empty() {
+        input.push(TalosInputItem::Files { file_ids });
+    }
+    input.extend(skills.iter().map(|skill| TalosInputItem::SkillSelection {
+        name: skill.name.clone(),
+        path: skill.path.to_string_lossy().to_string(),
+    }));
+    input
 }

@@ -30,40 +30,47 @@ use talos_types::{
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
-    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
-    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
-    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
-    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
-    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
-    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
-    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
-    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
-    SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
+    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
+    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
+    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
+    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 mod events;
-use events::dispatch_application_event;
+use events::{dispatch_application_event, dispatch_message_queue_change};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
-use crate::{GatewayClient, TimelineEventStream, TimelineStreamSubscription};
+use crate::{
+    GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
+};
 use talos_types::talos::TimelineEventEnvelope;
 
 mod response;
+mod stdout;
+use stdout::spawn_stdout_reader;
 
 #[path = "app_server/credentials.rs"]
 mod credentials;
@@ -125,6 +132,7 @@ pub struct AppServerClient {
 struct SubscriptionStream {
     session_id: String,
     sender: mpsc::Sender<TimelineEventEnvelope>,
+    message_queue_sender: mpsc::Sender<talos_types::MessageQueueChangedNotification>,
 }
 
 const APP_SERVER_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -563,6 +571,7 @@ impl GatewayClient for AppServerClient {
         let response = self.subscribe_timeline(request).await?;
         let subscription_id = response.subscription_id.clone();
         let (tx, rx) = mpsc::channel(256);
+        let (message_queue_tx, message_queue_rx) = mpsc::channel(256);
         {
             let mut streams = self.subscription_senders.lock().await;
             let buffered_events = self
@@ -581,12 +590,14 @@ impl GatewayClient for AppServerClient {
                 SubscriptionStream {
                     session_id,
                     sender: tx,
+                    message_queue_sender: message_queue_tx,
                 },
             );
         }
         Ok(TimelineStreamSubscription {
             response,
             stream: TimelineEventStream::new(rx),
+            message_queue_changes: MessageQueueChangeStream::new(message_queue_rx),
         })
     }
 
@@ -618,6 +629,55 @@ impl GatewayClient for AppServerClient {
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
         self.request_typed("turn.interrupt", request).await
+    }
+
+    async fn add_queued_message(
+        &mut self,
+        request: MessageQueueAddRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/add", request).await
+    }
+
+    async fn list_message_queue(
+        &mut self,
+        request: MessageQueueListRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/list", request).await
+    }
+
+    async fn update_queued_message(
+        &mut self,
+        request: MessageQueueUpdateRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/update", request).await
+    }
+
+    async fn delete_queued_message(
+        &mut self,
+        request: MessageQueueDeleteRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/delete", request).await
+    }
+
+    async fn reorder_message_queue(
+        &mut self,
+        request: MessageQueueReorderRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/reorder", request).await
+    }
+
+    async fn start_queued_message(
+        &mut self,
+        request: MessageQueueStartRequest,
+    ) -> TalosResult<StartTurnResponse> {
+        self.request_typed("messageQueue/start", request).await
+    }
+
+    async fn steer_queued_message(
+        &mut self,
+        request: MessageQueueSteerRequest,
+    ) -> TalosResult<MessageQueue> {
+        self.request_typed("messageQueue/steer", request).await
     }
 
     async fn submit_dynamic_tool_result(
@@ -865,106 +925,6 @@ impl GatewayClient for AppServerClient {
     async fn shutdown(&mut self) -> TalosResult<()> {
         self.shutdown().await
     }
-}
-
-fn spawn_stdout_reader(
-    stdout: ChildStdout,
-    pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
-    subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    pending_subscription_events: Arc<Mutex<HashMap<String, Vec<TimelineEventEnvelope>>>>,
-    events_tx: mpsc::Sender<TimelineEventEnvelope>,
-    notifications_tx: mpsc::Sender<TimelineSubscriptionNotification>,
-) {
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stdout);
-        loop {
-            let mut line = String::new();
-            let read_result = reader.read_line(&mut line).await;
-            let bytes = match read_result {
-                Ok(bytes) => bytes,
-                Err(error) => {
-                    response::fail_pending_responses(&pending_responses, error.to_string()).await;
-                    return;
-                }
-            };
-            if bytes == 0 {
-                response::fail_pending_responses(
-                    &pending_responses,
-                    "app-server stdout closed".to_string(),
-                )
-                .await;
-                return;
-            }
-
-            let message = match serde_json::from_str::<JsonRpcMessage>(line.trim_end()) {
-                Ok(message) => message,
-                Err(error) => {
-                    response::fail_pending_responses(&pending_responses, error.to_string()).await;
-                    return;
-                }
-            };
-
-            match message {
-                JsonRpcMessage::Response(response) => {
-                    if let RequestId::Number(id) = response.id {
-                        if let Some(sender) = pending_responses.lock().await.remove(&id) {
-                            let _ = sender.send(response::decode_api_response(response.result));
-                        }
-                    }
-                }
-                JsonRpcMessage::Error(error) => {
-                    if let Some(RequestId::Number(id)) = error.id {
-                        if let Some(sender) = pending_responses.lock().await.remove(&id) {
-                            let _ = sender.send(Err(response::map_app_server_error(error.error)));
-                        }
-                    }
-                }
-                JsonRpcMessage::Notification(notification) => {
-                    if let Ok(Some(terminated)) =
-                        response::decode_subscription_terminated(&notification)
-                    {
-                        subscription_senders
-                            .lock()
-                            .await
-                            .remove(&terminated.subscription_id);
-                        pending_subscription_events
-                            .lock()
-                            .await
-                            .remove(&terminated.subscription_id);
-                        continue;
-                    }
-                    let Ok(Some(notification)) = response::decode_event_notification(notification)
-                    else {
-                        continue;
-                    };
-                    let subscription_id = notification.subscription_id.clone();
-                    let event = notification.event.clone();
-                    dispatch_application_event(
-                        &subscription_senders,
-                        &pending_subscription_events,
-                        &subscription_id,
-                        event.clone(),
-                    )
-                    .await;
-                    match notifications_tx.try_send(notification) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            return;
-                        }
-                    }
-                    match events_tx.try_send(event) {
-                        Ok(()) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
-                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                            return;
-                        }
-                    }
-                }
-                JsonRpcMessage::Request(_) => {}
-            }
-        }
-    });
 }
 
 #[cfg(test)]

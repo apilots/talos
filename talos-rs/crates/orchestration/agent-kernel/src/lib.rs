@@ -23,22 +23,23 @@ pub use execution::{
     RequestOutputContract, StateDelta, StateNamespace, VecEventSink,
 };
 pub use general_turn::{
-    apply_general_turn_step, apply_general_turn_tool_batch, build_general_turn_step_request,
-    compact_session_memory, emit_general_turn_finalization_stream, execute_general_turn_loop,
-    execute_general_turn_loop_with_policy, execute_general_turn_loop_with_resume,
-    execute_general_turn_step, execute_general_turn_tool_batch, finalize_general_turn_artifacts,
-    form_daily_session_memory, persist_general_turn_artifacts, prepare_general_turn,
-    run_general_turn, run_general_turn_with_resume, BuiltInGeneralTurnPolicy,
-    ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome, GeneralTurnPolicy,
-    GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions,
-    GeneralTurnStepDisposition, GeneralTurnStepRequest, GeneralTurnStepResult,
-    GeneralTurnToolBatch, MemoryCompactionPolicy, MemoryFormationParams, MemoryFormationReport,
-    ModelFinishReason, PendingGeneralTurnAction, PreparedGeneralTurn, ResumeToolCall,
-    SessionCompactionState, StreamingToolExecutionConfig, UserActionResume,
-    SESSION_COMPACTION_STATE_KEY,
+    apply_general_turn_step, apply_general_turn_tool_batch, build_active_turn_input,
+    build_general_turn_step_request, compact_session_memory, emit_general_turn_finalization_stream,
+    execute_general_turn_loop, execute_general_turn_loop_with_policy,
+    execute_general_turn_loop_with_resume, execute_general_turn_step,
+    execute_general_turn_tool_batch, finalize_general_turn_artifacts, form_daily_session_memory,
+    persist_general_turn_artifacts, prepare_general_turn, run_general_turn,
+    run_general_turn_with_resume, BuiltInGeneralTurnPolicy, ExecutedTurnArtifacts,
+    GeneralTurnLoopState, GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop,
+    GeneralTurnResult, GeneralTurnResume, GeneralTurnSkillOptions, GeneralTurnStepDisposition,
+    GeneralTurnStepRequest, GeneralTurnStepResult, GeneralTurnToolBatch, MemoryCompactionPolicy,
+    MemoryFormationParams, MemoryFormationReport, ModelFinishReason, PendingGeneralTurnAction,
+    PreparedGeneralTurn, ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
+    UserActionResume, SESSION_COMPACTION_STATE_KEY,
 };
 pub use input::{
-    AttachmentReader, RejectingAttachmentReader, ResolvedAttachment, TurnFileScope, UserInput,
+    ActiveTurnInput, ActiveTurnInputDelivery, AttachmentReader, RejectingAttachmentReader,
+    ResolvedAttachment, TurnFileScope, UserInput,
 };
 pub use planner::BuiltInPlanner;
 pub use processor::{

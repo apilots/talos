@@ -65,6 +65,8 @@ fn status_for_error_code(code: ErrorCode) -> StatusCode {
         ErrorCode::ResourceExpired | ErrorCode::EventCursorExpired => StatusCode::GONE,
         ErrorCode::Conflict
         | ErrorCode::ActiveTurnRunning
+        | ErrorCode::MessageQueueFull
+        | ErrorCode::MessageQueueBusy
         | ErrorCode::RetrySourceCompleted
         | ErrorCode::RetrySourceMismatch
         | ErrorCode::IdempotencyConflict

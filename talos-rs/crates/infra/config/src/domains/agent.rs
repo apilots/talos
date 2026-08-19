@@ -11,6 +11,26 @@ fn default_agent_enabled() -> bool {
     true
 }
 
+fn default_max_messages_per_session() -> u32 {
+    10
+}
+
+/// Bounded in-memory message queue settings for each session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MessageQueueConfig {
+    #[serde(default = "default_max_messages_per_session")]
+    pub max_messages_per_session: u32,
+}
+
+impl Default for MessageQueueConfig {
+    fn default() -> Self {
+        Self {
+            max_messages_per_session: default_max_messages_per_session(),
+        }
+    }
+}
+
 /// Runtime family selected by an Agent definition.
 ///
 /// A new kind must have a matching AgentRuntimeConfig variant and Harness
@@ -97,6 +117,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub identity: Option<String>,
 
+    /// Session-scoped in-memory message queue settings.
+    #[serde(default)]
+    pub message_queue: MessageQueueConfig,
+
     /// Agent kernel runtime settings
     #[serde(default)]
     pub kernel: AgentKernelConfig,
@@ -116,6 +140,7 @@ impl Default for AgentConfig {
             name: default_agent_name(),
             workspace: None,
             identity: None,
+            message_queue: MessageQueueConfig::default(),
             kernel: AgentKernelConfig::default(),
             agents: Vec::new(),
         }

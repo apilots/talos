@@ -25,6 +25,7 @@ struct MockApp {
     dispatched_actors: Mutex<Vec<String>>,
     dispatched_auth_disabled: Mutex<Vec<bool>>,
     cancelled: Mutex<Vec<String>>,
+    cancelled_turns: Mutex<Vec<String>>,
     cancelled_actors: Mutex<Vec<String>>,
     drained: Mutex<usize>,
     live_tx: Mutex<Option<broadcast::Sender<TimelineEventEnvelope>>>,
@@ -101,11 +102,20 @@ impl AppServerApplication for MockApp {
         }
     }
 
-    async fn cancel_active_turn(&self, actor: &Actor, session_id: &str) -> ApplicationResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        actor: &Actor,
+        session_id: &str,
+        turn_id: &str,
+    ) -> ApplicationResult<()> {
         self.cancelled
             .lock()
             .expect("cancel lock")
             .push(session_id.to_string());
+        self.cancelled_turns
+            .lock()
+            .expect("cancel turn lock")
+            .push(turn_id.to_string());
         self.cancelled_actors
             .lock()
             .expect("cancel actor lock")
@@ -344,6 +354,13 @@ async fn owned_turn_shutdown_uses_business_request_actor() {
         &["s1"]
     );
     assert_eq!(
+        app.cancelled_turns
+            .lock()
+            .expect("cancel turn lock")
+            .as_slice(),
+        &["turn-1"]
+    );
+    assert_eq!(
         app.cancelled_actors
             .lock()
             .expect("cancel actor lock")
@@ -553,6 +570,68 @@ async fn closed_subscription_sends_completed_notification() {
     assert_eq!(notification["params"]["subscription_id"], subscription_id);
     assert_eq!(notification["params"]["session_id"], "s1");
     assert_eq!(notification["params"]["reason"], "completed");
+
+    client_write.shutdown().await.expect("shutdown input");
+    server_task.await.expect("server join").expect("server run");
+}
+
+#[tokio::test]
+async fn message_queue_change_uses_live_notification_without_subscription_envelope() {
+    let app = Arc::new(MockApp::default());
+    let (live_tx, _live_rx) = broadcast::channel(16);
+    *app.live_tx.lock().expect("live tx lock") = Some(live_tx);
+
+    let (client, server) = duplex(16 * 1024);
+    let (server_read, server_write) = split(server);
+    let server_task = tokio::spawn(run_jsonl(
+        server_read,
+        server_write,
+        app.clone(),
+        Arc::new(ExistingTokenValidator),
+        AppServerConfig::default(),
+    ));
+    let (client_read, mut client_write) = split(client);
+    let mut output = BufReader::new(client_read).lines();
+
+    client_write
+        .write_all(
+            format!(
+                "{}{}{}",
+                initialize_request("secret"),
+                initialized_notification(),
+                event_subscribe_request()
+            )
+            .as_bytes(),
+        )
+        .await
+        .expect("write requests");
+
+    let _initialize = read_output_line(&mut output).await;
+    let _subscribe = read_output_line(&mut output).await;
+    let sender = app
+        .stream_txs
+        .lock()
+        .expect("stream tx lock")
+        .first()
+        .cloned()
+        .expect("subscription sender");
+    sender
+        .send(TimelineSubscriptionMessage::MessageQueueChanged(
+            talos_types::MessageQueueChangedNotification {
+                session_id: "s1".to_string(),
+                revision: 7,
+            },
+        ))
+        .await
+        .expect("send message queue change");
+
+    let notification = read_output_line(&mut output).await;
+    assert_eq!(notification["method"], "messageQueue/changed");
+    assert_eq!(
+        notification["params"],
+        json!({ "sessionId": "s1", "revision": 7 })
+    );
+    assert!(notification["params"].get("subscription_id").is_none());
 
     client_write.shutdown().await.expect("shutdown input");
     server_task.await.expect("server join").expect("server run");

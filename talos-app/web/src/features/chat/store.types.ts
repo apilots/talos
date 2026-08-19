@@ -21,6 +21,7 @@ export interface ChatSlice {
   upsertUserInputBlock: (
     sessionId: string,
     messageId: string,
+    itemId: string,
     input: ChatUserInput,
   ) => void;
   setPendingInput: (sessionId: string, input?: PendingInput) => void;

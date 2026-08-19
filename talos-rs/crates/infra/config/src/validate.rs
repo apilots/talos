@@ -151,6 +151,12 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.name is empty or unresolved placeholder".to_string(),
         ));
     }
+    if config.agent.message_queue.max_messages_per_session == 0 {
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "agent.message_queue.max_messages_per_session must be > 0".to_string(),
+        ));
+    }
     if config.agent.kernel.tool_parallelism == 0 {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,

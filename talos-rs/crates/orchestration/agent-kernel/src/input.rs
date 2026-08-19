@@ -4,6 +4,8 @@ use std::pin::Pin;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_llm_provider::ChatMessage;
+use tokio::sync::oneshot;
 
 /// Normalized input for one Agent turn.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -32,6 +34,46 @@ pub struct ResolvedAttachment {
     pub media_type: String,
     pub size_bytes: u64,
     pub bytes: Bytes,
+}
+
+/// A validated user input accepted by an active Agent turn.
+///
+/// The Harness resolves file authorization and model attachment support before
+/// sending this object. The Kernel only owns safe-boundary ordering and context
+/// application for already accepted inputs.
+#[derive(Debug, Clone)]
+pub struct ActiveTurnInput {
+    pub input: UserInput,
+    pub message: ChatMessage,
+    pub attachment_tokens: usize,
+}
+
+/// Harness-to-Kernel delivery for one active-turn input.
+///
+/// The Kernel acknowledges the delivery only after taking it at a safe model
+/// boundary. Callers must treat a dropped acknowledgement as a rejected input.
+#[derive(Debug)]
+pub struct ActiveTurnInputDelivery {
+    input: ActiveTurnInput,
+    accepted_tx: oneshot::Sender<()>,
+}
+
+impl ActiveTurnInputDelivery {
+    /// Create a delivery whose acknowledgement is owned by the submitting caller.
+    pub fn new(input: ActiveTurnInput, accepted_tx: oneshot::Sender<()>) -> Self {
+        Self { input, accepted_tx }
+    }
+
+    /// Borrow the input before acknowledging its safe-boundary delivery.
+    pub(crate) fn input(&self) -> &ActiveTurnInput {
+        &self.input
+    }
+
+    /// Confirm that the Kernel took the input at a safe model boundary.
+    pub fn acknowledge(self) -> ActiveTurnInput {
+        let _ = self.accepted_tx.send(());
+        self.input
+    }
 }
 
 /// Resolves ordered, authorized file references for one model turn.

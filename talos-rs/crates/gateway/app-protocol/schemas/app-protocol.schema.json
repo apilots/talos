@@ -654,6 +654,13 @@
         "turn.start",
         "turn.interrupt",
         "turn.retry",
+        "messageQueue/add",
+        "messageQueue/list",
+        "messageQueue/update",
+        "messageQueue/delete",
+        "messageQueue/reorder",
+        "messageQueue/start",
+        "messageQueue/steer",
         "event.subscribe",
         "event.unsubscribe",
         "tool.dynamic_result.submit",
@@ -1109,6 +1116,132 @@
             },
             "params": {
               "$ref": "#/definitions/RetryTurnRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/add"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueAddRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/list"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueListRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/update"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueUpdateRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/delete"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueDeleteRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/reorder"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueReorderRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/start"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueStartRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/steer"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueSteerRequest"
             }
           },
           "required": [
@@ -2506,6 +2639,8 @@
         "resourceExpired",
         "conflict",
         "activeTurnRunning",
+        "messageQueueFull",
+        "messageQueueBusy",
         "retrySourceCompleted",
         "retrySourceMismatch",
         "idempotencyConflict",
@@ -2951,10 +3086,14 @@
       "properties": {
         "session_id": {
           "type": "string"
+        },
+        "turn_id": {
+          "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "session_id",
+        "turn_id"
       ],
       "type": "object"
     },
@@ -3390,6 +3529,178 @@
       },
       "required": [
         "query"
+      ],
+      "type": "object"
+    },
+    "MessageQueue": {
+      "description": "The complete bounded message queue visible to clients for one session.",
+      "properties": {
+        "maxMessages": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/QueuedMessage"
+          },
+          "type": "array"
+        },
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxMessages",
+        "messages",
+        "revision"
+      ],
+      "type": "object"
+    },
+    "MessageQueueAddRequest": {
+      "description": "Parameters for adding one message to a Session queue.",
+      "properties": {
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueChangedNotification": {
+      "description": "Live invalidation signal emitted after a visible queue mutation.",
+      "properties": {
+        "revision": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "revision",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueDeleteRequest": {
+      "description": "Parameters for deleting one waiting message.",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueListRequest": {
+      "description": "Parameters for reading one complete Session queue.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueReorderRequest": {
+      "description": "Parameters for applying a complete queue permutation.",
+      "properties": {
+        "messageIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageIds",
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueStartRequest": {
+      "description": "Parameters for starting the queue head or one selected message.",
+      "properties": {
+        "messageId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueSteerRequest": {
+      "description": "Parameters for steering one waiting message into an exact active Turn.",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "sessionId",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "MessageQueueUpdateRequest": {
+      "description": "Parameters for replacing one waiting message.",
+      "properties": {
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "input",
+        "messageId",
+        "sessionId"
       ],
       "type": "object"
     },
@@ -4265,6 +4576,25 @@
       ],
       "type": "object"
     },
+    "QueuedMessage": {
+      "description": "A user message waiting in a session-scoped in-memory queue.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "input": {
+          "items": {
+            "$ref": "#/definitions/TalosInputItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "input"
+      ],
+      "type": "object"
+    },
     "ReasoningEffort": {
       "enum": [
         "light",
@@ -4740,6 +5070,24 @@
             },
             "params": {
               "$ref": "#/definitions/SubscriptionTerminatedEnvelope"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "messageQueue/changed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/MessageQueueChangedNotification"
             }
           },
           "required": [
@@ -7720,6 +8068,33 @@
     "jsonrpc_message": {
       "$ref": "#/definitions/JsonRpcMessage"
     },
+    "message_queue": {
+      "$ref": "#/definitions/MessageQueue"
+    },
+    "message_queue_add_request": {
+      "$ref": "#/definitions/MessageQueueAddRequest"
+    },
+    "message_queue_changed_notification": {
+      "$ref": "#/definitions/MessageQueueChangedNotification"
+    },
+    "message_queue_delete_request": {
+      "$ref": "#/definitions/MessageQueueDeleteRequest"
+    },
+    "message_queue_list_request": {
+      "$ref": "#/definitions/MessageQueueListRequest"
+    },
+    "message_queue_reorder_request": {
+      "$ref": "#/definitions/MessageQueueReorderRequest"
+    },
+    "message_queue_start_request": {
+      "$ref": "#/definitions/MessageQueueStartRequest"
+    },
+    "message_queue_steer_request": {
+      "$ref": "#/definitions/MessageQueueSteerRequest"
+    },
+    "message_queue_update_request": {
+      "$ref": "#/definitions/MessageQueueUpdateRequest"
+    },
     "pending_user_action": {
       "$ref": "#/definitions/PendingUserAction"
     },
@@ -7805,6 +8180,15 @@
     "interrupt_turn_request",
     "interrupt_turn_response",
     "jsonrpc_message",
+    "message_queue",
+    "message_queue_add_request",
+    "message_queue_changed_notification",
+    "message_queue_delete_request",
+    "message_queue_list_request",
+    "message_queue_reorder_request",
+    "message_queue_start_request",
+    "message_queue_steer_request",
+    "message_queue_update_request",
     "pending_user_action",
     "profile_read_response",
     "recover_timeline_request",

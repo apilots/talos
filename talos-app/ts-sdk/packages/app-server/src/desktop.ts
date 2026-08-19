@@ -3,6 +3,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 import {
   AppServerClient,
   type AppServerEventHandler,
+  type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
@@ -20,6 +21,7 @@ export interface DesktopTalosInvoke {
 
 export interface DesktopTimelineEventSource {
   onEvent(handler: AppServerEventHandler): () => void;
+  onMessageQueueChanged?(handler: AppServerMessageQueueChangedHandler): () => void;
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void;
 }
 
@@ -57,6 +59,10 @@ class DesktopRendererTransport implements AppServerTransport {
 
   onEvent(handler: AppServerEventHandler): () => void {
     return this.bridge.onEvent(handler);
+  }
+
+  onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
+    return this.bridge.onMessageQueueChanged?.(handler) ?? (() => undefined);
   }
 
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {

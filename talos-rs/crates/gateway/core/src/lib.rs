@@ -4,6 +4,7 @@ mod fs;
 pub mod gateway;
 pub mod gateway_service;
 mod memory;
+mod message_queue;
 mod model;
 mod plugin;
 mod profile;

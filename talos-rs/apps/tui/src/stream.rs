@@ -108,7 +108,7 @@ impl TuiApp {
                     self.active_message_file_ids.clear();
                     self.active_retry_count = 0;
                     self.push_system_notice(format!("Failed to start stream: {}", err));
-                    self.push_right_event("queued dispatch dropped".to_string());
+                    self.push_right_event("stream connect failed".to_string());
                 }
             }
             None => {}
@@ -179,17 +179,13 @@ impl TuiApp {
                     self.finish_active_stream("stream stalled and timed out", true, true);
                     self.active_message_raw = None;
                     self.active_retry_count = 0;
-                    self.show_status_hint(
-                        "Current response timed out. Moving to next queued message.",
-                        Duration::from_secs(4),
-                    );
+                    self.show_status_hint("Current response timed out.", Duration::from_secs(4));
                 }
             }
         }
 
-        if !self.in_flight && !self.close_in_progress {
-            self.dispatch_next_queued_message().await;
-        }
+        self.ensure_message_queue_subscription().await;
+        self.poll_message_queue_changes().await;
     }
 
     async fn reconnect_active_stream(&mut self) -> bool {

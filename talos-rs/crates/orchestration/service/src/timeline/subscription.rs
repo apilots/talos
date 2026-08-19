@@ -4,8 +4,8 @@ use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{ActiveTurnStatus, TimelineEventId};
 use talos_types::talos::TimelineEventEnvelope;
-use talos_types::TimelineActiveTurnSnapshot;
-use tokio::sync::mpsc;
+use talos_types::{MessageQueueChangedNotification, TimelineActiveTurnSnapshot};
+use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::mapping::map_active_turn_snapshot;
@@ -27,6 +27,22 @@ impl TimelineSubscriptionService {
     pub async fn subscribe(
         &self,
         params: TimelineSubscribeCommand,
+    ) -> TalosResult<TimelineSubscription> {
+        self.subscribe_inner(params, None).await
+    }
+
+    pub(crate) async fn subscribe_with_queue_changes(
+        &self,
+        params: TimelineSubscribeCommand,
+        queue_changes: broadcast::Receiver<MessageQueueChangedNotification>,
+    ) -> TalosResult<TimelineSubscription> {
+        self.subscribe_inner(params, Some(queue_changes)).await
+    }
+
+    async fn subscribe_inner(
+        &self,
+        params: TimelineSubscribeCommand,
+        queue_changes: Option<broadcast::Receiver<MessageQueueChangedNotification>>,
     ) -> TalosResult<TimelineSubscription> {
         let live_events = self.subscribe_live_events()?;
         let high_water_mark_event_id = self.latest_event_id(&params.session_id).await?;
@@ -50,6 +66,7 @@ impl TimelineSubscriptionService {
             has_live_turn,
             params.close_when_idle,
             params.close_on_terminal,
+            queue_changes,
         );
         Ok(TimelineSubscription {
             session_id: params.session_id,
@@ -132,6 +149,7 @@ fn spawn_subscription_stream(
     has_live_turn: bool,
     close_when_idle: bool,
     close_on_terminal: bool,
+    mut queue_changes: Option<broadcast::Receiver<MessageQueueChangedNotification>>,
 ) -> mpsc::Receiver<TimelineSubscriptionMessage> {
     let (tx, rx) = mpsc::channel(256);
     tokio::spawn(async move {
@@ -171,7 +189,8 @@ fn spawn_subscription_stream(
         }
 
         loop {
-            match live_events.recv().await {
+            tokio::select! {
+            timeline_event = live_events.recv() => match timeline_event {
                 Ok(record) => {
                     if record.session_id != session_id {
                         continue;
@@ -230,10 +249,59 @@ fn spawn_subscription_stream(
                     .await;
                     return;
                 }
+            },
+            queue_change = recv_queue_change(&mut queue_changes), if queue_changes.is_some() => {
+                match queue_change {
+                    Ok(change) => {
+                        if change.session_id != session_id {
+                            continue;
+                        }
+                        if tx
+                            .send(TimelineSubscriptionMessage::MessageQueueChanged(change))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "message queue subscription lagged; closing stream for explicit refresh"
+                        );
+                        let _ = send_subscription_closed(
+                            &tx,
+                            TimelineSubscriptionCloseReason::Lagged,
+                            "subscription lagged behind message queue changes",
+                        )
+                        .await;
+                        return;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        let _ = send_subscription_closed(
+                            &tx,
+                            TimelineSubscriptionCloseReason::ServerShutdown,
+                            "message queue event source closed",
+                        )
+                        .await;
+                        return;
+                    }
+                }
+            }
             }
         }
     });
     rx
+}
+
+async fn recv_queue_change(
+    receiver: &mut Option<broadcast::Receiver<MessageQueueChangedNotification>>,
+) -> Result<MessageQueueChangedNotification, broadcast::error::RecvError> {
+    receiver
+        .as_mut()
+        .expect("queue change branch requires a receiver")
+        .recv()
+        .await
 }
 
 fn matches_turn_filter(record: &TimelineEventEnvelope, turn_id: Option<&str>) -> bool {

@@ -267,6 +267,7 @@ async fn test_escape_cancels_in_flight_turn() {
     let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.session_id = Some("sess-test".to_string());
     app.in_flight = true;
+    state.lock().unwrap().active_turn_id = Some("turn-test".to_string());
 
     let _ = app
         .handle_input(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
@@ -451,10 +452,10 @@ async fn test_submit_input_restores_pasted_blocks_when_queue_is_full() {
     app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
-    assert!(app.send_user_message("m2".to_string()).await.unwrap());
-    assert!(app.send_user_message("m3".to_string()).await.unwrap());
-    assert!(app.send_user_message("m4".to_string()).await.unwrap());
-    assert_eq!(app.message_queue.len(), 3);
+    for index in 2..=11 {
+        assert!(app.send_user_message(format!("m{index}")).await.unwrap());
+    }
+    assert_eq!(app.message_queue.messages.len(), 10);
 
     let pasted = format!("{}\n{}", "A".repeat(420), "B".repeat(420));
     app.input_buffer = "overflow\n\n".to_string();
@@ -687,7 +688,7 @@ async fn test_start_turn_stream_updates_final_answer_block() {
     for _ in 0..40 {
         app.on_tick().await;
         tokio::task::yield_now().await;
-        if !app.in_flight && app.message_queue.is_empty() {
+        if !app.in_flight && app.message_queue.messages.is_empty() {
             break;
         }
     }
@@ -911,36 +912,6 @@ async fn test_modes_alias_works_as_models() {
 }
 
 #[tokio::test]
-async fn test_queue_limit_and_serial_dispatch() {
-    let mut app = create_app_server_app();
-    app.initialize_session().await;
-
-    assert!(app.send_user_message("m1".to_string()).await.unwrap());
-    assert!(app.send_user_message("m2".to_string()).await.unwrap());
-    assert!(app.send_user_message("m3".to_string()).await.unwrap());
-    assert!(app.send_user_message("m4".to_string()).await.unwrap());
-    assert!(!app.send_user_message("m5".to_string()).await.unwrap());
-
-    assert_eq!(app.message_queue.len(), 3);
-    assert!(app.in_flight);
-
-    for _ in 0..120 {
-        app.on_tick().await;
-        tokio::task::yield_now().await;
-        if !app.in_flight && app.message_queue.is_empty() {
-            break;
-        }
-    }
-
-    assert!(app.message_queue.is_empty());
-    assert!(!app.in_flight);
-    let transcript = interactive_transcript_text(&app);
-    for message in ["m1", "m2", "m3", "m4"] {
-        assert!(transcript.contains(message));
-    }
-}
-
-#[tokio::test]
 async fn test_queued_messages_do_not_add_system_noise_blocks() {
     let mut app = create_app_server_app();
     app.initialize_session().await;
@@ -966,10 +937,13 @@ async fn test_submit_input_queues_without_adding_user_block() {
     let _ = app.submit_input().await.unwrap();
 
     assert_eq!(app.render_runtime.store().blocks().len(), before);
-    assert_eq!(app.message_queue.len(), 1);
+    assert_eq!(app.message_queue.messages.len(), 1);
     assert_eq!(
-        app.message_queue.front().map(|msg| msg.text.as_str()),
-        Some("m2")
+        app.message_queue
+            .messages
+            .first()
+            .map(crate::message_queue::queued_message_text),
+        Some("m2".to_string())
     );
     let transcript = interactive_transcript_text(&app);
     assert!(transcript.contains("m1"));
@@ -982,10 +956,10 @@ async fn test_submit_input_keeps_text_when_queue_is_full() {
     app.initialize_session().await;
 
     assert!(app.send_user_message("m1".to_string()).await.unwrap());
-    assert!(app.send_user_message("m2".to_string()).await.unwrap());
-    assert!(app.send_user_message("m3".to_string()).await.unwrap());
-    assert!(app.send_user_message("m4".to_string()).await.unwrap());
-    assert_eq!(app.message_queue.len(), 3);
+    for index in 2..=11 {
+        assert!(app.send_user_message(format!("m{index}")).await.unwrap());
+    }
+    assert_eq!(app.message_queue.messages.len(), 10);
 
     let before_blocks = app.render_runtime.store().blocks().len();
     app.input_buffer = "overflow".to_string();
@@ -995,7 +969,7 @@ async fn test_submit_input_keeps_text_when_queue_is_full() {
     assert!(!should_quit);
     assert_eq!(app.render_runtime.store().blocks().len(), before_blocks);
     assert_eq!(app.input_buffer, "overflow");
-    assert_eq!(app.message_queue.len(), 3);
+    assert_eq!(app.message_queue.messages.len(), 10);
     assert!(app
         .status_hint
         .as_ref()

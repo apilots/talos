@@ -1,6 +1,8 @@
 use talos_store::session::TimelineEventId;
 use talos_types::talos::TimelineEventEnvelope;
-use talos_types::{SubscribeTimelineResponse, TimelineActiveTurnSnapshot};
+use talos_types::{
+    MessageQueueChangedNotification, SubscribeTimelineResponse, TimelineActiveTurnSnapshot,
+};
 use tokio::sync::{broadcast, mpsc};
 
 pub type ApplicationEvent = TimelineEventEnvelope;
@@ -45,6 +47,7 @@ pub enum TimelineSubscriptionCloseReason {
 #[derive(Debug, Clone)]
 pub enum TimelineSubscriptionMessage {
     Event(TimelineEventEnvelope),
+    MessageQueueChanged(MessageQueueChangedNotification),
     Closed(TimelineSubscriptionClosed),
 }
 

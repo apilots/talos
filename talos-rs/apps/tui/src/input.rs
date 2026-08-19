@@ -173,6 +173,40 @@ impl TuiApp {
             return Ok(false);
         }
 
+        if key_event.code == KeyCode::Char('q')
+            && key_event.modifiers.intersects(KeyModifiers::CONTROL)
+        {
+            if self.selected_queue_message.is_some() {
+                self.selected_queue_message = None;
+            } else {
+                self.select_message_queue();
+            }
+            return Ok(false);
+        }
+
+        if self.selected_queue_message.is_some() {
+            match key_event.code {
+                KeyCode::Esc => self.selected_queue_message = None,
+                KeyCode::Up if key_event.modifiers.intersects(KeyModifiers::CONTROL) => {
+                    self.reorder_selected_queued_message(-1).await;
+                }
+                KeyCode::Down if key_event.modifiers.intersects(KeyModifiers::CONTROL) => {
+                    self.reorder_selected_queued_message(1).await;
+                }
+                KeyCode::Up | KeyCode::Char('k') => self.move_message_queue_selection(-1),
+                KeyCode::Down | KeyCode::Char('j') => self.move_message_queue_selection(1),
+                KeyCode::Delete | KeyCode::Backspace | KeyCode::Char('d') => {
+                    self.delete_selected_queued_message().await;
+                }
+                KeyCode::Char('e') => self.begin_selected_queue_edit(),
+                KeyCode::Enter | KeyCode::Char('s') => {
+                    self.start_or_steer_selected_queued_message().await;
+                }
+                _ => {}
+            }
+            return Ok(false);
+        }
+
         // Skill autocomplete navigation
         if self.show_skill_autocomplete {
             match key_event.code {
@@ -277,6 +311,13 @@ impl TuiApp {
 
         match key_event.code {
             KeyCode::Esc => {
+                if self.editing_queue_message_id.take().is_some() {
+                    self.reset_input();
+                    return Ok(false);
+                }
+                if self.selected_queue_message.take().is_some() {
+                    return Ok(false);
+                }
                 if self.in_flight {
                     self.cancel_active_turn().await;
                     return Ok(false);
@@ -495,7 +536,19 @@ impl TuiApp {
             self.show_status_hint("Gateway client unavailable.", Duration::from_secs(2));
             return;
         };
-        match client.cancel_active_turn(&session_id).await {
+        let active_turn = match client.get_active_turn(&session_id).await {
+            Ok(active_turn) => active_turn,
+            Err(err) => {
+                self.push_system_notice(format!("Failed to read active turn: {err}"));
+                self.push_right_event("cancel request failed".to_string());
+                return;
+            }
+        };
+        let Some(turn_id) = active_turn.turn_id else {
+            self.show_status_hint("No active turn to cancel.", Duration::from_secs(2));
+            return;
+        };
+        match client.cancel_active_turn(&session_id, &turn_id).await {
             Ok(()) => {
                 self.push_right_event(format!("cancel requested for session {}", session_id));
                 self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));

@@ -92,6 +92,16 @@ import type {
   TimelineActiveTurnSnapshot as ProtocolTimelineActiveTurnSnapshot,
   TimelineActiveTurnStatus as ProtocolTimelineActiveTurnStatus,
   TimelineEventEnvelope as ProtocolTimelineEventEnvelope,
+  MessageQueue as ProtocolMessageQueue,
+  MessageQueueAddRequest as ProtocolMessageQueueAddRequest,
+  MessageQueueChangedNotification as ProtocolMessageQueueChangedNotification,
+  MessageQueueDeleteRequest as ProtocolMessageQueueDeleteRequest,
+  MessageQueueListRequest as ProtocolMessageQueueListRequest,
+  MessageQueueReorderRequest as ProtocolMessageQueueReorderRequest,
+  MessageQueueStartRequest as ProtocolMessageQueueStartRequest,
+  MessageQueueSteerRequest as ProtocolMessageQueueSteerRequest,
+  MessageQueueUpdateRequest as ProtocolMessageQueueUpdateRequest,
+  QueuedMessage as ProtocolQueuedMessage,
   PendingUserAction as ProtocolPendingUserAction,
   TimelineRecoveryResponse as ProtocolTimelineRecoveryResponse,
   TimelineRecoverySnapshot as ProtocolTimelineRecoverySnapshot,
@@ -349,6 +359,17 @@ export type TalosTurnCompletedEvent = ProtocolTalosTurnCompletedEvent;
 export type AgentEventPayload = ProtocolAgentEventPayload;
 
 export type TimelineEventEnvelope = ProtocolTimelineEventEnvelope;
+
+export type QueuedMessage = ProtocolQueuedMessage;
+export type MessageQueue = ProtocolMessageQueue;
+export type MessageQueueAddRequest = ProtocolMessageQueueAddRequest;
+export type MessageQueueListRequest = ProtocolMessageQueueListRequest;
+export type MessageQueueUpdateRequest = ProtocolMessageQueueUpdateRequest;
+export type MessageQueueDeleteRequest = ProtocolMessageQueueDeleteRequest;
+export type MessageQueueReorderRequest = ProtocolMessageQueueReorderRequest;
+export type MessageQueueStartRequest = ProtocolMessageQueueStartRequest;
+export type MessageQueueSteerRequest = ProtocolMessageQueueSteerRequest;
+export type MessageQueueChangedNotification = ProtocolMessageQueueChangedNotification;
 
 export type TimelineReplay = ProtocolTimelineReplay;
 

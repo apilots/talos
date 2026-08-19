@@ -74,11 +74,11 @@ export function createChatSlice(set: ChatSliceSetter): ChatSlice {
           },
         };
       }),
-    upsertUserInputBlock: (sessionId, messageId, input) =>
+    upsertUserInputBlock: (sessionId, messageId, itemId, input) =>
       set((state) => {
         const stream = ensureStreamState(state, sessionId);
         const blocks = [...stream.blocks];
-        const id = `user-${messageId}`;
+        const id = `user-${messageId}-${itemId}`;
         const index = blocks.findIndex((block) => block.id === id && block.kind === "user");
         if (index >= 0) {
           const current = blocks[index];

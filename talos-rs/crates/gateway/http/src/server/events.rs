@@ -81,6 +81,9 @@ pub(super) async fn subscribe_timeline_events_handler(
     let stream = ReceiverStream::new(subscription.subscription.events).map(|message| {
         match message {
             TimelineSubscriptionMessage::Event(record) => timeline_sse_event(record),
+            TimelineSubscriptionMessage::MessageQueueChanged(change) => {
+                message_queue_changed_sse_event(change)
+            }
             TimelineSubscriptionMessage::Closed(closed) => {
                 timeline_subscription_closed_sse_event(closed)
             }
@@ -93,6 +96,14 @@ pub(super) async fn subscribe_timeline_events_handler(
             .keep_alive(KeepAlive::default())
             .into_response(),
     ))
+}
+
+fn message_queue_changed_sse_event(
+    change: talos_types::MessageQueueChangedNotification,
+) -> Result<Event, serde_json::Error> {
+    Ok(Event::default()
+        .event("messageQueue/changed")
+        .data(serde_json::to_string(&change)?))
 }
 
 fn timeline_sse_response(mut response: Response) -> Response {

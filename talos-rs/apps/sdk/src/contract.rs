@@ -21,28 +21,31 @@ use talos_types::{
     FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
     MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
     MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, ModelListRequest, ModelListResponse,
-    PluginDisableRequest, PluginDisableResponse, PluginEnableRequest, PluginEnableResponse,
-    PluginInstallRequest, PluginInstallResponse, PluginListRequest, PluginListResponse,
-    PluginReadRequest, PluginReadResponse, PluginSearchRequest, PluginSearchResponse,
-    PluginSourceAddRequest, PluginSourceAddResponse, PluginSourceListRequest,
-    PluginSourceListResponse, PluginSourceRefreshRequest, PluginSourceRefreshResponse,
-    PluginSourceRemoveRequest, PluginSourceRemoveResponse, PluginUninstallRequest,
-    PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse, ProfileReadRequest,
-    ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest,
-    ProjectDeleteResponse, ProjectListRequest, ProjectListResponse, ProjectPatchRequest,
-    ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, RecoverTimelineRequest,
-    RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest, SessionActiveTurnResponse,
-    SessionClearRequest, SessionClearResponse, SessionCloseRequest, SessionCloseResponse,
-    SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse,
-    SessionGetRequest, SessionGetResponse, SessionHistoryRequest, SessionHistoryResponse,
-    SessionListRequest, SessionListResponse, SessionPatchRequest, SessionUpdateResponse,
-    SkillsReadResponse, StartTurnRequest, StartTurnResponse, SubmitDynamicToolResultRequest,
-    SubmitDynamicToolResultResponse, SubmitUserActionRequest, SubmitUserActionResponse,
-    SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
-    UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
-    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
+    PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
+    PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
+    PluginSearchRequest, PluginSearchResponse, PluginSourceAddRequest, PluginSourceAddResponse,
+    PluginSourceListRequest, PluginSourceListResponse, PluginSourceRefreshRequest,
+    PluginSourceRefreshResponse, PluginSourceRemoveRequest, PluginSourceRemoveResponse,
+    PluginUninstallRequest, PluginUninstallResponse, PluginUpdateRequest, PluginUpdateResponse,
+    ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
+    ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
+    ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
+    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
+    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
+    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
+    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
+    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
+    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
+    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
+    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
+    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
+    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
+    WorkspaceInfoResponse,
 };
 use tokio::sync::mpsc;
 
@@ -53,6 +56,15 @@ pub struct TimelineEventStream {
 pub struct TimelineStreamSubscription {
     pub response: SubscribeTimelineResponse,
     pub stream: TimelineEventStream,
+    pub message_queue_changes: MessageQueueChangeStream,
+}
+
+/// Live queue invalidations delivered by an existing Session subscription.
+///
+/// Notifications are not replayed. Callers must list the complete queue after
+/// connecting and after observing a newer revision.
+pub struct MessageQueueChangeStream {
+    receiver: mpsc::Receiver<talos_types::MessageQueueChangedNotification>,
 }
 
 impl TimelineEventStream {
@@ -69,6 +81,16 @@ impl TimelineEventStream {
 
     pub fn into_inner(self) -> mpsc::Receiver<TimelineEventEnvelope> {
         self.receiver
+    }
+}
+
+impl MessageQueueChangeStream {
+    pub fn new(receiver: mpsc::Receiver<talos_types::MessageQueueChangedNotification>) -> Self {
+        Self { receiver }
+    }
+
+    pub async fn recv(&mut self) -> Option<talos_types::MessageQueueChangedNotification> {
+        self.receiver.recv().await
     }
 }
 
@@ -220,6 +242,48 @@ pub trait GatewayClient: Send {
         &mut self,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse>;
+
+    /// Adds one message to the server-owned Session queue.
+    async fn add_queued_message(
+        &mut self,
+        request: MessageQueueAddRequest,
+    ) -> TalosResult<MessageQueue>;
+
+    /// Reads the complete server-owned Session queue.
+    async fn list_message_queue(
+        &mut self,
+        request: MessageQueueListRequest,
+    ) -> TalosResult<MessageQueue>;
+
+    /// Replaces one waiting message without changing its identity or position.
+    async fn update_queued_message(
+        &mut self,
+        request: MessageQueueUpdateRequest,
+    ) -> TalosResult<MessageQueue>;
+
+    /// Deletes one waiting message by server-assigned ID.
+    async fn delete_queued_message(
+        &mut self,
+        request: MessageQueueDeleteRequest,
+    ) -> TalosResult<MessageQueue>;
+
+    /// Applies a complete ordered permutation of current message IDs.
+    async fn reorder_message_queue(
+        &mut self,
+        request: MessageQueueReorderRequest,
+    ) -> TalosResult<MessageQueue>;
+
+    /// Starts the queue head or one explicitly selected waiting message.
+    async fn start_queued_message(
+        &mut self,
+        request: MessageQueueStartRequest,
+    ) -> TalosResult<StartTurnResponse>;
+
+    /// Submits one waiting message to the exact active Turn.
+    async fn steer_queued_message(
+        &mut self,
+        request: MessageQueueSteerRequest,
+    ) -> TalosResult<MessageQueue>;
 
     async fn submit_dynamic_tool_result(
         &mut self,

@@ -199,3 +199,56 @@ fn file_methods_decode_shared_requests_and_upload_envelope() {
         ClientRequestParams::FileList(talos_types::FileListRequest { .. })
     ));
 }
+
+#[test]
+fn message_queue_methods_decode_shared_camel_case_requests() {
+    let cases = [
+        (
+            "messageQueue/add",
+            json!({
+                "sessionId": "s1",
+                "input": [{ "type": "text", "text": "first" }]
+            }),
+        ),
+        ("messageQueue/list", json!({ "sessionId": "s1" })),
+        (
+            "messageQueue/update",
+            json!({
+                "sessionId": "s1",
+                "messageId": "q1",
+                "input": [{ "type": "text", "text": "updated" }]
+            }),
+        ),
+        (
+            "messageQueue/delete",
+            json!({ "sessionId": "s1", "messageId": "q1" }),
+        ),
+        (
+            "messageQueue/reorder",
+            json!({ "sessionId": "s1", "messageIds": ["q2", "q1"] }),
+        ),
+        (
+            "messageQueue/start",
+            json!({ "sessionId": "s1", "messageId": null }),
+        ),
+        (
+            "messageQueue/steer",
+            json!({ "sessionId": "s1", "messageId": "q1", "turnId": "t1" }),
+        ),
+    ];
+
+    for (method, params) in cases {
+        ClientRequest::decode(method, Some(params))
+            .unwrap_or_else(|error| panic!("{method} should decode: {error}"));
+    }
+
+    let start = ClientRequest::decode("messageQueue/start", Some(json!({ "sessionId": "s1" })))
+        .expect("omitted messageId should decode");
+    assert_eq!(
+        start.params,
+        ClientRequestParams::MessageQueueStart(MessageQueueStartRequest {
+            session_id: "s1".to_string(),
+            message_id: None,
+        })
+    );
+}

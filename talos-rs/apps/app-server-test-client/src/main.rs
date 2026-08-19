@@ -16,10 +16,14 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 mod mcp_e2e;
+mod message_queue_e2e;
 mod request;
+mod scenario;
 mod skills_e2e;
 use mcp_e2e::{mcp_e2e, prepare_mcp_fixture};
+use message_queue_e2e::message_queue_e2e;
 use request::{start_turn_request, test_model_ref};
+use scenario::Scenario;
 use skills_e2e::{prepare_skills_fixture, skills_e2e};
 
 #[tokio::main]
@@ -56,45 +60,10 @@ async fn main() -> Result<()> {
         Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
         Scenario::McpE2e => mcp_e2e(&mut client).await?,
+        Scenario::MessageQueueE2e => message_queue_e2e(&mut client).await?,
     }
     GatewayClient::shutdown(&mut client).await?;
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Scenario {
-    Smoke,
-    Malformed,
-    Replay,
-    MultiSubscriber,
-    TurnSmoke,
-    ActiveTurnConflict,
-    ResourceMatrix,
-    CloudSessionCache,
-    SkillsE2e,
-    McpE2e,
-}
-
-impl Scenario {
-    fn parse(value: Option<&str>) -> Result<Self> {
-        match value.unwrap_or("smoke") {
-            "smoke" => Ok(Self::Smoke),
-            "malformed" => Ok(Self::Malformed),
-            "replay" => Ok(Self::Replay),
-            "multi-subscriber" => Ok(Self::MultiSubscriber),
-            "turn-smoke" => Ok(Self::TurnSmoke),
-            "active-turn-conflict" => Ok(Self::ActiveTurnConflict),
-            "resource-matrix" => Ok(Self::ResourceMatrix),
-            "cloud-session-cache" => Ok(Self::CloudSessionCache),
-            "skills-e2e" => Ok(Self::SkillsE2e),
-            "mcp-e2e" => Ok(Self::McpE2e),
-            other => Err(anyhow!("unsupported scenario: {other}")),
-        }
-    }
-
-    fn uses_cloud_session_cache(self) -> bool {
-        matches!(self, Self::CloudSessionCache)
-    }
 }
 
 async fn smoke(client: &mut AppServerClient) -> Result<()> {

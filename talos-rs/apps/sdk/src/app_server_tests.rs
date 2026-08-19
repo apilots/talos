@@ -72,6 +72,22 @@ fn file_upload_params_use_canonical_padded_base64() {
     assert_eq!(params.request.filename, "note.txt");
 }
 
+#[test]
+fn decodes_message_queue_change_notification_without_timeline_envelope() {
+    let notification = JsonRpcNotification::new(
+        "messageQueue/changed",
+        Some(serde_json::json!({ "sessionId": "session-1", "revision": 6 })),
+    );
+
+    assert_eq!(
+        response::decode_message_queue_changed(&notification).expect("notification should decode"),
+        Some(talos_types::MessageQueueChangedNotification {
+            session_id: "session-1".to_string(),
+            revision: 6,
+        })
+    );
+}
+
 #[tokio::test]
 async fn cloud_login_status_uses_returned_token_without_session_cache() {
     let mut client = test_app_server_client(false);
@@ -110,6 +126,8 @@ async fn dispatch_application_event_routes_only_matching_subscription() {
     let pending_subscription_events = Arc::new(Mutex::new(HashMap::new()));
     let (first_tx, mut first_rx) = mpsc::channel(4);
     let (second_tx, mut second_rx) = mpsc::channel(4);
+    let (first_queue_tx, _first_queue_rx) = mpsc::channel(4);
+    let (second_queue_tx, _second_queue_rx) = mpsc::channel(4);
     {
         let mut streams = subscription_senders.lock().await;
         streams.insert(
@@ -117,6 +135,7 @@ async fn dispatch_application_event_routes_only_matching_subscription() {
             SubscriptionStream {
                 session_id: "session-1".to_string(),
                 sender: first_tx,
+                message_queue_sender: first_queue_tx,
             },
         );
         streams.insert(
@@ -124,6 +143,7 @@ async fn dispatch_application_event_routes_only_matching_subscription() {
             SubscriptionStream {
                 session_id: "session-1".to_string(),
                 sender: second_tx,
+                message_queue_sender: second_queue_tx,
             },
         );
     }
@@ -160,6 +180,39 @@ async fn dispatch_application_event_buffers_until_stream_registration() {
         .expect("buffered event");
     assert_eq!(buffered.len(), 1);
     assert_eq!(buffered[0].event_id, "ev_1");
+}
+
+#[tokio::test]
+async fn message_queue_change_closes_a_lagged_sdk_subscription() {
+    let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
+    let (timeline_tx, mut timeline_rx) = mpsc::channel(1);
+    let (queue_tx, _queue_rx) = mpsc::channel(1);
+    queue_tx
+        .try_send(talos_types::MessageQueueChangedNotification {
+            session_id: "session-1".to_string(),
+            revision: 1,
+        })
+        .expect("fill queue channel");
+    subscription_senders.lock().await.insert(
+        "sub-1".to_string(),
+        SubscriptionStream {
+            session_id: "session-1".to_string(),
+            sender: timeline_tx,
+            message_queue_sender: queue_tx,
+        },
+    );
+
+    dispatch_message_queue_change(
+        &subscription_senders,
+        talos_types::MessageQueueChangedNotification {
+            session_id: "session-1".to_string(),
+            revision: 2,
+        },
+    )
+    .await;
+
+    assert!(subscription_senders.lock().await.is_empty());
+    assert!(timeline_rx.recv().await.is_none());
 }
 
 fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {

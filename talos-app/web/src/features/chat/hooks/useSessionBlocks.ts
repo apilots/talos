@@ -68,7 +68,11 @@ export function buildSessionBlocks({
   const liveBlockIds = new Set(liveBlocks.map((block) => block.id));
   const liveHasPendingInput = Boolean(
     streamState?.pendingInput?.serverMessageId &&
-      liveBlockIds.has(`user-${streamState.pendingInput.serverMessageId}`),
+      liveBlocks.some(
+        (block) =>
+          block.kind === "user" &&
+          block.id.startsWith(`user-${streamState.pendingInput?.serverMessageId}-`),
+      ),
   );
   const pendingInputBlock =
     historyHasPendingInput || liveHasPendingInput ? undefined : createPendingInputBlock(streamState);

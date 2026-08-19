@@ -1,4 +1,10 @@
-import type { FileInfo, SkillSuggestion, UserPermissionMode } from "@talos/sdk-browser";
+import type {
+  FileInfo,
+  MessageQueue,
+  SkillSuggestion,
+  TalosInputItem,
+  UserPermissionMode,
+} from "@talos/sdk-browser";
 
 import type { ContextCompactionStage } from "@/shared/types/protocol";
 import type {
@@ -13,6 +19,17 @@ import type { ComposerAttachmentKind } from "./useComposerAttachments";
 export type { ReasoningLevel, RuntimeMode };
 
 export type ProjectMenuMode = "list" | "add_menu";
+
+export interface MessageQueueController {
+  activeTurnId?: string;
+  error?: string;
+  queue?: MessageQueue;
+  delete: (messageId: string) => Promise<unknown>;
+  reorder: (messageIds: string[]) => Promise<unknown>;
+  start: (messageId?: string) => Promise<unknown>;
+  steer: (messageId: string, turnId: string) => Promise<unknown>;
+  update: (messageId: string, input: TalosInputItem[]) => Promise<unknown>;
+}
 
 export interface ChatComposerProps {
   draft: string;
@@ -47,4 +64,5 @@ export interface ChatComposerProps {
   compact?: boolean;
   initialAttachments?: FileInfo[];
   supportedAttachmentKinds?: ComposerAttachmentKind[];
+  messageQueue?: MessageQueueController;
 }

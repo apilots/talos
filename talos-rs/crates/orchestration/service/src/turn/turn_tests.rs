@@ -1,10 +1,11 @@
 use super::*;
 use crate::session::SessionService;
 use crate::test_support::run_test_migrations;
-use crate::{TimelineEventRetentionConfig, TimelineEventService};
+use crate::{SessionMessageQueueService, TimelineEventRetentionConfig, TimelineEventService};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use talos_error::ApiError;
 use talos_storage::SqliteStorage;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
@@ -28,6 +29,9 @@ use talos_types::{
     TimelineUserActionEvent, UserActionParams, UserActionResponse, UserActionState,
 };
 use tokio::sync::mpsc;
+
+#[path = "queue_start_tests.rs"]
+mod queue_start_tests;
 
 #[test]
 fn turn_input_accepts_files_without_text() {
@@ -108,7 +112,11 @@ fn resume_context_keeps_all_nonterminal_tool_item_identities_in_event_order() {
 #[derive(Default)]
 struct RecordingTurnExecutor {
     stream_request: Mutex<Option<AgentDispatchParams>>,
+    stream_requests: Mutex<Vec<AgentDispatchParams>>,
     stream_error: Mutex<Option<TalosError>>,
+    input_error: Mutex<Option<TalosError>>,
+    submitted_inputs: Mutex<Vec<AgentDispatchInputParams>>,
+    turn_errors_remaining: Mutex<usize>,
     dynamic_turn_id: Mutex<Option<String>>,
     title_update: Mutex<Option<String>>,
     completed_stop_reason: Mutex<Option<StopReason>>,
@@ -160,6 +168,7 @@ impl TurnExecutor for RecordingTurnExecutor {
         request: AgentDispatchParams,
     ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
         self.stream_request.lock().unwrap().replace(request.clone());
+        self.stream_requests.lock().unwrap().push(request.clone());
         if let Some(error) = self.stream_error.lock().unwrap().take() {
             return Err(error);
         }
@@ -199,44 +208,71 @@ impl TurnExecutor for RecordingTurnExecutor {
             .await
             .unwrap();
         }
+        let should_error = {
+            let mut turn_errors_remaining = self.turn_errors_remaining.lock().unwrap();
+            let should_error = *turn_errors_remaining > 0;
+            *turn_errors_remaining = turn_errors_remaining.saturating_sub(1);
+            should_error
+        };
+        let (event_type, payload) = if should_error {
+            (
+                talos_types::talos::AgentEventType::TurnError,
+                AgentEventPayload::TurnError(talos_types::talos::TalosTurnErrorEvent {
+                    request_id: "req-test".to_string(),
+                    turn_id: request.turn_id.clone(),
+                    error: ApiError::new(talos_error::ErrorCode::InternalError),
+                    failed_at_ms: 1,
+                }),
+            )
+        } else {
+            (
+                talos_types::talos::AgentEventType::TurnCompleted,
+                AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
+                    request_id: "req-test".to_string(),
+                    turn_id: request.turn_id.clone(),
+                    completed_at_ms: 1,
+                    stop_reason: self
+                        .completed_stop_reason
+                        .lock()
+                        .unwrap()
+                        .take()
+                        .unwrap_or(StopReason::EndTurn),
+                    usage: TokenUsage::default(),
+                    metrics: None,
+                    artifact_seq: Some(1),
+                }),
+            )
+        };
         let event = AgentEvent {
             event_seq: None,
             event_id: None,
             created_at_ms: None,
-            event_type: talos_types::talos::AgentEventType::TurnCompleted,
+            event_type,
             turn_id: request.turn_id.clone(),
             message_id: request.session.context.message_id.clone(),
             session_id: request.session.context.session_id.clone(),
             sequence: 1,
-            payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                request_id: "req-test".to_string(),
-                turn_id: request.turn_id,
-                completed_at_ms: 1,
-                stop_reason: self
-                    .completed_stop_reason
-                    .lock()
-                    .unwrap()
-                    .take()
-                    .unwrap_or(StopReason::EndTurn),
-                usage: TokenUsage::default(),
-                metrics: None,
-                artifact_seq: Some(1),
-            }),
+            payload,
         };
         tx.send(event).await.unwrap();
         Ok(rx)
     }
 
     async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
+        if let Some(error) = self.input_error.lock().unwrap().take() {
+            return Err(error);
+        }
         assert!(matches!(
             params.binding,
             talos_types::DispatchBinding::Exact { ref agent_id } if agent_id == "default"
         ));
-        assert!(matches!(
-            params.input,
-            AgentDispatchInput::UserActionResponse { .. }
-        ));
-        self.dynamic_turn_id.lock().unwrap().replace(params.turn_id);
+        if matches!(params.input, AgentDispatchInput::UserActionResponse { .. }) {
+            self.dynamic_turn_id
+                .lock()
+                .unwrap()
+                .replace(params.turn_id.clone());
+        }
+        self.submitted_inputs.lock().unwrap().push(params);
         Ok(())
     }
 
@@ -258,7 +294,7 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
         ))),
         ..Default::default()
     });
-    let (service, _event_service, store) = test_service(turn_executor).await;
+    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
     create_test_session_record(store.clone()).await;
 
     let error = service
@@ -291,6 +327,7 @@ async fn test_service(
     TurnService,
     Arc<TimelineEventService>,
     Arc<DatabaseSessionStore>,
+    SessionMessageQueueService,
 ) {
     test_service_with_runtime(turn_executor, Arc::new(NoopSessionRuntime::default())).await
 }
@@ -302,6 +339,7 @@ async fn test_service_with_runtime(
     TurnService,
     Arc<TimelineEventService>,
     Arc<DatabaseSessionStore>,
+    SessionMessageQueueService,
 ) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_test_migrations(storage.pool()).await;
@@ -323,6 +361,8 @@ async fn test_service_with_runtime(
         Arc::new(MockProjectStore::new()),
         config.clone(),
     ));
+    let message_queue =
+        SessionMessageQueueService::new(10).expect("queue service should initialize");
     (
         TurnService::new(
             turn_executor,
@@ -331,10 +371,12 @@ async fn test_service_with_runtime(
             profile_store,
             sessions,
             session_runtime,
+            message_queue.clone(),
             config,
         ),
         event_service,
         store,
+        message_queue,
     )
 }
 
@@ -567,10 +609,199 @@ async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
         .expect("session record should be created");
 }
 
+async fn wait_for_stream_requests(executor: &RecordingTurnExecutor, expected: usize) {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            if executor.stream_requests.lock().unwrap().len() >= expected {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("queued turns should be dispatched");
+}
+
+#[tokio::test]
+async fn queued_messages_auto_dispatch_in_fifo_order_after_fast_completion() {
+    let turn_executor = Arc::new(RecordingTurnExecutor::default());
+    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
+    create_test_session_record(store).await;
+    message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::Text {
+                text: "first".to_string(),
+            }],
+        )
+        .unwrap();
+    message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::Text {
+                text: "second".to_string(),
+            }],
+        )
+        .unwrap();
+
+    service
+        .try_dispatch_next("s1")
+        .await
+        .expect("first queued message should start")
+        .expect("queue should contain a message");
+    wait_for_stream_requests(turn_executor.as_ref(), 2).await;
+
+    let requests = turn_executor.stream_requests.lock().unwrap();
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| request.input.clone())
+            .collect::<Vec<_>>(),
+        vec![
+            vec![TalosInputItem::Text {
+                text: "first".to_string(),
+            }],
+            vec![TalosInputItem::Text {
+                text: "second".to_string(),
+            }],
+        ]
+    );
+    assert!(message_queue.list("s1").unwrap().messages.is_empty());
+}
+
+#[tokio::test]
+async fn queued_messages_continue_after_a_failed_turn() {
+    let turn_executor = Arc::new(RecordingTurnExecutor {
+        turn_errors_remaining: Mutex::new(1),
+        ..Default::default()
+    });
+    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
+    create_test_session_record(store).await;
+    message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::Text {
+                text: "fails".to_string(),
+            }],
+        )
+        .unwrap();
+    message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::Text {
+                text: "continues".to_string(),
+            }],
+        )
+        .unwrap();
+
+    service
+        .try_dispatch_next("s1")
+        .await
+        .expect("failed queued turn should still be accepted");
+    wait_for_stream_requests(turn_executor.as_ref(), 2).await;
+
+    assert!(message_queue.list("s1").unwrap().messages.is_empty());
+}
+
+#[tokio::test]
+async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them() {
+    let turn_executor = Arc::new(RecordingTurnExecutor::default());
+    let (service, _event_service, store, message_queue) = test_service(turn_executor.clone()).await;
+    create_test_session_record(store.clone()).await;
+    store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "s1".to_string(),
+            turn_id: "turn-active".to_string(),
+            message_id: Some("msg-active".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: None,
+            current_action_id: None,
+            updated_at: 1,
+        })
+        .await
+        .unwrap();
+    let accepted_input = vec![
+        TalosInputItem::Text {
+            text: "inspect this".to_string(),
+        },
+        TalosInputItem::Files {
+            file_ids: vec!["file-1".to_string()],
+        },
+    ];
+    let accepted = message_queue.add("s1", accepted_input.clone()).unwrap();
+
+    let stale_error = service
+        .steer_queued_message(test_session(), &accepted.messages[0].id, "turn-stale")
+        .await
+        .expect_err("stale turn id must not consume the queued message");
+    assert!(stale_error.is_code(talos_error::ErrorCode::ResourceNotFound));
+    assert_eq!(message_queue.list("s1").unwrap(), accepted);
+    assert!(turn_executor.submitted_inputs.lock().unwrap().is_empty());
+
+    service
+        .steer_queued_message(test_session(), &accepted.messages[0].id, "turn-active")
+        .await
+        .expect("text and files should be accepted for steer");
+
+    assert!(matches!(
+        &turn_executor.submitted_inputs.lock().unwrap()[0].input,
+        AgentDispatchInput::Message { input } if input == &accepted_input
+    ));
+    let rejected = message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::Text {
+                text: "too late".to_string(),
+            }],
+        )
+        .unwrap();
+    turn_executor
+        .input_error
+        .lock()
+        .unwrap()
+        .replace(TalosError::public(
+            talos_error::ErrorCode::Conflict,
+            "active turn ended before accepting the message".to_string(),
+        ));
+
+    let rejected_error = service
+        .steer_queued_message(test_session(), &rejected.messages[0].id, "turn-active")
+        .await
+        .expect_err("rejected active-turn input must remain queued");
+
+    assert!(rejected_error.is_code(talos_error::ErrorCode::Conflict));
+    assert_eq!(message_queue.list("s1").unwrap(), rejected);
+    message_queue
+        .delete("s1", &rejected.messages[0].id)
+        .unwrap();
+    let skill_queue = message_queue
+        .add(
+            "s1",
+            vec![TalosInputItem::SkillSelection {
+                name: "review".to_string(),
+                path: "/skills/review".to_string(),
+            }],
+        )
+        .unwrap();
+    let skill_id = skill_queue.messages[0].id.clone();
+
+    let error = service
+        .steer_queued_message(test_session(), &skill_id, "turn-active")
+        .await
+        .expect_err("skills are not supported by active turn steer");
+
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    assert_eq!(
+        message_queue.list("s1").unwrap().messages,
+        skill_queue.messages
+    );
+}
+
 #[tokio::test]
 async fn submit_start_turn_records_completed_turn_progress() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, _event_service, store, _message_queue) =
+        test_service(turn_executor.clone()).await;
     create_test_session_record(store.clone()).await;
 
     service
@@ -619,7 +850,7 @@ async fn cancelled_turn_does_not_advance_session_progress() {
         .lock()
         .unwrap()
         .replace(StopReason::Cancelled);
-    let (service, _event_service, store) = test_service(turn_executor).await;
+    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
     create_test_session_record(store.clone()).await;
 
     service
@@ -654,7 +885,8 @@ async fn cancelled_turn_does_not_advance_session_progress() {
 #[tokio::test]
 async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, _event_service, store, _message_queue) =
+        test_service(turn_executor.clone()).await;
     create_test_session_record(store.clone()).await;
     let request = StartTurnRequest {
         session_id: "s1".to_string(),
@@ -699,7 +931,7 @@ async fn submit_start_turn_persists_agent_title_update() {
         .lock()
         .unwrap()
         .replace("Meaningful Topic".to_string());
-    let (service, _event_service, store) = test_service(turn_executor).await;
+    let (service, _event_service, store, _message_queue) = test_service(turn_executor).await;
     create_test_session_record(store.clone()).await;
 
     service
@@ -746,7 +978,8 @@ async fn submit_start_turn_persists_agent_title_update() {
 #[tokio::test]
 async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, _event_service, store, _message_queue) =
+        test_service(turn_executor.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
 
@@ -837,7 +1070,7 @@ async fn submit_dynamic_tool_result_resumes_original_turn_and_message() {
 async fn sandbox_approval_cancel_finishes_the_turn_without_replaying_the_tool() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
     let session_runtime = Arc::new(NoopSessionRuntime::default());
-    let (service, _event_service, store) =
+    let (service, _event_service, store, _message_queue) =
         test_service_with_runtime(turn_executor.clone(), session_runtime.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_sandbox_approval(store.as_ref()).await;
@@ -887,7 +1120,8 @@ async fn sandbox_approval_cancel_finishes_the_turn_without_replaying_the_tool() 
 #[tokio::test]
 async fn submit_dynamic_tool_result_requires_original_tool_item_id() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, _event_service, store, _message_queue) =
+        test_service(turn_executor.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), None).await;
 
     let error = service
@@ -906,7 +1140,8 @@ async fn submit_dynamic_tool_result_requires_original_tool_item_id() {
 #[tokio::test]
 async fn stale_user_action_submission_does_not_accept_the_response() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, _event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, _event_service, store, _message_queue) =
+        test_service(turn_executor.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
     store
         .upsert_active_turn(ActiveTurnUpdate {
@@ -947,7 +1182,7 @@ async fn stale_user_action_submission_does_not_accept_the_response() {
 #[tokio::test]
 async fn accepted_user_action_recovery_resumes_the_original_turn() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, event_service, store, _message_queue) = test_service(turn_executor.clone()).await;
     create_test_session_record(store.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
     accept_pending_dynamic_action(&event_service).await;
@@ -967,7 +1202,7 @@ async fn accepted_user_action_recovery_resumes_the_original_turn() {
 #[tokio::test]
 async fn resuming_user_action_recovery_finishes_as_execution_unknown() {
     let turn_executor = Arc::new(RecordingTurnExecutor::default());
-    let (service, event_service, store) = test_service(turn_executor.clone()).await;
+    let (service, event_service, store, _message_queue) = test_service(turn_executor.clone()).await;
     insert_pending_dynamic_action(store.as_ref(), Some("tool-original")).await;
     let accepted = accept_pending_dynamic_action(&event_service).await;
     event_service

@@ -34,6 +34,8 @@ import { useComposerCommands } from "./useComposerCommands";
 import { EMPTY_ATTACHMENT_KINDS, EMPTY_ATTACHMENTS, EMPTY_SELECTED_SKILLS } from "./ChatComposer.defaults";
 import type * as Composer from "./ChatComposer.types";
 import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft";
+import { WaitingMessages } from "./WaitingMessages";
+import { filterComposerProjects } from "./ChatComposer.utils";
 
 // ─── main component ──────────────────────────────────────────────────────────
 
@@ -70,6 +72,7 @@ export function ChatComposer({
   compact = false,
   initialAttachments = EMPTY_ATTACHMENTS,
   supportedAttachmentKinds = EMPTY_ATTACHMENT_KINDS,
+  messageQueue,
 }: Composer.ChatComposerProps) {
   const { t } = useTranslation(["chat", "common", "settings"]);
   const isBusy = Boolean(isStreaming || isCancelling || contextCompactionStage);
@@ -193,13 +196,7 @@ export function ChatComposer({
   const activeProject = projects.find((p) => p.id === activeProjectId);
   const isProjectBound = activeProject && !isUnboundProject(activeProject.id);
 
-  const filteredProjects = projects.filter((p) => {
-    if (!projectSearch) return true;
-    return (
-      p.name.toLowerCase().includes(projectSearch.toLowerCase()) ||
-      p.directory?.toLowerCase().includes(projectSearch.toLowerCase())
-    );
-  });
+  const filteredProjects = filterComposerProjects(projects, projectSearch);
 
   function openDirectoryDialog(mode: ProjectDirectoryDialogMode) {
     closeProjectPicker();
@@ -336,6 +333,7 @@ export function ChatComposer({
     <div className="relative">
       <ComposerNotice commandNotice={commandNotice} contextCompactionStage={contextCompactionStage} />
       <Panel className="overflow-visible rounded-[1.5rem] border-border/70 bg-card p-0 shadow-[0_16px_34px_rgba(104,94,78,0.07)] backdrop-blur-none">
+        {messageQueue ? <WaitingMessages controller={messageQueue} /> : null}
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <ComposerModelSelect
@@ -369,7 +367,7 @@ export function ChatComposer({
             skills={selectedSkills}
           />
           <ComposerAttachmentTray
-            disabled={Boolean(disabled || isBusy)}
+            disabled={Boolean(disabled)}
             error={
               attachmentDraft.hasInvalidAttachments
                 ? t("chat:invalidAttachments")
@@ -420,7 +418,7 @@ export function ChatComposer({
               }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                if (isBusy) {
+                if (contextCompactionStage) {
                   return;
                 }
                 void handleSend();
@@ -451,7 +449,7 @@ export function ChatComposer({
         <div className="flex flex-wrap items-center gap-1 px-3 pb-3 pt-1.5">
           <ComposerAttachments
             availableFiles={attachmentDraft.availableFiles}
-            disabled={Boolean(disabled || isBusy)}
+            disabled={Boolean(disabled)}
             hasMoreAvailable={attachmentDraft.hasMoreAvailable}
             isLoading={attachmentDraft.isLoading}
             isLoadingMore={attachmentDraft.isLoadingMore}

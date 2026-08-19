@@ -40,7 +40,8 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
-    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, PlannerMode,
+    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, MessageQueueConfig,
+    PlannerMode,
 };
 pub use domains::automation::{
     AutomationConfig, MemoryDailyMaintenanceConfig, ProfileUsageRetentionConfig,

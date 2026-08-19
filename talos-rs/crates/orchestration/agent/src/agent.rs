@@ -3,7 +3,7 @@ use dashmap::DashMap;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 mod kernel;
 mod lifecycle;
@@ -288,6 +288,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
             | talos_error::ErrorCode::ResourceExpired
             | talos_error::ErrorCode::Conflict
             | talos_error::ErrorCode::ActiveTurnRunning
+            | talos_error::ErrorCode::MessageQueueFull
+            | talos_error::ErrorCode::MessageQueueBusy
             | talos_error::ErrorCode::RetrySourceCompleted
             | talos_error::ErrorCode::RetrySourceMismatch
             | talos_error::ErrorCode::IdempotencyConflict
@@ -638,44 +640,63 @@ impl AgentHarness for AgentHarnessImpl {
                 .map_err(Self::map_dynamic_input_error)?;
                 Ok(AgentInputResult { accepted: true })
             }
-            AgentInput::Message { message } => {
-                let session_id = params.session.context.session_id;
-                let handle = self.active_turns.get(&session_id).ok_or_else(|| {
-                    AgentError::run_not_found(format!(
-                        "active turn for session {session_id} is not running"
-                    ))
-                })?;
-                let ActiveTurnHandle::Running {
-                    turn_id,
-                    message_tx,
-                    ..
-                } = handle.value()
-                else {
-                    return Err(AgentError::run_not_found(format!(
-                        "active turn for session {session_id} is not running"
-                    )));
+            AgentInput::Message { input } => {
+                let session_id = params.session.context.session_id.clone();
+                let active_input = self
+                    .runtime
+                    .prepare_active_turn_input(&params.session, input)
+                    .await
+                    .map_err(Self::map_dynamic_input_error)?;
+                let sender = {
+                    let handle = self.active_turns.get(&session_id).ok_or_else(|| {
+                        AgentError::run_not_found(format!(
+                            "active turn for session {session_id} is not running"
+                        ))
+                    })?;
+                    let ActiveTurnHandle::Running {
+                        turn_id,
+                        message_tx,
+                        ..
+                    } = handle.value()
+                    else {
+                        return Err(AgentError::run_not_found(format!(
+                            "active turn for session {session_id} is not running"
+                        )));
+                    };
+                    if turn_id != &params.turn_id {
+                        return Err(AgentError::run_not_found(format!(
+                            "active turn `{}` for session {session_id}",
+                            params.turn_id
+                        )));
+                    }
+                    message_tx.as_ref().cloned().ok_or_else(|| {
+                        AgentError::input_rejected(format!(
+                            "active turn `{}` does not accept messages",
+                            params.turn_id
+                        ))
+                    })?
                 };
-                if turn_id != &params.turn_id {
-                    return Err(AgentError::run_not_found(format!(
-                        "active turn `{}` for session {session_id}",
-                        params.turn_id
-                    )));
-                }
-                let sender = message_tx.as_ref().ok_or_else(|| {
+                let (accepted_tx, accepted_rx) = oneshot::channel();
+                sender
+                    .try_send(talos_agent_kernel::ActiveTurnInputDelivery::new(
+                        active_input,
+                        accepted_tx,
+                    ))
+                    .map_err(|error| match error {
+                        mpsc::error::TrySendError::Full(_) => AgentError::input_rejected(format!(
+                            "active turn `{}` message input is full",
+                            params.turn_id
+                        )),
+                        mpsc::error::TrySendError::Closed(_) => AgentError::run_not_found(format!(
+                            "active turn `{}` message input is closed",
+                            params.turn_id
+                        )),
+                    })?;
+                accepted_rx.await.map_err(|_| {
                     AgentError::input_rejected(format!(
-                        "active turn `{}` does not accept messages",
+                        "active turn `{}` ended before accepting the message",
                         params.turn_id
                     ))
-                })?;
-                sender.try_send(message).map_err(|error| match error {
-                    mpsc::error::TrySendError::Full(_) => AgentError::input_rejected(format!(
-                        "active turn `{}` message input is full",
-                        params.turn_id
-                    )),
-                    mpsc::error::TrySendError::Closed(_) => AgentError::run_not_found(format!(
-                        "active turn `{}` message input is closed",
-                        params.turn_id
-                    )),
                 })?;
                 Ok(AgentInputResult { accepted: true })
             }

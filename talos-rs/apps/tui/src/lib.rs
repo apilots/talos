@@ -10,6 +10,7 @@ mod clipboard;
 mod commands;
 mod input;
 mod input_history;
+mod message_queue;
 mod model_picker;
 mod model_selection;
 mod permission_picker;
@@ -29,7 +30,7 @@ mod types;
 mod user_action;
 mod utils;
 
-pub use client::GatewayClient;
+pub use client::{GatewayClient, MessageQueueSubscription};
 pub use run::run_tui_app_with_gateway_client;
 pub use turn_request::TerminalTurnRequest;
 use types::*;
@@ -43,21 +44,20 @@ use render_runtime::runtime::engine::RenderRuntimeEngine;
 use render_runtime::transcript::block::TranscriptBlockId;
 use session_picker::SessionPickerState;
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     path::PathBuf,
     sync::Arc,
     time::{Duration, Instant},
 };
 use talos_error::TalosResult;
 use talos_sdk::{
-    ModelInfo, ReasoningEffort, SkillSuggestion, TalosTimelineItem, TimelineEventEnvelope,
-    UserPermissionMode,
+    MessageQueue, ModelInfo, ReasoningEffort, SkillSuggestion, TalosTimelineItem,
+    TimelineEventEnvelope, UserPermissionMode,
 };
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 use tokio::sync::mpsc;
 
 pub(crate) const MAX_RIGHT_EVENTS: usize = 120;
-pub(crate) const MAX_QUEUE_LEN: usize = 3;
 pub(crate) const STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const SESSION_CLOSE_SLOW_NOTICE: Duration = Duration::from_secs(4);
 pub(crate) const SESSION_CLOSE_FORCE_TIMEOUT: Duration = Duration::from_secs(65);
@@ -94,7 +94,13 @@ pub struct TuiApp {
     pub(crate) rendered_chat_cache_key: Option<ChatRenderCacheKey>,
     pub(crate) chat_content_rect: Option<Rect>,
     pub(crate) chat_viewport_height: usize,
-    pub(crate) message_queue: VecDeque<QueuedMessage>,
+    pub(crate) message_queue: MessageQueue,
+    pub(crate) message_queue_subscription: Option<client::MessageQueueSubscription>,
+    pub(crate) message_queue_subscription_session_id: Option<String>,
+    pub(crate) message_queue_retry_at: Option<Instant>,
+    pub(crate) message_queue_turn_reconcile_pending: bool,
+    pub(crate) selected_queue_message: Option<usize>,
+    pub(crate) editing_queue_message_id: Option<String>,
     pub(crate) trace_event_count: u64,
     pub(crate) in_flight: bool,
     pub(crate) received_output_delta: bool,

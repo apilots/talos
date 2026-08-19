@@ -464,6 +464,53 @@ mod tests {
     }
 
     #[test]
+    fn agent_events_interleave_same_turn_user_inputs_with_model_work() {
+        let mut engine = RenderRuntimeEngine::default();
+        let initial = timeline_user_input_item("initial");
+        let mut steer = timeline_user_input_item("steer");
+        steer.item_id = "user-item-2".to_string();
+        let mut before_steer = timeline_text_item(TalosTimelinePhase::Commentary);
+        before_steer.item_id = "assistant-item-1".to_string();
+        let mut after_steer = timeline_text_item(TalosTimelinePhase::FinalAnswer);
+        after_steer.item_id = "assistant-item-2".to_string();
+
+        engine.apply_timeline_item_started(&initial);
+        engine.apply_timeline_item_started(&before_steer);
+        engine.apply_timeline_item_delta(
+            &before_steer,
+            TalosTimelineDelta::Text {
+                text: "before steer".to_string(),
+            },
+        );
+        engine.apply_timeline_item_completed(&before_steer, None);
+        engine.apply_timeline_item_started(&steer);
+        engine.apply_timeline_item_started(&after_steer);
+        engine.apply_timeline_item_delta(
+            &after_steer,
+            TalosTimelineDelta::Text {
+                text: "after steer".to_string(),
+            },
+        );
+        engine.apply_timeline_item_completed(&after_steer, None);
+
+        let transcript = engine
+            .store()
+            .blocks()
+            .iter()
+            .map(|block| (block.kind, block.lines[0].content.plain_text()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            transcript,
+            vec![
+                (TranscriptBlockKind::UserInput, "initial".to_string()),
+                (TranscriptBlockKind::Commentary, "before steer".to_string(),),
+                (TranscriptBlockKind::UserInput, "steer".to_string()),
+                (TranscriptBlockKind::FinalAnswer, "after steer".to_string(),),
+            ]
+        );
+    }
+
+    #[test]
     fn engine_consumes_timeline_text_lifecycle_without_early_flush() {
         let mut engine = RenderRuntimeEngine::default();
         let item = timeline_text_item(TalosTimelinePhase::Unknown);

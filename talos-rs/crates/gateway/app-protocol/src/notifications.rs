@@ -4,6 +4,7 @@ use ts_rs::TS;
 
 use crate::events::{SubscriptionTerminatedEnvelope, TimelineSubscriptionNotification};
 use crate::version::ProtocolVersion;
+use talos_types::MessageQueueChangedNotification;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
@@ -28,6 +29,8 @@ pub enum ServerNotification {
     TimelineTurnError(TimelineSubscriptionNotification),
     #[serde(rename = "subscription.terminated")]
     SubscriptionTerminated(SubscriptionTerminatedEnvelope),
+    #[serde(rename = "messageQueue/changed")]
+    MessageQueueChanged(MessageQueueChangedNotification),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]

@@ -230,8 +230,8 @@ export async function deleteSession(sessionId: string) {
   await getTalosClient().sessions.delete({ session_id: sessionId });
 }
 
-export async function cancelActiveTurn(sessionId: string) {
-  await getTalosClient().sessions.cancel({ session_id: sessionId });
+export async function cancelActiveTurn(sessionId: string, turnId: string) {
+  await getTalosClient().sessions.cancel({ session_id: sessionId, turn_id: turnId });
 }
 
 export async function compactSession(sessionId: string) {

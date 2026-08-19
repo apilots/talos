@@ -46,9 +46,11 @@ export function buildBlocksFromHistorySnapshot(
   const inputItems: ChatTimelineBuildResult["inputItems"] = [];
   const messageIds = new Set<string>();
   let inputIndex = 0;
+  let activeInputItemId: string | undefined;
 
   function ensureTimelineBlock(messageId: string, metrics?: ChatTurnMetrics) {
-    const id = `timeline-${snapshot?.session_id ?? "history"}-${messageId}`;
+    const baseId = `timeline-${snapshot?.session_id ?? "history"}-${messageId}`;
+    const id = activeInputItemId ? `${baseId}-${activeInputItemId}` : baseId;
     const existing = blocks.find((block) => block.id === id);
     if (existing?.kind === "timeline") {
       existing.metrics = metrics ?? existing.metrics;
@@ -66,6 +68,7 @@ export function buildBlocksFromHistorySnapshot(
   }
 
   for (const message of snapshot?.messages ?? []) {
+    activeInputItemId = undefined;
     messageIds.add(message.message_id);
     const messageMetrics = message.metrics
       ? toChatTurnMetrics(message.metrics, "completed")
@@ -75,13 +78,14 @@ export function buildBlocksFromHistorySnapshot(
         const input = timelineUserInput(item.content);
         if (hasUserInput(input)) {
           blocks.push({
-            id: `user-${message.message_id}`,
+            id: `user-${message.message_id}-${item.item_id}`,
             kind: "user",
             ...input,
             live: false,
           });
           inputItems.push({ messageId: message.message_id, itemIndex: inputIndex, ...input });
           inputIndex += 1;
+          activeInputItemId = item.item_id;
         }
         continue;
       }
@@ -322,7 +326,7 @@ function applyItemStarted(sessionId: string, messageId: string, item: TalosTimel
   if (item.phase === "input") {
     const input = timelineUserInput(item.content);
     if (hasUserInput(input)) {
-      useAppStore.getState().upsertUserInputBlock(sessionId, messageId, input);
+      useAppStore.getState().upsertUserInputBlock(sessionId, messageId, item.item_id, input);
     }
     return;
   }

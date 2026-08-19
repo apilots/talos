@@ -181,6 +181,62 @@ impl Gateway for MockGateway {
         unreachable!("interrupt_turn is not used by channel tests")
     }
 
+    async fn add_queued_message(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueAddRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("add_queued_message")
+    }
+
+    async fn list_message_queue(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueListRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("list_message_queue")
+    }
+
+    async fn update_queued_message(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueUpdateRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("update_queued_message")
+    }
+
+    async fn delete_queued_message(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueDeleteRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("delete_queued_message")
+    }
+
+    async fn reorder_message_queue(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueReorderRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("reorder_message_queue")
+    }
+
+    async fn start_queued_message(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueStartRequest,
+    ) -> TalosResult<StartTurnResponse> {
+        unused_gateway("start_queued_message")
+    }
+
+    async fn steer_queued_message(
+        &self,
+        _actor: &Actor,
+        _request: talos_types::MessageQueueSteerRequest,
+    ) -> TalosResult<talos_types::MessageQueue> {
+        unused_gateway("steer_queued_message")
+    }
+
     async fn submit_dynamic_tool_result(
         &self,
         _actor: &Actor,

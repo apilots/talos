@@ -1,6 +1,6 @@
 use ratatui::text::Line;
 use talos_error::TalosResult;
-use talos_sdk::{SessionHistorySnapshot, SessionInfo, SkillSuggestion, TimelineRecoveryResponse};
+use talos_sdk::{SessionHistorySnapshot, SessionInfo, TimelineRecoveryResponse};
 
 // ── Suggestions ──────────────────────────────────────────────────────────────
 
@@ -135,27 +135,6 @@ pub(crate) struct PastedImageAttachment {
 pub(crate) enum PastedImageState {
     Pending { png_bytes: bytes::Bytes },
     Uploaded { file_id: String },
-}
-
-// ── Queue types ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub(crate) struct QueuedMessage {
-    pub(crate) text: String,
-    pub(crate) skills: Vec<SkillSuggestion>,
-    pub(crate) file_ids: Vec<String>,
-    pub(crate) dispatch_attempts: u8,
-}
-
-impl QueuedMessage {
-    pub(crate) fn new(text: String, skills: Vec<SkillSuggestion>, file_ids: Vec<String>) -> Self {
-        Self {
-            text,
-            skills,
-            file_ids,
-            dispatch_attempts: 0,
-        }
-    }
 }
 
 pub(crate) struct SessionHistoryLoad {

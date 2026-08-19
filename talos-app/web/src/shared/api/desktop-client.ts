@@ -17,6 +17,7 @@ import type {
   StartTurnResponse,
   SessionListRequest,
   SessionPatchRequest,
+  SessionEventStreamOptions,
   TimelineEventEnvelope,
   TimelineRecoveryResponse,
   WorkspaceDocKind,
@@ -74,10 +75,10 @@ export function createDesktopTalosClient(
       afterEventId: string | undefined,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-      options?: { persistent?: boolean },
+      options?: SessionEventStreamOptions,
     ) => streamTimelineEvents(client, sessionId, afterEventId ?? null, (event) => {
       onEvent(toTimelineEnvelope(event));
-    }, signal, options?.persistent ?? false),
+    }, signal, options),
     eventsForMessage: (
       sessionId: string,
       messageId: string,
@@ -182,6 +183,7 @@ export function createDesktopTalosClient(
       submit: (request: AppProtocol.SubmitUserActionRequest) =>
         client.submitUserAction(request),
     },
+    messageQueue: client.messageQueue,
     projects: {
       list: () => client.listProjects({}),
       get: (request: Parameters<TalosWebClient["projects"]["get"]>[0]) =>
@@ -315,11 +317,12 @@ function streamTimelineEvents(
   sinceEventId: string | null,
   onEvent: (event: AppProtocol.TimelineEventEnvelope) => void,
   signal?: AbortSignal,
-  persistent = false,
+  options?: SessionEventStreamOptions,
 ): Promise<void> {
   return streamUntilTerminal(client, sessionId, signal, (event) => {
     onEvent(event);
-  }, undefined, sinceEventId, null, !persistent, !persistent);
+  }, options?.onOpen, sinceEventId, null, !options?.persistent, !options?.persistent,
+  options?.onMessageQueueChanged);
 }
 
 function streamUntilTerminal(
@@ -335,6 +338,7 @@ function streamUntilTerminal(
   turnId: string | null = null,
   closeWhenIdle = false,
   closeOnTerminal = false,
+  onMessageQueueChanged?: (notification: AppProtocol.MessageQueueChangedNotification) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -391,6 +395,15 @@ function streamUntilTerminal(
       void Promise.resolve(onEvent(event, finish)).catch(fail);
     });
     cleanupFns.push(unsubscribe);
+
+    if (onMessageQueueChanged) {
+      const unsubscribeQueueChanges = client.onMessageQueueChanged((notification) => {
+        if (notification.sessionId === sessionId) {
+          onMessageQueueChanged(notification);
+        }
+      });
+      cleanupFns.push(unsubscribeQueueChanges);
+    }
 
     const unsubscribeTerminated = client.onSubscriptionTerminated((envelope) => {
       const matchesSubscription = subscriptionId

@@ -87,7 +87,7 @@ pub async fn execute_general_turn_loop_with_policy(
 
     let (final_text, stop_reason) = loop {
         let messages = take_running_messages(&prepared)?;
-        apply_running_messages(&mut state, messages);
+        apply_running_messages(&prepared, &mut state, messages).await;
         enforce_working_context_budget(&prepared, &mut state, kernel_config.as_ref()).await?;
         let tool_definitions =
             tool_executor_port.get_tool_definitions_for_request(&prepared.tool_selection_request);
@@ -130,7 +130,7 @@ pub async fn execute_general_turn_loop_with_policy(
         if !pending_messages.is_empty() && step.tool_calls.is_empty() {
             apply_general_turn_step(&mut state, &step);
             state.messages.push(ChatMessage::assistant(step_text));
-            apply_running_messages(&mut state, pending_messages);
+            apply_running_messages(&prepared, &mut state, pending_messages).await;
             emit_turn_metrics_stream_event(&prepared, &state, StopReason::EndTurn).await;
             continue;
         }
@@ -229,7 +229,7 @@ pub async fn execute_general_turn_loop_with_policy(
         }
         pending_messages.extend(take_running_messages(&prepared)?);
         let received_messages = !pending_messages.is_empty();
-        apply_running_messages(&mut state, pending_messages);
+        apply_running_messages(&prepared, &mut state, pending_messages).await;
 
         if let Some(policy_stop) = policy_stop {
             break (policy_stop.output_text, policy_stop.stop_reason);
@@ -248,7 +248,9 @@ pub async fn execute_general_turn_loop_with_policy(
     Ok(executed)
 }
 
-fn take_running_messages(prepared: &PreparedGeneralTurn) -> TalosResult<Vec<String>> {
+fn take_running_messages(
+    prepared: &PreparedGeneralTurn,
+) -> TalosResult<Vec<crate::ActiveTurnInputDelivery>> {
     let Some(receiver) = &prepared.message_rx else {
         return Ok(Vec::new());
     };
@@ -262,12 +264,26 @@ fn take_running_messages(prepared: &PreparedGeneralTurn) -> TalosResult<Vec<Stri
     Ok(messages)
 }
 
-fn apply_running_messages(state: &mut GeneralTurnLoopState, messages: Vec<String>) {
-    for message in messages {
-        state.messages.push(ChatMessage::user(message.clone()));
+async fn apply_running_messages(
+    prepared: &PreparedGeneralTurn,
+    state: &mut GeneralTurnLoopState,
+    messages: Vec<crate::ActiveTurnInputDelivery>,
+) {
+    for delivery in messages {
+        emit_stream_event(
+            prepared.stream_tx.as_ref(),
+            KernelStreamEventType::UserInput,
+            KernelStreamEventData::UserInput(delivery.input().input.clone()),
+        )
+        .await;
+        let message = delivery.acknowledge();
+        state.active_turn_attachment_tokens = state
+            .active_turn_attachment_tokens
+            .saturating_add(message.attachment_tokens);
+        state.messages.push(message.message);
         state.output_items.push(RunItem::UserInput {
-            text: message,
-            file_ids: Vec::new(),
+            text: message.input.text,
+            file_ids: message.input.file_ids,
         });
     }
 }

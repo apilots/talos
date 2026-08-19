@@ -53,6 +53,7 @@ pub struct RetryTurnRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct InterruptTurnRequest {
     pub session_id: String,
+    pub turn_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]

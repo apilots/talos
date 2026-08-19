@@ -20,6 +20,7 @@ fn build_turn_execution_metrics_includes_elapsed_duration() {
         final_answer_streamed: false,
         execution_summary_streamed: false,
         elapsed_duration_ms: 0,
+        active_turn_attachment_tokens: 0,
     };
 
     let metrics = build_turn_execution_metrics(&state, StopReason::EndTurn);

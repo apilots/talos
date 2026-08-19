@@ -1,6 +1,9 @@
 use super::*;
 use std::path::PathBuf;
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::talos::{
+    TalosConnectionMode, TalosContext, TalosInputItem, TalosProvider, TalosSessionEnvironment,
+    TalosSourceType,
+};
 
 fn start_turn_request(
     current_directory: Option<PathBuf>,

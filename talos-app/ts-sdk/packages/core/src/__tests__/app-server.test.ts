@@ -37,6 +37,30 @@ class RecordingTransport implements AppServerTransport {
 }
 
 describe("AppServerClient", () => {
+  it("maps every message queue operation to the canonical JSON-RPC method", async () => {
+    const transport = new RecordingTransport();
+    const client = new AppServerClient(transport);
+    const input = [{ type: "text" as const, text: "queued" }];
+
+    await client.messageQueue.add({ sessionId: "s1", input });
+    await client.messageQueue.list({ sessionId: "s1" });
+    await client.messageQueue.update({ sessionId: "s1", messageId: "q1", input });
+    await client.messageQueue.delete({ sessionId: "s1", messageId: "q1" });
+    await client.messageQueue.reorder({ sessionId: "s1", messageIds: ["q2", "q1"] });
+    await client.messageQueue.start({ sessionId: "s1", messageId: null });
+    await client.messageQueue.steer({ sessionId: "s1", messageId: "q1", turnId: "t1" });
+
+    expect(transport.requests).toEqual([
+      { method: "messageQueue/add", params: { sessionId: "s1", input } },
+      { method: "messageQueue/list", params: { sessionId: "s1" } },
+      { method: "messageQueue/update", params: { sessionId: "s1", messageId: "q1", input } },
+      { method: "messageQueue/delete", params: { sessionId: "s1", messageId: "q1" } },
+      { method: "messageQueue/reorder", params: { sessionId: "s1", messageIds: ["q2", "q1"] } },
+      { method: "messageQueue/start", params: { sessionId: "s1", messageId: null } },
+      { method: "messageQueue/steer", params: { sessionId: "s1", messageId: "q1", turnId: "t1" } },
+    ]);
+  });
+
   it("maps the files API to canonical App Server methods", async () => {
     const transport = new RecordingTransport();
     const client = new AppServerClient(transport);

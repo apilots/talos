@@ -270,8 +270,13 @@ where
 struct RuntimeState {
     actor: Option<Actor>,
     initialized_notification_seen: bool,
-    owned_turn_sessions: HashMap<String, Actor>,
+    owned_turn_sessions: HashMap<String, OwnedTurn>,
     subscription_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+}
+
+struct OwnedTurn {
+    actor: Actor,
+    turn_id: String,
 }
 
 async fn handle_line(
@@ -448,12 +453,17 @@ async fn handle_request(
             match app.dispatch(&actor, request).await {
                 Ok(result) => {
                     if decoded.method == ClientMethod::TurnStart {
-                        if let Some(session_id) = result
-                            .get("session_id")
-                            .and_then(serde_json::Value::as_str)
-                            .map(ToString::to_string)
-                        {
-                            state.owned_turn_sessions.insert(session_id, actor.clone());
+                        if let (Some(session_id), Some(turn_id)) = (
+                            result.get("session_id").and_then(serde_json::Value::as_str),
+                            result.get("turn_id").and_then(serde_json::Value::as_str),
+                        ) {
+                            state.owned_turn_sessions.insert(
+                                session_id.to_string(),
+                                OwnedTurn {
+                                    actor: actor.clone(),
+                                    turn_id: turn_id.to_string(),
+                                },
+                            );
                         }
                     }
                     send_result(outgoing_tx, id, Ok(result)).await
@@ -513,6 +523,14 @@ fn spawn_subscription(
                         return;
                     }
                 }
+                TimelineSubscriptionMessage::MessageQueueChanged(change) => {
+                    if send_message_queue_changed(change, &outgoing_tx)
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
                 TimelineSubscriptionMessage::Closed(closed) => {
                     let _ = send_subscription_terminated(
                         &subscription_id,
@@ -535,6 +553,22 @@ fn spawn_subscription(
         )
         .await;
     })
+}
+
+async fn send_message_queue_changed(
+    change: talos_types::MessageQueueChangedNotification,
+    outgoing_tx: &mpsc::Sender<OutgoingMessage>,
+) -> Result<(), ()> {
+    let params = serde_json::to_value(change).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialize message queue change");
+    })?;
+    outgoing_tx
+        .send(OutgoingMessage::Notification(JsonRpcNotification::new(
+            "messageQueue/changed",
+            Some(params),
+        )))
+        .await
+        .map_err(|_| ())
 }
 
 fn map_subscription_close_reason(
@@ -680,10 +714,13 @@ where
 
 async fn cancel_owned_turns(
     app: Arc<dyn AppServerApplication>,
-    session_actors: &HashMap<String, Actor>,
+    owned_turns: &HashMap<String, OwnedTurn>,
 ) {
-    for (session_id, session_actor) in session_actors {
-        if let Err(error) = app.cancel_active_turn(session_actor, session_id).await {
+    for (session_id, owned_turn) in owned_turns {
+        if let Err(error) = app
+            .cancel_active_turn(&owned_turn.actor, session_id, &owned_turn.turn_id)
+            .await
+        {
             tracing::warn!(session_id, error = ?error, "failed to cancel owned turn");
         }
     }

@@ -37,6 +37,7 @@ use talos_types::{
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
+use crate::server::message_queue::{add_queued_message_handler, list_message_queue_handler};
 use crate::server::messages::{
     interrupt_turn_handler, retry_turn_handler, start_turn_handler,
     submit_dynamic_tool_result_handler,
@@ -1038,5 +1039,7 @@ mod events;
 mod files;
 #[path = "tests/handlers.rs"]
 mod handlers;
+#[path = "tests/message_queue.rs"]
+mod message_queue;
 #[path = "tests/messages.rs"]
 mod messages;

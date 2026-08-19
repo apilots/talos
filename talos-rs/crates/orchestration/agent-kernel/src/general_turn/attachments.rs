@@ -4,19 +4,33 @@ use talos_llm_provider::{
     validate_attachment_usage, Attachment, AttachmentKind, ChatMessage, LlmProvider, Role,
 };
 use talos_prompt::PromptAssembly;
+use talos_types::ModelInfo;
 
-use crate::InvocationContext;
+use crate::{ActiveTurnInput, InvocationContext, ResolvedAttachment, UserInput};
 
 pub(super) fn prepare_model_attachments(
     ctx: &InvocationContext,
     provider: &dyn LlmProvider,
 ) -> TalosResult<(Vec<Attachment>, usize)> {
-    if ctx.input.file_ids.len() != ctx.resolved_attachments.len()
-        || ctx
-            .input
+    prepare_resolved_attachments(
+        &ctx.input,
+        &ctx.resolved_attachments,
+        &ctx.selected_model_info,
+        provider,
+    )
+}
+
+fn prepare_resolved_attachments(
+    input: &UserInput,
+    resolved_attachments: &[ResolvedAttachment],
+    selected_model_info: &ModelInfo,
+    provider: &dyn LlmProvider,
+) -> TalosResult<(Vec<Attachment>, usize)> {
+    if input.file_ids.len() != resolved_attachments.len()
+        || input
             .file_ids
             .iter()
-            .zip(&ctx.resolved_attachments)
+            .zip(resolved_attachments)
             .any(|(file_id, attachment)| file_id != &attachment.file_id)
     {
         return Err(TalosError::internal(
@@ -24,8 +38,8 @@ pub(super) fn prepare_model_attachments(
         ));
     }
 
-    let mut attachments = Vec::with_capacity(ctx.resolved_attachments.len());
-    for resolved in &ctx.resolved_attachments {
+    let mut attachments = Vec::with_capacity(resolved_attachments.len());
+    for resolved in resolved_attachments {
         let actual_size = u64::try_from(resolved.bytes.len())
             .map_err(|_| TalosError::internal("resolved attachment size overflow".to_string()))?;
         if actual_size != resolved.size_bytes {
@@ -42,13 +56,12 @@ pub(super) fn prepare_model_attachments(
             AttachmentKind::Image => ModelInputKind::Image,
             AttachmentKind::File => ModelInputKind::File,
         };
-        if !ctx.selected_model_info.model.input.contains(&model_input) {
+        if !selected_model_info.model.input.contains(&model_input) {
             return Err(TalosError::file_error(
                 TalosFileErrorKind::UnsupportedAttachment,
                 format!(
                     "model {} does not support {:?} input",
-                    ctx.selected_model_id(),
-                    kind
+                    selected_model_info.model.id, kind
                 ),
             ));
         }
@@ -59,9 +72,30 @@ pub(super) fn prepare_model_attachments(
             bytes: resolved.bytes.clone(),
         });
     }
-    let usage = provider.validate_attachments(ctx.selected_model_id(), &attachments)?;
+    let usage = provider.validate_attachments(&selected_model_info.model.id, &attachments)?;
     let total_tokens = validate_attachment_usage(attachments.len(), &usage)?;
     Ok((attachments, total_tokens))
+}
+
+/// Build one active-turn input using the same attachment validation as initial input.
+pub fn build_active_turn_input(
+    input: UserInput,
+    resolved_attachments: Vec<ResolvedAttachment>,
+    selected_model_info: &ModelInfo,
+    provider: &dyn LlmProvider,
+) -> TalosResult<ActiveTurnInput> {
+    let (attachments, attachment_tokens) =
+        prepare_resolved_attachments(&input, &resolved_attachments, selected_model_info, provider)?;
+    let message = if attachments.is_empty() {
+        ChatMessage::user(input.text.clone())
+    } else {
+        ChatMessage::user_with_attachments(input.text.clone(), attachments)?
+    };
+    Ok(ActiveTurnInput {
+        input,
+        message,
+        attachment_tokens,
+    })
 }
 
 pub(super) fn reserve_prompt_attachment_tokens(

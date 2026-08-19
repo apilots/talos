@@ -359,8 +359,8 @@ pub enum AgentInput {
         tool_name: String,
         response: talos_types::UserActionResponse,
     },
-    /// Message for the exact currently running Agent turn.
-    Message { message: String },
+    /// Structured user input for the exact currently running Agent turn.
+    Message { input: Vec<TalosInputItem> },
 }
 
 /// Result of delivering structured input to AgentHarness.

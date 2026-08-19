@@ -16,6 +16,15 @@ import type {
   MemoryGetResponse,
   MemorySearchRequest,
   MemorySearchResponse,
+  MessageQueue,
+  MessageQueueAddRequest,
+  MessageQueueChangedNotification,
+  MessageQueueDeleteRequest,
+  MessageQueueListRequest,
+  MessageQueueReorderRequest,
+  MessageQueueStartRequest,
+  MessageQueueSteerRequest,
+  MessageQueueUpdateRequest,
   ModelListResponse,
   ProfileReadResponse,
   PluginDisableRequest,
@@ -117,6 +126,12 @@ import type {
 
 interface RequestControlOptions {
   signal?: AbortSignal;
+}
+
+export interface SessionEventStreamOptions {
+  persistent?: boolean;
+  onOpen?: () => void;
+  onMessageQueueChanged?: (notification: MessageQueueChangedNotification) => void;
 }
 
 export class TalosStreamTerminatedError extends Error {
@@ -336,8 +351,8 @@ export class TalosClient {
       }
       return response;
     },
-    cancelById: (sessionId: string): Promise<InterruptTurnResponse> =>
-      this.sessions.cancel({ session_id: sessionId }),
+    cancelById: (sessionId: string, turnId: string): Promise<InterruptTurnResponse> =>
+      this.sessions.cancel({ session_id: sessionId, turn_id: turnId }),
     compact: (request: SessionCompactRequest) =>
       this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${request.session_id}/compact`), {
         method: "POST",
@@ -546,6 +561,44 @@ export class TalosClient {
       }),
   };
 
+  messageQueue = {
+    add: (request: MessageQueueAddRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/add"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    list: (request: MessageQueueListRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/list"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    update: (request: MessageQueueUpdateRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/update"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    delete: (request: MessageQueueDeleteRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/delete"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    reorder: (request: MessageQueueReorderRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/reorder"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    start: (request: MessageQueueStartRequest): Promise<StartTurnResponse> =>
+      this.http.request<StartTurnResponse>(this.url("/v1/message-queue/start"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+    steer: (request: MessageQueueSteerRequest): Promise<MessageQueue> =>
+      this.http.request<MessageQueue>(this.url("/v1/message-queue/steer"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
+  };
+
   turns = {
     start: (request: StartTurnRequest) =>
       this.turns.startWithIdempotencyKey(request, request.client_request_id ?? createIdempotencyKey()),
@@ -584,7 +637,7 @@ export class TalosClient {
       afterEventId: string | undefined,
       onEvent: (event: TimelineEventEnvelope) => void,
       signal?: AbortSignal,
-      options?: { persistent?: boolean },
+      options?: SessionEventStreamOptions,
     ) => {
       const query = new URLSearchParams();
       if (afterEventId) {
@@ -602,12 +655,17 @@ export class TalosClient {
             Accept: "text/event-stream",
           },
           signal,
+          onOpen: options?.onOpen,
         },
-        (data) => {
+        (data, event) => {
           if (data === "[DONE]") {
             return;
           }
           const payload = JSON.parse(data) as unknown;
+          if (event === "messageQueue/changed") {
+            options?.onMessageQueueChanged?.(payload as MessageQueueChangedNotification);
+            return;
+          }
           const terminated = normalizeSubscriptionTerminatedEvent(payload);
           if (terminated) {
             if (terminated.reason === "completed") {

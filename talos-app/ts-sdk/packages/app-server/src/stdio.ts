@@ -7,6 +7,7 @@ import {
   AppServerClient,
   type AppServerErrorHandler,
   type AppServerEventHandler,
+  type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
   type AppServerSubscriptionTerminatedHandler,
   type AppServerTransport,
@@ -182,6 +183,11 @@ export class JsonRpcStdioTransport implements AppServerTransport {
     return () => this.events.off("event", handler);
   }
 
+  onMessageQueueChanged(handler: AppServerMessageQueueChangedHandler): () => void {
+    this.events.on("messageQueueChanged", handler);
+    return () => this.events.off("messageQueueChanged", handler);
+  }
+
   onSubscriptionTerminated(handler: AppServerSubscriptionTerminatedHandler): () => void {
     this.events.on("subscriptionTerminated", handler);
     return () => this.events.off("subscriptionTerminated", handler);
@@ -270,6 +276,12 @@ export class JsonRpcStdioTransport implements AppServerTransport {
       }
       if (isSubscriptionTerminatedEnvelope(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
+      }
+      if (
+        message.method === "messageQueue/changed" &&
+        isMessageQueueChangedNotification(message.params)
+      ) {
+        this.events.emit("messageQueueChanged", message.params);
       }
       return;
     }
@@ -438,6 +450,16 @@ function isSubscriptionTerminatedEnvelope(value: unknown): value is AppProtocol.
     typeof candidate.reason === "string" &&
     typeof candidate.message === "string"
   );
+}
+
+function isMessageQueueChangedNotification(
+  value: unknown,
+): value is AppProtocol.MessageQueueChangedNotification {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<AppProtocol.MessageQueueChangedNotification>;
+  return typeof candidate.sessionId === "string" && typeof candidate.revision === "number";
 }
 
 function unwrapAppServerResult(value: unknown): unknown {

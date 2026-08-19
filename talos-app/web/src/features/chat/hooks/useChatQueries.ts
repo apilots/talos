@@ -295,7 +295,7 @@ export function useSessionActions(sessionId: string) {
   const queryClient = useQueryClient();
   return {
     cancelTurn: useMutation({
-      mutationFn: () => cancelActiveTurn(sessionId),
+      mutationFn: (turnId: string) => cancelActiveTurn(sessionId, turnId),
       onSuccess: async () => {
         await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       },

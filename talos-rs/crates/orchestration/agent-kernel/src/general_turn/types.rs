@@ -119,7 +119,7 @@ pub struct PreparedGeneralTurn {
     pub warnings: Vec<KernelWarning>,
     pub prompt_warning_state: Option<PromptWarningState>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
-    pub message_rx: Option<Arc<std::sync::Mutex<mpsc::Receiver<String>>>>,
+    pub message_rx: Option<Arc<std::sync::Mutex<mpsc::Receiver<crate::ActiveTurnInputDelivery>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -280,6 +280,7 @@ pub struct GeneralTurnLoopState {
     pub final_answer_streamed: bool,
     pub execution_summary_streamed: bool,
     pub elapsed_duration_ms: u64,
+    pub active_turn_attachment_tokens: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -324,6 +325,7 @@ impl GeneralTurnLoopState {
             final_answer_streamed: false,
             execution_summary_streamed: false,
             elapsed_duration_ms: 0,
+            active_turn_attachment_tokens: 0,
         }
     }
 

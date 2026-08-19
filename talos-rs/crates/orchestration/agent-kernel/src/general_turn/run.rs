@@ -48,7 +48,7 @@ pub async fn run_general_turn_with_resume(
     kernel_config: &AgentKernelConfig,
     resume: Option<GeneralTurnResume>,
     skill_options: Option<GeneralTurnSkillOptions>,
-    message_rx: Option<mpsc::Receiver<String>>,
+    message_rx: Option<mpsc::Receiver<crate::ActiveTurnInputDelivery>>,
 ) -> TalosResult<GeneralTurnResult> {
     let mut prepared = prepare_general_turn(
         ctx,

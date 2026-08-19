@@ -68,7 +68,7 @@ async fn test_context_compaction_rejects_message_and_preserves_draft() {
     app.submit_input().await.unwrap();
 
     assert_eq!(app.input_buffer, "keep this draft");
-    assert!(app.message_queue.is_empty());
+    assert!(app.message_queue.messages.is_empty());
     assert!(app
         .status_hint
         .as_ref()
@@ -221,7 +221,7 @@ async fn test_compact_command_rejects_input_before_the_first_delta() {
         .contains("Context compacting... preparing"));
     app.submit_input().await.unwrap();
     assert_eq!(app.input_buffer, "keep this draft");
-    assert!(app.message_queue.is_empty());
+    assert!(app.message_queue.messages.is_empty());
 
     app.input_buffer = "/clear".to_string();
     app.cursor_index = app.input_buffer.chars().count();

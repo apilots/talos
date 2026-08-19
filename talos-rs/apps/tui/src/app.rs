@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,8 +9,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use talos_sdk::{
-    ContextCompactionStage, ModelInfo, ModelRef, ModelSelection, ReasoningEffort, SessionInfo,
-    TalosContext, TalosProvider, TalosSourceType, TalosTimelineContent, TalosTimelineItemStatus,
+    ContextCompactionStage, MessageQueue, ModelInfo, ModelRef, ModelSelection, ReasoningEffort,
+    SessionInfo, TalosContext, TalosProvider, TalosSourceType, TalosTimelineContent,
+    TalosTimelineItemStatus,
 };
 use talos_types::talos::TokenUsage;
 
@@ -53,7 +54,17 @@ impl TuiApp {
             rendered_chat_cache_key: None,
             chat_content_rect: None,
             chat_viewport_height: 0,
-            message_queue: VecDeque::new(),
+            message_queue: MessageQueue {
+                revision: 0,
+                max_messages: 0,
+                messages: Vec::new(),
+            },
+            message_queue_subscription: None,
+            message_queue_subscription_session_id: None,
+            message_queue_retry_at: None,
+            message_queue_turn_reconcile_pending: false,
+            selected_queue_message: None,
+            editing_queue_message_id: None,
             trace_event_count: 0,
             in_flight: false,
             received_output_delta: false,

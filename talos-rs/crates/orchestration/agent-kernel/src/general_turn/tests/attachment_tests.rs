@@ -119,6 +119,42 @@ fn add_attachment_input(ctx: &mut InvocationContext) {
     ctx.selected_model_info.model.context_window = 32_768;
 }
 
+#[test]
+fn active_turn_input_reuses_ordered_attachment_validation() {
+    let provider = RecordingAttachmentProvider::default();
+    let mut ctx = build_ctx_with_stream(None);
+    add_attachment_input(&mut ctx);
+
+    let active_input = build_active_turn_input(
+        ctx.input.clone(),
+        ctx.resolved_attachments.clone(),
+        &ctx.selected_model_info,
+        &provider,
+    )
+    .expect("active turn attachments should be prepared");
+
+    assert_eq!(active_input.input, ctx.input);
+    assert_eq!(
+        active_input.message.attachments,
+        Some(
+            ctx.resolved_attachments
+                .iter()
+                .map(|resolved| Attachment {
+                    kind: if resolved.media_type.starts_with("image/") {
+                        AttachmentKind::Image
+                    } else {
+                        AttachmentKind::File
+                    },
+                    filename: resolved.filename.clone(),
+                    media_type: resolved.media_type.clone(),
+                    bytes: resolved.bytes.clone(),
+                })
+                .collect()
+        )
+    );
+    assert!(active_input.attachment_tokens > 0);
+}
+
 #[tokio::test]
 async fn attachment_only_turn_sends_ordered_files_and_persists_only_references() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());

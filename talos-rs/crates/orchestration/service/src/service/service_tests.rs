@@ -27,7 +27,8 @@ use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams}
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger, RunItem, StopReason, TalosContext, TalosInputItem, TalosProvider,
-    TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemStatus, TokenUsage,
+    TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemStatus,
+    TalosTurnCompletedEvent, TokenUsage,
 };
 
 enum TestTurnExecutorMode {
@@ -35,6 +36,9 @@ enum TestTurnExecutorMode {
     Timeout,
     Closed,
 }
+
+#[path = "interrupt_queue_tests.rs"]
+mod interrupt_queue_tests;
 
 struct TestTurnExecutor {
     mode: TestTurnExecutorMode,
@@ -487,6 +491,49 @@ fn create_session_params(
         project_id: None,
         current_directory,
     }
+}
+
+#[tokio::test]
+async fn delete_session_clears_its_message_queue() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-delete-queue", request_context(), None),
+        )
+        .await
+        .expect("session should be created");
+    service
+        .message_queue
+        .add(
+            "session-delete-queue",
+            vec![TalosInputItem::Text {
+                text: "waiting".to_string(),
+            }],
+        )
+        .expect("queued message should be added");
+
+    let ack = service
+        .delete_session(&actor, "session-delete-queue")
+        .await
+        .expect("session should be deleted");
+
+    assert!(ack.success);
+    assert_eq!(
+        service
+            .message_queue
+            .list("session-delete-queue")
+            .expect("deleted session queue should list")
+            .messages,
+        Vec::new()
+    );
 }
 
 #[tokio::test]
@@ -1008,7 +1055,7 @@ async fn patch_session_rejects_running_active_turn() {
 }
 
 #[tokio::test]
-async fn interrupt_turn_without_active_turn_is_idempotent() {
+async fn interrupt_turn_without_matching_active_turn_returns_not_found() {
     let (service, _store) = test_application_with_runtime(
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
@@ -1029,17 +1076,18 @@ async fn interrupt_turn_without_active_turn_is_idempotent() {
         .await
         .expect("session should be created");
 
-    let response = service
+    let error = service
         .interrupt_turn(
             &actor,
             talos_types::InterruptTurnRequest {
                 session_id: "session-interrupt-idempotent".to_string(),
+                turn_id: "turn-missing".to_string(),
             },
         )
         .await
-        .expect("interrupt without active turn should be idempotent");
+        .expect_err("interrupt without matching active turn should fail");
 
-    assert!(response.success);
+    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
 }
 
 #[tokio::test]
@@ -1061,6 +1109,7 @@ async fn interrupt_turn_unknown_session_returns_not_found() {
             &Actor::regular("member-user"),
             talos_types::InterruptTurnRequest {
                 session_id: "missing-session".to_string(),
+                turn_id: "turn-missing".to_string(),
             },
         )
         .await
@@ -1109,6 +1158,7 @@ async fn interrupt_turn_finalizes_orphaned_active_turn() {
             &actor,
             talos_types::InterruptTurnRequest {
                 session_id: "session-interrupt-runtime-missing".to_string(),
+                turn_id: "turn-existing".to_string(),
             },
         )
         .await

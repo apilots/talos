@@ -29,13 +29,13 @@ export function useSessionStreaming(
   }, [cancelStream]);
 
   const stopMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (turnId: string) => {
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "cancelling",
       });
       cancelStream();
-      await cancelActiveTurn(sessionId);
+      await cancelActiveTurn(sessionId, turnId);
     },
     onSuccess: async () => {
       useAppStore.getState().setPendingUserAction(sessionId, undefined);
@@ -214,11 +214,11 @@ export function useSessionStreaming(
     sendMutation,
     stopMutation,
     streamState,
-    stopResponse: () => {
+    stopResponse: (turnId: string) => {
       if (stopMutation.isPending) {
         return Promise.resolve();
       }
-      return stopMutation.mutateAsync();
+      return stopMutation.mutateAsync(turnId);
     },
     retryResponse: () => retryMutation.mutateAsync(),
     canRetryResponse: Boolean(

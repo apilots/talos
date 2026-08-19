@@ -12,6 +12,7 @@ fn test_default_config() {
     let config = Config::default();
     assert_eq!(config.agent.name, "talos");
     assert!(config.agent.agents.is_empty());
+    assert_eq!(config.agent.message_queue.max_messages_per_session, 10);
     assert_eq!(config.gateway.port, 18789);
     assert!(!config.gateway.auth);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
@@ -20,6 +21,34 @@ fn test_default_config() {
         config.logging.file.as_deref(),
         Some(config.talos_paths().log_file.to_string_lossy().as_ref())
     );
+}
+
+#[test]
+fn message_queue_config_parses_custom_capacity() {
+    let config: Config = serde_yaml::from_str(
+        r#"
+agent:
+  message_queue:
+    max_messages_per_session: 4
+"#,
+    )
+    .expect("message queue config should parse");
+
+    assert_eq!(config.agent.message_queue.max_messages_per_session, 4);
+}
+
+#[test]
+fn runtime_validation_rejects_zero_message_queue_capacity() {
+    let mut config = Config::default();
+    config.agent.message_queue.max_messages_per_session = 0;
+
+    let error = config
+        .validate_runtime()
+        .expect_err("zero queue capacity should fail validation");
+
+    assert!(error
+        .diagnostic_message()
+        .contains("agent.message_queue.max_messages_per_session"));
 }
 
 #[test]

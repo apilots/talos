@@ -197,7 +197,7 @@ impl CoordinatorImpl {
                 tool_name,
                 response,
             },
-            AgentDispatchInput::Message { message } => AgentInput::Message { message },
+            AgentDispatchInput::Message { input } => AgentInput::Message { input },
         };
         let input_params = AgentInputParams {
             session: params.session,

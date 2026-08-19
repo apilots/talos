@@ -65,6 +65,38 @@ describe("desktop IPC guard", () => {
     ).not.toThrow();
   });
 
+  it("allows message queue methods with transport-level params", () => {
+    expect(() => assertDesktopRendererInvoke("messageQueue/add", {
+      sessionId: "session-1",
+      input: [{ type: "text", text: "queued" }],
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/list", {
+      sessionId: "session-1",
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/update", {
+      sessionId: "session-1",
+      messageId: "q1",
+      input: [{ type: "text", text: "updated" }],
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/delete", {
+      sessionId: "session-1",
+      messageId: "q1",
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/reorder", {
+      sessionId: "session-1",
+      messageIds: ["q2", "q1"],
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/start", {
+      sessionId: "session-1",
+      messageId: null,
+    })).not.toThrow();
+    expect(() => assertDesktopRendererInvoke("messageQueue/steer", {
+      sessionId: "session-1",
+      messageId: "q1",
+      turnId: "turn-1",
+    })).not.toThrow();
+  });
+
   it("allows llm config methods", () => {
     expect(isDesktopRendererMethod("config.get")).toBe(true);
     expect(isDesktopRendererMethod("config.reload")).toBe(true);

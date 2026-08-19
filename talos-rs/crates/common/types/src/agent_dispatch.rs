@@ -58,8 +58,8 @@ pub enum AgentDispatchInput {
         tool_name: String,
         response: crate::UserActionResponse,
     },
-    /// Message delivered to the exact currently running Agent turn.
-    Message { message: String },
+    /// Structured user input delivered to the exact currently running Agent turn.
+    Message { input: Vec<TalosInputItem> },
 }
 
 /// Internal continuation context passed from Service to Coordinator/Harness.

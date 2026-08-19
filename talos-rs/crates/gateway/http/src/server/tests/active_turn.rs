@@ -121,13 +121,27 @@ async fn test_get_active_turn_handler_returns_pending_dynamic_action() {
 
 #[tokio::test]
 async fn test_interrupt_turn_handler_returns_success() {
-    let state = test_state(false).await;
+    let event_store = Arc::new(RecordingEventStore::default());
+    event_store.active_turns.lock().unwrap().insert(
+        "mock-session".to_string(),
+        ActiveTurnRecord {
+            session_id: "mock-session".to_string(),
+            turn_id: "turn-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: None,
+            current_action_id: None,
+            updated_at: 123,
+        },
+    );
+    let state = test_state_with_event_store(false, event_store).await;
 
     let result = interrupt_turn_handler(
         State(state),
         axum::extract::Extension(test_auth()),
         Json(talos_types::InterruptTurnRequest {
             session_id: "mock-session".to_string(),
+            turn_id: "turn-1".to_string(),
         }),
     )
     .await

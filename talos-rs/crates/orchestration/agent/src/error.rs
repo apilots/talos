@@ -180,6 +180,12 @@ impl AgentError {
             AgentErrorKind::RunFailure(ErrorCode::ActiveTurnRunning) => {
                 TalosError::public(talos_error::ErrorCode::ActiveTurnRunning, self.message)
             }
+            AgentErrorKind::RunFailure(ErrorCode::MessageQueueFull) => {
+                TalosError::public(talos_error::ErrorCode::MessageQueueFull, self.message)
+            }
+            AgentErrorKind::RunFailure(ErrorCode::MessageQueueBusy) => {
+                TalosError::public(talos_error::ErrorCode::MessageQueueBusy, self.message)
+            }
             AgentErrorKind::RunFailure(ErrorCode::ResourceNotFound)
             | AgentErrorKind::RunFailure(ErrorCode::SessionNotFound)
             | AgentErrorKind::RunFailure(ErrorCode::PathNotFound) => {
@@ -237,6 +243,14 @@ impl From<TalosError> for AgentError {
                 Self::run_not_found(message)
             }
             ErrorCode::ActiveTurnRunning => Self::new(AgentErrorKind::ActiveTurnRunning, message),
+            ErrorCode::MessageQueueFull => Self::new(
+                AgentErrorKind::RunFailure(ErrorCode::MessageQueueFull),
+                message,
+            ),
+            ErrorCode::MessageQueueBusy => Self::new(
+                AgentErrorKind::RunFailure(ErrorCode::MessageQueueBusy),
+                message,
+            ),
             ErrorCode::Conflict | ErrorCode::IdempotencyConflict | ErrorCode::AlreadyExists => {
                 Self::run_conflict(message)
             }

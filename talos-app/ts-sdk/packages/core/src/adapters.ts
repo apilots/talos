@@ -27,6 +27,7 @@ export interface HttpRequestOptions {
 
 export interface StreamRequestOptions extends HttpRequestOptions {
   signal?: AbortSignal;
+  onOpen?: () => void;
 }
 
 export interface HttpAdapter {
@@ -37,7 +38,7 @@ export interface StreamAdapter {
   stream(
     url: string,
     options: StreamRequestOptions,
-    onMessage: (data: string) => void,
+    onMessage: (data: string, event?: string) => void,
     onError?: (error: Error) => void,
   ): Promise<void>;
 }

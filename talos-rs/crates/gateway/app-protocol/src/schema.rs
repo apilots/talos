@@ -28,6 +28,15 @@ pub struct AppProtocolSchemaRoot {
     pub retry_turn_response: talos_types::RetryTurnResponse,
     pub interrupt_turn_request: talos_types::InterruptTurnRequest,
     pub interrupt_turn_response: talos_types::InterruptTurnResponse,
+    pub message_queue: talos_types::MessageQueue,
+    pub message_queue_add_request: talos_types::MessageQueueAddRequest,
+    pub message_queue_list_request: talos_types::MessageQueueListRequest,
+    pub message_queue_update_request: talos_types::MessageQueueUpdateRequest,
+    pub message_queue_delete_request: talos_types::MessageQueueDeleteRequest,
+    pub message_queue_reorder_request: talos_types::MessageQueueReorderRequest,
+    pub message_queue_start_request: talos_types::MessageQueueStartRequest,
+    pub message_queue_steer_request: talos_types::MessageQueueSteerRequest,
+    pub message_queue_changed_notification: talos_types::MessageQueueChangedNotification,
     pub submit_dynamic_tool_result_request: talos_types::SubmitDynamicToolResultRequest,
     pub submit_dynamic_tool_result_response: talos_types::SubmitDynamicToolResultResponse,
     pub submit_user_action_request: talos_types::SubmitUserActionRequest,
@@ -157,6 +166,16 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::RetryTurnResponse>());
     output.push_str(&export::<talos_types::InterruptTurnRequest>());
     output.push_str(&export::<talos_types::InterruptTurnResponse>());
+    output.push_str(&export::<talos_types::QueuedMessage>());
+    output.push_str(&export::<talos_types::MessageQueue>());
+    output.push_str(&export::<talos_types::MessageQueueAddRequest>());
+    output.push_str(&export::<talos_types::MessageQueueListRequest>());
+    output.push_str(&export::<talos_types::MessageQueueUpdateRequest>());
+    output.push_str(&export::<talos_types::MessageQueueDeleteRequest>());
+    output.push_str(&export::<talos_types::MessageQueueReorderRequest>());
+    output.push_str(&export::<talos_types::MessageQueueStartRequest>());
+    output.push_str(&export::<talos_types::MessageQueueSteerRequest>());
+    output.push_str(&export::<talos_types::MessageQueueChangedNotification>());
     output.push_str(&export::<talos_types::SubmitDynamicToolResultRequest>());
     output.push_str(&export::<talos_types::SubmitDynamicToolResultResponse>());
     output.push_str(&export::<talos_types::SubmitUserActionRequest>());
