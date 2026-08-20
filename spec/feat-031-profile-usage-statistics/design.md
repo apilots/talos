@@ -78,6 +78,8 @@ the `message_start` input values with `message_delta` output values.
 If the terminal turn has no provider usage values, Profile persists the row as
 unavailable. Aggregates propagate that availability and clients render
 `Unavailable` rather than a fabricated zero token total.
+An intermediate waiting/resume segment with no model usage is neutral: it does
+not erase usage or cache values already recorded for the logical turn.
 
 ## Public API and SDKs
 

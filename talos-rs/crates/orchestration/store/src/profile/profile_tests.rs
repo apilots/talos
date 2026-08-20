@@ -112,6 +112,65 @@ async fn duplicate_execution_segment_is_not_counted_twice() {
 }
 
 #[tokio::test]
+async fn zero_token_waiting_resume_preserves_known_usage() {
+    let store = store().await;
+    store
+        .record_turn_usage(update(
+            "request-1",
+            StopReason::WaitingUserAction,
+            usage(10, 2),
+        ))
+        .await
+        .unwrap();
+
+    let mut zero_token_resume = update(
+        "request-2",
+        StopReason::WaitingUserAction,
+        TokenUsage::default(),
+    );
+    zero_token_resume.usage_available = false;
+    store.record_turn_usage(zero_token_resume).await.unwrap();
+    store
+        .record_turn_usage(update("request-3", StopReason::EndTurn, usage(20, 3)))
+        .await
+        .unwrap();
+
+    let summary = store.usage_summary("user-1").await.unwrap();
+    assert_eq!(summary.usage, usage_with_cache(30, 5, 2, 4));
+    assert!(summary.usage_available);
+}
+
+#[tokio::test]
+async fn zero_token_terminal_segment_marks_usage_unavailable() {
+    let store = store().await;
+    store
+        .record_turn_usage(update(
+            "request-1",
+            StopReason::WaitingUserAction,
+            usage(10, 2),
+        ))
+        .await
+        .unwrap();
+
+    let mut terminal = update("request-2", StopReason::EndTurn, TokenUsage::default());
+    terminal.usage_available = false;
+    store.record_turn_usage(terminal).await.unwrap();
+
+    let summary = store.usage_summary("user-1").await.unwrap();
+    assert_eq!(
+        summary.usage,
+        TokenUsage {
+            input_tokens: 10,
+            output_tokens: 2,
+            total_tokens: 12,
+            cache_creation_input_tokens: None,
+            cache_read_input_tokens: None,
+        }
+    );
+    assert!(!summary.usage_available);
+}
+
+#[tokio::test]
 async fn usage_summary_counts_distinct_finalized_sessions() {
     let store = store().await;
     store

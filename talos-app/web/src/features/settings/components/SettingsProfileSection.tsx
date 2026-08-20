@@ -74,6 +74,7 @@ export function SettingsProfileSection({
         activity={profile.dailyUsage
           .filter((day) => day.usageAvailable)
           .map((day) => ({ date: day.date, tokens: day.usage.total_tokens }))}
+        asOfDate={profile.asOfDate}
         cumulativeLabel={t("settings:profile.cumulative")}
         dailyLabel={t("settings:profile.daily")}
         title={t("settings:profile.tokenActivity")}

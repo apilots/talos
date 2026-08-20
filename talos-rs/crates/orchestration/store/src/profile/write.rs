@@ -69,12 +69,19 @@ pub(super) async fn record_turn_usage(
             return Ok(());
         }
 
-        let usage = accumulate_usage(usage_from_row(&row)?, &update.usage)?;
-        let usage_available = row
+        let existing_usage = usage_from_row(&row)?;
+        let existing_usage_available = row
             .try_get::<i64, _>("usage_available")
             .map_err(storage_error("read profile usage availability"))?
-            != 0
-            && update.usage_available;
+            != 0;
+        let (usage, usage_available) = if !update.is_final() && !update.usage_available {
+            (existing_usage, existing_usage_available)
+        } else {
+            (
+                accumulate_usage(existing_usage, &update.usage)?,
+                existing_usage_available && update.usage_available,
+            )
+        };
         sqlx::query(
             r#"
             UPDATE profile_turn_usage
