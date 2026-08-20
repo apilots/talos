@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use talos_error::TalosResult;
 use talos_store::session::{
-    ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
-    UserActionRecord, UserActionStore,
+    ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId,
+    TimelineEventStore, UserActionRecord, UserActionStore,
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, TalosItemDeltaEvent, TalosTimelineDelta,
@@ -99,6 +99,73 @@ impl TimelineEventService {
         session_id: &str,
     ) -> TalosResult<Option<ActiveTurnRecord>> {
         self.active_turn_store.get_active_turn(session_id).await
+    }
+
+    /// Validate and persist an interrupt before asking the runtime to stop the turn.
+    pub(crate) async fn begin_cancellation(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+    ) -> TalosResult<ActiveTurnRecord> {
+        let current = self
+            .active_turn_store
+            .get_active_turn(session_id)
+            .await?
+            .filter(|current| {
+                current.turn_id == turn_id
+                    && matches!(
+                        current.status,
+                        ActiveTurnStatus::Running
+                            | ActiveTurnStatus::WaitingUserAction
+                            | ActiveTurnStatus::Cancelling
+                    )
+            })
+            .ok_or_else(|| {
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("active turn `{turn_id}` for session `{session_id}`"),
+                )
+            })?;
+        self.active_turn_store
+            .upsert_active_turn(ActiveTurnUpdate {
+                session_id: current.session_id.clone(),
+                turn_id: current.turn_id.clone(),
+                message_id: current.message_id.clone(),
+                status: ActiveTurnStatus::Cancelling,
+                last_event_id: current.last_event_id.clone(),
+                current_action_id: None,
+                updated_at: chrono::Utc::now().timestamp_millis(),
+            })
+            .await?;
+        Ok(current)
+    }
+
+    /// Restore the previous active state only when runtime cancellation was rejected.
+    pub(crate) async fn restore_active_turn_on_cancel_error(
+        &self,
+        previous: &ActiveTurnRecord,
+    ) -> TalosResult<()> {
+        let Some(current) = self
+            .active_turn_store
+            .get_active_turn(&previous.session_id)
+            .await?
+        else {
+            return Ok(());
+        };
+        if current.turn_id != previous.turn_id || current.status != ActiveTurnStatus::Cancelling {
+            return Ok(());
+        }
+        self.active_turn_store
+            .upsert_active_turn(ActiveTurnUpdate {
+                session_id: previous.session_id.clone(),
+                turn_id: previous.turn_id.clone(),
+                message_id: previous.message_id.clone(),
+                status: previous.status,
+                last_event_id: previous.last_event_id.clone(),
+                current_action_id: previous.current_action_id.clone(),
+                updated_at: chrono::Utc::now().timestamp_millis(),
+            })
+            .await
     }
 
     pub(crate) async fn get_current_user_action(

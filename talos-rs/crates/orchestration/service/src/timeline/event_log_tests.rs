@@ -150,6 +150,31 @@ async fn final_answer_commit_does_not_update_active_turn_terminal_status() {
 }
 
 #[tokio::test]
+async fn in_flight_events_do_not_restore_a_cancelling_turn_to_running() {
+    let (service, store) = service().await;
+    service.record_talos_event(started_event(1)).await.unwrap();
+    service.begin_cancellation("s1", "turn_1").await.unwrap();
+
+    service
+        .record_talos_event(final_answer_committed_event(2))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_active_turn("s1").await.unwrap().unwrap().status,
+        ActiveTurnStatus::Cancelling
+    );
+
+    service
+        .record_talos_event(completed_event(3))
+        .await
+        .unwrap();
+    assert_eq!(
+        store.get_active_turn("s1").await.unwrap().unwrap().status,
+        ActiveTurnStatus::Completed
+    );
+}
+
+#[tokio::test]
 async fn pending_dynamic_event_updates_active_turn_user_action() {
     let (service, store) = service().await;
     service.record_talos_event(dynamic_event(1)).await.unwrap();

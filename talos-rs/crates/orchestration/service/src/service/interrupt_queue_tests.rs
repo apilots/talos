@@ -62,6 +62,12 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
         *cancelled_turn_ids.lock().unwrap(),
         vec!["turn-current".to_string()]
     );
+    let cancelling_turn = store
+        .get_active_turn("session-interrupt-queue")
+        .await
+        .expect("active turn should load after interrupt")
+        .expect("interrupted turn should remain available for recovery");
+    assert_eq!(cancelling_turn.status, ActiveTurnStatus::Cancelling);
 
     service
         .event_log
@@ -119,4 +125,60 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
         .unwrap()
         .messages
         .is_empty());
+}
+
+#[tokio::test]
+async fn interrupt_restores_active_turn_when_runtime_rejects_cancellation() {
+    let (service, store) = test_application_with_runtime(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        Arc::new(TestSessionRuntime {
+            cancel_mode: TestCancelMode::Rejected,
+            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-interrupt-rejected", request_context(), None),
+        )
+        .await
+        .expect("session should be created");
+    store
+        .upsert_active_turn(ActiveTurnUpdate {
+            session_id: "session-interrupt-rejected".to_string(),
+            turn_id: "turn-existing".to_string(),
+            message_id: Some("msg-existing".to_string()),
+            status: ActiveTurnStatus::Running,
+            last_event_id: None,
+            current_action_id: None,
+            updated_at: 1,
+        })
+        .await
+        .expect("active turn should be inserted");
+
+    let error = service
+        .interrupt_turn(
+            &actor,
+            talos_types::InterruptTurnRequest {
+                session_id: "session-interrupt-rejected".to_string(),
+                turn_id: "turn-existing".to_string(),
+            },
+        )
+        .await
+        .expect_err("runtime rejection should be returned");
+
+    assert!(error
+        .diagnostic_message()
+        .contains("runtime rejected cancellation"));
+    let active_turn = store
+        .get_active_turn("session-interrupt-rejected")
+        .await
+        .expect("active turn should load")
+        .expect("active turn should remain available");
+    assert_eq!(active_turn.status, ActiveTurnStatus::Running);
 }

@@ -177,6 +177,9 @@ async fn running_active_state(
     let Some(active) = active_turn_store.get_active_turn(session_id).await? else {
         return Ok(Some(ActiveTurnState::running()));
     };
+    if active.turn_id == turn_id && active.status == ActiveTurnStatus::Cancelling {
+        return Ok(None);
+    }
     if active.turn_id == turn_id
         && active.status == ActiveTurnStatus::WaitingUserAction
         && active.current_action_id.is_some()
@@ -196,6 +199,9 @@ async fn resolve_pending_item_state(
     let Some(active) = active_turn_store.get_active_turn(session_id).await? else {
         return Ok(Some(ActiveTurnState::running()));
     };
+    if active.turn_id == turn_id && active.status == ActiveTurnStatus::Cancelling {
+        return Ok(None);
+    }
     if active.turn_id != turn_id || active.status != ActiveTurnStatus::WaitingUserAction {
         return Ok(Some(ActiveTurnState::running()));
     }

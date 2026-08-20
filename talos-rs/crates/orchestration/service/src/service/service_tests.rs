@@ -53,6 +53,7 @@ struct TestSessionRuntime {
 enum TestCancelMode {
     Ok,
     MissingRuntimeTurn,
+    Rejected,
 }
 
 struct TestAuthService;
@@ -280,6 +281,7 @@ impl SessionRuntime for TestSessionRuntime {
                 talos_error::ErrorCode::ResourceNotFound,
                 "active turn for session session-interrupt-runtime-missing".to_string(),
             )),
+            TestCancelMode::Rejected => Err(TalosError::internal("runtime rejected cancellation")),
         }
     }
 }

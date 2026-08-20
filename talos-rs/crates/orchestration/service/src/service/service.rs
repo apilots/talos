@@ -623,24 +623,9 @@ impl TalosService {
     ) -> ServiceResult<()> {
         let _session = self.access.get_session(actor, session_id).await?;
         let active_turn = self
-            .events
-            .get_active_turn(session_id)
-            .await?
-            .filter(|active| {
-                active.turn_id == turn_id
-                    && matches!(
-                        active.status,
-                        ActiveTurnStatus::Running
-                            | ActiveTurnStatus::WaitingUserAction
-                            | ActiveTurnStatus::Cancelling
-                    )
-            })
-            .ok_or_else(|| {
-                TalosError::public(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    format!("active turn `{turn_id}` for session `{session_id}`"),
-                )
-            })?;
+            .event_log
+            .begin_cancellation(session_id, turn_id)
+            .await?;
         match self
             .access
             .cancel_active_turn(actor, session_id, active_turn.turn_id.clone())
@@ -657,7 +642,12 @@ impl TalosService {
                 self.finalize_orphaned_active_turn(session_id, &active_turn)
                     .await
             }
-            Err(error) => Err(error),
+            Err(error) => {
+                self.event_log
+                    .restore_active_turn_on_cancel_error(&active_turn)
+                    .await?;
+                Err(error)
+            }
         }
     }
 
