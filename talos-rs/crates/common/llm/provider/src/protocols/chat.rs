@@ -3,7 +3,7 @@ use crate::{
     ModelBlockCompleted, ModelBlockDelta, ModelBlockKind, ModelBlockStarted, ModelBlockStream,
     ModelBlockStreamEvent, ModelOutputPhase, ModelToolCallStart, ReasoningBlock,
     ReasoningContinuation, ReasoningEffort, ReasoningOutput, Role, SseLineDecoder, ToolChoice,
-    ToolDefinition, Usage,
+    Usage,
 };
 use futures_util::StreamExt;
 use serde_json::Value;
@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 mod content;
 mod reasoning;
+mod tool_definitions;
 mod types;
 
 #[cfg(test)]
@@ -21,6 +22,7 @@ mod tests;
 
 pub use content::content_text;
 use reasoning::reasoning_fields;
+pub use tool_definitions::tools;
 pub use types::*;
 
 #[derive(Debug, Clone)]
@@ -214,22 +216,6 @@ pub fn messages(
             })
         })
         .collect()
-}
-
-pub fn tools(definitions: Option<Vec<ToolDefinition>>) -> Option<Vec<ChatCompletionTool>> {
-    definitions.map(|definitions| {
-        definitions
-            .into_iter()
-            .map(|tool| ChatCompletionTool {
-                r#type: "function".to_string(),
-                function: ChatCompletionFunctionDefinition {
-                    name: tool.name,
-                    description: tool.description,
-                    parameters: tool.parameters,
-                },
-            })
-            .collect()
-    })
 }
 
 pub fn tool_choice(choice: Option<ToolChoice>) -> Option<ChatCompletionToolChoice> {
