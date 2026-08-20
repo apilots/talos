@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { NavLink } from "react-router-dom";
 
 import { cn } from "@/shared/lib/cn";
+import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 interface SidebarNavItemProps {
   icon: ReactNode;
@@ -14,9 +15,9 @@ export function SidebarNavItem({ icon, label, to }: SidebarNavItemProps) {
     <NavLink
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink",
-          "focus-visible:ring-2 focus-visible:ring-brand/30",
-          isActive && "bg-card/92 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.5)]",
+          sidebarInteractiveRowClass,
+          "flex items-center gap-3 px-3 py-2.5 text-sm text-muted hover:text-ink",
+          isActive && "text-ink",
         )
       }
       to={to}

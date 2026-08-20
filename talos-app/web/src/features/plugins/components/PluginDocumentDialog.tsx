@@ -55,14 +55,14 @@ export function PluginDocumentDialog({ plugin, onClose }: PluginDocumentDialogPr
   const selectedDocument = documents.find((document) => document.path === selectedPath) ?? documents[0];
 
   return (
-    <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-ink/28 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
+    <div className="fixed inset-y-0 left-0 right-0 z-[80] flex items-center justify-center bg-black/30 px-6 py-8 backdrop-blur-[2px] lg:left-[280px]">
       <button
         aria-label={t("dialog.closePluginBackdrop")}
         className="absolute inset-0 cursor-default"
         onClick={onClose}
         type="button"
       />
-      <section className="relative flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[1.1rem] border border-border bg-background shadow-[0_24px_80px_rgba(34,28,20,0.22)]">
+      <section className="relative flex max-h-[86vh] w-full max-w-[860px] flex-col overflow-hidden rounded-[var(--radius-panel)] border border-border bg-card shadow-panel">
         <header className="flex items-start justify-between gap-4 border-b border-border px-6 py-5">
           <div className="flex min-w-0 items-start gap-3">
             <PluginIconBadge fallback="cloud" plugin={readPlugin} />

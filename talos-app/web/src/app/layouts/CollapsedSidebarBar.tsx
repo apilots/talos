@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, FileText, PanelLeftOpen, PencilLine } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, PanelLeft, PencilLine } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 
 import { useSessionsQuery } from "@/features/chat";
@@ -40,18 +40,18 @@ export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps)
   const title = session?.title ?? staticPageTitle(location.pathname);
 
   return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/55 bg-card px-4">
+    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border/55 bg-background px-4">
       <button
         aria-label="Open sidebar"
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] border border-border/70 bg-background/90 text-muted shadow-[0_10px_24px_rgba(95,84,64,0.08)] transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] border border-border/70 bg-surface text-muted transition hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         onClick={onOpenSidebar}
         type="button"
       >
-        <PanelLeftOpen aria-hidden="true" size={16} />
+        <PanelLeft aria-hidden="true" size={16} />
       </button>
       <button
         aria-label="Back"
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-card/80 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         onClick={() => navigate(-1)}
         type="button"
       >
@@ -59,7 +59,7 @@ export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps)
       </button>
       <button
         aria-label="Forward"
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-card/80 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         onClick={() => navigate(1)}
         type="button"
       >
@@ -67,7 +67,7 @@ export function CollapsedSidebarBar({ onOpenSidebar }: CollapsedSidebarBarProps)
       </button>
       <Link
         aria-label="New chat"
-        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-card/80 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+        className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
         to="/"
       >
         <PencilLine aria-hidden="true" size={17} />

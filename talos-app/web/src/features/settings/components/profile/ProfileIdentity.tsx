@@ -17,7 +17,7 @@ export function ProfileIdentity({
 }: ProfileIdentityProps) {
   return (
     <section className="text-center">
-      <div className="mx-auto flex size-24 items-center justify-center overflow-hidden rounded-full border border-border/80 bg-card text-3xl font-semibold text-ink shadow-[0_14px_34px_rgba(95,84,64,0.08)]">
+      <div className="mx-auto flex size-24 items-center justify-center overflow-hidden rounded-full border border-border/80 bg-card text-3xl font-semibold text-ink">
         {openMode ? avatarLabel : <UserCircle aria-hidden="true" size={48} />}
       </div>
       <h2 className="mt-6 text-[2rem] font-semibold leading-tight tracking-normal text-ink text-balance">

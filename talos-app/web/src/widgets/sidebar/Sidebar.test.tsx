@@ -52,7 +52,7 @@ function createSessions(count: number, projectId?: string | null) {
   );
 }
 
-function renderSidebar(overrides: Partial<ComponentProps<typeof Sidebar>> = {}) {
+function renderSidebar(overrides: Partial<ComponentProps<typeof Sidebar>> = {}, routerPath = "/") {
   const props = {
     chats: [session("chat-1", "Compare JSON-GRPC and WebSocket", null)],
     connection: {
@@ -77,7 +77,7 @@ function renderSidebar(overrides: Partial<ComponentProps<typeof Sidebar>> = {}) 
 
   return {
     ...render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[routerPath]}>
         <Sidebar {...props} />
       </MemoryRouter>,
     ),
@@ -103,6 +103,24 @@ describe("Sidebar", () => {
     expect(screen.getByText("talos")).toBeTruthy();
     expect(screen.queryByText("Review API design")).toBeNull();
     expect(screen.getByText("Compare JSON-GRPC and WebSocket")).toBeTruthy();
+  });
+
+  it("uses a neutral surface for the selected chat", () => {
+    renderSidebar({
+      currentPath: "/sessions/chat-1",
+      projectGroups: [],
+    });
+
+    const selectedChat = screen.getByText("Compare JSON-GRPC and WebSocket").closest("button");
+    expect(selectedChat).not.toBeNull();
+    expect(selectedChat?.getAttribute("data-selected")).toBe("true");
+  });
+
+  it("applies the selected surface directly to the active primary navigation route", () => {
+    renderSidebar({ projectGroups: [] }, "/plugins");
+
+    const plugins = screen.getByText("Plugins").closest("a");
+    expect(plugins?.getAttribute("aria-current")).toBe("page");
   });
 
   it("toggles project rows and keeps chat rows wired to navigation callbacks", () => {
@@ -169,6 +187,19 @@ describe("Sidebar", () => {
 
     expect(screen.queryByText("Review API design")).toBeNull();
     expect(screen.getByText("Explain sandbox design")).toBeTruthy();
+  });
+
+  it("keeps a selected project session full width without selecting its parent project", () => {
+    renderSidebar({ currentPath: "/sessions/project-session-1" });
+
+    fireEvent.click(screen.getByText("talos"));
+
+    const projectRow = screen.getByText("talos").closest('[data-sidebar-project-row="true"]');
+    const sessionButton = screen.getByText("Review API design").closest("button");
+
+    expect(projectRow).not.toBeNull();
+    expect(projectRow?.getAttribute("data-selected")).toBeNull();
+    expect(sessionButton?.getAttribute("data-selected")).toBe("true");
   });
 
   it("opens and closes project actions without leaving the menu behind", async () => {

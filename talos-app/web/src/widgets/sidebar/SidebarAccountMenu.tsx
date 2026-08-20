@@ -58,7 +58,7 @@ export function SidebarAccountMenu({
         ) : null}
         <button
           aria-expanded={open}
-          className="flex w-full items-center gap-3 rounded-[0.95rem] px-3 py-2 text-left transition hover:bg-card/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+          className="flex w-full items-center gap-3 rounded-[0.95rem] px-3 py-2 text-left transition hover:bg-selected/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           onClick={() => setOpen((value) => !value)}
           type="button"
         >
@@ -89,7 +89,7 @@ function AccountPopover({
   onLogout: SidebarAccountMenuProps["onLogout"];
 }) {
   return (
-    <div className="absolute bottom-[calc(100%+0.65rem)] left-0 right-0 z-30 overflow-hidden rounded-[1.1rem] border border-border/80 bg-card px-3 py-2 shadow-[0_22px_42px_rgba(95,84,64,0.18)]">
+    <div className="absolute bottom-[calc(100%+0.65rem)] left-0 right-0 z-30 overflow-hidden rounded-[1.1rem] border border-border bg-card px-3 py-2 shadow-panel">
       <AccountMenuSection>
         <MenuStaticRow icon={<UserCircle aria-hidden="true" size={16} />} label={authUsername} muted />
         <MenuStaticRow icon={<Settings2 aria-hidden="true" size={16} />} label={`${accountLabel} account`} muted />

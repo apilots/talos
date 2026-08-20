@@ -87,6 +87,20 @@ describe("timeline user action events", () => {
     ]));
   });
 
+  it("restores a cancelling turn without treating it as completed", () => {
+    applyActiveTurnSnapshot("sess-1", activeTurn({
+      status: "cancelling",
+      message_id: "msg-1",
+    }));
+
+    expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
+      activeTurnId: "turn-1",
+      activeMessageId: "msg-1",
+      isStreaming: true,
+      connectionState: "cancelling",
+    });
+  });
+
   it("does not rewind a newer consumed cursor to a recovery high-water mark", () => {
     useAppStore.getState().setStreamMeta("sess-1", {
       activeMessageId: "msg-1",

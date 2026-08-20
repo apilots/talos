@@ -15,7 +15,7 @@ export function ChatContextBar({
   onProjectClick,
 }: ChatContextBarProps) {
   return (
-    <div className="shrink-0 border-b border-border/55 bg-background/72 backdrop-blur-[14px]">
+    <div className="shrink-0 border-b border-border/55 bg-background">
       <div className="flex h-12 w-full items-center px-7">
         {loading ? (
           <SkeletonLine className="h-5 w-[280px]" />

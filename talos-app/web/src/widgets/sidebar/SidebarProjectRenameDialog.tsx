@@ -41,10 +41,10 @@ export function SidebarProjectRenameDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-background/65 px-4 backdrop-blur-[8px]">
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]">
       <div className="absolute inset-0" onClick={onClose} role="presentation" />
       <form
-        className="relative z-10 w-[min(560px,calc(100vw-32px))] rounded-[1.35rem] border border-border/75 bg-card p-6 shadow-[0_24px_80px_rgba(95,84,64,0.24)]"
+        className="relative z-10 w-[min(560px,calc(100vw-32px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 shadow-panel"
         onSubmit={(event) => {
           event.preventDefault();
           void submitRename();
@@ -95,7 +95,7 @@ function DialogHeader({
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
-        <h2 className="text-2xl font-semibold tracking-normal text-ink">{title}</h2>
+        <h2 className="text-xl font-semibold tracking-normal text-ink">{title}</h2>
         <p className="mt-2 text-sm text-muted">{detail}</p>
       </div>
       <button

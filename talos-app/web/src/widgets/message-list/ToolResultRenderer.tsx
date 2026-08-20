@@ -407,6 +407,8 @@ function toolResultStateLabel(status: ChatToolStatus) {
       return "Completed";
     case "error":
       return "Failed";
+    case "cancelled":
+      return "Cancelled";
   }
 }
 

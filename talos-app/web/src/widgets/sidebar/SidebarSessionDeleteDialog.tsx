@@ -32,9 +32,9 @@ export function SidebarSessionDeleteDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-background/65 px-4 backdrop-blur-[8px]">
+    <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/30 px-4 backdrop-blur-[2px]">
       <div className="absolute inset-0" onClick={onClose} role="presentation" />
-      <div className="relative z-10 w-[min(520px,calc(100vw-32px))] rounded-[var(--radius-panel)] border border-border/75 bg-card p-6 shadow-[0_24px_80px_rgba(95,84,64,0.24)]">
+      <div className="relative z-10 w-[min(520px,calc(100vw-32px))] rounded-[var(--radius-panel)] border border-border bg-card p-6 shadow-panel">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-semibold tracking-normal text-ink">

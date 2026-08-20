@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { QuestionAnswer } from "@talos/sdk-browser";
 import type { AppProtocol } from "@talos/sdk-core";
-import { MessageSquareText, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/shared/ui/Button";
@@ -21,14 +21,13 @@ export function QuestionPanel({ params, disabled, error, onSubmit }: QuestionPan
 
   return (
     <section className="mt-3 border-l-2 border-brand/35 pl-4" data-user-action="question">
-      <header className="mb-3 flex items-start gap-2.5">
-        <MessageSquareText className="mt-0.5 shrink-0 text-brand" size={16} />
+      <header className="mb-3">
         <div className="min-w-0">
           <p className="text-[12px] font-semibold text-muted">{params.header}</p>
           <p className="mt-1 text-sm leading-6 text-ink">{params.question}</p>
         </div>
       </header>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2">
         {params.options.map((option) => (
           <button
             className="min-w-0 rounded-[var(--radius-control)] border border-border/75 px-3 py-2.5 text-left transition hover:border-brand/45 hover:bg-brand/5 disabled:cursor-not-allowed disabled:opacity-50"

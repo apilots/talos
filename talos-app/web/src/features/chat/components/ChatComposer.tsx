@@ -333,7 +333,7 @@ export function ChatComposer({
   return (
     <div className="relative">
       <ComposerNotice commandNotice={commandNotice} contextCompactionStage={contextCompactionStage} />
-      <Panel className="overflow-visible rounded-[1.5rem] border-border/70 bg-card p-0 shadow-[0_16px_34px_rgba(104,94,78,0.07)] backdrop-blur-none">
+      <Panel className="overflow-visible rounded-[1.25rem] border-border bg-card p-0 shadow-panel">
         {messageQueue ? <WaitingMessages controller={messageQueue} /> : null}
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">

@@ -2,7 +2,7 @@ import type {
   SandboxApprovalDecision,
 } from "@talos/sdk-browser";
 import type { AppProtocol } from "@talos/sdk-core";
-import { Ban, Check, ShieldAlert, X } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/shared/ui/Button";
@@ -42,9 +42,6 @@ export function SandboxApprovalPanel({
             type="button"
             variant={decision === "allowOnce" ? "primary" : decision === "deny" ? "secondary" : "ghost"}
           >
-            {decision === "allowOnce" ? <Check size={14} /> : null}
-            {decision === "deny" ? <Ban size={14} /> : null}
-            {decision === "cancel" ? <X size={14} /> : null}
             {t(`sandboxDecision.${decision}`)}
           </Button>
         ))}

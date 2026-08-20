@@ -15,8 +15,8 @@ export function AppLayout() {
     <div
       className={
         showMainSidebar
-          ? "grid h-screen grid-cols-1 overflow-hidden bg-card text-ink lg:grid-cols-[320px_minmax(0,1fr)]"
-          : "grid h-screen grid-cols-1 overflow-hidden bg-card text-ink"
+          ? "grid h-screen grid-cols-1 overflow-hidden bg-background text-ink lg:grid-cols-[320px_minmax(0,1fr)]"
+          : "grid h-screen grid-cols-1 overflow-hidden bg-background text-ink"
       }
     >
       {showMainSidebar ? (

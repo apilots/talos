@@ -1,18 +1,17 @@
-import type { PropsWithChildren } from "react";
+import type { HTMLAttributes, PropsWithChildren } from "react";
 
 import { cn } from "@/shared/lib/cn";
 
-interface PanelProps {
-  className?: string;
-}
+type PanelProps = HTMLAttributes<HTMLDivElement>;
 
-export function Panel({ children, className }: PropsWithChildren<PanelProps>) {
+export function Panel({ children, className, ...props }: PropsWithChildren<PanelProps>) {
   return (
     <div
       className={cn(
-        "rounded-[var(--radius-panel)] border border-border/80 bg-card/90 shadow-panel backdrop-blur-[14px]",
+        "rounded-[var(--radius-panel)] border border-border/80 bg-card shadow-panel",
         className,
       )}
+      {...props}
     >
       {children}
     </div>

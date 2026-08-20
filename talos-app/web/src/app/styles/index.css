@@ -10,6 +10,7 @@
   --color-card: 21 31 35;
   --color-border: 36 49 55;
   --color-surface: 27 39 44;
+  --color-selected: 27 39 44;
   --color-ink: 244 247 246;
   --color-muted: 144 160 166;
   --color-brand: 242 140 40;
@@ -18,9 +19,6 @@
   --color-danger: 227 93 93;
   --color-success: 94 234 212;
   --color-info: 125 211 252;
-  --page-grid: rgba(255, 255, 255, 0.015);
-  --page-brand-glow: rgba(242, 140, 40, 0.14);
-  --page-info-glow: rgba(125, 211, 252, 0.12);
   --shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.22), 0 0 0 1px rgba(36, 49, 55, 0.9);
   --radius-panel: 1.18rem;
   --radius-control: 0.84rem;
@@ -30,26 +28,23 @@
 }
 
 :root[data-theme="light"] {
-  --color-background: 250 248 244;
-  --color-sidebar: 245 243 238;
-  --color-card: 255 253 249;
-  --color-border: 224 218 209;
-  --color-surface: 248 245 239;
-  --color-ink: 34 39 45;
-  --color-muted: 102 111 121;
+  --color-background: 255 255 255;
+  --color-sidebar: 250 250 249;
+  --color-card: 255 255 255;
+  --color-border: 230 230 226;
+  --color-surface: 248 248 246;
+  --color-selected: 236 236 234;
+  --color-ink: 32 33 31;
+  --color-muted: 119 122 117;
   --color-brand: 194 109 39;
   --color-brand-dim: 248 238 223;
   --color-warning: 171 126 56;
   --color-danger: 179 79 79;
   --color-success: 44 127 109;
   --color-info: 63 118 168;
-  --page-grid: rgba(34, 39, 45, 0.014);
-  --page-brand-glow: rgba(194, 109, 39, 0.035);
-  --page-info-glow: rgba(63, 118, 168, 0.022);
   --shadow-panel:
-    0 16px 34px rgba(104, 94, 78, 0.055),
-    0 1px 0 rgba(255, 255, 255, 0.94),
-    0 0 0 1px rgba(224, 218, 209, 0.78);
+    0 12px 30px rgba(32, 33, 31, 0.055),
+    0 0 0 1px rgba(230, 230, 226, 0.85);
 }
 
 * {
@@ -67,13 +62,7 @@ html[data-theme="light"] {
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    linear-gradient(var(--page-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--page-grid) 1px, transparent 1px),
-    radial-gradient(circle at top left, var(--page-brand-glow), transparent 26%),
-    radial-gradient(circle at bottom right, var(--page-info-glow), transparent 22%),
-    rgb(var(--color-background));
-  background-size: 24px 24px, 24px 24px, auto, auto, auto;
+  background: rgb(var(--color-background));
   color: rgb(var(--color-ink));
   text-rendering: optimizeLegibility;
 }
@@ -100,6 +89,12 @@ select {
 }
 
 @layer components {
+  .sidebar-interactive-row:hover,
+  .sidebar-interactive-row[aria-current="page"],
+  .sidebar-interactive-row[data-selected="true"] {
+    background-color: rgb(var(--color-selected));
+  }
+
   .form-control-focus {
     outline: none;
   }

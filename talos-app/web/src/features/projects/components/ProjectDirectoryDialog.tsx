@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot } from "@talos/sdk-browser";
 
@@ -172,18 +172,16 @@ export function ProjectDirectoryDialog({
 
   return (
     <div className="fixed inset-0 z-[70]">
-      <div className="absolute inset-0" onClick={onClose} role="presentation" />
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} role="presentation" />
       <div className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-center px-4 py-10 lg:left-[280px]">
-        <div className="pointer-events-auto flex max-h-[calc(100vh-80px)] w-[min(680px,calc(100vw-32px))] flex-col overflow-hidden rounded-[calc(var(--radius-panel)+2px)] border border-border/75 bg-card shadow-[0_24px_80px_rgba(0,0,0,0.26)]">
+        <div className="pointer-events-auto flex max-h-[calc(100vh-80px)] w-[min(680px,calc(100vw-32px))] flex-col overflow-hidden rounded-[var(--radius-panel)] border border-border bg-card shadow-panel">
           <div className="flex items-center gap-3 border-b border-border/60 px-4 py-3">
-            <div className="flex size-8 items-center justify-center rounded-full border border-border/60 bg-card text-muted">
-              <FolderOpen size={15} />
-            </div>
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-semibold text-ink">{title}</div>
             </div>
             <button
-              className="flex size-8 items-center justify-center rounded-full border border-border/75 bg-card text-muted transition hover:border-brand/30 hover:text-ink"
+              aria-label={t("common:close")}
+              className="flex size-8 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-surface hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30"
               onClick={onClose}
               type="button"
             >

@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { formatRelativeTime } from "@/shared/lib/time";
 import type { SessionUiStatus } from "@/shared/types/ui";
+import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 export interface SidebarSessionItem {
   id: string;
@@ -32,12 +33,15 @@ export function SidebarSessionRow({
   const active = currentPath === `/sessions/${session.id}`;
 
   return (
-    <div className={cn("group relative", indent && "ml-7")} key={`${session.id}-${session.createdAt}`}>
+    <div className="group relative" key={`${session.id}-${session.createdAt}`}>
       <button
         className={cn(
-          "grid h-8 w-full grid-cols-[minmax(0,1fr)_4.25rem] items-center gap-2 rounded-[var(--radius-control)] px-3 text-left text-sm transition hover:bg-card/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30",
-          active && "bg-ink/[0.07] text-ink hover:bg-ink/[0.07]",
+          sidebarInteractiveRowClass,
+          "grid h-8 grid-cols-[minmax(0,1fr)_4.25rem] items-center gap-2 text-left text-sm",
+          indent ? "pl-10 pr-3" : "px-3",
+          active && "text-ink",
         )}
+        data-selected={active ? "true" : undefined}
         onClick={() => onSelectSession(session.id)}
         type="button"
       >

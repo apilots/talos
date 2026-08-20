@@ -666,6 +666,22 @@ export function applyActiveTurnSnapshot(sessionId: string, activeTurn: TalosActi
     return;
   }
 
+  if (activeTurn.status === "cancelling") {
+    const state = useAppStore.getState();
+    state.setPendingUserAction(sessionId, undefined);
+    state.setSessionStatus(sessionId, "running");
+    state.setTimelineLive(sessionId, true);
+    state.setStreamMeta(sessionId, {
+      activeTurnId: activeTurn.turn_id ?? undefined,
+      activeMessageId: activeTurn.message_id ?? undefined,
+      isStreaming: true,
+      connectionState: "cancelling",
+      reconnectAttempt: undefined,
+      showReconnectControls: false,
+    });
+    return;
+  }
+
   const pending = activeTurn.pending_user_action;
   if (activeTurn.status === "running" && activeTurn.message_id) {
     const state = useAppStore.getState();

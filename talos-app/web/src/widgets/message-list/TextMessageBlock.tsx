@@ -1,4 +1,4 @@
-import { Bot, Paperclip, Sparkles, User, Wrench } from "lucide-react";
+import { Paperclip, Sparkles, Wrench } from "lucide-react";
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -22,13 +22,13 @@ export function TextMessageBlock({
   const isUser = kind === "user";
   const isThinking = kind === "thinking";
   const isSystem = kind === "system";
-  const icon = isUser ? <User size={16} /> : isThinking ? <Sparkles size={16} /> : isSystem ? <Wrench size={16} /> : <Bot size={16} />;
+  const icon = isThinking ? <Sparkles size={16} /> : <Wrench size={16} />;
   return (
     <div
       className={cn("flex items-start gap-3.5 md:gap-4", isUser ? "justify-end" : "justify-start")}
       data-chat-user-block-id={isUser ? messageId : undefined}
     >
-      {!isUser ? (
+      {isThinking || isSystem ? (
         <div
           className={cn(
             "mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border text-brand md:size-8",
@@ -46,7 +46,7 @@ export function TextMessageBlock({
         className={cn(
           "min-w-0",
           isUser
-            ? "max-w-[min(100%,39rem)] rounded-[1.25rem] border border-brand/18 bg-brandDim/95 px-4 py-3 text-ink shadow-[0_10px_24px_rgba(194,109,39,0.08)]"
+            ? "max-w-[min(100%,39rem)] rounded-[1.25rem] border border-border/70 bg-surface px-4 py-3 text-ink"
             : isThinking
               ? "flex-1 rounded-[1.25rem] border border-border/70 bg-background/34 px-4 py-3 text-muted"
               : isSystem
@@ -62,7 +62,7 @@ export function TextMessageBlock({
                 <div className="flex flex-wrap gap-2">
                   {fileIds.map((fileId, index) => (
                     <span
-                      className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-brand/15 bg-background/55 px-2.5 py-1.5 text-xs text-muted"
+                      className="inline-flex max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted"
                       key={fileId}
                       title={fileId}
                     >
@@ -93,11 +93,6 @@ export function TextMessageBlock({
           )}
         </div>
       </div>
-      {isUser ? (
-        <div className="mt-1.5 flex size-7.5 shrink-0 items-center justify-center rounded-[0.95rem] border border-brand/15 bg-brandDim text-brand md:size-8">
-          {icon}
-        </div>
-      ) : null}
     </div>
   );
 }

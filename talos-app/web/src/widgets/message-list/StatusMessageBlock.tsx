@@ -21,7 +21,7 @@ export function StatusMessageBlock({
       <div className={iconClassName}>
         <LoaderCircle className="animate-spin" size={16} />
       </div>
-      <div className="flex-1 rounded-[1.25rem] border border-brand/16 bg-card/92 px-5 py-4 text-ink shadow-[0_14px_34px_rgba(95,84,64,0.055)]">
+      <div className="flex-1 rounded-[1.25rem] border border-brand/16 bg-card px-5 py-4 text-ink">
         <div className="text-[11px] uppercase tracking-[0.16em] text-brand/80">{t("assistantLabel")}</div>
         <div className="mt-2 text-sm font-medium text-ink">{title}</div>
         <p className="mt-1.5 text-sm leading-6 text-muted">{detail}</p>

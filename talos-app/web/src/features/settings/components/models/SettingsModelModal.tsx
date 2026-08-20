@@ -36,9 +36,9 @@ export function SettingsModelModal({
   const isAdd = mode === "add";
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(28,22,16,0.46)] px-6 py-10">
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 px-6 py-10 backdrop-blur-[2px]">
       <div className="absolute inset-0" onClick={onClose} />
-      <Panel className="relative z-10 w-full max-w-[520px] rounded-[1.5rem] border-border/75 bg-card p-6 shadow-[0_24px_80px_rgba(69,55,34,0.18)]">
+      <Panel className="relative z-10 w-full max-w-[520px] rounded-[var(--radius-panel)] border-border bg-card p-6 shadow-panel">
         <div className="flex items-start justify-between gap-6">
           <div>
             <div className="text-lg font-semibold text-ink">

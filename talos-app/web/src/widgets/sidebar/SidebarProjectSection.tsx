@@ -9,6 +9,7 @@ import { SidebarProjectRemoveDialog } from "./SidebarProjectRemoveDialog";
 import { SidebarProjectRenameDialog } from "./SidebarProjectRenameDialog";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { SidebarSessionRow, type SidebarSessionItem } from "./SidebarSessionRow";
+import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 export interface SidebarProjectGroup {
   project: ProjectView;
@@ -87,7 +88,6 @@ export function SidebarProjectSection({
         <div className="mt-1 space-y-1">
           {groups.map((group) => {
             const projectOpen = expandedProjectIds.has(group.project.id);
-            const projectActive = group.sessions.some((session) => currentPath === `/sessions/${session.id}`);
             return (
               <ProjectGroup
                 currentPath={currentPath}
@@ -111,7 +111,6 @@ export function SidebarProjectSection({
                 onSelectSession={onSelectSession}
                 onToggleProject={() => toggleProject(group.project.id)}
                 open={projectOpen}
-                projectActive={projectActive}
                 sessionsExpanded={expandedSessionProjectIds.has(group.project.id)}
                 showMoreLabel={t("common:showMore")}
               />
@@ -158,7 +157,6 @@ function ProjectGroup({
   onSelectSession,
   onToggleProject,
   open,
-  projectActive,
   sessionsExpanded,
   showMoreLabel,
 }: {
@@ -174,7 +172,6 @@ function ProjectGroup({
   onSelectSession: (sessionId: string) => void;
   onToggleProject: () => void;
   open: boolean;
-  projectActive: boolean;
   sessionsExpanded: boolean;
   showMoreLabel: string;
 }) {
@@ -184,9 +181,10 @@ function ProjectGroup({
     <div>
       <div
         className={cn(
-          "group/project relative grid h-9 grid-cols-[minmax(0,1fr)_4.25rem] items-center gap-2 rounded-[var(--radius-control)] px-3 text-sm text-ink transition hover:bg-card/75",
-          projectActive && "bg-card/90 hover:bg-card/90",
+          sidebarInteractiveRowClass,
+          "group/project relative grid h-9 grid-cols-[minmax(0,1fr)_4.25rem] items-center gap-2 px-3 text-sm text-ink",
         )}
+        data-sidebar-project-row="true"
       >
         <button
           className="grid min-w-0 grid-cols-[1.25rem_minmax(0,1fr)] items-center gap-2 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
@@ -199,7 +197,7 @@ function ProjectGroup({
         <span className="flex items-center justify-end gap-1">
           <button
             aria-label="Project actions"
-            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-background/70 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
+            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
             data-sidebar-project-menu-trigger=""
             onClick={(event) => {
               event.stopPropagation();
@@ -211,7 +209,7 @@ function ProjectGroup({
           </button>
           <button
             aria-label="New chat in project"
-            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-background/70 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
+            className="hidden size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30 group-hover/project:flex group-focus-within/project:flex"
             onClick={(event) => {
               event.stopPropagation();
               onCreateProjectThread();
@@ -222,7 +220,7 @@ function ProjectGroup({
           </button>
           <button
             aria-label={open ? "Collapse project" : "Expand project"}
-            className="flex size-5 items-center justify-center rounded text-muted transition hover:bg-background/70 hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+            className="flex size-5 items-center justify-center rounded text-muted transition hover:bg-surface hover:text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
             onClick={(event) => {
               event.stopPropagation();
               onToggleProject();

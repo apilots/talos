@@ -1,7 +1,9 @@
 import { Blocks, Brain, FileText, PenLine } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { cn } from "@/shared/lib/cn";
 import { SidebarNavItem } from "./SidebarNavItem";
+import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
 
 interface SidebarPrimaryNavProps {
   onCreateThread: () => Promise<void> | void;
@@ -13,7 +15,10 @@ export function SidebarPrimaryNav({ onCreateThread }: SidebarPrimaryNavProps) {
   return (
     <nav className="mb-6 space-y-1">
       <button
-        className="flex w-full items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-left text-sm text-ink transition hover:bg-card/88 focus-visible:ring-2 focus-visible:ring-brand/30"
+        className={cn(
+          sidebarInteractiveRowClass,
+          "flex items-center gap-3 px-3 py-2.5 text-left text-sm text-ink",
+        )}
         onClick={() => void onCreateThread()}
         type="button"
       >

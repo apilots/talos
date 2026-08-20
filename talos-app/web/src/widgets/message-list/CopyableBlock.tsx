@@ -83,7 +83,7 @@ export function CopyableBlock({
       ) : (
         <button
           aria-label={copied ? copiedLabel : copyLabel}
-          className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-[0.7rem] border border-border/70 bg-card/95 text-muted opacity-0 shadow-[0_10px_24px_rgba(95,84,64,0.08)] transition hover:border-brand/35 hover:text-brand focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand/30 group-hover:opacity-100"
+          className="absolute right-2 top-2 z-10 flex size-8 items-center justify-center rounded-[0.7rem] border border-border/70 bg-card text-muted opacity-0 transition hover:border-brand/35 hover:text-brand focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand/30 group-hover:opacity-100"
           onClick={() => void copyBlock()}
           title={copied ? copiedLabel : copyLabel}
           type="button"

@@ -12,7 +12,7 @@ export function SidebarProjectActionsMenu({
 }: SidebarProjectActionsMenuProps) {
   return (
     <div
-      className="absolute right-2 top-8 z-40 w-[12.5rem] overflow-hidden rounded-[1.1rem] border border-border/80 bg-card p-2 shadow-[0_22px_42px_rgba(95,84,64,0.2)]"
+      className="absolute right-2 top-8 z-40 w-[12.5rem] overflow-hidden rounded-[1.1rem] border border-border bg-card p-2 shadow-panel"
       data-sidebar-project-menu-root=""
     >
       <ProjectMenuButton icon={<Pencil aria-hidden="true" size={16} />} label="Rename project" onClick={onRename} />

@@ -92,9 +92,9 @@ export function SettingsNavigation({ activeSection, canManageConfig, canOpenAcco
   };
 
   return (
-    <aside className="flex h-screen w-full flex-col border-r border-border/70 bg-background px-4 py-5">
+    <aside className="flex h-screen w-full flex-col border-r border-border/70 bg-sidebar px-4 py-5">
       <Link
-        className="mb-7 inline-flex items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-sm text-muted transition hover:bg-card/80 hover:text-ink"
+        className="mb-7 inline-flex items-center gap-2 rounded-[var(--radius-control)] px-2 py-2 text-sm text-muted transition hover:bg-selected/60 hover:text-ink"
         to="/"
       >
         <ArrowLeft size={15} />
@@ -155,8 +155,8 @@ function NavigationGroup({
           const Icon = item.icon;
           const isCurrent = item.external ? false : activeSection === item.id;
           const className = cn(
-            "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-card/88 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30",
-            isCurrent && "bg-card/95 text-ink shadow-[inset_0_0_0_1px_rgba(224,218,209,0.55)]",
+            "flex items-center gap-3 rounded-[var(--radius-control)] px-3 py-2.5 text-sm text-muted transition hover:bg-selected/60 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/30",
+            isCurrent && "bg-selected text-ink",
             item.external && "disabled:cursor-not-allowed disabled:opacity-55",
           );
 

@@ -45,7 +45,8 @@ export type ChatToolStatus =
   | "running"
   | "waiting_dynamic_input"
   | "done"
-  | "error";
+  | "error"
+  | "cancelled";
 
 export type StreamConnectionState =
   | "idle"

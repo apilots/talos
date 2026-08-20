@@ -2,15 +2,21 @@ import { Home } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
+import { cn } from "@/shared/lib/cn";
+import { sidebarInteractiveRowClass } from "./sidebarRowStyles";
+
 export function SidebarHomeEntry() {
   const { t } = useTranslation("common");
 
   return (
     <Link
-      className="mb-6 grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 rounded-[var(--radius-control)] px-1.5 py-1.5 text-ink transition hover:bg-card/70 focus-visible:ring-2 focus-visible:ring-brand/30"
+      className={cn(
+        sidebarInteractiveRowClass,
+        "mb-6 grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-3 px-1.5 py-1.5 text-ink",
+      )}
       to="/"
     >
-      <span className="flex size-9 items-center justify-center rounded-[0.7rem] border border-border/75 bg-background/70 text-ink">
+      <span className="flex size-9 items-center justify-center rounded-[0.7rem] border border-border/75 bg-surface text-ink">
         <Home aria-hidden="true" size={17} />
       </span>
       <span className="min-w-0">

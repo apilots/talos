@@ -11,6 +11,7 @@ export default {
         card: "rgb(var(--color-card) / <alpha-value>)",
         border: "rgb(var(--color-border) / <alpha-value>)",
         surface: "rgb(var(--color-surface) / <alpha-value>)",
+        selected: "rgb(var(--color-selected) / <alpha-value>)",
         ink: "rgb(var(--color-ink) / <alpha-value>)",
         muted: "rgb(var(--color-muted) / <alpha-value>)",
         brand: "rgb(var(--color-brand) / <alpha-value>)",
