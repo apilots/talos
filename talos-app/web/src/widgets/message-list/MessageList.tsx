@@ -66,6 +66,17 @@ export function MessageList({
             />
           );
         }
+        if (block.kind === "user") {
+          return (
+            <TextMessageBlock
+              fileIds={block.fileIds}
+              key={block.id}
+              kind={block.kind}
+              messageId={block.id}
+              text={block.text}
+            />
+          );
+        }
         const copyText = blockToMarkdown(block);
         if (block.kind === "tool") {
           return (
@@ -109,9 +120,7 @@ export function MessageList({
             variant={block.kind === "assistant" ? "response" : "hover"}
           >
             <TextMessageBlock
-              fileIds={block.kind === "user" ? block.fileIds : undefined}
               kind={block.kind}
-              messageId={block.kind === "user" ? block.id : undefined}
               text={block.text}
             />
           </CopyableBlock>
@@ -121,17 +130,8 @@ export function MessageList({
   );
 }
 
-function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" }>) {
+function blockToMarkdown(block: Exclude<ChatRenderBlock, { kind: "timeline" | "user" }>) {
   switch (block.kind) {
-    case "user":
-      return [
-        block.text,
-        block.fileIds.length > 0
-          ? `Attachments:\n${block.fileIds.map((fileId) => `- ${fileId}`).join("\n")}`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
     case "assistant":
     case "thinking":
     case "system":

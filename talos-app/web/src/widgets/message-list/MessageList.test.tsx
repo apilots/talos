@@ -87,6 +87,26 @@ describe("MessageList", () => {
     });
   });
 
+  it("does not show a copy action on user messages", () => {
+    render(
+      <MessageList
+        blocks={[
+          {
+            id: "user-1",
+            kind: "user",
+            text: "What model are you?",
+            fileIds: [],
+          },
+        ]}
+        emptyDetail=""
+        emptyTitle=""
+      />,
+    );
+
+    expect(screen.getByText("What model are you?")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "Copy block" })).toBeNull();
+  });
+
   it("copies the original markdown for text blocks", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
