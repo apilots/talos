@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicU64, Ordering};
 use talos_error::TalosResult;
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{SessionConf, DEFAULT_SESSION_TITLE};
 
 use super::{SessionQuery, SessionRecord, SessionStore, SessionSummary, SessionTreeIdentity};
@@ -58,7 +58,7 @@ impl SessionStore for MockSessionStore {
             message_count: 0,
             latest_turn_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
             memory_processed_until_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
-            usage: TokenUsage::default(),
+            usage: talos_types::SessionUsage::default(),
             conf: SessionConf::default(),
             workspace_id: None,
             project_id: None,
@@ -91,6 +91,14 @@ impl SessionStore for MockSessionStore {
     }
 
     async fn update_session_record(&self, _record: &SessionRecord) -> TalosResult<bool> {
+        Ok(true)
+    }
+
+    async fn update_context_usage(
+        &self,
+        _session_id: &str,
+        _context_usage: &talos_types::ContextUsage,
+    ) -> TalosResult<bool> {
         Ok(true)
     }
 

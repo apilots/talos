@@ -111,7 +111,7 @@ fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
             created_at: 0,
             last_activity: 0,
             message_count: 0,
-            usage: TokenUsage::default(),
+            usage: talos_types::SessionUsage::default(),
         },
     }
 }

@@ -20,6 +20,7 @@ interface ComposerDropdownProps {
   onChange: (value: string) => void;
   triggerIcon?: React.ReactNode;
   className?: string;
+  menuClassName?: string;
   disabled?: boolean;
   triggerRef?: React.Ref<HTMLButtonElement>;
 }
@@ -31,6 +32,7 @@ export function ComposerDropdown({
   onChange,
   triggerIcon,
   className,
+  menuClassName,
   disabled = false,
   triggerRef,
 }: ComposerDropdownProps) {
@@ -68,7 +70,12 @@ export function ComposerDropdown({
       </button>
 
       {open ? (
-        <div className="absolute bottom-[calc(100%+6px)] left-0 z-50 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-card py-1 shadow-lg">
+        <div
+          className={cn(
+            "absolute bottom-[calc(100%+6px)] left-0 z-50 min-w-[160px] overflow-hidden rounded-xl border border-border/60 bg-card py-1 shadow-lg",
+            menuClassName,
+          )}
+        >
           <div className="px-3 pb-1 pt-1.5 text-[11px] font-medium text-muted">{header}</div>
           {items.map((item, index) => (
             <Fragment key={item.value}>

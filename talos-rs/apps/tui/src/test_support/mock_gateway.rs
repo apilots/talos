@@ -37,6 +37,7 @@ pub(crate) struct MockGatewayState {
     pub(crate) cancelled_sessions: Vec<String>,
     pub(crate) active_turn_id: Option<String>,
     pub(crate) session_usage: talos_types::talos::TokenUsage,
+    pub(crate) session_context_usage: Option<talos_sdk::ContextUsage>,
     pub(crate) compact_calls: usize,
     pub(crate) compact_failures_remaining: u8,
     pub(crate) clear_calls: usize,
@@ -96,7 +97,10 @@ impl MockGatewayState {
             created_at: 1,
             last_activity: 2,
             message_count,
-            usage: self.session_usage.clone(),
+            usage: talos_sdk::SessionUsage {
+                tokens: self.session_usage.clone(),
+                context: self.session_context_usage.clone(),
+            },
             project_id: None,
             current_directory: self.current_project_root.clone(),
         }

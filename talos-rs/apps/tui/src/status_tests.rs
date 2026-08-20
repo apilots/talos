@@ -29,12 +29,15 @@ fn session_info() -> SessionInfo {
         created_at: 1,
         last_activity: 2,
         message_count: 3,
-        usage: TokenUsage {
-            input_tokens: 120_000,
-            output_tokens: 40_000,
-            total_tokens: 160_000,
-            cache_creation_input_tokens: Some(3_000),
-            cache_read_input_tokens: Some(21_000),
+        usage: talos_sdk::SessionUsage {
+            tokens: TokenUsage {
+                input_tokens: 120_000,
+                output_tokens: 40_000,
+                total_tokens: 160_000,
+                cache_creation_input_tokens: Some(3_000),
+                cache_read_input_tokens: Some(21_000),
+            },
+            context: talos_sdk::ContextUsage::new(160_000, 200_000, 180_000, 1),
         },
         project_id: None,
         current_directory: Some(PathBuf::from("/tmp/talos-project")),
@@ -110,7 +113,7 @@ fn test_status_snapshot_renders_card_from_real_state() {
     assert!(card.contains("Session:          sess-status"));
     assert!(card.contains("Runtime:          embedded ● connected"));
     assert!(card.contains("Permissions:      Full access"));
-    assert!(card.contains("[■■■■■■■■■■■■■■■■□□□□] 80% used"));
+    assert!(card.contains("[■■■■■■■■■■■■■■■■□□□□] 80.0% used"));
     assert!(card.contains("160.0K used / 200.0K total · 40.0K left"));
     assert!(card.contains("160.0K tokens · cache read 21.0K"));
     assert!(card.contains("last · 4 rounds · 7 tools · 6 ok · 1 err · 9.6s"));

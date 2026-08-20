@@ -2599,6 +2599,37 @@
       ],
       "type": "string"
     },
+    "ContextUsage": {
+      "description": "Last successfully measured model-context usage for a Session.",
+      "properties": {
+        "contextWindowTokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "effectivePromptBudgetTokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "measuredAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "usedTokens": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "contextWindowTokens",
+        "effectivePromptBudgetTokens",
+        "measuredAt",
+        "usedTokens"
+      ],
+      "type": "object"
+    },
     "DynamicToolResult": {
       "description": "Result submitted by an external Dynamic Tool consumer.",
       "properties": {
@@ -5215,6 +5246,17 @@
       ],
       "type": "object"
     },
+    "SessionGetResponse": {
+      "properties": {
+        "session": {
+          "$ref": "#/definitions/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "type": "object"
+    },
     "SessionHistoryMessage": {
       "description": "Stable message view for session history.",
       "properties": {
@@ -5310,6 +5352,94 @@
       ],
       "type": "object"
     },
+    "SessionInfo": {
+      "properties": {
+        "configuredDefaultMode": {
+          "$ref": "#/definitions/UserPermissionMode"
+        },
+        "created_at": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "current_directory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "effectiveMode": {
+          "$ref": "#/definitions/UserPermissionMode"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_activity": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "message_count": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "modelSelection": {
+          "$ref": "#/definitions/ModelSelection"
+        },
+        "project_id": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "$ref": "#/definitions/TalosProvider"
+        },
+        "source_type": {
+          "$ref": "#/definitions/TalosSourceType"
+        },
+        "title": {
+          "type": "string"
+        },
+        "usage": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/SessionUsage"
+            }
+          ],
+          "default": {
+            "context": null,
+            "tokens": {
+              "cache_creation_input_tokens": null,
+              "cache_read_input_tokens": null,
+              "input_tokens": 0,
+              "output_tokens": 0,
+              "total_tokens": 0
+            }
+          }
+        },
+        "user_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "configuredDefaultMode",
+        "created_at",
+        "effectiveMode",
+        "id",
+        "last_activity",
+        "message_count",
+        "modelSelection",
+        "provider",
+        "source_type",
+        "title",
+        "user_id"
+      ],
+      "type": "object"
+    },
     "SessionListRequest": {
       "properties": {
         "limit": {
@@ -5380,6 +5510,29 @@
           "type": "string"
         }
       },
+      "type": "object"
+    },
+    "SessionUsage": {
+      "description": "Session-owned usage combining cumulative token accounting with the latest context snapshot.",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tokens": {
+          "$ref": "#/definitions/TokenUsage"
+        }
+      },
+      "required": [
+        "tokens"
+      ],
       "type": "object"
     },
     "SkillSelector": {
@@ -8116,6 +8269,9 @@
     "server_request": {
       "$ref": "#/definitions/ServerRequest"
     },
+    "session_get_response": {
+      "$ref": "#/definitions/SessionGetResponse"
+    },
     "session_history_response": {
       "$ref": "#/definitions/SessionHistoryResponse"
     },
@@ -8196,6 +8352,7 @@
     "retry_turn_response",
     "server_notification",
     "server_request",
+    "session_get_response",
     "session_history_response",
     "start_turn_request",
     "start_turn_response",

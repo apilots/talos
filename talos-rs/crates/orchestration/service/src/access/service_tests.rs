@@ -6,7 +6,7 @@ use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
 use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
-use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
+use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
 use talos_types::{
     AgentTurnRef, ModelRef, ModelSelection, ProjectPatch, SessionConf, SessionListRequest,
     SessionPatch, TalosConfig, DEFAULT_SESSION_TITLE,
@@ -145,6 +145,19 @@ impl SessionStore for RecordingSessionStore {
             return Ok(false);
         };
         *stored = record.clone();
+        Ok(true)
+    }
+
+    async fn update_context_usage(
+        &self,
+        session_id: &str,
+        context_usage: &talos_types::ContextUsage,
+    ) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let Some(stored) = records.iter_mut().find(|stored| stored.id == session_id) else {
+            return Ok(false);
+        };
+        stored.usage.context = Some(context_usage.clone());
         Ok(true)
     }
 
@@ -309,7 +322,7 @@ fn record_for(
         message_count: 0,
         latest_turn_seq: 0,
         memory_processed_until_seq: 0,
-        usage: TokenUsage::default(),
+        usage: talos_types::SessionUsage::default(),
         conf,
         workspace_id: None,
         project_id,

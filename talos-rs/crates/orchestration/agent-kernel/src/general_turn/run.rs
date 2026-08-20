@@ -164,6 +164,7 @@ pub async fn run_general_turn_with_resume(
         output_items: executed.output_items.clone(),
         stop_reason: executed.stop_reason,
         usage: executed.usage.clone(),
+        last_model_usage: executed.last_model_usage.clone(),
         metrics: executed.metrics.clone(),
         prompt_diagnostics,
         warnings,

@@ -46,7 +46,7 @@ fn record(
         message_count: 0,
         latest_turn_seq: 0,
         memory_processed_until_seq: 0,
-        usage: TokenUsage::default(),
+        usage: talos_types::SessionUsage::default(),
         conf: SessionConf::default(),
         workspace_id: Some("workspace-alpha".to_string()),
         project_id,
@@ -278,12 +278,13 @@ async fn test_update_session_record_persists_fields() {
 
     record.title = "Custom Title".to_string();
     record.message_count = 2;
-    record.usage = TokenUsage {
+    record.usage.tokens = TokenUsage {
         input_tokens: 10,
         output_tokens: 5,
         total_tokens: 15,
         ..TokenUsage::default()
     };
+    record.usage.context = talos_types::ContextUsage::new(7, 100, 80, 12);
     record.model = "gpt-5.4".to_string();
     assert!(store.update_session_record(&record).await.unwrap());
 
@@ -296,8 +297,39 @@ async fn test_update_session_record_persists_fields() {
     assert_eq!(loaded.message_count, 2);
     assert_eq!(loaded.memory_processed_until_seq, 3);
     assert_eq!(loaded.latest_turn_seq, 3);
-    assert_eq!(loaded.usage.total_tokens, 15);
+    assert_eq!(loaded.usage, record.usage);
     assert_eq!(loaded.model, "gpt-5.4");
+}
+
+#[tokio::test]
+async fn context_usage_update_preserves_the_rest_of_the_session_record() {
+    let store = store().await;
+    let mut record = record("session-1", "user-1", None, None);
+    record.title = "Concurrent title".to_string();
+    record.model = "gpt-5.4".to_string();
+    record.usage.tokens = TokenUsage {
+        input_tokens: 10,
+        output_tokens: 5,
+        total_tokens: 15,
+        ..TokenUsage::default()
+    };
+    store.insert_session_record(&record, "api").await.unwrap();
+
+    let context = talos_types::ContextUsage::new(17, 100, 80, 12).unwrap();
+    assert!(store
+        .update_context_usage("session-1", &context)
+        .await
+        .unwrap());
+
+    let loaded = store
+        .get_session_record("session-1")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(loaded.title, "Concurrent title");
+    assert_eq!(loaded.model, "gpt-5.4");
+    assert_eq!(loaded.usage.tokens, record.usage.tokens);
+    assert_eq!(loaded.usage.context, Some(context));
 }
 
 #[tokio::test]

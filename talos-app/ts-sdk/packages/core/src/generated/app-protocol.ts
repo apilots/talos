@@ -75,7 +75,11 @@ export type SessionClearRequest = { session_id: string, };
 
 export type SessionClearResponse = { session: SessionInfo, };
 
-export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, created_at: number, last_activity: number, message_count: number, usage: TokenUsage, project_id?: string, current_directory?: string, };
+export type SessionInfo = { id: string, title: string, user_id: string, source_type: TalosSourceType, provider: TalosProvider, modelSelection: ModelSelection, configuredDefaultMode: UserPermissionMode, effectiveMode: UserPermissionMode, created_at: number, last_activity: number, message_count: number, usage: SessionUsage, project_id?: string, current_directory?: string, };
+
+export type SessionUsage = { tokens: TokenUsage, context: ContextUsage | null, };
+
+export type ContextUsage = { usedTokens: number, contextWindowTokens: number, effectivePromptBudgetTokens: number, measuredAt: number, };
 
 export type UserPermissionMode = "askForApproval" | "approveForMe" | "fullAccess";
 

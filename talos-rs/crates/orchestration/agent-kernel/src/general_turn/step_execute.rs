@@ -807,6 +807,7 @@ pub fn apply_general_turn_step(state: &mut GeneralTurnLoopState, step: &GeneralT
     state.final_answer_streamed = state.final_answer_streamed || step.final_answer_streamed;
     state.execution_summary_streamed =
         state.execution_summary_streamed || step.execution_summary_streamed;
+    state.last_model_usage = step.usage.clone();
     state.usage.accumulate(&step.usage);
     state.output_items.extend(step.output_items.clone());
     state

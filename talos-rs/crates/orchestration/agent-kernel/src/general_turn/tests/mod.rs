@@ -310,7 +310,12 @@ impl LlmProvider for ExecLoopProvider {
                 content: "Run bash and use its final output.".to_string(),
                 reasoning: ReasoningOutput::default(),
                 model: request.model,
-                usage: Usage::default(),
+                usage: Usage {
+                    prompt_tokens: 60,
+                    completion_tokens: 10,
+                    total_tokens: 70,
+                    ..Usage::default()
+                },
                 finish_reason: Some("tool_calls".to_string()),
                 tool_calls: Some(vec![FunctionCall::new(
                     "call_bash",
@@ -350,7 +355,12 @@ impl LlmProvider for ExecLoopProvider {
                     content: format!("Final answer after bash output: {}", output.trim()),
                     reasoning: ReasoningOutput::default(),
                     model: request.model,
-                    usage: Usage::default(),
+                    usage: Usage {
+                        prompt_tokens: 90,
+                        completion_tokens: 20,
+                        total_tokens: 110,
+                        ..Usage::default()
+                    },
                     finish_reason: Some("stop".to_string()),
                     tool_calls: None,
                 })

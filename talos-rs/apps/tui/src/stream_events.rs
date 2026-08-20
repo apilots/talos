@@ -90,6 +90,7 @@ impl TuiApp {
             }
             AgentEventPayload::TurnCompleted(payload) => {
                 self.session_usage.accumulate(&payload.usage);
+                self.schedule_session_usage_refresh();
                 if let Some(metrics) = payload.metrics {
                     self.turn_metrics = Some(metrics);
                 }

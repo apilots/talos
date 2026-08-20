@@ -643,7 +643,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
             created_at: 1,
             last_activity: 1,
             message_count: 2,
-            usage: TokenUsage::default(),
+            usage: talos_types::SessionUsage::default(),
         },
     }
 }

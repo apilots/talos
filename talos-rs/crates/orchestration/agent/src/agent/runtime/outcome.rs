@@ -1,5 +1,7 @@
 use super::super::kernel;
+use super::super::request::AgentKernelParams;
 use super::KernelTimelineState;
+use crate::AgentRunResult;
 use talos_agent_kernel::{
     GeneralTurnOutcome, GeneralTurnResult, StopReason as KernelStopReason, TimelineBuilder,
 };
@@ -35,6 +37,25 @@ pub(super) fn execution_from_general_turn_result(
             kernel::map_stop_reason(*stop_reason),
             usage.clone(),
         ),
+    }
+}
+
+pub(super) fn agent_run_result_from_general_turn_result(
+    result: &GeneralTurnResult,
+    session_id: String,
+) -> AgentRunResult {
+    let (output_text, output_items, stop_reason, usage) =
+        execution_from_general_turn_result(result);
+    let reasoning = AgentKernelParams::collect_reasoning(&output_items);
+    AgentRunResult {
+        output_text,
+        output_items,
+        reasoning,
+        stop_reason,
+        usage,
+        task_count: 1,
+        session_id,
+        generated_session_title: None,
     }
 }
 

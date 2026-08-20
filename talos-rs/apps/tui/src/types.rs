@@ -153,6 +153,11 @@ pub(crate) struct SessionCloseUpdate {
     pub(crate) client_shutdown_completed: bool,
 }
 
+pub(crate) struct SessionUsageRefresh {
+    pub(crate) session_id: String,
+    pub(crate) result: TalosResult<SessionInfo>,
+}
+
 // ── Command update ───────────────────────────────────────────────────────────
 
 pub(crate) enum CommandUpdate {

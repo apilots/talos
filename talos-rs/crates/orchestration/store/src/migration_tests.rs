@@ -5,6 +5,69 @@ use talos_storage::SqliteStorage;
 use super::{run_migrations, test_migrations_dir};
 
 #[tokio::test]
+async fn migration_wraps_legacy_session_token_usage_without_losing_totals() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608190001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (
+            session_key, user_id, channel, scope, peer_id, agent_id,
+            created_at, last_activity, usage_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind("session-legacy-usage")
+    .bind("user-1")
+    .bind("http")
+    .bind("api")
+    .bind("user-1")
+    .bind("talos")
+    .bind(1_i64)
+    .bind(1_i64)
+    .bind(r#"{"input_tokens":21,"output_tokens":8,"total_tokens":29}"#)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let usage_json =
+        sqlx::query_scalar::<_, String>("SELECT usage_json FROM sessions WHERE session_key = ?")
+            .bind("session-legacy-usage")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&usage_json).unwrap(),
+        serde_json::json!({
+            "tokens": {
+                "input_tokens": 21,
+                "output_tokens": 8,
+                "total_tokens": 29
+            },
+            "context": null
+        })
+    );
+}
+
+#[tokio::test]
 async fn migration_replaces_legacy_pending_actions_with_user_action_store() {
     let storage = Arc::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)

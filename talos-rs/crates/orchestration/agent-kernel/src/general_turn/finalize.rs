@@ -66,6 +66,7 @@ pub fn finalize_general_turn_artifacts(
         output_items,
         stop_reason,
         usage: state.usage,
+        last_model_usage: state.last_model_usage,
         metrics,
         reasoning_log,
         tool_call_log: state.tool_call_log,

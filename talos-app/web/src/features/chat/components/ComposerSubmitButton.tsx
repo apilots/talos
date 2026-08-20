@@ -1,4 +1,4 @@
-import { ArrowUp, LoaderCircle, Square } from "lucide-react";
+import { ArrowUp, Square } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { cn } from "@/shared/lib/cn";
@@ -22,20 +22,29 @@ export function ComposerSubmitButton({
 }: ComposerSubmitButtonProps) {
   const { t } = useTranslation(["chat", "common"]);
   const label = isBusy ? t("common:stopResponse") : t("chat:send");
+  const state = isCancelling
+    ? "cancelling"
+    : isBusy
+      ? "running"
+      : disabled || !canSubmit
+        ? "disabled"
+        : "ready";
 
   return (
     <button
       aria-label={label}
       className={cn(
-        "flex h-8 w-8 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none",
+        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full outline-none transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand/25",
+        isCancelling && "animate-pulse",
         isBusy
-          ? "bg-danger text-white hover:bg-danger/90"
+          ? "bg-ink text-background hover:bg-ink/85"
           : !canSubmit || disabled
-            ? "bg-muted/20 text-muted/60"
-            : "bg-ink text-background hover:bg-ink/85",
+            ? "cursor-not-allowed bg-muted/20 text-muted/45"
+            : "bg-brand text-background hover:bg-brand/85",
       )}
       data-smoke="chat-composer-send"
-      disabled={isBusy ? false : Boolean(disabled || !canSubmit)}
+      data-state={state}
+      disabled={isCancelling || (!isBusy && Boolean(disabled || !canSubmit))}
       onClick={() => {
         if (isBusy) {
           onCancel?.();
@@ -46,10 +55,8 @@ export function ComposerSubmitButton({
       title={label}
       type="button"
     >
-      {isCancelling ? (
-        <LoaderCircle className="animate-spin" size={14} />
-      ) : isBusy ? (
-        <Square size={14} />
+      {isBusy ? (
+        <Square fill="currentColor" size={11} strokeWidth={1.5} />
       ) : (
         <ArrowUp size={15} strokeWidth={2.5} />
       )}

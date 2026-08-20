@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::UserPermissionMode;
-use talos_sdk::{AuthSessionReadResponse, ReasoningEffort, SessionInfo, WorkspaceInfoResponse};
+use talos_sdk::{
+    AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo, WorkspaceInfoResponse,
+};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
 use crate::utils::{text_display_width, APP_VERSION};
@@ -25,6 +27,7 @@ pub(crate) struct TuiStatusSnapshot {
     permission_mode: UserPermissionMode,
     connection_status: String,
     usage: TokenUsage,
+    context_usage: Option<ContextUsage>,
     turn: StatusTurn,
     event_count: u64,
 }
@@ -94,8 +97,11 @@ impl TuiStatusSnapshot {
             .map(|session| session.id.clone())
             .or_else(|| app.session_id.clone());
         let mut usage = session
-            .map(|session| session.usage.clone())
+            .map(|session| session.usage.tokens.clone())
             .unwrap_or_else(|| app.session_usage.clone());
+        let context_usage = session
+            .and_then(|session| session.usage.context.clone())
+            .or_else(|| app.session_context_usage.clone());
         if app.turn_metrics_live {
             if let Some(metrics) = &app.turn_metrics {
                 usage.accumulate(&metrics.usage);
@@ -130,6 +136,7 @@ impl TuiStatusSnapshot {
                 .unwrap_or(app.current_permission_mode),
             connection_status: app.connection_status.clone(),
             usage,
+            context_usage,
             turn: StatusTurn {
                 state: if app.turn_metrics_live {
                     "live"
@@ -234,31 +241,28 @@ fn format_runtime(mode: &str, connection_status: &str) -> String {
 }
 
 fn format_context_bar(snapshot: &TuiStatusSnapshot) -> String {
-    let used = snapshot
-        .usage
-        .total_tokens
-        .min(snapshot.model.context_window);
-    let percent = used_percent(used, snapshot.model.context_window);
-    let filled = filled_bar_cells(used, snapshot.model.context_window);
+    let Some(context) = snapshot.context_usage.as_ref() else {
+        return "unavailable".to_string();
+    };
+    let percent = context.used_percent().clamp(0.0, 100.0);
+    let filled = filled_bar_cells(context.used_tokens, context.context_window_tokens);
     let empty = CONTEXT_BAR_WIDTH.saturating_sub(filled);
     format!(
-        "[{}{}] {percent}% used",
+        "[{}{}] {percent:.1}% used",
         "■".repeat(filled),
         "□".repeat(empty)
     )
 }
 
 fn format_context_window(snapshot: &TuiStatusSnapshot) -> String {
-    let used = snapshot
-        .usage
-        .total_tokens
-        .min(snapshot.model.context_window);
-    let left = snapshot.model.context_window.saturating_sub(used);
+    let Some(context) = snapshot.context_usage.as_ref() else {
+        return "unavailable".to_string();
+    };
     format!(
         "{} used / {} total · {} left",
-        format_tokens(used),
-        format_tokens(snapshot.model.context_window),
-        format_tokens(left)
+        format_tokens(context.used_tokens),
+        format_tokens(context.context_window_tokens),
+        format_tokens(context.remaining_tokens())
     )
 }
 
@@ -299,12 +303,6 @@ fn filled_bar_cells(used: u32, context_window: u32) -> usize {
         .saturating_add(context_window as usize - 1)
         / context_window as usize;
     filled.clamp(1, CONTEXT_BAR_WIDTH)
-}
-
-fn used_percent(used: u32, context_window: u32) -> u32 {
-    used.saturating_mul(100)
-        .saturating_add(context_window.saturating_sub(1))
-        / context_window
 }
 
 fn format_tokens(value: u32) -> String {

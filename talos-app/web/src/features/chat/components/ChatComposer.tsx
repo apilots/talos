@@ -22,10 +22,9 @@ import { ComposerCommandSuggestions } from "./ComposerCommandSuggestions";
 import { ComposerAttachmentTray } from "./ComposerAttachmentTray";
 import { ComposerAttachments } from "./ComposerAttachments";
 import { ComposerNotice } from "./ComposerNotice";
-import { ComposerSubmitButton } from "./ComposerSubmitButton";
 import { buildInputHistoryNavigationItems } from "./composerInputHistory";
 import { ComposerModelSelect } from "./ComposerModelSelect";
-import { ComposerProviderModelDropdowns } from "./ComposerProviderModelDropdowns";
+import { ComposerRunControls } from "./ComposerRunControls";
 import { ComposerPermissionModeSelect } from "./ComposerPermissionModeSelect";
 import { SelectedSkillChips } from "./SelectedSkillChips";
 import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
@@ -55,6 +54,8 @@ export function ChatComposer({
   isStreaming,
   isCancelling = false,
   contextCompactionStage,
+  contextUsage,
+  sessionTotalTokens,
   models,
   selectedModel,
   onModelChange,
@@ -337,10 +338,11 @@ export function ChatComposer({
         {showInlineProject && (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <ComposerModelSelect
+              disabled={Boolean(disabled || isBusy)}
               modelLabel={t("chat:modelLabel")}
               models={models}
               onChange={onModelChange}
-              providerLabel={t("settings:modelsPanel.activeProvider")}
+              providerLabel={t("chat:providerLabel")}
               selectedModel={selectedModel}
             />
             <select
@@ -468,33 +470,23 @@ export function ChatComposer({
 
           <div className="min-w-4 flex-1" />
 
-          {!compact && (
-            <>
-              <ComposerProviderModelDropdowns
-                modelLabel={t("chat:modelLabel")}
-                models={models}
-                onChange={onModelChange}
-                modelTriggerRef={modelTriggerRef}
-                providerLabel={t("settings:modelsPanel.activeProvider")}
-                selectedModel={selectedModel}
-              />
-              <ComposerDropdown
-                disabled={!reasoningEnabled}
-                header={t("chat:reasoningLabel")}
-                items={reasoningItems}
-                onChange={(v) => onReasoningLevelChange?.(v as Composer.ReasoningLevel)}
-                value={reasoningLevel}
-              />
-            </>
-          )}
-
-          <ComposerSubmitButton
+          <ComposerRunControls
             canSubmit={attachmentDraft.canSubmit(draft)}
+            compact={compact}
+            contextUsage={contextUsage}
             disabled={disabled}
             isBusy={isBusy}
             isCancelling={isCancelling}
+            modelTriggerRef={modelTriggerRef}
+            models={models}
             onCancel={onCancel}
+            onModelChange={onModelChange}
+            onReasoningLevelChange={onReasoningLevelChange}
             onSend={handleSend}
+            reasoningItems={reasoningItems}
+            reasoningLevel={reasoningLevel}
+            selectedModel={selectedModel}
+            sessionTotalTokens={sessionTotalTokens}
           />
         </div>
 

@@ -82,36 +82,6 @@ describe("ChatComposer controls", () => {
     vi.restoreAllMocks();
   });
 
-  it("allows stopping an active response even when the composer is otherwise disabled", () => {
-    const onCancel = vi.fn();
-    renderComposer({
-      disabled: true,
-      isStreaming: true,
-      onCancel,
-    });
-
-    const stopButton = screen.getByRole("button", { name: "Stop response" });
-    expect((stopButton as HTMLButtonElement).disabled).toBe(false);
-
-    fireEvent.click(stopButton);
-
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
-  it("keeps the draft and blocks submission during context compaction", () => {
-    const onCancel = vi.fn();
-    const onSend = vi.fn();
-    renderControlledComposer({ contextCompactionStage: "summarizing", initialDraft: "keep this draft", onCancel, onSend });
-
-    expect(screen.getByRole("status")).toHaveTextContent("Context compacting... summarizing");
-    fireEvent.keyDown(getComposerInput(), { key: "Enter" });
-    expect(onSend).not.toHaveBeenCalled();
-    expect(getComposerInput()).toHaveValue("keep this draft");
-
-    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
-  });
-
   it("filters and executes slash commands from the composer", () => {
     const onCommand = vi.fn();
     renderControlledComposer({ initialDraft: "/c", onCommand });
@@ -231,58 +201,6 @@ describe("ChatComposer controls", () => {
     expect(cloudOption).toBeDisabled();
     fireEvent.click(cloudOption);
     expect(onRuntimeModeChange).not.toHaveBeenCalledWith("cloud");
-  });
-
-  it("shows only a disabled none control when reasoning is unsupported", () => {
-    renderComposer({ reasoningEnabled: false, reasoningLevel: "none" });
-
-    expect(screen.getByRole("button", { name: /none/i })).toBeDisabled();
-    expect(screen.queryByText("Light")).not.toBeInTheDocument();
-  });
-
-  it("selects the first configured model and filters models when the provider changes", () => {
-    const onModelChange = vi.fn();
-    renderComposer({
-      models: [
-        { id: "deepseek:deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "deepseek" },
-        { id: "deepseek:deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek" },
-        { id: "anthropic:claude-opus", name: "Claude Opus", provider: "anthropic" },
-        { id: "anthropic:claude-sonnet", name: "Claude Sonnet", provider: "anthropic" },
-      ],
-      onModelChange,
-      selectedModel: "deepseek:deepseek-v4-flash",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "deepseek" }));
-    fireEvent.click(screen.getByRole("button", { name: "anthropic" }));
-
-    expect(onModelChange).toHaveBeenCalledWith("anthropic:claude-opus");
-    expect(screen.getByRole("button", { name: /claude opus/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /claude opus/i }));
-
-    expect(screen.getByRole("button", { name: "Claude Sonnet" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "DeepSeek V4 Pro" })).not.toBeInTheDocument();
-  });
-
-  it("keeps the selected model when the current provider is selected again", () => {
-    const onModelChange = vi.fn();
-    renderComposer({
-      models: [
-        { id: "deepseek:deepseek-v4-flash", name: "DeepSeek V4 Flash", provider: "deepseek" },
-        { id: "deepseek:deepseek-v4-pro", name: "DeepSeek V4 Pro", provider: "deepseek" },
-        { id: "anthropic:claude-opus", name: "Claude Opus", provider: "anthropic" },
-      ],
-      onModelChange,
-      selectedModel: "deepseek:deepseek-v4-pro",
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "deepseek" }));
-    const providerButtons = screen.getAllByRole("button", { name: "deepseek" });
-    fireEvent.click(providerButtons[providerButtons.length - 1]);
-
-    expect(onModelChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: /deepseek v4 pro/i })).toBeInTheDocument();
   });
 
   it("closes the project picker when clicking outside the composer", () => {

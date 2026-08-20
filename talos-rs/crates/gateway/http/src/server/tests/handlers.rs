@@ -249,6 +249,30 @@ async fn test_get_session_handler_returns_not_found_for_unknown_session() {
 }
 
 #[tokio::test]
+async fn test_get_session_handler_returns_session_usage() {
+    let state = test_state(false).await;
+
+    let response = get_session_handler(
+        State(state),
+        axum::extract::Extension(test_auth()),
+        Path("mock-session".to_string()),
+    )
+    .await
+    .expect("known session should be returned");
+
+    let data = expect_success(response.0);
+    assert_eq!(data.session.usage.tokens.total_tokens, 120);
+    assert_eq!(
+        data.session
+            .usage
+            .context
+            .as_ref()
+            .map(|context| context.used_tokens),
+        Some(80)
+    );
+}
+
+#[tokio::test]
 async fn test_patch_session_handler_returns_success_ack() {
     let state = test_state(false).await;
 
@@ -370,7 +394,7 @@ async fn test_clear_session_handler_returns_reset_session_payload() {
     let data = expect_success(response.0);
     assert_eq!(data.session.id, "mock-session");
     assert_eq!(data.session.message_count, 0);
-    assert_eq!(data.session.usage.total_tokens, 0);
+    assert_eq!(data.session.usage.tokens.total_tokens, 0);
 }
 
 #[tokio::test]

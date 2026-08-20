@@ -133,6 +133,7 @@ fn memory_get_keeps_the_full_tool_result() {
         round: 0,
         output_items: Vec::new(),
         usage: TokenUsage::default(),
+        last_model_usage: TokenUsage::default(),
         reasoning_log: Vec::new(),
         tool_call_log: Vec::new(),
         tool_result_log: Vec::new(),

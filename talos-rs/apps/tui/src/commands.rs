@@ -542,7 +542,8 @@ impl TuiApp {
         let session_id = session.id.clone();
         self.session_id = Some(session_id.clone());
         self.set_current_model_selection(&session.model_selection);
-        self.session_usage = session.usage.clone();
+        self.session_usage = session.usage.tokens.clone();
+        self.session_context_usage = session.usage.context.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         // Reset chat and input history for the new session

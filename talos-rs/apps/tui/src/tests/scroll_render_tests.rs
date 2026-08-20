@@ -35,6 +35,7 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
         total_tokens: 980,
         ..TokenUsage::default()
     };
+    app.session_context_usage = talos_sdk::ContextUsage::new(980, 32_768, 30_000, 1);
 
     let text = line_plain_text(&app.input_status_line(120));
 
@@ -43,14 +44,28 @@ fn test_input_status_line_uses_dynamic_token_left_percent() {
 }
 
 #[tokio::test]
-async fn test_turn_completed_updates_session_usage() {
-    let mut app = create_app_server_app();
+async fn test_turn_completed_updates_session_usage_without_inferring_context_usage() {
+    let client = std::sync::Arc::new(MockGatewayClient::new());
+    let gateway_client: std::sync::Arc<dyn GatewayClient> = client.clone();
+    let mut app = TuiApp::new_with_gateway_client(gateway_client);
     app.initialize_session().await;
     set_test_model_info(&mut app, "kimi-k2.5", 32_768);
     app.current_model = "kimi-k2.5".to_string();
     app.in_flight = true;
     app.received_output_delta = false;
     app.session_id = Some("sess-test".to_string());
+    app.session_context_usage = talos_sdk::ContextUsage::new(400, 32_768, 30_000, 1);
+    {
+        let mut state = client.state.lock().unwrap();
+        state.session_usage = TokenUsage {
+            input_tokens: 1_100,
+            output_tokens: 45,
+            total_tokens: 1_145,
+            cache_creation_input_tokens: Some(7),
+            cache_read_input_tokens: Some(13),
+        };
+        state.session_context_usage = talos_sdk::ContextUsage::new(1_020, 32_768, 30_000, 2);
+    }
 
     app.handle_stream_event(completed_event(
         "msg-usage",
@@ -68,7 +83,25 @@ async fn test_turn_completed_updates_session_usage() {
     assert_eq!(app.session_usage.total_tokens, 980);
     assert_eq!(app.session_usage.cache_creation_input_tokens, Some(7));
     assert_eq!(app.session_usage.cache_read_input_tokens, Some(13));
-    assert_eq!(app.token_left_percent(), Some(97));
+    assert_eq!(app.token_left_percent(), None);
+
+    app.session_id = Some("sess-other".to_string());
+    tokio::task::yield_now().await;
+    app.poll_session_usage_refresh();
+    assert_eq!(app.session_usage.total_tokens, 980);
+    assert_eq!(app.session_context_usage, None);
+
+    app.session_id = Some("sess-test".to_string());
+    app.schedule_session_usage_refresh();
+    tokio::task::yield_now().await;
+    app.poll_session_usage_refresh();
+    assert_eq!(app.session_usage.total_tokens, 1_145);
+    assert_eq!(
+        app.session_context_usage
+            .as_ref()
+            .map(|usage| usage.used_tokens),
+        Some(1_020)
+    );
 }
 
 #[tokio::test]
@@ -122,7 +155,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     assert_eq!(app.displayed_usage().total_tokens, 140);
     assert_eq!(app.displayed_usage().cache_creation_input_tokens, Some(5));
     assert_eq!(app.displayed_usage().cache_read_input_tokens, Some(9));
-    assert_eq!(app.token_left_percent(), Some(86));
+    assert_eq!(app.token_left_percent(), None);
     let live_metrics_line = app
         .turn_metrics_status_line(180)
         .map(|line| line_plain_text(&line))
@@ -132,7 +165,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     );
     assert!(!live_metrics_line.contains("Brewing"));
     let input_status = line_plain_text(&app.input_status_line(180));
-    assert!(input_status.contains("86%"));
+    assert!(!input_status.contains('%'));
     assert!(!input_status.contains("Brewing"));
 
     app.handle_stream_event(completed_event_with_metrics(
@@ -148,7 +181,7 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     assert_eq!(app.session_usage.cache_read_input_tokens, Some(9));
     assert_eq!(app.turn_metrics, Some(final_metrics));
     assert!(!app.turn_metrics_live);
-    assert_eq!(app.token_left_percent(), Some(86));
+    assert_eq!(app.token_left_percent(), None);
     let final_metrics_line = app
         .turn_metrics_status_line(180)
         .map(|line| line_plain_text(&line))

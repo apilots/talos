@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use talos_config::{Config, RuntimeEnv};
-use talos_types::talos::{TalosProvider, TalosSourceType, TokenUsage};
+use talos_types::talos::{TalosProvider, TalosSourceType};
 use talos_types::{SessionConf, SessionContext, SessionState, TalosSession, DEFAULT_SESSION_TITLE};
 
 use super::AgentHarnessImpl;
@@ -35,7 +35,7 @@ fn runtime_kernel_config_uses_session_runtime_env() {
             created_at: 1,
             last_activity: 1,
             message_count: 0,
-            usage: TokenUsage::default(),
+            usage: talos_types::SessionUsage::default(),
         },
     };
     session.config.agent.kernel.runtime_env = RuntimeEnv::load_from_iter(

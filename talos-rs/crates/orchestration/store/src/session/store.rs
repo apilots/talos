@@ -3,8 +3,8 @@ use serde_json::Value;
 use std::sync::Arc;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
-use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{AgentPath, SessionConf, DEFAULT_SESSION_TITLE};
+use talos_types::talos::TalosContext;
+use talos_types::{AgentPath, ContextUsage, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     ActiveTurnStatus, SessionQuery, SessionRecord, SessionSummary, SessionTreeIdentity,
@@ -34,6 +34,13 @@ pub trait SessionStore: Send + Sync {
     async fn has_active_subagent_turn(&self, tree_root_session_id: &str) -> TalosResult<bool>;
 
     async fn update_session_record(&self, record: &SessionRecord) -> TalosResult<bool>;
+
+    /// Atomically replaces the latest context snapshot without overwriting other Session fields.
+    async fn update_context_usage(
+        &self,
+        session_id: &str,
+        context_usage: &ContextUsage,
+    ) -> TalosResult<bool>;
 
     /// Advances the contiguous session range already processed into long-term memory.
     async fn advance_memory_processed_until_seq(
@@ -88,12 +95,14 @@ impl DatabaseSessionStore {
             .unwrap_or_default()
             .try_into()
             .unwrap_or_default();
-        let usage = row
-            .get_string("usage_json")
-            .and_then(|raw| serde_json::from_str::<TokenUsage>(&raw).ok())
-            .unwrap_or_default();
-
         let id = row.get_string("session_key").unwrap_or_default();
+        let usage = match row.get_string("usage_json") {
+            Some(raw) => serde_json::from_str::<SessionUsage>(&raw).map_err(|error| {
+                TalosError::internal(format!("parse session '{id}' usage_json: {error}"))
+            })?,
+            None => SessionUsage::default(),
+        };
+
         let parent_session_id =
             Self::normalized_optional_string(row.get_string("parent_session_id"));
         let parent_turn_id = Self::normalized_optional_string(row.get_string("parent_turn_id"));
@@ -208,7 +217,7 @@ impl DatabaseSessionStore {
         serde_json::to_string(context).map_err(|e| talos_error::TalosError::internal(e.to_string()))
     }
 
-    fn build_usage_json(usage: &TokenUsage) -> TalosResult<String> {
+    fn build_usage_json(usage: &SessionUsage) -> TalosResult<String> {
         serde_json::to_string(usage).map_err(|e| talos_error::TalosError::internal(e.to_string()))
     }
 
@@ -555,6 +564,23 @@ impl SessionStore for DatabaseSessionStore {
         let affected = self
             .storage
             .update("sessions", &row, "session_key = ?", &[record.id.as_str()])
+            .await?;
+        Ok(affected > 0)
+    }
+
+    async fn update_context_usage(
+        &self,
+        session_id: &str,
+        context_usage: &ContextUsage,
+    ) -> TalosResult<bool> {
+        let context_json = serde_json::to_string(context_usage)
+            .map_err(|error| TalosError::internal(error.to_string()))?;
+        let affected = self
+            .storage
+            .execute(
+                "UPDATE sessions SET usage_json = json_set(usage_json, '$.context', json(?)) WHERE session_key = ?",
+                &[context_json.as_str(), session_id],
+            )
             .await?;
         Ok(affected > 0)
     }

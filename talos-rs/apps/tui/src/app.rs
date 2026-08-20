@@ -43,6 +43,7 @@ impl TuiApp {
             reasoning_effort_override: None,
             current_permission_mode: talos_sdk::UserPermissionMode::FullAccess,
             session_usage: TokenUsage::default(),
+            session_context_usage: None,
             turn_metrics: None,
             turn_metrics_live: false,
             available_model_info: vec![],
@@ -80,6 +81,8 @@ impl TuiApp {
             pending_stream: None,
             pending_command_update: None,
             pending_command_task: None,
+            pending_session_usage_refresh: None,
+            pending_session_usage_refresh_task: None,
             pending_close_update: None,
             pending_close_task: None,
             active_stream_message_id: None,
@@ -306,7 +309,8 @@ impl TuiApp {
         self.session_id = Some(session.id.clone());
         self.set_current_model_selection(&session.model_selection);
         self.current_permission_mode = session.effective_mode;
-        self.session_usage = session.usage.clone();
+        self.session_usage = session.usage.tokens.clone();
+        self.session_context_usage = session.usage.context.clone();
         self.turn_metrics = None;
         self.turn_metrics_live = false;
         self.current_project_root = session

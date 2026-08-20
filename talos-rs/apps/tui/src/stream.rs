@@ -167,6 +167,7 @@ impl TuiApp {
         self.poll_session_connect();
         self.poll_stream_connect().await;
         self.poll_stream_events();
+        self.poll_session_usage_refresh();
         self.poll_command_updates();
         self.poll_close_updates();
         self.poll_close_progress();

@@ -40,6 +40,7 @@ export function ComposerPermissionModeSelect({
           icon: <TriangleAlert size={13} />,
         },
       ]}
+      menuClassName="w-[320px] max-w-[calc(100vw-2rem)]"
       onChange={(mode) => onChange?.(mode as UserPermissionMode)}
       value={value}
     />

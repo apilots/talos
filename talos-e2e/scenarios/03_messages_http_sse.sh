@@ -81,11 +81,13 @@ session_after_msg_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "messages_session_usage_after_non_stream" "{\"session_id\":\"${session_id}\"}" "${session_after_msg_json}"
 session_after_msg_data_json="$(api_data_json "${session_after_msg_json}")"
 session_usage_total="$(usage_total_from_json "${session_after_msg_data_json}")"
-if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 ]]; then
+context_used_tokens="$(json_get "${session_after_msg_data_json}" "session.usage.context.usedTokens")"
+context_window_tokens="$(json_get "${session_after_msg_data_json}" "session.usage.context.contextWindowTokens")"
+if [[ -z "${session_usage_total}" || "${session_usage_total}" -le 0 || -z "${context_used_tokens}" || "${context_used_tokens}" -le 0 || -z "${context_window_tokens}" || "${context_window_tokens}" -le 0 ]]; then
   echo "CASE messages_session_usage_after_non_stream FAIL response=${session_after_msg_json}"
   exit 1
 fi
-echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_usage_total}"
+echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_usage_total} context_used_tokens=${context_used_tokens} context_window_tokens=${context_window_tokens}"
 
 sse_log="$(scenario_report_path sse_events.log)"
 sse_payload='{

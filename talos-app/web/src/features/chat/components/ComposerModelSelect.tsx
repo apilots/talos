@@ -7,6 +7,7 @@ export interface ComposerModelOption {
 }
 
 interface ComposerModelSelectProps {
+  disabled?: boolean;
   models: ComposerModelOption[];
   onChange?: (model: string) => void;
   selectedModel?: string;
@@ -52,6 +53,7 @@ export function useComposerModelOptions(
 }
 
 export function ComposerModelSelect({
+  disabled = false,
   models,
   onChange,
   selectedModel,
@@ -66,7 +68,7 @@ export function ComposerModelSelect({
       <select
         aria-label={providerLabel}
         className="form-control-focus min-w-[8rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm transition md:max-w-[12rem]"
-        disabled={providers.length <= 1}
+        disabled={disabled || providers.length <= 1}
         onChange={(event) => changeProvider(event.target.value)}
         value={activeProvider}
       >
@@ -79,6 +81,7 @@ export function ComposerModelSelect({
       <select
         aria-label={modelLabel}
         className="form-control-focus min-w-[10rem] flex-1 rounded-2xl border border-border bg-surface/80 px-3 py-2 text-sm transition md:max-w-[15rem]"
+        disabled={disabled}
         onChange={(event) => onChange?.(event.target.value)}
         value={activeModel}
       >

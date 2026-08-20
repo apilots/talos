@@ -18,6 +18,7 @@ fn build_executed_turn_artifacts(
         output_items: Vec::new(),
         stop_reason: StopReason::EndTurn,
         usage: TokenUsage::default(),
+        last_model_usage: TokenUsage::default(),
         metrics: TurnExecutionMetrics::default(),
         reasoning_log: Vec::new(),
         tool_call_log,

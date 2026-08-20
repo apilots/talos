@@ -391,12 +391,15 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
             created_at: 100,
             last_activity: 200,
             message_count: 3,
-            usage: talos::TokenUsage {
-                input_tokens: 1,
-                output_tokens: 2,
-                total_tokens: 3,
-                cache_creation_input_tokens: None,
-                cache_read_input_tokens: None,
+            usage: SessionUsage {
+                tokens: talos::TokenUsage {
+                    input_tokens: 1,
+                    output_tokens: 2,
+                    total_tokens: 3,
+                    cache_creation_input_tokens: None,
+                    cache_read_input_tokens: None,
+                },
+                context: None,
             },
         },
     };
@@ -415,11 +418,72 @@ fn test_talos_session_apply_turn_progress_updates_state_and_model() {
 
     assert_eq!(session.state.message_count, 5);
     assert!(session.state.last_activity >= 200);
-    assert_eq!(session.state.usage.input_tokens, 5);
-    assert_eq!(session.state.usage.output_tokens, 7);
-    assert_eq!(session.state.usage.total_tokens, 12);
-    assert_eq!(session.state.usage.cache_creation_input_tokens, Some(7));
+    assert_eq!(session.state.usage.tokens.input_tokens, 5);
+    assert_eq!(session.state.usage.tokens.output_tokens, 7);
+    assert_eq!(session.state.usage.tokens.total_tokens, 12);
+    assert_eq!(
+        session.state.usage.tokens.cache_creation_input_tokens,
+        Some(7)
+    );
     assert_eq!(session.config.llm.model, "qwen-plus");
+}
+
+#[test]
+fn test_context_usage_preserves_base_metrics() {
+    let usage = ContextUsage::new(1, 128, 96, 42).unwrap();
+    assert_eq!(
+        usage,
+        ContextUsage {
+            used_tokens: 1,
+            context_window_tokens: 128,
+            effective_prompt_budget_tokens: 96,
+            measured_at: 42,
+        }
+    );
+    assert_eq!(usage.remaining_tokens(), 127);
+    assert_eq!(usage.used_percent(), 0.78125);
+    assert_eq!(
+        ContextUsage::new(200, 128, 256, 42),
+        Some(ContextUsage {
+            used_tokens: 200,
+            context_window_tokens: 128,
+            effective_prompt_budget_tokens: 256,
+            measured_at: 42,
+        })
+    );
+    assert_eq!(ContextUsage::new(1, 0, 0, 42), None);
+}
+
+#[test]
+fn test_session_usage_serializes_tokens_and_nullable_camel_case_context() {
+    let usage = SessionUsage {
+        tokens: talos::TokenUsage {
+            input_tokens: 12,
+            output_tokens: 3,
+            total_tokens: 15,
+            ..talos::TokenUsage::default()
+        },
+        context: ContextUsage::new(8, 100, 80, 42),
+    };
+
+    assert_eq!(
+        serde_json::to_value(usage).unwrap(),
+        serde_json::json!({
+            "tokens": {
+                "input_tokens": 12,
+                "output_tokens": 3,
+                "total_tokens": 15,
+                "cache_creation_input_tokens": null,
+                "cache_read_input_tokens": null
+            },
+            "context": {
+                "usedTokens": 8,
+                "contextWindowTokens": 100,
+                "effectivePromptBudgetTokens": 80,
+                "measuredAt": 42
+            }
+        })
+    );
 }
 
 #[test]
@@ -614,7 +678,7 @@ fn test_resolve_effective_project_root_prefers_project_directory() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TokenUsage::default(),
+            usage: SessionUsage::default(),
         },
     };
 
@@ -659,7 +723,7 @@ fn test_resolve_effective_project_root_uses_embedded_current_directory() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TokenUsage::default(),
+            usage: SessionUsage::default(),
         },
     };
 
@@ -701,7 +765,7 @@ fn test_resolve_effective_project_root_uses_workspace_root() {
             created_at: 100,
             last_activity: 200,
             message_count: 0,
-            usage: talos::TokenUsage::default(),
+            usage: SessionUsage::default(),
         },
     };
 

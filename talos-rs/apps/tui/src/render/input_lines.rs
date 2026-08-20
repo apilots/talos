@@ -198,24 +198,10 @@ impl TuiApp {
     }
 
     pub(crate) fn token_left_percent(&self) -> Option<u8> {
-        let context_window = self
-            .available_model_info
-            .iter()
-            .find(|model| {
-                model.provider == self.current_model_provider
-                    && model.model.id == self.current_model
-            })
-            .map(|model| model.model.context_window)
-            .filter(|window| *window > 0)?;
-        if context_window == 0 {
-            return None;
-        }
-        let used = self.displayed_usage().total_tokens.min(context_window);
-        let used_percent = used
-            .saturating_mul(100)
-            .saturating_add(context_window.saturating_sub(1))
-            / context_window;
-        Some(100_u8.saturating_sub(used_percent as u8))
+        self.session_context_usage.as_ref().map(|usage| {
+            let used_percent = usage.used_percent().clamp(0.0, 100.0);
+            (100.0 - used_percent).round() as u8
+        })
     }
 
     pub(crate) fn queue_panel_lines(&self, max_lines: usize) -> Vec<Line<'static>> {

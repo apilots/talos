@@ -369,7 +369,8 @@ impl SessionService {
             .timestamp_millis()
             .try_into()
             .unwrap_or_default();
-        record.usage.accumulate(usage);
+        record.usage.tokens.accumulate(usage);
+        record.usage.context = None;
         record.model = assistant_model.to_string();
         self.session_store.update_session_record(&record).await?;
         Ok(())
@@ -401,7 +402,7 @@ impl SessionService {
             .message_count
             .saturating_add(persisted_turn_delta.saturating_mul(2));
         record.latest_turn_seq = artifact_seq;
-        record.usage.accumulate(usage);
+        record.usage.tokens.accumulate(usage);
         record.model = assistant_model.to_string();
         self.session_store.update_session_record(&record).await?;
         Ok(())
@@ -549,15 +550,20 @@ impl SessionService {
         mut record: SessionRecord,
         patch: SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
+        let previous_selection =
+            SessionConfigOverridePolicy::extract_model_selection(&record.conf)?;
         if let Some(conf) = patch.conf.as_ref() {
             SessionConfigOverridePolicy::validate_conf(conf)?;
         }
         let patch_conf = patch.conf.as_ref().cloned().unwrap_or_default();
         record.conf = SessionConfigOverridePolicy::merge_conf(&record.conf, &patch_conf);
-        if let Some(selection) = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?
-        {
-            self.validate_model_selection(&selection)?;
-            record.model = selection.model_ref.id;
+        let next_selection = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?;
+        if let Some(selection) = next_selection.as_ref() {
+            self.validate_model_selection(selection)?;
+            record.model = selection.model_ref.id.clone();
+        }
+        if next_selection != previous_selection {
+            record.usage.context = None;
         }
         if let Some(project_id_patch) = &patch.project_id {
             match project_id_patch {

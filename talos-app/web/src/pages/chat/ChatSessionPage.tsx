@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
@@ -33,6 +33,7 @@ import {
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
 import { useSessionCommands } from "./useSessionCommands";
 import { useSessionPermissionMode } from "./useSessionPermissionMode";
+import { useSelectedSessionProject } from "./useSelectedSessionProject";
 import type { ModelRef } from "@talos/sdk-browser";
 
 export function ChatSessionPage() {
@@ -116,18 +117,13 @@ export function ChatSessionPage() {
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
   const autoScroll = useChatSessionAutoScroll({ blocks, isStreaming, sessionId, streamError });
 
-  const selectedProjectId = useMemo(() => {
-    if (!session) {
-      return draftProjectId ?? activeProjectId;
-    }
-    return session.project_id ?? UNBOUND_PROJECT_ID;
-  }, [activeProjectId, draftProjectId, session]);
-  const boundProject = useMemo(() => {
-    if (!session?.project_id) {
-      return undefined;
-    }
-    return projects.find((entry) => entry.id === session.project_id);
-  }, [projects, session?.project_id]);
+  const { boundProject, selectedProjectId } = useSelectedSessionProject({
+    activeProjectId,
+    draftProjectId,
+    projects,
+    sessionExists: Boolean(session),
+    sessionProjectId: session?.project_id,
+  });
   useInitialSessionInput({
     locationPathname: location.pathname,
     locationState,
@@ -204,6 +200,8 @@ export function ChatSessionPage() {
             isCancelling={isCancelling}
             commandNotice={sessionCommands.notice}
             contextCompactionStage={sessionCommands.compactionStage}
+            contextUsage={session?.usage?.context}
+            sessionTotalTokens={session?.usage?.tokens.total_tokens}
             isStreaming={isStreaming}
             permissionMode={permissionMode.value}
             permissionModeDisabled={permissionMode.disabled}

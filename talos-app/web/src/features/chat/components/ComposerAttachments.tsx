@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { FileText, Image, Paperclip, Upload } from "lucide-react";
+import { FileText, Image, Plus, Upload } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { FileInfo } from "@talos/sdk-browser";
 
@@ -57,13 +57,13 @@ export function ComposerAttachments({
       />
       <button
         aria-label={t("addAttachment")}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border/70 text-muted outline-none transition hover:border-brand/40 hover:text-brand focus:outline-none disabled:cursor-not-allowed disabled:opacity-45"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted outline-none transition hover:bg-muted/12 hover:text-ink focus-visible:ring-2 focus-visible:ring-brand/25 disabled:cursor-not-allowed disabled:opacity-45"
         disabled={attachmentsDisabled}
         onClick={() => setMenu((current) => current === "closed" ? "actions" : "closed")}
         title={supportedKinds.length === 0 ? t("attachmentsUnsupported") : t("addAttachment")}
         type="button"
       >
-        <Paperclip size={13} />
+        <Plus size={18} strokeWidth={1.8} />
       </button>
 
       {menu !== "closed" ? (

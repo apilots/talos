@@ -76,7 +76,53 @@ pub struct SessionState {
     pub last_activity: u64,
     pub message_count: u64,
     #[serde(default)]
-    pub usage: talos::TokenUsage,
+    pub usage: SessionUsage,
+}
+
+/// Session-owned usage combining cumulative token accounting with the latest context snapshot.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+pub struct SessionUsage {
+    pub tokens: talos::TokenUsage,
+    #[serde(default)]
+    pub context: Option<ContextUsage>,
+}
+
+/// Last successfully measured model-context usage for a Session.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsage {
+    pub used_tokens: u32,
+    pub context_window_tokens: u32,
+    pub effective_prompt_budget_tokens: u32,
+    #[ts(type = "number")]
+    pub measured_at: i64,
+}
+
+impl ContextUsage {
+    pub fn new(
+        used_tokens: u32,
+        context_window_tokens: u32,
+        effective_prompt_budget_tokens: u32,
+        measured_at: i64,
+    ) -> Option<Self> {
+        if context_window_tokens == 0 {
+            return None;
+        }
+        Some(Self {
+            used_tokens,
+            context_window_tokens,
+            effective_prompt_budget_tokens,
+            measured_at,
+        })
+    }
+
+    pub fn remaining_tokens(&self) -> u32 {
+        self.context_window_tokens.saturating_sub(self.used_tokens)
+    }
+
+    pub fn used_percent(&self) -> f64 {
+        f64::from(self.used_tokens) / f64::from(self.context_window_tokens) * 100.0
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -193,7 +239,7 @@ impl TalosSession {
     ) {
         self.state.last_activity = crate::now();
         self.state.message_count = self.state.message_count.saturating_add(message_delta);
-        self.state.usage.accumulate(usage);
+        self.state.usage.tokens.accumulate(usage);
         self.config.llm.model = assistant_model.to_string();
     }
 }
@@ -233,7 +279,7 @@ pub struct SessionInfo {
     #[ts(type = "number")]
     pub message_count: u64,
     #[serde(default)]
-    pub usage: talos::TokenUsage,
+    pub usage: SessionUsage,
     #[serde(default)]
     #[ts(optional)]
     pub project_id: Option<String>,

@@ -620,6 +620,7 @@ impl MockGatewayClient {
                 cancelled_sessions: Vec::new(),
                 active_turn_id: None,
                 session_usage: talos_types::talos::TokenUsage::default(),
+                session_context_usage: None,
                 compact_calls: 0,
                 compact_failures_remaining: 0,
                 clear_calls: 0,

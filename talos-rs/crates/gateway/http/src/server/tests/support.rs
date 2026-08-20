@@ -271,7 +271,19 @@ impl SessionService for MockSessionService {
                 created_at: 0,
                 last_activity: 0,
                 message_count: if session_cleared { 0 } else { 1 },
-                usage: talos_types::talos::TokenUsage::default(),
+                usage: if session_cleared {
+                    talos_types::SessionUsage::default()
+                } else {
+                    talos_types::SessionUsage {
+                        tokens: TokenUsage {
+                            input_tokens: 100,
+                            output_tokens: 20,
+                            total_tokens: 120,
+                            ..TokenUsage::default()
+                        },
+                        context: talos_types::ContextUsage::new(80, 128_000, 120_000, 3),
+                    }
+                },
             },
         }))
     }
@@ -285,7 +297,7 @@ impl SessionService for MockSessionService {
             )
         })?;
         session.state.message_count = 0;
-        session.state.usage = talos_types::talos::TokenUsage::default();
+        session.state.usage = talos_types::SessionUsage::default();
         Ok(session)
     }
 

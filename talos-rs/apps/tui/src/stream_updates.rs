@@ -1,13 +1,81 @@
 use std::time::Duration;
 
 use talos_error::TalosError;
-use tokio::sync::mpsc::error::TryRecvError;
+use tokio::sync::{mpsc, mpsc::error::TryRecvError};
+use tracing::error;
 
 use crate::status_picker::{render_status_card, TuiStatusSnapshot};
 use crate::types::CommandUpdate;
 use crate::{TuiApp, SESSION_CLOSE_SLOW_NOTICE};
 
 impl TuiApp {
+    pub(crate) fn schedule_session_usage_refresh(&mut self) {
+        self.session_context_usage = None;
+
+        let (Some(client), Some(session_id)) =
+            (self.gateway_client.clone(), self.session_id.clone())
+        else {
+            return;
+        };
+
+        if let Some(task) = self.pending_session_usage_refresh_task.take() {
+            task.abort();
+        }
+        let (tx, rx) = mpsc::channel(1);
+        self.pending_session_usage_refresh = Some(rx);
+        self.pending_session_usage_refresh_task = Some(tokio::spawn(async move {
+            let result = client.get_session(&session_id).await;
+            if tx
+                .send(crate::types::SessionUsageRefresh { session_id, result })
+                .await
+                .is_err()
+            {
+                error!("failed to deliver session usage refresh to TUI task");
+            }
+        }));
+    }
+
+    pub(crate) fn poll_session_usage_refresh(&mut self) {
+        let Some(rx) = self.pending_session_usage_refresh.as_mut() else {
+            return;
+        };
+
+        let update = match rx.try_recv() {
+            Ok(update) => Some(update),
+            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Disconnected) => None,
+        };
+        self.pending_session_usage_refresh = None;
+        self.pending_session_usage_refresh_task = None;
+
+        let Some(update) = update else {
+            self.push_right_event("session usage refresh channel dropped".to_string());
+            return;
+        };
+        if self.session_id.as_deref() != Some(update.session_id.as_str()) {
+            self.push_right_event(format!(
+                "ignored usage refresh from other session: {}",
+                update.session_id
+            ));
+            return;
+        }
+
+        match update.result {
+            Ok(session) if session.id == update.session_id => {
+                self.session_usage = session.usage.tokens;
+                self.session_context_usage = session.usage.context;
+                self.request_chat_activity();
+            }
+            Ok(session) => self.push_right_event(format!(
+                "ignored mismatched usage refresh: expected {}, received {}",
+                update.session_id, session.id
+            )),
+            Err(err) => {
+                self.push_right_event(format!("session usage refresh failed: {err}"));
+            }
+        }
+    }
+
     fn apply_cleared_session_snapshot(&mut self, session: &talos_sdk::SessionInfo) {
         self.apply_session_snapshot(session);
         self.input_buffer.clear();

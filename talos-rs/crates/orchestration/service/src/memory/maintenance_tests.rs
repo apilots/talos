@@ -255,7 +255,7 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
         message_count: 1,
         latest_turn_seq: 0,
         memory_processed_until_seq: 0,
-        usage: TokenUsage::default(),
+        usage: talos_types::SessionUsage::default(),
         conf: SessionConf {
             model_selection: Some(ModelSelection::without_reasoning(ModelRef {
                 provider: "test".to_string(),

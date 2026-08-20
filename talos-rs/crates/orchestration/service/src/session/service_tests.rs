@@ -9,7 +9,10 @@ use talos_store::session::{
     SessionTreeIdentity,
 };
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
-use talos_types::{ModelRef, ModelSelection, SessionConf, SessionInfo, UserPermissionMode};
+use talos_types::{
+    ContextUsage, ModelRef, ModelSelection, SessionConf, SessionInfo, SessionPatch,
+    UserPermissionMode,
+};
 
 use super::{CreateSessionParams, SessionService};
 
@@ -98,6 +101,19 @@ impl SessionStore for RecordingSessionStore {
             return Ok(false);
         };
         *stored = record.clone();
+        Ok(true)
+    }
+
+    async fn update_context_usage(
+        &self,
+        session_id: &str,
+        context_usage: &ContextUsage,
+    ) -> TalosResult<bool> {
+        let mut records = self.records.lock().unwrap();
+        let Some(stored) = records.iter_mut().find(|stored| stored.id == session_id) else {
+            return Ok(false);
+        };
+        stored.usage.context = Some(context_usage.clone());
         Ok(true)
     }
 
@@ -536,6 +552,104 @@ async fn reset_keeps_monotonic_turn_seq_for_the_next_completed_turn() {
         .expect("read session")
         .expect("session exists");
     assert_eq!((record.message_count, record.latest_turn_seq), (2, 2));
+}
+
+#[tokio::test]
+async fn reset_clears_session_tokens_and_context_usage() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "current-model"),
+    );
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+    {
+        let mut records = store.records.lock().unwrap();
+        records[0].usage.tokens.total_tokens = 40;
+        records[0].usage.context = ContextUsage::new(20, 100, 80, 1);
+    }
+
+    service
+        .reset_session(&session.context.session_id)
+        .await
+        .unwrap();
+
+    let record = store.records.lock().unwrap()[0].clone();
+    assert_eq!(record.usage, talos_types::SessionUsage::default());
+}
+
+#[tokio::test]
+async fn model_selection_change_clears_context_but_preserves_token_totals() {
+    let mut config = config_with_model("anthropic", "model-a");
+    config.llm.anthropic.models.push(provider_model("model-b"));
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(store.clone(), Arc::new(MockProjectStore::new()), config);
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+    {
+        let mut records = store.records.lock().unwrap();
+        records[0].usage.tokens.total_tokens = 40;
+        records[0].usage.context = ContextUsage::new(20, 100, 80, 1);
+    }
+
+    service
+        .patch_session(
+            &session.context.session_id,
+            SessionPatch {
+                conf: Some(SessionConf {
+                    model_selection: Some(ModelSelection::without_reasoning(ModelRef {
+                        provider: "anthropic".to_string(),
+                        id: "model-b".to_string(),
+                    })),
+                    ..SessionConf::default()
+                }),
+                ..SessionPatch::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let record = store.records.lock().unwrap()[0].clone();
+    assert_eq!(record.usage.tokens.total_tokens, 40);
+    assert_eq!(record.usage.context, None);
+}
+
+#[tokio::test]
+async fn explicit_compaction_usage_invalidates_the_previous_context_snapshot() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "current-model"),
+    );
+    let session = service
+        .create_session(create_session_params(context(), "default", None))
+        .await
+        .unwrap();
+    store.records.lock().unwrap()[0].usage.context = ContextUsage::new(20, 100, 80, 1);
+
+    service
+        .record_usage(
+            &session.context.session_id,
+            "current-model",
+            &TokenUsage {
+                input_tokens: 3,
+                output_tokens: 2,
+                total_tokens: 5,
+                ..TokenUsage::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    let record = store.records.lock().unwrap()[0].clone();
+    assert_eq!(record.usage.tokens.total_tokens, 5);
+    assert_eq!(record.usage.context, None);
 }
 
 #[tokio::test]

@@ -720,13 +720,31 @@ PY
 usage_total_from_json() {
   local json="$1"
   local usage_total
+  usage_total="$(json_get "${json}" "usage.tokens.total_tokens")"
+  if [[ -n "${usage_total}" ]]; then
+    echo "${usage_total}"
+    return 0
+  fi
+
   usage_total="$(json_get "${json}" "usage.total_tokens")"
   if [[ -n "${usage_total}" ]]; then
     echo "${usage_total}"
     return 0
   fi
 
+  usage_total="$(json_get "${json}" "session.usage.tokens.total_tokens")"
+  if [[ -n "${usage_total}" ]]; then
+    echo "${usage_total}"
+    return 0
+  fi
+
   usage_total="$(json_get "${json}" "session.usage.total_tokens")"
+  if [[ -n "${usage_total}" ]]; then
+    echo "${usage_total}"
+    return 0
+  fi
+
+  usage_total="$(json_get "${json}" "state.usage.tokens.total_tokens")"
   if [[ -n "${usage_total}" ]]; then
     echo "${usage_total}"
     return 0

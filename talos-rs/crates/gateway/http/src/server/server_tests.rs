@@ -517,6 +517,14 @@ impl SessionStore for SessionStoreAdapter {
         Ok(true)
     }
 
+    async fn update_context_usage(
+        &self,
+        _session_id: &str,
+        _context_usage: &talos_types::ContextUsage,
+    ) -> talos_error::TalosResult<bool> {
+        Ok(true)
+    }
+
     async fn advance_memory_processed_until_seq(
         &self,
         _session_id: &str,

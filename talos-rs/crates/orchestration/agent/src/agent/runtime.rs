@@ -7,7 +7,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use self::outcome::{
-    execution_from_general_turn_result, outcome_metrics, outcome_stop_reason, outcome_usage,
+    agent_run_result_from_general_turn_result, outcome_metrics, outcome_stop_reason, outcome_usage,
     seed_resume_context,
 };
 use self::resume::build_general_turn_resume;
@@ -45,6 +45,7 @@ use talos_types::talos::{
 use talos_types::{ModelInfo, PendingUserAction, TimelineUserActionEvent, UserActionState};
 
 mod active_turn_input;
+mod context_usage;
 mod outcome;
 mod resume;
 
@@ -290,25 +291,6 @@ impl KernelAgent {
         })
     }
 
-    fn agent_run_result_from_general_turn_result(
-        result: &talos_agent_kernel::GeneralTurnResult,
-        session_id: String,
-    ) -> AgentRunResult {
-        let (output_text, output_items, stop_reason, usage) =
-            execution_from_general_turn_result(result);
-        let reasoning = AgentKernelParams::collect_reasoning(&output_items);
-        AgentRunResult {
-            output_text,
-            output_items,
-            reasoning,
-            stop_reason,
-            usage,
-            task_count: 1,
-            session_id,
-            generated_session_title: None,
-        }
-    }
-
     async fn execute_unary_run(
         &self,
         request: AgentRunParams,
@@ -360,7 +342,10 @@ impl KernelAgent {
         )
         .await?;
 
-        Ok(Self::agent_run_result_from_general_turn_result(
+        context_usage::persist_context_usage(self.session_store.as_ref(), &session_id, &result)
+            .await?;
+
+        Ok(agent_run_result_from_general_turn_result(
             &result, session_id,
         ))
     }
@@ -530,6 +515,16 @@ impl KernelAgent {
 
             match run_result {
                 Ok(Ok(result)) => {
+                    if let Err(err) = context_usage::persist_context_usage(
+                        this.session_store.as_ref(),
+                        &session_id,
+                        &result,
+                    )
+                    .await
+                    {
+                        let _ = tx.send(timeline.fail_turn(&err)).await;
+                        return Err(err.into());
+                    }
                     match emit_missing_tool_items_from_result(
                         &mut timeline,
                         &mut timeline_state,
@@ -577,7 +572,7 @@ impl KernelAgent {
                             Some(result.artifact_seq),
                         ))
                         .await;
-                    Ok(Self::agent_run_result_from_general_turn_result(
+                    Ok(agent_run_result_from_general_turn_result(
                         &result, session_id,
                     ))
                 }

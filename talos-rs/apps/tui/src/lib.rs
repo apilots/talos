@@ -8,6 +8,7 @@ mod chat;
 mod client;
 mod clipboard;
 mod commands;
+mod frame_fingerprint;
 mod input;
 mod input_history;
 mod message_queue;
@@ -83,6 +84,7 @@ pub struct TuiApp {
     pub(crate) reasoning_effort_override: Option<ReasoningEffort>,
     pub(crate) current_permission_mode: UserPermissionMode,
     pub(crate) session_usage: TokenUsage,
+    pub(crate) session_context_usage: Option<talos_sdk::ContextUsage>,
     pub(crate) turn_metrics: Option<TurnExecutionMetrics>,
     pub(crate) turn_metrics_live: bool,
     pub(crate) available_model_info: Vec<ModelInfo>,
@@ -117,6 +119,8 @@ pub struct TuiApp {
     pub(crate) pending_stream: Option<mpsc::Receiver<TimelineEventEnvelope>>,
     pub(crate) pending_command_update: Option<mpsc::Receiver<CommandUpdate>>,
     pub(crate) pending_command_task: Option<tokio::task::JoinHandle<()>>,
+    pub(crate) pending_session_usage_refresh: Option<mpsc::Receiver<types::SessionUsageRefresh>>,
+    pub(crate) pending_session_usage_refresh_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) pending_close_update: Option<mpsc::Receiver<types::SessionCloseUpdate>>,
     pub(crate) pending_close_task: Option<tokio::task::JoinHandle<()>>,
     pub(crate) active_stream_message_id: Option<String>,
@@ -155,6 +159,7 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
+    #[cfg(test)]
     pub(crate) fn displayed_usage(&self) -> TokenUsage {
         let mut usage = self.session_usage.clone();
         if self.turn_metrics_live {

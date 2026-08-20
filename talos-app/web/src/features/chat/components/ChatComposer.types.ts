@@ -47,6 +47,8 @@ export interface ChatComposerProps {
   isStreaming?: boolean;
   isCancelling?: boolean;
   contextCompactionStage?: ContextCompactionStage;
+  contextUsage?: import("@talos/sdk-browser").SessionInfo["usage"]["context"];
+  sessionTotalTokens?: number;
   models: Array<{ id: string; name: string; provider: string }>;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
