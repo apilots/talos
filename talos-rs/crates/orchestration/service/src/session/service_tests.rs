@@ -620,7 +620,7 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
 }
 
 #[tokio::test]
-async fn explicit_compaction_usage_invalidates_the_previous_context_snapshot() {
+async fn record_usage_invalidates_context_snapshot() {
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(
         store.clone(),

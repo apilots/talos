@@ -170,6 +170,13 @@ impl TurnService {
             let mut auto_dispatch_session = initial_auto_dispatch_session;
             while let Some(event) = stream_rx.recv().await {
                 let progress_event = event.clone();
+                record_completed_turn_progress(
+                    sessions.as_ref(),
+                    session_runtime.as_ref(),
+                    &progress_event,
+                    &assistant_model,
+                )
+                .await;
                 if let Err(err) = event_service.record_talos_event(event).await {
                     error!(error = %err, "failed to persist timeline stream event");
                     continue;
@@ -182,13 +189,6 @@ impl TurnService {
                     )
                     .await;
                 }
-                record_completed_turn_progress(
-                    sessions.as_ref(),
-                    session_runtime.as_ref(),
-                    &progress_event,
-                    &assistant_model,
-                )
-                .await;
                 if let Some(turn) = completed_turn_from_event(&progress_event) {
                     completed_turn = Some(turn);
                 }
@@ -465,6 +465,8 @@ impl TurnService {
         };
         let message_id = first_event.message_id.clone();
         let progress_event = first_event.clone();
+        self.record_completed_turn_progress(&progress_event, &assistant_model)
+            .await;
         self.event_service
             .record_talos_event(first_event)
             .await
@@ -475,8 +477,6 @@ impl TurnService {
             &progress_event,
         )
         .await;
-        self.record_completed_turn_progress(&progress_event, &assistant_model)
-            .await;
         self.spawn_event_forwarder(
             assistant_model,
             Some(profile_context),
@@ -659,6 +659,8 @@ impl TurnService {
             }
         };
         let progress_event = first_event.clone();
+        self.record_completed_turn_progress(&progress_event, &assistant_model)
+            .await;
         self.event_service
             .record_talos_event(first_event)
             .await
@@ -669,8 +671,6 @@ impl TurnService {
             &progress_event,
         )
         .await;
-        self.record_completed_turn_progress(&progress_event, &assistant_model)
-            .await;
         self.spawn_event_forwarder(
             assistant_model,
             Some(profile_context),

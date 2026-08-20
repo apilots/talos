@@ -152,15 +152,34 @@ impl UserService for TestAuthService {
 
 async fn test_gateway() -> ServiceGateway {
     let config = test_config();
+    let (storage, store) = test_session_storage().await;
+    let handler = Arc::new(RecordingHandler);
+    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
+        handler.clone() as Arc<dyn AgentDispatchRuntime>
+    ));
+    test_gateway_with_runtime(config, storage, store, turn_executor, handler).await
+}
+
+async fn test_session_storage() -> (Arc<SqliteStorage>, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     let migration_dir =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../../conf/migrations/sqlite");
     run_migrations(storage.pool(), &migration_dir)
         .await
         .unwrap();
+    let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
+    (storage, store)
+}
+
+async fn test_gateway_with_runtime(
+    config: TalosConfig,
+    storage: Arc<SqliteStorage>,
+    store: Arc<DatabaseSessionStore>,
+    turn_executor: Arc<dyn talos_service::TurnExecutor>,
+    session_runtime: Arc<dyn SessionRuntime>,
+) -> ServiceGateway {
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
-    let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let file_store = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
     let project_store_impl = Arc::new(StorageProjectStore::new(storage).await.unwrap());
     let session_store: Arc<dyn SessionStore> = store.clone();
@@ -186,11 +205,6 @@ async fn test_gateway() -> ServiceGateway {
         store.clone() as Arc<dyn talos_store::session::UserActionStore>,
         TimelineEventRetentionConfig::default(),
     ));
-    let handler = Arc::new(RecordingHandler);
-    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
-        handler.clone() as Arc<dyn AgentDispatchRuntime>
-    ));
-    let session_runtime: Arc<dyn SessionRuntime> = handler;
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
@@ -220,6 +234,9 @@ async fn test_gateway() -> ServiceGateway {
     ));
     ServiceGateway::new(service)
 }
+
+#[path = "basic_tests/context_usage_tests.rs"]
+mod context_usage_tests;
 
 fn test_config() -> TalosConfig {
     let mut config = TalosConfig::default();

@@ -22,6 +22,23 @@ fn append_transcript_answer(app: &mut TuiApp, user: &str, answer: &str) {
     ]);
 }
 
+fn deliver_session_usage_refresh(
+    app: &mut TuiApp,
+    session_id: &str,
+    session: talos_sdk::SessionInfo,
+) {
+    if let Some(task) = app.pending_session_usage_refresh_task.take() {
+        task.abort();
+    }
+    let (tx, rx) = tokio::sync::mpsc::channel(1);
+    tx.try_send(crate::types::SessionUsageRefresh {
+        session_id: session_id.to_string(),
+        result: Ok(session),
+    })
+    .expect("ready session usage refresh should fit in channel");
+    app.pending_session_usage_refresh = Some(rx);
+}
+
 #[test]
 fn test_input_status_line_uses_dynamic_token_left_percent() {
     let mut app = create_embedded_app();
@@ -85,15 +102,18 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
     assert_eq!(app.session_usage.cache_read_input_tokens, Some(13));
     assert_eq!(app.token_left_percent(), None);
 
+    let refreshed_session = client
+        .get_session("sess-test")
+        .await
+        .expect("mock session refresh should succeed");
+    deliver_session_usage_refresh(&mut app, "sess-test", refreshed_session.clone());
     app.session_id = Some("sess-other".to_string());
-    tokio::task::yield_now().await;
     app.poll_session_usage_refresh();
     assert_eq!(app.session_usage.total_tokens, 980);
     assert_eq!(app.session_context_usage, None);
 
     app.session_id = Some("sess-test".to_string());
-    app.schedule_session_usage_refresh();
-    tokio::task::yield_now().await;
+    deliver_session_usage_refresh(&mut app, "sess-test", refreshed_session);
     app.poll_session_usage_refresh();
     assert_eq!(app.session_usage.total_tokens, 1_145);
     assert_eq!(

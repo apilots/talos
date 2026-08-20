@@ -21,7 +21,13 @@ async-trait = "0.1"
 [dev-dependencies]
 mockall = "0.12"
 opendal = { workspace = true, features = ["services-memory"] }
+talos-agent = { path = "../../orchestration/agent" }
+talos-agent-kernel = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
 talos-llm-provider = { path = "../../common/llm/provider" }
+talos-memory = { workspace = true }
+talos-router = { path = "../../orchestration/router" }
 talos-store = { workspace = true }
 talos-storage = { path = "../../infra/storage" }
+talos-tools = { workspace = true }
+talos-tools-policy = { workspace = true }
