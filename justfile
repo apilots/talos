@@ -72,6 +72,10 @@ fix *args:
 gen-app-protocol:
     cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 
+# Regenerate Web and Desktop logo assets from the vector master.
+gen-logo-assets:
+    ../scripts/generate-logo-assets.sh
+
 # Run E2E scenarios. Pass runner args such as `--case 01_health_and_models`.
 e2e *args:
     ../talos-e2e/run_e2e.sh "$@"

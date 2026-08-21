@@ -118,6 +118,12 @@ describe("AuthPage", () => {
     expect(redirectToExternalUrlMock).not.toHaveBeenCalled();
   });
 
+  it("renders the vector Talos logo", () => {
+    renderAuthPage("/auth/login");
+
+    expect(screen.getByAltText("Talos").getAttribute("src")).toBe("/talos-logo.svg");
+  });
+
   it("starts device login and opens the Cloud device page after user action", async () => {
     renderAuthPage("/auth/login?next=/settings");
 

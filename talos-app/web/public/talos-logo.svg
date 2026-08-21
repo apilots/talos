@@ -1,4 +1,98 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title description">
   <title id="title">Talos</title>
-  <image href="./logo.png" width="1254" height="1254" preserveAspectRatio="xMidYMid meet" />
+  <desc id="description">A rounded blue organic mark with a flowing cyan fold and a soft white T.</desc>
+  <defs>
+    <path id="body" d="M245 340C249 239 313 136 414 105C514 75 624 113 690 162C750 136 824 137 885 154C992 184 1051 275 1055 383C1154 414 1222 495 1221 606C1220 701 1177 771 1094 816C1084 915 1035 1023 947 1083C870 1135 773 1161 684 1127C635 1108 612 1108 565 1123C477 1151 379 1137 300 1091C210 1039 132 931 127 810C47 772 17 691 34 584C50 484 129 398 245 340Z"/>
+    <clipPath id="bodyClip">
+      <use href="#body"/>
+    </clipPath>
+    <path id="lowerFoldShape" d="M347 1113C452 1102 515 1041 565 970C622 888 662 809 798 778C869 762 956 774 1049 739C1122 711 1178 662 1221 606C1220 701 1177 771 1094 816C1084 915 1035 1023 947 1083C870 1135 773 1161 684 1127C635 1108 612 1108 565 1123C483 1149 398 1138 347 1113Z"/>
+    <clipPath id="lowerFoldClip">
+      <use href="#lowerFoldShape"/>
+    </clipPath>
+    <linearGradient id="bodyBase" x1="174" y1="250" x2="1078" y2="1004" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8fa6f7"/>
+      <stop offset="0.27" stop-color="#5f91f9"/>
+      <stop offset="0.57" stop-color="#1974ff"/>
+      <stop offset="0.78" stop-color="#0b5cf8"/>
+      <stop offset="1" stop-color="#789af6"/>
+    </linearGradient>
+    <radialGradient id="centerLight" cx="0" cy="0" r="1" gradientTransform="translate(625 590) rotate(90) scale(448 515)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e2ffff" stop-opacity="0.96"/>
+      <stop offset="0.28" stop-color="#9ceafb" stop-opacity="0.76"/>
+      <stop offset="0.64" stop-color="#5aaafb" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#2b79f8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="lowerDepth" cx="0" cy="0" r="1" gradientTransform="translate(315 938) rotate(-20) scale(326 304)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f49ef" stop-opacity="0.86"/>
+      <stop offset="0.5" stop-color="#175cf6" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#2a76f8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="rightBlue" cx="0" cy="0" r="1" gradientTransform="translate(1160 603) rotate(180) scale(315 340)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#006afd" stop-opacity="0.82"/>
+      <stop offset="0.52" stop-color="#0968fb" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#1976fa" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="topFold" x1="302" y1="143" x2="642" y2="377" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#a5b6fa"/>
+      <stop offset="0.42" stop-color="#7596f7"/>
+      <stop offset="1" stop-color="#205bf1"/>
+    </linearGradient>
+    <linearGradient id="topFoldShade" x1="402" y1="111" x2="500" y2="389" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.18"/>
+      <stop offset="0.72" stop-color="#2d62ee" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#163edc" stop-opacity="0.35"/>
+    </linearGradient>
+    <linearGradient id="lowerFold" x1="822" y1="734" x2="823" y2="1147" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#75d8fa"/>
+      <stop offset="0.28" stop-color="#60b9f9"/>
+      <stop offset="0.62" stop-color="#508ef9"/>
+      <stop offset="1" stop-color="#4778f7"/>
+    </linearGradient>
+    <radialGradient id="lowerFoldLight" cx="0" cy="0" r="1" gradientTransform="translate(685 842) rotate(-17) scale(342 224)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e2ffff" stop-opacity="0.84"/>
+      <stop offset="0.46" stop-color="#8de9fa" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#477ff1" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softBlur" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="54"/>
+    </filter>
+    <filter id="boundaryGlow" x="-30%" y="-80%" width="160%" height="260%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <linearGradient id="tFill" x1="493" y1="464" x2="686" y2="824" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e5fbff"/>
+      <stop offset="0.44" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e7f8ff"/>
+    </linearGradient>
+    <filter id="tGlow" x="-35%" y="-35%" width="170%" height="170%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="14" result="blur"/>
+      <feFlood flood-color="#d9ffff" flood-opacity="0.56" result="color"/>
+      <feComposite in="color" in2="blur" operator="in" result="glow"/>
+      <feMerge>
+        <feMergeNode in="glow"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <use href="#body" fill="url(#bodyBase)"/>
+  <g clip-path="url(#bodyClip)">
+    <use href="#body" fill="url(#centerLight)"/>
+    <ellipse cx="681" cy="220" rx="230" ry="130" fill="#c5ceff" fill-opacity="0.35" filter="url(#softBlur)"/>
+    <ellipse cx="535" cy="525" rx="250" ry="220" fill="#c9f9ff" fill-opacity="0.08" filter="url(#softBlur)"/>
+    <use href="#body" fill="url(#lowerDepth)"/>
+    <use href="#body" fill="url(#rightBlue)"/>
+    <path d="M245 340C249 239 313 136 414 105C514 75 624 113 690 162C653 184 615 222 579 267C528 331 482 377 416 380C351 383 297 360 245 340Z" fill="url(#topFold)"/>
+    <path d="M245 340C249 239 313 136 414 105C514 75 624 113 690 162C653 184 615 222 579 267C528 331 482 377 416 380C351 383 297 360 245 340Z" fill="url(#topFoldShade)"/>
+    <use href="#lowerFoldShape" fill="url(#lowerFold)"/>
+    <use href="#lowerFoldShape" fill="url(#lowerFoldLight)"/>
+    <path d="M347 1113C452 1102 515 1041 565 970C622 888 662 809 798 778C869 762 956 774 1049 739C1122 711 1178 662 1221 606" fill="none" stroke="#dcffff" stroke-opacity="0.52" stroke-width="54" filter="url(#boundaryGlow)" clip-path="url(#lowerFoldClip)"/>
+    <path d="M347 1113C452 1102 515 1041 565 970C622 888 662 809 798 778C869 762 956 774 1049 739C1122 711 1178 662 1221 606" fill="none" stroke="#b5f8ff" stroke-opacity="0.72" stroke-width="2.5"/>
+  </g>
+  <use href="#body" fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="10" filter="url(#boundaryGlow)"/>
+  <use href="#body" fill="none" stroke="#f4ffff" stroke-opacity="0.34" stroke-width="2"/>
+
+  <path d="M424 459C464 452 498 494 545 513C598 535 648 532 708 508C753 490 785 451 823 459C859 466 879 493 867 527C854 565 819 575 782 560C749 547 716 559 685 585C658 608 657 648 661 692C665 738 692 782 671 814C650 845 608 839 584 810C559 780 577 738 582 697C589 650 585 611 552 585C523 562 494 553 466 563C429 576 394 565 381 533C366 496 386 465 424 459Z" fill="url(#tFill)" filter="url(#tGlow)" transform="translate(25 32.5) scale(0.96 0.95)"/>
+  <path d="M424 459C464 452 498 494 545 513C598 535 648 532 708 508C753 490 785 451 823 459C859 466 879 493 867 527C854 565 819 575 782 560C749 547 716 559 685 585C658 608 657 648 661 692C665 738 692 782 671 814C650 845 608 839 584 810C559 780 577 738 582 697C589 650 585 611 552 585C523 562 494 553 466 563C429 576 394 565 381 533C366 496 386 465 424 459Z" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="2" transform="translate(25 32.5) scale(0.96 0.95)"/>
 </svg>

@@ -27,7 +27,7 @@ export function AuthPage() {
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const nextPath = sanitizeNextPath(params.get("next"));
   const isLoggedOut = location.pathname === "/auth/logout" || connection.authStatus === "logged_out";
-  const logoSrc = `${import.meta.env.BASE_URL}logo.png`;
+  const logoSrc = `${import.meta.env.BASE_URL}talos-logo.svg`;
 
   useEffect(() => {
     if (connection.authStatus === "authenticated" || connection.authStatus === "open") {
