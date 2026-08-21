@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-opendal = { workspace = true }
+opendal = { workspace = true, features = ["reqwest-rustls-tls", "services-fs", "services-s3"] }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

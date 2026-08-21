@@ -37,7 +37,7 @@ url = "2"
 uuid = { workspace = true, features = ["v4", "v7"] }
 
 [dev-dependencies]
-opendal = { workspace = true, features = ["services-memory"] }
+opendal = { workspace = true, features = ["services-fs", "services-memory"] }
 sqlx = { workspace = true }
 talos-storage = { workspace = true }
 tempfile = "3"

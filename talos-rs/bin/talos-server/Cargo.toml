@@ -11,4 +11,4 @@ path = "src/main.rs"
 
 [dependencies]
 talos-base = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }

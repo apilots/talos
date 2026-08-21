@@ -50,7 +50,7 @@ dev-web *args:
 
 # Type-check selected packages or the current workspace selection.
 check *args:
-    CARGO_TARGET_DIR=target/talos-check cargo check "$@"
+    cargo check "$@"
 
 # Run tests through nextest. Prefer scoped runs such as `just test -p talos-service`.
 test *args:
@@ -60,9 +60,13 @@ test *args:
     fi
     RUST_MIN_STACK={{ rust_min_stack }} cargo nextest run --no-fail-fast "$@"
 
-# Run clippy for selected packages or the current workspace selection.
+# Run fast Clippy checks for selected packages without linting path dependencies.
 clippy *args:
-    cargo clippy --tests "$@"
+    cargo clippy --no-deps "$@"
+
+# Run Clippy against test targets without linting path dependencies.
+clippy-tests *args:
+    cargo clippy --no-deps --tests "$@"
 
 # Apply clippy fixes for selected packages. Prefer `just fix -p <package>`.
 fix *args:

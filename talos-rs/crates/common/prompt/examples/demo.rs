@@ -3,8 +3,7 @@
 use std::collections::HashMap;
 use talos_prompt::{presets, PromptContext, PromptManager, PromptTemplate};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Talos Prompt Template System Demo ===\n");
 
     // Example 1: Basic template usage

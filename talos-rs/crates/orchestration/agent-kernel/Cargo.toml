@@ -22,6 +22,6 @@ talos-skills = { workspace = true }
 talos-store = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }

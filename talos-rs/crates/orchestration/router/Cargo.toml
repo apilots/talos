@@ -10,7 +10,7 @@ talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.0", features = ["full"] }
+tokio = { workspace = true }
 thiserror = "1.0"
 tracing = "0.1"
 async-trait = "0.1"

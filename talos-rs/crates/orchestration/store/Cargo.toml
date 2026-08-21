@@ -20,7 +20,7 @@ talos-memory = { workspace = true }
 talos-storage = { workspace = true }
 talos-types = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs", "io-util"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 

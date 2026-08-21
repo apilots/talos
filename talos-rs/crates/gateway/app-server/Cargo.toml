@@ -21,7 +21,7 @@ talos-gateway = { path = "../core" }
 talos-skills = { workspace = true }
 talos-tools = { workspace = true }
 talos-types = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["io-std", "io-util"] }
 tracing = { workspace = true }
 uuid = { workspace = true }
 
