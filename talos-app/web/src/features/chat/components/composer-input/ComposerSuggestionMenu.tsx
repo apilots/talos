@@ -79,7 +79,7 @@ export function ComposerSuggestionMenu({
             title = commandTitle(suggestion.id);
             description = suggestion.id === "compact" && contextUsage?.usedTokens
               ? t("commandCompactDescriptionWithUsage", {
-                  percent: contextUsedPercent(contextUsage).toFixed(0),
+                  percent: contextUsedPercent(contextUsage).toFixed(1),
                 })
               : t(`command${capitalize(suggestion.id)}Description`);
           } else {

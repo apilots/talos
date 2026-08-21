@@ -125,16 +125,16 @@ describe("ChatComposer suggestions", () => {
   it("shows measured context usage beside the compact command", () => {
     renderControlledComposer({
       contextUsage: {
-        usedTokens: 85,
-        contextWindowTokens: 100,
-        effectivePromptBudgetTokens: 90,
+        usedTokens: 17,
+        contextWindowTokens: 1_000,
+        effectivePromptBudgetTokens: 900,
         measuredAt: 1,
       },
       initialDraft: "/co",
       onCommand: vi.fn(),
     });
 
-    expect(screen.getByText("Compact the current session context (85% used)")).toBeInTheDocument();
+    expect(screen.getByText("Compact the current session context (1.7% used)")).toBeInTheDocument();
   });
 
   it("opens the model picker without dispatching a session command", () => {
