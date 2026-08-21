@@ -116,6 +116,26 @@ describe("Sidebar", () => {
     expect(selectedChat?.getAttribute("data-selected")).toBe("true");
   });
 
+  it("shows a motion-safe spinner only while a session is running", () => {
+    const runningSession = session("chat-running", "Analyze Rust compilation");
+    runningSession.status = "running";
+    renderSidebar({
+      chats: [runningSession, session("chat-done", "Review completed analysis")],
+      currentPath: "/sessions/chat-running",
+      projectGroups: [],
+    });
+
+    const runningStatus = screen.getByRole("status", {
+      name: "Running Analyze Rust compilation",
+    });
+    expect(runningStatus.querySelector("svg")?.classList).toContain("motion-safe:animate-spin");
+    expect(runningStatus.querySelector("svg")?.classList).toContain(
+      "motion-safe:[animation-duration:1.6s]",
+    );
+    expect(runningStatus).toMatchSnapshot();
+    expect(screen.queryByRole("status", { name: "Running Review completed analysis" })).toBeNull();
+  });
+
   it("applies the selected surface directly to the active primary navigation route", () => {
     renderSidebar({ projectGroups: [] }, "/plugins");
 

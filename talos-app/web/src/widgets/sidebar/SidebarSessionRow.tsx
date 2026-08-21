@@ -1,4 +1,4 @@
-import { Trash2 } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { formatRelativeTime } from "@/shared/lib/time";
@@ -31,6 +31,7 @@ export function SidebarSessionRow({
   onDeleteSession,
 }: SidebarSessionRowProps) {
   const active = currentPath === `/sessions/${session.id}`;
+  const running = session.status === "running";
 
   return (
     <div className="group relative" key={`${session.id}-${session.createdAt}`}>
@@ -47,19 +48,32 @@ export function SidebarSessionRow({
       >
         <span className="truncate font-medium leading-5 text-ink">{session.label}</span>
         <span
+          aria-label={running ? `Running ${session.label}` : undefined}
           className={cn(
-            "whitespace-nowrap text-right text-xs tabular-nums text-muted transition-opacity",
-            active ? "opacity-0" : "group-hover:opacity-0 group-focus-within:opacity-0",
+            "flex justify-end text-muted transition-opacity",
+            !running && "whitespace-nowrap text-xs tabular-nums",
+            active && !running
+              ? "opacity-0"
+              : "group-hover:opacity-0 group-focus-within:opacity-0",
           )}
+          role={running ? "status" : undefined}
         >
-          {formatRelativeTime(session.lastActivityAt)}
+          {running ? (
+            <LoaderCircle
+              aria-hidden="true"
+              className="motion-safe:animate-spin motion-safe:[animation-duration:1.6s]"
+              size={14}
+            />
+          ) : (
+            formatRelativeTime(session.lastActivityAt)
+          )}
         </span>
       </button>
       <button
         aria-label={`Delete ${session.label}`}
         className={cn(
           "absolute right-2 top-1/2 size-6 -translate-y-1/2 items-center justify-center rounded-[var(--radius-control)] text-muted transition hover:bg-danger/10 hover:text-danger focus:outline-none focus-visible:ring-2 focus-visible:ring-danger/30",
-          active ? "flex" : "hidden group-hover:flex group-focus-within:flex",
+          active && !running ? "flex" : "hidden group-hover:flex group-focus-within:flex",
         )}
         onClick={(event) => {
           event.stopPropagation();
