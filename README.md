@@ -1,251 +1,137 @@
-# Talos (塔罗斯) 🤖
+# Talos
 
-> AI Agent Framework - 智能管家底层框架（多语言实现）
+[Chinese](README_zh.md)
 
-**名字来源**：希腊神话中的青铜自动巨人塔罗斯（Talos），每天绕克里特岛巡逻，守护岛屿免受入侵。象征着自动化、忠诚、坚固的守护者。
+Talos is an AI agent platform with shared runtime semantics across terminal, web,
+desktop, HTTP, and embedded clients. The Rust workspace owns the agent runtime,
+session and turn lifecycle, model integration, memory, tools, Skills, MCP, and
+sandboxing. The TypeScript workspace provides the Web UI, Desktop shell, and
+client SDKs.
 
----
+## Product entry points
 
-## 项目定位
+| Entry point | Kind | Purpose |
+| --- | --- | --- |
+| `talos` | Product | TUI and non-interactive terminal commands using the embedded runtime |
+| `talos-server` | Product | HTTP API, SSE timeline streaming, and hosted Web UI server |
+| Web UI | Product surface | React UI served in development or by `talos-server` |
+| Desktop | Product | Electron shell backed by the local app-server |
+| `app-server` | Internal adapter | JSON-RPC over stdio for Desktop and protocol tests |
 
-Talos 是一个 AI 智能管家底层框架，为上层应用（如贾维斯 Jarvis）提供：
+## Core capabilities
 
-- **感知层**：多模态输入处理、环境理解、事件监听
-- **认知层**：记忆系统、推理引擎、决策系统
-- **执行层**：工具调用、按需工具发现、Skills、MCP server plugins、输出通道
-- **编排层**：多 Agent Runtime 注册与分发、Session/Turn 生命周期、Subagent 协作
-- **元认知层**：自我监控、持续学习
+- Session, turn, project, and timeline lifecycle management
+- Model-neutral agent execution with multiple LLM providers
+- Persistent memory and bounded context construction
+- Built-in tools, Skills, MCP server plugins, policy, and sandbox execution
+- Parent-child subagent collaboration through the same runtime dispatch path
+- SDK-first access and shared domain semantics across Web, Desktop, TUI, and gateways
+- Capability parity as the required contract for TypeScript, Rust, and embedded SDK evolution
 
-## 用户界面
+## Architecture direction
 
-Talos提供了多种用户交互界面：
+Talos is both an Agent platform for its first-party products and a framework for
+higher-level applications. It evolves through stable, language-neutral product
+contracts, aligned SDKs, layered runtime ownership, and composable capability
+domains.
 
-### 产品入口
-
-| 入口 | 说明 |
-|------|------|
-| `talos` | TUI 用户入口；通过目标平台对应的 Release bundle 安装 |
-| `app-server` | 本地 JSON-RPC over stdio 协议适配器，供 Desktop 和协议测试使用，不作为独立产品发布 |
-| `talos-server` | HTTP API / WebUI 服务端入口，面向服务端 tar 包部署 |
-
-### 终端用户界面 (TUI)
-- 使用公开安装脚本安装最新的 macOS/Linux Release bundle：
-  `curl --proto '=https' --tlsv1.2 -fsSL https://github.com/apilots/talos-releases/releases/latest/download/install.sh | sh`
-- 使用 `cargo run -p talos-tui --bin talos` 运行
-- 丰富的键盘导航支持
-- 支持多面板视图（聊天、历史、工具、设置）
-- 默认以内嵌 runtime 运行，不需要单独启动 `app-server`，也不占用本地端口
-
-### API接口
-- HTTP API + SSE 支持
-- 本地 JSON-RPC over stdio app-server 支持，供 Desktop 和协议测试使用
-- 适用于与其他应用集成
-
-### 桌面端
-- Electron Desktop shell 已接入本地 app-server
-- 复用 `talos-app/web` 的前端领域模型和主要 UI
-
-### 其他语言实现计划
-- 图形用户界面 (GUI) - 计划中
-- 移动端应用 - 计划中
-
----
-
-## 多语言实现
-
-| 实现 | 语言 | 状态 | 说明 |
-|------|------|------|------|
-| **talos-rs** | Rust | 🚧 开发中 | 系统级性能，内存安全，推荐用于生产环境 |
-| **talos-py** | Python | 📋 计划中 | 快速原型，AI 生态集成 |
-| **talos-go** | Go | 📋 计划中 | 高并发，云原生部署 |
-| **talos-js** | TypeScript/Node.js | 📋 计划中 | Web 集成，快速开发 |
-
----
-
-## 为什么多语言？
-
-- **Rust**：核心基础设施，性能敏感场景
-- **Python**：AI/ML 模型集成，快速实验
-- **Go**：微服务部署，云原生
-- **TypeScript**：前端/Web 集成
-
-不同语言可以混合部署；当前 Rust 服务端暴露 HTTP/SSE 与本地 JSON-RPC app-server 两类入口。
-
----
-
-## 项目结构
-
+```text
++----------------------------------------------------------------------------+
+| Talos products and higher-level applications                               |
++----------------------------------------------------------------------------+
+| Talos framework                                                            |
+| Language-neutral contracts | Client SDKs | Embedded SDK | Gateways         |
++------------------------+------------------------+--------------------------+
+| Perception             | Cognition              | Action                   |
+| Inputs | Channels      | Memory | Reasoning     | Tools | Skills | MCP     |
++------------------------+------------------------+--------------------------+
+| Agent orchestration and runtime                                            |
+| Agent routing | Session / Turn | Multiple runtimes | Subagent collaboration|
++----------------------------------------------------------------------------+
+| Infrastructure                                                             |
+| Store | Storage | Config | Auth | Automation | Logging | Observability     |
++----------------------------------------------------------------------------+
+| Metacognition [cross-cutting evolution]                                    |
+| Evaluation | Self-monitoring | Learning | Identity and personality         |
++----------------------------------------------------------------------------+
 ```
+
+This is the long-term layering direction, not an execution sequence. The same
+layers are expanded with current and planned status in
+[System architecture](docs/architecture/ARCHITECTURE.md).
+
+## Repository map
+
+```text
 talos/
-├── talos-rs/          # Rust 实现
-│   ├── Cargo.toml
-│   ├── crates/
-│   ├── apps/
-│   └── bin/
-├── deploy/            # 服务端部署示例与反向代理配置要求
-├── talos-py/          # Python 实现（计划中）
-├── talos-go/          # Go 实现（计划中）
-├── talos-app/         # TypeScript Web / Desktop / SDK workspace
-├── talos-e2e/         # 端到端测试场景与 runner
-├── spec/              # 接口规范与功能设计
-└── README.md
+|-- talos-rs/       Rust runtime, gateways, SDKs, TUI, and server binaries
+|-- talos-app/      Web, Desktop, and TypeScript SDK workspace
+|-- talos-e2e/      Cross-component integration and release scenarios
+|-- deploy/         Server deployment and TUI installation assets
+|-- conf/           Repository-managed configuration and migrations
+|-- docs/           Current architecture, reference, and development docs
+|-- spec/           Active and archived change specifications
+|-- build/          Product packaging and branding resources
+`-- scripts/        Repository automation
 ```
 
----
+## Quick start
 
-## 快速开始
-
-### Rust 实现
+Prerequisites are Rust and Cargo, Node.js 24, pnpm 9.14.4, and `just`. Bootstrap
+the repository tools and frontend dependencies:
 
 ```bash
-cd talos
-
-# 安装本地开发工具
+cargo install --locked just
 just install-tools
-
-# Enable repository-managed Git hooks
 just setup-git-hooks
+pnpm --dir talos-app install
+```
 
-# 格式化
-just fmt
+The default model uses DeepSeek. Export its key, then run the Web UI and server
+in separate terminals:
 
-# 构建指定包
-just build -p talos-server
+```bash
+export TALOS_LLM_DEEPSEEK_API_KEY="your-api-key"
+just dev-server
+just dev-web
+```
 
-# 运行指定包测试，避免日常全量 workspace 编译
+Run the terminal client:
+
+```bash
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos
+```
+
+## Common development commands
+
+```bash
+just fmt-check
+just check -p talos-service
 just test -p talos-service
-
-# 运行单个 E2E 场景
 just e2e-case 01_health_and_models
 ```
 
-Talos 的 Rust workspace 使用根目录 `justfile` 统一开发入口。`just test`
-通过 `cargo-nextest` 运行测试；日常开发应优先按 package 或测试名缩小范围。
+Prefer package-scoped checks during development. See
+[Development](docs/development/DEVELOPMENT.md) for the full workflow.
 
-Repository-managed hooks are enabled with `just setup-git-hooks`. `commit-msg` validates
-categorized subjects, `pre-commit` checks the staged snapshot, and `pre-push` runs path-gated
-frontend or Rust quality checks. Plain uncategorized subjects remain valid and appear under Other
-in release notes.
+## Documentation
 
-Changed-file size checks use dynamic Git baselines: historical oversized files may stay unchanged
-or shrink, but may not grow. New frontend components are limited to 200 non-empty lines; pages,
-hooks, stores, and tests to 300; other TypeScript files to 1000. New Rust source files are limited
-to 800 non-empty lines with a warning above 500, and Rust test files to 1200. Changed blobs are
-limited to 500 KiB unless explicitly allowlisted.
-`just check` 使用独立的 `target/talos-check` 目录，避免日常类型检查继续膨胀
-`target/debug`。
-E2E 也可以通过 root `justfile` 运行：`just e2e` 会转发到
-`talos-e2e/run_e2e.sh`，`just e2e-case <case>` 用于单 case 重跑，
-`just e2e-group <group>` 用于按分组执行。
-如果 `talos-rs/target` 体积过大，先使用 `just target-size` 查看分布，再按需运行
-`just clean-incremental` 或 `just clean-debug`。不要把清理 target 当作常规验证步骤；
-它会牺牲后续增量编译速度。
+- [Documentation index](docs/README.md)
+- [System architecture](docs/architecture/ARCHITECTURE.md)
+- [Runtime architecture](docs/architecture/RUNTIME_ARCHITECTURE.md)
+- [Client architecture](docs/architecture/CLIENT_ARCHITECTURE.md)
+- [Error model](docs/architecture/ERROR_MODEL.md)
+- [Project structure](docs/reference/PROJECT_STRUCTURE.md)
+- [Rust workspace modules](docs/reference/RUST_MODULES.md)
+- [Rust workspace](talos-rs/README.md)
+- [Web, Desktop, and TypeScript SDKs](talos-app/README.md)
+- [End-to-end tests](talos-e2e/README.md)
+- [Deployment](deploy/README.md)
 
-### 服务端部署
+Change-specific designs live under [`spec/`](spec/). The
+[`spec/REGISTRY.md`](spec/REGISTRY.md) file is the authoritative index for
+active and archived specifications.
 
-HTTP/WebUI 服务端通过 SSE 推送实时 timeline 事件。反向代理必须对
-`/v1/sessions/*/events` 禁用压缩和缓冲，详见 [deploy/README.md](deploy/README.md)。
+## License
 
-### 其他语言实现
-
-待开发...
-
-### TUI使用示例
-```bash
-# 启动 TUI 界面（默认 embedded runtime）
-cd talos/talos-rs
-cargo run -p talos-tui --bin talos
-
-# TUI/CLI 直接使用 embedded runtime，不需要额外启动 app-server
-
-# 运行 command mode（默认 embedded runtime）
-cargo run -p talos-tui --bin talos -- exec --session demo "hello"
-
-# 终端管理命令同样走 embedded runtime
-cargo run -p talos-tui --bin talos -- models
-
-# 启动 HTTP/WebUI 服务端
-cargo run -p talos-server --bin talos-server
-```
-
----
-
-## 发布 Release
-
-根目录提供 `release.sh` 用于发布 GitHub Release。脚本只负责打 tag 和创建 Release notes；
-构建、打包和产物发布由 tag 触发的 CI release workflow 自动完成。
-
-发布前需要先通过 PR 把版本号升级合并到 `main`，并准备好外部 release notes 文件。
-
-```bash
-# 在最新 main 分支执行
-./release.sh 0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md
-
-# 自动确认并监控 tag 触发的 workflow
-./release.sh v0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md --yes --watch
-
-# 只做本地校验和命令预览，不创建 tag / release
-./release.sh 0.1.3 --notes /tmp/talos-v0.1.3-release-notes.md --dry-run
-```
-
-脚本会校验：
-
-- 当前目录是仓库根目录
-- 当前分支是 `main`
-- `main` 与 `origin/main` 同步
-- 工作区干净
-- `gh` 已登录
-- 本地和远端不存在同名 tag
-- GitHub Release 不存在
-- Rust / TUI / Web / Desktop / TS SDK 版本号与指定版本一致
-
-脚本不会自动修改版本号，也不会上传本地编译产物。
-
----
-
-## 架构设计
-
-```
-┌─────────────────────────────────────────┐
-│           上层应用 (Jarvis)              │
-├─────────────────────────────────────────┤
-│              Talos 框架                   │
-├─────────────┬─────────────┬─────────────┤
-│   感知层    │   认知层    │   执行层    │
-│ Perception  │ Cognition   │   Action    │
-│   (TUI/CLI) │ (Memory/LLM)│ (Tools/MCP) │
-├─────────────┴─────────────┴─────────────┤
-│            编排层 / 网关层               │
-│         (Agent/Session/Gateway)         │
-├─────────────────────────────────────────┤
-│            元认知层 (Meta)               │
-│     自我监控 / 持续学习 / 人格管理        │
-└─────────────────────────────────────────┘
-```
-
-Talos 将“可注册的多 Agent Runtime”与“基于父子 Session/Turn 的 Subagent 协作”建模为两套正交机制。Subagent 继承父级已经确定的 Agent binding，重新进入 Coordinator 分发链，并解析到同一个已注册的 AgentHarness 实例及其 AgentRuntime。完整边界参见 [Talos-RS 架构设计](talos-rs/ARCHITECTURE.md#agent-runtime-与-subagent-协作边界)。
-
----
-
-## 开发状态
-
-🚧 **早期开发中** - 核心架构设计阶段
-
-- [x] 项目结构搭建
-- [x] Rust 实现骨架
-- [ ] 核心模块实现
-- [ ] 多语言接口规范
-- [ ] 第一个可用版本
-
----
-
-## 许可证
-
-MIT License
-
----
-
-## 相关项目
-
-- **Jarvis**：基于 Talos 构建的上层 AI 智能管家应用
-- **OpenClaw**：灵感来源，Node.js 版本的助手框架
+Talos is licensed under the MIT License.

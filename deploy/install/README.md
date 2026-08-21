@@ -1,5 +1,7 @@
 # Talos TUI installer
 
+[Chinese](README_zh.md)
+
 The installer selects the TUI release bundle for the current macOS or Linux CPU target,
 verifies its release checksum, installs immutable product resources, and activates a stable
 launcher.

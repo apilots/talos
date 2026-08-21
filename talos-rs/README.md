@@ -1,313 +1,79 @@
-# Talos AI Agent Framework
+# Talos Rust workspace
 
-Talos is an AI Agent Framework designed to serve as the software brain for AI assistants similar to Jarvis. This framework includes comprehensive functionality for running AI agent services with multi-channel support and advanced capabilities.
+[Chinese](README_zh.md)
 
-## ✨ Features Implemented
+`talos-rs` contains the Talos runtime, application service, gateways, Rust SDKs,
+terminal product, and server binaries. It is the owner of shared product
+semantics used by Web, Desktop, TUI, HTTP, and embedded clients.
 
-### Infrastructure Layer
-- **Error Handling**: Centralized error management
-- **Logging**: Structured logging with configurable levels
-- **Configuration**: YAML-based configuration with environment variable support
-- **Storage**: SQLite-based storage with automatic schema setup
-- **Authentication**: JWT-based authentication system
+## Layout
 
-### Cognitive Layer
-- **Memory System**: Short-term and long-term memory with unified interface
-- **Prompt Builder**: Shared prompt composition with configurable planner modes
-- **LLM Providers**: Support for Anthropic, OpenAI, Bailian, DeepSeek, OpenRouter, and Ollama
-
-### Action Layer
-- **Tool System**: Built-in tools plus deferred discovery through `tool_search`
-- **Plugin Lifecycle**: Unified install, enable, disable, update, and uninstall flow for Skills and MCP server plugins
-- **Skills**: Prompt-injected instruction bundles managed through the plugin system
-- **MCP Runtime**: `rmcp`-based MCP client runtime exposed to the model as on-demand external tools
-- **Tool Policy**: Allow/deny list policies for tool access control
-- **Sandbox Execution**: Isolated execution environments for security
-
-### Orchestration Layer
-- **Agent Runtime Registration**: Agent definitions are built into harnesses and registered for Coordinator dispatch
-- **Agent Core**: Shared Harness lifecycle with pluggable Agent Runtime implementations
-- **Session Management**: Database-backed session storage with multi-channel support
-- **Routing System**: Routed or exact Agent binding for each Session/Turn
-- **Subagent Collaboration**: Collaboration tools create child Sessions/Turns that inherit the parent Agent binding
-
-### Gateway Layer
-- **HTTP Server**: Session-first REST API (`/v1/sessions` + `/v1/turns/start`)
-- **App Server**: Local JSON-RPC over stdio JSONL for CLI, TUI, and Desktop
-- **Application Service**: Shared service layer used by HTTP, app-server, SDK, and WebUI adapters
-- **Plugin API**: Shared API surface for plugin source, lifecycle, search, read, and MCP/Skill detail flows
-- **Authentication Middleware**: Bearer token validation
-
-### Perception Layer
-- **Channel Integration**: Unified interface for IM platforms (Telegram, Discord, etc.)
-- **TUI (Terminal UI)**: Rich terminal-based interface with keyboard navigation
-
-### Unified Client Interface
-- **Standardized API**: All clients (TUI, CLI, mobile apps, third-party) use same interface
-- **Gateway Client**: Centralized communication layer for consistent client-server interaction
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Rust 1.70+ (installation script provided)
-
-### Installation
-
-1. Clone the repository
-```bash
-git clone <repository-url>
-cd talos
+```text
+talos-rs/
+|-- crates/
+|   |-- common/          Shared types, LLM providers, prompts, and filesystem
+|   |-- infra/           Error, config, logging, storage, auth, and automation
+|   |-- perception/      External channel adapters
+|   |-- cognition/       Memory capabilities
+|   |-- action/          Tools, Skills, MCP, policy, and sandboxing
+|   |-- orchestration/   Store, service, routing, Agents, and coordination
+|   |-- gateway/         Shared Gateway, HTTP, app-server, and protocol
+|   `-- app/             Runtime composition and upgrade capability
+|-- apps/                Rust SDKs, TUI, and app-server test client
+`-- bin/                 app-server and talos-server binaries
 ```
 
-2. Install Rust and local developer tools
-```bash
-cargo install --locked just
-cargo install --locked cargo-nextest
-```
+See [Rust workspace modules](../docs/reference/RUST_MODULES.md) for the current
+inventory and [System architecture](../docs/architecture/ARCHITECTURE.md)
+for cross-component boundaries.
 
-3. Use the root `justfile` for routine Rust commands
-```bash
-just fmt
-just build -p talos-server
-just test -p talos-service
-```
-
-`just` runs from the repository root and uses `talos-rs` as its working
-directory. Prefer scoped package commands such as `just test -p talos-service`
-for local iteration. Avoid routine full-workspace `cargo test` runs because
-they create large `target/debug/deps` and `target/debug/incremental` trees.
-`just check` writes check artifacts to `target/talos-check` so normal type
-checks do not keep growing `target/debug`. Use `just target-size` to inspect
-Rust build output, `just clean-incremental` to reclaim incremental state, and
-`just clean-debug` only when `target/debug` must be rebuilt from scratch.
-
-### Configuration
-
-1. Choose the runtime home if you do not want the default `${HOME}/.talos`:
-```bash
-mkdir -p "${TALOS_HOME:-$HOME/.talos}/conf"
-```
-
-2. Start Talos. It creates `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` and `${TALOS_HOME:-$HOME/.talos}/.env` on first run.
-
-3. Put provider secrets in `${TALOS_HOME:-$HOME/.talos}/.env`:
-```bash
-TALOS_LLM_ANTHROPIC_API_KEY="your-anthropic-api-key"
-# or
-TALOS_LLM_OPENAI_API_KEY="your-openai-api-key"
-TALOS_TELEGRAM_BOT_TOKEN="your-telegram-bot-token"  # for Telegram integration
-```
-
-### Running the Server
-
-### Entry Points
+## Entry points
 
 | Binary | Package | Purpose |
-|--------|---------|---------|
-| `talos` | `talos-tui` | Terminal entrypoint for TUI and command mode |
-| `app-server` | `app-server` | Private JSON-RPC stdio protocol adapter used by Desktop and protocol tests |
-| `talos-server` | `talos-server` | HTTP API and WebUI server |
+| --- | --- | --- |
+| `talos` | `talos-tui` | TUI and command mode using the embedded runtime |
+| `app-server` | `app-server` | Local JSON-RPC over stdio adapter for Desktop and protocol tests |
+| `talos-server` | `talos-server` | HTTP API, SSE, and Web UI server |
 
-`app-server` is not the product server. It is a local JSON-RPC protocol adapter
-for Desktop and protocol tests, and does not listen on a port. `talos-server` is
-the deployable HTTP/WebUI server.
+## Run
 
-Start the Talos server:
+From the repository root:
+
 ```bash
-cargo run -p talos-server --bin talos-server
+just dev-server
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- exec "hello"
 ```
 
-The server will start on `http://0.0.0.0:8080` by default.
+`app-server` is a protocol adapter, not the deployable product server. The TUI
+uses `talos-sdk-embedded` and does not start an app-server child process.
 
-Start the local app-server protocol adapter for protocol testing:
+## Validate
+
 ```bash
-cargo run -p app-server --bin app-server
+just fmt
+just check -p talos-service
+just test -p talos-service
+just clippy -p talos-service
 ```
 
-`app-server` speaks JSON-RPC over stdin/stdout JSONL. It does not open a
-port; stdout is reserved for protocol messages and logs go to stderr.
+Prefer the smallest package or test filter that proves the change. Protocol
+shape changes also require `just gen-app-protocol`.
 
-Run terminal command mode through the embedded runtime path:
-```bash
-cargo run -p talos-tui --bin talos -- exec "hello"
-cargo run -p talos-tui --bin talos -- exec --session demo "continue"
-cargo run -p talos-tui --bin talos -- models
-```
+## Boundary rules
 
-`exec` is the primary non-interactive execution command. `models`, `session`,
-and `status` are terminal management commands backed by the same embedded
-runtime path; they are not a separate `talos-cli` product.
+- Gateways map transports; `TalosService` owns product lifecycle semantics.
+- Store records do not cross service, protocol, SDK, or UI boundaries.
+- Multiple Agent definitions register separate Harnesses; Coordinator resolves one by Agent id.
+- Each Harness delegates through the `AgentRuntime` SPI to its concrete runtime family.
+- Local composition defaults to the current `KernelAgent`; cloud composition will default to `CloudAgent` behind the same SPI.
+- Rust `AppServerClient` and `EmbeddedServerClient` implement the same `GatewayClient` capability contract.
+- Tools, Skills, MCP, permissions, and sandbox failures remain explicit.
 
-### Running the TUI
+## Related documentation
 
-Start the Terminal User Interface:
-```bash
-cargo run -p talos-tui --bin talos
-```
-
-The TUI runs the embedded Talos runtime in-process and talks to Gateway through
-the Rust embedded SDK without starting an app-server child process or opening a
-local port.
-
-### API Usage
-
-Start a chat with a client supplied session id:
-```bash
-SESSION_ID="sess_$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
-
-curl -X POST "http://localhost:8080/v1/turns/start" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-token-here" \
-  -d '{
-    "session_id": "'"${SESSION_ID}"'",
-    "input": [
-      { "type": "text", "text": "Hello, how are you?" }
-    ],
-    "workspace_id": null,
-    "context": {
-      "source_type": "http",
-      "provider": "http",
-      "channel_id": "default",
-      "user_id": "user123",
-      "thread_id": null,
-      "message_id": "msg-start-1",
-      "trace_id": "trace-start-1"
-    },
-    "project_id": null,
-    "current_directory": null,
-    "client_request_id": null
-  }'
-```
-
-`workspace_id` is an Agent workspace logical routing key. It is not a
-filesystem path, project directory, or current directory. When omitted, the
-session uses `agent.kernel.default_workspace_id` as the default routing key;
-project execution roots are still resolved from `project.directory`, embedded
-`current_directory`, then the effective workspace root.
-
-Send another message inside an existing session:
-```bash
-curl -X POST http://localhost:8080/v1/turns/start \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-token-here" \
-  -d '{
-    "session_id": "<session_id>",
-    "input": [
-      { "type": "text", "text": "Hello, how are you?" }
-    ],
-    "workspace_id": null,
-    "context": null,
-    "project_id": null,
-    "current_directory": null,
-    "client_request_id": null
-  }'
-```
-
-Health check:
-```bash
-curl http://localhost:8080/health
-```
-
-## 🏗️ Architecture Overview
-
-Talos follows an eight-layer architecture with clear separation of concerns:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Clients (TUI, CLI, Mobile Apps, Third-party)                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  SDK Client - Unified API Interface (talos-sdk)                           │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Gateway Layer - HTTP API, Authentication, Rate Limiting                  │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Orchestration Layer - Agent Coordination, Session Management, Routing     │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Cognition Layer - Memory, Prompting, Model Selection                      │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Action Layer - Tool Execution, Policy, Sandbox                            │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Perception Layer - Channels And TUI                                       │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    ⬇
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  Infrastructure Layer - Storage, Config, Logging, Error Handling           │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-Talos keeps multi-Agent Runtime registration separate from Subagent
-collaboration. `AgentDefinition` builds a registered Agent Harness and Runtime;
-a Subagent creates a child Session/Turn, inherits the parent's exact Agent
-binding, and re-enters the same Coordinator dispatch path. It does not create
-or select another Agent definition. See
-[ARCHITECTURE.md](ARCHITECTURE.md#agent-runtime-与-subagent-协作边界) for the
-complete ownership boundaries and invariants.
-
-## 📁 Project Structure
-
-- `crates/common/` - Shared utilities and LLM abstractions
-- `crates/common/fs/` - Shared filesystem helper for atomic writes, directory operations, and file locks
-- `crates/infra/` - Infrastructure components (config, logging, storage, auth)
-- `crates/perception/` - Channel integrations
-- `crates/cognition/` - Memory-related services
-- `crates/action/` - Tools, MCP runtime, Skills, Plugin lifecycle, policy, and sandbox execution
-- `crates/orchestration/` - Agent coordination, kernel, store, routing, and service facade
-- `crates/gateway/` - HTTP gateway, app-server JSON-RPC adapter, and protocol types
-- `crates/app/talos-base/` - Shared runtime base used by `app-server` and `talos-server`
-- `crates/orchestration/service/` - Shared `TalosService` facade and business services used by protocol adapters
-- `apps/sdk/` - Rust SDK package (`talos-sdk`)
-- `bin/app-server/` - App Server binary
-- `bin/talos-server/` - HTTP/WebUI Server binary
-- `apps/tui/` - TUI package that builds the `talos` binary
-
-## ⚙️ Configuration Options
-
-The system can be configured via `${TALOS_HOME:-$HOME/.talos}/conf/talos.yaml` and `${TALOS_HOME:-$HOME/.talos}/.env`:
-
-- `TALOS_LLM_ANTHROPIC_API_KEY` - API key for Anthropic services
-- `TALOS_LLM_OPENAI_API_KEY` - API key for OpenAI services
-- `TALOS_LLM_BAILIAN_API_KEY` - API key for Bailian services
-- `GATEWAY_TOKEN` - Authentication token for the API
-- `TALOS_TELEGRAM_BOT_TOKEN` - Token for Telegram bot integration
-- `TALOS_LOG_LEVEL` - Logging level (debug, info, warn, error)
-
-## 🔒 Security Features
-
-- JWT-based authentication for API requests
-- Configurable tool policies (whitelist/blacklist)
-- Sandboxed tool execution environments
-- Secure session management
-- Environment variable support for sensitive data
-- Channel-specific access controls
-
-## 📈 Next Steps
-
-Future enhancements include:
-- Enhanced memory management with vector storage
-- Advanced reasoning and planning capabilities
-- Cross-AgentDefinition delegation
-- Additional integration channels (WhatsApp, Slack, Discord)
-- Web-based administration interface
-
-## 🤝 Contributing
-
-We welcome contributions! Please see our contributing guidelines for details on how to participate in the project.
-
-## 📄 License
-
-MIT License - see LICENSE file for details.
-
-## 🎯 MVP Completion
-
-✅ **MVP Version Completed** - Talos framework now includes all core functionality needed for an AI agent platform with multi-channel support, unified client interface, and extensible architecture.
+- [Runtime architecture](../docs/architecture/RUNTIME_ARCHITECTURE.md)
+- [Error model](../docs/architecture/ERROR_MODEL.md)
+- [Development workflow](../docs/development/DEVELOPMENT.md)
+- [TUI notes](apps/tui/README.md)
+- [App Server protocol](crates/gateway/app-protocol/README.md)

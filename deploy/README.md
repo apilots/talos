@@ -1,40 +1,44 @@
-# Talos deployment notes
+# Talos deployment
 
-## TUI installation
+[Chinese](README_zh.md)
 
-The versioned macOS/Linux TUI bundle installer is documented in
-`deploy/install/README.md`. It installs product resources separately from the user-owned
-`$TALOS_HOME` runtime directory.
+This directory owns deployment examples for `talos-server` and installation
+assets for the released `talos` terminal bundle.
 
-## Reverse proxy requirements for SSE
-
-Talos streams live timeline events through HTTP Server-Sent Events.
-
-Current SSE route:
+## Layout
 
 ```text
-/v1/sessions/*/events
+deploy/
+|-- caddy/          Caddy reverse-proxy example
+|-- docker/         Docker Compose deployment
+|-- install/        TUI release installer and documentation
+`-- nginx/          Nginx reverse-proxy example
 ```
 
-Reverse proxies must handle this route separately from normal HTTP traffic:
+## Server deployment
 
-- disable response compression for this route
-- disable proxy buffering and proxy cache for this route
-- flush upstream chunks immediately
-- keep read timeouts long enough for active turns
-- keep normal compression enabled for all non-SSE routes
+`talos-server` exposes HTTP APIs, the Web UI, and SSE Timeline streams. Reverse
+proxies must disable response buffering and compression for
+`/v1/sessions/*/events` so events are delivered incrementally.
 
-The Talos server also sends SSE-friendly headers on this route:
+The examples under `caddy/`, `nginx/`, and `docker/` are the maintained starting
+points. Review authentication, TLS, persistence, resource limits, and secrets
+before production use.
 
-- `Cache-Control: no-cache`
-- `X-Accel-Buffering: no`
+Start the Docker Compose example after setting a provider key in its `.env`:
 
-Use the examples in this directory as deployment references:
+```bash
+cd deploy/docker
+cp .env.example .env
+docker compose up -d
+curl http://127.0.0.1:8080/health
+```
 
-- `deploy/caddy/Caddyfile.example`
-- `deploy/nginx/talos.conf.example`
-- `deploy/docker/docker-compose.yml`
-- `deploy/docker/.env.example`
+## Terminal installation
 
-If Talos is behind Cloudflare or another edge proxy, verify that the edge does not buffer,
-compress, cache, or prematurely close the SSE route.
+The release bundle installer lives under [`install/`](install/README.md). It
+installs product resources separately from user-owned configuration and runtime
+state.
+
+Deployment changes require a real startup or installation path check, not only
+static configuration validation.

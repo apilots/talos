@@ -1,137 +1,72 @@
-# talos-app
+# Talos application workspace
 
-Talos Web 前端应用，基于 React 19 + Vite + pnpm monorepo。
+[Chinese](README_zh.md)
 
-## 目录结构
+`talos-app` contains the React Web UI, Electron Desktop shell, and TypeScript
+SDK packages. Product features consume shared SDK domain objects and backend
+semantics instead of defining client-specific business models.
 
-```
+## Layout
+
+```text
 talos-app/
-├── web/          # 主 Web 应用（React + Vite）
-├── desktop/      # Electron 桌面端，复用 Web UI 与本地 app-server
-├── ts-sdk/       # TypeScript SDK（供 web、desktop 和外部使用）
-│   └── packages/
-│       ├── core/        # 共享类型、协议生成物与 app-server client 内核
-│       ├── browser/     # HTTP/SSE 浏览器适配器
-│       └── app-server/  # JSON-RPC stdio 与 Electron IPC 适配器
-├── scripts/      # 构建辅助脚本
-└── pnpm-workspace.yaml
+|-- web/                  React 19 and Vite Web UI
+|-- desktop/              Electron shell using the shared Web UI
+|-- ts-sdk/packages/
+|   |-- core/             Generated protocol types and client primitives
+|   |-- browser/          HTTP and SSE adapter
+|   `-- app-server/       JSON-RPC stdio, Electron, and IPC adapters
+|-- scripts/              Build and verification helpers
+`-- pnpm-workspace.yaml   Workspace definition
 ```
 
-## 环境要求
+## Requirements
 
-- Node.js >= 20
-- pnpm >= 9.14.4（`npm install -g pnpm@9.14.4`）
+- Node.js 24 recommended; 20.19.0 is the minimum supported 20.x release
+- pnpm 9.14.4 or a compatible repository version
 
-## 快速启动（开发调试）
+## Run the Web UI
 
-### 1. 安装依赖
+From the repository root, start the server and Web UI in separate terminals:
 
 ```bash
-cd talos-app
-pnpm install
+just dev-server
+just dev-web
 ```
 
-### 2. 启动后端服务
+The development UI is available at `http://127.0.0.1:5173` and connects to the
+Talos server at `http://127.0.0.1:8080` by default.
 
-Web 应用需要连接 Talos 后端（默认端口 `8080`）。在另一个终端启动后端：
+## Run Desktop
 
 ```bash
-cd talos-rs
-cargo run -p talos-server --bin talos-server
-# 或使用 make
-make run
+pnpm --dir talos-app desktop:dev
+pnpm --dir talos-app desktop:check
 ```
 
-确认后端已就绪：`curl http://localhost:8080/health`
+Desktop starts `app-server` in the Electron main process and communicates over
+JSON-RPC stdio. Renderer code uses the typed preload bridge and cannot access
+Node.js or the filesystem directly.
 
-### 3. 启动前端开发服务器
+## Validate
 
 ```bash
-cd talos-app
-pnpm dev
+pnpm --dir talos-app lint
+pnpm --dir talos-app test
+pnpm --dir talos-app build
 ```
 
-开发服务器启动在 `http://127.0.0.1:5173`，支持热重载（HMR）。
+Use package filters for local iteration. Generated protocol files are refreshed
+from Rust with `just gen-app-protocol`; do not edit them manually.
 
-### 4. 配置后端连接
+## Boundary rules
 
-首次打开 `http://127.0.0.1:5173`，进入 **Settings → Server** 配置：
+- UI features consume `@talos/sdk-browser` or `@talos/sdk-app-server`.
+- Shared protocol and domain types come from `@talos/sdk-core`.
+- Browser and App Server facades must expose aligned TypeScript SDK capability families.
+- TypeScript, Rust, and embedded Rust SDK capabilities are reviewed and completed together.
+- Backend search, matching, lifecycle, and permission rules are not duplicated in UI code.
+- User-visible timeline changes require rendering and interaction coverage.
 
-| 字段       | 默认值                    |
-|-----------|--------------------------|
-| Server URL | `http://127.0.0.1:8080`  |
-| Auth Token | （可选，开发模式可留空）    |
-
-配置保存在浏览器 `localStorage`（key: `talos-web-ui`）。
-
-## Desktop / 本地 app-server
-
-Desktop 通过 Electron main process 启动 `app-server` 子进程，使用
-JSON-RPC over stdio JSONL 通信，不占用本地端口。Renderer 只能通过 preload
-暴露的 typed IPC bridge 使用 `@talos/sdk-app-server/desktop`，不直接访问 Node
-或文件系统能力。
-
-```bash
-cd talos-app
-pnpm desktop:dev
-pnpm --filter talos-desktop test
-pnpm desktop:build
-pnpm desktop:check
-```
-
-常用本地 app-server SDK 验证：
-
-```bash
-cd talos-rs
-cargo build -p app-server --bin app-server
-
-cd ../talos-app
-TALOS_APP_SERVER_BIN=../talos-rs/target/debug/app-server \
-TALOS_APP_SERVER_CWD=../talos-rs \
-pnpm --filter @talos/sdk-app-server test:integration
-```
-
-## Plugin / Skills / MCP 管理
-
-Web 的 `/plugins` 页面是插件能力的统一管理入口：
-
-- `Plugins` tab 展示所有 plugin capabilities。
-- `Skills` tab 只展示 skill plugins，详情页读取 `SKILL.md` 等 plugin documents。
-- `MCP` tab 只展示 MCP server plugins，详情页读取 `README.md` 和 `talos-mcp.json`。
-- 安装、更新、启用、禁用、卸载都通过后端 Plugin lifecycle API，不在首页提供 MCP 单独入口。
-
-前端类型来自 `@talos/sdk-browser` / `@talos/sdk-core` 的协议生成物，页面组件只消费共享 Plugin / MCP / Skill 对象，不在 UI 层复制领域结构。
-
-## 预览构建产物
-
-```bash
-pnpm build     # 编译 TypeScript + Vite 打包
-pnpm preview   # 启动预览服务器（http://127.0.0.1:4173）
-```
-
-> 当前 `http://127.0.0.1:4173` 运行的即是 preview 模式，对应 `vite preview`。
-
-## 其他脚本
-
-```bash
-pnpm typecheck   # TypeScript 类型检查
-pnpm lint        # ESLint 检查
-pnpm test        # Vitest 单元测试
-pnpm check       # lint + test + build 全量检查
-```
-
-## 权限管理
-
-用户、角色、账号类型等统一权限管理能力已迁移到 `talos-cloud`。Talos Web 只展示当前登录用户自己的项目、会话、记忆、工作区文档和个人配置。
-
-## 项目工作空间默认路径
-
-```
-$HOME/.talos/workspace-talos
-```
-
-可通过环境变量覆盖：
-
-```bash
-VITE_DEFAULT_PROJECT_ROOT=/your/path pnpm dev
-```
+See [Client architecture](../docs/architecture/CLIENT_ARCHITECTURE.md) for the
+cross-client transport and ownership model.

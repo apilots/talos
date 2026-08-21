@@ -1,5 +1,7 @@
 # Talos Terminal
 
+[Chinese](README_zh.md)
+
 `talos-tui` builds the public `talos` terminal binary. The binary contains both
 interactive TUI mode and non-interactive command mode, backed by the same
 embedded Talos runtime and Rust SDK adapter.
@@ -14,24 +16,25 @@ curl --proto '=https' --tlsv1.2 -fsSL \
 ```
 
 The installer keeps immutable release resources outside `$TALOS_HOME`. See
-`deploy/install/README.md` for version pinning, paths, and installation E2E coverage.
+[the installer documentation](../../../deploy/install/README.md) for version
+pinning, paths, and installation E2E coverage.
 
 ```bash
 # Open the interactive TUI. This is the default when no command is provided.
-cargo run -p talos-tui --bin talos
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos
 
 # Explicitly open the interactive TUI.
-cargo run -p talos-tui --bin talos -- tui
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- tui
 
 # Execute one task in command mode.
-cargo run -p talos-tui --bin talos -- exec "hello"
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- exec "hello"
 
 # Reuse a session in command mode.
-cargo run -p talos-tui --bin talos -- exec --session <session-id> "continue"
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- exec --session <session-id> "continue"
 
 # List models and sessions.
-cargo run -p talos-tui --bin talos -- models
-cargo run -p talos-tui --bin talos -- session list
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- models
+cargo run --manifest-path talos-rs/Cargo.toml -p talos-tui --bin talos -- session list
 ```
 
 ## Command mode
