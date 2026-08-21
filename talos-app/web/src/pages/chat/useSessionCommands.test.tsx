@@ -37,14 +37,29 @@ describe("useSessionCommands", () => {
 
   it("executes compact through the existing session action", async () => {
     const { result } = renderHook(() => useSessionCommands({
-      currentModel: "model-1",
-      isStreaming: false,
       sessionId: "sess-1",
     }));
 
     await act(async () => result.current.execute("compact"));
 
     expect(mocks.compact).toHaveBeenCalledTimes(1);
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      state: "success",
+    });
+  });
+
+  it("derives active compaction rendering from the backend stage", () => {
+    const { result } = renderHook(() => useSessionCommands({
+      contextCompactionStage: "summarizing",
+      sessionId: "sess-1",
+    }));
+
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      stage: "summarizing",
+      state: "running",
+    });
   });
 
   it("shows the busy notice when remote compaction wins the command race", async () => {
@@ -53,14 +68,72 @@ describe("useSessionCommands", () => {
       message: "Active turn is already running",
     }));
     const { result } = renderHook(() => useSessionCommands({
-      currentModel: "model-1",
-      isStreaming: false,
       sessionId: "sess-1",
     }));
 
     await act(async () => {
       await result.current.execute("compact")?.catch(() => undefined);
     });
-    expect(result.current.notice).toBe("Context compacting... Please wait.");
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      message: "Context compacting... Please wait.",
+      state: "error",
+    });
+  });
+
+  it("requires confirmation before clearing the session", async () => {
+    const { result } = renderHook(() => useSessionCommands({
+      sessionId: "sess-1",
+    }));
+
+    act(() => result.current.execute("clear"));
+    expect(result.current.clearConfirmationOpen).toBe(true);
+    expect(mocks.clear).not.toHaveBeenCalled();
+
+    await act(async () => result.current.confirmClear());
+    expect(mocks.clear).toHaveBeenCalledTimes(1);
+    expect(mocks.resetStream).toHaveBeenCalledWith("sess-1");
+    expect(result.current.clearConfirmationOpen).toBe(false);
+    expect(result.current.response).toEqual({ kind: "clear", state: "success" });
+  });
+
+  it("keeps the confirmation open and reports a clear failure", async () => {
+    mocks.clear.mockRejectedValue(new Error("clear failed"));
+    const { result } = renderHook(() => useSessionCommands({
+      sessionId: "sess-1",
+    }));
+
+    act(() => result.current.execute("clear"));
+    await act(async () => result.current.confirmClear());
+
+    expect(result.current.clearConfirmationOpen).toBe(true);
+    expect(result.current.clearError).toBe("Chat could not be cleared. Please try again.");
+    expect(mocks.resetStream).not.toHaveBeenCalled();
+  });
+
+  it("opens and dismisses the structured session status", () => {
+    const { result } = renderHook(() => useSessionCommands({
+      sessionId: "sess-1",
+    }));
+
+    act(() => result.current.execute("status"));
+    expect(result.current.response).toEqual({ kind: "status" });
+
+    act(() => result.current.dismissResponse());
+    expect(result.current.response).toBeUndefined();
+  });
+
+  it("reports a selected model through the same response surface", () => {
+    const { result } = renderHook(() => useSessionCommands({
+      sessionId: "sess-1",
+    }));
+
+    act(() => result.current.showModelChanged("GPT-5.6 Sol", "medium"));
+    expect(result.current.response).toEqual({
+      kind: "model",
+      model: "GPT-5.6 Sol",
+      reasoningLevel: "medium",
+      state: "success",
+    });
   });
 });

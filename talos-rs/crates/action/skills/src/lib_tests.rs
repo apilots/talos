@@ -148,6 +148,8 @@ fn suggest_supports_fuzzy_name_matching() {
         r#"---
 name: find-skills
 description: Discover and install agent skills.
+metadata:
+  display_name: Find Skills
 ---
 
 Find skills.
@@ -172,6 +174,13 @@ Work with documents.
         Some("find-skills")
     );
     assert!(suggestions.iter().any(|skill| skill.name == "find-skills"));
+    assert_eq!(
+        suggestions[0]
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.display_name.as_deref()),
+        Some("Find Skills")
+    );
 }
 
 #[test]

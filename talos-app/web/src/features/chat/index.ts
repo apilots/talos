@@ -19,6 +19,15 @@ export {
   updateSessionProject,
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
+export type { ChatComposerProps } from "./components/ChatComposer.types";
+export {
+  ComposerCommandResponse,
+  SessionClearConfirmationDialog,
+  type ComposerCommandResponseState,
+  type ComposerStatusSnapshot,
+} from "./components/command-response";
+export type { ComposerSessionCommandId } from "./components/composer-input/composer-suggestions";
+export type { ContextUsage } from "./components/contextUsage";
 export { UserActionPanel } from "./components/user-action/UserActionPanel";
 export {
   supportedAttachmentKinds,

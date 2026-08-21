@@ -181,6 +181,8 @@ pub struct SkillSuggestion {
     pub source_plugin: Option<String>,
     #[serde(default)]
     pub source_install: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<SkillMetadata>,
 }
 
 impl From<&SkillSummary> for SkillSuggestion {
@@ -194,6 +196,7 @@ impl From<&SkillSummary> for SkillSuggestion {
             scope: skill.scope,
             source_plugin: skill.source_plugin.clone(),
             source_install: skill.source_install.clone(),
+            metadata: skill.metadata.clone(),
         }
     }
 }

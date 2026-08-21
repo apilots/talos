@@ -136,6 +136,7 @@ async fn steer_rejects_skill_and_interrupt_keeps_the_queue() {
                 scope: talos_sdk::SkillScope::External,
                 source_plugin: None,
                 source_install: None,
+                metadata: None,
             }],
             Vec::new(),
         )

@@ -71,9 +71,6 @@ export function useInitialSessionInput({
       ),
       userPermissionMode: locationState?.initialPermissionMode,
       project,
-      skills: locationState?.initialSkills?.length
-        ? locationState.initialSkills
-        : undefined,
       ...(initialAttachments.length
         ? { fileIds: initialAttachments.map((file) => file.fileId) }
         : {}),

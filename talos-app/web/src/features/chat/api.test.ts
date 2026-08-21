@@ -19,13 +19,12 @@ describe("chat api initial turn request", () => {
       "user-1",
       "hello",
       {
-        modelRef: { provider: "bailian", id: "qwen-max" },
-        reasoningEffort: null,
+        modelSelection: {
+          modelRef: { provider: "bailian", id: "qwen-max" },
+          reasoningEffort: null,
+        },
+        userPermissionMode: "askForApproval",
       },
-      undefined,
-      [],
-      [],
-      "askForApproval",
     );
 
     expect(request).toMatchObject({
@@ -44,35 +43,14 @@ describe("chat api initial turn request", () => {
     });
   });
 
-  it("keeps selected skills as structured input items", () => {
+  it("keeps Skill mentions in text for backend resolution", () => {
     const request = createInitialTurnRequest(
       "sess-1",
       "user-1",
       "use $docs",
-      undefined,
-      undefined,
-      [
-        {
-          name: "docs",
-          description: "Write docs",
-          short_description: null,
-          root: "/Users/test/.agents/skills/docs",
-          path: "/Users/test/.agents/skills/docs/SKILL.md",
-          scope: "external",
-          source_plugin: null,
-          source_install: null,
-        },
-      ],
     );
 
-    expect(request.input).toEqual([
-      { type: "text", text: "use $docs" },
-      {
-        type: "skill_selection",
-        name: "docs",
-        path: "/Users/test/.agents/skills/docs/SKILL.md",
-      },
-    ]);
+    expect(request.input).toEqual([{ type: "text", text: "use $docs" }]);
   });
 
   it("keeps ordered file ids as one structured input item", () => {
@@ -80,10 +58,7 @@ describe("chat api initial turn request", () => {
       "sess-1",
       "user-1",
       "",
-      undefined,
-      undefined,
-      [],
-      ["file-2", "file-1"],
+      { fileIds: ["file-2", "file-1"] },
     );
 
     expect(request.input).toEqual([

@@ -1,28 +1,15 @@
-import { useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   ChatComposer,
-  supportedAttachmentKinds,
-  modelInfoForRef,
-  modelPickerOptions,
-  modelRefForKey,
-  modelRefKey,
-  modelSelectionForRef,
-  reasoningLevelForEffort,
-  reasoningLevelForModel,
+  SessionClearConfirmationDialog,
   useChatSession,
-  useConfiguredSessionModelSelection,
   useModelsQuery,
   useProjectsView,
   useSessionQuery,
-  useUpdateSessionModelMutation,
-  useUpdateSessionProjectMutation,
   useSubmitUserActionMutation,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
-import type { ReasoningLevel } from "@/shared/types/ui";
 import { ChatContextBar } from "@/widgets/chat-context-bar/ChatContextBar";
 import { ChatSessionTimeline } from "./ChatSessionTimeline";
 import type { SessionLocationState } from "./chatSessionLocation";
@@ -31,23 +18,13 @@ import {
   useInitialSessionInput,
 } from "./useInitialSessionInput";
 import { useChatSessionAutoScroll } from "./useChatSessionAutoScroll";
-import { useSessionCommands } from "./useSessionCommands";
-import { useSessionPermissionMode } from "./useSessionPermissionMode";
-import { useSelectedSessionProject } from "./useSelectedSessionProject";
-import type { ModelRef } from "@talos/sdk-browser";
+import { useChatSessionComposer } from "./useChatSessionComposer";
 
 export function ChatSessionPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const sessionId = useParams().sessionId ?? "";
   const locationState = location.state as SessionLocationState | null;
-  const [draftModel, setDraftModel] = useState<ModelRef | undefined>(locationState?.initialModel);
-  const [draftReasoningLevel, setDraftReasoningLevel] = useState<ReasoningLevel | undefined>(
-    locationState?.initialReasoningLevel,
-  );
-  const [draftProjectId, setDraftProjectId] = useState<string | undefined>(
-    locationState?.initialProjectId,
-  );
   const { data: session } = useSessionQuery(
     sessionId,
     !hasInitialSessionInput(locationState),
@@ -55,16 +32,13 @@ export function ChatSessionPage() {
   const { data: modelCatalog } = useModelsQuery();
   const models = modelCatalog?.models;
   const projectsView = useProjectsView();
+  const chat = useChatSession(sessionId, session?.message_count, session?.title);
   const {
     blocks,
-    draft,
-    inputHistory,
     setDraft,
-    sendTurn,
     sendText,
     isStreaming,
     isCancelling,
-    contextCompactionStage,
     canRetryResponse,
     retryResponse,
     retryStream,
@@ -74,55 +48,22 @@ export function ChatSessionPage() {
     sessionHistoryQuery,
     activeTurnId,
     pendingUserAction,
-    messageQueue,
-  } = useChatSession(sessionId, session?.message_count, session?.title);
-  const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
-  const updateProject = useUpdateSessionProjectMutation(sessionId);
+  } = chat;
   const submitUserAction = useSubmitUserActionMutation(sessionId);
-  const connection = useAppStore((state) => state.connection);
-  const setConnection = useAppStore((state) => state.setConnection);
   const projects = projectsView.projects;
   const sidebarOpen = useAppStore((state) => state.sidebarOpen);
-  const activeProjectId = projectsView.activeProjectId;
-  const setActiveProjectId = projectsView.setActiveProjectId;
-  const activeSessionModelSelection = useConfiguredSessionModelSelection({
-    catalog: modelCatalog,
-    selection: session?.modelSelection,
-    sessionId,
-    updateSelection: updateSessionModel,
-  });
-  const currentModelRef = activeSessionModelSelection?.modelRef ?? draftModel ?? modelCatalog?.defaultModelSelection.modelRef;
-  const currentModel = currentModelRef ? modelRefKey(currentModelRef) : undefined;
-  const currentModelInfo = modelInfoForRef(models, currentModelRef);
-  const currentReasoningLevel = activeSessionModelSelection
-    ? reasoningLevelForEffort(activeSessionModelSelection.reasoningEffort)
-    : draftReasoningLevel ?? (draftModel
-        ? reasoningLevelForModel(models, draftModel)
-        : reasoningLevelForEffort(modelCatalog?.defaultModelSelection.reasoningEffort ?? null));
-  const permissionMode = useSessionPermissionMode({
-    blocked: Boolean(isStreaming || pendingUserAction),
-    initialMode: locationState?.initialPermissionMode,
-    persistedMode: session?.effectiveMode,
-    sessionExists: Boolean(session),
-    sessionId,
-  });
-  const sessionCommands = useSessionCommands({
-    contextCompactionStage,
-    currentModel,
-    isStreaming,
-    sessionId,
-  });
   const sessionHistoryError = sessionHistoryQuery.error;
   const shouldShowMessageList =
     blocks.length > 0 || (sessionHistoryQuery.isSuccess && !sessionHistoryError);
   const autoScroll = useChatSessionAutoScroll({ blocks, isStreaming, sessionId, streamError });
 
-  const { boundProject, selectedProjectId } = useSelectedSessionProject({
-    activeProjectId,
-    draftProjectId,
-    projects,
-    sessionExists: Boolean(session),
-    sessionProjectId: session?.project_id,
+  const sessionComposer = useChatSessionComposer({
+    chat,
+    locationState,
+    modelCatalog,
+    projectsView,
+    session,
+    sessionId,
   });
   useInitialSessionInput({
     locationPathname: location.pathname,
@@ -146,14 +87,14 @@ export function ChatSessionPage() {
         <ChatContextBar
           loading={!session}
           onProjectClick={
-            boundProject
+            sessionComposer.boundProject
               ? () => {
-                  setActiveProjectId(boundProject.id);
+                  projectsView.setActiveProjectId(sessionComposer.boundProject!.id);
                   navigate("/");
                 }
               : undefined
           }
-          projectName={boundProject?.name}
+          projectName={sessionComposer.boundProject?.name}
           sessionTitle={session?.title}
         />
       ) : null}
@@ -192,112 +133,10 @@ export function ChatSessionPage() {
       />
       <div className="mt-4 shrink-0">
         <div className="mx-auto w-full max-w-[920px] px-7 pb-5">
-          <ChatComposer
-            activeProjectId={selectedProjectId}
-            disabled={false}
-            draft={draft}
-            inputHistory={inputHistory}
-            isCancelling={isCancelling}
-            commandNotice={sessionCommands.notice}
-            contextCompactionStage={sessionCommands.compactionStage}
-            contextUsage={session?.usage?.context}
-            sessionTotalTokens={session?.usage?.tokens.total_tokens}
-            isStreaming={isStreaming}
-            permissionMode={permissionMode.value}
-            permissionModeDisabled={permissionMode.disabled}
-            models={modelPickerOptions(models)}
-            initialAttachments={locationState?.initialAttachments}
-            messageQueue={messageQueue}
-            onCancel={() => void stopResponse()}
-            onCommand={sessionCommands.execute}
-            onDraftChange={setDraft}
-            onModelChange={(model) => {
-              if (sessionCommands.compactionStage) {
-                return;
-              }
-              const modelRef = modelRefForKey(model);
-              if (!modelRef) {
-                return;
-              }
-              if (!session) {
-                setDraftModel(modelRef);
-                setDraftReasoningLevel(reasoningLevelForModel(models, modelRef));
-                return;
-              }
-              const modelSelection = modelSelectionForRef(models, modelRef);
-              if (modelSelection) {
-                updateSessionModel(modelSelection);
-              }
-            }}
-            onPermissionModeChange={permissionMode.onChange}
-            onProjectChange={(projectId) => {
-              if (sessionCommands.compactionStage) {
-                return;
-              }
-              setActiveProjectId(projectId);
-              if (!session) {
-                setDraftProjectId(projectId);
-                return;
-              }
-              const project = projects.find((entry) => entry.id === projectId);
-              if (project || projectId === UNBOUND_PROJECT_ID) {
-                updateProject.mutate(project);
-              }
-            }}
-            onRuntimeModeChange={(mode) => {
-              if (sessionCommands.compactionStage) {
-                return;
-              }
-              if (mode === "local") {
-                setConnection({ runtimeMode: mode });
-              }
-            }}
-            onReasoningLevelChange={(level) => {
-              if (sessionCommands.compactionStage) {
-                return;
-              }
-              if (!session) {
-                setDraftReasoningLevel(level);
-                return;
-              }
-              const modelSelection = modelSelectionForRef(models, currentModelRef, level);
-              if (modelSelection) {
-                updateSessionModel(modelSelection);
-              }
-            }}
-            onSend={(skills, attachments) => {
-              const fileIds = attachments.map((file) => file.fileId);
-              const fileOptions = fileIds.length > 0 ? { fileIds } : {};
-              if (!session) {
-                const selectedProject = projects.find((entry) => entry.id === selectedProjectId);
-                return sendTurn({
-                  modelSelection: modelSelectionForRef(
-                    models,
-                    currentModelRef,
-                    currentReasoningLevel,
-                  ),
-                  project: selectedProject,
-                  skills: skills.length > 0 ? skills : undefined,
-                  userPermissionMode: permissionMode.value,
-                  ...fileOptions,
-                });
-              }
-              return sendTurn({
-                skills: skills.length > 0 ? skills : undefined,
-                ...fileOptions,
-              });
-            }}
-            projects={projects}
-            runtimeMode={connection.runtimeMode}
-            reasoningLevel={currentReasoningLevel}
-            reasoningEnabled={currentModelInfo?.reasoning ?? false}
-            supportedAttachmentKinds={supportedAttachmentKinds(currentModelInfo)}
-            selectedModel={currentModel}
-            showProjectSelector={false}
-            showRuntimeModeSelector={false}
-          />
+          <ChatComposer {...sessionComposer.props} />
         </div>
       </div>
+      <SessionClearConfirmationDialog {...sessionComposer.clearConfirmation} />
     </div>
   );
 }

@@ -12,3 +12,12 @@ export function contextUsedPercent(usage: ContextUsage): number {
 export function contextRemainingTokens(usage: ContextUsage): number {
   return Math.max(0, usage.contextWindowTokens - usage.usedTokens);
 }
+
+const TOKEN_COUNT_FORMATTER = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 1,
+  notation: "compact",
+});
+
+export function formatTokenCount(value: number): string {
+  return TOKEN_COUNT_FORMATTER.format(value);
+}

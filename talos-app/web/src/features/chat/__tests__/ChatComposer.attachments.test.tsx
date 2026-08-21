@@ -59,7 +59,7 @@ describe("ChatComposer attachments", () => {
     expect(await screen.findByText("pasted.png")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[1].map((file: FileInfo) => file.fileId)).toEqual(["file-image"]);
+    expect(onSend.mock.calls[0]?.[0].map((file: FileInfo) => file.fileId)).toEqual(["file-image"]);
   });
 
   it("uploads multiple files with independent progress and preserves selection order", async () => {
@@ -119,7 +119,7 @@ describe("ChatComposer attachments", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Send" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]?.[1].map((file: FileInfo) => file.fileId)).toEqual([
+    expect(onSend.mock.calls[0]?.[0].map((file: FileInfo) => file.fileId)).toEqual([
       "file-docx",
       "file-csv",
     ]);
@@ -140,7 +140,7 @@ describe("ChatComposer attachments", () => {
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     expect(fileApiMocks.upload).not.toHaveBeenCalled();
-    expect(onSend.mock.calls[0]?.[1][0]?.fileId).toBe("file-existing");
+    expect(onSend.mock.calls[0]?.[0][0]?.fileId).toBe("file-existing");
   });
 
   it("disables attachment controls when the model has no attachment input", () => {

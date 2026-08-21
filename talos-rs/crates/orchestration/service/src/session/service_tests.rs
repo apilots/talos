@@ -10,7 +10,7 @@ use talos_store::session::{
 };
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType, TokenUsage};
 use talos_types::{
-    ContextUsage, ModelRef, ModelSelection, SessionConf, SessionInfo, SessionPatch,
+    ContextUsage, ModelRef, ModelSelection, SessionConf, SessionInfo, SessionPatch, SessionUsage,
     UserPermissionMode,
 };
 
@@ -620,7 +620,7 @@ async fn model_selection_change_clears_context_but_preserves_token_totals() {
 }
 
 #[tokio::test]
-async fn record_usage_invalidates_context_snapshot() {
+async fn compaction_usage_preserves_the_measured_context_snapshot() {
     let store = Arc::new(RecordingSessionStore::default());
     let service = SessionService::new(
         store.clone(),
@@ -631,10 +631,11 @@ async fn record_usage_invalidates_context_snapshot() {
         .create_session(create_session_params(context(), "default", None))
         .await
         .unwrap();
-    store.records.lock().unwrap()[0].usage.context = ContextUsage::new(20, 100, 80, 1);
+    let context_usage = ContextUsage::new(20, 100, 80, 1);
+    store.records.lock().unwrap()[0].usage.context = context_usage.clone();
 
     service
-        .record_usage(
+        .record_compaction_usage(
             &session.context.session_id,
             "current-model",
             &TokenUsage {
@@ -648,8 +649,18 @@ async fn record_usage_invalidates_context_snapshot() {
         .unwrap();
 
     let record = store.records.lock().unwrap()[0].clone();
-    assert_eq!(record.usage.tokens.total_tokens, 5);
-    assert_eq!(record.usage.context, None);
+    assert_eq!(
+        record.usage,
+        SessionUsage {
+            tokens: TokenUsage {
+                input_tokens: 3,
+                output_tokens: 2,
+                total_tokens: 5,
+                ..TokenUsage::default()
+            },
+            context: context_usage,
+        }
+    );
 }
 
 #[tokio::test]

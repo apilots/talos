@@ -293,6 +293,15 @@ export function useDeleteSessionMutation() {
 export function useSessionActions(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
+  const applySessionResult = async (session: SessionInfo) => {
+    queryClient.setQueryData<SessionInfo>(
+      chatKeys.session(connectionKey, sessionId),
+      session,
+    );
+    await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
+    await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
+  };
   return {
     cancelTurn: useMutation({
       mutationFn: (turnId: string) => cancelActiveTurn(sessionId, turnId),
@@ -302,21 +311,11 @@ export function useSessionActions(sessionId: string) {
     }),
     compact: useMutation({
       mutationFn: () => compactSession(sessionId),
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
-      },
+      onSuccess: applySessionResult,
     }),
     clear: useMutation({
       mutationFn: () => clearSession(sessionId),
-      onSuccess: async () => {
-        await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
-        await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
-      },
+      onSuccess: applySessionResult,
     }),
   };
 }

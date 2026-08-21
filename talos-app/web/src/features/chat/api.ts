@@ -4,7 +4,6 @@ import type {
   ModelSelection,
   ProjectInfo as ApiProjectInfo,
   RetryTurnRequest,
-  SkillSuggestion,
   StartTurnRequest,
   SessionInfo,
   SessionPatchRequest,
@@ -92,32 +91,33 @@ export function generateSessionId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+interface InitialTurnOptions {
+  fileIds?: string[];
+  modelSelection?: ModelSelection;
+  project?: ProjectView;
+  userPermissionMode?: UserPermissionMode;
+}
+
 export function createInitialTurnRequest(
   sessionId: string,
   userId: string,
   text: string,
-  modelSelection: ModelSelection | undefined,
-  project: ProjectView | undefined,
-  skills: SkillSuggestion[] = [],
-  fileIds: string[] = [],
-  userPermissionMode?: UserPermissionMode,
+  options: InitialTurnOptions = {},
 ): StartTurnRequest {
+  const fileIds = options.fileIds ?? [];
   const input: TalosInputItem[] = [
     ...(text ? [{ type: "text" as const, text }] : []),
     ...(fileIds.length > 0 ? [{ type: "files" as const, fileIds }] : []),
-    ...skills.map((skill) => ({
-      type: "skill_selection" as const,
-      name: skill.name,
-      path: skill.path,
-    })),
   ];
   return {
     session_id: sessionId,
     input,
     context: createContext(userId),
-    modelSelection,
-    userPermissionMode,
-    project_id: project && !isUnboundProject(project.id) ? project.id : undefined,
+    modelSelection: options.modelSelection,
+    userPermissionMode: options.userPermissionMode,
+    project_id: options.project && !isUnboundProject(options.project.id)
+      ? options.project.id
+      : undefined,
   };
 }
 

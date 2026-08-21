@@ -2,7 +2,7 @@ import { useId, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatRelativeTime } from "@/shared/lib/time";
-import { contextRemainingTokens, type ContextUsage } from "./contextUsage";
+import { contextRemainingTokens, formatTokenCount, type ContextUsage } from "./contextUsage";
 
 interface ComposerContextUsageTooltipProps {
   children: ReactNode;
@@ -25,14 +25,14 @@ export function ComposerContextUsageTooltip({
     {
       label: t("contextUsageTokens"),
       value: t("contextUsageTokenRatio", {
-        used: formatTokens(usage.usedTokens),
-        total: formatTokens(usage.contextWindowTokens),
+        used: formatTokenCount(usage.usedTokens),
+        total: formatTokenCount(usage.contextWindowTokens),
       }),
     },
     {
       label: t("contextUsageRemaining"),
       value: t("contextUsageTokenCount", {
-        value: formatTokens(contextRemainingTokens(usage)),
+        value: formatTokenCount(contextRemainingTokens(usage)),
       }),
     },
     ...(sessionTotalTokens === undefined
@@ -40,13 +40,13 @@ export function ComposerContextUsageTooltip({
       : [
           {
             label: t("contextUsageSessionTotal"),
-            value: t("contextUsageTokenCount", { value: formatTokens(sessionTotalTokens) }),
+            value: t("contextUsageTokenCount", { value: formatTokenCount(sessionTotalTokens) }),
           },
         ]),
     {
       label: t("contextUsagePromptBudget"),
       value: t("contextUsageTokenCount", {
-        value: formatTokens(usage.effectivePromptBudgetTokens),
+        value: formatTokenCount(usage.effectivePromptBudgetTokens),
       }),
     },
     {
@@ -93,11 +93,4 @@ export function ComposerContextUsageTooltip({
       </span>
     </span>
   );
-}
-
-function formatTokens(value: number) {
-  return new Intl.NumberFormat("en-US", {
-    maximumFractionDigits: 1,
-    notation: "compact",
-  }).format(value);
 }

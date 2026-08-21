@@ -1,5 +1,5 @@
 import { useMemo, type ClipboardEvent } from "react";
-import type { FileInfo, SkillSuggestion } from "@talos/sdk-browser";
+import type { FileInfo } from "@talos/sdk-browser";
 
 import { isUnboundProject } from "@/shared/types/domain";
 import {
@@ -40,7 +40,7 @@ export function useChatComposerAttachmentDraft({
     );
   }
 
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>): void {
+  function handlePaste(event: ClipboardEvent<HTMLElement>): void {
     const images = Array.from(event.clipboardData.files).filter((file) =>
       file.type.startsWith("image/"),
     );
@@ -53,13 +53,12 @@ export function useChatComposerAttachmentDraft({
 
   async function submit(
     text: string,
-    skills: SkillSuggestion[],
-    onSend: (skills: SkillSuggestion[], attachments: FileInfo[]) => Promise<void> | void,
+    onSend: (attachments: FileInfo[]) => Promise<void> | void,
   ): Promise<void> {
     if (!canSubmit(text)) {
       return;
     }
-    await onSend(skills, draft.attachments);
+    await onSend(draft.attachments);
     draft.clear();
   }
 

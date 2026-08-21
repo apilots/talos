@@ -261,11 +261,12 @@ describe("useChatSession", () => {
       "session-1",
       expect.any(String),
       "",
-      undefined,
-      undefined,
-      [],
-      ["file-2", "file-1"],
-      undefined,
+      {
+        fileIds: ["file-2", "file-1"],
+        modelSelection: undefined,
+        project: undefined,
+        userPermissionMode: undefined,
+      },
     );
     expect(mocks.send).toHaveBeenCalledTimes(1);
   });

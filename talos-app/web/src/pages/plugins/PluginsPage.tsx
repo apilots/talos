@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
-import type { SkillSuggestion, SkillSummary } from "@talos/sdk-browser";
+import type { SkillSummary } from "@talos/sdk-browser";
 
 import {
   addMarketplaceSource,
@@ -33,8 +33,7 @@ export function PluginsPage() {
     const creator = findSkillCreator(skills.data);
     navigate("/", {
       state: {
-        initialDraft: creator ? "" : t("drafts.createSkill"),
-        initialSkills: creator ? [toSuggestion(creator)] : [],
+        initialDraft: creator ? `$${creator.name} ` : t("drafts.createSkill"),
       },
     });
   }
@@ -99,17 +98,4 @@ export function PluginsPage() {
 
 function findSkillCreator(skills: SkillSummary[]) {
   return skills.find((skill) => skill.name === "skill-creator" || skill.name === "skill_creator");
-}
-
-function toSuggestion(skill: SkillSummary): SkillSuggestion {
-  return {
-    name: skill.name,
-    description: skill.description,
-    short_description: skill.short_description,
-    root: skill.root,
-    path: skill.path,
-    scope: skill.scope,
-    source_plugin: skill.source_plugin,
-    source_install: skill.source_install,
-  };
 }

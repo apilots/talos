@@ -22,6 +22,7 @@ interface ComposerProviderModelDropdownsProps {
   models: ComposerModelOption[];
   onChange?: (model: string) => void;
   onEffortChange?: (effort: string) => void;
+  onOpenChange?: (open: boolean) => void;
   providerLabel: string;
   reasoningItems: DropdownItem[];
   selectedEffort: string;
@@ -36,6 +37,7 @@ export function ComposerProviderModelDropdowns({
   models,
   onChange,
   onEffortChange,
+  onOpenChange,
   providerLabel,
   reasoningItems,
   selectedEffort,
@@ -50,6 +52,10 @@ export function ComposerProviderModelDropdowns({
   const activeModelLabel = models.find((model) => model.id === activeModel)?.name ?? modelLabel;
   const activeEffortLabel = reasoningItems.find((item) => item.value === selectedEffort)?.label
     ?? selectedEffort;
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [onOpenChange, open]);
 
   useEffect(() => {
     if (!open) {

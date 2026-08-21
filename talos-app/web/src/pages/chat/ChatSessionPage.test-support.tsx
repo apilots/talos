@@ -30,19 +30,19 @@ export async function createChatFeatureMock(
   return {
     ...actual,
     ChatComposer: (props: {
-      commandNotice?: string;
+      commandResponse?: { kind: string; state?: string };
       disabled?: boolean;
       onModelChange?: (model: string) => void;
       onCommand?: (command: "compact" | "clear" | "status" | "model") => Promise<void> | void;
       onProjectChange: (projectId: string) => void;
       onReasoningLevelChange?: (level: "light" | "medium" | "high" | "extra_high") => void;
-      onSend: (skills: [], attachments: []) => Promise<void>;
+      onSend: (attachments: []) => Promise<void>;
       showRuntimeModeSelector?: boolean;
     }) => {
       mocks.composerProps = props;
       return (
         <div data-disabled={props.disabled ? "true" : "false"} data-testid="chat-composer">
-          {props.commandNotice ? <div>{props.commandNotice}</div> : null}
+          {props.commandResponse ? <div>{props.commandResponse.kind}</div> : null}
           <button onClick={() => props.onModelChange?.("model-2")} type="button">
             Model
           </button>
@@ -55,7 +55,7 @@ export async function createChatFeatureMock(
           <button onClick={() => void Promise.resolve(props.onCommand?.("compact")).catch(() => undefined)} type="button">
             Compact
           </button>
-          <button onClick={() => void props.onSend([], [])} type="button">
+          <button onClick={() => void props.onSend([])} type="button">
             Send
           </button>
         </div>

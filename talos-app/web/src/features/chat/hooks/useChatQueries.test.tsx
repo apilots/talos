@@ -6,14 +6,16 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelSelection, SessionInfo } from "@talos/sdk-browser";
 
-import { chatKeys, useUpdateSessionModelMutation } from "./useChatQueries";
+import { chatKeys, useSessionActions, useUpdateSessionModelMutation } from "./useChatQueries";
 
 const apiMocks = vi.hoisted(() => ({
+  compactSession: vi.fn(),
   updateSessionModel: vi.fn(),
 }));
 
 vi.mock("../api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api")>()),
+  compactSession: apiMocks.compactSession,
   updateSessionModel: apiMocks.updateSessionModel,
 }));
 
@@ -21,6 +23,13 @@ vi.mock("@/shared/store/app-store", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({ connection: { authToken: "token", userId: "user-1" } }),
 }));
+
+function createQueryHarness() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrapper = ({ children }: PropsWithChildren) =>
+    createElement(QueryClientProvider, { client: queryClient }, children);
+  return { queryClient, wrapper };
+}
 
 describe("useUpdateSessionModelMutation", () => {
   afterEach(() => {
@@ -36,7 +45,7 @@ describe("useUpdateSessionModelMutation", () => {
         resolveUpdate = resolve;
       }),
     );
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { queryClient, wrapper } = createQueryHarness();
     const connectionKey = "token|user-1";
     const sessionKey = chatKeys.session(connectionKey, "session-1");
     queryClient.setQueryData(sessionKey, {
@@ -45,8 +54,6 @@ describe("useUpdateSessionModelMutation", () => {
         reasoningEffort: "light",
       },
     } as SessionInfo);
-    const wrapper = ({ children }: PropsWithChildren) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
     const { result } = renderHook(() => useUpdateSessionModelMutation("session-1"), { wrapper });
     const nextSelection: ModelSelection = {
       modelRef: { provider: "anthropic", id: "claude-opus" },
@@ -69,7 +76,7 @@ describe("useUpdateSessionModelMutation", () => {
     apiMocks.updateSessionModel.mockImplementation(
       () => new Promise<void>((resolve) => resolvers.push(resolve)),
     );
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { queryClient, wrapper } = createQueryHarness();
     const sessionKey = chatKeys.session("token|user-1", "session-1");
     queryClient.setQueryData(sessionKey, {
       modelSelection: {
@@ -77,8 +84,6 @@ describe("useUpdateSessionModelMutation", () => {
         reasoningEffort: "light",
       },
     } as SessionInfo);
-    const wrapper = ({ children }: PropsWithChildren) =>
-      createElement(QueryClientProvider, { client: queryClient }, children);
     const { result } = renderHook(() => useUpdateSessionModelMutation("session-1"), { wrapper });
     const firstSelection: ModelSelection = {
       modelRef: { provider: "anthropic", id: "claude-opus" },
@@ -122,5 +127,56 @@ describe("useUpdateSessionModelMutation", () => {
         finalSelection,
       );
     });
+  });
+});
+
+describe("useSessionActions", () => {
+  afterEach(() => {
+    cleanup();
+    apiMocks.compactSession.mockReset();
+    vi.restoreAllMocks();
+  });
+
+  it("stores the compacted session as the current session cache", async () => {
+    const previousSession = {
+      id: "session-1",
+      usage: {
+        tokens: {
+          input_tokens: 11_037,
+          output_tokens: 35,
+          total_tokens: 11_072,
+          cache_creation_input_tokens: null,
+          cache_read_input_tokens: 3_712,
+        },
+        context: {
+          contextWindowTokens: 258_000,
+          effectivePromptBudgetTokens: 250_000,
+          measuredAt: 1,
+          usedTokens: 219_000,
+        },
+      },
+    } as SessionInfo;
+    const compactedSession = {
+      ...previousSession,
+      usage: {
+        tokens: {
+          input_tokens: 11_341,
+          output_tokens: 452,
+          total_tokens: 11_793,
+          cache_creation_input_tokens: null,
+          cache_read_input_tokens: 3_968,
+        },
+        context: previousSession.usage.context,
+      },
+    } as SessionInfo;
+    apiMocks.compactSession.mockResolvedValue(compactedSession);
+    const { queryClient, wrapper } = createQueryHarness();
+    const sessionKey = chatKeys.session("token|user-1", "session-1");
+    queryClient.setQueryData(sessionKey, previousSession);
+    const { result } = renderHook(() => useSessionActions("session-1"), { wrapper });
+
+    await act(async () => result.current.compact.mutateAsync());
+
+    expect(queryClient.getQueryData<SessionInfo>(sessionKey)).toEqual(compactedSession);
   });
 });

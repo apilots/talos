@@ -5,7 +5,7 @@ import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
-import { getComposerInput, renderComposer, renderControlledComposer } from "./ChatComposer.test-utils";
+import { getComposerInput, getComposerValue, renderComposer, renderControlledComposer } from "./ChatComposer.test-utils";
 
 describe("ChatComposer run state", () => {
   afterEach(cleanup);
@@ -43,16 +43,21 @@ describe("ChatComposer run state", () => {
     const onCancel = vi.fn();
     const onSend = vi.fn();
     renderControlledComposer({
-      contextCompactionStage: "summarizing",
+      commandResponse: {
+        kind: "compact",
+        stage: "summarizing",
+        state: "running",
+      },
       initialDraft: "keep this draft",
       onCancel,
       onSend,
     });
 
-    expect(screen.getByRole("status")).toHaveTextContent("Context compacting... summarizing");
+    expect(screen.getByRole("status")).toHaveTextContent("Compacting context");
+    expect(screen.getByRole("status")).toHaveTextContent("Summarizing context");
     fireEvent.keyDown(getComposerInput(), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
-    expect(getComposerInput()).toHaveValue("keep this draft");
+    expect(getComposerValue()).toBe("keep this draft");
 
     fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -84,19 +89,4 @@ describe("ChatComposer context usage", () => {
     expect(tooltip).toHaveTextContent("114.5K tokens");
   });
 
-  it("hides context usage when the session has no measured usage", () => {
-    renderComposer();
-    expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument();
-
-    cleanup();
-    renderComposer({
-      contextUsage: {
-        usedTokens: 0,
-        contextWindowTokens: 100,
-        effectivePromptBudgetTokens: 80,
-        measuredAt: 1,
-      },
-    });
-    expect(screen.queryByTestId("composer-context-usage")).not.toBeInTheDocument();
-  });
 });

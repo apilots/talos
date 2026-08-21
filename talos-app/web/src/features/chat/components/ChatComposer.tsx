@@ -1,40 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  ArrowLeft,
-  ChevronDown,
-  FolderOpen,
-  FolderPlus,
-  Plus,
-  Search,
-  TriangleAlert,
-} from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { SkillSuggestion } from "@talos/sdk-browser";
 
-import { createFsDirectory, readFsDirectory, suggestSkills } from "../api";
-import { ProjectDirectoryDialog, type ProjectDirectoryDialogMode } from "@/features/projects/components/ProjectDirectoryDialog";
 import { cn } from "@/shared/lib/cn";
 import { Panel } from "@/shared/ui/Panel";
-import { Textarea } from "@/shared/ui/Input";
 import { describeProjectDirectory, isUnboundProject } from "@/shared/types/domain";
-import { ComposerDropdown, type DropdownItem } from "./ComposerDropdown";
-import { ComposerCommandSuggestions } from "./ComposerCommandSuggestions";
+import type { DropdownItem } from "./ComposerDropdown";
 import { ComposerAttachmentTray } from "./ComposerAttachmentTray";
 import { ComposerAttachments } from "./ComposerAttachments";
-import { ComposerNotice } from "./ComposerNotice";
-import { buildInputHistoryNavigationItems } from "./composerInputHistory";
 import { ComposerModelSelect } from "./ComposerModelSelect";
 import { ComposerRunControls } from "./ComposerRunControls";
 import { ComposerPermissionModeSelect } from "./ComposerPermissionModeSelect";
-import { SelectedSkillChips } from "./SelectedSkillChips";
-import { SkillSuggestionsPopover } from "./SkillSuggestionsPopover";
-import { activeSkillTrigger, replaceSkillTrigger } from "./skillTrigger";
-import { useComposerCommands } from "./useComposerCommands";
-import { EMPTY_ATTACHMENT_KINDS, EMPTY_ATTACHMENTS, EMPTY_SELECTED_SKILLS } from "./ChatComposer.defaults";
+import { ComposerProjectContext } from "./ComposerProjectContext";
+import { ComposerSuggestionMenu } from "./composer-input/ComposerSuggestionMenu";
+import { availableComposerCommands } from "./composer-input/composer-suggestions";
+import { useComposerSuggestions } from "./composer-input/useComposerSuggestions";
+import { useComposerSuggestionActions } from "./composer-input/useComposerSuggestionActions";
+import { useComposerInputHistory } from "./composer-input/useComposerInputHistory";
+import { EMPTY_ATTACHMENT_KINDS, EMPTY_ATTACHMENTS } from "./ChatComposer.defaults";
 import type * as Composer from "./ChatComposer.types";
 import { useChatComposerAttachmentDraft } from "./useChatComposerAttachmentDraft";
 import { WaitingMessages } from "./WaitingMessages";
-import { filterComposerProjects } from "./ChatComposer.utils";
+import { ComposerCommandResponse } from "./command-response";
 
 // ─── main component ──────────────────────────────────────────────────────────
 
@@ -43,8 +29,9 @@ export function ChatComposer({
   onDraftChange,
   onSend,
   onCommand,
-  commandNotice,
-  initialSelectedSkills = EMPTY_SELECTED_SKILLS,
+  commandResponse,
+  commandStatus,
+  onDismissCommandResponse,
   onCancel,
   inputHistory,
   disabled,
@@ -53,7 +40,6 @@ export function ChatComposer({
   onPermissionModeChange,
   isStreaming,
   isCancelling = false,
-  contextCompactionStage,
   contextUsage,
   sessionTotalTokens,
   models,
@@ -76,142 +62,38 @@ export function ChatComposer({
   messageQueue,
 }: Composer.ChatComposerProps) {
   const { t } = useTranslation(["chat", "common", "settings"]);
-  const isBusy = Boolean(isStreaming || isCancelling || contextCompactionStage);
-  const [projectOpen, setProjectOpen] = useState(false);
-  const [projectSearch, setProjectSearch] = useState("");
-  const [projectMode, setProjectMode] = useState<Composer.ProjectMenuMode>("list");
-  const [skillSuggestions, setSkillSuggestions] = useState<SkillSuggestion[]>([]);
-  const [selectedSkills, setSelectedSkills] = useState<SkillSuggestion[]>(initialSelectedSkills);
-  const [skillSuggestionIndex, setSkillSuggestionIndex] = useState(0);
-  const [skillCursorIndex, setSkillCursorIndex] = useState(() => draft.length);
-  const [directoryDialogMode, setDirectoryDialogMode] = useState<ProjectDirectoryDialogMode | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const projectTriggerRef = useRef<HTMLButtonElement>(null);
-  const projectPickerRef = useRef<HTMLDivElement>(null);
+  const commandRunning = commandResponse?.kind === "compact" && commandResponse.state === "running";
+  const isBusy = Boolean(isStreaming || isCancelling || commandRunning);
+  const [cursorIndex, setCursorIndex] = useState(() => draft.length);
+  const [isComposing, setIsComposing] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
-  const historyIndexRef = useRef<number | null>(null);
-  const historyDraftRef = useRef("");
   const attachmentDraft = useChatComposerAttachmentDraft({
     activeProjectId,
     supportedKinds: supportedAttachmentKinds,
     initialAttachments,
   });
-  const activeInputHistoryItems = useMemo(
-    () => buildInputHistoryNavigationItems(inputHistory),
-    [inputHistory],
+  const commandIds = useMemo(
+    () => availableComposerCommands({
+      hasModels: !isBusy && models.length > 0 && Boolean(onModelChange),
+      hasSessionCommands: Boolean(onCommand) && !isBusy,
+    }),
+    [isBusy, models.length, onCommand, onModelChange],
   );
-  const activeInputHistoryKey = useMemo(
-    () => activeInputHistoryItems.map((item) => item.key).join("|"),
-    [activeInputHistoryItems],
-  );
-
-  const closeProjectPicker = () => {
-    setProjectOpen(false);
-    setProjectSearch("");
-    setProjectMode("list");
-  };
-
-  const resetInputHistoryNavigation = () => {
-    historyIndexRef.current = null;
-    historyDraftRef.current = "";
-  };
-  const composerCommands = useComposerCommands({
-    draft,
-    enabled: Boolean(onCommand) && !isBusy,
-    onCommand,
-    onDraftChange,
-    onExecute: resetInputHistoryNavigation,
-    openModelPicker: () => modelTriggerRef.current?.click(),
+  const composerSuggestions = useComposerSuggestions({
+    commands: commandIds,
+    cursorIndex,
+    enabled: !disabled,
+    isComposing,
+    value: draft,
   });
 
-  useEffect(() => {
-    if (!projectOpen) {
-      return;
-    }
-
-    function onPointerDown(event: PointerEvent) {
-      const target = event.target as Node | null;
-      if (!target) {
-        return;
-      }
-      if (projectTriggerRef.current?.contains(target) || projectPickerRef.current?.contains(target)) {
-        return;
-      }
-      closeProjectPicker();
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeProjectPicker();
-      }
-    }
-
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [projectOpen]);
-
-  useEffect(() => {
-    historyIndexRef.current = null;
-    historyDraftRef.current = "";
-  }, [activeInputHistoryKey]);
-
-  useEffect(() => {
-    const trigger = activeSkillTrigger(draft, Math.min(skillCursorIndex, draft.length));
-    if (!trigger) {
-      setSkillSuggestions([]);
-      setSkillSuggestionIndex(0);
-      setSelectedSkills((skills) => skills.filter((skill) => draft.includes(`$${skill.name}`)));
-      return;
-    }
-
-    let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void suggestSkills(trigger.query)
-        .then((skills) => {
-          if (!cancelled) {
-            setSkillSuggestions(skills);
-            setSkillSuggestionIndex(0);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            setSkillSuggestions([]);
-          }
-        });
-    }, 120);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timer);
-    };
-  }, [draft, skillCursorIndex]);
-
-  useEffect(() => {
-    setSelectedSkills(initialSelectedSkills);
-  }, [initialSelectedSkills]);
-
-  const activeProject = projects.find((p) => p.id === activeProjectId);
-  const isProjectBound = activeProject && !isUnboundProject(activeProject.id);
-
-  const filteredProjects = filterComposerProjects(projects, projectSearch);
-
-  function openDirectoryDialog(mode: ProjectDirectoryDialogMode) {
-    closeProjectPicker();
-    setDirectoryDialogMode(mode);
-  }
-
-  const showCollapsibleProject = showProjectSelector && !compact;
-  const showInlineProject = showProjectSelector && compact;
-  const effectiveRuntimeMode: Composer.RuntimeMode = runtimeMode === "local" ? "local" : "local";
-
-  const moveCursorToPosition = (textarea: HTMLTextAreaElement, cursorIndex: number) => {
+  const moveCursorToPosition = (nextCursorIndex: number) => {
     const applySelection = () => {
-      textarea.setSelectionRange(cursorIndex, cursorIndex);
-      setSkillCursorIndex(cursorIndex);
+      editorRef.current?.focus();
+      editorRef.current?.setSelectionRange(nextCursorIndex, nextCursorIndex);
+      setCursorIndex(nextCursorIndex);
     };
     if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(applySelection);
@@ -220,105 +102,30 @@ export function ChatComposer({
     applySelection();
   };
 
-  const setDraftFromHistory = (textarea: HTMLTextAreaElement, value: string) => {
-    onDraftChange(value);
-    moveCursorToPosition(textarea, value.length);
-  };
-
-  const canUseInputHistory = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (
-      disabled ||
-      event.altKey ||
-      event.ctrlKey ||
-      event.metaKey ||
-      event.nativeEvent.isComposing ||
-      activeInputHistoryItems.length === 0
-    ) {
-      return false;
-    }
-
-    if (historyIndexRef.current !== null) {
-      return true;
-    }
-
-    const textarea = event.currentTarget;
-    const cursorAtEnd =
-      textarea.selectionStart === textarea.value.length &&
-      textarea.selectionEnd === textarea.value.length;
-    return textarea.value.length === 0 || cursorAtEnd;
-  };
-
-  const handleInputHistoryKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!canUseInputHistory(event)) {
-      return false;
-    }
-
-    if (event.key === "ArrowUp") {
-      event.preventDefault();
-      const nextIndex =
-        historyIndexRef.current === null
-          ? activeInputHistoryItems.length - 1
-          : Math.max(0, historyIndexRef.current - 1);
-      if (historyIndexRef.current === null) {
-        historyDraftRef.current = draft;
-      }
-      historyIndexRef.current = nextIndex;
-      setDraftFromHistory(event.currentTarget, activeInputHistoryItems[nextIndex]?.text ?? "");
-      return true;
-    }
-
-    if (event.key === "ArrowDown" && historyIndexRef.current !== null) {
-      event.preventDefault();
-      const nextIndex = historyIndexRef.current + 1;
-      if (nextIndex >= activeInputHistoryItems.length) {
-        const restoredDraft = historyDraftRef.current;
-        resetInputHistoryNavigation();
-        setDraftFromHistory(event.currentTarget, restoredDraft);
-        return true;
-      }
-
-      historyIndexRef.current = nextIndex;
-      setDraftFromHistory(event.currentTarget, activeInputHistoryItems[nextIndex]?.text ?? "");
-      return true;
-    }
-
-    return false;
-  };
+  const inputHistoryNavigation = useComposerInputHistory({
+    disabled,
+    inputHistory,
+    moveCursorToPosition,
+    onDraftChange,
+    value: draft,
+  });
+  const suggestionActions = useComposerSuggestionActions({
+    draft,
+    modelTriggerRef,
+    moveCursorToPosition,
+    onCommand,
+    onDraftChange,
+    onResetHistory: inputHistoryNavigation.reset,
+    session: composerSuggestions,
+  });
 
   const handleSend = async () => {
     if (!attachmentDraft.canSubmit(draft)) {
       return;
     }
-    resetInputHistoryNavigation();
-    const skills = selectedSkills;
-    setSelectedSkills([]);
-    setSkillSuggestions([]);
-    try {
-      await attachmentDraft.submit(draft, skills, onSend);
-    } catch {
-      setSelectedSkills(skills);
-    }
-  };
-
-  const selectSkill = (skill: SkillSuggestion, textarea?: HTMLTextAreaElement | null) => {
-    const cursorIndex =
-      textarea && document.activeElement === textarea ? textarea.selectionStart : skillCursorIndex;
-    const trigger = activeSkillTrigger(draft, cursorIndex);
-    if (!trigger) {
-      return;
-    }
-    const next = replaceSkillTrigger(draft, trigger, skill.name);
-    setSelectedSkills((skills) => {
-      if (skills.some((item) => item.path === skill.path)) {
-        return skills;
-      }
-      return [...skills, skill];
-    });
-    setSkillSuggestions([]);
-    onDraftChange(next.value);
-    if (textarea) {
-      moveCursorToPosition(textarea, next.cursorIndex);
-    }
+    inputHistoryNavigation.reset();
+    composerSuggestions.cancelCurrentTrigger();
+    await attachmentDraft.submit(draft, onSend);
   };
 
   const reasoningItems: DropdownItem[] = reasoningEnabled
@@ -332,10 +139,18 @@ export function ChatComposer({
 
   return (
     <div className="relative">
-      <ComposerNotice commandNotice={commandNotice} contextCompactionStage={contextCompactionStage} />
+      {!composerSuggestions.open && !modelPickerOpen ? (
+        <ComposerCommandResponse
+          contextUsage={contextUsage ?? undefined}
+          onDismiss={onDismissCommandResponse}
+          response={commandResponse}
+          sessionTotalTokens={sessionTotalTokens}
+          status={commandStatus}
+        />
+      ) : null}
       <Panel className="overflow-visible rounded-[1.25rem] border-border bg-card p-0 shadow-panel">
         {messageQueue ? <WaitingMessages controller={messageQueue} /> : null}
-        {showInlineProject && (
+        {showProjectSelector && compact ? (
           <div className="flex flex-wrap items-center gap-2 border-b border-border/70 px-3 py-2">
             <ComposerModelSelect
               disabled={Boolean(disabled || isBusy)}
@@ -359,92 +174,62 @@ export function ChatComposer({
               ))}
             </select>
           </div>
-        )}
+        ) : null}
 
+        <ComposerAttachmentTray
+          disabled={Boolean(disabled)}
+          error={
+            attachmentDraft.hasInvalidAttachments
+              ? t("chat:invalidAttachments")
+              : attachmentDraft.error
+          }
+          items={attachmentDraft.items}
+          onRemove={attachmentDraft.remove}
+        />
         <div>
-          <SelectedSkillChips
-            draft={draft}
-            onDraftChange={onDraftChange}
-            onSkillsChange={setSelectedSkills}
-            skills={selectedSkills}
-          />
-          <ComposerAttachmentTray
-            disabled={Boolean(disabled)}
-            error={
-              attachmentDraft.hasInvalidAttachments
-                ? t("chat:invalidAttachments")
-                : attachmentDraft.error
-            }
-            items={attachmentDraft.items}
-            onRemove={attachmentDraft.remove}
-          />
-          <Textarea
+          <textarea
+            aria-label={t("chat:askTalos")}
             className={cn(
-              "resize-none border-0 bg-transparent px-5 text-[14px] leading-[1.6] focus:border-0 focus:shadow-none",
-              compact ? "min-h-10 pt-3" : "min-h-12 pt-4",
+              "[field-sizing:content] max-h-40 w-full resize-none overflow-y-auto border-0 bg-transparent px-5 text-[14px] leading-[1.6] text-ink outline-none placeholder:text-muted",
+              compact ? "min-h-10 py-3" : "min-h-12 py-4",
             )}
             data-smoke="chat-composer-input"
             disabled={disabled}
             onChange={(event) => {
-              resetInputHistoryNavigation();
-              composerCommands.reset();
-              setSkillCursorIndex(event.currentTarget.selectionStart);
-              onDraftChange(event.target.value);
+              const nextCursorIndex = event.currentTarget.selectionStart;
+              inputHistoryNavigation.reset();
+              composerSuggestions.updateTriggerSession(event.currentTarget.value, nextCursorIndex);
+              setCursorIndex(nextCursorIndex);
+              onDraftChange(event.currentTarget.value);
             }}
-            onClick={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
+            onCompositionEnd={() => setIsComposing(false)}
+            onCompositionStart={() => setIsComposing(true)}
+            onClick={(event) => setCursorIndex(event.currentTarget.selectionStart)}
             onKeyDown={(event) => {
-              if (composerCommands.handleKeyDown(event)) {
-                return;
-              }
-              if (skillSuggestions.length > 0) {
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setSkillSuggestionIndex((index) => Math.min(skillSuggestions.length - 1, index + 1));
-                  return;
-                }
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setSkillSuggestionIndex((index) => Math.max(0, index - 1));
-                  return;
-                }
-                if (event.key === "Enter" || event.key === "Tab") {
-                  event.preventDefault();
-                  selectSkill(skillSuggestions[skillSuggestionIndex] ?? skillSuggestions[0], event.currentTarget);
-                  return;
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  setSkillSuggestions([]);
-                  return;
-                }
-              }
+              if (suggestionActions.handleKeyDown(event)) return;
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
-                if (contextCompactionStage) {
-                  return;
-                }
-                void handleSend();
+                if (!commandRunning) void handleSend();
                 return;
               }
-              handleInputHistoryKeyDown(event);
+              inputHistoryNavigation.handleKeyDown(event);
             }}
+            onKeyUp={(event) => setCursorIndex(event.currentTarget.selectionStart)}
             onPaste={attachmentDraft.handlePaste}
-            onKeyUp={(event) => setSkillCursorIndex(event.currentTarget.selectionStart)}
             placeholder={t("chat:askTalos")}
-            ref={textareaRef}
+            ref={editorRef}
+            rows={1}
             value={draft}
           />
-          <SkillSuggestionsPopover
-            onHover={setSkillSuggestionIndex}
-            onSelect={(skill) => selectSkill(skill, textareaRef.current)}
-            selectedIndex={skillSuggestionIndex}
-            suggestions={skillSuggestions}
-          />
-          <ComposerCommandSuggestions
-            commands={composerCommands.commands}
-            onHover={composerCommands.setSelectedIndex}
-            onSelect={(command) => void composerCommands.execute(command)}
-            selectedIndex={composerCommands.selectedIndex}
+          <ComposerSuggestionMenu
+            contextUsage={contextUsage ?? undefined}
+            error={composerSuggestions.error}
+            loading={composerSuggestions.loading}
+            onHover={composerSuggestions.setSelectedIndex}
+            onSelect={suggestionActions.selectSuggestion}
+            open={composerSuggestions.open}
+            selectedIndex={composerSuggestions.selectedIndex}
+            suggestions={composerSuggestions.suggestions}
           />
         </div>
 
@@ -481,6 +266,7 @@ export function ChatComposer({
             models={models}
             onCancel={onCancel}
             onModelChange={onModelChange}
+            onModelPickerOpenChange={setModelPickerOpen}
             onReasoningLevelChange={onReasoningLevelChange}
             onSend={handleSend}
             reasoningItems={reasoningItems}
@@ -490,175 +276,18 @@ export function ChatComposer({
           />
         </div>
 
-        <div className="mx-3 border-t border-border/50">
-          <div className="flex flex-wrap items-center gap-1">
-            {showCollapsibleProject && (
-              <>
-                <button
-                  className="flex items-center gap-2 py-2.5 text-[12px] text-muted outline-none transition hover:text-ink focus:outline-none"
-                  onClick={() => setProjectOpen(!projectOpen)}
-                  ref={projectTriggerRef}
-                  type="button"
-                >
-                  <FolderOpen size={13} className="shrink-0" />
-                  <span className="max-w-[220px] truncate">
-                    {isProjectBound
-                      ? `${activeProject.name} · ${describeProjectDirectory(activeProject.directory)}`
-                      : t("chat:workInProject")}
-                  </span>
-                  <ChevronDown
-                    className={cn("shrink-0 transition-transform", projectOpen && "rotate-180")}
-                    size={13}
-                  />
-                </button>
-                {showRuntimeModeSelector && (
-                  <div className="border-l border-border/40 pl-1">
-                    <ComposerDropdown
-                      header={t("common:runtimeMode")}
-                      items={[
-                        { value: "local", label: t("common:local") },
-                        {
-                          value: "cloud",
-                          label: t("common:cloud"),
-                          description: t("common:comingSoon"),
-                          disabled: true,
-                        },
-                      ]}
-                      onChange={(v) => onRuntimeModeChange(v as Composer.RuntimeMode)}
-                      value={effectiveRuntimeMode}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-
-            {showRuntimeModeSelector && !showCollapsibleProject && !compact && (
-              <ComposerDropdown
-                header={t("common:runtimeMode")}
-                items={[
-                  { value: "local", label: t("common:local") },
-                  {
-                    value: "cloud",
-                    label: t("common:cloud"),
-                    description: t("common:comingSoon"),
-                    disabled: true,
-                  },
-                ]}
-                onChange={(v) => onRuntimeModeChange(v as Composer.RuntimeMode)}
-                value={effectiveRuntimeMode}
-              />
-            )}
-          </div>
-        </div>
-      </Panel>
-
-      {showCollapsibleProject && projectOpen && (
-        <div
-          className="absolute left-0 right-0 top-[calc(100%-1px)] z-50 rounded-b-[1.5rem] border border-t-0 border-border/70 bg-card px-2 pb-2 pt-1 shadow-lg"
-          ref={projectPickerRef}
-        >
-          {projectMode === "list" ? (
-            <>
-              <div className="relative mb-1 mt-1">
-                <Search
-                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted"
-                  size={12}
-                />
-                <input
-                  autoFocus
-                  className="form-control-focus w-full rounded-xl border border-border/50 bg-background/60 py-1.5 pl-7 pr-3 text-[12px] placeholder:text-muted"
-                  onChange={(e) => setProjectSearch(e.target.value)}
-                  placeholder={t("chat:searchProjects")}
-                  value={projectSearch}
-                />
-              </div>
-              <div className="max-h-44 overflow-y-auto">
-                {filteredProjects.map((project) => {
-                  const unavailable = Boolean(
-                    project.status && project.status.state !== "available",
-                  );
-                  return (
-                    <button
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] outline-none transition hover:bg-muted/10 focus:outline-none",
-                        project.id === activeProjectId && "text-brand",
-                        unavailable && "text-muted",
-                      )}
-                      key={project.id}
-                      onClick={() => {
-                        if (unavailable) {
-                          return;
-                        }
-                        onProjectChange(project.id);
-                        closeProjectPicker();
-                      }}
-                      title={unavailable ? t("chat:projectDirectoryUnavailable") : undefined}
-                      type="button"
-                    >
-                      <FolderOpen size={12} className="shrink-0 text-muted" />
-                      <span className="truncate">
-                        {isUnboundProject(project.id) ? t("common:noProject") : project.name}
-                      </span>
-                      {unavailable ? (
-                        <TriangleAlert className="ml-auto shrink-0 text-danger" size={12} />
-                      ) : !isUnboundProject(project.id) && project.directory ? (
-                        <span className="ml-auto shrink-0 text-muted">
-                          {describeProjectDirectory(project.directory)}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-              <button
-                className="mt-0.5 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
-                onClick={() => setProjectMode("add_menu")}
-                type="button"
-              >
-                <FolderPlus size={12} />
-                {t("chat:addNewProject")}
-                <ChevronDown className="-rotate-90 ml-auto" size={12} />
-              </button>
-            </>
-          ) : projectMode === "add_menu" ? (
-            <div className="py-1">
-              <button
-                className="mb-1 flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12px] text-muted outline-none transition hover:bg-muted/10 hover:text-ink focus:outline-none"
-                onClick={() => setProjectMode("list")}
-                type="button"
-              >
-                <ArrowLeft size={12} />
-                {t("chat:backToProjects")}
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none"
-                onClick={() => openDirectoryDialog("create")}
-                type="button"
-              >
-                <Plus size={14} />
-                {t("chat:startFromScratch")}
-              </button>
-              <button
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-ink outline-none transition hover:bg-muted/10 focus:outline-none"
-                onClick={() => openDirectoryDialog("existing")}
-                type="button"
-              >
-                <FolderOpen size={14} />
-                {t("chat:useExistingFolder")}
-              </button>
-            </div>
-          ) : null}
-        </div>
-      )}
-      {onCreateProject ? (
-        <ProjectDirectoryDialog
-          createDirectory={createFsDirectory}
-          mode={directoryDialogMode}
-          onClose={() => setDirectoryDialogMode(null)}
+        <ComposerProjectContext
+          activeProjectId={activeProjectId}
+          compact={compact}
           onCreateProject={onCreateProject}
-          readDirectory={readFsDirectory}
+          onProjectChange={onProjectChange}
+          onRuntimeModeChange={onRuntimeModeChange}
+          projects={projects}
+          runtimeMode={runtimeMode}
+          showProjectSelector={showProjectSelector}
+          showRuntimeModeSelector={showRuntimeModeSelector}
         />
-      ) : null}
+      </Panel>
     </div>
   );
 }

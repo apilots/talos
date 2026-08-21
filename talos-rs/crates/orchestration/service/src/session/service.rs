@@ -352,7 +352,7 @@ impl SessionService {
         Ok(SessionPatchAck { success })
     }
 
-    pub(crate) async fn record_usage(
+    pub(crate) async fn record_compaction_usage(
         &self,
         session_id: &str,
         assistant_model: &str,
@@ -370,7 +370,6 @@ impl SessionService {
             .try_into()
             .unwrap_or_default();
         record.usage.tokens.accumulate(usage);
-        record.usage.context = None;
         record.model = assistant_model.to_string();
         self.session_store.update_session_record(&record).await?;
         Ok(())

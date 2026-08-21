@@ -174,7 +174,7 @@ impl ResourceAccessService {
             })
             .await?;
         self.sessions
-            .record_usage(session_id, &session.config.llm.model, &usage)
+            .record_compaction_usage(session_id, &session.config.llm.model, &usage)
             .await?;
         self.invalidate_cached_session(session_id).await?;
         self.get_session(actor, session_id).await

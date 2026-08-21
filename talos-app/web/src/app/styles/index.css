@@ -274,3 +274,19 @@ select {
     @apply my-6;
   }
 }
+
+@keyframes command-response-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.35rem) scale(0.995);
+  }
+}
+
+@keyframes command-progress {
+  from {
+    transform: translateX(-105%);
+  }
+  to {
+    transform: translateX(405%);
+  }
+}

@@ -10,6 +10,7 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
         Arc::new(TestSessionRuntime {
             cancel_mode: TestCancelMode::Ok,
             cancelled_turn_ids: cancelled_turn_ids.clone(),
+            compaction_usage: TokenUsage::default(),
         }),
         configured_test_config(),
     )
@@ -136,6 +137,7 @@ async fn interrupt_restores_active_turn_when_runtime_rejects_cancellation() {
         Arc::new(TestSessionRuntime {
             cancel_mode: TestCancelMode::Rejected,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
+            compaction_usage: TokenUsage::default(),
         }),
         configured_test_config(),
     )

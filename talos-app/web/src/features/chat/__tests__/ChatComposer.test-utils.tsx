@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { ChatComposer } from "../components/ChatComposer";
@@ -10,23 +10,7 @@ import type { SessionInputHistory } from "@/shared/types/ui";
 
 export function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatComposer>> = {}) {
   return renderWithQueryClient(
-    <ChatComposer
-      activeProjectId={UNBOUND_PROJECT_ID}
-      draft=""
-      isStreaming={false}
-      models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
-      onCancel={vi.fn()}
-      onDraftChange={vi.fn()}
-      onModelChange={vi.fn()}
-      onProjectChange={vi.fn()}
-      onRuntimeModeChange={vi.fn()}
-      onSend={vi.fn()}
-      projects={createDefaultProjects()}
-      runtimeMode="local"
-      selectedModel="mock:model-1"
-      showProjectSelector={false}
-      {...overrides}
-    />,
+    <ChatComposer {...defaultComposerProps()} {...overrides} />,
   );
 }
 
@@ -39,21 +23,9 @@ export function renderControlledComposer({
 
     return (
       <ChatComposer
-        activeProjectId={UNBOUND_PROJECT_ID}
-        disabled={false}
+        {...defaultComposerProps()}
         draft={draft}
-        isStreaming={false}
-        models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
-        onCancel={vi.fn()}
         onDraftChange={setDraft}
-        onModelChange={vi.fn()}
-        onProjectChange={vi.fn()}
-        onRuntimeModeChange={vi.fn()}
-        onSend={vi.fn()}
-        projects={createDefaultProjects()}
-        runtimeMode="local"
-        selectedModel="mock:model-1"
-        showProjectSelector={false}
         {...overrides}
       />
     );
@@ -68,27 +40,34 @@ export function renderControlledComposerWithRebuiltHistory(texts: string[]) {
 
     return (
       <ChatComposer
-        activeProjectId={UNBOUND_PROJECT_ID}
-        disabled={false}
+        {...defaultComposerProps()}
         draft={draft}
         inputHistory={committedHistory(...texts)}
-        isStreaming={false}
-        models={[{ id: "mock:model-1", name: "Model 1", provider: "mock" }]}
-        onCancel={vi.fn()}
         onDraftChange={setDraft}
-        onModelChange={vi.fn()}
-        onProjectChange={vi.fn()}
-        onRuntimeModeChange={vi.fn()}
-        onSend={vi.fn()}
-        projects={createDefaultProjects()}
-        runtimeMode="local"
-        selectedModel="mock:model-1"
-        showProjectSelector={false}
       />
     );
   }
 
   return renderWithQueryClient(<ControlledComposer />);
+}
+
+function defaultComposerProps(): React.ComponentProps<typeof ChatComposer> {
+  return {
+    activeProjectId: UNBOUND_PROJECT_ID,
+    draft: "",
+    isStreaming: false,
+    models: [{ id: "mock:model-1", name: "Model 1", provider: "mock" }],
+    onCancel: vi.fn(),
+    onDraftChange: vi.fn(),
+    onModelChange: vi.fn(),
+    onProjectChange: vi.fn(),
+    onRuntimeModeChange: vi.fn(),
+    onSend: vi.fn(),
+    projects: createDefaultProjects(),
+    runtimeMode: "local",
+    selectedModel: "mock:model-1",
+    showProjectSelector: false,
+  };
 }
 
 export function renderWithQueryClient(element: React.ReactElement) {
@@ -109,8 +88,25 @@ export function getComposerInput() {
   return screen.getByRole("textbox") as HTMLTextAreaElement;
 }
 
-export function moveCursorToEnd(textarea: HTMLTextAreaElement) {
-  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+export function getComposerValue(editor = getComposerInput()) {
+  return editor.value;
+}
+
+export function setComposerValue(value: string, editor = getComposerInput()) {
+  editor.focus();
+  fireEvent.change(editor, { target: { value } });
+  editor.setSelectionRange(value.length, value.length);
+  fireEvent.keyUp(editor);
+}
+
+export function setComposerSelection(cursorIndex: number, editor = getComposerInput()) {
+  editor.focus();
+  editor.setSelectionRange(cursorIndex, cursorIndex);
+  fireEvent.keyUp(editor);
+}
+
+export function moveCursorToEnd(editor: HTMLTextAreaElement) {
+  setComposerSelection(getComposerValue(editor).length, editor);
 }
 
 export function committedHistory(...texts: string[]): SessionInputHistory {

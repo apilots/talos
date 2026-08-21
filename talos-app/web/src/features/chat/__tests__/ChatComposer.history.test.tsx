@@ -9,10 +9,13 @@ import "@/shared/i18n/setup";
 import {
   committedHistory,
   getComposerInput,
+  getComposerValue,
   moveCursorToEnd,
   renderComposer,
   renderControlledComposer,
   renderControlledComposerWithRebuiltHistory,
+  setComposerSelection,
+  setComposerValue,
 } from "./ChatComposer.test-utils";
 
 describe("ChatComposer input history", () => {
@@ -33,14 +36,14 @@ describe("ChatComposer input history", () => {
     const textarea = getComposerInput();
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("second input");
+    expect(getComposerValue(textarea)).toBe("second input");
 
-    textarea.setSelectionRange(0, 0);
+    setComposerSelection(0, textarea);
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("first input");
+    expect(getComposerValue(textarea)).toBe("first input");
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("first input");
+    expect(getComposerValue(textarea)).toBe("first input");
   });
 
   it("keeps history navigation when parent rerenders with the same history identity", () => {
@@ -48,10 +51,10 @@ describe("ChatComposer input history", () => {
     const textarea = getComposerInput();
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("latest input");
+    expect(getComposerValue(textarea)).toBe("latest input");
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("older input");
+    expect(getComposerValue(textarea)).toBe("older input");
   });
 
   it("restores the original draft after navigating past the newest history item", () => {
@@ -63,10 +66,10 @@ describe("ChatComposer input history", () => {
     moveCursorToEnd(textarea);
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("latest input");
+    expect(getComposerValue(textarea)).toBe("latest input");
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
-    expect(textarea).toHaveValue("current draft");
+    expect(getComposerValue(textarea)).toBe("current draft");
   });
 
   it("does not start history navigation with ArrowDown", () => {
@@ -75,7 +78,7 @@ describe("ChatComposer input history", () => {
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
 
-    expect(textarea).toHaveValue("");
+    expect(getComposerValue(textarea)).toBe("");
   });
 
   it("does not add pending input to keyboard history once committed history owns its message", () => {
@@ -97,10 +100,10 @@ describe("ChatComposer input history", () => {
     const textarea = getComposerInput();
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("latest input");
+    expect(getComposerValue(textarea)).toBe("latest input");
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("older input");
+    expect(getComposerValue(textarea)).toBe("older input");
   });
 
   it("does not add completed pending input to keyboard history before canonical history catches up", () => {
@@ -127,10 +130,10 @@ describe("ChatComposer input history", () => {
     const textarea = getComposerInput();
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("latest committed input");
+    expect(getComposerValue(textarea)).toBe("latest committed input");
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("older input");
+    expect(getComposerValue(textarea)).toBe("older input");
   });
 
   it("keeps native textarea navigation when the cursor is not at the end", () => {
@@ -139,11 +142,11 @@ describe("ChatComposer input history", () => {
       inputHistory: committedHistory("latest input"),
     });
     const textarea = getComposerInput();
-    textarea.setSelectionRange(0, 0);
+    setComposerSelection(0, textarea);
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
 
-    expect(textarea).toHaveValue("first line\nsecond line");
+    expect(getComposerValue(textarea)).toBe("first line\nsecond line");
   });
 
   it("resets history navigation after manual edits", () => {
@@ -151,13 +154,13 @@ describe("ChatComposer input history", () => {
     const textarea = getComposerInput();
 
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
-    expect(textarea).toHaveValue("latest input");
+    expect(getComposerValue(textarea)).toBe("latest input");
 
-    fireEvent.change(textarea, { target: { value: "manual edit" } });
+    setComposerValue("manual edit", textarea);
     moveCursorToEnd(textarea);
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
 
-    expect(textarea).toHaveValue("manual edit");
+    expect(getComposerValue(textarea)).toBe("manual edit");
   });
 
   it("does not navigate history during IME composition or modifier key shortcuts", () => {
@@ -167,10 +170,10 @@ describe("ChatComposer input history", () => {
     Object.defineProperty(composingEvent, "isComposing", { value: true });
 
     fireEvent(textarea, composingEvent);
-    expect(textarea).toHaveValue("");
+    expect(getComposerValue(textarea)).toBe("");
 
     fireEvent.keyDown(textarea, { ctrlKey: true, key: "ArrowUp" });
-    expect(textarea).toHaveValue("");
+    expect(getComposerValue(textarea)).toBe("");
   });
 
   it("allows Enter to queue another message while streaming", () => {

@@ -463,7 +463,7 @@ export type SkillMetadata = { display_name: string | null, icon: string | null, 
 
 export type SkillSummary = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, enabled: boolean, read_only: boolean, metadata: SkillMetadata | null, };
 
-export type SkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, };
+export type SkillSuggestion = { name: string, description: string, short_description: string | null, root: string, path: string, scope: SkillScope, source_plugin: string | null, source_install: string | null, metadata: SkillMetadata | null, };
 
 export type SkillLoadErrorKind = "skill_root_read_failed" | "skill_directory_read_failed" | "missing_skill_file" | "skill_file_metadata_read_failed" | "skill_file_too_large" | "skill_file_read_failed" | "invalid_frontmatter" | "missing_required_field";
 

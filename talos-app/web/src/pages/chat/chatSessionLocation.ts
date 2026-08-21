@@ -1,7 +1,6 @@
 import type {
   FileInfo,
   ModelRef,
-  SkillSuggestion,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 
@@ -15,6 +14,5 @@ export interface SessionLocationState {
   initialPermissionMode?: UserPermissionMode;
   initialProjectId?: string;
   initialProject?: ProjectView;
-  initialSkills?: SkillSuggestion[];
   initialAttachments?: FileInfo[];
 }

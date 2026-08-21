@@ -1,65 +1,110 @@
-import { useState } from "react";
-import type { ComponentProps } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
-  ChatComposer,
   isActiveTurnRunningError,
+  type ComposerCommandResponseState,
+  type ComposerSessionCommandId,
   useSessionActions,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
 import type { ContextCompactionStage } from "@/shared/types/protocol";
+import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface UseSessionCommandsOptions {
   contextCompactionStage?: ContextCompactionStage;
-  currentModel?: string;
-  isStreaming: boolean;
   sessionId: string;
 }
 
-type ComposerCommand = Parameters<
-  NonNullable<ComponentProps<typeof ChatComposer>["onCommand"]>
->[0];
-
 export function useSessionCommands({
   contextCompactionStage,
-  currentModel,
-  isStreaming,
   sessionId,
 }: UseSessionCommandsOptions) {
   const { t } = useTranslation("chat");
-  const [notice, setNotice] = useState<string>();
+  const [settledResponse, setSettledResponse] = useState<ComposerCommandResponseState>();
+  const [clearConfirmationOpen, setClearConfirmationOpen] = useState(false);
+  const [clearError, setClearError] = useState<string>();
   const actions = useSessionActions(sessionId);
-  const compactionStage = contextCompactionStage;
+  const response: ComposerCommandResponseState | undefined = contextCompactionStage || actions.compact.isPending
+    ? {
+        kind: "compact",
+        stage: contextCompactionStage,
+        state: "running",
+      }
+    : settledResponse;
 
-  const execute = (command: ComposerCommand) => {
-    if (compactionStage) {
+  useEffect(() => {
+    if (!response || response.kind === "status" || response.state !== "success") {
       return;
     }
-    setNotice(undefined);
+    const timeout = window.setTimeout(
+      () => setSettledResponse(undefined),
+      response.kind === "compact" ? 5_000 : 3_500,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [response]);
+
+  const execute = (command: ComposerSessionCommandId) => {
+    if (contextCompactionStage) {
+      return;
+    }
+    setSettledResponse(undefined);
     if (command === "compact") {
-      return actions.compact.mutateAsync().then(() => undefined).catch(handleBusyError);
+      return actions.compact.mutateAsync()
+        .then(() => setSettledResponse({ kind: "compact", state: "success" }))
+        .catch((error: unknown) => {
+          const message = isActiveTurnRunningError(error)
+            ? t("contextCompactingWait")
+            : t("commandCompactErrorDetail");
+          setSettledResponse({ kind: "compact", message, state: "error" });
+          throw error;
+        });
     }
     if (command === "clear") {
-      return actions.clear.mutateAsync().then(() => {
-        useAppStore.getState().resetStream(sessionId);
-      }).catch(handleBusyError);
+      setClearError(undefined);
+      setClearConfirmationOpen(true);
+      return;
     }
-    if (command === "status") {
-      const status = isStreaming ? t("sessionStatusRunning") : t("sessionStatusReady");
-      setNotice(t("sessionStatusSummary", {
-        model: currentModel ?? t("sessionStatusUnknownModel"),
-        status,
-      }));
+    setSettledResponse({ kind: "status" });
+  };
+
+  const confirmClear = async () => {
+    if (actions.clear.isPending) {
+      return;
+    }
+    setClearError(undefined);
+    try {
+      await actions.clear.mutateAsync();
+      useAppStore.getState().resetStream(sessionId);
+      setClearConfirmationOpen(false);
+      setSettledResponse({ kind: "clear", state: "success" });
+    } catch (error) {
+      const message = isActiveTurnRunningError(error)
+        ? t("contextCompactingWait")
+        : t("clearSessionFailed");
+      setClearError(message);
+      setSettledResponse({ kind: "clear", message, state: "error" });
     }
   };
 
-  function handleBusyError(error: unknown): never {
-    if (isActiveTurnRunningError(error)) {
-      setNotice(t("contextCompactingWait"));
-    }
-    throw error;
-  }
-
-  return { compactionStage, execute, notice };
+  return {
+    cancelClear: () => {
+      setClearConfirmationOpen(false);
+      setClearError(undefined);
+    },
+    clearConfirmationOpen,
+    clearError,
+    clearing: actions.clear.isPending,
+    compactionStage: contextCompactionStage,
+    confirmClear,
+    dismissResponse: () => setSettledResponse(undefined),
+    execute,
+    response,
+    showModelChanged: (model: string, reasoningLevel?: ReasoningLevel) => {
+      setSettledResponse({ kind: "model", model, reasoningLevel, state: "success" });
+    },
+    showModelChangeFailed: (model: string, message: string, reasoningLevel?: ReasoningLevel) => {
+      setSettledResponse({ kind: "model", message, model, reasoningLevel, state: "error" });
+    },
+  };
 }

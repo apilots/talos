@@ -20,6 +20,7 @@ interface ComposerRunControlsProps {
   models: ComposerModelOption[];
   onCancel?: () => void;
   onModelChange?: (model: string) => void;
+  onModelPickerOpenChange?: (open: boolean) => void;
   onReasoningLevelChange?: (level: ReasoningLevel) => void;
   onSend: () => Promise<void>;
   reasoningItems: DropdownItem[];
@@ -39,6 +40,7 @@ export function ComposerRunControls({
   models,
   onCancel,
   onModelChange,
+  onModelPickerOpenChange,
   onReasoningLevelChange,
   onSend,
   reasoningItems,
@@ -58,6 +60,7 @@ export function ComposerRunControls({
           models={models}
           onChange={onModelChange}
           onEffortChange={(value) => onReasoningLevelChange?.(value as ReasoningLevel)}
+          onOpenChange={onModelPickerOpenChange}
           modelTriggerRef={modelTriggerRef}
           providerLabel={t("chat:providerLabel")}
           reasoningItems={reasoningItems}

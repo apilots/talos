@@ -220,10 +220,13 @@ describe("ChatSessionPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Reasoning" }));
 
-    expect(mocks.mutateModel).toHaveBeenCalledWith({
-      modelRef: { provider: "mock", id: "model-1" },
-      reasoningEffort: "high",
-    });
+    expect(mocks.mutateModel).toHaveBeenCalledWith(
+      {
+        modelRef: { provider: "mock", id: "model-1" },
+        reasoningEffort: "high",
+      },
+      expect.objectContaining({ onError: expect.any(Function), onSuccess: expect.any(Function) }),
+    );
   });
 
   it("keeps draft sessions sendable after the initial prompt fails", async () => {
@@ -269,7 +272,6 @@ describe("ChatSessionPage", () => {
         reasoningEffort: "medium",
       },
       project: undefined,
-      skills: undefined,
       userPermissionMode: "approveForMe",
     });
   });

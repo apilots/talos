@@ -45,10 +45,7 @@ export function useChatSession(
   );
   const sessionHistoryQuery = useSessionHistoryQuery(sessionId, sessionAvailable);
   const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable, () => {
-    void Promise.all([
-      sessionHistoryQuery.refetch(),
-      activeTurnQuery.refetch(),
-    ]);
+    void Promise.all([sessionHistoryQuery.refetch(), activeTurnQuery.refetch()]);
   });
   const shouldRecoverLiveTail =
     !streamState?.isStreaming &&
@@ -190,11 +187,12 @@ export function useChatSession(
           sessionId,
           useAppStore.getState().connection.userId,
           content,
-          options.modelSelection,
-          options.project,
-          options.skills ?? [],
-          fileIds,
-          options.userPermissionMode,
+          {
+            fileIds,
+            modelSelection: options.modelSelection,
+            project: options.project,
+            userPermissionMode: options.userPermissionMode,
+          },
         )
       : undefined;
     return streamText(content, request);
@@ -235,11 +233,12 @@ export function useChatSession(
             sessionId,
             useAppStore.getState().connection.userId,
             text,
-            options.modelSelection,
-            options.project,
-            options.skills ?? [],
-            fileIds,
-            options.userPermissionMode,
+            {
+              fileIds,
+              modelSelection: options.modelSelection,
+              project: options.project,
+              userPermissionMode: options.userPermissionMode,
+            },
           )
         : undefined;
       return sendMutation.mutateAsync({ text, appendUserInput: true, request }).catch((error: unknown) => {

@@ -21,18 +21,12 @@ import { resolveProjectView } from "@/shared/types/domain";
 import type {
   FileInfo,
   ModelRef,
-  SkillSuggestion,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 import type { ReasoningLevel } from "@/shared/types/ui";
 
 interface HomeLocationState {
   initialDraft?: string;
-  initialSkills?: SkillSuggestion[];
-}
-
-function initialSkillsState(skills: SkillSuggestion[]) {
-  return skills.length > 0 ? skills : undefined;
 }
 
 export function ChatHomePage() {
@@ -50,7 +44,6 @@ export function ChatHomePage() {
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const [draft, setDraft] = useState(locationState?.initialDraft ?? "");
-  const [initialSkills] = useState<SkillSuggestion[]>(locationState?.initialSkills ?? []);
   const [selectedModel, setSelectedModel] = useState<ModelRef>();
   const [selectedReasoningLevel, setSelectedReasoningLevel] = useState<ReasoningLevel>("none");
   const [permissionMode, setPermissionMode] = useState<UserPermissionMode>("fullAccess");
@@ -76,15 +69,14 @@ export function ChatHomePage() {
   }, [activeProject, activeProjectId, setActiveProjectId]);
 
   useEffect(() => {
-    if (!locationState?.initialDraft && !locationState?.initialSkills?.length) {
+    if (!locationState?.initialDraft) {
       return;
     }
     navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, locationState?.initialDraft, locationState?.initialSkills, navigate]);
+  }, [location.pathname, locationState?.initialDraft, navigate]);
 
   async function handleStartDraft(
     initialPrompt?: string,
-    skills: SkillSuggestion[] = [],
     attachments: FileInfo[] = [],
   ) {
     const trimmed = initialPrompt?.trim();
@@ -98,7 +90,6 @@ export function ChatHomePage() {
             initialPermissionMode: permissionMode,
             initialProjectId: activeProject?.id,
             initialProject: activeProject,
-            initialSkills: initialSkillsState(skills),
             initialAttachments: attachments.length > 0 ? attachments : undefined,
           }
         : undefined,
@@ -135,7 +126,6 @@ export function ChatHomePage() {
           models={modelPickerOptions(models)}
           onCreateProject={handleCreateProject}
           onDraftChange={setDraft}
-          initialSelectedSkills={initialSkills}
           onModelChange={(model) => {
             const modelRef = modelRefForKey(model);
             if (!modelRef) {
@@ -152,7 +142,7 @@ export function ChatHomePage() {
             }
           }}
           onReasoningLevelChange={setSelectedReasoningLevel}
-          onSend={(skills, attachments) => handleStartDraft(draft, skills, attachments)}
+          onSend={(attachments) => handleStartDraft(draft, attachments)}
           permissionMode={permissionMode}
           projects={projects}
           runtimeMode={connection.runtimeMode}
