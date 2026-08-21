@@ -1,10 +1,11 @@
-import type {
-  ChatTurnMetrics,
-  ChatTimelineItem,
-  StreamSessionState,
-} from "@/shared/types/ui";
+import type { ChatTurnMetrics, ChatTimelineItem, StreamSessionState } from "@/shared/types/ui";
 import type { TalosTimelinePhase } from "@talos/sdk-core";
 import type { ContextCompactionStage } from "@/shared/types/protocol";
+
+export type ChatContextCompactionItem = Extract<
+  ChatTimelineItem,
+  { kind: "context_compaction" }
+>;
 
 const ACTIVE_CONTEXT_COMPACTION_STAGES: ReadonlySet<ContextCompactionStage> = new Set([
   "preparing",
@@ -13,45 +14,55 @@ const ACTIVE_CONTEXT_COMPACTION_STAGES: ReadonlySet<ContextCompactionStage> = ne
   "trimming",
 ]);
 
-export function activeContextCompactionStage(
+export function isContextCompactionRunning(item: ChatContextCompactionItem) {
+  return item.status === "running" && ACTIVE_CONTEXT_COMPACTION_STAGES.has(item.stage);
+}
+
+export function latestContextCompaction(
   stream: StreamSessionState | undefined,
-): ContextCompactionStage | undefined {
+): ChatContextCompactionItem | undefined {
   if (!stream) {
     return undefined;
   }
-  for (const block of stream?.blocks ?? []) {
+  let latest: ChatContextCompactionItem | undefined;
+  for (const block of stream.blocks) {
+    if (block.kind !== "timeline") {
+      continue;
+    }
+    for (const item of block.items) {
+      if (
+        item.kind === "context_compaction" &&
+        (!latest || item.startedAtMs >= latest.startedAtMs)
+      ) {
+        latest = item;
+      }
+    }
+  }
+  return latest;
+}
+
+export function activeContextCompaction(
+  stream: StreamSessionState | undefined,
+): ChatContextCompactionItem | undefined {
+  if (!stream) {
+    return undefined;
+  }
+  for (let blockIndex = stream.blocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
+    const block = stream.blocks[blockIndex];
     if (block.kind !== "timeline" || !block.live) {
       continue;
     }
-    for (let index = block.items.length - 1; index >= 0; index -= 1) {
-      const item = block.items[index];
+    for (let itemIndex = block.items.length - 1; itemIndex >= 0; itemIndex -= 1) {
+      const item = block.items[itemIndex];
       if (
         item.kind === "context_compaction" &&
-        item.status === "running" &&
-        ACTIVE_CONTEXT_COMPACTION_STAGES.has(item.stage)
+        isContextCompactionRunning(item)
       ) {
-        return item.stage;
+        return item;
       }
     }
   }
   return undefined;
-}
-
-export function contextCompactionStageLabel(stage: ContextCompactionStage) {
-  switch (stage) {
-    case "preparing":
-      return "preparing";
-    case "summarizing":
-      return "summarizing";
-    case "rebuilding_prompt":
-      return "rebuilding prompt";
-    case "trimming":
-      return "trimming";
-    case "completed":
-      return "completed";
-    case "failed":
-      return "failed";
-  }
 }
 
 function timelineBlockPrefix(sessionId: string, messageId: string) {

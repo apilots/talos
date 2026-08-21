@@ -54,7 +54,7 @@ describe("ChatComposer run state", () => {
     });
 
     expect(screen.getByRole("status")).toHaveTextContent("Compacting context");
-    expect(screen.getByRole("status")).toHaveTextContent("Summarizing context");
+    expect(screen.getByRole("status")).toHaveTextContent("Summarizing earlier conversation");
     fireEvent.keyDown(getComposerInput(), { key: "Enter" });
     expect(onSend).not.toHaveBeenCalled();
     expect(getComposerValue()).toBe("keep this draft");

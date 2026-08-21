@@ -1,4 +1,7 @@
-import type { ContextCompactionStage } from "@/shared/types/protocol";
+import type {
+  ContextCompactionOutcome,
+  ContextCompactionStage,
+} from "@/shared/types/protocol";
 import type { ReasoningLevel, RuntimeMode } from "@/shared/types/ui";
 
 export interface ComposerStatusSnapshot {
@@ -17,7 +20,12 @@ export type ComposerCommandResponseState =
       stage?: ContextCompactionStage;
       state: "running";
     }
-  | { kind: "compact"; message?: string; state: "success" | "error" }
+  | {
+      kind: "compact";
+      message?: string;
+      outcome?: ContextCompactionOutcome;
+      state: "success" | "error" | "cancelled";
+    }
   | { kind: "clear"; message?: string; state: "success" | "error" }
   | {
       kind: "model";

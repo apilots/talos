@@ -510,7 +510,10 @@ function toChatTimelineItem(item: TalosTimelineItem | TalosHistoryTimelineItem):
       status: item.status,
       title: item.title,
       text: contextCompactionText(item.content),
+      trigger: item.content.trigger,
       stage: item.content.stage,
+      outcome: item.content.outcome,
+      metrics: item.content.metrics,
       startedAtMs,
       completedAtMs,
     };

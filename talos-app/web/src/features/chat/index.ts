@@ -67,3 +67,4 @@ export { useSessionMessageStream } from "./hooks/useSessionMessageStream";
 export { useSessionStreaming } from "./hooks/useSessionStreaming";
 export { createChatSlice, type ChatSlice, type ChatSliceSetter } from "./store";
 export { applyActiveTurnSnapshot, applyStreamEvent, clearInactiveTurnSnapshot } from "./stream-events";
+export { isContextCompactionRunning, type ChatContextCompactionItem } from "./timeline-state";

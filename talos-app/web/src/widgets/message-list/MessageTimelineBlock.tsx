@@ -3,9 +3,12 @@ import type { TalosPendingUserAction } from "@talos/sdk-browser";
 import {
   Activity,
   Brain,
+  Check,
   ChevronDown,
+  CircleStop,
   LoaderCircle,
   MessageCircle,
+  TriangleAlert,
   Wrench,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -17,6 +20,7 @@ import { formatDuration } from "./formatDuration";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { ToolCallBlock } from "./ToolCallBlock";
 import { TurnMetricsFooter } from "./TurnMetricsFooter";
+import { ContextCompactionTimelineItem } from "./context-compaction/ContextCompactionTimelineItem";
 
 type TimelineBlock = Extract<ChatRenderBlock, { kind: "timeline" }>;
 type TimelineItem = TimelineBlock["items"][number];
@@ -46,12 +50,15 @@ export function MessageTimelineBlock({
 }: MessageTimelineBlockProps) {
   const { t } = useTranslation("chat");
   const { items, id: timelineId } = block;
+  const visibleItems = items.filter(
+    (item) => item.kind !== "context_compaction" || item.trigger !== "user_requested",
+  );
   const live = Boolean(block.live);
   const metrics = block.metrics ?? null;
-  const responseItems = items.filter(
+  const responseItems = visibleItems.filter(
     (item): item is TimelineTextItem => item.kind !== "tool_call" && isTimelineResponseItem(item),
   );
-  const processItems = items.filter((item) => !isTimelineResponseItem(item));
+  const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
   const hasRunningItem = processItems.some(
     (item) => item.status === "running" || item.status === "waiting_user_action",
   );
@@ -85,6 +92,10 @@ export function MessageTimelineBlock({
     }
     wasActiveRef.current = hasActiveTimeline;
   }, [hasActiveTimeline, requiresAttention]);
+
+  if (processItems.length === 0 && responseItems.length === 0) {
+    return null;
+  }
 
   const processLabel = timelineProcessLabel({
     displayDuration,
@@ -155,6 +166,8 @@ export function MessageTimelineBlock({
                         ? renderUserAction?.(pendingUserAction)
                         : null}
                     </div>
+                  ) : item.kind === "context_compaction" ? (
+                    <ContextCompactionTimelineItem item={item} />
                   ) : (
                     <article className={timelineTextCardClass(role)} data-timeline-surface="plain">
                       {role === "system" || statusLabel ? (
@@ -292,6 +305,18 @@ function TimelineItemIcon({ item }: { item: TimelineItem }) {
   }
   if (item.kind === "reasoning") {
     return <Brain className="shrink-0" size={13} />;
+  }
+  if (item.kind === "context_compaction") {
+    if (item.status === "running") {
+      return <LoaderCircle className="shrink-0 motion-safe:animate-spin" size={13} />;
+    }
+    if (item.status === "cancelled") {
+      return <CircleStop className="shrink-0 text-muted" size={13} />;
+    }
+    if (item.status === "failed" || item.stage === "failed") {
+      return <TriangleAlert className="shrink-0 text-danger" size={13} />;
+    }
+    return <Check className="shrink-0" size={13} />;
   }
   if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "unknown")) {
     return <MessageCircle className="shrink-0" size={13} />;

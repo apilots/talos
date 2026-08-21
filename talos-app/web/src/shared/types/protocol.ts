@@ -1,9 +1,13 @@
 import type { TalosTimelineContent } from "@talos/sdk-browser";
 
-export type ContextCompactionStage = Extract<
+export type ContextCompactionContent = Extract<
   TalosTimelineContent,
   { type: "context_compaction" }
->["stage"];
+>;
+export type ContextCompactionTrigger = ContextCompactionContent["trigger"];
+export type ContextCompactionStage = ContextCompactionContent["stage"];
+export type ContextCompactionOutcome = ContextCompactionContent["outcome"];
+export type ContextCompactionMetrics = ContextCompactionContent["metrics"];
 
 export type {
   TalosContentItem,

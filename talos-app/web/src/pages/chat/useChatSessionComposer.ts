@@ -79,7 +79,8 @@ export function useChatSessionComposer({
     sessionId,
   });
   const sessionCommands = useSessionCommands({
-    contextCompactionStage: chat.contextCompactionStage,
+    contextCompaction: chat.contextCompaction,
+    onCompactionObservationChange: chat.setCompactionObservationActive,
     sessionId,
   });
   const { boundProject, selectedProjectId } = useSelectedSessionProject({

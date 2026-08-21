@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import "@/shared/i18n/setup";
+import type { ChatContextCompactionItem } from "@/features/chat";
 import { useSessionCommands } from "./useSessionCommands";
 
 const mocks = vi.hoisted(() => ({
@@ -35,23 +36,113 @@ describe("useSessionCommands", () => {
     mocks.resetStream.mockReset();
   });
 
-  it("executes compact through the existing session action", async () => {
-    const { result } = renderHook(() => useSessionCommands({
+  it("keeps observing until the matching backend compaction reaches a terminal outcome", async () => {
+    const onCompactionObservationChange = vi.fn();
+    let contextCompaction: ChatContextCompactionItem | undefined;
+    const { result, rerender } = renderHook(() => useSessionCommands({
+      contextCompaction,
+      onCompactionObservationChange,
       sessionId: "sess-1",
     }));
 
     await act(async () => result.current.execute("compact"));
 
     expect(mocks.compact).toHaveBeenCalledTimes(1);
+    expect(onCompactionObservationChange.mock.calls).toEqual([[true]]);
     expect(result.current.response).toEqual({
       kind: "compact",
+      state: "running",
+    });
+
+    contextCompaction = compactionItem({ itemId: "compact-2", stage: "summarizing" });
+    rerender();
+    contextCompaction = compactionItem({
+      completedAtMs: 2,
+      itemId: "compact-2",
+      outcome: "no_changes",
+      stage: "completed",
+      status: "completed",
+    });
+    rerender();
+
+    expect(onCompactionObservationChange.mock.calls).toEqual([[true], [false]]);
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      outcome: "no_changes",
+      state: "success",
+    });
+  });
+
+  it("does not carry an in-flight manual compaction into another session", async () => {
+    let resolveCompact: (() => void) | undefined;
+    mocks.compact.mockReturnValue(new Promise<void>((resolve) => {
+      resolveCompact = resolve;
+    }));
+    const onCompactionObservationChange = vi.fn();
+    let sessionId = "sess-1";
+    const { result, rerender } = renderHook(() => useSessionCommands({
+      onCompactionObservationChange,
+      sessionId,
+    }));
+
+    let execution: Promise<void> | void;
+    act(() => {
+      execution = result.current.execute("compact");
+    });
+    expect(result.current.response).toEqual({ kind: "compact", state: "running" });
+
+    sessionId = "sess-2";
+    rerender();
+
+    expect(result.current.response).toBeUndefined();
+    expect(onCompactionObservationChange.mock.calls).toEqual([[true], [false]]);
+
+    await act(async () => {
+      resolveCompact?.();
+      await execution;
+    });
+    expect(result.current.response).toBeUndefined();
+
+    sessionId = "sess-1";
+    rerender();
+    expect(result.current.response).toBeUndefined();
+  });
+
+  it("waits for a new backend item instead of reusing the previous compaction outcome", async () => {
+    let contextCompaction = compactionItem({
+      completedAtMs: 2,
+      outcome: "applied",
+      stage: "completed",
+      status: "completed",
+    });
+    const { result, rerender } = renderHook(() => useSessionCommands({
+      contextCompaction,
+      sessionId: "sess-1",
+    }));
+
+    await act(async () => result.current.execute("compact"));
+    expect(result.current.response).toEqual({ kind: "compact", state: "running" });
+
+    contextCompaction = compactionItem({
+      completedAtMs: 4,
+      itemId: "compact-2",
+      outcome: "no_changes",
+      stage: "completed",
+      startedAtMs: 3,
+      status: "completed",
+    });
+    rerender();
+
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      outcome: "no_changes",
       state: "success",
     });
   });
 
   it("derives active compaction rendering from the backend stage", () => {
     const { result } = renderHook(() => useSessionCommands({
-      contextCompactionStage: "summarizing",
+      contextCompaction: compactionItem({ stage: "summarizing" }),
       sessionId: "sess-1",
     }));
 
@@ -59,6 +150,37 @@ describe("useSessionCommands", () => {
       kind: "compact",
       stage: "summarizing",
       state: "running",
+    });
+  });
+
+  it("keeps automatic compaction out of the Composer response", () => {
+    const { result } = renderHook(() => useSessionCommands({
+      contextCompaction: compactionItem({ trigger: "threshold_exceeded" }),
+      sessionId: "sess-1",
+    }));
+
+    expect(result.current.response).toBeUndefined();
+  });
+
+  it("settles a recovered manual compaction from its backend outcome", () => {
+    let contextCompaction = compactionItem({ stage: "summarizing" });
+    const { result, rerender } = renderHook(() => useSessionCommands({
+      contextCompaction,
+      sessionId: "sess-1",
+    }));
+
+    contextCompaction = compactionItem({
+      completedAtMs: 2,
+      outcome: "no_changes",
+      stage: "completed",
+      status: "running",
+    });
+    rerender();
+
+    expect(result.current.response).toEqual({
+      kind: "compact",
+      outcome: "no_changes",
+      state: "success",
     });
   });
 
@@ -137,3 +259,19 @@ describe("useSessionCommands", () => {
     });
   });
 });
+
+function compactionItem(
+  overrides: Partial<ChatContextCompactionItem> = {},
+): ChatContextCompactionItem {
+  return {
+    itemId: "compact-1",
+    kind: "context_compaction",
+    phase: "system",
+    status: "running",
+    text: "Summarizing session context.",
+    trigger: "user_requested",
+    stage: "preparing",
+    startedAtMs: 1,
+    ...overrides,
+  };
+}

@@ -4,7 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextCompactionStarted, turnCompleted } from "../__tests__/streaming-fixtures";
-import { activeContextCompactionStage } from "../timeline-state";
+import { activeContextCompaction } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useAppStore } from "@/shared/store/app-store";
 import {
@@ -60,7 +60,7 @@ describe("useSessionTimelineEvents", () => {
     });
     act(() => onEvent(contextCompactionStarted("compact-1", "preparing", "Preparing.", 5)));
 
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBe("preparing");
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("preparing");
   });
 
   it("requests authoritative reconciliation after a terminal turn", () => {

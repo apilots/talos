@@ -2,9 +2,16 @@ import type {
   TalosActiveTurn,
   TalosContentItem,
   TalosSessionHistorySnapshot,
+  TalosTimelineContent,
   AgentEvent,
   TimelineEventEnvelope,
 } from "@talos/sdk-core";
+
+type ContextCompactionContent = Extract<TalosTimelineContent, { type: "context_compaction" }>;
+type ContextCompactionMetrics = ContextCompactionContent["metrics"];
+type ContextCompactionOutcome = NonNullable<ContextCompactionContent["outcome"]>;
+type ContextCompactionStage = ContextCompactionContent["stage"];
+type ContextCompactionTrigger = ContextCompactionContent["trigger"];
 
 export function baseEvent(payload: AgentEvent["payload"], sequence: number): TimelineEventEnvelope {
   return {
@@ -153,9 +160,10 @@ export function toolResult(
 
 export function contextCompactionStarted(
   itemId: string,
-  stage: "preparing" | "summarizing" | "rebuilding_prompt" | "trimming" | "completed" | "failed",
+  stage: ContextCompactionStage,
   message: string | null,
   sequence: number,
+  trigger: ContextCompactionTrigger = "threshold_exceeded",
 ): TimelineEventEnvelope {
   return baseEvent({
     type: "item_started",
@@ -172,7 +180,7 @@ export function contextCompactionStarted(
       completed_at_ms: null,
       content: {
         type: "context_compaction",
-        trigger: "threshold_exceeded",
+        trigger,
         stage,
         outcome: null,
         metrics: null,
@@ -184,10 +192,11 @@ export function contextCompactionStarted(
 
 export function contextCompactionDelta(
   itemId: string,
-  stage: "preparing" | "summarizing" | "rebuilding_prompt" | "trimming" | "completed" | "failed",
-  outcome: "applied" | "rejected_missing_summary" | "trimmed_fallback_applied" | "failed_context_still_too_large" | "failed_provider_error" | null,
+  stage: ContextCompactionStage,
+  outcome: ContextCompactionOutcome | null,
   message: string | null,
   sequence: number,
+  metrics: ContextCompactionMetrics | null = null,
 ): TimelineEventEnvelope {
   return baseEvent({
     type: "item_delta",
@@ -198,7 +207,7 @@ export function contextCompactionDelta(
       type: "context_compaction",
       stage,
       outcome,
-      metrics: null,
+      metrics,
       message,
     },
   }, sequence);

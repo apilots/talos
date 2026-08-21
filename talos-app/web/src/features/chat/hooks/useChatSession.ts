@@ -3,20 +3,21 @@ import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useSessionBlocks } from "./useSessionBlocks";
 import { useSessionStreaming } from "./useSessionStreaming";
-import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
 import { useSessionMessageQueue } from "./useSessionMessageQueue";
 import {
   useActiveTurnQuery,
   useSessionHistoryQuery,
-  useLiveRecoveryQuery,
 } from "./useChatQueries";
+import {
+  isLiveRecoverableActiveTurn,
+  useChatSessionTimelineLifecycle,
+} from "./useChatSessionTimelineLifecycle";
 import { createInitialTurnRequest, isActiveTurnRunningError } from "../api";
 import {
   applyActiveTurnSnapshot,
-  applyTimelineRecovery,
   clearInactiveTurnSnapshot,
 } from "../stream-events";
-import { activeContextCompactionStage } from "../timeline-state";
+import { activeContextCompaction } from "../timeline-state";
 import { buildQueuedInput, type SendTextOptions } from "../session-input";
 export type { SendTextOptions } from "../session-input";
 import { useAppStore } from "@/shared/store/app-store";
@@ -47,29 +48,16 @@ export function useChatSession(
   const messageQueue = useSessionMessageQueue(sessionId, sessionAvailable, () => {
     void Promise.all([sessionHistoryQuery.refetch(), activeTurnQuery.refetch()]);
   });
-  const shouldRecoverLiveTail =
-    !streamState?.isStreaming &&
-    isLiveRecoverableActiveTurn(activeTurnQuery.data?.status);
-  const liveRecoveryQuery = useLiveRecoveryQuery(
+  const {
+    contextCompaction,
+    retryTimeline,
+    setCompactionObservationActive,
+  } = useChatSessionTimelineLifecycle({
+    activeTurnQuery,
+    sessionHistoryQuery,
     sessionId,
-    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
-    shouldRecoverLiveTail && sessionHistoryQuery.isSuccess,
-  );
-  const shouldSubscribeTimeline =
-    Boolean(streamState?.isStreaming && streamState.activeMessageId) ||
-    (shouldRecoverLiveTail && sessionHistoryQuery.isSuccess);
-  const { retryTimeline } = useSessionTimelineEvents(
-    sessionId,
-    sessionHistoryQuery.data?.last_stable_event_id ?? undefined,
-    Boolean(sessionId) && shouldSubscribeTimeline,
-    async () => {
-      await Promise.all([
-        sessionHistoryQuery.refetch(),
-        activeTurnQuery.refetch(),
-      ]);
-    },
-  );
-  const contextCompactionStage = activeContextCompactionStage(streamState);
+    streamState,
+  });
   const pendingInput = streamState?.pendingInput;
   const pendingInputServerMessageId = streamState?.pendingInput?.serverMessageId;
   const {
@@ -106,13 +94,6 @@ export function useChatSession(
     }
     applyActiveTurnSnapshot(sessionId, activeTurnQuery.data);
   }, [activeTurnQuery.data, sessionId]);
-
-  useEffect(() => {
-    if (!liveRecoveryQuery.data) {
-      return;
-    }
-    applyTimelineRecovery(sessionId, liveRecoveryQuery.data);
-  }, [sessionId, liveRecoveryQuery.data]);
 
   useEffect(() => {
     const error = activeTurnQuery.error;
@@ -176,7 +157,7 @@ export function useChatSession(
     if (!content && fileIds.length === 0) {
       return Promise.resolve();
     }
-    if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
+    if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
       return Promise.resolve();
     }
     if (activeTurnId) {
@@ -219,7 +200,7 @@ export function useChatSession(
       if (!text && fileIds.length === 0) {
         return Promise.resolve();
       }
-      if (activeContextCompactionStage(useAppStore.getState().streams[sessionId])) {
+      if (activeContextCompaction(useAppStore.getState().streams[sessionId])) {
         return Promise.resolve();
       }
       if (activeTurnId) {
@@ -255,7 +236,8 @@ export function useChatSession(
     stopResponse: () => activeTurnId ? stopResponse(activeTurnId) : Promise.resolve(),
     isStreaming,
     isCancelling,
-    contextCompactionStage,
+    contextCompaction,
+    setCompactionObservationActive,
     activeTurnId,
     messageQueue: {
       ...messageQueue,
@@ -299,10 +281,6 @@ export function buildSessionInputHistory(
     committed,
     pendingInput,
   };
-}
-
-function isLiveRecoverableActiveTurn(status: string | undefined) {
-  return status === "running" || status === "waiting_user_action" || status === "cancelling";
 }
 
 function sessionInputHistoryHasMessage(

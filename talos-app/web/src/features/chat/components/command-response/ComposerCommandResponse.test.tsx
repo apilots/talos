@@ -53,23 +53,24 @@ describe("ComposerCommandResponse", () => {
     );
 
     expect(screen.getByRole("status")).toHaveTextContent("Compacting context");
-    expect(screen.getByRole("status")).toHaveTextContent("Summarizing context");
-    expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Summarizing earlier conversation while preserving recent work",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Summarizing");
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 
-  it("explains when the measured context usage will refresh", () => {
+  it("renders the outcome-specific terminal state", () => {
     render(
       <ComposerCommandResponse
         onDismiss={vi.fn()}
-        response={{ kind: "compact", state: "success" }}
+        response={{ kind: "compact", outcome: "no_changes", state: "success" }}
       />,
     );
 
-    expect(screen.getByRole("status")).toHaveTextContent("Context compacted");
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "Context usage will refresh after the next model response.",
-    );
+    expect(screen.getByRole("status")).toHaveTextContent("Context already compact");
+    expect(screen.getByRole("status")).toHaveTextContent("No new session history needed");
   });
 
   it("renders concise clear and model results", () => {

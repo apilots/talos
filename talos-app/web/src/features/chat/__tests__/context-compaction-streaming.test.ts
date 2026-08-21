@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { applyStreamEvent } from "../stream-events";
-import { activeContextCompactionStage } from "../timeline-state";
+import { activeContextCompaction, latestContextCompaction } from "../timeline-state";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   contextCompactionDelta,
@@ -23,9 +23,9 @@ describe("context compaction stream state", () => {
       1,
     ));
 
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBe("preparing");
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("preparing");
     useAppStore.getState().setStreamMeta("sess-1", { isStreaming: false });
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBe("preparing");
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("preparing");
 
     applyStreamEvent("sess-1", contextCompactionDelta(
       "compact-1",
@@ -34,7 +34,7 @@ describe("context compaction stream state", () => {
       "Session history compaction finished.",
       2,
     ));
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBeUndefined();
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])).toBeUndefined();
   });
 
   it("clears the compaction guard on a terminal turn event", () => {
@@ -44,11 +44,11 @@ describe("context compaction stream state", () => {
       "Trimming context.",
       1,
     ));
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBe("trimming");
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("trimming");
 
     applyStreamEvent("sess-1", turnCompleted(2, 0));
 
-    expect(activeContextCompactionStage(useAppStore.getState().streams["sess-1"])).toBeUndefined();
+    expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])).toBeUndefined();
   });
   it("renders live context compaction timeline status", () => {
     applyStreamEvent("sess-1", contextCompactionStarted(
@@ -77,10 +77,14 @@ describe("context compaction stream state", () => {
           kind: "context_compaction",
           phase: "system",
           status: "completed",
+          trigger: "threshold_exceeded",
           stage: "completed",
+          outcome: "applied",
           text: "Session history compaction finished.",
         }),
       ],
     });
+    expect(latestContextCompaction(useAppStore.getState().streams["sess-1"])?.itemId)
+      .toBe("compact-1");
   });
 });

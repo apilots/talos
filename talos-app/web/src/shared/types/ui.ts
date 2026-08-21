@@ -1,5 +1,8 @@
 import type {
+  ContextCompactionMetrics,
+  ContextCompactionOutcome,
   ContextCompactionStage,
+  ContextCompactionTrigger,
   TalosContentItem,
   TalosPendingUserAction,
   TalosTimelineItemKind,
@@ -131,7 +134,10 @@ export type ChatTimelineItem =
       title?: string | null;
       text: string;
       replayFinalAnswer?: boolean;
+      trigger: ContextCompactionTrigger;
       stage: ContextCompactionStage;
+      outcome?: ContextCompactionOutcome;
+      metrics?: ContextCompactionMetrics;
       startedAtMs: number;
       completedAtMs?: number | null;
     }

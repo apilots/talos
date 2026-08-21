@@ -170,6 +170,35 @@ describe("useChatSession", () => {
     );
   });
 
+  it("observes idle-session maintenance before a manual command starts", () => {
+    const { result } = renderHook(() => useChatSession("session-1", 0));
+
+    act(() => result.current.setCompactionObservationActive(true));
+
+    expect(mocks.timeline).toHaveBeenLastCalledWith(
+      "session-1",
+      undefined,
+      true,
+      expect.any(Function),
+    );
+  });
+
+  it("does not transfer idle maintenance observation to another session", () => {
+    let sessionId = "session-1";
+    const { result, rerender } = renderHook(() => useChatSession(sessionId, 0));
+
+    act(() => result.current.setCompactionObservationActive(true));
+    sessionId = "session-2";
+    rerender();
+
+    expect(mocks.timeline).toHaveBeenLastCalledWith(
+      "session-2",
+      undefined,
+      false,
+      expect.any(Function),
+    );
+  });
+
   it("does not poll active turn snapshots while a local event stream is active", () => {
     mocks.activeTurn = {
       session_id: "session-1",
