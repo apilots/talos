@@ -1,0 +1,62 @@
+name: talos-desktop-dmg
+
+concurrency:
+  group: talos-desktop-dmg-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "talos-app/desktop/**"
+      - "build/desktop/dmg/**"
+      - "build/desktop/icons/**"
+      - ".github/workflows/talos-desktop-dmg.yml"
+  push:
+    paths:
+      - "talos-app/desktop/**"
+      - "build/desktop/dmg/**"
+      - "build/desktop/icons/**"
+      - ".github/workflows/talos-desktop-dmg.yml"
+
+jobs:
+  desktop-dmg-package:
+    name: desktop-dmg-package
+    runs-on: macos-15
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: talos-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.14.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: talos-app/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Package desktop DMG
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          TALOS_DESKTOP_APP_SERVER_BIN: ${{ runner.temp }}/app-server
+        run: |
+          touch "${TALOS_DESKTOP_APP_SERVER_BIN}"
+          chmod +x "${TALOS_DESKTOP_APP_SERVER_BIN}"
+          pnpm --filter talos-desktop package:mac
+
+      - name: Verify desktop DMG
+        run: pnpm --filter talos-desktop verify:dmg
