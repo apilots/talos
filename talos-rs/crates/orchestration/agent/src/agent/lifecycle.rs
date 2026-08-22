@@ -2,64 +2,29 @@ use super::AgentHarnessImpl;
 use crate::{AgentResult, AgentRunParams, AgentRunResult};
 use dashmap::mapref::entry::Entry;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::AgentEvent;
+use talos_run_control::{
+    ActiveRunControl, CancellationMode, CancellationPolicy, CleanupReport, RunIdentity,
+    RunTermination, Settlement, SettlementKind,
+};
+use talos_types::talos::{AgentEvent, AgentEventPayload, AgentEventType, TalosTurnErrorEvent};
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::AbortHandle;
 
-/// Harness-owned abort handle for a runtime execution.
-///
-/// Runtime implementations can expose backend abort mechanics through this
-/// wrapper, but callers outside Harness must use AgentInterruptParams instead.
-#[derive(Clone)]
-pub(crate) struct AgentRuntimeAbortHandle {
-    outer: Option<AbortHandle>,
-    inner: Arc<Mutex<Option<AbortHandle>>>,
-    cancelled: Arc<AtomicBool>,
+pub(super) const RUN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const RUN_CANCELLATION_POLICY: CancellationPolicy = CancellationPolicy {
+    grace: Duration::from_secs(5),
+};
+
+#[derive(Clone, Copy)]
+pub(super) enum RunTerminalDisposition {
+    AsEmitted,
+    ForcedAbort,
+    CleanupUnconfirmed { task_count: usize },
 }
 
-impl AgentRuntimeAbortHandle {
-    /// Create an abort handle for a newly spawned runtime task.
-    pub(crate) fn new(outer: AbortHandle) -> Self {
-        Self {
-            outer: Some(outer),
-            inner: Arc::new(Mutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub(super) fn inner_only() -> Self {
-        Self {
-            outer: None,
-            inner: Arc::new(Mutex::new(None)),
-            cancelled: Arc::new(AtomicBool::new(false)),
-        }
-    }
-
-    pub(super) fn attach_inner(&self, handle: AbortHandle) {
-        self.inner.lock().unwrap().replace(handle);
-    }
-
-    pub(super) fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
-    }
-
-    /// Abort all tracked runtime tasks for the active Harness run.
-    pub(crate) fn abort(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
-        if let Some(outer) = &self.outer {
-            outer.abort();
-        }
-        if let Some(inner) = self.inner.lock().unwrap().as_ref() {
-            inner.abort();
-        }
-    }
-}
-
-/// Harness-internal operation selected for a queued or active run.
+/// Harness-internal execution selected for a queued or active run.
 ///
 /// The mode decides which AgentRuntime SPI method is called after lifecycle
 /// reservation. It must not be exposed as a Service, Gateway, or SDK field.
@@ -84,8 +49,8 @@ pub(crate) enum ActiveTurnHandle {
     Running {
         /// Talos turn id; this is also the Agent run identity.
         turn_id: String,
-        /// Abort handle owned by the concrete runtime task.
-        execution_task: AgentRuntimeAbortHandle,
+        /// Run-scoped lifecycle control owned by Harness.
+        run_control: Arc<ActiveRunControl>,
         /// Bounded input sender for the exact running turn.
         message_tx: Option<mpsc::Sender<talos_agent_kernel::ActiveTurnInputDelivery>>,
     },
@@ -98,7 +63,7 @@ pub(crate) enum ActiveTurnHandle {
 pub(crate) enum QueuedTurn {
     /// Non-streaming run waiting for a result channel.
     Unary {
-        /// Runtime operation to execute after dequeue.
+        /// Runtime execution to start after dequeue.
         mode: AgentRunMode,
         /// Shared Agent run parameters.
         request: AgentRunParams,
@@ -107,7 +72,7 @@ pub(crate) enum QueuedTurn {
     },
     /// Streaming run waiting for its event channel to be connected.
     Stream {
-        /// Runtime operation to execute after dequeue.
+        /// Runtime execution to start after dequeue.
         mode: AgentRunMode,
         /// Shared Agent run parameters.
         request: AgentRunParams,
@@ -141,14 +106,14 @@ impl AgentHarnessImpl {
         &self,
         session_id: &str,
         turn_id: String,
-        execution_task: AgentRuntimeAbortHandle,
+        run_control: Arc<ActiveRunControl>,
         message_tx: Option<mpsc::Sender<talos_agent_kernel::ActiveTurnInputDelivery>>,
     ) -> TalosResult<()> {
         match self.active_turns.entry(session_id.to_string()) {
             Entry::Occupied(mut entry) => {
                 entry.insert(ActiveTurnHandle::Running {
                     turn_id,
-                    execution_task,
+                    run_control,
                     message_tx,
                 });
                 Ok(())
@@ -215,16 +180,24 @@ impl AgentHarnessImpl {
                     .iter()
                     .map(|entry| entry.key().clone())
                     .collect();
-                for session_id in &remaining {
-                    if let Some(handle) = self.active_turns.get(session_id) {
-                        if let ActiveTurnHandle::Running { execution_task, .. } = handle.value() {
-                            execution_task.abort();
+                let running: Vec<_> = self
+                    .active_turns
+                    .iter()
+                    .filter_map(|entry| match entry.value() {
+                        ActiveTurnHandle::Running { run_control, .. } => {
+                            Some((entry.key().clone(), run_control.clone()))
                         }
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                for session_id in &remaining {
-                    self.clear_active_turn(session_id);
+                        ActiveTurnHandle::Reserved => None,
+                    })
+                    .collect();
+                for (_, run_control) in &running {
+                    let _ = run_control
+                        .settle(RunTermination::Cancelled {
+                            policy: CancellationPolicy {
+                                grace: Duration::ZERO,
+                            },
+                        })
+                        .await;
                 }
                 return Err(TalosError::internal(format!(
                     "drain_active_turns timed out with {} sessions still active: {:?}",
@@ -368,5 +341,61 @@ impl AgentHarnessImpl {
                 self.spawn_reserved_stream_turn(mode, request, event_tx);
             }
         }
+    }
+}
+
+/// Create the Harness-owned lifecycle control for one exact Run.
+pub(crate) fn create_run_control(session_id: &str, turn_id: &str) -> Arc<ActiveRunControl> {
+    Arc::new(ActiveRunControl::new(RunIdentity::new(session_id, turn_id)))
+}
+
+pub(super) fn run_terminal_disposition(settlement: &Settlement) -> RunTerminalDisposition {
+    match (&settlement.kind, &settlement.cleanup) {
+        (SettlementKind::Cancelled(CancellationMode::Forced), _) => {
+            RunTerminalDisposition::ForcedAbort
+        }
+        (_, CleanupReport::Unconfirmed { count, .. }) => {
+            RunTerminalDisposition::CleanupUnconfirmed { task_count: *count }
+        }
+        (
+            SettlementKind::Completed | SettlementKind::Cancelled(CancellationMode::Cooperative),
+            CleanupReport::Confirmed,
+        ) => RunTerminalDisposition::AsEmitted,
+    }
+}
+
+pub(super) fn apply_run_terminal_disposition(
+    mut event: AgentEvent,
+    disposition: RunTerminalDisposition,
+) -> AgentEvent {
+    let Some(error) = terminal_error(disposition) else {
+        return event;
+    };
+    let request_id = match &event.payload {
+        AgentEventPayload::TurnCompleted(payload) => payload.request_id.clone(),
+        AgentEventPayload::TurnError(payload) => payload.request_id.clone(),
+        _ => return event,
+    };
+    event.event_type = AgentEventType::TurnError;
+    event.payload = AgentEventPayload::TurnError(TalosTurnErrorEvent {
+        request_id,
+        turn_id: event.turn_id.clone(),
+        error: error.to_api_error(),
+        failed_at_ms: u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or_default(),
+    });
+    event
+}
+
+pub(super) fn terminal_error(disposition: RunTerminalDisposition) -> Option<TalosError> {
+    match disposition {
+        RunTerminalDisposition::AsEmitted => None,
+        RunTerminalDisposition::ForcedAbort => Some(TalosError::public(
+            talos_error::ErrorCode::RunForcedAbort,
+            "Run required forced cancellation",
+        )),
+        RunTerminalDisposition::CleanupUnconfirmed { task_count } => Some(TalosError::public(
+            talos_error::ErrorCode::RunCleanupUnconfirmed,
+            format!("Run cleanup was not confirmed for {task_count} task(s)"),
+        )),
     }
 }

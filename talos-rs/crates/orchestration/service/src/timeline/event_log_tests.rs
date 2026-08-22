@@ -66,6 +66,15 @@ fn completed_event(sequence: u64) -> AgentEvent {
     )
 }
 
+fn waiting_completed_event(sequence: u64) -> AgentEvent {
+    let mut event = completed_event(sequence);
+    let AgentEventPayload::TurnCompleted(completed) = &mut event.payload else {
+        unreachable!("completed_event must contain a turn completion");
+    };
+    completed.stop_reason = StopReason::WaitingUserAction;
+    event
+}
+
 fn started_event(sequence: u64) -> AgentEvent {
     timeline_event(
         sequence,
@@ -175,12 +184,12 @@ async fn in_flight_events_do_not_restore_a_cancelling_turn_to_running() {
 }
 
 #[tokio::test]
-async fn pending_dynamic_event_updates_active_turn_user_action() {
+async fn pending_dynamic_event_keeps_runtime_running_until_the_waiting_terminal() {
     let (service, store) = service().await;
     service.record_talos_event(dynamic_event(1)).await.unwrap();
 
     let active = store.get_active_turn("s1").await.unwrap().unwrap();
-    assert_eq!(active.status, ActiveTurnStatus::WaitingUserAction);
+    assert_eq!(active.status, ActiveTurnStatus::Running);
     let action_id = active.current_action_id.as_deref().unwrap();
     assert_eq!(action_id, "ua_test");
     let action = store
@@ -214,4 +223,26 @@ async fn completed_event_preserves_pending_dynamic_active_turn() {
         Some(TimelineEventId::from(completed.event_id))
     );
     assert!(active.current_action_id.is_some());
+}
+
+#[tokio::test]
+async fn cancellation_rejects_a_late_waiting_handoff() {
+    let (service, store) = service().await;
+    service.record_talos_event(started_event(1)).await.unwrap();
+    service.begin_cancellation("s1", "turn_1").await.unwrap();
+
+    let requested = service
+        .record_forwarded_event(dynamic_event(2))
+        .await
+        .unwrap();
+    let waiting = service
+        .record_forwarded_event(waiting_completed_event(3))
+        .await
+        .unwrap();
+
+    assert!(requested.is_none());
+    assert!(waiting.is_none());
+    let active = store.get_active_turn("s1").await.unwrap().unwrap();
+    assert_eq!(active.status, ActiveTurnStatus::Cancelling);
+    assert_eq!(active.current_action_id, None);
 }

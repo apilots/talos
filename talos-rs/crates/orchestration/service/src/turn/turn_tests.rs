@@ -151,9 +151,9 @@ impl SessionRuntime for NoopSessionRuntime {
     async fn cancel_active_turn(
         &self,
         params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.cancelled_turns.lock().unwrap().push(params.turn_id);
-        Ok(())
+        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 }
 

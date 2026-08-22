@@ -84,9 +84,10 @@ fn status_for_error_code(code: ErrorCode) -> StatusCode {
         }
         ErrorCode::ToolExecutionFailed => StatusCode::BAD_GATEWAY,
         ErrorCode::Timeout => StatusCode::GATEWAY_TIMEOUT,
-        ErrorCode::ContextCompactionFailed | ErrorCode::InternalError => {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+        ErrorCode::ContextCompactionFailed
+        | ErrorCode::RunForcedAbort
+        | ErrorCode::RunCleanupUnconfirmed
+        | ErrorCode::InternalError => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
 

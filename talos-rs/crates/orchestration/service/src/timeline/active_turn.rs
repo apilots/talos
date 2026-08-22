@@ -65,7 +65,7 @@ pub(crate) async fn state_for_event(
                     ));
                 }
                 Some(ActiveTurnState {
-                    status: ActiveTurnStatus::WaitingUserAction,
+                    status: ActiveTurnStatus::Running,
                     current_action_id: Some(action.action_id.clone()),
                     new_action: Some(UserActionRecord {
                         session_id: event.session_id.clone(),
@@ -161,7 +161,10 @@ async fn completed_active_state(
         .as_deref()
         .is_some_and(|value| value == message_id);
     if (same_turn || same_message)
-        && active.status == ActiveTurnStatus::WaitingUserAction
+        && matches!(
+            active.status,
+            ActiveTurnStatus::Running | ActiveTurnStatus::WaitingUserAction
+        )
         && active.current_action_id.is_some()
     {
         return Ok(Some(ActiveTurnState::waiting(&active)));
@@ -180,11 +183,12 @@ async fn running_active_state(
     if active.turn_id == turn_id && active.status == ActiveTurnStatus::Cancelling {
         return Ok(None);
     }
-    if active.turn_id == turn_id
-        && active.status == ActiveTurnStatus::WaitingUserAction
-        && active.current_action_id.is_some()
-    {
-        return Ok(Some(ActiveTurnState::waiting(&active)));
+    if active.turn_id == turn_id && active.current_action_id.is_some() {
+        return Ok(Some(ActiveTurnState {
+            status: active.status,
+            current_action_id: active.current_action_id,
+            new_action: None,
+        }));
     }
     Ok(Some(ActiveTurnState::running()))
 }

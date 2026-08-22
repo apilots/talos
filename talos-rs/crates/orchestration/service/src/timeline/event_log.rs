@@ -1,5 +1,8 @@
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
+use talos_agent_kernel::TimelineBuilder;
 use talos_error::TalosResult;
 use talos_store::session::{
     ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId,
@@ -7,10 +10,10 @@ use talos_store::session::{
 };
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, AgentEventType, TalosItemDeltaEvent, TalosTimelineDelta,
-    TimelineEventEnvelope,
+    TalosTimelineItemStatus, TimelineEventEnvelope, TokenUsage,
 };
-use talos_types::{TimelineUserActionEvent, UserActionParams, UserActionState};
-use tokio::sync::broadcast;
+use talos_types::{StopReason, TimelineUserActionEvent, UserActionParams, UserActionState};
+use tokio::sync::{broadcast, Mutex as AsyncMutex};
 use tokio_util::sync::CancellationToken;
 
 use super::active_turn::{resolve_pending_user_action_update, state_for_event};
@@ -42,6 +45,7 @@ pub struct TimelineEventService {
     user_action_store: Arc<dyn UserActionStore>,
     retention: TimelineEventRetentionConfig,
     live_tx: broadcast::Sender<TimelineEventEnvelope>,
+    session_writes: Arc<Mutex<HashMap<String, Weak<AsyncMutex<()>>>>>,
 }
 
 impl TimelineEventService {
@@ -57,7 +61,19 @@ impl TimelineEventService {
             user_action_store,
             retention,
             live_tx: broadcast::channel(1024).0,
+            session_writes: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn session_write_lock(&self, session_id: &str) -> Arc<AsyncMutex<()>> {
+        let mut locks = self.session_writes.lock().unwrap();
+        locks.retain(|_, lock| lock.strong_count() > 0);
+        if let Some(lock) = locks.get(session_id).and_then(Weak::upgrade) {
+            return lock;
+        }
+        let lock = Arc::new(AsyncMutex::new(()));
+        locks.insert(session_id.to_string(), Arc::downgrade(&lock));
+        lock
     }
 
     pub async fn list_events_after(
@@ -101,31 +117,52 @@ impl TimelineEventService {
         self.active_turn_store.get_active_turn(session_id).await
     }
 
+    pub(crate) async fn wait_for_turn_terminal(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        timeout: Duration,
+    ) -> TalosResult<bool> {
+        let mut events = self.live_tx.subscribe();
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            if self
+                .active_turn_store
+                .get_active_turn(session_id)
+                .await?
+                .is_some_and(|active| active.turn_id == turn_id && active.status.is_terminal())
+            {
+                return Ok(true);
+            }
+            match tokio::time::timeout_at(deadline, events.recv()).await {
+                Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(broadcast::error::RecvError::Closed)) | Err(_) => return Ok(false),
+            }
+        }
+    }
+
     /// Validate and persist an interrupt before asking the runtime to stop the turn.
     pub(crate) async fn begin_cancellation(
         &self,
         session_id: &str,
         turn_id: &str,
     ) -> TalosResult<ActiveTurnRecord> {
+        let write_lock = self.session_write_lock(session_id);
+        let _guard = write_lock.lock().await;
         let current = self
             .active_turn_store
             .get_active_turn(session_id)
             .await?
-            .filter(|current| {
-                current.turn_id == turn_id
-                    && matches!(
-                        current.status,
-                        ActiveTurnStatus::Running
-                            | ActiveTurnStatus::WaitingUserAction
-                            | ActiveTurnStatus::Cancelling
-                    )
-            })
+            .filter(|current| current.turn_id == turn_id)
             .ok_or_else(|| {
                 talos_error::TalosError::public(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("active turn `{turn_id}` for session `{session_id}`"),
                 )
             })?;
+        if current.status.is_terminal() {
+            return Ok(current);
+        }
         self.active_turn_store
             .upsert_active_turn(ActiveTurnUpdate {
                 session_id: current.session_id.clone(),
@@ -133,7 +170,7 @@ impl TimelineEventService {
                 message_id: current.message_id.clone(),
                 status: ActiveTurnStatus::Cancelling,
                 last_event_id: current.last_event_id.clone(),
-                current_action_id: None,
+                current_action_id: current.current_action_id.clone(),
                 updated_at: chrono::Utc::now().timestamp_millis(),
             })
             .await?;
@@ -180,6 +217,108 @@ impl TimelineEventService {
             .get(&active.session_id, &active.turn_id, action_id)
             .await?
             .map(|record| record.action))
+    }
+
+    /// Cancel a persisted waiting action and close its item before the Turn.
+    pub(crate) async fn cancel_waiting_user_action(
+        &self,
+        active: ActiveTurnRecord,
+    ) -> TalosResult<()> {
+        let write_lock = self.session_write_lock(&active.session_id);
+        let _guard = write_lock.lock().await;
+        let action_id = active.current_action_id.clone().ok_or_else(|| {
+            talos_error::TalosError::internal("waiting active turn is missing its user action id")
+        })?;
+        let record = self
+            .user_action_store
+            .get(&active.session_id, &active.turn_id, &action_id)
+            .await?
+            .ok_or_else(|| {
+                talos_error::TalosError::internal(format!(
+                    "waiting active turn references missing user action {action_id}"
+                ))
+            })?;
+        let record = self.user_actions().cancel(record).await?;
+        let item_id = record.action.item_id.clone().ok_or_else(|| {
+            talos_error::TalosError::internal("waiting user action is missing its timeline item id")
+        })?;
+        let previous = self
+            .event_store
+            .list_turn_events(&active.session_id, &active.turn_id, 1024)
+            .await?;
+        let has_finished = previous.iter().any(|event| {
+            matches!(
+                &event.payload,
+                AgentEventPayload::ItemDelta(delta)
+                    if matches!(
+                        &delta.delta,
+                        TalosTimelineDelta::UserAction {
+                            event: TimelineUserActionEvent::Finished {
+                                action_id: finished_action_id,
+                                state: UserActionState::Cancelled,
+                                ..
+                            }
+                        } if finished_action_id == &action_id
+                    )
+            )
+        });
+        let item_is_terminal = previous.iter().any(|event| {
+            matches!(
+                &event.payload,
+                AgentEventPayload::ItemCompleted(completed) if completed.item_id == item_id
+            )
+        });
+        let turn_is_terminal = previous.iter().any(|event| match &event.payload {
+            AgentEventPayload::TurnError(_) => true,
+            AgentEventPayload::TurnCompleted(completed) => {
+                completed.stop_reason != StopReason::WaitingUserAction
+            }
+            _ => false,
+        });
+        let next_sequence = previous
+            .last()
+            .map(|event| event.sequence.saturating_add(1))
+            .unwrap_or_default();
+        let request_id = previous
+            .first()
+            .map(|event| event.request_id().to_string())
+            .unwrap_or_else(|| format!("req_cancel_{}", active.turn_id));
+        let message_id = active
+            .message_id
+            .clone()
+            .unwrap_or_else(|| format!("msg_cancel_{}", active.turn_id));
+        let mut timeline = TimelineBuilder::new_with_sequence(
+            request_id,
+            active.turn_id.clone(),
+            message_id,
+            active.session_id.clone(),
+            next_sequence,
+        );
+        timeline.track_existing_tool_call(&item_id, record.action.call_id.clone(), "", "");
+        if !has_finished {
+            let finished = timeline.append_delta(
+                &item_id,
+                TalosTimelineDelta::UserAction {
+                    event: TimelineUserActionEvent::Finished {
+                        action_id: record.action.action_id.clone(),
+                        state: UserActionState::Cancelled,
+                        response: record.response.clone(),
+                    },
+                },
+            )?;
+            self.record_talos_event_inner(finished).await?;
+        }
+        if !item_is_terminal {
+            let item_completed =
+                timeline.complete_item(&item_id, TalosTimelineItemStatus::Cancelled, None)?;
+            self.record_talos_event_inner(item_completed).await?;
+        }
+        if !turn_is_terminal {
+            let turn_completed =
+                timeline.complete_turn(StopReason::Cancelled, TokenUsage::default(), None, None);
+            self.record_talos_event_inner(turn_completed).await?;
+        }
+        Ok(())
     }
 
     pub(crate) fn user_actions(&self) -> UserActionService {
@@ -278,6 +417,61 @@ impl TimelineEventService {
         &self,
         event: AgentEvent,
     ) -> TalosResult<TimelineEventEnvelope> {
+        let write_lock = self.session_write_lock(&event.session_id);
+        let _guard = write_lock.lock().await;
+        self.record_talos_event_inner(event).await
+    }
+
+    /// Persist an Agent-forwarded event unless cancellation already owns the terminal path.
+    pub(crate) async fn record_forwarded_event(
+        &self,
+        event: AgentEvent,
+    ) -> TalosResult<Option<TimelineEventEnvelope>> {
+        let write_lock = self.session_write_lock(&event.session_id);
+        let _guard = write_lock.lock().await;
+        if self.should_skip_forwarded_event(&event).await? {
+            return Ok(None);
+        }
+        self.record_talos_event_inner(event).await.map(Some)
+    }
+
+    async fn should_skip_forwarded_event(&self, event: &AgentEvent) -> TalosResult<bool> {
+        let Some(active) = self
+            .active_turn_store
+            .get_active_turn(&event.session_id)
+            .await?
+        else {
+            return Ok(false);
+        };
+        if active.turn_id != event.turn_id {
+            return Ok(false);
+        }
+        if active.status.is_terminal() {
+            return Ok(true);
+        }
+        if active.status != ActiveTurnStatus::Cancelling {
+            return Ok(false);
+        }
+        Ok(matches!(
+            &event.payload,
+            AgentEventPayload::TurnCompleted(completed)
+                if completed.stop_reason == StopReason::WaitingUserAction
+        ) || matches!(
+            &event.payload,
+            AgentEventPayload::ItemDelta(delta)
+                if matches!(
+                    &delta.delta,
+                    TalosTimelineDelta::UserAction {
+                        event: TimelineUserActionEvent::Requested { .. }
+                    }
+                )
+        ))
+    }
+
+    async fn record_talos_event_inner(
+        &self,
+        event: AgentEvent,
+    ) -> TalosResult<TimelineEventEnvelope> {
         if matches!(event.payload, AgentEventPayload::TurnMetrics(_)) {
             let envelope = live_only_event_envelope(event);
             let _ = self.live_tx.send(envelope.clone());
@@ -349,8 +543,10 @@ impl TimelineEventService {
         else {
             return Ok(None);
         };
-        if active.status != talos_store::session::ActiveTurnStatus::WaitingUserAction
-            || active.turn_id != source.turn_id
+        if !matches!(
+            active.status,
+            ActiveTurnStatus::WaitingUserAction | ActiveTurnStatus::Cancelling
+        ) || active.turn_id != source.turn_id
         {
             return Ok(None);
         }
@@ -367,9 +563,19 @@ impl TimelineEventService {
         if record.action.item_id.as_deref() != Some(item_id.as_str()) {
             return Ok(None);
         }
-        if record.action.state == UserActionState::Resuming {
+        if record.action.state == UserActionState::Cancelled {
+            return Ok(None);
+        }
+        if active.status == ActiveTurnStatus::Cancelling
+            && record.action.state == UserActionState::Pending
+        {
+            record = self.user_actions().cancel(record).await?;
+        } else if record.action.state == UserActionState::Resuming {
             record = self.user_actions().resolve(record).await?;
-        } else if record.action.state != UserActionState::Resolved {
+        } else if !matches!(
+            record.action.state,
+            UserActionState::Resolved | UserActionState::Cancelled
+        ) {
             return Ok(None);
         }
         let response = if matches!(record.action.params, UserActionParams::DynamicToolResult(_)) {
@@ -411,7 +617,11 @@ impl TimelineEventService {
                 session_id: active.session_id,
                 turn_id: active.turn_id,
                 message_id: active.message_id,
-                status: talos_store::session::ActiveTurnStatus::Running,
+                status: if active.status == ActiveTurnStatus::Cancelling {
+                    ActiveTurnStatus::Cancelling
+                } else {
+                    ActiveTurnStatus::Running
+                },
                 last_event_id: Some(TimelineEventId::from(finished_envelope.event_id.clone())),
                 current_action_id: None,
                 updated_at: finished_envelope.created_at_ms,

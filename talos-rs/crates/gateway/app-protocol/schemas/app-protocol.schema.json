@@ -2699,6 +2699,8 @@
         "timeout",
         "cancelled",
         "serviceUnavailable",
+        "runForcedAbort",
+        "runCleanupUnconfirmed",
         "internalError"
       ],
       "type": "string"

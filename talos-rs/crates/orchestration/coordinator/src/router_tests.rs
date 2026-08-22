@@ -4,8 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use talos_agent::{
     AgentCapabilities, AgentDescriptor, AgentHarness, AgentInputParams, AgentInputResult,
-    AgentInterruptParams, AgentInterruptResult, AgentKind, AgentResult, AgentRunParams,
-    AgentRunResult, AgentStatus,
+    AgentInterruptParams, AgentKind, AgentResult, AgentRunParams, AgentRunResult, AgentStatus,
 };
 use talos_error::TalosResult;
 use talos_router::Binding;
@@ -120,8 +119,11 @@ impl AgentHarness for DescriptorAgent {
         false
     }
 
-    async fn interrupt(&self, _params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
-        Ok(AgentInterruptResult { interrupted: true })
+    async fn interrupt(
+        &self,
+        _params: AgentInterruptParams,
+    ) -> AgentResult<talos_types::CancelActiveTurnOutcome> {
+        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {

@@ -122,6 +122,9 @@ impl UserActionService {
     }
 
     pub(crate) async fn cancel(&self, record: UserActionRecord) -> TalosResult<UserActionRecord> {
+        if record.action.state == UserActionState::Cancelled {
+            return Ok(record);
+        }
         self.transition(record, UserActionState::Cancelled, None)
             .await
     }

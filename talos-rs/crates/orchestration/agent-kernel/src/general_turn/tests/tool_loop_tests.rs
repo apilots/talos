@@ -763,6 +763,7 @@ async fn test_execute_general_turn_loop_uses_policy_step_hooks() {
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     };
 
     let result = execute_general_turn_loop_with_policy(
@@ -847,6 +848,7 @@ async fn test_execute_general_turn_loop_replays_dynamic_resume_before_model_step
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let resume = GeneralTurnResume::UserAction(UserActionResume {
         call_id: "call_dynamic".to_string(),
@@ -984,6 +986,7 @@ async fn question_pending_and_resume_continue_the_original_tool_call() {
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let deferred_calls = ["call-question-2", "call-question-3"]
         .into_iter()

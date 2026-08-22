@@ -111,6 +111,62 @@ use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+#[allow(clippy::too_many_arguments)]
+async fn run_general_turn(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    tool_executor_port: Arc<dyn ToolExecutorPort>,
+    memory_writer: Arc<dyn MemoryWriter>,
+    kernel_config: &AgentKernelConfig,
+    skill_options: GeneralTurnSkillOptions,
+) -> TalosResult<GeneralTurnResult> {
+    super::run_general_turn(
+        ctx,
+        agent_name,
+        agent_description,
+        input,
+        llm_provider,
+        tool_definition_provider,
+        tool_executor_port,
+        memory_writer,
+        kernel_config,
+        skill_options,
+        crate::test_run_tasks(),
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn prepare_general_turn(
+    ctx: &mut InvocationContext,
+    agent_name: &str,
+    agent_description: &str,
+    input: &str,
+    llm_provider: Arc<dyn LlmProvider>,
+    tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
+    memory_writer: Arc<dyn MemoryWriter>,
+    kernel_config: &AgentKernelConfig,
+    skill_options: Option<GeneralTurnSkillOptions>,
+) -> TalosResult<PreparedGeneralTurn> {
+    super::prepare_general_turn(
+        ctx,
+        agent_name,
+        agent_description,
+        input,
+        llm_provider,
+        tool_definition_provider,
+        memory_writer,
+        kernel_config,
+        skill_options,
+        crate::test_run_tasks(),
+    )
+    .await
+}
+
 mod attachment_tests;
 mod compaction_loop_tests;
 mod daily_memory_tests;

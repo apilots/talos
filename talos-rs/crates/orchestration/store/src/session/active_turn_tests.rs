@@ -12,7 +12,7 @@ async fn store() -> DatabaseSessionStore {
 }
 
 #[tokio::test]
-async fn cancelling_clears_current_action_id() {
+async fn cancelling_preserves_current_action_id() {
     let store = store().await;
     store
         .upsert_active_turn(ActiveTurnUpdate {
@@ -29,7 +29,7 @@ async fn cancelling_clears_current_action_id() {
 
     let record = store.get_active_turn("s1").await.unwrap().unwrap();
     assert_eq!(record.status, ActiveTurnStatus::Cancelling);
-    assert_eq!(record.current_action_id, None);
+    assert_eq!(record.current_action_id.as_deref(), Some("action-1"));
 }
 
 #[tokio::test]

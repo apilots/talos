@@ -21,13 +21,17 @@ mod timeline_status_tests;
 
 pub use mock::MockAgent;
 
-use lifecycle::{ActiveTurnHandle, AgentRunMode, AgentRuntimeAbortHandle, QueuedTurn};
+use lifecycle::{
+    apply_run_terminal_disposition, create_run_control, run_terminal_disposition, terminal_error,
+    ActiveTurnHandle, AgentRunMode, QueuedTurn, RunTerminalDisposition, RUN_CANCELLATION_POLICY,
+    RUN_COMPLETION_TIMEOUT,
+};
 
 use crate::{
     AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentInput, AgentInputParams,
-    AgentInputResult, AgentInterruptParams, AgentInterruptResult, AgentResult, AgentResumeParams,
-    AgentRunConfig, AgentRunParams, AgentRunResult, AgentRunSessionState,
-    AgentSessionCompactionParams, AgentStatus, SkillRootsResolver,
+    AgentInputResult, AgentInterruptParams, AgentResult, AgentResumeParams, AgentRunConfig,
+    AgentRunParams, AgentRunResult, AgentRunSessionState, AgentSessionCompactionParams,
+    AgentStatus, SkillRootsResolver,
 };
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
@@ -37,9 +41,15 @@ use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
 use talos_memory::MemoryWriter;
+use talos_run_control::{
+    CancellationMode, CancellationPolicy, CleanupReport, RunTaskCompletion, RunTaskError,
+    RunTermination, SettlementKind, SpawnError,
+};
 use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
-use talos_types::talos::{AgentEvent, StopReason as TalosStopReason, TokenUsage};
+use talos_types::talos::{
+    AgentEvent, AgentEventPayload, StopReason as TalosStopReason, TokenUsage,
+};
 use talos_types::{deterministic_session_title, session_title_or_fallback, ModelSelection};
 use tracing::warn;
 
@@ -315,6 +325,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
             | talos_error::ErrorCode::ProviderUnavailable
             | talos_error::ErrorCode::Cancelled
             | talos_error::ErrorCode::ServiceUnavailable
+            | talos_error::ErrorCode::RunForcedAbort
+            | talos_error::ErrorCode::RunCleanupUnconfirmed
             | talos_error::ErrorCode::InternalError => error.into(),
         }
     }
@@ -329,28 +341,62 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let session_state = request.session_state.clone();
         let run_config = request.config.clone();
         let title_input = request::AgentKernelParams::extract_text_input(&request.input);
+        let run_control = create_run_control(&session_id, &turn_id);
+        let run_tasks = run_control.tasks();
         let runtime = self.runtime.clone();
         let (message_tx, message_rx) = mpsc::channel(ACTIVE_TURN_MESSAGE_CAPACITY);
-        let run_handle = tokio::spawn(async move {
-            match mode {
-                AgentRunMode::Start => runtime.run(request, message_rx).await,
-                AgentRunMode::Resume => {
-                    runtime
-                        .resume(AgentResumeParams::new(request), message_rx)
-                        .await
+        let runtime_tasks = run_tasks.clone();
+        let run_task = run_tasks
+            .spawn(move |cancellation| async move {
+                let result = tokio::select! {
+                    result = async move {
+                        match mode {
+                            AgentRunMode::Start => {
+                                runtime.run(request, message_rx, runtime_tasks).await
+                            }
+                            AgentRunMode::Resume => {
+                                runtime
+                                    .resume(
+                                        AgentResumeParams::new(request),
+                                        message_rx,
+                                        runtime_tasks,
+                                    )
+                                    .await
+                            }
+                        }
+                    } => result,
+                    () = cancellation.requested() => Err(TalosError::public(
+                        talos_error::ErrorCode::Cancelled,
+                        "agent runtime cancellation requested",
+                    ).into()),
+                };
+                RunTaskCompletion::Confirmed(result)
+            })
+            .map_err(|error| match error {
+                SpawnError::Closed => AgentError::from(TalosError::public(
+                    talos_error::ErrorCode::Cancelled,
+                    "Run stopped accepting Runtime tasks",
+                )),
+                SpawnError::CapacityExceeded => {
+                    AgentError::runtime_error("Run task capacity exceeded".to_string())
                 }
-            }
-        });
-        let abort_handle = AgentRuntimeAbortHandle::new(run_handle.abort_handle());
+            })?;
         if let Err(err) =
-            self.activate_reserved_turn(&session_id, turn_id, abort_handle, Some(message_tx))
+            self.activate_reserved_turn(&session_id, turn_id, run_control.clone(), Some(message_tx))
         {
-            run_handle.abort();
+            let _ = run_control
+                .settle(RunTermination::Cancelled {
+                    policy: CancellationPolicy {
+                        grace: Duration::ZERO,
+                    },
+                })
+                .await;
+            let _ = run_task.await;
             self.finish_active_turn_and_dispatch_next(&session_id).await;
             return Err(err.into());
         }
 
-        let result = match run_handle.await {
+        let result = match run_task.await {
             Ok(Ok(mut result)) => {
                 result.generated_session_title = self
                     .generate_session_title(
@@ -362,8 +408,7 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     .await;
                 Ok(result)
             }
-            Ok(Err(err)) => Err(err),
-            Err(err) if err.is_cancelled() => Ok(AgentRunResult {
+            Ok(Err(err)) if matches!(err.kind, AgentErrorKind::Interrupted) => Ok(AgentRunResult {
                 output_text: String::new(),
                 output_items: Vec::new(),
                 reasoning: Default::default(),
@@ -373,13 +418,34 @@ After receiving tool outputs, continue reasoning and provide the final response.
                 session_id: session_id.clone(),
                 generated_session_title: None,
             }),
-            Err(err) => Err(AgentError::runtime_error(format!(
-                "kernel task join failed: {}",
-                err
-            ))),
+            Ok(Err(err)) => Err(err),
+            Err(RunTaskError::Stopped) => Ok(AgentRunResult {
+                output_text: String::new(),
+                output_items: Vec::new(),
+                reasoning: Default::default(),
+                stop_reason: TalosStopReason::Cancelled,
+                usage: TokenUsage::default(),
+                task_count: 0,
+                session_id: session_id.clone(),
+                generated_session_title: None,
+            }),
         };
+        let settlement = run_control
+            .settle(RunTermination::Completed {
+                timeout: RUN_COMPLETION_TIMEOUT,
+            })
+            .await;
+        let disposition = run_terminal_disposition(&settlement);
         self.finish_active_turn_and_dispatch_next(&session_id).await;
-        result
+        match disposition {
+            RunTerminalDisposition::AsEmitted => result,
+            disposition @ (RunTerminalDisposition::ForcedAbort
+            | RunTerminalDisposition::CleanupUnconfirmed { .. }) => {
+                Err(terminal_error(disposition)
+                    .expect("a failed Run disposition must produce a public error")
+                    .into())
+            }
+        }
     }
 
     fn spawn_reserved_stream_turn(
@@ -397,13 +463,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
             let run_config = request.config.clone();
             let title_input = request::AgentKernelParams::extract_text_input(&request.input);
             let title_turn_id = request_turn_id.clone();
+            let run_control = create_run_control(&session_id, &request_turn_id);
+            let run_tasks = run_control.tasks();
             let runtime = this.runtime.clone();
             let (message_tx, message_rx) = mpsc::channel(ACTIVE_TURN_MESSAGE_CAPACITY);
             let runtime_stream = match mode {
-                AgentRunMode::Start => runtime.run_streamed(request, message_rx).await,
+                AgentRunMode::Start => runtime.run_streamed(request, message_rx, run_tasks).await,
                 AgentRunMode::Resume => {
                     runtime
-                        .resume_streamed(AgentResumeParams::new(request), message_rx)
+                        .resume_streamed(AgentResumeParams::new(request), message_rx, run_tasks)
                         .await
                 }
             };
@@ -418,20 +486,30 @@ After receiving tool outputs, continue reasoning and provide the final response.
                     );
                     let talos_error = err.clone().into_talos_error();
                     let _ = tx.send(timeline.fail_turn(&talos_error)).await;
+                    let _ = run_control
+                        .settle(RunTermination::Completed {
+                            timeout: RUN_COMPLETION_TIMEOUT,
+                        })
+                        .await;
                     this.finish_active_turn_and_dispatch_next(&session_id).await;
                     return;
                 }
             };
 
-            let abort_handle = runtime_stream.abort_handle.clone();
             if let Err(err) = this.activate_reserved_turn(
                 &session_id,
                 request_turn_id,
-                abort_handle,
+                run_control.clone(),
                 Some(message_tx),
             ) {
-                runtime_stream.abort_handle.abort();
-                runtime_stream.completion.abort();
+                let _ = run_control
+                    .settle(RunTermination::Cancelled {
+                        policy: CancellationPolicy {
+                            grace: Duration::ZERO,
+                        },
+                    })
+                    .await;
+                let _ = runtime_stream.completion.await;
                 let mut timeline = TimelineBuilder::new(
                     "req_failed".to_string(),
                     title_turn_id.clone(),
@@ -444,16 +522,53 @@ After receiving tool outputs, continue reasoning and provide the final response.
             }
 
             let mut runtime_events = runtime_stream.events;
+            let runtime_completion = runtime_stream.completion;
+            let mut terminal_event = None;
+            let mut terminal_request_id = None;
+            let mut next_sequence = 0;
+            let mut consumer_connected = true;
             while let Some(event) = runtime_events.recv().await {
-                if tx.send(event).await.is_err() {
-                    runtime_stream.abort_handle.abort();
-                    runtime_stream.completion.abort();
-                    this.finish_active_turn_and_dispatch_next(&session_id).await;
-                    return;
+                next_sequence = next_sequence.max(event.sequence.saturating_add(1));
+                if terminal_request_id.is_none() {
+                    terminal_request_id = Some(event.request_id().to_string());
+                }
+                if matches!(
+                    &event.payload,
+                    AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnError(_)
+                ) {
+                    terminal_event = Some(event);
+                    continue;
+                }
+                if consumer_connected && tx.send(event).await.is_err() {
+                    consumer_connected = false;
                 }
             }
 
-            match runtime_stream.completion.await {
+            let completion_result = runtime_completion.await;
+            let settlement = run_control
+                .settle(RunTermination::Completed {
+                    timeout: RUN_COMPLETION_TIMEOUT,
+                })
+                .await;
+            let disposition = run_terminal_disposition(&settlement);
+            let terminal_event = match terminal_event {
+                Some(event) => Some(apply_run_terminal_disposition(event, disposition)),
+                None => terminal_error(disposition).map(|error| {
+                    let mut timeline = TimelineBuilder::new_with_sequence(
+                        terminal_request_id
+                            .unwrap_or_else(|| format!("req_cancel_{}", title_turn_id)),
+                        title_turn_id.clone(),
+                        message_id.clone(),
+                        session_id.clone(),
+                        next_sequence,
+                    );
+                    timeline.fail_turn(&error)
+                }),
+            };
+            if let Some(event) = terminal_event {
+                let _ = tx.send(event).await;
+            }
+            match completion_result {
                 Ok(Ok(result)) => {
                     this.finish_active_turn_and_dispatch_next(&session_id).await;
                     if let Some(title) = this
@@ -588,33 +703,57 @@ impl AgentHarness for AgentHarnessImpl {
         AgentHarnessImpl::has_active_turn(self, session_id)
     }
 
-    async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
+    async fn interrupt(
+        &self,
+        params: AgentInterruptParams,
+    ) -> AgentResult<talos_types::CancelActiveTurnOutcome> {
         self.validate_interrupt_request(&params)?;
-        let Some(handle) = self.active_turns.get(&params.session_id) else {
-            return Err(AgentError::run_not_found(format!(
-                "active turn for session {}",
-                params.session_id
-            )));
-        };
-        if let ActiveTurnHandle::Running {
-            turn_id,
-            execution_task,
-            ..
-        } = handle.value()
-        {
+        let run_control = {
+            let Some(handle) = self.active_turns.get(&params.session_id) else {
+                return Err(AgentError::run_not_found(format!(
+                    "active turn for session {}",
+                    params.session_id
+                )));
+            };
+            let ActiveTurnHandle::Running {
+                turn_id,
+                run_control,
+                ..
+            } = handle.value()
+            else {
+                return Err(AgentError::run_not_found(format!(
+                    "active turn for session {} is not running",
+                    params.session_id
+                )));
+            };
             if turn_id != &params.turn_id {
                 return Err(AgentError::run_not_found(format!(
                     "active turn `{}` for session {}",
                     params.turn_id, params.session_id
                 )));
             }
-            execution_task.abort();
-            return Ok(AgentInterruptResult { interrupted: true });
-        }
-        Err(AgentError::run_not_found(format!(
-            "active turn for session {} is not running",
-            params.session_id
-        )))
+            run_control.clone()
+        };
+        let settlement = run_control
+            .settle(RunTermination::Cancelled {
+                policy: RUN_CANCELLATION_POLICY,
+            })
+            .await;
+        Ok(match (settlement.kind, settlement.cleanup) {
+            (SettlementKind::Cancelled(CancellationMode::Forced), _) => {
+                talos_types::CancelActiveTurnOutcome::ForceAborted
+            }
+            (_, CleanupReport::Unconfirmed { count, .. }) => {
+                talos_types::CancelActiveTurnOutcome::CleanupUnconfirmed { task_count: count }
+            }
+            (SettlementKind::Completed, CleanupReport::Confirmed) => {
+                talos_types::CancelActiveTurnOutcome::Completed
+            }
+            (
+                SettlementKind::Cancelled(CancellationMode::Cooperative),
+                CleanupReport::Confirmed,
+            ) => talos_types::CancelActiveTurnOutcome::Cancelled,
+        })
     }
 
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()> {

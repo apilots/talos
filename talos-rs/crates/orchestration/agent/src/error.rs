@@ -208,6 +208,12 @@ impl AgentError {
             AgentErrorKind::RunFailure(ErrorCode::Timeout) => {
                 TalosError::public(talos_error::ErrorCode::Timeout, self.message)
             }
+            AgentErrorKind::RunFailure(ErrorCode::RunForcedAbort) => {
+                TalosError::public(talos_error::ErrorCode::RunForcedAbort, self.message)
+            }
+            AgentErrorKind::RunFailure(ErrorCode::RunCleanupUnconfirmed) => {
+                TalosError::public(talos_error::ErrorCode::RunCleanupUnconfirmed, self.message)
+            }
             AgentErrorKind::RunFailure(ErrorCode::FileInputRejected)
             | AgentErrorKind::RunFailure(ErrorCode::InvalidRequest)
             | AgentErrorKind::RunFailure(ErrorCode::InvalidRetryRequest)
@@ -303,6 +309,9 @@ impl From<TalosError> for AgentError {
             | ErrorCode::SymlinkNotSupported
             | ErrorCode::NotDirectory
             | ErrorCode::InvalidName => Self::invalid_execution_context(message),
+            ErrorCode::RunForcedAbort | ErrorCode::RunCleanupUnconfirmed => {
+                Self::new(AgentErrorKind::RunFailure(code), message)
+            }
             ErrorCode::SessionBudgetExceeded
             | ErrorCode::UsageLimitExceeded
             | ErrorCode::InternalError => {

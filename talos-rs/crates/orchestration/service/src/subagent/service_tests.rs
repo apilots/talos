@@ -236,7 +236,7 @@ impl SessionRuntime for RecordingSessionRuntime {
     async fn cancel_active_turn(
         &self,
         params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.cancellations.lock().unwrap().push((
             params.session.context.session_id,
             params.turn_id,
@@ -245,7 +245,7 @@ impl SessionRuntime for RecordingSessionRuntime {
                 DispatchBinding::Exact { agent_id } => Some(agent_id),
             },
         ));
-        Ok(())
+        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 }
 

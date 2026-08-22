@@ -3,8 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_agent::{
     AgentCapabilities, AgentDescriptor, AgentInputParams, AgentInputResult, AgentInterruptParams,
-    AgentInterruptResult, AgentKind, AgentResult, AgentResumeParams, AgentRunParams,
-    AgentRunResult, AgentStatus,
+    AgentKind, AgentResult, AgentResumeParams, AgentRunParams, AgentRunResult, AgentStatus,
 };
 use talos_error::TalosResult;
 use talos_types::agent_dispatch::{
@@ -246,9 +245,12 @@ impl AgentHarness for RecordingStreamAgent {
         false
     }
 
-    async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
+    async fn interrupt(
+        &self,
+        params: AgentInterruptParams,
+    ) -> AgentResult<talos_types::CancelActiveTurnOutcome> {
         self.interrupt_requests.lock().unwrap().push(params);
-        Ok(AgentInterruptResult { interrupted: true })
+        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {

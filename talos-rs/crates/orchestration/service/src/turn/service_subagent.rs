@@ -38,6 +38,7 @@ impl TurnService {
                 turn_id,
             })
             .await
+            .map(|_| ())
     }
 
     pub(crate) async fn submit_subagent_message(

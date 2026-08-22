@@ -4,6 +4,44 @@ use crate::{
     KernelTranscriptEventKind, KernelTranscriptPayload, KernelTranscriptService,
 };
 
+pub(crate) async fn stage_session_state_update(
+    ctx: &mut InvocationContext,
+    session_id: &str,
+    invocation_id: &str,
+    branch: ExecutionBranch,
+    key: &str,
+    value: serde_json::Value,
+) -> TalosResult<()> {
+    let mut event = KernelTranscriptEvent::new(
+        session_id.to_string(),
+        invocation_id.to_string(),
+        branch,
+        EventAuthor::System,
+        KernelTranscriptEventKind::Planning,
+        KernelTranscriptPayload::StateOnly,
+    );
+    event.actions.state_delta.push(crate::StateDelta {
+        namespace: crate::StateNamespace::Session,
+        key: key.to_string(),
+        value,
+    });
+    if let Some(transcript_service) = ctx.transcript_service.clone() {
+        transcript_service
+            .append_event(&mut ctx.session, event)
+            .await?;
+    } else {
+        stage_kernel_transcript_event(ctx, event);
+    }
+    Ok(())
+}
+
+fn stage_kernel_transcript_event(ctx: &mut InvocationContext, event: KernelTranscriptEvent) {
+    for delta in &event.actions.state_delta {
+        ctx.session.state.apply_delta(delta);
+    }
+    ctx.session.events.push(event);
+}
+
 pub async fn persist_general_turn_artifacts(
     prepared: &PreparedGeneralTurn,
     input: &UserInput,

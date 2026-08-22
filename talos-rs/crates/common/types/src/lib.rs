@@ -25,6 +25,7 @@ pub mod skills;
 pub mod subagent;
 pub mod talos;
 mod talos_content_display;
+mod talos_event;
 pub mod turn_api;
 pub mod user_action;
 

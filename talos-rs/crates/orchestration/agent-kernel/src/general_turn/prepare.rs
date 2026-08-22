@@ -1,9 +1,6 @@
 use super::prepare_compaction::*;
 use super::*;
-use crate::{
-    EventAuthor, ExecutionBranch, KernelTranscriptEvent, KernelTranscriptEventKind,
-    KernelTranscriptPayload,
-};
+use crate::ExecutionBranch;
 use serde::de::DeserializeOwned;
 use talos_config::SkillsRuntimeConfig;
 use talos_prompt::{DynamicTrimPolicy, PromptSectionKind};
@@ -539,44 +536,7 @@ fn filter_prompt_warnings(
     (filtered, changed.then_some(warning_state))
 }
 
-pub(crate) async fn stage_session_state_update(
-    ctx: &mut InvocationContext,
-    session_id: &str,
-    invocation_id: &str,
-    branch: ExecutionBranch,
-    key: &str,
-    value: serde_json::Value,
-) -> TalosResult<()> {
-    let mut event = KernelTranscriptEvent::new(
-        session_id.to_string(),
-        invocation_id.to_string(),
-        branch,
-        EventAuthor::System,
-        KernelTranscriptEventKind::Planning,
-        KernelTranscriptPayload::StateOnly,
-    );
-    event.actions.state_delta.push(crate::StateDelta {
-        namespace: crate::StateNamespace::Session,
-        key: key.to_string(),
-        value,
-    });
-    if let Some(transcript_service) = ctx.transcript_service.clone() {
-        transcript_service
-            .append_event(&mut ctx.session, event)
-            .await?;
-    } else {
-        stage_kernel_transcript_event(ctx, event);
-    }
-    Ok(())
-}
-
-fn stage_kernel_transcript_event(ctx: &mut InvocationContext, event: KernelTranscriptEvent) {
-    for delta in &event.actions.state_delta {
-        ctx.session.state.apply_delta(delta);
-    }
-    ctx.session.events.push(event);
-}
-
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare_general_turn(
     ctx: &mut InvocationContext,
     agent_name: &str,
@@ -587,6 +547,7 @@ pub async fn prepare_general_turn(
     memory_writer: Arc<dyn MemoryWriter>,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
+    run_tasks: talos_run_control::RunTaskGroup,
 ) -> TalosResult<PreparedGeneralTurn> {
     let session_id = ctx.session_id.clone();
     let message_id = ctx.message_id.clone();
@@ -959,5 +920,6 @@ pub async fn prepare_general_turn(
         prompt_warning_state,
         stream_tx,
         message_rx: None,
+        run_tasks,
     })
 }

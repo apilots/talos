@@ -9,7 +9,7 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
         ..TokenUsage::default()
     };
     let runtime = Arc::new(TestSessionRuntime {
-        cancel_mode: TestCancelMode::Ok,
+        cancel_mode: TestCancelMode::Cancelled,
         cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         compaction_usage,
     });
@@ -131,7 +131,7 @@ async fn explicit_compaction_persists_the_existing_timeline_events() {
 #[tokio::test]
 async fn explicit_compaction_records_terminal_after_an_intermediate_event_failure() {
     let runtime = Arc::new(TestSessionRuntime {
-        cancel_mode: TestCancelMode::Ok,
+        cancel_mode: TestCancelMode::Cancelled,
         cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
         compaction_usage: TokenUsage::default(),
     });

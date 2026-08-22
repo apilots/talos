@@ -1,14 +1,15 @@
 use std::collections::HashMap;
+use std::future::Future;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{
     CallToolRequest, CallToolRequestParams, ClientCapabilities, ClientInfo, ClientRequest,
-    Implementation, PaginatedRequestParams, ProtocolVersion, ReadResourceRequestParams,
-    ServerResult,
+    Implementation, PaginatedRequestParams, ProtocolVersion, ReadResourceRequest,
+    ReadResourceRequestParams, ServerResult,
 };
-use rmcp::service::{RunningService, ServiceError};
+use rmcp::service::{RequestHandle, RunningService, ServiceError};
 use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientHandler, RoleClient};
@@ -77,7 +78,11 @@ impl TalosMcpRuntime {
             .collect()
     }
 
-    pub async fn call_tool(&self, request: McpCallToolRequest) -> TalosResult<McpCallToolResponse> {
+    pub async fn call_tool(
+        &self,
+        request: McpCallToolRequest,
+        cancellation: impl Future<Output = ()> + Send,
+    ) -> TalosResult<McpCallToolResponse> {
         let servers = self.servers.read().await;
         let server = servers.get(&request.server_name).ok_or_else(|| {
             TalosError::public(
@@ -85,12 +90,13 @@ impl TalosMcpRuntime {
                 format!("MCP server `{}` not connected", request.server_name),
             )
         })?;
-        server.call_tool(request).await
+        server.call_tool(request, cancellation).await
     }
 
     pub async fn read_resource(
         &self,
         request: McpReadResourceRequest,
+        cancellation: impl Future<Output = ()> + Send,
     ) -> TalosResult<McpReadResourceResponse> {
         let servers = self.servers.read().await;
         let server = servers.get(&request.server_name).ok_or_else(|| {
@@ -99,7 +105,7 @@ impl TalosMcpRuntime {
                 format!("MCP server `{}` not connected", request.server_name),
             )
         })?;
-        server.read_resource(request).await
+        server.read_resource(request, cancellation).await
     }
 
     pub async fn shutdown(&self) {
@@ -188,7 +194,11 @@ impl ManagedMcpServer {
         }
     }
 
-    async fn call_tool(&self, request: McpCallToolRequest) -> TalosResult<McpCallToolResponse> {
+    async fn call_tool(
+        &self,
+        request: McpCallToolRequest,
+        cancellation: impl Future<Output = ()> + Send,
+    ) -> TalosResult<McpCallToolResponse> {
         let Self::Ready { service, .. } = self else {
             return Err(TalosError::public(
                 talos_error::ErrorCode::ToolExecutionFailed,
@@ -207,26 +217,21 @@ impl ManagedMcpServer {
         };
         let mut params = CallToolRequestParams::new(request.tool_name);
         params.arguments = arguments;
-        let options = rmcp::service::PeerRequestOptions::no_options();
-        let response = time::timeout(DEFAULT_TOOL_TIMEOUT, async {
-            service
-                .peer()
-                .send_request_with_option(
-                    ClientRequest::CallToolRequest(CallToolRequest::new(params)),
-                    options,
-                )
-                .await?
-                .await_response()
-                .await
-        })
-        .await
-        .map_err(|_| {
-            TalosError::public(
-                talos_error::ErrorCode::ToolExecutionFailed,
-                "MCP tools/call timed out".to_string(),
+        let handle = service
+            .peer()
+            .send_request_with_option(
+                ClientRequest::CallToolRequest(CallToolRequest::new(params)),
+                rmcp::service::PeerRequestOptions::no_options(),
             )
-        })?
-        .map_err(map_service_error)?;
+            .await
+            .map_err(map_service_error)?;
+        let response = await_request(
+            handle,
+            cancellation,
+            DEFAULT_TOOL_TIMEOUT,
+            "MCP tools/call timed out",
+        )
+        .await?;
         match response {
             ServerResult::CallToolResult(result) => Ok(map_call_tool_result(result)),
             _ => Err(TalosError::public(
@@ -239,6 +244,7 @@ impl ManagedMcpServer {
     async fn read_resource(
         &self,
         request: McpReadResourceRequest,
+        cancellation: impl Future<Output = ()> + Send,
     ) -> TalosResult<McpReadResourceResponse> {
         let Self::Ready { service, .. } = self else {
             return Err(TalosError::public(
@@ -246,16 +252,32 @@ impl ManagedMcpServer {
                 format!("MCP server `{}` is not ready", request.server_name),
             ));
         };
-        let params = ReadResourceRequestParams::new(request.uri);
-        let result = time::timeout(DEFAULT_TOOL_TIMEOUT, service.read_resource(params))
+        let handle = service
+            .peer()
+            .send_request_with_option(
+                ClientRequest::ReadResourceRequest(ReadResourceRequest::new(
+                    ReadResourceRequestParams::new(request.uri),
+                )),
+                rmcp::service::PeerRequestOptions::no_options(),
+            )
             .await
-            .map_err(|_| {
-                TalosError::public(
-                    talos_error::ErrorCode::ToolExecutionFailed,
-                    "MCP resources/read timed out".to_string(),
-                )
-            })?
             .map_err(map_service_error)?;
+        let result = match await_request(
+            handle,
+            cancellation,
+            DEFAULT_TOOL_TIMEOUT,
+            "MCP resources/read timed out",
+        )
+        .await?
+        {
+            ServerResult::ReadResourceResult(result) => result,
+            _ => {
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::ToolExecutionFailed,
+                    "MCP resources/read returned unexpected response",
+                ));
+            }
+        };
         Ok(McpReadResourceResponse {
             contents: result
                 .contents
@@ -268,6 +290,48 @@ impl ManagedMcpServer {
     async fn shutdown(self) {
         if let Self::Ready { service, .. } = self {
             service.cancellation_token().cancel();
+        }
+    }
+}
+
+async fn await_request(
+    mut handle: RequestHandle<RoleClient>,
+    cancellation: impl Future<Output = ()> + Send,
+    timeout: Duration,
+    timeout_message: &'static str,
+) -> TalosResult<ServerResult> {
+    tokio::pin!(cancellation);
+    let deadline = time::sleep(timeout);
+    tokio::pin!(deadline);
+    tokio::select! {
+        response = &mut handle.rx => response
+            .map_err(|_| map_service_error(ServiceError::TransportClosed))?
+            .map_err(map_service_error),
+        () = &mut cancellation => {
+            handle
+                .cancel(Some("Run cancellation requested".to_string()))
+                .await
+                .map_err(|error| TalosError::public(
+                    talos_error::ErrorCode::RunCleanupUnconfirmed,
+                    format!("MCP request cancellation could not be sent: {error}"),
+                ))?;
+            Err(TalosError::public(
+                talos_error::ErrorCode::Cancelled,
+                "MCP request cancellation requested",
+            ))
+        }
+        () = &mut deadline => {
+            handle
+                .cancel(Some(timeout_message.to_string()))
+                .await
+                .map_err(|error| TalosError::public(
+                    talos_error::ErrorCode::RunCleanupUnconfirmed,
+                    format!("MCP timed-out request cancellation could not be sent: {error}"),
+                ))?;
+            Err(TalosError::public(
+                talos_error::ErrorCode::ToolExecutionFailed,
+                timeout_message,
+            ))
         }
     }
 }

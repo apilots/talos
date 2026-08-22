@@ -20,8 +20,14 @@ vi.hoisted(() => {
 });
 
 const mocks = vi.hoisted(() => ({
+  cancelActiveTurn: vi.fn(),
   eventMessage: vi.fn(),
   invalidateSessionQueries: vi.fn(),
+}));
+
+vi.mock("../api", () => ({
+  cancelActiveTurn: mocks.cancelActiveTurn,
+  isActiveTurnRunningError: () => false,
 }));
 
 vi.mock("./useSessionMessageStream", () => ({
@@ -43,6 +49,7 @@ describe("useSessionStreaming", () => {
   beforeEach(() => {
     useAppStore.setState({ streams: {}, transientStatuses: {} });
     mocks.eventMessage.mockReset();
+    mocks.cancelActiveTurn.mockReset().mockResolvedValue(undefined);
     mocks.invalidateSessionQueries.mockReset().mockResolvedValue(undefined);
   });
 
@@ -68,5 +75,24 @@ describe("useSessionStreaming", () => {
       pendingInput: undefined,
     });
     expect(useAppStore.getState().transientStatuses["session-1"]).toBe("error");
+  });
+
+  it("keeps cancelling while the terminal refresh is pending", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(QueryClientProvider, { client: queryClient }, children);
+    const { result } = renderHook(() => useSessionStreaming("session-1"), { wrapper });
+
+    await act(async () => {
+      await result.current.stopResponse("turn-1");
+    });
+
+    expect(useAppStore.getState().streams["session-1"]).toMatchObject({
+      connectionState: "cancelling",
+      isStreaming: true,
+    });
+    expect(mocks.invalidateSessionQueries).toHaveBeenCalledOnce();
   });
 });

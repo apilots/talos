@@ -1,8 +1,7 @@
 use super::request::AgentKernelParams;
 use crate::{
     service::{
-        AgentInputParams, AgentInputResult, AgentInterruptParams, AgentInterruptResult,
-        AgentRunParams, AgentRunResult,
+        AgentInputParams, AgentInputResult, AgentInterruptParams, AgentRunParams, AgentRunResult,
     },
     AgentCapabilities, AgentDescriptor, AgentHarness, AgentKind, AgentResult, AgentStatus,
 };
@@ -153,8 +152,11 @@ impl AgentHarness for MockAgent {
         false
     }
 
-    async fn interrupt(&self, _params: AgentInterruptParams) -> AgentResult<AgentInterruptResult> {
-        Ok(AgentInterruptResult { interrupted: false })
+    async fn interrupt(
+        &self,
+        _params: AgentInterruptParams,
+    ) -> AgentResult<talos_types::CancelActiveTurnOutcome> {
+        Ok(talos_types::CancelActiveTurnOutcome::Completed)
     }
 
     async fn drain_active_turns(&self, _timeout: Duration) -> TalosResult<()> {

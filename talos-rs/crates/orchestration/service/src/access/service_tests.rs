@@ -281,7 +281,7 @@ impl SessionRuntime for NoopSessionRuntime {
     async fn cancel_active_turn(
         &self,
         _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         unreachable!("not used in this test")
     }
 }

@@ -54,7 +54,8 @@ struct TestSessionRuntime {
 
 #[derive(Clone, Copy)]
 enum TestCancelMode {
-    Ok,
+    Cancelled,
+    CleanupUnconfirmed,
     MissingRuntimeTurn,
     Rejected,
 }
@@ -277,10 +278,13 @@ impl SessionRuntime for TestSessionRuntime {
     async fn cancel_active_turn(
         &self,
         params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.cancelled_turn_ids.lock().unwrap().push(params.turn_id);
         match self.cancel_mode {
-            TestCancelMode::Ok => Ok(()),
+            TestCancelMode::Cancelled => Ok(talos_types::CancelActiveTurnOutcome::Cancelled),
+            TestCancelMode::CleanupUnconfirmed => {
+                Ok(talos_types::CancelActiveTurnOutcome::CleanupUnconfirmed { task_count: 1 })
+            }
             TestCancelMode::MissingRuntimeTurn => Err(TalosError::public(
                 talos_error::ErrorCode::ResourceNotFound,
                 "active turn for session session-interrupt-runtime-missing".to_string(),
@@ -333,7 +337,7 @@ async fn test_application(
     test_application_with_runtime(
         turn_executor,
         Arc::new(TestSessionRuntime {
-            cancel_mode: TestCancelMode::Ok,
+            cancel_mode: TestCancelMode::Cancelled,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
         }),

@@ -121,6 +121,8 @@ pub struct PreparedGeneralTurn {
     pub prompt_warning_state: Option<PromptWarningState>,
     pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
     pub message_rx: Option<Arc<std::sync::Mutex<mpsc::Receiver<crate::ActiveTurnInputDelivery>>>>,
+    /// Harness-owned Run capabilities propagated to Tool execution.
+    pub run_tasks: talos_run_control::RunTaskGroup,
 }
 
 #[derive(Debug, Clone)]

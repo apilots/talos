@@ -3,16 +3,14 @@ use std::future::Future;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use self::outcome::{
-    agent_run_result_from_general_turn_result, outcome_metrics, outcome_stop_reason, outcome_usage,
-    seed_resume_context,
+    agent_run_result_from_general_turn_result, map_run_task_spawn_error, outcome_metrics,
+    outcome_stop_reason, outcome_usage, seed_resume_context,
 };
 use self::resume::build_general_turn_resume;
 use super::kernel;
-use super::lifecycle::AgentRuntimeAbortHandle;
 use super::request::{agent_run_params_to_kernel_params, AgentKernelParams};
 use super::runtime_compaction::emit_context_compaction_timeline_events;
 use crate::session_artifacts::SessionStoreKernelTranscriptService;
@@ -34,6 +32,7 @@ use talos_config::{
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
 use talos_memory::MemoryWriter;
+use talos_run_control::{RunTask, RunTaskCompletion, RunTaskGroup};
 use talos_store::session::{SessionArtifactStore, SessionStore};
 
 use talos_tools::ToolRegistry;
@@ -67,6 +66,7 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
         &self,
         params: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Execute a backend run and stream standardized Agent events.
@@ -74,6 +74,7 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
         &self,
         params: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 
     /// Continue a non-streaming backend run using same-turn Agent parameters.
@@ -81,6 +82,7 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
         &self,
         params: AgentResumeParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> impl Future<Output = AgentResult<AgentRunResult>> + Send;
 
     /// Continue a backend run and stream standardized same-turn Agent events.
@@ -88,6 +90,7 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
         &self,
         params: AgentResumeParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> impl Future<Output = AgentResult<AgentRuntimeStream>> + Send;
 }
 
@@ -98,10 +101,8 @@ pub(crate) trait AgentRuntime: Clone + Send + Sync + 'static {
 pub(crate) struct AgentRuntimeStream {
     /// Standardized Agent events emitted by the runtime.
     pub(crate) events: mpsc::Receiver<AgentEvent>,
-    /// Harness-owned abort handle for interrupting the backend task.
-    pub(crate) abort_handle: AgentRuntimeAbortHandle,
-    /// Completion task that resolves to the final AgentRunResult.
-    pub(crate) completion: JoinHandle<AgentResult<AgentRunResult>>,
+    /// Group-owned Runtime task that resolves to the final AgentRunResult.
+    pub(crate) completion: RunTask<AgentResult<AgentRunResult>>,
 }
 
 /// Built-in Talos runtime implementation for AgentRuntime.
@@ -295,6 +296,7 @@ impl KernelAgent {
         &self,
         request: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRunResult> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
@@ -339,6 +341,7 @@ impl KernelAgent {
             resume,
             Some(skill_options),
             Some(message_rx),
+            run_tasks,
         )
         .await?;
 
@@ -354,6 +357,7 @@ impl KernelAgent {
         &self,
         request: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRuntimeStream> {
         let turn_id = request.turn_id().to_string();
         let resume_context = request.resume_context.clone();
@@ -374,182 +378,236 @@ impl KernelAgent {
 
         let (tx, rx) = mpsc::channel(256);
         let this = self.clone();
-        let abort_handle = AgentRuntimeAbortHandle::inner_only();
-        let task_abort_handle = abort_handle.clone();
-        let task: JoinHandle<AgentResult<AgentRunResult>> = tokio::spawn(async move {
-            let llm_provider = match this.llm_provider_for_run(&agent_request.config) {
-                Ok(llm_provider) => llm_provider,
-                Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    return Err(err.into());
-                }
-            };
-            let kernel_config = match this.kernel_config_for_run(
-                &agent_request.context,
-                agent_request.config.user_permission_mode,
-            ) {
-                Ok(value) => value,
-                Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    return Err(err.into());
-                }
-            };
-            let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
-            let kernel_ctx = match this
-                .build_invocation_context(
-                    &agent_request,
-                    input.clone(),
-                    invocation_id,
-                    Some(kernel_tx),
-                    &kernel_config,
-                )
-                .await
-            {
-                Ok(context) => context,
-                Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    return Err(err.into());
-                }
-            };
-            let resume = match build_general_turn_resume(
-                this.session_artifact_store.as_ref(),
-                std::path::Path::new(&kernel_config.workspace_dir),
-                &session_id,
-                &turn_id,
-                resume_context.clone(),
-            )
-            .await
-            {
-                Ok(resume) => resume,
-                Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    return Err(err.into());
-                }
-            };
-
-            let _ = tx.send(timeline.start_turn()).await;
-            if resume.is_none() {
-                let _ = tx
-                    .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
-                    .await;
-            }
-            if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
-                match active_turn_input::emit_user_input_item(&mut timeline, &input) {
-                    Ok(events) => {
-                        for event in events {
-                            let _ = tx.send(event).await;
-                        }
-                    }
-                    Err(err) => {
-                        let _ = tx.send(timeline.fail_turn(&err)).await;
-                        return Err(err.into());
-                    }
-                }
-            }
-
-            let skill_options = match this.build_skill_options(&agent_request.input, &kernel_config)
-            {
-                Ok(skill_options) => skill_options,
-                Err(err) => {
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    return Err(err.into());
-                }
-            };
-
-            let mut context = kernel_ctx;
-            let run_handle = tokio::spawn({
-                let this = this.clone();
-                let input = input.clone();
-                async move {
-                    run_general_turn_with_resume(
-                        &mut context,
-                        &this.name,
-                        &this.description,
-                        &input.text,
-                        llm_provider,
-                        this.tool_registry.clone(),
-                        this.tool_registry.clone(),
-                        this.memory_writer.clone(),
-                        &kernel_config,
-                        resume,
-                        Some(skill_options),
-                        Some(message_rx),
-                    )
-                    .await
-                }
-            });
-            let run_abort_handle = run_handle.abort_handle();
-            task_abort_handle.attach_inner(run_abort_handle.clone());
-            if task_abort_handle.is_cancelled() {
-                run_abort_handle.abort();
-            }
-
-            tokio::pin!(run_handle);
-            let run_result = loop {
-                tokio::select! {
-                    kernel_event = kernel_rx.recv() => {
-                        let Some(kernel_event) = kernel_event else {
-                            break (&mut run_handle).await;
-                        };
-                        if let Err(err) = forward_kernel_event(
-                            &mut timeline,
-                            &mut timeline_state,
-                            &tx,
-                            kernel_event,
-                        )
-                        .await
-                        {
-                            run_abort_handle.abort();
-                            return Err(err.into());
-                        }
-                    }
-                    result = &mut run_handle => break result,
-                }
-            };
-
-            while let Ok(kernel_event) = kernel_rx.try_recv() {
-                forward_kernel_event(&mut timeline, &mut timeline_state, &tx, kernel_event)
-                    .await
-                    .map_err(AgentError::from)?;
-            }
-
-            match run_result {
-                Ok(Ok(result)) => {
-                    if let Err(err) = context_usage::persist_context_usage(
-                        this.session_store.as_ref(),
-                        &session_id,
-                        &result,
-                    )
-                    .await
-                    {
-                        let _ = tx.send(timeline.fail_turn(&err)).await;
-                        return Err(err.into());
-                    }
-                    match emit_missing_tool_items_from_result(
-                        &mut timeline,
-                        &mut timeline_state,
-                        &result.output_items,
-                    ) {
-                        Ok(events) => {
-                            for event in events {
-                                let _ = tx.send(event).await;
-                            }
-                        }
+        let task_group = run_tasks.clone();
+        let task = task_group
+            .spawn(move |cancellation| async move {
+                let output = async move {
+                    let llm_provider = match this.llm_provider_for_run(&agent_request.config) {
+                        Ok(llm_provider) => llm_provider,
                         Err(err) => {
                             let _ = tx.send(timeline.fail_turn(&err)).await;
                             return Err(err.into());
                         }
-                    }
-                    if matches!(
-                        result.outcome,
-                        talos_agent_kernel::GeneralTurnOutcome::Completed { .. }
+                    };
+                    let kernel_config = match this.kernel_config_for_run(
+                        &agent_request.context,
+                        agent_request.config.user_permission_mode,
                     ) {
-                        let active_tool_item_ids = timeline.active_tool_item_ids();
-                        if !active_tool_item_ids.is_empty() {
-                            let err = TalosError::internal(format!(
-                                "completed turn has active tool items: {}",
-                                active_tool_item_ids.join(", ")
-                            ));
+                        Ok(value) => value,
+                        Err(err) => {
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
+                            return Err(err.into());
+                        }
+                    };
+                    let (kernel_tx, mut kernel_rx) = mpsc::channel(256);
+                    let kernel_ctx = match this
+                        .build_invocation_context(
+                            &agent_request,
+                            input.clone(),
+                            invocation_id,
+                            Some(kernel_tx),
+                            &kernel_config,
+                        )
+                        .await
+                    {
+                        Ok(context) => context,
+                        Err(err) => {
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
+                            return Err(err.into());
+                        }
+                    };
+                    let resume = match build_general_turn_resume(
+                        this.session_artifact_store.as_ref(),
+                        std::path::Path::new(&kernel_config.workspace_dir),
+                        &session_id,
+                        &turn_id,
+                        resume_context.clone(),
+                    )
+                    .await
+                    {
+                        Ok(resume) => resume,
+                        Err(err) => {
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
+                            return Err(err.into());
+                        }
+                    };
+
+                    let _ = tx.send(timeline.start_turn()).await;
+                    if resume.is_none() {
+                        let _ = tx
+                            .send(timeline.turn_metrics(TurnExecutionMetrics::default()))
+                            .await;
+                    }
+                    if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
+                        match active_turn_input::emit_user_input_item(&mut timeline, &input) {
+                            Ok(events) => {
+                                for event in events {
+                                    let _ = tx.send(event).await;
+                                }
+                            }
+                            Err(err) => {
+                                let _ = tx.send(timeline.fail_turn(&err)).await;
+                                return Err(err.into());
+                            }
+                        }
+                    }
+
+                    let skill_options =
+                        match this.build_skill_options(&agent_request.input, &kernel_config) {
+                            Ok(skill_options) => skill_options,
+                            Err(err) => {
+                                let _ = tx.send(timeline.fail_turn(&err)).await;
+                                return Err(err.into());
+                            }
+                        };
+
+                    let mut context = kernel_ctx;
+                    let run_handle = {
+                        let this = this.clone();
+                        let input = input.clone();
+                        async move {
+                            tokio::select! {
+                                result = run_general_turn_with_resume(
+                                    &mut context,
+                                    &this.name,
+                                    &this.description,
+                                    &input.text,
+                                    llm_provider,
+                                    this.tool_registry.clone(),
+                                    this.tool_registry.clone(),
+                                    this.memory_writer.clone(),
+                                    &kernel_config,
+                                    resume,
+                                    Some(skill_options),
+                                    Some(message_rx),
+                                    run_tasks.clone(),
+                                ) => result,
+                                () = cancellation.requested() => Err(TalosError::public(
+                                    ErrorCode::Cancelled,
+                                    "agent runtime cancellation requested",
+                                )),
+                            }
+                        }
+                    };
+
+                    tokio::pin!(run_handle);
+                    let run_result = loop {
+                        tokio::select! {
+                            kernel_event = kernel_rx.recv() => {
+                                let Some(kernel_event) = kernel_event else {
+                                    break (&mut run_handle).await;
+                                };
+                                if let Err(err) = forward_kernel_event(
+                                    &mut timeline,
+                                    &mut timeline_state,
+                                    &tx,
+                                    kernel_event,
+                                )
+                                .await
+                                {
+                                    return Err(err.into());
+                                }
+                            }
+                            result = &mut run_handle => break result,
+                        }
+                    };
+
+                    while let Ok(kernel_event) = kernel_rx.try_recv() {
+                        forward_kernel_event(&mut timeline, &mut timeline_state, &tx, kernel_event)
+                            .await
+                            .map_err(AgentError::from)?;
+                    }
+
+                    match run_result {
+                        Ok(result) => {
+                            if let Err(err) = context_usage::persist_context_usage(
+                                this.session_store.as_ref(),
+                                &session_id,
+                                &result,
+                            )
+                            .await
+                            {
+                                let _ = tx.send(timeline.fail_turn(&err)).await;
+                                return Err(err.into());
+                            }
+                            match emit_missing_tool_items_from_result(
+                                &mut timeline,
+                                &mut timeline_state,
+                                &result.output_items,
+                            ) {
+                                Ok(events) => {
+                                    for event in events {
+                                        let _ = tx.send(event).await;
+                                    }
+                                }
+                                Err(err) => {
+                                    let _ = tx.send(timeline.fail_turn(&err)).await;
+                                    return Err(err.into());
+                                }
+                            }
+                            if matches!(
+                                result.outcome,
+                                talos_agent_kernel::GeneralTurnOutcome::Completed { .. }
+                            ) {
+                                let active_tool_item_ids = timeline.active_tool_item_ids();
+                                if !active_tool_item_ids.is_empty() {
+                                    let err = TalosError::internal(format!(
+                                        "completed turn has active tool items: {}",
+                                        active_tool_item_ids.join(", ")
+                                    ));
+                                    emit_terminal_item_closures(
+                                        &mut timeline,
+                                        &tx,
+                                        TalosTimelineItemStatus::Failed,
+                                    )
+                                    .await;
+                                    let _ = tx.send(timeline.fail_turn(&err)).await;
+                                    return Err(err.into());
+                                }
+                                emit_success_item_closures(&mut timeline, &tx).await;
+                            }
+                            let _ = tx
+                                .send(timeline.turn_metrics(outcome_metrics(&result.outcome)))
+                                .await;
+                            let _ = tx
+                                .send(timeline.complete_turn(
+                                    kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
+                                    outcome_usage(&result.outcome),
+                                    Some(outcome_metrics(&result.outcome)),
+                                    Some(result.artifact_seq),
+                                ))
+                                .await;
+                            Ok(agent_run_result_from_general_turn_result(
+                                &result, session_id,
+                            ))
+                        }
+                        Err(err) if err.is_code(ErrorCode::Cancelled) => {
+                            emit_terminal_item_closures(
+                                &mut timeline,
+                                &tx,
+                                TalosTimelineItemStatus::Cancelled,
+                            )
+                            .await;
+                            let _ = tx
+                                .send(timeline.complete_turn(
+                                    TalosStopReason::Cancelled,
+                                    TokenUsage::default(),
+                                    None,
+                                    None,
+                                ))
+                                .await;
+                            Ok(AgentRunResult {
+                                output_text: String::new(),
+                                output_items: Vec::new(),
+                                reasoning: Default::default(),
+                                stop_reason: TalosStopReason::Cancelled,
+                                usage: TokenUsage::default(),
+                                task_count: 0,
+                                session_id,
+                                generated_session_title: None,
+                            })
+                        }
+                        Err(err) => {
                             emit_terminal_item_closures(
                                 &mut timeline,
                                 &tx,
@@ -557,82 +615,17 @@ impl KernelAgent {
                             )
                             .await;
                             let _ = tx.send(timeline.fail_turn(&err)).await;
-                            return Err(err.into());
+                            Err(err.into())
                         }
-                        emit_success_item_closures(&mut timeline, &tx).await;
                     }
-                    let _ = tx
-                        .send(timeline.turn_metrics(outcome_metrics(&result.outcome)))
-                        .await;
-                    let _ = tx
-                        .send(timeline.complete_turn(
-                            kernel::map_stop_reason(outcome_stop_reason(&result.outcome)),
-                            outcome_usage(&result.outcome),
-                            Some(outcome_metrics(&result.outcome)),
-                            Some(result.artifact_seq),
-                        ))
-                        .await;
-                    Ok(agent_run_result_from_general_turn_result(
-                        &result, session_id,
-                    ))
                 }
-                Err(err) if err.is_cancelled() => {
-                    emit_terminal_item_closures(
-                        &mut timeline,
-                        &tx,
-                        TalosTimelineItemStatus::Cancelled,
-                    )
-                    .await;
-                    let _ = tx
-                        .send(timeline.complete_turn(
-                            TalosStopReason::Cancelled,
-                            TokenUsage::default(),
-                            None,
-                            None,
-                        ))
-                        .await;
-                    Ok(AgentRunResult {
-                        output_text: String::new(),
-                        output_items: Vec::new(),
-                        reasoning: Default::default(),
-                        stop_reason: TalosStopReason::Cancelled,
-                        usage: TokenUsage::default(),
-                        task_count: 0,
-                        session_id,
-                        generated_session_title: None,
-                    })
-                }
-                Ok(Err(err)) => {
-                    emit_terminal_item_closures(
-                        &mut timeline,
-                        &tx,
-                        TalosTimelineItemStatus::Failed,
-                    )
-                    .await;
-                    let _ = tx.send(timeline.fail_turn(&err)).await;
-                    Err(err.into())
-                }
-                Err(err) => {
-                    emit_terminal_item_closures(
-                        &mut timeline,
-                        &tx,
-                        TalosTimelineItemStatus::Failed,
-                    )
-                    .await;
-                    let error = AgentError::runtime_error(format!(
-                        "kernel stream task join failed: {}",
-                        err
-                    ));
-                    let talos_error = error.clone().into_talos_error();
-                    let _ = tx.send(timeline.fail_turn(&talos_error)).await;
-                    Err(error)
-                }
-            }
-        });
+                .await;
+                RunTaskCompletion::Confirmed(output)
+            })
+            .map_err(map_run_task_spawn_error)?;
 
         Ok(AgentRuntimeStream {
             events: rx,
-            abort_handle,
             completion: task,
         })
     }
@@ -1321,31 +1314,37 @@ impl AgentRuntime for KernelAgent {
         &self,
         params: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRunResult> {
-        self.execute_unary_run(params, message_rx).await
+        self.execute_unary_run(params, message_rx, run_tasks).await
     }
 
     async fn run_streamed(
         &self,
         params: AgentRunParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRuntimeStream> {
-        self.start_streamed_run(params, message_rx).await
+        self.start_streamed_run(params, message_rx, run_tasks).await
     }
 
     async fn resume(
         &self,
         params: AgentResumeParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRunResult> {
-        self.execute_unary_run(params.run, message_rx).await
+        self.execute_unary_run(params.run, message_rx, run_tasks)
+            .await
     }
 
     async fn resume_streamed(
         &self,
         params: AgentResumeParams,
         message_rx: mpsc::Receiver<talos_agent_kernel::ActiveTurnInputDelivery>,
+        run_tasks: RunTaskGroup,
     ) -> AgentResult<AgentRuntimeStream> {
-        self.start_streamed_run(params.run, message_rx).await
+        self.start_streamed_run(params.run, message_rx, run_tasks)
+            .await
     }
 }

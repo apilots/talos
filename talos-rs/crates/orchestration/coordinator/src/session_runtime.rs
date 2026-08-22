@@ -2,7 +2,7 @@ use async_trait::async_trait;
 pub use talos_agent::{AgentSessionCompactionIdentity, AgentSessionCompactionParams};
 use talos_error::TalosResult;
 use talos_types::talos::{TalosContext, TokenUsage};
-use talos_types::{CancelActiveTurnParams, TalosSession};
+use talos_types::{CancelActiveTurnOutcome, CancelActiveTurnParams, TalosSession};
 
 /// Coordinator-owned session lifecycle facade.
 ///
@@ -36,7 +36,10 @@ pub trait SessionRuntime: Send + Sync {
     async fn prepare_delete_session(&self, session: TalosSession) -> TalosResult<()>;
 
     /// Cancel the active Agent turn associated with a product session.
-    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()>;
+    async fn cancel_active_turn(
+        &self,
+        params: CancelActiveTurnParams,
+    ) -> TalosResult<CancelActiveTurnOutcome>;
 
     /// Return whether the selected runtime still owns an active in-process turn.
     async fn has_active_turn(&self, _session: &TalosSession) -> TalosResult<bool> {

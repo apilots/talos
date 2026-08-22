@@ -421,10 +421,11 @@ impl SessionRuntime for SessionServiceRuntimeAdapter {
     async fn cancel_active_turn(
         &self,
         params: talos_types::CancelActiveTurnParams,
-    ) -> talos_error::TalosResult<()> {
+    ) -> talos_error::TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.service
             .cancel_active_turn(&params.session.context.session_id)
             .await
+            .map(|_| talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 }
 

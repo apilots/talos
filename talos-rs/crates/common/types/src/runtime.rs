@@ -23,6 +23,20 @@ pub struct CancelActiveTurnParams {
     pub turn_id: String,
 }
 
+/// Final result of an accepted active Turn cancellation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum CancelActiveTurnOutcome {
+    /// Runtime completed while the cancellation request was racing with settlement.
+    Completed,
+    /// Runtime and registered tasks stopped cooperatively.
+    Cancelled,
+    /// Cancellation grace elapsed and unfinished tasks were force-aborted.
+    ForceAborted,
+    /// At least one task could not confirm cleanup by the final deadline.
+    CleanupUnconfirmed { task_count: usize },
+}
+
 /// Runtime boundary used by TalosService to dispatch work to AgentCoordinator.
 ///
 /// Public transports must call Gateway. This trait is only for the internal

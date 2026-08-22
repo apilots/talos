@@ -114,6 +114,7 @@ pub async fn execute_general_turn_loop_with_policy(
                     user_action_responses: std::collections::HashMap::new(),
                     sandbox_approval_fingerprints: std::collections::HashMap::new(),
                     command_risk_assessor: Some(command_risk_assessor.clone()),
+                    run_tasks: prepared.run_tasks.clone(),
                 },
                 tool_registry: tool_executor_port.clone(),
             });

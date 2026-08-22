@@ -1,0 +1,13 @@
+[package]
+name = "talos-run-control"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Run-scoped task lifecycle control for Talos orchestration"
+repository.workspace = true
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }

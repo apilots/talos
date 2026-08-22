@@ -46,7 +46,7 @@ impl ToolHandler for McpToolHandler {
                 arguments,
             } => Ok(ToolDispatchOutcome::executed(
                 self.manager
-                    .call_tool(&server, &tool, Some(arguments))
+                    .call_tool(&server, &tool, Some(arguments), context.tool_context())
                     .await?,
             )),
             ToolCallPayload::Function { arguments } => match invocation.tool_name.as_str() {

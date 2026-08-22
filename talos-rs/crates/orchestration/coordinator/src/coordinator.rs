@@ -169,7 +169,7 @@ impl CoordinatorImpl {
     async fn cancel_active_turn_for_session(
         &self,
         params: CancelActiveTurnParams,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         let session_id = params.session.context.session_id.clone();
         let turn_id = params.turn_id;
         let (_agent_id, agent) = self
@@ -180,7 +180,7 @@ impl CoordinatorImpl {
             turn_id,
         };
         Self::map_agent_result(agent.validate_interrupt_request(&interrupt_params))?;
-        Self::map_agent_result(agent.interrupt(interrupt_params).await).map(|_| ())
+        Self::map_agent_result(agent.interrupt(interrupt_params).await)
     }
 
     async fn submit_input_for_session(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
@@ -339,7 +339,10 @@ impl SessionRuntime for CoordinatorImpl {
         self.prepare_delete_session_runtime(session).await
     }
 
-    async fn cancel_active_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
+    async fn cancel_active_turn(
+        &self,
+        params: CancelActiveTurnParams,
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.cancel_active_turn_for_session(params).await
     }
 

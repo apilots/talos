@@ -177,9 +177,13 @@ impl TurnService {
                     &assistant_model,
                 )
                 .await;
-                if let Err(err) = event_service.record_talos_event(event).await {
-                    error!(error = %err, "failed to persist timeline stream event");
-                    continue;
+                match event_service.record_forwarded_event(event).await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => continue,
+                    Err(err) => {
+                        error!(error = %err, "failed to persist timeline stream event");
+                        continue;
+                    }
                 }
                 if let Some(profile_context) = profile_context.as_ref() {
                     Self::record_profile_turn_usage(

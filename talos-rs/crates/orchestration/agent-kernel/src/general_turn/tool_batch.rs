@@ -402,6 +402,7 @@ pub async fn execute_general_turn_tool_batch(
         user_action_responses,
         sandbox_approval_fingerprints,
         command_risk_assessor: Some(command_risk_assessor),
+        run_tasks: prepared.run_tasks.clone(),
     };
     let inputs = tool_calls
         .iter()

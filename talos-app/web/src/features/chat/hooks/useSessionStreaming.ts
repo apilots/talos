@@ -38,13 +38,6 @@ export function useSessionStreaming(
       await cancelActiveTurn(sessionId, turnId);
     },
     onSuccess: async () => {
-      useAppStore.getState().setPendingUserAction(sessionId, undefined);
-      useAppStore.getState().setSessionStatus(sessionId, undefined);
-      useAppStore.getState().setStreamError(sessionId, undefined);
-      useAppStore.getState().setStreamMeta(sessionId, {
-        isStreaming: false,
-        connectionState: "idle",
-      });
       await invalidateSessionQueries();
     },
     onError: (error) => {

@@ -109,8 +109,8 @@ impl SessionRuntime for RecordingHandler {
     async fn cancel_active_turn(
         &self,
         _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<()> {
-        Ok(())
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
+        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
     }
 }
 

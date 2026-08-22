@@ -10,6 +10,7 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 #[cfg(not(unix))]
 use tokio::process::Command;
 use tokio::sync::{Mutex, Notify};
+use tokio::task::JoinHandle;
 
 use crate::runtimes::{
     map_sandbox_process_error, process_environment, resolve_base_dir, resolve_executable,
@@ -22,8 +23,8 @@ use talos_tools_sandbox::{
 
 const DEFAULT_BASH_YIELD_TIME_MS: u64 = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024;
-const TERMINAL_OUTPUT_DRAIN_GRACE_MS: u64 = 100;
 const PROCESS_TERMINATE_GRACE_MS: u64 = 200;
+const TASK_JOIN_GRACE_MS: u64 = 200;
 
 fn default_bash_yield_time_ms() -> u64 {
     DEFAULT_BASH_YIELD_TIME_MS
@@ -75,6 +76,7 @@ pub struct BashCommandRequest {
 pub enum BashRunStatus {
     Running,
     TimedOut,
+    Cancelled,
     Exited,
 }
 
@@ -128,6 +130,8 @@ struct BashSession {
     command_kind: BashCommandKind,
     risk: BashCommandRisk,
     progress_emitter: Option<ToolProgressEmitter>,
+    cancellation: Option<crate::InvocationCancellation>,
+    tasks: Mutex<Option<BashSessionTasks>>,
 }
 
 #[derive(Default)]
@@ -137,7 +141,19 @@ struct BashSessionState {
     output: String,
     delivered_bytes: usize,
     exit_code: Option<i32>,
-    timed_out: bool,
+    termination: Option<BashTermination>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BashTermination {
+    TimedOut,
+    Cancelled,
+}
+
+struct BashSessionTasks {
+    readers: Vec<JoinHandle<()>>,
+    waiter: JoinHandle<()>,
+    timeout: Option<JoinHandle<()>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -206,19 +222,35 @@ impl BashSessionManager {
             command_kind,
             risk,
             progress_emitter: context.progress_emitter(),
+            cancellation: context.cancellation(),
+            tasks: Mutex::new(None),
         });
         self.sessions.insert(session_id, session.clone());
 
+        let mut readers = Vec::new();
         if let Some(stdout) = stdout {
-            spawn_reader(stdout, session.clone(), OutputStreamKind::Stdout);
+            readers.push(spawn_reader(
+                stdout,
+                session.clone(),
+                OutputStreamKind::Stdout,
+            ));
         }
         if let Some(stderr) = stderr {
-            spawn_reader(stderr, session.clone(), OutputStreamKind::Stderr);
+            readers.push(spawn_reader(
+                stderr,
+                session.clone(),
+                OutputStreamKind::Stderr,
+            ));
         }
-        spawn_waiter(child, session.clone());
-        if let Some(timeout_ms) = request.timeout_ms {
-            spawn_timeout(session.clone(), timeout_ms);
-        }
+        let waiter = spawn_waiter(child, session.clone());
+        let timeout = request
+            .timeout_ms
+            .map(|timeout_ms| spawn_timeout(session.clone(), timeout_ms));
+        session.tasks.lock().await.replace(BashSessionTasks {
+            readers,
+            waiter,
+            timeout,
+        });
 
         self.collect_output(
             session_id,
@@ -247,29 +279,48 @@ impl BashSessionManager {
                 )
             })?;
 
-        if yield_time_ms > 0 {
-            let deadline = Instant::now() + Duration::from_millis(yield_time_ms);
+        if yield_time_ms > 0 || session.cancellation.is_some() {
+            let deadline = session
+                .cancellation
+                .is_none()
+                .then(|| Instant::now() + Duration::from_millis(yield_time_ms));
             loop {
                 {
                     let state = session.state.lock().await;
-                    if state.exit_code.is_some() || state.timed_out {
-                        drop(state);
-                        tokio::time::sleep(Duration::from_millis(TERMINAL_OUTPUT_DRAIN_GRACE_MS))
-                            .await;
+                    if state.exit_code.is_some() || state.termination.is_some() {
                         break;
                     }
                 }
 
-                let now = Instant::now();
-                if now >= deadline {
-                    break;
-                }
+                let deadline_wait = async {
+                    match deadline {
+                        Some(deadline) => {
+                            let now = Instant::now();
+                            if now < deadline {
+                                tokio::time::sleep(deadline.saturating_duration_since(now)).await;
+                            }
+                        }
+                        None => std::future::pending::<()>().await,
+                    }
+                };
 
                 tokio::select! {
-                    _ = tokio::time::sleep(deadline.saturating_duration_since(now)) => break,
+                    _ = deadline_wait => break,
                     _ = session.notify.notified() => {}
+                    () = wait_for_cancellation(session.cancellation.clone()) => {
+                        cancel_session(&session).await;
+                        break;
+                    }
                 }
             }
+        }
+
+        let terminal = {
+            let state = session.state.lock().await;
+            state.exit_code.is_some() || state.termination.is_some()
+        };
+        if terminal {
+            join_session_tasks(&session).await;
         }
 
         let mut state = session.state.lock().await;
@@ -281,12 +332,11 @@ impl BashSessionManager {
         let (chunk, consumed_bytes, truncated) = truncate_prefix(pending, max_bytes);
         state.delivered_bytes = state.delivered_bytes.max(start + consumed_bytes);
 
-        let status = if state.timed_out {
-            BashRunStatus::TimedOut
-        } else if state.exit_code.is_some() {
-            BashRunStatus::Exited
-        } else {
-            BashRunStatus::Running
+        let status = match state.termination {
+            Some(BashTermination::TimedOut) => BashRunStatus::TimedOut,
+            Some(BashTermination::Cancelled) => BashRunStatus::Cancelled,
+            None if state.exit_code.is_some() => BashRunStatus::Exited,
+            None => BashRunStatus::Running,
         };
         let exit_code = state.exit_code;
         let stdout = state.stdout.clone();
@@ -360,7 +410,11 @@ fn build_command(request: &BashCommandRequest, workdir: &Path) -> TalosResult<To
     })
 }
 
-fn spawn_reader<R>(reader: R, session: Arc<BashSession>, stream_kind: OutputStreamKind)
+fn spawn_reader<R>(
+    reader: R,
+    session: Arc<BashSession>,
+    stream_kind: OutputStreamKind,
+) -> JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -396,7 +450,7 @@ where
                 }
             }
         }
-    });
+    })
 }
 
 fn elapsed_ms(session: &BashSession) -> u64 {
@@ -413,40 +467,85 @@ fn classify_command(command: &str) -> (BashCommandKind, BashCommandRisk) {
     (facts.kind, risk)
 }
 
-fn spawn_waiter(mut child: RunningToolProcess, session: Arc<BashSession>) {
+fn spawn_waiter(mut child: RunningToolProcess, session: Arc<BashSession>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let exit_code = child.wait().await.ok().and_then(|status| status.code());
         {
             let mut state = session.state.lock().await;
-            if !state.timed_out {
+            if state.termination.is_none() {
                 state.exit_code = exit_code;
             }
         }
         session.notify.notify_waiters();
-    });
+    })
 }
 
-fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) {
+fn spawn_timeout(session: Arc<BashSession>, timeout_ms: u64) -> JoinHandle<()> {
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-        {
-            let state = session.state.lock().await;
-            if state.exit_code.is_some() || state.timed_out {
-                return;
-            }
+        if !claim_termination(&session, BashTermination::TimedOut, 124).await {
+            return;
         }
         if let Some(termination_target) = session.termination_target {
             terminate_process(termination_target).await;
         }
-        {
-            let mut state = session.state.lock().await;
-            if state.exit_code.is_none() && !state.timed_out {
-                state.timed_out = true;
-                state.exit_code = Some(124);
-            }
-        }
         session.notify.notify_waiters();
-    });
+    })
+}
+
+async fn wait_for_cancellation(cancellation: Option<crate::InvocationCancellation>) {
+    match cancellation {
+        Some(cancellation) => cancellation.requested().await,
+        None => std::future::pending().await,
+    }
+}
+
+async fn cancel_session(session: &BashSession) {
+    if !claim_termination(session, BashTermination::Cancelled, 130).await {
+        return;
+    }
+    if let Some(termination_target) = session.termination_target {
+        terminate_process(termination_target).await;
+    }
+    session.notify.notify_waiters();
+}
+
+async fn claim_termination(
+    session: &BashSession,
+    termination: BashTermination,
+    exit_code: i32,
+) -> bool {
+    let mut state = session.state.lock().await;
+    if state.exit_code.is_some() || state.termination.is_some() {
+        return false;
+    }
+    state.termination = Some(termination);
+    state.exit_code = Some(exit_code);
+    true
+}
+
+async fn join_session_tasks(session: &BashSession) {
+    let Some(tasks) = session.tasks.lock().await.take() else {
+        return;
+    };
+    if let Some(timeout) = tasks.timeout {
+        timeout.abort();
+        let _ = timeout.await;
+    }
+    join_or_abort(tasks.waiter).await;
+    for reader in tasks.readers {
+        join_or_abort(reader).await;
+    }
+}
+
+async fn join_or_abort(mut task: JoinHandle<()>) {
+    if tokio::time::timeout(Duration::from_millis(TASK_JOIN_GRACE_MS), &mut task)
+        .await
+        .is_err()
+    {
+        task.abort();
+        let _ = task.await;
+    }
 }
 
 #[cfg(unix)]

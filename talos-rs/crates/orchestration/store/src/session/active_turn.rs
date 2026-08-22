@@ -17,6 +17,11 @@ pub enum ActiveTurnStatus {
 }
 
 impl ActiveTurnStatus {
+    /// Return whether this persisted Turn reached a final state.
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Completed | Self::Failed)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Running => "running",
@@ -81,10 +86,10 @@ fn current_action_id(
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| TalosError::internal("waiting_user_action requires current_action_id"))
             .map(Some),
-        ActiveTurnStatus::Running
-        | ActiveTurnStatus::Cancelling
-        | ActiveTurnStatus::Completed
-        | ActiveTurnStatus::Failed => Ok(None),
+        ActiveTurnStatus::Running | ActiveTurnStatus::Cancelling => {
+            Ok(current_action_id.filter(|value| !value.trim().is_empty()))
+        }
+        ActiveTurnStatus::Completed | ActiveTurnStatus::Failed => Ok(None),
     }
 }
 

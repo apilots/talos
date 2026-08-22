@@ -1,14 +1,26 @@
 use super::super::kernel;
 use super::super::request::AgentKernelParams;
 use super::KernelTimelineState;
-use crate::AgentRunResult;
+use crate::{AgentError, AgentRunResult};
 use talos_agent_kernel::{
     GeneralTurnOutcome, GeneralTurnResult, StopReason as KernelStopReason, TimelineBuilder,
 };
+use talos_error::{ErrorCode, TalosError};
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
 use talos_types::talos::{
     RunItem, StopReason as TalosStopReason, TokenUsage, TurnExecutionMetrics,
 };
+
+pub(super) fn map_run_task_spawn_error(error: talos_run_control::SpawnError) -> AgentError {
+    match error {
+        talos_run_control::SpawnError::Closed => {
+            TalosError::public(ErrorCode::Cancelled, "Run stopped accepting Runtime tasks").into()
+        }
+        talos_run_control::SpawnError::CapacityExceeded => {
+            AgentError::runtime_error("Run task capacity exceeded".to_string())
+        }
+    }
+}
 
 pub(super) fn execution_from_general_turn_result(
     result: &GeneralTurnResult,

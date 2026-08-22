@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use talos_tools::spec::ToolBehaviorFlags;
 use talos_tools::{register_core_local_tools, Tool, ToolContext, ToolOutputPayload, ToolRegistry};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::time::{sleep, Duration};
 
 struct ObservedDelayTool {
@@ -27,6 +27,59 @@ struct PendingTool;
 
 struct CountingTool {
     executions: Arc<AtomicUsize>,
+}
+
+struct CancellationAwareTool {
+    started: Arc<Notify>,
+}
+
+struct CleanupUnconfirmedTool;
+
+#[async_trait]
+impl Tool for CleanupUnconfirmedTool {
+    fn name(&self) -> &str {
+        "Read"
+    }
+
+    fn description(&self) -> &str {
+        "Report unconfirmed resource cleanup"
+    }
+
+    async fn execute_payload(
+        &self,
+        _input: Value,
+        _context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        Err(TalosError::public(
+            talos_error::ErrorCode::RunCleanupUnconfirmed,
+            "request cancellation was not confirmed",
+        ))
+    }
+}
+
+#[async_trait]
+impl Tool for CancellationAwareTool {
+    fn name(&self) -> &str {
+        "Read"
+    }
+
+    fn description(&self) -> &str {
+        "Wait for Run cancellation"
+    }
+
+    async fn execute_payload(
+        &self,
+        _input: Value,
+        context: ToolContext,
+    ) -> TalosResult<ToolOutputPayload> {
+        self.started.notify_one();
+        context
+            .cancellation()
+            .expect("Run cancellation should reach ToolContext")
+            .requested()
+            .await;
+        Ok(ToolOutputPayload::success_text("cancelled"))
+    }
 }
 
 #[async_trait]
@@ -209,6 +262,7 @@ async fn tool_execution_context_propagates_the_trusted_agent_id() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
 
     SequentialToolExecutor
@@ -251,6 +305,7 @@ async fn tool_execution_context_propagates_resolved_permission_mode() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
 
     SequentialToolExecutor
@@ -336,11 +391,100 @@ fn test_execution_context() -> ToolExecutionContext {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     }
 }
 
-#[test]
-fn runtime_carries_session_workspace_and_project_into_sandbox_environment() {
+#[tokio::test]
+async fn run_cancellation_settles_a_registered_tool_task() {
+    let control = Arc::new(talos_run_control::ActiveRunControl::new(
+        talos_run_control::RunIdentity::new("s1", "turn-1"),
+    ));
+    let mut execution_context = test_execution_context();
+    execution_context.run_tasks = control.tasks();
+    let started = Arc::new(Notify::new());
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register(Arc::new(CancellationAwareTool {
+        started: started.clone(),
+    }));
+    let execution_task = tokio::spawn({
+        let registry = registry.clone();
+        async move {
+            SequentialToolExecutor
+                .execute(
+                    &execution_context,
+                    registry,
+                    &[ToolExecutionInput {
+                        call_id: "call-cancel".to_string(),
+                        tool_name: "Read".to_string(),
+                        arguments: json!({}),
+                    }],
+                )
+                .await
+        }
+    });
+    started.notified().await;
+
+    let settlement = control
+        .settle(talos_run_control::RunTermination::Cancelled {
+            policy: talos_run_control::CancellationPolicy {
+                grace: Duration::from_secs(1),
+            },
+        })
+        .await;
+
+    assert_eq!(
+        settlement,
+        talos_run_control::Settlement {
+            kind: talos_run_control::SettlementKind::Cancelled(
+                talos_run_control::CancellationMode::Cooperative,
+            ),
+            cleanup: talos_run_control::CleanupReport::Confirmed,
+        }
+    );
+    assert_eq!(execution_task.await.unwrap().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn unconfirmed_tool_cleanup_is_preserved_in_run_settlement() {
+    let control = Arc::new(talos_run_control::ActiveRunControl::new(
+        talos_run_control::RunIdentity::new("s1", "turn-1"),
+    ));
+    let mut execution_context = test_execution_context();
+    execution_context.run_tasks = control.tasks();
+    let registry = Arc::new(ToolRegistry::new());
+    registry.register(Arc::new(CleanupUnconfirmedTool));
+
+    let outputs = SequentialToolExecutor
+        .execute(
+            &execution_context,
+            registry,
+            &[ToolExecutionInput {
+                call_id: "call-unconfirmed".to_string(),
+                tool_name: "Read".to_string(),
+                arguments: json!({}),
+            }],
+        )
+        .await
+        .unwrap();
+    let settlement = control
+        .settle(talos_run_control::RunTermination::Completed {
+            timeout: Duration::from_secs(1),
+        })
+        .await;
+
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(
+        settlement.cleanup,
+        talos_run_control::CleanupReport::Unconfirmed {
+            count: 1,
+            failures: vec![talos_run_control::CleanupFailure::OwnerUnconfirmed],
+        }
+    );
+}
+
+#[tokio::test]
+async fn runtime_carries_session_workspace_and_project_into_sandbox_environment() {
     let root = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
     let session_workspace = root.join("session-workspace");
     let project = root.join("project");
@@ -460,6 +604,7 @@ async fn test_parallel_tool_executor_preserves_input_order() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let calls = vec![
         ToolExecutionInput {
@@ -521,6 +666,7 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let calls = vec![
         ToolExecutionInput {
@@ -568,6 +714,7 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let mut scheduler = StreamingToolScheduler::new(
         ToolExecutionMode::Sequential,
@@ -629,6 +776,7 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let mut scheduler = StreamingToolScheduler::new(
         ToolExecutionMode::Parallel,

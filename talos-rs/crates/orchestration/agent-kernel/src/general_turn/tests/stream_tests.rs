@@ -972,6 +972,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
                 user_action_responses: HashMap::new(),
                 sandbox_approval_fingerprints: HashMap::new(),
                 command_risk_assessor: None,
+                run_tasks: crate::test_run_tasks(),
             },
             tool_registry: registry,
         }),
@@ -1227,6 +1228,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         user_action_responses: std::collections::HashMap::new(),
         sandbox_approval_fingerprints: std::collections::HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let (tx, mut rx) = mpsc::channel(16);
 

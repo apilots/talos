@@ -1,5 +1,7 @@
 use dashmap::DashMap;
+use futures_util::future::{BoxFuture, FutureExt, Shared};
 use std::fmt;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
@@ -35,6 +37,26 @@ pub struct ToolProgressEvent {
 #[derive(Clone)]
 pub struct ToolProgressEmitter {
     sink: Arc<dyn Fn(ToolProgressEvent) + Send + Sync>,
+}
+
+/// Narrow Run cancellation facade projected by Agent Kernel.
+#[derive(Clone)]
+pub struct InvocationCancellation {
+    requested: Shared<BoxFuture<'static, ()>>,
+}
+
+impl InvocationCancellation {
+    /// Build a Tool projection from an orchestration-owned cancellation signal.
+    pub fn new(requested: impl Future<Output = ()> + Send + 'static) -> Self {
+        Self {
+            requested: requested.boxed().shared(),
+        }
+    }
+
+    /// Wait until cancellation is requested for the owning Run.
+    pub async fn requested(&self) {
+        self.requested.clone().await;
+    }
 }
 
 impl ToolProgressEmitter {
@@ -77,6 +99,7 @@ pub struct ToolContext {
     sandbox_environment: Option<ToolSandboxEnvironment>,
     sandbox_permit: Option<ToolSandboxPermit>,
     command_risk_assessor: Option<Arc<dyn CommandRiskAssessor>>,
+    cancellation: Option<InvocationCancellation>,
 }
 
 impl ToolContext {
@@ -116,6 +139,7 @@ impl ToolContext {
             sandbox_environment: None,
             sandbox_permit: None,
             command_risk_assessor: None,
+            cancellation: None,
         }
     }
 
@@ -176,6 +200,17 @@ impl ToolContext {
     pub fn with_command_risk_assessor(mut self, assessor: Arc<dyn CommandRiskAssessor>) -> Self {
         self.command_risk_assessor = Some(assessor);
         self
+    }
+
+    /// Attach cancellation scoped to the owning Agent Run.
+    pub fn with_cancellation(mut self, cancellation: InvocationCancellation) -> Self {
+        self.cancellation = Some(cancellation);
+        self
+    }
+
+    /// Return cancellation scoped to the owning Agent Run when available.
+    pub fn cancellation(&self) -> Option<InvocationCancellation> {
+        self.cancellation.clone()
     }
 
     pub fn command_risk_assessor(&self) -> Option<Arc<dyn CommandRiskAssessor>> {

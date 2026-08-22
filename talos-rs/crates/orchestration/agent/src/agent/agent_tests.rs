@@ -41,6 +41,8 @@ use talos_types::talos::{
 mod message_input_tests;
 #[path = "resume_tests.rs"]
 mod resume_tests;
+#[path = "run_lifecycle_tests.rs"]
+mod run_lifecycle_tests;
 #[path = "run_validation_tests.rs"]
 mod run_validation_tests;
 use talos_types::{
@@ -250,7 +252,7 @@ fn dynamic_user_action_response(output: &str, success: bool) -> talos_types::Use
 async fn interrupt_session(
     agent: &AgentHarnessImpl,
     session_id: &str,
-) -> AgentResult<AgentInterruptResult> {
+) -> AgentResult<talos_types::CancelActiveTurnOutcome> {
     agent
         .interrupt(AgentInterruptParams {
             session_id: session_id.to_string(),
@@ -1969,13 +1971,14 @@ async fn test_interrupt_aborts_only_current_session_turn() {
         .await
         .expect_err("wrong turn id should not interrupt current run");
     assert_eq!(wrong_turn_error.kind, crate::AgentErrorKind::RunNotFound);
-    agent
+    let outcome = agent
         .interrupt(AgentInterruptParams {
             session_id: session.context.session_id.clone(),
             turn_id: "turn-cancel".to_string(),
         })
         .await
         .expect("interrupt should succeed");
+    assert_eq!(outcome, talos_types::CancelActiveTurnOutcome::Cancelled);
 
     let mut first_stop_reason = None;
     while let Some(event) = first_stream.recv().await {
@@ -2006,30 +2009,6 @@ async fn test_interrupt_aborts_only_current_session_turn() {
     assert_eq!(second_stop_reason, Some(TalosStopReason::EndTurn));
 }
 
-#[tokio::test]
-async fn test_interrupt_reports_missing_runtime_state() {
-    let agent = build_test_agent();
-
-    let error = interrupt_session(&agent, "missing-session")
-        .await
-        .expect_err("missing active turn should be reported");
-
-    assert_eq!(error.kind, crate::AgentErrorKind::RunNotFound);
-}
-
-#[tokio::test]
-async fn test_interrupt_rejects_reserved_turn_without_runtime_handle() {
-    let agent = build_test_agent();
-    agent
-        .try_reserve_active_turn("reserved-session")
-        .expect("test should reserve active slot");
-
-    let error = interrupt_session(&agent, "reserved-session")
-        .await
-        .expect_err("reserved turn cannot report a successful interrupt");
-
-    assert_eq!(error.kind, crate::AgentErrorKind::RunNotFound);
-}
 #[tokio::test]
 async fn clear_session_advances_memory_cursor_and_preserves_turn_sequence() {
     let (workspace, agent) = build_temp_agent();

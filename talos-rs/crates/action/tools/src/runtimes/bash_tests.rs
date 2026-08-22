@@ -134,6 +134,57 @@ async fn test_bash_timeout_terminates_process_group() {
 }
 
 #[tokio::test]
+async fn run_cancellation_terminates_the_bash_process_group() {
+    let tempdir = tempfile::tempdir().expect("tempdir should be created");
+    let marker = tempdir.path().join("child-finished");
+    let command = format!(
+        "trap '' TERM; (sleep 1; printf done > '{}') & wait",
+        marker.display()
+    );
+    let requested = tokio_util::sync::CancellationToken::new();
+    let observed = requested.clone();
+    let context = crate::test_support::full_access_process_context(
+        crate::ToolContext::default()
+            .with_project_root(std::env::current_dir().expect("cwd should exist"))
+            .with_cancellation(crate::InvocationCancellation::new(async move {
+                observed.cancelled().await
+            })),
+    );
+    let cancel_task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        requested.cancel();
+    });
+    let result = run_bash_command(
+        &BashCommandRequest {
+            cmd: command,
+            workdir: None,
+            shell: Some("sh".to_string()),
+            login: false,
+            tty: false,
+            yield_time_ms: 5_000,
+            timeout_ms: Some(5_000),
+            max_output_tokens: None,
+            sandbox_permissions: SandboxPermissions::UseDefault,
+            justification: None,
+            prefix_rule: None,
+        },
+        &context,
+    )
+    .await
+    .expect("Bash cancellation should settle cleanly");
+    cancel_task.await.expect("cancellation task should finish");
+
+    assert_eq!(result.status, BashRunStatus::Cancelled);
+    assert_eq!(result.exit_code, Some(130));
+    assert_eq!(result.session_id, None);
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    assert!(
+        !marker.exists(),
+        "cancellation should terminate child processes"
+    );
+}
+
+#[tokio::test]
 async fn test_bash_runtime_allows_escalated_command_when_called_directly() {
     let context = crate::test_support::full_access_process_context(
         crate::ToolContext::default()

@@ -109,6 +109,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
         user_action_responses: std::collections::HashMap::new(),
         sandbox_approval_fingerprints: std::collections::HashMap::new(),
         command_risk_assessor: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let (tx, mut rx) = mpsc::channel(16);
 

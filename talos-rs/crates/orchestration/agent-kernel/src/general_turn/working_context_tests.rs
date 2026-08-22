@@ -38,6 +38,7 @@ fn prepared_with_budget(effective_prompt_budget: usize) -> PreparedGeneralTurn {
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     }
 }
 

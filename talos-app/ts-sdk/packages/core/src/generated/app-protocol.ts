@@ -737,7 +737,7 @@ export type TalosTurnMetricsEvent = { request_id: string, turn_id: string, metri
 
 export type TalosTurnCompletedEvent = { request_id: string, turn_id: string, completed_at_ms: number, stop_reason: StopReason, usage: TokenUsage, metrics: TurnExecutionMetrics | null, };
 
-export type ErrorCode = "invalidRequest" | "invalidRetryRequest" | "unauthenticated" | "permissionDenied" | "resourceNotFound" | "sessionNotFound" | "resourceExpired" | "conflict" | "activeTurnRunning" | "messageQueueFull" | "messageQueueBusy" | "retrySourceCompleted" | "retrySourceMismatch" | "idempotencyConflict" | "invalidCursor" | "eventCursorExpired" | "fsDisabled" | "invalidPath" | "pathOutsideRoot" | "symlinkNotSupported" | "pathNotFound" | "notDirectory" | "invalidName" | "alreadyExists" | "uploadTooLarge" | "unsupportedMediaType" | "attachmentLimitExceeded" | "unsupportedAttachment" | "fileInputRejected" | "contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "contextCompactionFailed" | "providerUnavailable" | "toolExecutionFailed" | "timeout" | "cancelled" | "serviceUnavailable" | "internalError";
+export type ErrorCode = "invalidRequest" | "invalidRetryRequest" | "unauthenticated" | "permissionDenied" | "resourceNotFound" | "sessionNotFound" | "resourceExpired" | "conflict" | "activeTurnRunning" | "messageQueueFull" | "messageQueueBusy" | "retrySourceCompleted" | "retrySourceMismatch" | "idempotencyConflict" | "invalidCursor" | "eventCursorExpired" | "fsDisabled" | "invalidPath" | "pathOutsideRoot" | "symlinkNotSupported" | "pathNotFound" | "notDirectory" | "invalidName" | "alreadyExists" | "uploadTooLarge" | "unsupportedMediaType" | "attachmentLimitExceeded" | "unsupportedAttachment" | "fileInputRejected" | "contextWindowExceeded" | "sessionBudgetExceeded" | "usageLimitExceeded" | "contextCompactionFailed" | "providerUnavailable" | "toolExecutionFailed" | "timeout" | "cancelled" | "serviceUnavailable" | "runForcedAbort" | "runCleanupUnconfirmed" | "internalError";
 
 export const ErrorCode = {
   InvalidRequest: "invalidRequest",
@@ -778,6 +778,8 @@ export const ErrorCode = {
   Timeout: "timeout",
   Cancelled: "cancelled",
   ServiceUnavailable: "serviceUnavailable",
+  RunForcedAbort: "runForcedAbort",
+  RunCleanupUnconfirmed: "runCleanupUnconfirmed",
   InternalError: "internalError",
 } as const satisfies Record<string, ErrorCode>;
 

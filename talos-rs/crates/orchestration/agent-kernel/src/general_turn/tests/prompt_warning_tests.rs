@@ -40,6 +40,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     };
 
     let result = execute_general_turn_loop(

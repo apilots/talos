@@ -88,3 +88,12 @@ pub use warnings::{
     PromptBootstrapFileMissingWarning, PromptBootstrapFileTruncatedWarning,
     PromptDynamicSectionDroppedWarning,
 };
+
+#[cfg(test)]
+pub(crate) fn test_run_tasks() -> talos_run_control::RunTaskGroup {
+    talos_run_control::ActiveRunControl::new(talos_run_control::RunIdentity::new(
+        "test-session",
+        "test-turn",
+    ))
+    .tasks()
+}

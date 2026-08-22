@@ -243,7 +243,7 @@ impl ResourceAccessService {
         actor: &Actor,
         session_id: &str,
         turn_id: String,
-    ) -> TalosResult<()> {
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         let session = self.get_session(actor, session_id).await?;
         let record = self
             .sessions
@@ -425,7 +425,10 @@ impl ResourceAccessService {
         self.session_runtime.prepare_delete_session(session).await
     }
 
-    async fn cancel_runtime_turn(&self, params: CancelActiveTurnParams) -> TalosResult<()> {
+    async fn cancel_runtime_turn(
+        &self,
+        params: CancelActiveTurnParams,
+    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
         self.session_runtime.cancel_active_turn(params).await
     }
 

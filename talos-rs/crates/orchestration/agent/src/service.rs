@@ -325,13 +325,6 @@ pub struct AgentInterruptParams {
     pub turn_id: String,
 }
 
-/// Result of an Agent interrupt request.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentInterruptResult {
-    /// True when an active run accepted the interrupt signal.
-    pub interrupted: bool,
-}
-
 /// Parameters for delivering structured input to an Agent run.
 ///
 /// This is the single Harness input bridge. New input kinds should extend
@@ -492,7 +485,10 @@ pub trait AgentHarness: Send + Sync {
     /// Check whether Harness currently owns an in-memory active run.
     fn has_active_turn(&self, session_id: &str) -> bool;
     /// Interrupt an active Agent run by product session and turn identity.
-    async fn interrupt(&self, params: AgentInterruptParams) -> AgentResult<AgentInterruptResult>;
+    async fn interrupt(
+        &self,
+        params: AgentInterruptParams,
+    ) -> AgentResult<talos_types::CancelActiveTurnOutcome>;
     /// Wait for in-memory active runs to drain.
     async fn drain_active_turns(&self, timeout: Duration) -> TalosResult<()>;
     /// Submit structured input to the single Agent input bridge.

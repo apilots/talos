@@ -45,14 +45,24 @@ impl McpConnectionManager {
         server: &str,
         tool: &str,
         arguments: Option<Value>,
+        context: &ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
+        let cancellation = context.cancellation();
         let response = self
             .runtime
-            .call_tool(McpCallToolRequest {
-                server_name: server.to_string(),
-                tool_name: tool.to_string(),
-                arguments: arguments.unwrap_or(Value::Null),
-            })
+            .call_tool(
+                McpCallToolRequest {
+                    server_name: server.to_string(),
+                    tool_name: tool.to_string(),
+                    arguments: arguments.unwrap_or(Value::Null),
+                },
+                async move {
+                    match cancellation {
+                        Some(cancellation) => cancellation.requested().await,
+                        None => std::future::pending().await,
+                    }
+                },
+            )
             .await?;
         let payload = mcp_content_to_payload(&response.content)?;
         if response.is_error {
@@ -110,14 +120,23 @@ impl McpConnectionManager {
         &self,
         server: &str,
         uri: &str,
-        _context: &ToolContext,
+        context: &ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
+        let cancellation = context.cancellation();
         let response = self
             .runtime
-            .read_resource(McpReadResourceRequest {
-                server_name: server.to_string(),
-                uri: uri.to_string(),
-            })
+            .read_resource(
+                McpReadResourceRequest {
+                    server_name: server.to_string(),
+                    uri: uri.to_string(),
+                },
+                async move {
+                    match cancellation {
+                        Some(cancellation) => cancellation.requested().await,
+                        None => std::future::pending().await,
+                    }
+                },
+            )
             .await?;
         let mut content_items = Vec::new();
         let mut entries = Vec::new();

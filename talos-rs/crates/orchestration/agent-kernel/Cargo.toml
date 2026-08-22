@@ -18,6 +18,7 @@ talos-config = { workspace = true }
 talos-llm-provider = { workspace = true }
 talos-memory = { workspace = true }
 talos-prompt = { workspace = true }
+talos-run-control = { workspace = true }
 talos-skills = { workspace = true }
 talos-store = { workspace = true }
 talos-tools = { workspace = true }

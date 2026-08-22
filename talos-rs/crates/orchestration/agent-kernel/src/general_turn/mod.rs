@@ -108,8 +108,9 @@ pub use memory_summary::{
     compact_session_memory, MemoryCompactionPolicy, MemoryFormationParams, MemoryFormationReport,
 };
 pub use persist::persist_general_turn_artifacts;
+pub(crate) use persist::stage_session_state_update;
+pub(crate) use prepare::next_session_compaction_state;
 pub use prepare::prepare_general_turn;
-pub(crate) use prepare::{next_session_compaction_state, stage_session_state_update};
 pub(crate) use prepare::{
     LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
 };

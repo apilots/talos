@@ -24,7 +24,9 @@ pub use command_risk::{
     BashCommandFacts, CommandRiskAssessmentError, CommandRiskAssessmentInput, CommandRiskAssessor,
     EffectivePermissionSummary, LlmCommandRiskAssessor,
 };
-pub use context::{ToolContext, ToolProgressEmitter, ToolProgressEvent, ToolProgressKind};
+pub use context::{
+    InvocationCancellation, ToolContext, ToolProgressEmitter, ToolProgressEvent, ToolProgressKind,
+};
 pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHandler};
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
 pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};

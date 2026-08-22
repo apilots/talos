@@ -123,6 +123,7 @@ impl Tool for BashTool {
         let status = match response.status {
             BashRunStatus::Running => TalosToolTaskStatus::Running,
             BashRunStatus::TimedOut => TalosToolTaskStatus::TimedOut,
+            BashRunStatus::Cancelled => TalosToolTaskStatus::Cancelled,
             BashRunStatus::Exited => {
                 if response.exit_code == Some(0) {
                     TalosToolTaskStatus::Completed

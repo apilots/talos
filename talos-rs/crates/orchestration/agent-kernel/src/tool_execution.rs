@@ -10,9 +10,10 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_memory::MemoryScope;
+use talos_run_control::{RunTaskCompletion, RunTaskGroup, SpawnError};
 use talos_tools::{
-    AbsolutePathBuf, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolProgressEmitter,
-    ToolProgressEvent, ToolSandboxEnvironment,
+    AbsolutePathBuf, ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload,
+    ToolProgressEmitter, ToolProgressEvent, ToolSandboxEnvironment,
 };
 use talos_types::UserActionResponse;
 use tokio::sync::mpsc;
@@ -30,6 +31,7 @@ pub struct ToolExecutionContext {
     pub user_action_responses: HashMap<String, UserActionResponse>,
     pub sandbox_approval_fingerprints: HashMap<String, String>,
     pub command_risk_assessor: Option<Arc<dyn talos_tools::CommandRiskAssessor>>,
+    pub run_tasks: RunTaskGroup,
 }
 
 impl fmt::Debug for ToolExecutionContext {
@@ -180,9 +182,13 @@ async fn execute_single_tool_call(
     let result = match tool_context {
         Ok(tool_context) => match call.build_invocation(registry.as_ref()) {
             Ok(invocation) => {
-                registry
-                    .execute_invocation_with_context(invocation, tool_context)
-                    .await
+                execute_tool_invocation(
+                    registry,
+                    &execution_context.run_tasks,
+                    invocation,
+                    tool_context,
+                )
+                .await
             }
             Err(error) => Err(error),
         },
@@ -217,6 +223,43 @@ async fn execute_single_tool_call(
             }
         }
     }
+}
+
+async fn execute_tool_invocation(
+    registry: Arc<dyn ToolExecutorPort>,
+    run_tasks: &RunTaskGroup,
+    invocation: ToolInvocation,
+    tool_context: talos_tools::ToolContext,
+) -> TalosResult<ToolDispatchOutcome> {
+    let run_task = run_tasks.spawn(move |cancellation| async move {
+        let tool_context = tool_context.with_cancellation(
+            talos_tools::InvocationCancellation::new(cancellation.requested()),
+        );
+        let result = registry
+            .execute_invocation_with_context(invocation, tool_context)
+            .await;
+        if result
+            .as_ref()
+            .is_err_and(|error| error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed))
+        {
+            RunTaskCompletion::CleanupUnconfirmed(result)
+        } else {
+            RunTaskCompletion::Confirmed(result)
+        }
+    });
+    let run_task = run_task.map_err(|error| match error {
+        SpawnError::Closed => TalosError::public(
+            talos_error::ErrorCode::Cancelled,
+            "Run stopped accepting Tool tasks",
+        ),
+        SpawnError::CapacityExceeded => TalosError::internal("Run Tool task capacity exceeded"),
+    })?;
+    run_task.await.map_err(|_| {
+        TalosError::public(
+            talos_error::ErrorCode::Cancelled,
+            "Tool task ended without a result",
+        )
+    })?
 }
 
 fn tool_error_outcome(error: TalosError) -> ToolDispatchOutcome {
@@ -317,51 +360,10 @@ impl ToolExecutor for ParallelToolExecutor {
         let mut join_set = JoinSet::new();
         for (index, call) in calls.iter().cloned().enumerate() {
             let registry = registry.clone();
-            let tool_context =
-                build_tool_context(execution_context, registry.as_ref(), &call.call_id, None);
-            let session_id = execution_context.session_id.clone();
-            let turn_id = execution_context.turn_id.clone();
+            let execution_context = execution_context.clone();
             join_set.spawn(async move {
-                let result = match tool_context {
-                    Ok(tool_context) => match call.build_invocation(registry.as_ref()) {
-                        Ok(invocation) => {
-                            registry
-                                .execute_invocation_with_context(invocation, tool_context)
-                                .await
-                        }
-                        Err(error) => Err(error),
-                    },
-                    Err(error) => Err(error),
-                };
-                let output = match result {
-                    Ok(payload) => ToolExecutionOutput {
-                        call_id: call.call_id,
-                        tool_name: call.tool_name,
-                        arguments: call.arguments,
-                        is_error: payload
-                            .payload()
-                            .map(|item| item.is_error())
-                            .unwrap_or(false),
-                        outcome: payload,
-                    },
-                    Err(error) => {
-                        tracing::error!(
-                            session_id = %session_id,
-                            turn_id = %turn_id,
-                            tool_name = %call.tool_name,
-                            call_id = %call.call_id,
-                            error = ?error,
-                            "tool execution failed"
-                        );
-                        ToolExecutionOutput {
-                            call_id: call.call_id,
-                            tool_name: call.tool_name,
-                            arguments: call.arguments,
-                            outcome: tool_error_outcome(error),
-                            is_error: true,
-                        }
-                    }
-                };
+                let output =
+                    execute_single_tool_call(registry, &execution_context, call, None).await;
                 (index, output)
             });
         }

@@ -2,8 +2,8 @@ use super::*;
 use talos_llm_provider::{ChatMessage, ModelSpeed, ReasoningEffort};
 use talos_prompt::{PromptMode, PromptWindowUsage};
 
-#[test]
-fn test_build_general_turn_step_request() {
+#[tokio::test]
+async fn test_build_general_turn_step_request() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
@@ -36,6 +36,7 @@ fn test_build_general_turn_step_request() {
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
+        run_tasks: crate::test_run_tasks(),
     };
     let mut state = GeneralTurnLoopState::new(&prepared);
 

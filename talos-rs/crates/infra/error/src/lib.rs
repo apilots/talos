@@ -51,6 +51,8 @@ pub enum ErrorCode {
     Timeout,
     Cancelled,
     ServiceUnavailable,
+    RunForcedAbort,
+    RunCleanupUnconfirmed,
     InternalError,
 }
 
@@ -95,6 +97,8 @@ impl ErrorCode {
             Self::Timeout => "Operation timed out",
             Self::Cancelled => "Operation was cancelled",
             Self::ServiceUnavailable => "Service unavailable",
+            Self::RunForcedAbort => "Run required forced cancellation",
+            Self::RunCleanupUnconfirmed => "Run cleanup could not be confirmed",
             Self::InternalError => "An internal error occurred",
         }
     }

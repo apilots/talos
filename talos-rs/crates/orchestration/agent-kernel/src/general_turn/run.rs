@@ -4,6 +4,8 @@ use super::prepare::{
 };
 use super::*;
 use crate::ExecutionBranch;
+use std::sync::Arc;
+use talos_run_control::RunTaskGroup;
 
 #[allow(clippy::too_many_arguments)]
 pub async fn run_general_turn(
@@ -17,6 +19,7 @@ pub async fn run_general_turn(
     memory_writer: Arc<dyn MemoryWriter>,
     kernel_config: &AgentKernelConfig,
     skill_options: GeneralTurnSkillOptions,
+    run_tasks: RunTaskGroup,
 ) -> TalosResult<GeneralTurnResult> {
     run_general_turn_with_resume(
         ctx,
@@ -31,6 +34,7 @@ pub async fn run_general_turn(
         None,
         Some(skill_options),
         None,
+        run_tasks,
     )
     .await
 }
@@ -49,6 +53,7 @@ pub async fn run_general_turn_with_resume(
     resume: Option<GeneralTurnResume>,
     skill_options: Option<GeneralTurnSkillOptions>,
     message_rx: Option<mpsc::Receiver<crate::ActiveTurnInputDelivery>>,
+    run_tasks: RunTaskGroup,
 ) -> TalosResult<GeneralTurnResult> {
     let mut prepared = prepare_general_turn(
         ctx,
@@ -60,6 +65,7 @@ pub async fn run_general_turn_with_resume(
         memory_writer,
         kernel_config,
         skill_options.clone(),
+        run_tasks,
     )
     .await?;
     prepared.message_rx = message_rx.map(|receiver| Arc::new(std::sync::Mutex::new(receiver)));

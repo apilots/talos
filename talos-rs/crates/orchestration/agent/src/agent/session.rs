@@ -1,10 +1,15 @@
-use super::lifecycle::AgentRuntimeAbortHandle;
+use super::lifecycle::{
+    create_run_control, run_terminal_disposition, terminal_error, RUN_COMPLETION_TIMEOUT,
+};
 use super::AgentHarnessImpl;
 use crate::AgentSessionCompactionParams;
 use chrono::Utc;
 use talos_agent_kernel::{SessionCompactionState, TimelineBuilder, SESSION_COMPACTION_STATE_KEY};
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult};
+use talos_run_control::{
+    CancellationPolicy, RunTaskCompletion, RunTaskError, RunTermination, SpawnError,
+};
 use talos_store::session::{
     SessionTranscriptActions, SessionTranscriptAuthor, SessionTranscriptBranch,
     SessionTranscriptEventKind, SessionTranscriptHeader, SessionTranscriptPayload,
@@ -196,6 +201,7 @@ impl AgentHarnessImpl {
         } = params;
         let session_id = session.context.session_id.clone();
         self.try_reserve_active_turn(&session_id)?;
+        let run_control = create_run_control(&session_id, &identity.turn_id);
         let result = async {
             let kernel_config = self.runtime_kernel_config_for_session(&session)?;
             let selected_model = Self::session_model(&session)?;
@@ -209,70 +215,98 @@ impl AgentHarnessImpl {
             let task_turn_id = identity.turn_id.clone();
             let workspace_root = std::path::PathBuf::from(&kernel_config.workspace_dir);
             let (start_tx, start_rx) = tokio::sync::oneshot::channel();
-            let task = tokio::spawn(async move {
-                start_rx.await.map_err(|_| {
-                    TalosError::public(
-                        talos_error::ErrorCode::Cancelled,
-                        "session context compaction was cancelled before start".to_string(),
-                    )
-                })?;
-                let report = talos_agent_kernel::compact_session_memory(
-                    talos_agent_kernel::MemoryFormationParams {
-                        session_id: &task_session_id,
-                        selected_model: &selected_model,
-                        llm_provider,
-                        memory_writer: this.memory_writer.as_ref(),
-                        memory_scope: &memory_scope,
-                        session_artifact_store: this.session_artifact_store.as_ref(),
-                        session_store: this.session_store.as_ref(),
-                        kernel_config: &kernel_config,
-                    },
-                    talos_agent_kernel::MemoryCompactionPolicy::for_compaction(),
-                )
-                .await?;
-                if report.covers_until_seq.is_some() {
-                    let mut actions = SessionTranscriptActions::default();
-                    actions.state_delta.push(SessionTranscriptStateDelta {
-                        namespace: SessionTranscriptStateNamespace::Session,
-                        key: SESSION_COMPACTION_STATE_KEY.to_string(),
-                        value: serde_json::to_value(SessionCompactionState::recovery())
-                            .map_err(|error| {
-                                TalosError::internal(format!(
-                                    "serialize session compaction recovery state: {error}"
-                                ))
-                            })?
-                            .into(),
-                    });
-                    this.session_artifact_store
-                        .append_transcript_record(
-                            &workspace_root,
-                            &SessionTranscriptRecord {
-                                header: SessionTranscriptHeader {
-                                    id: Uuid::new_v4().to_string(),
-                                    session_id: task_session_id.clone(),
-                                    invocation_id: task_turn_id,
-                                    branch: SessionTranscriptBranch::ModelThinking,
-                                    timestamp: Utc::now(),
+            let task = run_control
+                .tasks()
+                .spawn(move |cancellation| async move {
+                    let output = async move {
+                        start_rx.await.map_err(|_| {
+                            TalosError::public(
+                                talos_error::ErrorCode::Cancelled,
+                                "session context compaction was cancelled before start".to_string(),
+                            )
+                        })?;
+                        let report = tokio::select! {
+                            result = talos_agent_kernel::compact_session_memory(
+                                talos_agent_kernel::MemoryFormationParams {
+                                    session_id: &task_session_id,
+                                    selected_model: &selected_model,
+                                    llm_provider,
+                                    memory_writer: this.memory_writer.as_ref(),
+                                    memory_scope: &memory_scope,
+                                    session_artifact_store: this.session_artifact_store.as_ref(),
+                                    session_store: this.session_store.as_ref(),
+                                    kernel_config: &kernel_config,
                                 },
-                                author: SessionTranscriptAuthor::System,
-                                kind: SessionTranscriptEventKind::Planning,
-                                payload: SessionTranscriptPayload::StateOnly,
-                                actions,
-                                partial: false,
-                            },
-                        )
-                        .await?;
-                }
-                Ok(report)
-            });
-            let abort_handle = AgentRuntimeAbortHandle::new(task.abort_handle());
+                                talos_agent_kernel::MemoryCompactionPolicy::for_compaction(),
+                            ) => result?,
+                            () = cancellation.requested() => {
+                                return Err(TalosError::public(
+                                    talos_error::ErrorCode::Cancelled,
+                                    "session context compaction cancellation requested",
+                                ));
+                            }
+                        };
+                        if report.covers_until_seq.is_some() {
+                            let mut actions = SessionTranscriptActions::default();
+                            actions.state_delta.push(SessionTranscriptStateDelta {
+                                namespace: SessionTranscriptStateNamespace::Session,
+                                key: SESSION_COMPACTION_STATE_KEY.to_string(),
+                                value: serde_json::to_value(SessionCompactionState::recovery())
+                                    .map_err(|error| {
+                                        TalosError::internal(format!(
+                                            "serialize session compaction recovery state: {error}"
+                                        ))
+                                    })?
+                                    .into(),
+                            });
+                            this.session_artifact_store
+                                .append_transcript_record(
+                                    &workspace_root,
+                                    &SessionTranscriptRecord {
+                                        header: SessionTranscriptHeader {
+                                            id: Uuid::new_v4().to_string(),
+                                            session_id: task_session_id.clone(),
+                                            invocation_id: task_turn_id,
+                                            branch: SessionTranscriptBranch::ModelThinking,
+                                            timestamp: Utc::now(),
+                                        },
+                                        author: SessionTranscriptAuthor::System,
+                                        kind: SessionTranscriptEventKind::Planning,
+                                        payload: SessionTranscriptPayload::StateOnly,
+                                        actions,
+                                        partial: false,
+                                    },
+                                )
+                                .await?;
+                        }
+                        Ok(report)
+                    }
+                    .await;
+                    RunTaskCompletion::Confirmed(output)
+                })
+                .map_err(|error| match error {
+                    SpawnError::Closed => TalosError::public(
+                        talos_error::ErrorCode::Cancelled,
+                        "Run stopped accepting compaction tasks",
+                    ),
+                    SpawnError::CapacityExceeded => {
+                        TalosError::internal("Run task capacity exceeded")
+                    }
+                })?;
             if let Err(error) = self.activate_reserved_turn(
                 &session_id,
                 identity.turn_id.clone(),
-                abort_handle,
+                run_control.clone(),
                 None,
             ) {
-                task.abort();
+                let _ = run_control
+                    .settle(RunTermination::Cancelled {
+                        policy: CancellationPolicy {
+                            grace: std::time::Duration::ZERO,
+                        },
+                    })
+                    .await;
+                let _ = task.await;
                 return Err(error);
             }
 
@@ -318,7 +352,13 @@ impl AgentHarnessImpl {
                 Ok(item_id) => item_id,
                 Err(error) => {
                     drop(start_tx);
-                    task.abort();
+                    let _ = run_control
+                        .settle(RunTermination::Cancelled {
+                            policy: CancellationPolicy {
+                                grace: std::time::Duration::ZERO,
+                            },
+                        })
+                        .await;
                     let _ = task.await;
                     return Err(error);
                 }
@@ -326,7 +366,24 @@ impl AgentHarnessImpl {
             let _ = start_tx.send(());
             let report = match task.await {
                 Ok(report) => report,
-                Err(error) if error.is_cancelled() => {
+                Err(RunTaskError::Stopped) => Err(TalosError::public(
+                    talos_error::ErrorCode::Cancelled,
+                    "session context compaction was cancelled",
+                )),
+            };
+            let settlement = run_control
+                .settle(RunTermination::Completed {
+                    timeout: RUN_COMPLETION_TIMEOUT,
+                })
+                .await;
+            let lifecycle_error = terminal_error(run_terminal_disposition(&settlement));
+            if let Some(error) = lifecycle_error {
+                send_compaction_event(&event_tx, timeline.fail_turn(&error)).await?;
+                return Err(error);
+            }
+            let report = match report {
+                Ok(report) => report,
+                Err(error) if error.is_code(talos_error::ErrorCode::Cancelled) => {
                     let cancelled_content = TalosTimelineContent::ContextCompaction {
                         trigger: ContextCompactionTrigger::UserRequested,
                         stage: ContextCompactionStage::Failed,
@@ -353,17 +410,8 @@ impl AgentHarnessImpl {
                         ),
                     )
                     .await?;
-                    return Err(TalosError::public(
-                        talos_error::ErrorCode::Cancelled,
-                        "session context compaction was cancelled".to_string(),
-                    ));
+                    return Err(error);
                 }
-                Err(error) => Err(TalosError::internal(format!(
-                    "session context compaction task failed: {error}"
-                ))),
-            };
-            let report = match report {
-                Ok(report) => report,
                 Err(error) => {
                     let outcome = match error.error_code() {
                         talos_error::ErrorCode::ServiceUnavailable
@@ -406,6 +454,8 @@ impl AgentHarnessImpl {
                         | talos_error::ErrorCode::UsageLimitExceeded
                         | talos_error::ErrorCode::ContextCompactionFailed
                         | talos_error::ErrorCode::Cancelled
+                        | talos_error::ErrorCode::RunForcedAbort
+                        | talos_error::ErrorCode::RunCleanupUnconfirmed
                         | talos_error::ErrorCode::InternalError => {
                             ContextCompactionOutcome::FailedInternalError
                         }
@@ -507,6 +557,11 @@ impl AgentHarnessImpl {
             Ok(usage)
         }
         .await;
+        let _ = run_control
+            .settle(RunTermination::Completed {
+                timeout: RUN_COMPLETION_TIMEOUT,
+            })
+            .await;
         self.finish_active_turn_and_dispatch_next(&session_id).await;
         result
     }
