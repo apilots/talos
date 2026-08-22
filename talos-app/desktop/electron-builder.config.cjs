@@ -5,6 +5,7 @@ const packageTarget = process.env.TALOS_DESKTOP_PACKAGE_TARGET ?? "desktop-mac";
 const outputDir = process.env.TALOS_DESKTOP_PACKAGE_DIR ?? path.join(repoRoot, `dist/products/dev/${packageTarget}`);
 const releaseBuild = process.env.TALOS_DESKTOP_RELEASE === "1";
 const macEntitlements = path.join(repoRoot, "build/desktop/mac/entitlements.mac.plist");
+const dmgBackground = path.join(repoRoot, "build/desktop/dmg/background.png");
 const packageArch = process.env.TALOS_PACKAGE_ARCH ?? (process.arch === "arm64" ? "arm64" : "amd64");
 const electronBuilderArch = packageArch === "arm64" ? "arm64" : "x64";
 
@@ -58,6 +59,27 @@ module.exports = {
   },
   dmg: {
     artifactName: "Talos-Desktop-${version}-macos-${arch}.${ext}",
+    background: dmgBackground,
+    contents: [
+      {
+        x: 140,
+        y: 205,
+        type: "file",
+      },
+      {
+        x: 400,
+        y: 205,
+        type: "link",
+        path: "/Applications",
+      },
+    ],
+    iconSize: 108,
+    iconTextSize: 12,
+    title: "Talos",
+    window: {
+      width: 540,
+      height: 380,
+    },
   },
   linux: {
     icon: path.join(repoRoot, "build/desktop/icons/icon.png"),
