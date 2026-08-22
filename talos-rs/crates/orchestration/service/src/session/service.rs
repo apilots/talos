@@ -78,13 +78,13 @@ impl SessionService {
     }
 
     fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
-        let selection = record.conf.model_selection.as_ref().ok_or_else(|| {
+        record.conf.model_selection.as_ref().ok_or_else(|| {
             TalosError::internal(format!(
                 "session '{}' uses an incompatible persisted session format: missing modelSelection",
                 record.id
             ))
         })?;
-        self.validate_model_selection(selection)
+        SessionConfigOverridePolicy::validate_conf(&record.conf)
     }
 
     fn base_config_snapshot(&self) -> TalosConfig {
