@@ -5,18 +5,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-interface DmgContent {
-  x: number;
-  y: number;
-  type: "file" | "link";
-  path?: string;
-}
-
 interface DmgConfiguration {
   background: string;
-  contents: DmgContent[];
-  iconSize: number;
-  title: string;
   window: {
     width: number;
     height: number;
@@ -41,18 +31,6 @@ describe("macOS DMG installer", () => {
     expect(readPngSize(retinaBackground)).toEqual({
       width: window.width * 2,
       height: window.height * 2,
-    });
-  });
-
-  it("exposes one clear drag path from Talos to Applications", () => {
-    expect(builderConfig.dmg).toMatchObject({
-      contents: [
-        { x: 140, y: 205, type: "file" },
-        { x: 400, y: 205, type: "link", path: "/Applications" },
-      ],
-      iconSize: 108,
-      title: "Talos",
-      window: { width: 540, height: 380 },
     });
   });
 });

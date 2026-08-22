@@ -12,6 +12,7 @@
     "build:main": "vite build && vite build --config vite.preload.config.ts",
     "prepare:app-server": "node scripts/prepare-app-server.mjs",
     "package:mac": "pnpm build && TALOS_DESKTOP_APP_SERVER_PROFILE=release pnpm prepare:app-server && TALOS_DESKTOP_PACKAGE_TARGET=desktop-mac electron-builder --mac dmg --config electron-builder.config.cjs",
+    "verify:dmg": "node scripts/verify-dmg.mjs",
     "package:linux": "pnpm build && TALOS_DESKTOP_APP_SERVER_PROFILE=release pnpm prepare:app-server && TALOS_DESKTOP_PACKAGE_TARGET=desktop-linux electron-builder --linux --config electron-builder.config.cjs",
     "typecheck": "tsc -p tsconfig.json",
     "lint": "eslint src vite.config.ts vite.preload.config.ts --ext .ts",
