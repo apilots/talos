@@ -7,7 +7,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | Type | Next ID |
 | --- | ---: |
 | `feat` | 041 |
-| `fix` | 006 |
+| `fix` | 007 |
 | `refactor` | 041 |
 | `docs` | 001 |
 
@@ -15,6 +15,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| fix-006 | `fix-006-turn-task-lifecycle-control` | implemented |
 | fix-005 | `fix-005-context-compaction-event-presentation` | implemented |
 | feat-040 | `feat-040-web-light-theme-chat-presentation` | implemented |
 | feat-039 | `feat-039-tui-release-installer` | active |
