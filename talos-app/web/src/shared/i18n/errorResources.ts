@@ -38,6 +38,8 @@ export const errorResources = {
     timeout: "Operation timed out",
     cancelled: "Operation was cancelled",
     serviceUnavailable: "Service unavailable",
+    runForcedAbort: "Run was force-aborted",
+    runCleanupUnconfirmed: "Run cleanup could not be confirmed",
     internalError: "An internal error occurred",
   },
   zh: {
@@ -79,6 +81,8 @@ export const errorResources = {
     timeout: "操作超时",
     cancelled: "操作已取消",
     serviceUnavailable: "服务暂不可用",
+    runForcedAbort: "运行已被强制终止",
+    runCleanupUnconfirmed: "无法确认运行清理已完成",
     internalError: "发生内部错误",
   },
 } as const;
