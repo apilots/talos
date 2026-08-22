@@ -76,7 +76,7 @@ fix *args:
 gen-app-protocol:
     cargo run -p talos-app-protocol --example generate_app_protocol_artifacts
 
-# Regenerate Web and Desktop logo assets from the vector master.
+# Regenerate brand and cross-platform application icon assets from the vector master.
 gen-logo-assets:
     ../scripts/generate-logo-assets.sh
 

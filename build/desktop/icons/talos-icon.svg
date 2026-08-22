@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="title description">
-  <title id="title">Talos</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" role="img" aria-labelledby="app-icon-title app-icon-description">
+  <title id="app-icon-title">Talos app icon</title>
+  <desc id="app-icon-description">The Talos mark centered on a white application icon tile.</desc>
+  <rect x="58" y="58" width="1138" height="1138" rx="254" fill="#ffffff" stroke="#dfe4ec" stroke-width="8"/>
+  <g transform="translate(152 152) scale(0.7575757576)">
+<title id="title">Talos</title>
   <desc id="description">A rounded blue organic mark with a flowing cyan fold and a soft white T.</desc>
   <defs>
     <path id="body" d="M245 340C249 239 313 136 414 105C514 75 624 113 690 162C750 136 824 137 885 154C992 184 1051 275 1055 383C1154 414 1222 495 1221 606C1220 701 1177 771 1094 816C1084 915 1035 1023 947 1083C870 1135 773 1161 684 1127C635 1108 612 1108 565 1123C477 1151 379 1137 300 1091C210 1039 132 931 127 810C47 772 17 691 34 584C50 484 129 398 245 340Z"/>
@@ -95,4 +99,5 @@
 
   <path d="M424 459C464 452 498 494 545 513C598 535 648 532 708 508C753 490 785 451 823 459C859 466 879 493 867 527C854 565 819 575 782 560C749 547 716 559 685 585C658 608 657 648 661 692C665 738 692 782 671 814C650 845 608 839 584 810C559 780 577 738 582 697C589 650 585 611 552 585C523 562 494 553 466 563C429 576 394 565 381 533C366 496 386 465 424 459Z" fill="url(#tFill)" filter="url(#tGlow)" transform="translate(25 32.5) scale(0.96 0.95)"/>
   <path d="M424 459C464 452 498 494 545 513C598 535 648 532 708 508C753 490 785 451 823 459C859 466 879 493 867 527C854 565 819 575 782 560C749 547 716 559 685 585C658 608 657 648 661 692C665 738 692 782 671 814C650 845 608 839 584 810C559 780 577 738 582 697C589 650 585 611 552 585C523 562 494 553 466 563C429 576 394 565 381 533C366 496 386 465 424 459Z" fill="none" stroke="#ffffff" stroke-opacity="0.72" stroke-width="2" transform="translate(25 32.5) scale(0.96 0.95)"/>
+  </g>
 </svg>
