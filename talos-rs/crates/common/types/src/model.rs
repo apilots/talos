@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 pub use talos_config::{
-    LlmConfig, LlmProtocol, ModelCostConfig, ModelInputKind, ModelSpeed, ProviderConfig,
+    LlmConfig, LlmProtocol, ModelCostConfig, ModelInputKind, ModelRef, ModelSpeed, ProviderConfig,
     ProviderModelConfig, ReasoningEffort,
 };
 
@@ -17,13 +17,6 @@ pub struct ModelListRequest {}
 pub struct ModelListResponse {
     pub models: Vec<ModelInfo>,
     pub default_model_selection: ModelSelection,
-}
-
-/// Identifies a concrete model under a provider for request-time selection.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct ModelRef {
-    pub provider: String,
-    pub id: String,
 }
 
 /// Selects a model and the reasoning policy applied to requests using it.

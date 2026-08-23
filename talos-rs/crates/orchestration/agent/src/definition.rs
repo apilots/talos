@@ -174,19 +174,34 @@ pub struct AgentHarnessFactory {
     session_store: Arc<dyn SessionStore>,
     memory_writer: Arc<dyn MemoryWriter>,
     attachment_reader: Arc<dyn AttachmentReader>,
+    inner_model: Arc<crate::InnerModelClient>,
+}
+
+/// Explicit dependencies shared by every Harness built by one factory.
+pub struct AgentHarnessFactoryParams {
+    pub llm_provider_router: Arc<dyn LlmProviderRouter>,
+    pub tool_registry: Arc<ToolRegistry>,
+    pub skill_roots_resolver: Arc<dyn SkillRootsResolver>,
+    pub session_artifact_store: Arc<dyn SessionArtifactStore>,
+    pub session_store: Arc<dyn SessionStore>,
+    pub memory_writer: Arc<dyn MemoryWriter>,
+    pub attachment_reader: Arc<dyn AttachmentReader>,
+    pub inner_model: Arc<crate::InnerModelClient>,
 }
 
 impl AgentHarnessFactory {
     /// Create a factory with shared Harness infrastructure.
-    pub fn new(
-        llm_provider_router: Arc<dyn LlmProviderRouter>,
-        tool_registry: Arc<ToolRegistry>,
-        skill_roots_resolver: Arc<dyn SkillRootsResolver>,
-        session_artifact_store: Arc<dyn SessionArtifactStore>,
-        session_store: Arc<dyn SessionStore>,
-        memory_writer: Arc<dyn MemoryWriter>,
-        attachment_reader: Arc<dyn AttachmentReader>,
-    ) -> Self {
+    pub fn new(params: AgentHarnessFactoryParams) -> Self {
+        let AgentHarnessFactoryParams {
+            llm_provider_router,
+            tool_registry,
+            skill_roots_resolver,
+            session_artifact_store,
+            session_store,
+            memory_writer,
+            attachment_reader,
+            inner_model,
+        } = params;
         Self {
             llm_provider_router,
             tool_registry,
@@ -195,6 +210,7 @@ impl AgentHarnessFactory {
             session_store,
             memory_writer,
             attachment_reader,
+            inner_model,
         }
     }
 
@@ -217,6 +233,7 @@ impl AgentHarnessFactory {
                     description: definition.description.clone(),
                     llm_provider_router: self.llm_provider_router.clone(),
                     model_selection: definition.model_selection.clone(),
+                    inner_model: self.inner_model.clone(),
                     tool_registry: self.tool_registry.clone(),
                     kernel_config: kernel.clone(),
                     skill_roots_resolver: self.skill_roots_resolver.clone(),

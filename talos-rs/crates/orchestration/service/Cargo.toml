@@ -19,6 +19,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 talos-auth = { workspace = true }
+talos-agent = { path = "../agent" }
 talos-agent-kernel = { workspace = true }
 talos-config = { workspace = true }
 talos-coordinator = { path = "../coordinator" }

@@ -3,7 +3,7 @@ mod support;
 use std::sync::Arc;
 
 use serde_json::json;
-use support::NoopMemoryWriter;
+use support::{mock_inner_model, NoopMemoryWriter};
 use talos_agent::{
     empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
     AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
@@ -104,15 +104,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let registry = Arc::new(ToolRegistry::new_with_policy(policy));
     registry.register(Arc::new(WebSearchTool));
 
+    let router: Arc<dyn LlmProviderRouter> = Arc::new(StaticLlmProviderRouter { provider });
+    let selection = ModelSelection::without_reasoning(ModelRef {
+        provider: "openai".to_string(),
+        id: "mock-model".to_string(),
+    });
     let agent = AgentHarnessImpl::new(AgentHarnessParams {
         id: "demo-native-tool-agent".to_string(),
         name: "NativeToolAgent".to_string(),
         description: "Demonstrates native tool calling flow".to_string(),
-        llm_provider_router: Arc::new(StaticLlmProviderRouter { provider }),
-        model_selection: ModelSelection::without_reasoning(ModelRef {
-            provider: "openai".to_string(),
-            id: "mock-model".to_string(),
-        }),
+        llm_provider_router: router.clone(),
+        model_selection: selection.clone(),
+        inner_model: mock_inner_model(router, &selection)?,
         tool_registry: registry,
         kernel_config: Default::default(),
         skill_roots_resolver: empty_skill_roots_resolver(),

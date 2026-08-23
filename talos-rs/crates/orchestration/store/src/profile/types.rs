@@ -1,4 +1,4 @@
-use talos_types::{ModelRef, StopReason, TokenUsage};
+use talos_types::{ModelRef, ModelUsageKind, StopReason, TokenUsage};
 
 /// Provides the aggregate usage values used to build a Profile response.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,4 +57,38 @@ impl TurnUsageUpdate {
     pub fn is_discarded(&self) -> bool {
         self.stop_reason == StopReason::Cancelled
     }
+}
+
+/// Carries one completed non-Turn model call into Profile persistence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelCallUsageUpdate {
+    /// Profile owner charged for the model call.
+    pub user_id: String,
+    /// Optional Session that originated the call.
+    pub session_id: Option<String>,
+    /// Idempotency identity for this completed Provider call.
+    pub request_id: String,
+    /// Workload classification persisted as `usage_kind`.
+    pub kind: ModelUsageKind,
+    /// Provider and model that produced the usage.
+    pub model_ref: ModelRef,
+    /// Provider-reported Token usage.
+    pub usage: TokenUsage,
+    /// Whether the Provider returned any measurable usage value.
+    pub usage_available: bool,
+    /// Timezone used to derive `usage_date`.
+    pub timezone: String,
+    /// Provider call completion time as Unix milliseconds.
+    pub completed_at_ms: i64,
+    /// Local calendar date used by Profile daily aggregation.
+    pub usage_date: String,
+}
+
+/// Selects the lifecycle used to persist a Profile model-usage update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileUsageUpdate {
+    /// Turn lifecycle update with waiting, finalization, and discard semantics.
+    Turn(TurnUsageUpdate),
+    /// One already-completed non-Turn model call.
+    ModelCall(ModelCallUsageUpdate),
 }

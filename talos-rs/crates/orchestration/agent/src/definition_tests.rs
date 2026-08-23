@@ -76,6 +76,24 @@ fn default_model_selection() -> ModelSelection {
     })
 }
 
+fn inner_model() -> Arc<crate::InnerModelClient> {
+    let selection = default_model_selection();
+    Arc::new(
+        crate::InnerModelClient::builder()
+            .configured_model(None)
+            .agent_default_model(selection.model_ref.clone())
+            .model_catalog(vec![talos_types::ModelInfo::from_provider_model(
+                selection.model_ref.provider.clone(),
+                serde_json::from_value(serde_json::json!({"id": selection.model_ref.id})).unwrap(),
+            )])
+            .provider_router(Arc::new(TestLlmProviderRouter))
+            .profile_store(Arc::new(talos_store::profile::MockProfileStore::default()))
+            .profile_timezone("UTC".to_string())
+            .build()
+            .unwrap(),
+    )
+}
+
 #[test]
 fn loader_builds_synthesized_default_definition() {
     let config = AgentConfig {
@@ -207,15 +225,16 @@ fn factory_rejects_disabled_definition() {
     let definition = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load")
         .remove(0);
-    let factory = AgentHarnessFactory::new(
-        Arc::new(TestLlmProviderRouter),
-        Arc::new(ToolRegistry::new()),
-        empty_skill_roots_resolver(),
-        Arc::new(FileSessionArtifactStore::default()),
-        Arc::new(talos_store::session::MockSessionStore::new()),
-        Arc::new(TestMemoryWriter),
-        Arc::new(talos_agent_kernel::RejectingAttachmentReader),
-    );
+    let factory = AgentHarnessFactory::new(AgentHarnessFactoryParams {
+        llm_provider_router: Arc::new(TestLlmProviderRouter),
+        tool_registry: Arc::new(ToolRegistry::new()),
+        skill_roots_resolver: empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(TestMemoryWriter),
+        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
+        inner_model: inner_model(),
+    });
 
     let error = match factory.build(&definition) {
         Ok(_) => panic!("disabled definition should be rejected"),
@@ -231,15 +250,16 @@ fn factory_builds_kernel_agent_with_descriptor() {
     let definition = AgentDefinitionLoader::load(&config, &default_model_selection())
         .expect("definitions should load")
         .remove(0);
-    let factory = AgentHarnessFactory::new(
-        Arc::new(TestLlmProviderRouter),
-        Arc::new(ToolRegistry::new()),
-        empty_skill_roots_resolver(),
-        Arc::new(FileSessionArtifactStore::default()),
-        Arc::new(talos_store::session::MockSessionStore::new()),
-        Arc::new(TestMemoryWriter),
-        Arc::new(talos_agent_kernel::RejectingAttachmentReader),
-    );
+    let factory = AgentHarnessFactory::new(AgentHarnessFactoryParams {
+        llm_provider_router: Arc::new(TestLlmProviderRouter),
+        tool_registry: Arc::new(ToolRegistry::new()),
+        skill_roots_resolver: empty_skill_roots_resolver(),
+        session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
+        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
+        memory_writer: Arc::new(TestMemoryWriter),
+        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
+        inner_model: inner_model(),
+    });
 
     let agent = factory.build(&definition).expect("agent should build");
     let descriptor = agent.descriptor();

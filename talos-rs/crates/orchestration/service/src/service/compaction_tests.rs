@@ -11,7 +11,7 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
     let runtime = Arc::new(TestSessionRuntime {
         cancel_mode: TestCancelMode::Cancelled,
         cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
-        compaction_usage,
+        compaction_usage: compaction_usage.clone(),
     });
     let (service, store) = test_application_with_runtime(
         Arc::new(TestTurnExecutor {
@@ -62,6 +62,10 @@ async fn explicit_compaction_records_maintenance_usage_and_preserves_measured_co
         [compacted.state.usage, reloaded.state.usage, stored.usage],
         [expected.clone(), expected.clone(), expected]
     );
+    let profile = service.profile.read_profile(&actor).await.unwrap();
+    assert_eq!(profile.usage, compaction_usage);
+    assert_eq!(profile.usage_session_count, 0);
+    assert_eq!(profile.model_usage[0].turn_count, 0);
 }
 
 #[tokio::test]

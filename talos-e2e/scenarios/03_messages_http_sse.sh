@@ -25,6 +25,10 @@ create_payload='{
     "thread_id": null,
     "message_id": "msg-messages-http",
     "trace_id": "trace-messages-http"
+  },
+  "modelSelection": {
+    "modelRef": {"provider": "deepseek", "id": "deepseek-v4-pro"},
+    "reasoningEffort": null
   }
 }'
 create_id="$(new_session_id)"
@@ -76,6 +80,57 @@ fi
 echo "CASE messages_non_stream PASS message_id=${message_id} session_id=${session_id}"
 echo "DETAIL messages_non_stream_output=${output_text}"
 echo "DETAIL messages_non_stream_usage_total=${message_usage_total}"
+
+model_usage_evidence=""
+for _ in {1..20}; do
+  model_usage_evidence="$(python3 - "${TALOS_HOME}/data/talos.db" "${session_id}" <<'PY'
+import sqlite3
+import sys
+
+database_path, session_id = sys.argv[1:]
+with sqlite3.connect(database_path) as connection:
+    rows = connection.execute(
+        """
+        SELECT usage_kind, user_id, model_provider, model_id, input_tokens, output_tokens, total_tokens
+        FROM profile_turn_usage
+        WHERE session_id = ? AND usage_kind IN ('turn', 'title')
+        ORDER BY id ASC
+        """,
+        (session_id,),
+    ).fetchall()
+by_kind = {row[0]: row[1:] for row in rows}
+if "turn" in by_kind and "title" in by_kind:
+    print("\t".join(str(value) for value in (*by_kind["turn"], *by_kind["title"])))
+PY
+)"
+  if [[ -n "${model_usage_evidence}" ]]; then
+    break
+  fi
+  sleep 1
+done
+IFS=$'\t' read -r turn_user turn_provider turn_model turn_input turn_output turn_total inner_user inner_provider inner_model inner_input inner_output inner_total <<< "${model_usage_evidence}"
+if [[ -z "${turn_total}" || "${turn_user}" != "anonymous" || "${turn_provider}" != "deepseek" || "${turn_model}" != "deepseek-v4-pro" || "${turn_total}" -le 0 ]]; then
+  echo "CASE session_model_turn_usage_db FAIL evidence=${model_usage_evidence}"
+  exit 1
+fi
+echo "CASE session_model_turn_usage_db PASS user=${turn_user} kind=turn model=${turn_provider}:${turn_model} input=${turn_input} output=${turn_output} total=${turn_total}"
+if [[ -z "${inner_total}" || "${inner_user}" != "anonymous" || "${inner_provider}" != "deepseek" || "${inner_model}" != "deepseek-v4-flash" || "${inner_total}" -le 0 || "${inner_model}" == "${turn_model}" ]]; then
+  echo "CASE inner_model_title_usage_db FAIL evidence=${model_usage_evidence}"
+  exit 1
+fi
+echo "CASE inner_model_title_usage_db PASS user=${inner_user} kind=title model=${inner_provider}:${inner_model} input=${inner_input} output=${inner_output} total=${inner_total}"
+
+profile_json="$(curl -sS "${GATEWAY_URL}/v1/profile")"
+log_case_json "inner_model_profile_usage" "{\"session_id\":\"${session_id}\"}" "${profile_json}"
+profile_data_json="$(api_data_json "${profile_json}")"
+profile_total="$(usage_total_from_json "${profile_data_json}")"
+profile_inner_total="$(INNER_PROVIDER="${inner_provider}" INNER_MODEL="${inner_model}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); item=next((entry for entry in payload.get("modelUsage", []) if entry.get("modelRef") == {"provider":os.environ["INNER_PROVIDER"],"id":os.environ["INNER_MODEL"]}), {}); print(item.get("usage", {}).get("total_tokens", 0))' <<< "${profile_data_json}")"
+profile_turn_total="$(TURN_PROVIDER="${turn_provider}" TURN_MODEL="${turn_model}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); item=next((entry for entry in payload.get("modelUsage", []) if entry.get("modelRef") == {"provider":os.environ["TURN_PROVIDER"],"id":os.environ["TURN_MODEL"]}), {}); print(item.get("usage", {}).get("total_tokens", 0))' <<< "${profile_data_json}")"
+if [[ "${profile_total}" -lt "$((turn_total + inner_total))" || "${profile_inner_total}" -lt "${inner_total}" || "${profile_turn_total}" -lt "${turn_total}" ]]; then
+  echo "CASE inner_model_profile_usage FAIL profile=${profile_json} turn_db_total=${turn_total} inner_db_total=${inner_total}"
+  exit 1
+fi
+echo "CASE inner_model_profile_usage PASS profile_total=${profile_total} turn_model_total=${profile_turn_total} inner_model_total=${profile_inner_total}"
 
 session_after_msg_json="$(curl -sS "${GATEWAY_URL}/v1/sessions/${session_id}")"
 log_case_json "messages_session_usage_after_non_stream" "{\"session_id\":\"${session_id}\"}" "${session_after_msg_json}"

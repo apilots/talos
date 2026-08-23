@@ -60,6 +60,7 @@ async fn run_uses_session_provider_for_llm_routing() {
     .expect("agent harness should build");
 
     let mut session = build_test_session("session-provider-routing", "workspace-1");
+    session.title = "Existing title".to_string();
     session.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
         provider: "deepseek".to_string(),
         id: "secondary-model".to_string(),
@@ -100,12 +101,15 @@ async fn run_resolves_file_ids_with_session_owner_and_project_before_model_call(
         seen_model: seen_model.clone(),
     });
     let reader = Arc::new(RecordingFailingAttachmentReader::default());
+    let router = static_router(provider);
+    let selection = model_selection("agent-model");
     let agent = AgentHarnessImpl::new(AgentHarnessParams {
         id: "test_agent".to_string(),
         name: "Test Agent".to_string(),
         description: "An agent for testing".to_string(),
-        llm_provider_router: static_router(provider),
-        model_selection: model_selection("agent-model"),
+        llm_provider_router: router.clone(),
+        model_selection: selection.clone(),
+        inner_model: super::test_inner_model(router, &selection).unwrap(),
         tool_registry: Arc::new(ToolRegistry::new()),
         kernel_config: AgentKernelConfig::default(),
         skill_roots_resolver: crate::empty_skill_roots_resolver(),

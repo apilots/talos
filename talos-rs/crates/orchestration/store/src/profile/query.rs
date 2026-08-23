@@ -11,7 +11,8 @@ pub(super) async fn usage_summary(
 ) -> TalosResult<ProfileUsageSummary> {
     let row = sqlx::query(
         r#"
-        SELECT COUNT(*) AS turn_count, COUNT(DISTINCT session_id) AS usage_session_count,
+        SELECT COUNT(*) AS usage_count,
+               COUNT(DISTINCT CASE WHEN usage_kind = 'turn' THEN session_id END) AS usage_session_count,
                SUM(input_tokens) AS input_tokens,
                SUM(output_tokens) AS output_tokens, SUM(total_tokens) AS total_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)
@@ -28,10 +29,10 @@ pub(super) async fn usage_summary(
     .fetch_one(pool)
     .await
     .map_err(storage_error("read profile usage summary"))?;
-    let turn_count = row
-        .try_get::<i64, _>("turn_count")
-        .map_err(storage_error("read profile turn count"))?;
-    if turn_count == 0 {
+    let usage_count = row
+        .try_get::<i64, _>("usage_count")
+        .map_err(storage_error("read profile usage count"))?;
+    if usage_count == 0 {
         return Ok(ProfileUsageSummary {
             usage: TokenUsage::default(),
             usage_available: false,
@@ -114,7 +115,8 @@ pub(super) async fn model_usage(
     })?;
     let rows = sqlx::query(
         r#"
-        SELECT model_provider, model_id, COUNT(*) AS turn_count,
+        SELECT model_provider, model_id,
+               SUM(CASE WHEN usage_kind = 'turn' THEN 1 ELSE 0 END) AS turn_count,
                SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
                SUM(total_tokens) AS total_tokens,
                CASE WHEN COUNT(cache_creation_input_tokens) = COUNT(*)

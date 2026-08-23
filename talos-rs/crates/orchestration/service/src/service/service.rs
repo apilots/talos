@@ -32,9 +32,10 @@ use crate::project::ProjectService;
 use crate::subagent::SubagentService;
 use crate::{
     AccountService, Actor, ConfigService, MemoryService, PluginManagerService, ProfileService,
-    RuntimeConfigReloadHook, SessionHistoryService, SessionMessageQueueService, SessionService,
-    SkillsService, TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionService,
-    TimelineSubscriptionSource, TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
+    RuntimeConfigReloadHook, RuntimeConfigReloadTrigger, SessionHistoryService,
+    SessionMessageQueueService, SessionService, SkillsService, TimelineEventService,
+    TimelineSubscribeCommand, TimelineSubscriptionService, TimelineSubscriptionSource,
+    TurnExecutor, TurnRetryParams, TurnService, WorkspaceDocService,
 };
 
 #[path = "interrupt.rs"]
@@ -134,15 +135,23 @@ impl TalosService {
         let reload_hook: Option<RuntimeConfigReloadHook> = {
             let sessions = sessions.clone();
             let base_config_state = Arc::new(std::sync::RwLock::new(base_config.clone()));
-            Some(Arc::new(move |value: ConfigValue| {
+            Some(Arc::new(move |trigger: RuntimeConfigReloadTrigger| {
                 let reloaded_config = if let Some(hook) = &reload_hook {
-                    hook(value.clone())?
+                    hook(trigger.clone())?
                 } else {
-                    let mut base_config = base_config_state
-                        .write()
-                        .expect("service base config write lock");
-                    apply_config_value_to_config(&mut base_config, &value);
-                    base_config.clone()
+                    match &trigger {
+                        RuntimeConfigReloadTrigger::Updated(value) => {
+                            let mut base_config = base_config_state
+                                .write()
+                                .expect("service base config write lock");
+                            apply_config_value_to_config(&mut base_config, value);
+                            base_config.clone()
+                        }
+                        RuntimeConfigReloadTrigger::Explicit => base_config_state
+                            .read()
+                            .expect("service base config read lock")
+                            .clone(),
+                    }
                 };
                 sessions.update_base_config(reloaded_config.clone());
                 Ok(reloaded_config)
@@ -184,6 +193,7 @@ impl TalosService {
                 session_runtime.clone(),
                 sessions.clone(),
                 projects,
+                profile_store.clone(),
             ),
             account: AccountService::new(
                 auth_service,

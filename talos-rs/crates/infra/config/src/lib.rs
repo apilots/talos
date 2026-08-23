@@ -57,9 +57,9 @@ pub use domains::network::{
     allowed_llm_protocols, default_llm_protocol, effective_llm_protocol,
     llm_provider_supports_protocol, provider_protocol_capabilities, ChannelConfig, ChannelsConfig,
     DmPolicy, DmScope, GatewayConfig, GroupPolicy, LlmConfig, LlmProtocol, ModelCostConfig,
-    ModelInputKind, ModelSpeed, ProviderConfig, ProviderModelConfig, ProviderProtocolCapabilities,
-    ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig, TelegramGroupConfig,
-    TelegramMode, TelegramTopicConfig,
+    ModelInputKind, ModelRef, ModelSpeed, ProviderConfig, ProviderModelConfig,
+    ProviderProtocolCapabilities, ReasoningEffort, TelegramAccountConfig, TelegramChannelsConfig,
+    TelegramGroupConfig, TelegramMode, TelegramTopicConfig,
 };
 pub use domains::plugins::{
     PluginRootConfig, PluginRootKind, PluginSourceConfig, PluginSourceKind, PluginSourceType,

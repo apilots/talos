@@ -304,7 +304,7 @@ impl TurnService {
                 request_id: completed.request_id.clone(),
                 model_ref: context.model_ref.clone(),
                 usage: completed.usage.clone(),
-                usage_available: usage_is_available(&completed.usage),
+                usage_available: completed.usage.is_available(),
                 stop_reason: completed.stop_reason,
                 timezone: context.timezone.clone(),
                 completed_at_ms,
@@ -783,12 +783,4 @@ impl TurnService {
         )
         .await;
     }
-}
-
-fn usage_is_available(usage: &talos_types::TokenUsage) -> bool {
-    usage.total_tokens > 0
-        || usage.input_tokens > 0
-        || usage.output_tokens > 0
-        || usage.cache_creation_input_tokens.unwrap_or_default() > 0
-        || usage.cache_read_input_tokens.unwrap_or_default() > 0
 }

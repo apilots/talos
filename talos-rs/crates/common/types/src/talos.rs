@@ -559,35 +559,7 @@ pub struct TalosReasoning {
     pub text: String,
 }
 
-/// Token usage values shared by runs, sessions, history, and metrics.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TokenUsage {
-    pub input_tokens: u32,
-    pub output_tokens: u32,
-    pub total_tokens: u32,
-    #[serde(default)]
-    #[ts(optional)]
-    #[ts(type = "number | null")]
-    pub cache_creation_input_tokens: Option<u32>,
-    #[serde(default)]
-    #[ts(optional)]
-    #[ts(type = "number | null")]
-    pub cache_read_input_tokens: Option<u32>,
-}
-
-impl TokenUsage {
-    pub fn accumulate(&mut self, other: &Self) {
-        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
-        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
-        self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
-        self.cache_creation_input_tokens = sum_optional_tokens(
-            self.cache_creation_input_tokens,
-            other.cache_creation_input_tokens,
-        );
-        self.cache_read_input_tokens =
-            sum_optional_tokens(self.cache_read_input_tokens, other.cache_read_input_tokens);
-    }
-}
+pub use crate::usage::TokenUsage;
 
 /// Kernel-owned execution metrics for a turn.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
@@ -601,15 +573,6 @@ pub struct TurnExecutionMetrics {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub duration_ms: Option<u64>,
-}
-
-fn sum_optional_tokens(left: Option<u32>, right: Option<u32>) -> Option<u32> {
-    match (left, right) {
-        (Some(left), Some(right)) => Some(left.saturating_add(right)),
-        (Some(left), None) => Some(left),
-        (None, Some(right)) => Some(right),
-        (None, None) => None,
-    }
 }
 
 /// Agent execution event lifecycle type.

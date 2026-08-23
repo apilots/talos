@@ -5,11 +5,12 @@ use talos_coordinator::{
     AgentSessionCompactionIdentity, AgentSessionCompactionParams, SessionRuntime,
 };
 use talos_error::{TalosError, TalosResult};
+use talos_store::profile::{ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdate};
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    CancelActiveTurnParams, ModelSelection, OptionalProjectIdPatch, ProjectPatch, SessionConf,
-    SessionListRequest, SessionPatch, TalosSession, UserPermissionMode,
+    CancelActiveTurnParams, ModelSelection, ModelUsageKind, OptionalProjectIdPatch, ProjectPatch,
+    SessionConf, SessionListRequest, SessionPatch, TalosSession, UserPermissionMode,
 };
 
 use super::types::Actor;
@@ -21,6 +22,7 @@ pub(crate) struct ResourceAccessService {
     session_runtime: Arc<dyn SessionRuntime>,
     sessions: Arc<SessionService>,
     projects: Arc<ProjectService>,
+    profiles: Arc<dyn ProfileStore>,
 }
 
 /// Request accepted by `TalosService` when a caller needs a session handle.
@@ -39,11 +41,13 @@ impl ResourceAccessService {
         session_runtime: Arc<dyn SessionRuntime>,
         sessions: Arc<SessionService>,
         projects: Arc<ProjectService>,
+        profiles: Arc<dyn ProfileStore>,
     ) -> Self {
         Self {
             session_runtime,
             sessions,
             projects,
+            profiles,
         }
     }
 
@@ -166,12 +170,45 @@ impl ResourceAccessService {
         event_tx: tokio::sync::mpsc::Sender<talos_types::talos::AgentEvent>,
     ) -> TalosResult<TalosSession> {
         let session = self.get_session(actor, session_id).await?;
+        let request_id = identity.request_id.clone();
         let usage = self
             .compact_runtime_session(AgentSessionCompactionParams {
                 session: session.clone(),
                 identity,
                 event_tx,
             })
+            .await?;
+        let completed_at = chrono::Utc::now();
+        let timezone_name = session.config.agent.kernel.timezone.clone();
+        let timezone = talos_config::parse_timezone(&timezone_name)?;
+        let model_ref = session
+            .conf
+            .model_selection
+            .as_ref()
+            .ok_or_else(|| {
+                TalosError::internal(format!(
+                    "session '{session_id}' is missing its persisted model selection"
+                ))
+            })?
+            .model_ref
+            .clone();
+        self.profiles
+            .record_usage(ProfileUsageUpdate::ModelCall(ModelCallUsageUpdate {
+                user_id: session.user_id.clone(),
+                session_id: Some(session_id.to_string()),
+                request_id,
+                kind: ModelUsageKind::Compact,
+                model_ref,
+                usage: usage.clone(),
+                usage_available: usage.is_available(),
+                timezone: timezone_name,
+                completed_at_ms: completed_at.timestamp_millis(),
+                usage_date: completed_at
+                    .with_timezone(&timezone)
+                    .date_naive()
+                    .format("%Y-%m-%d")
+                    .to_string(),
+            }))
             .await?;
         self.sessions
             .record_compaction_usage(session_id, &session.config.llm.model, &usage)

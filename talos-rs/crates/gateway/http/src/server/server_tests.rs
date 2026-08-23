@@ -15,7 +15,7 @@ use talos_service::{TalosService, TurnExecutor};
 use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
 use talos_store::profile::{
     ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileStore, ProfileUsageSummary,
-    TurnUsageUpdate,
+    ProfileUsageUpdate,
 };
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
@@ -138,7 +138,7 @@ struct EmptyProfileStore;
 
 #[async_trait]
 impl ProfileStore for EmptyProfileStore {
-    async fn record_turn_usage(&self, _update: TurnUsageUpdate) -> TalosResult<()> {
+    async fn record_usage(&self, _update: ProfileUsageUpdate) -> TalosResult<()> {
         Ok(())
     }
 

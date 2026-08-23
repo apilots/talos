@@ -253,6 +253,15 @@ impl Default for TelegramGroupConfig {
     }
 }
 
+/// Identifies a concrete configured model under one Provider.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+pub struct ModelRef {
+    /// Provider configuration key used for routing.
+    pub provider: String,
+    /// Model identifier within the selected Provider.
+    pub id: String,
+}
+
 /// LLM configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct LlmConfig {

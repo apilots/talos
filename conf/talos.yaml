@@ -37,6 +37,9 @@ fs:
 
 agent:
   name: "talos"
+  inner_model:
+    provider: "deepseek"
+    id: "deepseek-v4-flash"
   kernel:
     tool_parallelism: 3
     tool_result_max_bytes: 65536
