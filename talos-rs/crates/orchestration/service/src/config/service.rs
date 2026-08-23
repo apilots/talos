@@ -13,7 +13,7 @@ use talos_types::{
 };
 use tokio::sync::RwLock;
 
-use super::types::RuntimeConfigReloadHook;
+use super::types::{RuntimeConfigReloadHook, RuntimeConfigReloadTrigger};
 
 #[derive(Clone)]
 pub struct ConfigService {
@@ -103,15 +103,18 @@ impl ConfigService {
             ConfigValue::Llm(llm) => {
                 let llm = *llm;
                 let saved = self.config_store.save_llm(&llm)?;
-                let reloaded =
-                    self.reload_after_update(ConfigValue::Llm(Box::new(saved.clone())))?;
+                let reloaded = self.reload(RuntimeConfigReloadTrigger::Updated(
+                    ConfigValue::Llm(Box::new(saved.clone())),
+                ))?;
                 self.reload_models(reloaded.as_ref().map_or(&saved, |config| &config.llm))?;
                 self.config_store.load_llm_read().map(Into::into)
             }
             ConfigValue::WebSearch(web_search) => {
                 validate_web_search_config(&web_search)?;
                 let saved = self.config_store.save_web_search(&web_search)?;
-                self.reload_after_update(ConfigValue::WebSearch(Box::new(saved.clone())))?;
+                self.reload(RuntimeConfigReloadTrigger::Updated(ConfigValue::WebSearch(
+                    Box::new(saved.clone()),
+                )))?;
                 self.config_store.load_web_search_read().map(Into::into)
             }
         }
@@ -119,7 +122,9 @@ impl ConfigService {
 
     pub fn update_llm(&self, llm: LlmConfig) -> TalosResult<LlmConfig> {
         let new_llm = self.config_store.save_llm(&llm)?;
-        let reloaded = self.reload_after_update(ConfigValue::Llm(Box::new(new_llm.clone())))?;
+        let reloaded = self.reload(RuntimeConfigReloadTrigger::Updated(ConfigValue::Llm(
+            Box::new(new_llm.clone()),
+        )))?;
         self.reload_models(reloaded.as_ref().map_or(&new_llm, |config| &config.llm))?;
         self.config_store.load_llm_raw()
     }
@@ -136,13 +141,17 @@ impl ConfigService {
         &self,
         _request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
+        if let Some(config) = self.reload(RuntimeConfigReloadTrigger::Explicit)? {
+            self.reload_models(&config.llm)?;
+        }
         Ok(ConfigReloadResponse { success: true })
     }
 
-    fn reload_after_update(&self, value: ConfigValue) -> TalosResult<Option<Config>> {
+    /// Invokes the optional composition-root reload hook for one typed trigger.
+    fn reload(&self, trigger: RuntimeConfigReloadTrigger) -> TalosResult<Option<Config>> {
         self.reload_hook
             .as_ref()
-            .map(|reload_hook| reload_hook(value))
+            .map(|reload_hook| reload_hook(trigger))
             .transpose()
     }
 

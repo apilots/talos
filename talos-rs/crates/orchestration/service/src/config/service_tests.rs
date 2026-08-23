@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use talos_config::InMemoryLlmConfigStore;
 use talos_types::{
-    resolve_model_catalog, ConfigGetRequest, ConfigPath, ConfigResponse, ConfigUpdateRequest,
-    ConfigValue, ModelRef, ModelSelection, ReasoningEffort,
+    resolve_model_catalog, ConfigGetRequest, ConfigPath, ConfigReloadRequest, ConfigResponse,
+    ConfigUpdateRequest, ConfigValue, ModelRef, ModelSelection, ReasoningEffort,
 };
 
-use super::ConfigService;
+use super::{ConfigService, RuntimeConfigReloadTrigger};
 
 fn test_service() -> ConfigService {
     let mut llm = talos_config::LlmConfig {
@@ -140,6 +140,28 @@ fn update_llm_invokes_reload_hook() {
     llm.model = "updated-model".to_string();
     service.update_llm(llm).unwrap();
 
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn reload_config_invokes_explicit_runtime_reload() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_hook = calls.clone();
+    let service = ConfigService::new_with_reload_hook(
+        Arc::new(InMemoryLlmConfigStore::new(
+            talos_config::LlmConfig::default(),
+        )),
+        Vec::new(),
+        Some(Arc::new(move |trigger| {
+            assert!(matches!(trigger, RuntimeConfigReloadTrigger::Explicit));
+            calls_for_hook.fetch_add(1, Ordering::SeqCst);
+            Ok(talos_config::Config::default())
+        })),
+    );
+
+    let response = service.reload_config(ConfigReloadRequest {}).unwrap();
+
+    assert!(response.success);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 

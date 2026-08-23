@@ -38,6 +38,44 @@ agent:
 }
 
 #[test]
+fn inner_model_config_parses_and_validates_against_model_catalog() {
+    let mut config = Config::default();
+    config.agent.inner_model = Some(ModelRef {
+        provider: "deepseek".to_string(),
+        id: "deepseek-v4-flash".to_string(),
+    });
+    config.llm.deepseek.models = vec![ProviderModelConfig {
+        id: "deepseek-v4-flash".to_string(),
+        name: "DeepSeek V4 Flash".to_string(),
+        context_window: 1_000_000,
+        reasoning: false,
+        reasoning_effort: ReasoningEffort::Medium,
+        speed: ModelSpeed::Fast,
+        input: vec![ModelInputKind::Text],
+        cost: ModelCostConfig::default(),
+    }];
+
+    assert!(config.validate_runtime().is_ok());
+}
+
+#[test]
+fn runtime_validation_rejects_unknown_inner_model() {
+    let mut config = Config::default();
+    config.agent.inner_model = Some(ModelRef {
+        provider: "deepseek".to_string(),
+        id: "missing-model".to_string(),
+    });
+
+    let error = config
+        .validate_runtime()
+        .expect_err("unknown inner model should fail validation");
+
+    assert!(error
+        .diagnostic_message()
+        .contains("deepseek:missing-model"));
+}
+
+#[test]
 fn runtime_validation_rejects_zero_message_queue_capacity() {
     let mut config = Config::default();
     config.agent.message_queue.max_messages_per_session = 0;

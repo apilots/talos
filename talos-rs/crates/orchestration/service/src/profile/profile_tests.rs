@@ -5,7 +5,7 @@ use chrono::{TimeZone, Utc};
 use talos_error::TalosResult;
 use talos_store::profile::{
     ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileStore, ProfileUsageSummary,
-    TurnUsageUpdate,
+    ProfileUsageUpdate,
 };
 use talos_store::project::MockProjectStore;
 use talos_store::session::MockSessionStore;
@@ -18,7 +18,7 @@ struct TestProfileStore;
 
 #[async_trait]
 impl ProfileStore for TestProfileStore {
-    async fn record_turn_usage(&self, _update: TurnUsageUpdate) -> TalosResult<()> {
+    async fn record_usage(&self, _update: ProfileUsageUpdate) -> TalosResult<()> {
         Ok(())
     }
 

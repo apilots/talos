@@ -2,7 +2,15 @@ use sqlx::{Row, SqlitePool};
 use talos_error::{TalosError, TalosResult};
 
 use super::usage::{accumulate_usage, storage_error, usage_from_row};
-use super::TurnUsageUpdate;
+use super::{ModelCallUsageUpdate, ProfileUsageUpdate, TurnUsageUpdate};
+
+/// Routes a shared Profile usage update to its lifecycle-specific persistence path.
+pub(super) async fn record_usage(pool: &SqlitePool, update: ProfileUsageUpdate) -> TalosResult<()> {
+    match update {
+        ProfileUsageUpdate::Turn(update) => record_turn_usage(pool, update).await,
+        ProfileUsageUpdate::ModelCall(update) => record_model_call_usage(pool, update).await,
+    }
+}
 
 pub(super) async fn record_turn_usage(
     pool: &SqlitePool,
@@ -13,7 +21,7 @@ pub(super) async fn record_turn_usage(
         .await
         .map_err(storage_error("begin profile usage update"))?;
     let existing = sqlx::query(
-        "SELECT user_id, last_request_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, finalized, timezone FROM profile_turn_usage WHERE session_id = ? AND turn_id = ?",
+        "SELECT user_id, last_request_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, finalized, timezone FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?",
     )
     .bind(&update.session_id)
     .bind(&update.turn_id)
@@ -31,7 +39,7 @@ pub(super) async fn record_turn_usage(
             None => false,
         };
         if !finalized {
-            sqlx::query("DELETE FROM profile_turn_usage WHERE session_id = ? AND turn_id = ?")
+            sqlx::query("DELETE FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?")
                 .bind(&update.session_id)
                 .bind(&update.turn_id)
                 .execute(&mut *transaction)
@@ -114,11 +122,11 @@ pub(super) async fn record_turn_usage(
         sqlx::query(
             r#"
             INSERT INTO profile_turn_usage (
-                user_id, session_id, turn_id, last_request_id, model_provider, model_id,
+                user_id, usage_kind, session_id, turn_id, last_request_id, model_provider, model_id,
                 input_tokens, output_tokens, total_tokens,
                 cache_creation_input_tokens, cache_read_input_tokens, usage_available,
                 finalized, usage_date, timezone, completed_at_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, 'turn', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&update.user_id)
@@ -153,12 +161,103 @@ pub(super) async fn discard_turn_usage(
     session_id: &str,
     turn_id: &str,
 ) -> TalosResult<()> {
-    sqlx::query("DELETE FROM profile_turn_usage WHERE session_id = ? AND turn_id = ?")
+    sqlx::query("DELETE FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?")
         .bind(session_id)
         .bind(turn_id)
         .execute(pool)
         .await
         .map_err(storage_error("discard failed profile turn usage"))?;
+    Ok(())
+}
+
+/// Inserts one finalized non-Turn model call with request-id idempotency.
+async fn record_model_call_usage(
+    pool: &SqlitePool,
+    update: ModelCallUsageUpdate,
+) -> TalosResult<()> {
+    if update.kind == talos_types::ModelUsageKind::Turn {
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            "Turn usage requires TurnUsageUpdate".to_string(),
+        ));
+    }
+    let existing = sqlx::query(
+        "SELECT session_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, timezone, completed_at_ms, usage_date FROM profile_turn_usage WHERE user_id = ? AND usage_kind = ? AND last_request_id = ?",
+    )
+    .bind(&update.user_id)
+    .bind(update.kind.as_str())
+    .bind(&update.request_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(storage_error("read profile model-call usage"))?;
+    if let Some(row) = existing {
+        let matches = row
+            .try_get::<Option<String>, _>("session_id")
+            .map_err(storage_error("read profile model-call session"))?
+            == update.session_id
+            && row
+                .try_get::<String, _>("model_provider")
+                .map_err(storage_error("read profile model-call provider"))?
+                == update.model_ref.provider
+            && row
+                .try_get::<String, _>("model_id")
+                .map_err(storage_error("read profile model-call model"))?
+                == update.model_ref.id
+            && usage_from_row(&row)? == update.usage
+            && row
+                .try_get::<i64, _>("usage_available")
+                .map_err(storage_error("read profile model-call availability"))?
+                == i64::from(u8::from(update.usage_available))
+            && row
+                .try_get::<String, _>("timezone")
+                .map_err(storage_error("read profile model-call timezone"))?
+                == update.timezone
+            && row
+                .try_get::<i64, _>("completed_at_ms")
+                .map_err(storage_error("read profile model-call completion"))?
+                == update.completed_at_ms
+            && row
+                .try_get::<String, _>("usage_date")
+                .map_err(storage_error("read profile model-call date"))?
+                == update.usage_date;
+        return if matches {
+            Ok(())
+        } else {
+            Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "profile model-call usage context changed for one request".to_string(),
+            ))
+        };
+    }
+
+    sqlx::query(
+        r#"
+        INSERT INTO profile_turn_usage (
+            user_id, usage_kind, session_id, turn_id, last_request_id,
+            model_provider, model_id, input_tokens, output_tokens, total_tokens,
+            cache_creation_input_tokens, cache_read_input_tokens, usage_available,
+            finalized, usage_date, timezone, completed_at_ms
+        ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        "#,
+    )
+    .bind(&update.user_id)
+    .bind(update.kind.as_str())
+    .bind(&update.session_id)
+    .bind(&update.request_id)
+    .bind(&update.model_ref.provider)
+    .bind(&update.model_ref.id)
+    .bind(i64::from(update.usage.input_tokens))
+    .bind(i64::from(update.usage.output_tokens))
+    .bind(i64::from(update.usage.total_tokens))
+    .bind(update.usage.cache_creation_input_tokens.map(i64::from))
+    .bind(update.usage.cache_read_input_tokens.map(i64::from))
+    .bind(i64::from(u8::from(update.usage_available)))
+    .bind(&update.usage_date)
+    .bind(&update.timezone)
+    .bind(update.completed_at_ms)
+    .execute(pool)
+    .await
+    .map_err(storage_error("insert profile model-call usage"))?;
     Ok(())
 }
 

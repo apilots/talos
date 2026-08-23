@@ -12,6 +12,7 @@ mod request;
 mod runtime;
 mod runtime_compaction;
 mod session;
+mod session_title;
 #[cfg(test)]
 #[path = "agent/agent_tests.rs"]
 mod tests;
@@ -29,9 +30,8 @@ use lifecycle::{
 
 use crate::{
     AgentDescriptor, AgentError, AgentErrorKind, AgentHarness, AgentInput, AgentInputParams,
-    AgentInputResult, AgentInterruptParams, AgentResult, AgentResumeParams, AgentRunConfig,
-    AgentRunParams, AgentRunResult, AgentRunSessionState, AgentSessionCompactionParams,
-    AgentStatus, SkillRootsResolver,
+    AgentInputResult, AgentInterruptParams, AgentResult, AgentResumeParams, AgentRunParams,
+    AgentRunResult, AgentSessionCompactionParams, AgentStatus, SkillRootsResolver,
 };
 #[cfg(test)]
 use runtime::{emit_kernel_timeline_events, KernelTimelineState};
@@ -39,7 +39,7 @@ use runtime::{AgentRuntime, KernelAgent, KernelAgentParams};
 use talos_agent_kernel::{AttachmentReader, TimelineBuilder};
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::{ChatMessage, ChatRequest, LlmProviderRouter};
+use talos_llm_provider::LlmProviderRouter;
 use talos_memory::MemoryWriter;
 use talos_run_control::{
     CancellationMode, CancellationPolicy, CleanupReport, RunTaskCompletion, RunTaskError,
@@ -50,20 +50,9 @@ use talos_tools::ToolRegistry;
 use talos_types::talos::{
     AgentEvent, AgentEventPayload, StopReason as TalosStopReason, TokenUsage,
 };
-use talos_types::{deterministic_session_title, session_title_or_fallback, ModelSelection};
-use tracing::warn;
+use talos_types::ModelSelection;
 
 const ACTIVE_TURN_MESSAGE_CAPACITY: usize = 16;
-const SESSION_TITLE_PROMPT: &str = r#"Generate a concise session title for the conversation.
-
-Rules:
-- Return only the title text.
-- One line only.
-- No markdown, no quotes, no trailing punctuation.
-- Prefer 3-8 words.
-- Focus on the core task topic.
-"#;
-
 /// Default AgentHarness implementation used by Talos today.
 ///
 /// The Harness owns shared Agent framework behavior and delegates backend
@@ -81,6 +70,8 @@ pub struct AgentHarnessImpl {
     pub llm_provider_router: Arc<dyn LlmProviderRouter>,
     /// Default model and reasoning policy for this Harness.
     pub model_selection: ModelSelection,
+    /// Shared client for Agent-owned auxiliary model calls.
+    inner_model: Arc<crate::InnerModelClient>,
     /// Long-term memory persistence injected by the composition root.
     memory_writer: Arc<dyn MemoryWriter>,
     /// Recoverable session artifact persistence injected by the composition root.
@@ -112,6 +103,8 @@ pub struct AgentHarnessParams {
     pub llm_provider_router: Arc<dyn LlmProviderRouter>,
     /// Default model selection.
     pub model_selection: ModelSelection,
+    /// Shared client for Agent-owned auxiliary model calls.
+    pub inner_model: Arc<crate::InnerModelClient>,
     /// Tools available to this Harness.
     pub tool_registry: Arc<ToolRegistry>,
     /// Resolved Kernel runtime configuration.
@@ -137,6 +130,7 @@ impl AgentHarnessImpl {
             description,
             llm_provider_router,
             model_selection,
+            inner_model,
             tool_registry,
             kernel_config,
             skill_roots_resolver,
@@ -154,6 +148,7 @@ impl AgentHarnessImpl {
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
             model_selection: model_selection.clone(),
+            inner_model,
             memory_writer: memory_writer.clone(),
             session_artifact_store: session_artifact_store.clone(),
             session_store: session_store.clone(),
@@ -220,52 +215,6 @@ After receiving tool outputs, continue reasoning and provide the final response.
             self.description,
             available_tools.join(", ")
         )
-    }
-
-    async fn generate_session_title(
-        &self,
-        session_state: &AgentRunSessionState,
-        run_config: &AgentRunConfig,
-        first_user_text: &str,
-        first_assistant_text: &str,
-    ) -> Option<String> {
-        if session_state.has_real_title() || first_user_text.trim().is_empty() {
-            return None;
-        }
-
-        let request = ChatRequest::builder()
-            .model(run_config.model_selection.model_ref.id.clone())
-            .messages(vec![
-                ChatMessage::system(SESSION_TITLE_PROMPT),
-                ChatMessage::user(format!(
-                    "First user message:\n{}\n\nFirst assistant response:\n{}",
-                    first_user_text.trim(),
-                    first_assistant_text.trim()
-                )),
-            ])
-            .build();
-
-        let llm_provider = match self
-            .llm_provider_router
-            .provider_for(&run_config.model_selection.model_ref)
-        {
-            Ok(llm_provider) => llm_provider,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    "failed to resolve provider for session title generation"
-                );
-                return Some(deterministic_session_title(first_user_text));
-            }
-        };
-
-        match llm_provider.chat(request).await {
-            Ok(response) => Some(session_title_or_fallback(response.content, first_user_text)),
-            Err(error) => {
-                warn!(?error, "failed to generate session title");
-                Some(deterministic_session_title(first_user_text))
-            }
-        }
     }
 
     fn generated_session_title_key(session_id: &str, turn_id: &str) -> String {
@@ -338,8 +287,8 @@ After receiving tool outputs, continue reasoning and provide the final response.
     ) -> AgentResult<AgentRunResult> {
         let turn_id = request.turn_id().to_string();
         let session_id = request.context.session_id.clone();
+        let title_user_id = request.context.owner_user_id.clone();
         let session_state = request.session_state.clone();
-        let run_config = request.config.clone();
         let title_input = request::AgentKernelParams::extract_text_input(&request.input);
         let run_control = create_run_control(&session_id, &turn_id);
         let run_tasks = run_control.tasks();
@@ -398,14 +347,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
 
         let result = match run_task.await {
             Ok(Ok(mut result)) => {
-                result.generated_session_title = self
-                    .generate_session_title(
-                        &session_state,
-                        &run_config,
-                        &title_input,
-                        &result.output_text,
-                    )
-                    .await;
+                result.generated_session_title = session_title::generate(
+                    &self.inner_model,
+                    &session_state,
+                    &title_user_id,
+                    &session_id,
+                    &title_input,
+                    &result.output_text,
+                )
+                .await;
                 Ok(result)
             }
             Ok(Err(err)) if matches!(err.kind, AgentErrorKind::Interrupted) => Ok(AgentRunResult {
@@ -458,9 +408,9 @@ After receiving tool outputs, continue reasoning and provide the final response.
         let stream_task = tokio::spawn(async move {
             let request_turn_id = request.turn_id().to_string();
             let session_id = request.context.session_id.clone();
+            let title_user_id = request.context.owner_user_id.clone();
             let message_id = request.context.message_id.clone();
             let session_state = request.session_state.clone();
-            let run_config = request.config.clone();
             let title_input = request::AgentKernelParams::extract_text_input(&request.input);
             let title_turn_id = request_turn_id.clone();
             let run_control = create_run_control(&session_id, &request_turn_id);
@@ -571,14 +521,15 @@ After receiving tool outputs, continue reasoning and provide the final response.
             match completion_result {
                 Ok(Ok(result)) => {
                     this.finish_active_turn_and_dispatch_next(&session_id).await;
-                    if let Some(title) = this
-                        .generate_session_title(
-                            &session_state,
-                            &run_config,
-                            &title_input,
-                            &result.output_text,
-                        )
-                        .await
+                    if let Some(title) = session_title::generate(
+                        &this.inner_model,
+                        &session_state,
+                        &title_user_id,
+                        &session_id,
+                        &title_input,
+                        &result.output_text,
+                    )
+                    .await
                     {
                         this.generated_session_titles.insert(
                             Self::generated_session_title_key(&session_id, &title_turn_id),

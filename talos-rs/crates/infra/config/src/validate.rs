@@ -151,6 +151,22 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "agent.name is empty or unresolved placeholder".to_string(),
         ));
     }
+    if let Some(model_ref) = &config.agent.inner_model {
+        let provider = model_ref.provider.trim();
+        let model = model_ref.id.trim();
+        let configured = !provider.is_empty()
+            && !model.is_empty()
+            && !is_unresolved_placeholder(provider)
+            && !is_unresolved_placeholder(model)
+            && crate::provider_config_for_llm(&config.llm, provider)
+                .is_some_and(|config| config.models.iter().any(|entry| entry.id == model));
+        if !configured {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::ProviderUnavailable,
+                format!("agent.inner_model is not configured: {provider}:{model}"),
+            ));
+        }
+    }
     if config.agent.message_queue.max_messages_per_session == 0 {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,

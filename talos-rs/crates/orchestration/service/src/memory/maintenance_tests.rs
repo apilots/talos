@@ -5,14 +5,19 @@ use chrono::{DateTime, Utc};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use talos_llm_provider::{
-    ChatChunk, ChatResponse, ChatStream, LlmProvider, ReasoningOutput, Usage,
+    ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter,
+    ReasoningOutput, Usage,
 };
 use talos_storage::SqliteStorage;
+use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
 use talos_store::session::{DatabaseSessionStore, SessionArtifactStore, SessionRecord, TalosTurn};
 use talos_types::talos::{
     RunItem, StopReason, TalosContext, TalosProvider, TalosSourceType, TokenUsage,
 };
-use talos_types::{resolve_default_model_selection, ModelRef, ModelSelection, SessionConf};
+use talos_types::{
+    resolve_default_model_selection, resolve_model_catalog, ModelRef, ModelSelection,
+    ModelUsageKind, SessionConf,
+};
 use tokio::sync::mpsc;
 
 struct TestProvider {
@@ -92,16 +97,32 @@ async fn daily_maintenance_processes_two_user_scopes() {
     config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
     config.llm.provider = "anthropic".to_string();
     config.llm.model = "default-maintenance-model".to_string();
-    config.llm.anthropic.models = vec![talos_config::ProviderModelConfig {
-        id: config.llm.model.clone(),
-        name: "Default maintenance model".to_string(),
-        context_window: 32_768,
-        reasoning: false,
-        reasoning_effort: Default::default(),
-        speed: Default::default(),
-        input: Vec::new(),
-        cost: Default::default(),
-    }];
+    config.llm.anthropic.models = vec![
+        talos_config::ProviderModelConfig {
+            id: config.llm.model.clone(),
+            name: "Default maintenance model".to_string(),
+            context_window: 32_768,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+        },
+        talos_config::ProviderModelConfig {
+            id: "inner-maintenance-model".to_string(),
+            name: "Inner maintenance model".to_string(),
+            context_window: 32_768,
+            reasoning: false,
+            reasoning_effort: Default::default(),
+            speed: Default::default(),
+            input: Vec::new(),
+            cost: Default::default(),
+        },
+    ];
+    config.agent.inner_model = Some(ModelRef {
+        provider: "anthropic".to_string(),
+        id: "inner-maintenance-model".to_string(),
+    });
     let default_selection =
         resolve_default_model_selection(&config.llm).expect("default model selection");
     let storage = Arc::new(SqliteStorage::new(":memory:").await.expect("storage"));
@@ -162,19 +183,33 @@ async fn daily_maintenance_processes_two_user_scopes() {
             "- managed memory".to_string(),
             "- managed memory".to_string(),
             "- managed memory".to_string(),
+            candidate_response("failed-metrics"),
+            "- changed memory".to_string(),
         ])),
     });
     let router = Arc::new(TestRouter {
         provider,
         requested_model_refs: Mutex::new(Vec::new()),
     });
+    let profiles = Arc::new(MockProfileStore::default());
+    let inner_model = Arc::new(
+        talos_agent::InnerModelClient::builder()
+            .configured_model(config.agent.inner_model.clone())
+            .agent_default_model(default_selection.model_ref.clone())
+            .model_catalog(resolve_model_catalog(&config.llm))
+            .provider_router(router.clone())
+            .profile_store(profiles.clone())
+            .profile_timezone("UTC".to_string())
+            .build()
+            .expect("inner model client"),
+    );
     let maintenance = MemoryDailyMaintenance::new(
         sessions.clone(),
         sessions.clone(),
-        artifacts,
+        artifacts.clone(),
         memory,
-        router.clone(),
-        config,
+        inner_model,
+        config.clone(),
         MemoryDailyMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
@@ -225,9 +260,79 @@ async fn daily_maintenance_processes_two_user_scopes() {
         .expect("requested model refs")
         .clone();
     assert!(!requested_model_refs.is_empty());
+    let expected_inner_model = config.agent.inner_model.unwrap();
+    let usage_kinds = profiles
+        .updates()
+        .into_iter()
+        .map(|update| match update {
+            ProfileUsageUpdate::ModelCall(update) => (update.kind, update.model_ref),
+            ProfileUsageUpdate::Turn(_) => panic!("maintenance must not record Turn usage"),
+        })
+        .collect::<Vec<_>>();
     assert!(requested_model_refs
         .iter()
-        .all(|model_ref| model_ref == &default_selection.model_ref));
+        .all(|model_ref| model_ref == &expected_inner_model));
+    assert!(usage_kinds
+        .iter()
+        .any(|(kind, _)| *kind == ModelUsageKind::Dream));
+    assert!(usage_kinds
+        .iter()
+        .any(|(kind, _)| *kind == ModelUsageKind::Memory));
+    assert!(usage_kinds
+        .iter()
+        .all(|(_, model_ref)| model_ref == &expected_inner_model));
+
+    let u1_workspace = workspace.path().join("users").join("u1");
+    let memory_path = u1_workspace.join("MEMORY.md");
+    let memory_before_failure = std::fs::read_to_string(&memory_path).expect("managed memory");
+    artifacts
+        .append_turn(
+            &u1_workspace,
+            &TalosTurn {
+                turn_id: "turn-s1-2".to_string(),
+                message_id: "message-s1-2".to_string(),
+                session_id: "s1".to_string(),
+                seq: 2,
+                timestamp: DateTime::<Utc>::from_timestamp(1_784_251_801, 0).expect("timestamp"),
+                items: vec![RunItem::UserInput {
+                    text: "remember failure invariant".to_string(),
+                    file_ids: Vec::new(),
+                }],
+                usage: TokenUsage::default(),
+                stop_reason: StopReason::EndTurn,
+            },
+        )
+        .await
+        .expect("append failure turn");
+    let record_before_failure = sessions
+        .get_session_record("s1")
+        .await
+        .expect("load session")
+        .expect("session record");
+    profiles.set_record_usage_failure(true);
+
+    maintenance
+        .process_session(record_before_failure.clone())
+        .await
+        .expect_err("daily memory must fail when usage recording fails");
+    let record_after_failure = sessions
+        .get_session_record("s1")
+        .await
+        .expect("reload session")
+        .expect("session record");
+    assert_eq!(
+        record_after_failure.memory_processed_until_seq,
+        record_before_failure.memory_processed_until_seq
+    );
+
+    maintenance
+        .refresh_managed_memory("u1")
+        .await
+        .expect_err("managed memory must fail when usage recording fails");
+    assert_eq!(
+        std::fs::read_to_string(memory_path).expect("managed memory after failure"),
+        memory_before_failure
+    );
 }
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {

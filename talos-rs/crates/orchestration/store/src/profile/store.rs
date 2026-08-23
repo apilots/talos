@@ -3,7 +3,8 @@ use sqlx::SqlitePool;
 use talos_error::TalosResult;
 
 use super::{
-    ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileUsageSummary, TurnUsageUpdate,
+    ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileUsageSummary, ProfileUsageUpdate,
+    TurnUsageUpdate,
 };
 
 /// Reads and records Profile usage without exposing database records.
@@ -13,7 +14,13 @@ use super::{
 /// and persistence validation; callers do not receive transactions or rows.
 #[async_trait]
 pub trait ProfileStore: Send + Sync {
-    async fn record_turn_usage(&self, update: TurnUsageUpdate) -> TalosResult<()>;
+    /// Persists one strongly typed Turn or completed model-call usage update.
+    async fn record_usage(&self, update: ProfileUsageUpdate) -> TalosResult<()>;
+
+    /// Preserves the previous Turn-specific convenience entrypoint for existing callers.
+    async fn record_turn_usage(&self, update: TurnUsageUpdate) -> TalosResult<()> {
+        self.record_usage(ProfileUsageUpdate::Turn(update)).await
+    }
 
     /// Removes unfinished usage when a logical Turn fails before finalization.
     async fn discard_turn_usage(&self, session_id: &str, turn_id: &str) -> TalosResult<()>;
@@ -47,6 +54,7 @@ pub struct DatabaseProfileStore {
 }
 
 impl DatabaseProfileStore {
+    /// Creates a Profile repository backed by the supplied SQLite pool.
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }
@@ -54,8 +62,8 @@ impl DatabaseProfileStore {
 
 #[async_trait]
 impl ProfileStore for DatabaseProfileStore {
-    async fn record_turn_usage(&self, update: TurnUsageUpdate) -> TalosResult<()> {
-        super::write::record_turn_usage(&self.pool, update).await
+    async fn record_usage(&self, update: ProfileUsageUpdate) -> TalosResult<()> {
+        super::write::record_usage(&self.pool, update).await
     }
 
     async fn discard_turn_usage(&self, session_id: &str, turn_id: &str) -> TalosResult<()> {

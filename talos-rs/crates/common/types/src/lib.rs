@@ -27,6 +27,7 @@ pub mod talos;
 mod talos_content_display;
 mod talos_event;
 pub mod turn_api;
+pub mod usage;
 pub mod user_action;
 
 pub use agent_dispatch::*;
@@ -48,6 +49,7 @@ pub use skills::*;
 pub use subagent::*;
 pub use talos::*;
 pub use turn_api::*;
+pub use usage::*;
 pub use user_action::*;
 
 #[cfg(test)]

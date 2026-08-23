@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use talos_error::TalosResult;
 
-use crate::AgentKernelConfig;
+use crate::{AgentKernelConfig, ModelRef};
 
 fn default_agent_id() -> String {
     "default".to_string()
@@ -117,6 +117,10 @@ pub struct AgentConfig {
     #[serde(default)]
     pub identity: Option<String>,
 
+    /// Optional model used by Agent-owned auxiliary model calls.
+    #[serde(default)]
+    pub inner_model: Option<ModelRef>,
+
     /// Session-scoped in-memory message queue settings.
     #[serde(default)]
     pub message_queue: MessageQueueConfig,
@@ -140,6 +144,7 @@ impl Default for AgentConfig {
             name: default_agent_name(),
             workspace: None,
             identity: None,
+            inner_model: None,
             message_queue: MessageQueueConfig::default(),
             kernel: AgentKernelConfig::default(),
             agents: Vec::new(),

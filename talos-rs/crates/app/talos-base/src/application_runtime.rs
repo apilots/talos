@@ -1,7 +1,10 @@
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
-use talos_agent::{AgentDefinitionLoader, AgentHarness, AgentHarnessFactory};
+use talos_agent::{
+    resolve_inner_model_ref, AgentDefinitionLoader, AgentHarness, AgentHarnessFactory,
+    AgentHarnessFactoryParams, InnerModelClient,
+};
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
 use talos_config::{Config, ConfigStore, YamlConfigStore};
 use talos_coordinator::{Coordinator, CoordinatorImpl, SessionRuntime};
@@ -107,6 +110,17 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         },
     )));
     let llm_provider_router: Arc<dyn LlmProviderRouter> = reloadable_llm_provider_router.clone();
+    let model_catalog = resolve_model_catalog(&config.llm);
+    let inner_model = Arc::new(
+        InnerModelClient::builder()
+            .configured_model(config.agent.inner_model.clone())
+            .agent_default_model(default_model_selection.model_ref.clone())
+            .model_catalog(model_catalog.clone())
+            .provider_router(llm_provider_router.clone())
+            .profile_store(profile_store.clone())
+            .profile_timezone(config.agent.kernel.timezone.clone())
+            .build()?,
+    );
     let sandbox = ToolSandbox::with_runtime_paths(sandbox_runtime_paths(&config));
     let tool_registry = Arc::new(ToolRegistry::new_with_sandbox(sandbox));
     register_core_local_tools(tool_registry.as_ref());
@@ -132,15 +146,16 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     memory_service.rebuild_known_scopes().await?;
     tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
 
-    let agent_factory = AgentHarnessFactory::new(
-        llm_provider_router.clone(),
-        tool_registry.clone(),
+    let agent_factory = AgentHarnessFactory::new(AgentHarnessFactoryParams {
+        llm_provider_router: llm_provider_router.clone(),
+        tool_registry: tool_registry.clone(),
         skill_roots_resolver,
-        session_artifact_store.clone(),
-        session_store_impl.clone(),
-        Arc::new(memory_service.clone()),
-        file_service.clone(),
-    );
+        session_artifact_store: session_artifact_store.clone(),
+        session_store: session_store_impl.clone(),
+        memory_writer: Arc::new(memory_service.clone()),
+        attachment_reader: file_service.clone(),
+        inner_model: inner_model.clone(),
+    });
 
     let coordinator = Arc::new(CoordinatorImpl::new(router));
 
@@ -171,19 +186,31 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         config.talos_paths().env_file,
     ));
 
-    let model_catalog = resolve_model_catalog(&config.llm);
     let provider_reloader = reloadable_llm_provider.clone();
     let provider_router_reloader = reloadable_llm_provider_router.clone();
     let provider_router_config_reloader = llm_router_config.clone();
+    let inner_model_reloader = inner_model.clone();
     let runtime_reload_hook: talos_service::RuntimeConfigReloadHook = Arc::new(move |_| {
         let reloaded_config = Config::load()?;
         reloaded_config.validate_runtime()?;
         let reloaded_provider = create_llm_provider(&reloaded_config)?;
+        let reloaded_default_selection = resolve_default_model_selection(&reloaded_config.llm)?;
+        let reloaded_model_catalog = resolve_model_catalog(&reloaded_config.llm);
+        let reloaded_inner_model_ref = resolve_inner_model_ref(
+            reloaded_config.agent.inner_model.as_ref(),
+            &reloaded_default_selection.model_ref,
+            &reloaded_model_catalog,
+        )?;
+        let mut inner_provider_config = reloaded_config.clone();
+        inner_provider_config.llm.provider = reloaded_inner_model_ref.provider.clone();
+        inner_provider_config.llm.model = reloaded_inner_model_ref.id.clone();
+        create_llm_provider(&inner_provider_config)?;
         provider_reloader.reload(reloaded_provider);
         *provider_router_config_reloader
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config.clone();
         provider_router_reloader.reload();
+        inner_model_reloader.reload(reloaded_inner_model_ref);
         Ok(reloaded_config)
     });
     let service = Arc::new(TalosService::new_with_reload_hook(
@@ -215,7 +242,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         active_turn_store,
         session_artifact_store,
         memory_service,
-        llm_provider_router,
+        inner_model,
         config.clone(),
         config.automation.memory_daily_maintenance.clone(),
     );

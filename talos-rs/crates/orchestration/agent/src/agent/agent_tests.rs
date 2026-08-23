@@ -21,7 +21,6 @@ use talos_llm_provider::{
     ModelBlockStreamEvent, ModelOutputPhase, ReasoningContinuation, ReasoningOutput, Role,
     ToolDefinition, Usage,
 };
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
 use talos_store::session::{self as session_artifacts, FileSessionArtifactStore};
 use talos_tools::{
     default_governance_for_source, ReadTool, RegisteredToolSpec, ToolParallelism, ToolPayloadKind,
@@ -45,56 +44,20 @@ mod resume_tests;
 mod run_lifecycle_tests;
 #[path = "run_validation_tests.rs"]
 mod run_validation_tests;
+#[path = "test_support.rs"]
+mod test_support;
 use talos_types::{
     ModelRef, ModelSelection, SessionConf, SessionContext, SessionState, TalosSession,
     DEFAULT_SESSION_TITLE,
 };
 use tempfile::TempDir;
+use test_support::{test_agent_harness, test_inner_model, TestMemoryWriter};
 use tokio::sync::Notify;
 
 #[path = "attachment_tests.rs"]
 mod attachment_tests;
 #[path = "compaction_tests.rs"]
 mod compaction_tests;
-
-struct TestMemoryWriter;
-
-impl MemoryWriter for TestMemoryWriter {
-    fn write<'a>(
-        &'a self,
-        _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
-    ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
-    > {
-        Box::pin(async { Ok(()) })
-    }
-}
-
-fn test_agent_harness(
-    id: String,
-    name: String,
-    description: String,
-    llm_provider_router: Arc<dyn LlmProviderRouter>,
-    model_selection: ModelSelection,
-    tool_registry: Arc<ToolRegistry>,
-    kernel_config: AgentKernelConfig,
-) -> talos_error::TalosResult<AgentHarnessImpl> {
-    AgentHarnessImpl::new(AgentHarnessParams {
-        id,
-        name,
-        description,
-        llm_provider_router,
-        model_selection,
-        tool_registry,
-        kernel_config,
-        skill_roots_resolver: crate::empty_skill_roots_resolver(),
-        session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
-        session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(TestMemoryWriter),
-        attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
-    })
-}
 
 async fn append_transcript_record(
     workspace_root: &std::path::Path,
@@ -1356,16 +1319,15 @@ async fn title_generation_accepts_user_input_before_final_assistant_output() {
     session.state.message_count = 0;
     session.title = DEFAULT_SESSION_TITLE.to_string();
     let session_state = AgentRunSessionState::from_session(&session);
-    let run_config = AgentRunConfig::from_session(&session);
-
-    let title = agent
-        .generate_session_title(
-            &session_state,
-            &run_config,
-            "Analyze ADK code and build a mock demo",
-            "",
-        )
-        .await;
+    let title = session_title::generate(
+        &agent.inner_model,
+        &session_state,
+        &session.user_id,
+        &session.context.session_id,
+        "Analyze ADK code and build a mock demo",
+        "",
+    )
+    .await;
 
     assert_eq!(title.as_deref(), Some("Test response"));
 }
@@ -1385,16 +1347,15 @@ async fn title_generation_falls_back_when_provider_is_unavailable() {
     let mut session = build_test_session("session-title-fallback", "workspace-1");
     session.title = DEFAULT_SESSION_TITLE.to_string();
     let session_state = AgentRunSessionState::from_session(&session);
-    let run_config = AgentRunConfig::from_session(&session);
-
-    let title = agent
-        .generate_session_title(
-            &session_state,
-            &run_config,
-            "Analyze ADK code and build a mock demo.",
-            "",
-        )
-        .await;
+    let title = session_title::generate(
+        &agent.inner_model,
+        &session_state,
+        &session.user_id,
+        &session.context.session_id,
+        "Analyze ADK code and build a mock demo.",
+        "",
+    )
+    .await;
 
     assert_eq!(
         title.as_deref(),

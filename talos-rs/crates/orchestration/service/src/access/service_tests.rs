@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use talos_coordinator::SessionRuntime;
 use talos_error::TalosResult;
+use talos_store::profile::MockProfileStore;
 use talos_store::project::{ProjectRecord, ProjectStore};
 use talos_store::session::{SessionQuery, SessionRecord, SessionStore, SessionSummary};
 use talos_types::talos::{TalosContext, TalosProvider, TalosSourceType};
@@ -59,7 +60,12 @@ fn recording_access_service(
 ) -> ResourceAccessService {
     let sessions = recording_session_service(store.clone());
     let projects = Arc::new(crate::project::ProjectService::new(store));
-    ResourceAccessService::with_services(runtime, sessions, projects)
+    ResourceAccessService::with_services(
+        runtime,
+        sessions,
+        projects,
+        Arc::new(MockProfileStore::default()),
+    )
 }
 
 #[async_trait]

@@ -254,8 +254,37 @@ async fn migration_creates_profile_usage_schema() {
         .unwrap();
     let pool = storage.pool().clone();
 
-    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
-    run_migrations(&pool, &test_migrations_dir()).await.unwrap();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608230001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO profile_turn_usage (
+            user_id, session_id, turn_id, last_request_id, model_provider, model_id,
+            input_tokens, output_tokens, total_tokens, usage_available, finalized,
+            usage_date, timezone, completed_at_ms
+        ) VALUES ('user-1', 'session-1', 'turn-1', 'request-1', 'deepseek',
+                  'deepseek-v4-flash', 11, 3, 14, 1, 1, '2026-08-23', 'UTC', 1000)
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+    run_migrations(&pool, &migration_dir).await.unwrap();
 
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'profile_turn_usage'",
@@ -271,7 +300,45 @@ async fn migration_creates_profile_usage_schema() {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(index_count, 1);
+    let columns = sqlx::query("PRAGMA table_info(profile_turn_usage)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<String, _>("name"))
+        .collect::<std::collections::BTreeSet<_>>();
+    let model_call_index_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_profile_model_call_usage_request'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let legacy_row = sqlx::query(
+        "SELECT usage_kind, session_id, turn_id, total_tokens FROM profile_turn_usage WHERE last_request_id = 'request-1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            index_count,
+            model_call_index_count,
+            columns.contains("usage_kind"),
+            legacy_row.get::<String, _>("usage_kind"),
+            legacy_row.get::<String, _>("session_id"),
+            legacy_row.get::<String, _>("turn_id"),
+            legacy_row.get::<i64, _>("total_tokens"),
+        ),
+        (
+            1,
+            1,
+            true,
+            "turn".to_string(),
+            "session-1".to_string(),
+            "turn-1".to_string(),
+            14,
+        )
+    );
 }
 
 #[tokio::test]

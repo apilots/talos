@@ -414,15 +414,32 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
     registry.register(Arc::new(EchoTool {
         state: state.clone(),
     }));
+    let router: Arc<dyn LlmProviderRouter> = Arc::new(StaticLlmProviderRouter { provider });
+    let selection = ModelSelection::without_reasoning(ModelRef {
+        provider: "openai".to_string(),
+        id: "mock-model".to_string(),
+    });
+    let inner_model = Arc::new(
+        talos_agent::InnerModelClient::builder()
+            .configured_model(None)
+            .agent_default_model(selection.model_ref.clone())
+            .model_catalog(vec![talos_types::ModelInfo::from_provider_model(
+                "openai",
+                serde_json::from_value(serde_json::json!({"id": "mock-model"})).unwrap(),
+            )])
+            .provider_router(router.clone())
+            .profile_store(Arc::new(talos_store::profile::MockProfileStore::default()))
+            .profile_timezone("UTC".to_string())
+            .build()
+            .unwrap(),
+    );
     AgentHarnessImpl::new(AgentHarnessParams {
         id: "integration_agent".to_string(),
         name: "Integration Agent".to_string(),
         description: "Agent for integration tests".to_string(),
-        llm_provider_router: Arc::new(StaticLlmProviderRouter { provider }),
-        model_selection: ModelSelection::without_reasoning(ModelRef {
-            provider: "openai".to_string(),
-            id: "mock-model".to_string(),
-        }),
+        llm_provider_router: router,
+        model_selection: selection,
+        inner_model,
         tool_registry: registry,
         kernel_config: Default::default(),
         skill_roots_resolver: empty_skill_roots_resolver(),

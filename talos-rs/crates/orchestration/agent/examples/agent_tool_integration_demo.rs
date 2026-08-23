@@ -3,7 +3,7 @@
 mod support;
 
 use std::sync::Arc;
-use support::NoopMemoryWriter;
+use support::{mock_inner_model, NoopMemoryWriter};
 use talos_agent::{
     empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
     AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
@@ -90,17 +90,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create an agent with a mock provider
     let llm_provider = Arc::new(DemoLlmProvider {});
+    let router: Arc<dyn LlmProviderRouter> = Arc::new(StaticLlmProviderRouter {
+        provider: llm_provider,
+    });
+    let selection = ModelSelection::without_reasoning(ModelRef {
+        provider: "openai".to_string(),
+        id: "demo-model".to_string(),
+    });
     let agent = AgentHarnessImpl::new(AgentHarnessParams {
         id: "demo_agent_1".to_string(),
         name: "Demo Agent".to_string(),
         description: "An agent for demonstration purposes".to_string(),
-        llm_provider_router: Arc::new(StaticLlmProviderRouter {
-            provider: llm_provider,
-        }),
-        model_selection: ModelSelection::without_reasoning(ModelRef {
-            provider: "openai".to_string(),
-            id: "demo-model".to_string(),
-        }),
+        llm_provider_router: router.clone(),
+        model_selection: selection.clone(),
+        inner_model: mock_inner_model(router, &selection)?,
         tool_registry,
         kernel_config: Default::default(),
         skill_roots_resolver: empty_skill_roots_resolver(),
