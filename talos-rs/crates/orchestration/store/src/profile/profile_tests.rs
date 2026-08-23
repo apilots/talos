@@ -4,7 +4,8 @@ use talos_types::{ModelRef, ModelUsageKind, StopReason, TokenUsage};
 use crate::migration::{run_migrations, test_migrations_dir};
 
 use super::{
-    DatabaseProfileStore, ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdate, TurnUsageUpdate,
+    DatabaseProfileStore, ModelCallUsageUpdate, ProfileModelUsageSummary, ProfileStore,
+    ProfileUsageUpdate, TurnUsageUpdate,
 };
 
 async fn store() -> DatabaseProfileStore {
@@ -93,6 +94,62 @@ async fn model_call_usage_reuses_profile_aggregates_without_changing_session_cou
     .await
     .unwrap();
     assert_eq!(kinds, vec!["turn".to_string(), "dream".to_string()]);
+}
+
+#[tokio::test]
+async fn model_usage_limit_ranks_all_usage_kinds_by_total_tokens() {
+    let store = store().await;
+    for (index, token_count) in [(1, 10), (2, 20), (3, 30)] {
+        let mut turn = update(
+            &format!("turn-request-{index}"),
+            StopReason::EndTurn,
+            usage(token_count, 2),
+        );
+        turn.session_id = format!("session-{index}");
+        turn.turn_id = format!("turn-{index}");
+        turn.model_ref.id = format!("turn-model-{index}");
+        store.record_turn_usage(turn).await.unwrap();
+    }
+
+    let mut dream = model_call("dream-request", usage(100, 5));
+    dream.model_ref.id = "inner-model".to_string();
+    store
+        .record_usage(ProfileUsageUpdate::ModelCall(dream))
+        .await
+        .unwrap();
+
+    assert_eq!(
+        store.model_usage("user-1", 3).await.unwrap(),
+        vec![
+            ProfileModelUsageSummary {
+                model_ref: ModelRef {
+                    provider: "anthropic".to_string(),
+                    id: "inner-model".to_string(),
+                },
+                turn_count: 0,
+                usage: usage(100, 5),
+                usage_available: true,
+            },
+            ProfileModelUsageSummary {
+                model_ref: ModelRef {
+                    provider: "anthropic".to_string(),
+                    id: "turn-model-3".to_string(),
+                },
+                turn_count: 1,
+                usage: usage(30, 2),
+                usage_available: true,
+            },
+            ProfileModelUsageSummary {
+                model_ref: ModelRef {
+                    provider: "anthropic".to_string(),
+                    id: "turn-model-2".to_string(),
+                },
+                turn_count: 1,
+                usage: usage(20, 2),
+                usage_available: true,
+            },
+        ]
+    );
 }
 
 #[tokio::test]

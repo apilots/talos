@@ -116,6 +116,7 @@ pub(super) async fn model_usage(
     let rows = sqlx::query(
         r#"
         SELECT model_provider, model_id,
+               COUNT(*) AS usage_count,
                SUM(CASE WHEN usage_kind = 'turn' THEN 1 ELSE 0 END) AS turn_count,
                SUM(input_tokens) AS input_tokens, SUM(output_tokens) AS output_tokens,
                SUM(total_tokens) AS total_tokens,
@@ -127,7 +128,7 @@ pub(super) async fn model_usage(
         FROM profile_turn_usage
         WHERE user_id = ? AND finalized = 1
         GROUP BY model_provider, model_id
-        ORDER BY turn_count DESC, model_provider ASC, model_id ASC
+        ORDER BY total_tokens DESC, usage_count DESC, model_provider ASC, model_id ASC
         LIMIT ?
         "#,
     )
