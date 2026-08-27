@@ -145,6 +145,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let memory_service = MemoryService::new(config.clone(), memory_store)?;
     memory_service.rebuild_known_scopes().await?;
     tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
+    let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
+    tool_registry.set_user_workspace_memory_writer(user_workspace_memory.clone());
 
     let agent_factory = AgentHarnessFactory::new(AgentHarnessFactoryParams {
         llm_provider_router: llm_provider_router.clone(),
@@ -153,6 +155,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         session_artifact_store: session_artifact_store.clone(),
         session_store: session_store_impl.clone(),
         memory_writer: Arc::new(memory_service.clone()),
+        user_workspace_memory_reader: user_workspace_memory.clone(),
+        user_workspace_memory_writer: user_workspace_memory.clone(),
         attachment_reader: file_service.clone(),
         inner_model: inner_model.clone(),
     });
@@ -213,24 +217,27 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         inner_model_reloader.reload(reloaded_inner_model_ref);
         Ok(reloaded_config)
     });
-    let service = Arc::new(TalosService::new_with_reload_hook(
-        turn_executor,
-        session_runtime,
-        session_store,
-        session_artifact_store.clone(),
-        project_store,
-        profile_store.clone(),
-        file_service,
-        event_service.clone(),
-        idempotency_store,
-        config.clone(),
-        memory_service.clone(),
-        config_store,
-        model_catalog,
-        auth_service.clone(),
-        user_service,
-        Some(runtime_reload_hook),
-    ));
+    let service = Arc::new(
+        TalosService::new_with_reload_hook(
+            turn_executor,
+            session_runtime,
+            session_store,
+            session_artifact_store.clone(),
+            project_store,
+            profile_store.clone(),
+            file_service,
+            event_service.clone(),
+            idempotency_store,
+            config.clone(),
+            memory_service.clone(),
+            config_store,
+            model_catalog,
+            auth_service.clone(),
+            user_service,
+            Some(runtime_reload_hook),
+        )
+        .with_user_workspace_memory(user_workspace_memory),
+    );
     if config.agent.kernel.tools.enable_collaboration_tools {
         register_subagent_tools(tool_registry.as_ref());
         tool_registry.set_agent_control(Arc::new(ApplicationAgentControl::new(service.clone())));

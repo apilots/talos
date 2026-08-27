@@ -111,6 +111,14 @@ use talos_tools::{register_core_local_tools, ToolRegistry};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+fn missing_user_workspace_memory() -> talos_prompt::UserWorkspaceMemoryPromptContext {
+    talos_prompt::UserWorkspaceMemoryPromptContext {
+        file_state: talos_prompt::UserWorkspaceMemoryPromptFileState::Missing,
+        version_token: None,
+        content: String::new(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_general_turn(
     ctx: &mut InvocationContext,
@@ -133,6 +141,7 @@ async fn run_general_turn(
         tool_definition_provider,
         tool_executor_port,
         memory_writer,
+        missing_user_workspace_memory(),
         kernel_config,
         skill_options,
         crate::test_run_tasks(),
@@ -160,6 +169,7 @@ async fn prepare_general_turn(
         llm_provider,
         tool_definition_provider,
         memory_writer,
+        missing_user_workspace_memory(),
         kernel_config,
         skill_options,
         crate::test_run_tasks(),

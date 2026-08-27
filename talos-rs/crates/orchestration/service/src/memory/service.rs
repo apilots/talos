@@ -232,11 +232,6 @@ impl MemoryService {
         MemoryReader::get(self, &memory_scope(&workspace), request).await
     }
 
-    pub(crate) async fn recent_high(&self, user_id: &str) -> TalosResult<Vec<MemoryInfo>> {
-        let records = self.store.list_recent_high(user_id, 20).await?;
-        Ok(records.into_iter().map(memory_info).collect())
-    }
-
     fn memory_dir(&self, config: &TalosConfig) -> PathBuf {
         resolve_workspace_root(config).join(&config.memory.memory_dirname)
     }

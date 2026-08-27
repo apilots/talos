@@ -29,6 +29,7 @@ echo "CASE workspace_info PASS user_workspace_dir=${WORKSPACE_DIR}"
 MEMORY_DATE="$(date '+%Y-%m-%d')"
 MEMORY_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.md"
 SOUL_FILE="${WORKSPACE_DIR}/SOUL.md"
+MEMORY_DOC_FILE="${WORKSPACE_DIR}/MEMORY.md"
 MEMORY_MARKER="memory-api-marker-$(date '+%Y%m%d%H%M%S')-$$"
 DOC_MARKER="workspace-doc-marker-$(date '+%Y%m%d%H%M%S')-$$"
 
@@ -140,6 +141,88 @@ if [[ "${status}" != "409" ]]; then
   exit 1
 fi
 echo "CASE reject_workspace_doc_blind_overwrite PASS status=${status}"
+
+parse_response "$(request_json GET "${GATEWAY_URL}/v1/workspace/docs/memory")"
+status="${RESPONSE_STATUS}"
+body="${RESPONSE_BODY}"
+body_data="$(api_data_json "${body}")"
+memory_doc_exists="$(json_get "${body_data}" "doc.exists")"
+memory_doc_exists="$(printf '%s' "${memory_doc_exists}" | tr '[:upper:]' '[:lower:]')"
+if [[ "${status}" != "200" || "${memory_doc_exists}" != "false" ]]; then
+  echo "CASE get_missing_user_workspace_memory FAIL status=${status} body=${body}"
+  exit 1
+fi
+echo "CASE get_missing_user_workspace_memory PASS exists=${memory_doc_exists}"
+
+create_memory_doc_payload="$(python3 - <<'PY'
+import json
+content = """---
+type: UserWorkspaceMemory
+title: User Workspace Memory
+description: Durable cross-session memory scoped to one agent and one user.
+tags:
+  - talos
+  - agent
+  - user-memory
+status: stable
+---
+
+# User Workspace Memory
+
+<!--
+Keep only information that remains useful across Sessions.
+Record conclusions instead of chronological activity.
+Update or remove stale entries instead of accumulating history.
+-->
+
+<!-- talos:user-workspace-memory:start -->
+
+## Interaction Guidance
+
+<!-- Model-learned collaboration preferences and confirmed feedback. -->
+
+## Key Knowledge
+
+<!-- Durable facts, decisions, constraints, lessons, and references. -->
+
+## Active Context
+
+<!-- Cross-session goals, commitments, blockers, ownership, and next steps. -->
+
+<!-- talos:user-workspace-memory:end -->
+"""
+print(json.dumps({"content": content, "base_version": {"mode": "must_not_exist"}}))
+PY
+)"
+parse_response "$(request_json PUT "${GATEWAY_URL}/v1/workspace/docs/memory" "${create_memory_doc_payload}")"
+status="${RESPONSE_STATUS}"
+body="${RESPONSE_BODY}"
+if [[ "${status}" != "200" || ! -f "${MEMORY_DOC_FILE}" ]]; then
+  echo "CASE create_user_workspace_memory FAIL status=${status} body=${body}"
+  exit 1
+fi
+for expected in \
+  "type: UserWorkspaceMemory" \
+  "status: stable" \
+  "<!-- talos:user-workspace-memory:start -->" \
+  "## Interaction Guidance" \
+  "## Key Knowledge" \
+  "## Active Context" \
+  "<!-- talos:user-workspace-memory:end -->"; do
+  if ! grep -Fq "${expected}" "${MEMORY_DOC_FILE}"; then
+    echo "CASE create_user_workspace_memory FAIL missing=${expected} path=${MEMORY_DOC_FILE}"
+    exit 1
+  fi
+done
+echo "CASE create_user_workspace_memory PASS path=${MEMORY_DOC_FILE}"
+
+parse_response "$(request_json PUT "${GATEWAY_URL}/v1/workspace/docs/memory" "${create_memory_doc_payload}")"
+status="${RESPONSE_STATUS}"
+if [[ "${status}" != "409" ]]; then
+  echo "CASE reject_user_workspace_memory_blind_overwrite FAIL status=${status} body=${RESPONSE_BODY}"
+  exit 1
+fi
+echo "CASE reject_user_workspace_memory_blind_overwrite PASS status=${status}"
 
 parse_response "$(request_json GET "${GATEWAY_URL}/v1/memory/files?limit=5")"
 status="${RESPONSE_STATUS}"

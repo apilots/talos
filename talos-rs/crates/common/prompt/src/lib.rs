@@ -9,6 +9,7 @@ mod builder;
 mod context;
 mod diagnostics;
 mod manager;
+mod memory;
 pub mod presets;
 mod regions;
 mod renderer;
@@ -39,6 +40,7 @@ pub use types::{
     RequestContextInjection, SectionCacheScope, SessionContinuity, SessionHistoryCompaction,
     SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger, SessionPromptContext,
     SessionPromptMessage, SessionPromptSummary, SessionToolExchangeContext,
-    SessionToolExchangeOutcome, SessionToolResultContext, TalosMessageRole, VerifiedPathEvidence,
+    SessionToolExchangeOutcome, SessionToolResultContext, TalosMessageRole,
+    UserWorkspaceMemoryPromptContext, UserWorkspaceMemoryPromptFileState, VerifiedPathEvidence,
     WorkspaceBootstrapFile, WorkspaceBootstrapFileKind,
 };

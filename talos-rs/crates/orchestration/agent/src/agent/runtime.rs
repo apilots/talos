@@ -23,7 +23,7 @@ use talos_agent_kernel::{
     GeneralTurnSkillOptions, InvocationContext, InvocationExecutionState, InvocationLimits,
     KernelEvent, KernelEventData, KernelEventLabel, KernelEventType, KernelStreamEvent,
     KernelStreamEventData, KernelStreamEventType, KernelStreamItemKey, TimelineBuilder,
-    ToolProgressKind, ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
+    ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
 };
 use talos_config::{
     resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
@@ -37,7 +37,7 @@ use talos_store::session::{SessionArtifactStore, SessionStore};
 
 use talos_tools::ToolRegistry;
 use talos_types::talos::{
-    AgentEventPayload, RunItem, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
+    AgentEventPayload, StopReason as TalosStopReason, TalosContentItem, TalosInputItem,
     TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemKind, TalosTimelineItemStatus,
     TalosTimelinePhase, TalosToolProgressKind, TokenUsage, TurnExecutionMetrics,
 };
@@ -47,6 +47,13 @@ mod active_turn_input;
 mod context_usage;
 mod outcome;
 mod resume;
+mod tool_timeline;
+
+use tool_timeline::{
+    append_text_item_delta, emit_missing_tool_items_from_result, ensure_tool_item,
+    ensure_tool_item_for_call, map_timeline_tool_progress_kind, optional_started_with_delta,
+    stream_key_fallback,
+};
 
 /// Internal SPI implemented by concrete agent backends attached to AgentHarness.
 ///
@@ -111,7 +118,7 @@ pub(crate) struct AgentRuntimeStream {
 /// shared Agent events/results before returning to AgentHarness.
 #[derive(Clone)]
 pub(crate) struct KernelAgent {
-    id: String,
+    pub(super) id: String,
     name: String,
     description: String,
     llm_provider_router: Arc<dyn LlmProviderRouter>,
@@ -119,8 +126,11 @@ pub(crate) struct KernelAgent {
     kernel_config: AgentKernelConfig,
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     session_artifact_store: Arc<dyn SessionArtifactStore>,
-    session_store: Arc<dyn SessionStore>,
+    pub(super) session_store: Arc<dyn SessionStore>,
     memory_writer: Arc<dyn MemoryWriter>,
+    pub(super) user_workspace_memory_reader: Arc<dyn talos_memory::UserWorkspaceMemoryReader>,
+    pub(super) user_workspace_memory_writer: Arc<dyn talos_memory::UserWorkspaceMemoryWriter>,
+    pub(super) inner_model: Arc<crate::InnerModelClient>,
     attachment_reader: Arc<dyn AttachmentReader>,
 }
 
@@ -138,6 +148,9 @@ impl KernelAgent {
             session_artifact_store: params.session_artifact_store,
             session_store: params.session_store,
             memory_writer: params.memory_writer,
+            user_workspace_memory_reader: params.user_workspace_memory_reader,
+            user_workspace_memory_writer: params.user_workspace_memory_writer,
+            inner_model: params.inner_model,
             attachment_reader: params.attachment_reader,
         }
     }
@@ -327,6 +340,9 @@ impl KernelAgent {
                 &kernel_config,
             )
             .await?;
+        let user_workspace_memory = self
+            .load_user_workspace_memory_prompt_context(&context.user_id, &kernel_config)
+            .await?;
 
         let result = run_general_turn_with_resume(
             &mut context,
@@ -337,6 +353,7 @@ impl KernelAgent {
             self.tool_registry.clone(),
             self.tool_registry.clone(),
             self.memory_writer.clone(),
+            user_workspace_memory,
             &kernel_config,
             resume,
             Some(skill_options),
@@ -347,6 +364,14 @@ impl KernelAgent {
 
         context_usage::persist_context_usage(self.session_store.as_ref(), &session_id, &result)
             .await?;
+        self.reflect_user_workspace_memory(
+            &context.user_id,
+            &session_id,
+            &input.text,
+            &result,
+            &kernel_config.workspace_dir,
+        )
+        .await;
 
         Ok(agent_run_result_from_general_turn_result(
             &result, session_id,
@@ -460,7 +485,23 @@ impl KernelAgent {
                                 return Err(err.into());
                             }
                         };
+                    let user_workspace_memory = match this
+                        .load_user_workspace_memory_prompt_context(
+                            &kernel_ctx.user_id,
+                            &kernel_config,
+                        )
+                        .await
+                    {
+                        Ok(context) => context,
+                        Err(err) => {
+                            let _ = tx.send(timeline.fail_turn(&err)).await;
+                            return Err(err.into());
+                        }
+                    };
 
+                    let reflection_user_id = kernel_ctx.user_id.clone();
+                    let reflection_input = input.text.clone();
+                    let reflection_workspace_root = kernel_config.workspace_dir.clone();
                     let mut context = kernel_ctx;
                     let run_handle = {
                         let this = this.clone();
@@ -476,6 +517,7 @@ impl KernelAgent {
                                     this.tool_registry.clone(),
                                     this.tool_registry.clone(),
                                     this.memory_writer.clone(),
+                                    user_workspace_memory,
                                     &kernel_config,
                                     resume,
                                     Some(skill_options),
@@ -530,6 +572,14 @@ impl KernelAgent {
                                 let _ = tx.send(timeline.fail_turn(&err)).await;
                                 return Err(err.into());
                             }
+                            this.reflect_user_workspace_memory(
+                                &reflection_user_id,
+                                &session_id,
+                                &reflection_input,
+                                &result,
+                                &reflection_workspace_root,
+                            )
+                            .await;
                             match emit_missing_tool_items_from_result(
                                 &mut timeline,
                                 &mut timeline_state,
@@ -1088,95 +1138,6 @@ pub(super) fn close_active_reasoning_item(
     Ok(vec![completed])
 }
 
-fn append_text_item_delta(
-    timeline: &mut TimelineBuilder,
-    item_id_slot: &mut Option<String>,
-    text: String,
-) -> TalosResult<Vec<AgentEvent>> {
-    let mut events = Vec::new();
-    let item_id = match item_id_slot.clone() {
-        Some(item_id) => item_id,
-        None => {
-            let started = timeline.start_reasoning();
-            let item_id = item_id_from_started(&started)?;
-            *item_id_slot = Some(item_id.clone());
-            events.push(started);
-            item_id
-        }
-    };
-    events.push(timeline.append_delta(&item_id, TalosTimelineDelta::Text { text })?);
-    Ok(events)
-}
-
-fn emit_missing_tool_items_from_result(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    output_items: &[RunItem],
-) -> TalosResult<Vec<AgentEvent>> {
-    let mut events = Vec::new();
-    for output_item in output_items {
-        match output_item {
-            RunItem::ToolCall {
-                call_id,
-                name,
-                arguments,
-            } if !state.tool_item_by_call_id.contains_key(call_id) => {
-                events.extend(close_active_reasoning_item(timeline, state)?);
-                let started = timeline.start_tool_call(call_id, name, arguments.to_string());
-                let item_id = item_id_from_started(&started)?;
-                state
-                    .tool_item_by_call_id
-                    .insert(call_id.clone(), item_id.clone());
-                state.active_tool_items.insert(call_id.clone(), item_id);
-                events.push(started);
-            }
-            RunItem::ToolResult {
-                call_id,
-                tool_name,
-                content,
-                is_error,
-            } if !state.completed_tool_call_ids.contains(call_id) => {
-                events.extend(close_active_reasoning_item(timeline, state)?);
-                let item_id = match state.tool_item_by_call_id.get(call_id).cloned() {
-                    Some(item_id) => item_id,
-                    None => {
-                        let started = timeline.start_tool_call(call_id, tool_name, String::new());
-                        let item_id = item_id_from_started(&started)?;
-                        state
-                            .tool_item_by_call_id
-                            .insert(call_id.clone(), item_id.clone());
-                        state
-                            .active_tool_items
-                            .insert(call_id.clone(), item_id.clone());
-                        events.push(started);
-                        item_id
-                    }
-                };
-                let result = timeline.append_delta(
-                    &item_id,
-                    TalosTimelineDelta::ToolResult {
-                        content: content.clone(),
-                        is_error: *is_error,
-                    },
-                )?;
-                events.push(result);
-                events.push(timeline.complete_item(
-                    &item_id,
-                    if *is_error {
-                        TalosTimelineItemStatus::Failed
-                    } else {
-                        TalosTimelineItemStatus::Completed
-                    },
-                    None,
-                )?);
-                state.completed_tool_call_ids.insert(call_id.clone());
-            }
-            _ => {}
-        }
-    }
-    Ok(events)
-}
-
 pub(super) fn item_id_from_started(event: &AgentEvent) -> TalosResult<String> {
     match &event.payload {
         AgentEventPayload::ItemStarted(payload) => Ok(payload.item.item_id.clone()),
@@ -1184,103 +1145,6 @@ pub(super) fn item_id_from_started(event: &AgentEvent) -> TalosResult<String> {
             "expected item started timeline event".to_string(),
         )),
     }
-}
-
-fn tool_item_id(
-    state: &KernelTimelineState,
-    stream_key: ToolStreamKey,
-    call_id: Option<&str>,
-) -> TalosResult<String> {
-    if let Some(call_id) = call_id {
-        if let Some(item_id) = state.tool_item_by_call_id.get(call_id) {
-            return Ok(item_id.clone());
-        }
-    }
-    state
-        .active_tool_items
-        .get(&stream_key_key(&stream_key))
-        .cloned()
-        .ok_or_else(|| {
-            TalosError::public(
-                ErrorCode::InvalidRequest,
-                format!(
-                    "timeline tool item not found for stream key round={} index={}",
-                    stream_key.round, stream_key.index
-                ),
-            )
-        })
-}
-
-fn ensure_tool_item(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    stream_key: ToolStreamKey,
-    call_id: Option<&str>,
-    tool_name: Option<&str>,
-    arguments: String,
-) -> TalosResult<(String, Option<AgentEvent>)> {
-    if let Ok(item_id) = tool_item_id(state, stream_key.clone(), call_id) {
-        return Ok((item_id, None));
-    }
-
-    let call_id = call_id
-        .map(ToString::to_string)
-        .unwrap_or_else(|| stream_key_fallback(&stream_key));
-    let tool_name = tool_name.unwrap_or("unknown");
-    let started = timeline.start_tool_call(call_id.clone(), tool_name, arguments);
-    let item_id = item_id_from_started(&started)?;
-    state
-        .active_tool_items
-        .insert(stream_key_key(&stream_key), item_id.clone());
-    state.tool_item_by_call_id.insert(call_id, item_id.clone());
-    Ok((item_id, Some(started)))
-}
-
-fn ensure_tool_item_for_call(
-    timeline: &mut TimelineBuilder,
-    state: &mut KernelTimelineState,
-    call_id: &str,
-    tool_name: &str,
-) -> (String, Option<AgentEvent>) {
-    if let Some(item_id) = state.tool_item_by_call_id.get(call_id).cloned() {
-        return (item_id, None);
-    }
-
-    let started = timeline.start_tool_call(call_id, tool_name, String::new());
-    let item_id = match item_id_from_started(&started) {
-        Ok(item_id) => item_id,
-        Err(_) => return (call_id.to_string(), Some(started)),
-    };
-    state
-        .tool_item_by_call_id
-        .insert(call_id.to_string(), item_id.clone());
-    state
-        .active_tool_items
-        .insert(call_id.to_string(), item_id.clone());
-    (item_id, Some(started))
-}
-
-fn optional_started_with_delta(started: Option<AgentEvent>, delta: AgentEvent) -> Vec<AgentEvent> {
-    match started {
-        Some(started) => vec![started, delta],
-        None => vec![delta],
-    }
-}
-
-fn map_timeline_tool_progress_kind(kind: ToolProgressKind) -> TalosToolProgressKind {
-    match kind {
-        ToolProgressKind::Status => TalosToolProgressKind::Status,
-        ToolProgressKind::Stdout => TalosToolProgressKind::Stdout,
-        ToolProgressKind::Stderr => TalosToolProgressKind::Stderr,
-    }
-}
-
-fn stream_key_fallback(stream_key: &ToolStreamKey) -> String {
-    format!("tool_{}_{}", stream_key.round, stream_key.index)
-}
-
-fn stream_key_key(stream_key: &ToolStreamKey) -> String {
-    format!("{}:{}", stream_key.round, stream_key.index)
 }
 
 /// Construction parameters for the built-in KernelAgent runtime.
@@ -1298,6 +1162,9 @@ pub(crate) struct KernelAgentParams {
     pub(crate) session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub(crate) session_store: Arc<dyn SessionStore>,
     pub(crate) memory_writer: Arc<dyn MemoryWriter>,
+    pub(crate) user_workspace_memory_reader: Arc<dyn talos_memory::UserWorkspaceMemoryReader>,
+    pub(crate) user_workspace_memory_writer: Arc<dyn talos_memory::UserWorkspaceMemoryWriter>,
+    pub(crate) inner_model: Arc<crate::InnerModelClient>,
     pub(crate) attachment_reader: Arc<dyn AttachmentReader>,
 }
 

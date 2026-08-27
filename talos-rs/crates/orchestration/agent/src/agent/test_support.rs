@@ -2,15 +2,95 @@ use std::sync::Arc;
 
 use talos_config::{AgentKernelConfig, ModelInputKind, ProviderModelConfig};
 use talos_llm_provider::LlmProviderRouter;
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_memory::{
+    MemoryScope, MemoryWriteBatch, MemoryWriter, UserWorkspaceMemoryDocument,
+    UserWorkspaceMemoryEntry, UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate,
+    UserWorkspaceMemoryReader, UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
+};
 use talos_store::session::FileSessionArtifactStore;
 use talos_tools::ToolRegistry;
+use talos_types::ExpectedFileVersion;
 use talos_types::{ModelInfo, ModelSelection};
 
 use super::{AgentHarnessImpl, AgentHarnessParams};
 
 /// Memory writer used by Agent Harness tests that do not inspect persisted memory.
 pub(super) struct TestMemoryWriter;
+
+pub(super) struct TestUserWorkspaceMemory;
+
+fn test_user_workspace_memory_snapshot() -> UserWorkspaceMemorySnapshot {
+    UserWorkspaceMemorySnapshot::Missing {
+        template: UserWorkspaceMemoryDocument::template()
+            .expect("test User Workspace Memory template should build"),
+    }
+}
+
+impl UserWorkspaceMemoryReader for TestUserWorkspaceMemory {
+    fn read<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = talos_error::TalosResult<UserWorkspaceMemorySnapshot>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(test_user_workspace_memory_snapshot()) })
+    }
+
+    fn get_entry<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _key: &'a str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = talos_error::TalosResult<Option<UserWorkspaceMemoryEntry>>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn list_entries<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _query: UserWorkspaceMemoryEntryQuery,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = talos_error::TalosResult<Vec<UserWorkspaceMemoryEntry>>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+macro_rules! test_user_workspace_memory_write {
+    ($name:ident($($arg:ident: $ty:ty),*)) => {
+        fn $name<'a>(
+            &'a self,
+            _scope: &'a MemoryScope,
+            $($arg: $ty),*
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = talos_error::TalosResult<UserWorkspaceMemorySnapshot>> + Send + 'a>> {
+            Box::pin(async { Ok(test_user_workspace_memory_snapshot()) })
+        }
+    };
+}
+
+impl UserWorkspaceMemoryWriter for TestUserWorkspaceMemory {
+    test_user_workspace_memory_write!(create_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(update_entry(_key: &'a str, _update: UserWorkspaceMemoryEntryUpdate));
+    test_user_workspace_memory_write!(upsert_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(replace_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(remove_entry(_key: &'a str));
+    test_user_workspace_memory_write!(replace_document(_content: String, _base_version: ExpectedFileVersion));
+}
 
 impl MemoryWriter for TestMemoryWriter {
     fn write<'a>(
@@ -48,6 +128,8 @@ pub(super) fn test_agent_harness(
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })
 }

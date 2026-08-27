@@ -19,6 +19,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent/timeline_status_tests.rs"]
 mod timeline_status_tests;
+mod user_workspace_memory;
 
 pub use mock::MockAgent;
 
@@ -40,7 +41,7 @@ use talos_agent_kernel::{AttachmentReader, TimelineBuilder};
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
-use talos_memory::MemoryWriter;
+use talos_memory::{MemoryWriter, UserWorkspaceMemoryReader, UserWorkspaceMemoryWriter};
 use talos_run_control::{
     CancellationMode, CancellationPolicy, CleanupReport, RunTaskCompletion, RunTaskError,
     RunTermination, SettlementKind, SpawnError,
@@ -117,6 +118,10 @@ pub struct AgentHarnessParams {
     pub session_store: Arc<dyn SessionStore>,
     /// Long-term memory persistence.
     pub memory_writer: Arc<dyn MemoryWriter>,
+    /// Current User Workspace Memory reader.
+    pub user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    /// User Workspace Memory mutation capability.
+    pub user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     /// Authorized file content reader used only for the active model turn.
     pub attachment_reader: Arc<dyn AttachmentReader>,
 }
@@ -137,6 +142,8 @@ impl AgentHarnessImpl {
             session_artifact_store,
             session_store,
             memory_writer,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
         } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
@@ -148,7 +155,7 @@ impl AgentHarnessImpl {
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
             model_selection: model_selection.clone(),
-            inner_model,
+            inner_model: inner_model.clone(),
             memory_writer: memory_writer.clone(),
             session_artifact_store: session_artifact_store.clone(),
             session_store: session_store.clone(),
@@ -168,6 +175,9 @@ impl AgentHarnessImpl {
                 session_artifact_store,
                 session_store,
                 memory_writer,
+                user_workspace_memory_reader,
+                user_workspace_memory_writer,
+                inner_model,
                 attachment_reader,
             }),
         })

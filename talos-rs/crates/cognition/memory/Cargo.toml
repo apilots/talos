@@ -10,4 +10,5 @@ repository.workspace = true
 [dependencies]
 serde.workspace = true
 talos-error.workspace = true
+talos-knowledge-format.workspace = true
 talos-types.workspace = true

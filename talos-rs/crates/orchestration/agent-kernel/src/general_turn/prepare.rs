@@ -1,4 +1,7 @@
 use super::prepare_compaction::*;
+use super::prepare_load_policy::{
+    build_compacted_prompt_load_policy, build_initial_prompt_load_policy,
+};
 use super::*;
 use crate::ExecutionBranch;
 use serde::de::DeserializeOwned;
@@ -11,36 +14,6 @@ use talos_types::talos::{ContextCompactionOutcome, ContextCompactionStage};
 pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
-
-fn build_prompt_load_policy(kernel_config: &AgentKernelConfig) -> PromptLoadPolicy {
-    PromptLoadPolicy {
-        compact_cursor: None,
-        include_session_summary: true,
-        include_recent_messages: true,
-        include_recent_tool_history: true,
-        include_recent_tool_outputs: true,
-        session_recent_limit: kernel_config.compaction.recent_messages_keep,
-        session_recent_max_chars: kernel_config.compaction.recent_messages_max_chars,
-        recent_tool_history_limit: kernel_config.compaction.source_recent_tool_exchanges_limit,
-        recent_tool_history_max_chars: kernel_config.compaction.tool_exchange_max_chars,
-        recent_tool_outputs_limit: kernel_config.compaction.source_recent_tool_results_limit,
-        recent_tool_outputs_max_chars: kernel_config.compaction.tool_output_max_chars,
-        session_summary_recent_count: kernel_config.compaction.recent_summaries_keep,
-        session_summary_max_chars: kernel_config.compaction.summary_max_chars,
-        unified_recent_limit: 10,
-    }
-}
-
-fn build_initial_prompt_load_policy(
-    kernel_config: &AgentKernelConfig,
-    compaction_state: Option<&SessionCompactionState>,
-) -> PromptLoadPolicy {
-    if compaction_state.is_some_and(SessionCompactionState::is_recovery) {
-        build_compacted_prompt_load_policy(kernel_config, None)
-    } else {
-        build_prompt_load_policy(kernel_config)
-    }
-}
 
 fn build_tool_selection_request(
     session_id: &str,
@@ -59,31 +32,6 @@ fn build_tool_selection_request(
     }
 }
 
-fn build_compacted_prompt_load_policy(
-    kernel_config: &AgentKernelConfig,
-    compact_cursor: Option<talos_prompt::CompactPromptCursor>,
-) -> PromptLoadPolicy {
-    PromptLoadPolicy {
-        compact_cursor,
-        include_session_summary: true,
-        include_recent_messages: true,
-        include_recent_tool_history: true,
-        include_recent_tool_outputs: true,
-        session_recent_limit: kernel_config
-            .compaction
-            .compacted_recent_messages_keep
-            .max(1),
-        session_recent_max_chars: kernel_config.compaction.compacted_recent_messages_max_chars,
-        recent_tool_history_limit: kernel_config.compaction.tool_exchange_keep_last.max(1),
-        recent_tool_history_max_chars: kernel_config.compaction.compacted_tool_exchange_max_chars,
-        recent_tool_outputs_limit: kernel_config.compaction.tool_output_keep_last.max(1),
-        recent_tool_outputs_max_chars: kernel_config.compaction.compacted_tool_output_max_chars,
-        session_summary_recent_count: kernel_config.compaction.recent_summaries_keep.max(1),
-        session_summary_max_chars: kernel_config.compaction.compacted_summary_max_chars,
-        unified_recent_limit: 10,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn build_prompt_builder<'a>(
     agent_name: &str,
@@ -99,6 +47,7 @@ fn build_prompt_builder<'a>(
     session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
+    user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     load_policy: PromptLoadPolicy,
     dynamic_trim_policy: DynamicTrimPolicy,
     skill_options: Option<GeneralTurnSkillOptions>,
@@ -121,6 +70,7 @@ fn build_prompt_builder<'a>(
         .session_environment(session_environment)
         .project_root(project_root)
         .session_continuity(session_continuity)
+        .user_workspace_memory(user_workspace_memory)
         .dynamic_trim_policy(dynamic_trim_policy)
         .user_input(input.to_string());
 
@@ -167,6 +117,7 @@ async fn rebuild_prompt_assembly(
     session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
+    user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     load_policy: PromptLoadPolicy,
     dynamic_trim_policy: DynamicTrimPolicy,
     skill_options: Option<GeneralTurnSkillOptions>,
@@ -269,6 +220,7 @@ async fn rebuild_prompt_assembly(
         session_environment,
         project_root,
         session_continuity,
+        user_workspace_memory.clone(),
         load_policy,
         dynamic_trim_policy,
         skill_options,
@@ -298,6 +250,7 @@ async fn compact_session_history_if_needed(
     session_environment: Option<talos_types::talos::TalosSessionEnvironment>,
     project_root: Option<std::path::PathBuf>,
     session_continuity: Option<SessionContinuity>,
+    user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<
     Option<(
@@ -378,6 +331,7 @@ async fn compact_session_history_if_needed(
         session_environment,
         project_root,
         session_continuity,
+        user_workspace_memory,
         build_compacted_prompt_load_policy(kernel_config, compact_cursor),
         DynamicTrimPolicy::PreserveAll,
         skill_options,
@@ -545,6 +499,7 @@ pub async fn prepare_general_turn(
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     memory_writer: Arc<dyn MemoryWriter>,
+    user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
     run_tasks: talos_run_control::RunTaskGroup,
@@ -591,6 +546,7 @@ pub async fn prepare_general_turn(
         ctx.session_environment.clone(),
         ctx.project_root.clone(),
         session_continuity.clone(),
+        user_workspace_memory.clone(),
         initial_load_policy.clone(),
         DynamicTrimPolicy::PreserveAll,
         skill_options.clone(),
@@ -646,6 +602,7 @@ pub async fn prepare_general_turn(
         ctx.session_environment.clone(),
         ctx.project_root.clone(),
         session_continuity.clone(),
+        user_workspace_memory.clone(),
         skill_options.clone(),
     )
     .await;
@@ -774,6 +731,7 @@ pub async fn prepare_general_turn(
             ctx.session_environment.clone(),
             ctx.project_root.clone(),
             session_continuity,
+            user_workspace_memory,
             fallback_load_policy,
             DynamicTrimPolicy::TrimToBudget,
             skill_options,

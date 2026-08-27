@@ -20,7 +20,7 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_llm_provider::ToolDefinition;
-use talos_memory::MemoryReader;
+use talos_memory::{MemoryReader, UserWorkspaceMemoryWriter};
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
 use talos_tools_sandbox::{
     ToolGovernanceArgumentOverride, ToolGovernanceSpec, ToolSandbox, ToolSandboxMode,
@@ -128,6 +128,7 @@ pub struct ToolRegistry {
     policy_checker: ToolPolicyChecker,
     agent_control: DashMap<&'static str, Arc<dyn AgentControl>>,
     memory_reader: DashMap<&'static str, Arc<dyn MemoryReader>>,
+    user_workspace_memory_writer: DashMap<&'static str, Arc<dyn UserWorkspaceMemoryWriter>>,
     sandbox: ToolSandbox,
 }
 
@@ -370,6 +371,7 @@ impl ToolRegistry {
             policy_checker: ToolPolicyChecker::new(policy),
             agent_control: DashMap::new(),
             memory_reader: DashMap::new(),
+            user_workspace_memory_writer: DashMap::new(),
             sandbox,
         }
     }
@@ -654,12 +656,21 @@ impl ToolRegistry {
         } else {
             ctx
         };
-        if let Some(reader) = self
+        let ctx = if let Some(reader) = self
             .memory_reader
             .get("default")
             .map(|entry| entry.value().clone())
         {
             ctx.with_memory_reader(reader)
+        } else {
+            ctx
+        };
+        if let Some(writer) = self
+            .user_workspace_memory_writer
+            .get("default")
+            .map(|entry| entry.value().clone())
+        {
+            ctx.with_user_workspace_memory_writer(writer)
         } else {
             ctx
         }
@@ -672,6 +683,11 @@ impl ToolRegistry {
 
     pub fn set_memory_reader(&self, reader: Arc<dyn MemoryReader>) {
         self.memory_reader.insert("default", reader);
+    }
+
+    /// Configures the application-owned User Workspace Memory mutation capability.
+    pub fn set_user_workspace_memory_writer(&self, writer: Arc<dyn UserWorkspaceMemoryWriter>) {
+        self.user_workspace_memory_writer.insert("default", writer);
     }
 
     /// Update the policy for the registry.

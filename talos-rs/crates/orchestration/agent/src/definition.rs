@@ -7,7 +7,7 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
-use talos_memory::MemoryWriter;
+use talos_memory::{MemoryWriter, UserWorkspaceMemoryReader, UserWorkspaceMemoryWriter};
 use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
 use talos_types::ModelSelection;
@@ -173,6 +173,8 @@ pub struct AgentHarnessFactory {
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     session_store: Arc<dyn SessionStore>,
     memory_writer: Arc<dyn MemoryWriter>,
+    user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     attachment_reader: Arc<dyn AttachmentReader>,
     inner_model: Arc<crate::InnerModelClient>,
 }
@@ -185,6 +187,8 @@ pub struct AgentHarnessFactoryParams {
     pub session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub session_store: Arc<dyn SessionStore>,
     pub memory_writer: Arc<dyn MemoryWriter>,
+    pub user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    pub user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     pub attachment_reader: Arc<dyn AttachmentReader>,
     pub inner_model: Arc<crate::InnerModelClient>,
 }
@@ -199,6 +203,8 @@ impl AgentHarnessFactory {
             session_artifact_store,
             session_store,
             memory_writer,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
             inner_model,
         } = params;
@@ -209,6 +215,8 @@ impl AgentHarnessFactory {
             session_artifact_store,
             session_store,
             memory_writer,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
             inner_model,
         }
@@ -240,6 +248,8 @@ impl AgentHarnessFactory {
                     session_artifact_store: self.session_artifact_store.clone(),
                     session_store: self.session_store.clone(),
                     memory_writer: self.memory_writer.clone(),
+                    user_workspace_memory_reader: self.user_workspace_memory_reader.clone(),
+                    user_workspace_memory_writer: self.user_workspace_memory_writer.clone(),
                     attachment_reader: self.attachment_reader.clone(),
                 })
             }

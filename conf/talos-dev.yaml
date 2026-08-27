@@ -1,7 +1,6 @@
 timezone: Asia/Shanghai
 
 memory:
-  root_memory_filename: MEMORY.md
   memory_dirname: memory
   file_list_default_limit: 20
   file_list_max_limit: 90
@@ -112,7 +111,6 @@ agent:
         include_identity: true
         include_user: true
         include_heartbeat: true
-        include_memory: true
     output:
       max_tokens: 32000
       upper_limit: 64000

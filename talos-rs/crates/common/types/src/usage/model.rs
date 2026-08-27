@@ -12,7 +12,7 @@ pub enum ModelUsageKind {
     Compact,
     /// Agent-owned Session title generation.
     Title,
-    /// Agent-owned managed `MEMORY.md` maintenance.
+    /// Agent-owned User Workspace Memory reflection.
     Memory,
     /// Agent-owned Daily Memory candidate formation.
     Dream,

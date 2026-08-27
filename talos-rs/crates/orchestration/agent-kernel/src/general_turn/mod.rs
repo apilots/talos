@@ -76,6 +76,7 @@ mod persist;
 mod prepare;
 mod prepare_compaction;
 mod prepare_continuity;
+mod prepare_load_policy;
 #[cfg(test)]
 mod prepare_tests;
 mod run;

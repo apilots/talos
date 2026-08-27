@@ -225,12 +225,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
             "memory.file_list_default_limit must be < memory.file_list_max_limit".to_string(),
         ));
     }
-    if config.memory.root_memory_filename.trim() != "MEMORY.md" {
-        return Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "memory.root_memory_filename must be MEMORY.md".to_string(),
-        ));
-    }
     let memory_dirname = config.memory.memory_dirname.as_str();
     let mut memory_components = Path::new(memory_dirname).components();
     if memory_dirname.trim() != memory_dirname

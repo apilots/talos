@@ -17,6 +17,7 @@ mod subagent;
 mod timeline;
 pub mod turn;
 pub mod user_action;
+mod user_workspace_memory;
 mod workspace;
 mod workspace_docs;
 
@@ -45,5 +46,6 @@ pub use timeline::{
 pub use turn::{
     turn_submission_hash, AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams, TurnService,
 };
+pub use user_workspace_memory::UserWorkspaceMemoryService;
 pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;

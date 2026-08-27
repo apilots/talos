@@ -3,7 +3,7 @@
 mod support;
 
 use std::sync::Arc;
-use support::{mock_inner_model, NoopMemoryWriter};
+use support::{mock_inner_model, NoopMemoryWriter, NoopUserWorkspaceMemory};
 use talos_agent::{
     empty_skill_roots_resolver, AgentHarness, AgentHarnessImpl, AgentHarnessParams, AgentRunConfig,
     AgentRunContext, AgentRunOptions, AgentRunParams, AgentRunSessionState,
@@ -110,6 +110,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(NoopMemoryWriter),
+        user_workspace_memory_reader: Arc::new(NoopUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(NoopUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })?;
 

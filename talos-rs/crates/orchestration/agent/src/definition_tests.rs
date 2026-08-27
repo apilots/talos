@@ -7,10 +7,14 @@ use talos_config::{
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ReasoningOutput, Usage,
 };
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_memory::{
+    MemoryScope, MemoryWriteBatch, MemoryWriter, UserWorkspaceMemoryEntry,
+    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryReader,
+    UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
+};
 use talos_store::session::FileSessionArtifactStore;
 use talos_tools::ToolRegistry;
-use talos_types::{ModelRef, ModelSelection};
+use talos_types::{ExpectedFileVersion, ModelRef, ModelSelection};
 
 use super::*;
 use crate::{empty_skill_roots_resolver, AgentHarness};
@@ -18,6 +22,7 @@ use crate::{empty_skill_roots_resolver, AgentHarness};
 struct TestLlmProvider;
 
 struct TestMemoryWriter;
+struct TestUserWorkspaceMemory;
 
 impl MemoryWriter for TestMemoryWriter {
     fn write<'a>(
@@ -29,6 +34,33 @@ impl MemoryWriter for TestMemoryWriter {
     > {
         Box::pin(async { Ok(()) })
     }
+}
+
+macro_rules! unused_user_workspace_memory_method {
+    ($name:ident($($arg:ident: $ty:ty),*) -> $output:ty) => {
+        fn $name<'a>(
+            &'a self,
+            _scope: &'a MemoryScope,
+            $($arg: $ty),*
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = talos_error::TalosResult<$output>> + Send + 'a>> {
+            Box::pin(async { unreachable!("factory test must not access User Workspace Memory") })
+        }
+    };
+}
+
+impl UserWorkspaceMemoryReader for TestUserWorkspaceMemory {
+    unused_user_workspace_memory_method!(read() -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(get_entry(_key: &'a str) -> Option<UserWorkspaceMemoryEntry>);
+    unused_user_workspace_memory_method!(list_entries(_query: UserWorkspaceMemoryEntryQuery) -> Vec<UserWorkspaceMemoryEntry>);
+}
+
+impl UserWorkspaceMemoryWriter for TestUserWorkspaceMemory {
+    unused_user_workspace_memory_method!(create_entry(_entry: UserWorkspaceMemoryEntry) -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(update_entry(_key: &'a str, _update: UserWorkspaceMemoryEntryUpdate) -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(upsert_entry(_entry: UserWorkspaceMemoryEntry) -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(replace_entry(_entry: UserWorkspaceMemoryEntry) -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(remove_entry(_key: &'a str) -> UserWorkspaceMemorySnapshot);
+    unused_user_workspace_memory_method!(replace_document(_content: String, _base_version: ExpectedFileVersion) -> UserWorkspaceMemorySnapshot);
 }
 
 #[async_trait::async_trait]
@@ -232,6 +264,8 @@ fn factory_rejects_disabled_definition() {
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
         inner_model: inner_model(),
     });
@@ -257,6 +291,8 @@ fn factory_builds_kernel_agent_with_descriptor() {
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
         inner_model: inner_model(),
     });

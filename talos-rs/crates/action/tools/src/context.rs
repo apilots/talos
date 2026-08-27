@@ -5,7 +5,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_memory::{MemoryReader, MemoryScope};
+use talos_memory::{MemoryReader, MemoryScope, UserWorkspaceMemoryWriter};
 use talos_tools_sandbox::{ToolFileSystemHandle, ToolSandboxEnvironment, ToolSandboxPermit};
 use talos_types::{UserActionResponse, UserPermissionMode};
 
@@ -92,6 +92,7 @@ pub struct ToolContext {
     kernel_config: Option<Arc<AgentKernelConfig>>,
     agent_control: Option<Arc<dyn AgentControl>>,
     memory_reader: Option<Arc<dyn MemoryReader>>,
+    user_workspace_memory_writer: Option<Arc<dyn UserWorkspaceMemoryWriter>>,
     memory_scope: Option<MemoryScope>,
     session_state: Arc<SessionToolState>,
     progress_emitter: Option<ToolProgressEmitter>,
@@ -132,6 +133,7 @@ impl ToolContext {
             kernel_config,
             agent_control: None,
             memory_reader: None,
+            user_workspace_memory_writer: None,
             memory_scope: None,
             session_state: get_session_tool_state(&session_id),
             progress_emitter: None,
@@ -162,6 +164,15 @@ impl ToolContext {
 
     pub fn with_memory_reader(mut self, reader: Arc<dyn MemoryReader>) -> Self {
         self.memory_reader = Some(reader);
+        self
+    }
+
+    /// Attaches the application-owned User Workspace Memory mutation capability.
+    pub fn with_user_workspace_memory_writer(
+        mut self,
+        writer: Arc<dyn UserWorkspaceMemoryWriter>,
+    ) -> Self {
+        self.user_workspace_memory_writer = Some(writer);
         self
     }
 
@@ -254,6 +265,11 @@ impl ToolContext {
 
     pub fn memory_reader(&self) -> Option<Arc<dyn MemoryReader>> {
         self.memory_reader.clone()
+    }
+
+    /// Returns the scoped User Workspace Memory mutation capability.
+    pub fn user_workspace_memory_writer(&self) -> Option<Arc<dyn UserWorkspaceMemoryWriter>> {
+        self.user_workspace_memory_writer.clone()
     }
 
     pub fn memory_scope(&self) -> Option<&MemoryScope> {

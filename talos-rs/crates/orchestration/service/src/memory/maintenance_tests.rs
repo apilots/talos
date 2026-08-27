@@ -71,25 +71,6 @@ impl LlmProviderRouter for TestRouter {
     }
 }
 
-#[test]
-fn managed_update_preserves_user_content() {
-    let current = format!("# My Memory\n\nUser note.\n\n{MANAGED_START}\n- old\n{MANAGED_END}\n");
-
-    let updated = replace_managed_content(&current, "- new").expect("managed update");
-
-    assert_eq!(
-        updated,
-        format!("# My Memory\n\nUser note.\n\n{MANAGED_START}\n- new\n{MANAGED_END}\n")
-    );
-}
-
-#[test]
-fn managed_update_rejects_unpaired_marker() {
-    let error = replace_managed_content(MANAGED_START, "- new").expect_err("invalid markers");
-
-    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
-}
-
 #[tokio::test]
 async fn daily_maintenance_processes_two_user_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
@@ -179,12 +160,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
         responses: Mutex::new(VecDeque::from([
             candidate_response("first"),
             candidate_response("second"),
-            "- managed memory".to_string(),
-            "- managed memory".to_string(),
-            "- managed memory".to_string(),
-            "- managed memory".to_string(),
             candidate_response("failed-metrics"),
-            "- changed memory".to_string(),
         ])),
     });
     let router = Arc::new(TestRouter {
@@ -224,22 +200,17 @@ async fn daily_maintenance_processes_two_user_scopes() {
         MemoryDailyMaintenanceReport {
             processed_sessions: 2,
             failed_sessions: 0,
-            updated_users: 2,
-            failed_users: 0,
         }
     );
     for user_id in ["u1", "u2"] {
-        let content = std::fs::read_to_string(
-            workspace
+        assert!(
+            !workspace
                 .path()
                 .join("users")
                 .join(user_id)
-                .join("MEMORY.md"),
-        )
-        .expect("managed memory");
-        assert_eq!(
-            content,
-            format!("{MANAGED_START}\n- managed memory\n{MANAGED_END}\n")
+                .join("MEMORY.md")
+                .exists(),
+            "Daily Maintenance must not create User Workspace Memory"
         );
     }
 
@@ -250,8 +221,6 @@ async fn daily_maintenance_processes_two_user_scopes() {
         MemoryDailyMaintenanceReport {
             processed_sessions: 0,
             failed_sessions: 0,
-            updated_users: 2,
-            failed_users: 0,
         }
     );
     let requested_model_refs = router
@@ -277,14 +246,13 @@ async fn daily_maintenance_processes_two_user_scopes() {
         .any(|(kind, _)| *kind == ModelUsageKind::Dream));
     assert!(usage_kinds
         .iter()
-        .any(|(kind, _)| *kind == ModelUsageKind::Memory));
+        .all(|(kind, _)| *kind == ModelUsageKind::Dream));
     assert!(usage_kinds
         .iter()
         .all(|(_, model_ref)| model_ref == &expected_inner_model));
 
     let u1_workspace = workspace.path().join("users").join("u1");
     let memory_path = u1_workspace.join("MEMORY.md");
-    let memory_before_failure = std::fs::read_to_string(&memory_path).expect("managed memory");
     artifacts
         .append_turn(
             &u1_workspace,
@@ -325,13 +293,9 @@ async fn daily_maintenance_processes_two_user_scopes() {
         record_before_failure.memory_processed_until_seq
     );
 
-    maintenance
-        .refresh_managed_memory("u1")
-        .await
-        .expect_err("managed memory must fail when usage recording fails");
-    assert_eq!(
-        std::fs::read_to_string(memory_path).expect("managed memory after failure"),
-        memory_before_failure
+    assert!(
+        !memory_path.exists(),
+        "Daily Maintenance failure must not create User Workspace Memory"
     );
 }
 

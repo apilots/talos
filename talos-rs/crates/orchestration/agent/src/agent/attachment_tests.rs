@@ -1,3 +1,4 @@
+use super::test_support::TestUserWorkspaceMemory;
 use super::*;
 use talos_agent_kernel::{AttachmentReader, ResolvedAttachment, TurnFileScope};
 
@@ -116,6 +117,8 @@ async fn run_resolves_file_ids_with_session_owner_and_project_before_model_call(
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
         memory_writer: Arc::new(TestMemoryWriter),
+        user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: reader.clone(),
     })
     .expect("agent harness should build");

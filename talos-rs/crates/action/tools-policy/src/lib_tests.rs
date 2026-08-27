@@ -77,6 +77,7 @@ fn test_default_policy_allows_builtin_tools() {
 
     assert!(policy.is_allowed("MemorySearch"));
     assert!(policy.is_allowed("MemoryGet"));
+    assert!(policy.is_allowed("UserWorkspaceMemoryUpdate"));
     assert!(policy.is_allowed("Bash"));
     assert!(policy.is_allowed("Read"));
     assert!(policy.is_allowed("Grep"));

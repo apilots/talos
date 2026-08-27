@@ -56,30 +56,6 @@ impl MemoryStore {
         .transpose()
     }
 
-    /// List bounded high-importance records for managed MEMORY.md maintenance.
-    pub async fn list_recent_high(
-        &self,
-        user_id: &str,
-        limit: u32,
-    ) -> TalosResult<Vec<MemoryRecord>> {
-        if user_id.trim().is_empty() || !(1..=20).contains(&limit) {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "memory user_id and limit are required".to_string(),
-            ));
-        }
-        let rows = sqlx::query(&format!(
-            "SELECT {} FROM memory_entries WHERE user_id = ? AND importance = 'high' ORDER BY occurred_at DESC, memory_id ASC LIMIT ?",
-            record_columns()
-        ))
-        .bind(user_id)
-        .bind(i64::from(limit))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage_error("list recent high memory"))?;
-        rows.iter().map(record_from_row).collect()
-    }
-
     async fn search_fts(
         &self,
         user_id: &str,

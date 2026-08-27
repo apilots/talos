@@ -28,6 +28,7 @@ pub struct PromptBuilder<'a> {
     pub(crate) session_environment: Option<TalosSessionEnvironment>,
     pub(crate) project_root: Option<PathBuf>,
     pub(crate) session_continuity: Option<SessionContinuity>,
+    pub(crate) user_workspace_memory: Option<UserWorkspaceMemoryPromptContext>,
     pub(crate) model_info: Option<ModelInfo>,
     pub(crate) config: PromptBuildConfig,
     pub(crate) dynamic_trim_policy: DynamicTrimPolicy,
@@ -58,6 +59,7 @@ impl<'a> PromptBuilder<'a> {
             session_environment: None,
             project_root: None,
             session_continuity: None,
+            user_workspace_memory: None,
             model_info: None,
             config: PromptBuildConfig::default(),
             dynamic_trim_policy: DynamicTrimPolicy::TrimToBudget,
@@ -147,6 +149,12 @@ impl<'a> PromptBuilder<'a> {
 
     pub fn session_continuity(mut self, session_continuity: Option<SessionContinuity>) -> Self {
         self.session_continuity = session_continuity;
+        self
+    }
+
+    /// Attaches the current bounded User Workspace Memory dynamic context.
+    pub fn user_workspace_memory(mut self, context: UserWorkspaceMemoryPromptContext) -> Self {
+        self.user_workspace_memory = Some(context);
         self
     }
 
