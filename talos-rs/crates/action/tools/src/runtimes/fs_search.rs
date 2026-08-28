@@ -102,6 +102,17 @@ pub async fn run(
     } else {
         crate::runtimes::resolve_base_dir(context)?
     };
+    if search_path.is_file()
+        && search_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == ".env" || name.starts_with(".env."))
+    {
+        return Err(TalosError::public(
+            talos_error::ErrorCode::ToolExecutionFailed,
+            "searching dotenv files is not allowed".to_string(),
+        ));
+    }
     let limit = request.head_limit.unwrap_or(request.limit).min(MAX_LIMIT);
     let context_lines = request
         .context
@@ -173,6 +184,12 @@ async fn run_rg(
             args.extend(["--type".to_string(), kind.to_string()]);
         }
     }
+    args.extend([
+        "--glob".to_string(),
+        "!.env".to_string(),
+        "--glob".to_string(),
+        "!.env.*".to_string(),
+    ]);
     args.push(pattern.to_string());
     args.push(search_path.to_string_lossy().into_owned());
     let cwd = if search_path.is_dir() {

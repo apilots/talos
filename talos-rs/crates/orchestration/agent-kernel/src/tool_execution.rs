@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
-use talos_config::AgentKernelConfig;
+use talos_config::{AgentKernelConfig, TalosPaths};
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
 use talos_memory::MemoryScope;
 use talos_run_control::{RunTaskCompletion, RunTaskGroup, SpawnError};
@@ -109,7 +109,8 @@ fn build_tool_context(
         })
         .collect::<TalosResult<Vec<_>>>()?;
     let readable_roots = resolve_runtime_readable_roots(&workspace_roots);
-    let sandbox_environment = ToolSandboxEnvironment::local(workspace_roots, Vec::new())
+    let denied_roots = resolve_runtime_denied_roots()?;
+    let sandbox_environment = ToolSandboxEnvironment::local(workspace_roots, denied_roots)
         .map_err(|error| TalosError::internal(format!("resolve sandbox environment: {error}")))?
         .with_readable_roots(readable_roots);
     let ctx = registry
@@ -156,6 +157,28 @@ fn build_tool_context(
     } else {
         Ok(ctx)
     }
+}
+
+fn resolve_runtime_denied_roots() -> TalosResult<Vec<AbsolutePathBuf>> {
+    let env_file = TalosPaths::resolve().env_file;
+    let env_file = if env_file.exists() {
+        std::fs::canonicalize(&env_file).map_err(|error| {
+            TalosError::internal(format!(
+                "resolve protected env file {}: {error}",
+                env_file.display()
+            ))
+        })?
+    } else {
+        std::path::absolute(&env_file).map_err(|error| {
+            TalosError::internal(format!(
+                "resolve protected env file {}: {error}",
+                env_file.display()
+            ))
+        })?
+    };
+    AbsolutePathBuf::new(env_file)
+        .map(|path| vec![path])
+        .map_err(|error| TalosError::internal(format!("resolve protected env file: {error}")))
 }
 
 fn resolve_runtime_readable_roots(workspace_roots: &[AbsolutePathBuf]) -> Vec<AbsolutePathBuf> {

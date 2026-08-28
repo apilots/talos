@@ -16,7 +16,7 @@ use std::{collections::BTreeMap, env};
 
 use talos_config::resolve_runtime_path;
 use talos_error::{TalosError, TalosResult};
-use talos_tools_sandbox::TalosSandboxError;
+use talos_tools_sandbox::{filter_inherited_tool_environment, TalosSandboxError};
 
 use crate::ToolContext;
 
@@ -75,7 +75,7 @@ pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
 }
 
 pub(crate) fn process_environment() -> BTreeMap<String, String> {
-    env::vars().collect()
+    filter_inherited_tool_environment(env::vars())
 }
 
 pub(crate) fn map_sandbox_file_error(error: TalosSandboxError) -> TalosError {

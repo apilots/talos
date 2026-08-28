@@ -106,6 +106,43 @@ fn user_modes_map_to_expected_effective_policies() {
 }
 
 #[test]
+fn denied_paths_are_rejected_in_every_user_mode() {
+    let resolver = EffectiveToolPermissionPolicyResolver;
+    for (user_mode, file_system, network) in [
+        (
+            UserPermissionMode::AskForApproval,
+            FileSystemPermissionLevel::WorkspaceWrite,
+            NetworkSandboxPolicy::Restricted,
+        ),
+        (
+            UserPermissionMode::ApproveForMe,
+            FileSystemPermissionLevel::WorkspaceWrite,
+            NetworkSandboxPolicy::Enabled,
+        ),
+        (
+            UserPermissionMode::FullAccess,
+            FileSystemPermissionLevel::FullAccess,
+            NetworkSandboxPolicy::Enabled,
+        ),
+    ] {
+        let mut denied_request = request("denied-env", user_mode, file_system, network);
+        denied_request.requested_permissions = denied_request
+            .requested_permissions
+            .with_file_system_access(vec![RequestedFileSystemAccess::new(
+                FileSystemOperation::Read,
+                vec![root("denied/.env")],
+            )
+            .expect("denied access should be valid")])
+            .expect("requested permissions should be valid");
+
+        assert!(matches!(
+            resolver.resolve(denied_request),
+            ToolSandboxDecision::Denied(ToolSandboxDenial::GovernanceConstraint { .. })
+        ));
+    }
+}
+
+#[test]
 fn workspace_write_keeps_runtime_roots_read_only() {
     let resolver = EffectiveToolPermissionPolicyResolver;
     let mut runtime_request = request(
