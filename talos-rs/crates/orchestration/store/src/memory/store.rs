@@ -3,11 +3,19 @@ use std::path::{Path, PathBuf};
 
 use chrono_tz::Tz;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
+use sqlx::{Row, Sqlite, SqlitePool};
 use talos_error::{TalosError, TalosResult};
+use talos_memory::{
+    DreamMemoryBundleEventKind, DreamMemoryDate, DreamMemoryProvenance, DreamMemorySourceRange,
+    MemoryScope, MemorySessionId,
+};
 
-use super::parser::parse_source;
-use super::types::{memory_importance_as_str, memory_kind_as_str, ParsedMemorySource};
+use super::bundle::current_memory_date;
+use super::consistency::{clear_index_stale_marker, mark_index_stale};
+use super::source::source_from_markdown;
+use super::types::{
+    memory_importance_as_str, memory_kind_as_str, MemoryIndexScope, ParsedMemorySource,
+};
 
 static SQLITE_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./src/memory/migrations/sqlite");
 
@@ -93,41 +101,48 @@ impl MemoryStore {
     /// Synchronize one user scope from canonical daily Markdown into the derived index.
     pub async fn rebuild_scope(
         &self,
-        user_id: &str,
-        workspace_root: &Path,
+        scope: &MemoryScope,
         memory_dirname: &str,
         timezone: Tz,
     ) -> TalosResult<()> {
-        if user_id.trim().is_empty() {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "memory user_id cannot be empty".to_string(),
-            ));
-        }
-        let sources = load_sources(user_id, workspace_root, memory_dirname, timezone).await?;
-        let mut memory_ids = HashSet::new();
-        for source in &sources {
-            for parsed in &source.records {
-                if !memory_ids.insert(parsed.record.memory_id.as_str()) {
-                    return Err(TalosError::public(
-                        talos_error::ErrorCode::InvalidRequest,
-                        format!(
-                            "duplicate memory_id {} in user scope",
-                            parsed.record.memory_id
-                        ),
-                    ));
-                }
-            }
-        }
+        let lock_path = memory_scope_lock_path(&scope.workspace_root);
+        talos_fs::with_file_lock(&lock_path, || async {
+            self.rebuild_scope_unlocked(scope, memory_dirname, timezone)
+                .await
+        })
+        .await
+    }
+
+    pub(super) async fn rebuild_scope_unlocked(
+        &self,
+        scope: &MemoryScope,
+        memory_dirname: &str,
+        timezone: Tz,
+    ) -> TalosResult<()> {
+        let index_scope = MemoryIndexScope::from_scope(scope)?;
+        let sources = load_sources(scope, memory_dirname, timezone).await?;
+        validate_scope_sources(&sources)?;
+        mark_index_stale(&scope.workspace_root).await?;
+        self.sync_bundle_unlocked(
+            scope,
+            memory_dirname,
+            &sources,
+            DreamMemoryBundleEventKind::Recovery,
+            current_memory_date(timezone)?,
+        )
+        .await?;
 
         let mut transaction = self
             .pool
             .begin()
             .await
             .map_err(storage_error("begin memory rebuild"))?;
-        let existing =
-            sqlx::query("SELECT source_path, fingerprint FROM memory_sources WHERE user_id = ?")
-                .bind(user_id)
+        let existing = sqlx::query(
+            "SELECT source_path, fingerprint FROM memory_sources WHERE agent_id = ? AND user_id = ? AND workspace_root = ?",
+        )
+                .bind(index_scope.agent_id())
+                .bind(index_scope.user_id())
+                .bind(index_scope.workspace_root())
                 .fetch_all(&mut *transaction)
                 .await
                 .map_err(storage_error("load memory source fingerprints"))?
@@ -149,14 +164,18 @@ impl MemoryStore {
             if current_paths.contains(source_path.as_str()) {
                 continue;
             }
-            sqlx::query("DELETE FROM memory_entries WHERE user_id = ? AND source_path = ?")
-                .bind(user_id)
+            sqlx::query("DELETE FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+                .bind(index_scope.agent_id())
+                .bind(index_scope.user_id())
+                .bind(index_scope.workspace_root())
                 .bind(source_path)
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error("delete removed memory entries"))?;
-            sqlx::query("DELETE FROM memory_sources WHERE user_id = ? AND source_path = ?")
-                .bind(user_id)
+            sqlx::query("DELETE FROM memory_sources WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+                .bind(index_scope.agent_id())
+                .bind(index_scope.user_id())
+                .bind(index_scope.workspace_root())
                 .bind(source_path)
                 .execute(&mut *transaction)
                 .await
@@ -170,114 +189,38 @@ impl MemoryStore {
             {
                 continue;
             }
-            replace_source(&mut transaction, user_id, &source).await?;
+            replace_source(&mut transaction, &index_scope, &source).await?;
         }
         transaction
             .commit()
             .await
-            .map_err(storage_error("commit memory rebuild"))
-    }
-
-    /// Validate a whole-file edit without exposing store records to callers.
-    pub async fn validate_source_edit(
-        &self,
-        user_id: &str,
-        source_path: &str,
-        current: Option<&str>,
-        updated: &str,
-        timezone: Tz,
-    ) -> TalosResult<()> {
-        let current = current
-            .map(|content| parse_source(user_id, source_path, content, timezone))
-            .transpose()?;
-        let updated = parse_source(user_id, source_path, updated, timezone)?;
-        let current_by_id = current
-            .as_ref()
-            .into_iter()
-            .flat_map(|source| &source.records)
-            .map(|parsed| (parsed.record.memory_id.as_str(), &parsed.record))
-            .collect::<HashMap<_, _>>();
-        let mut memory_ids = HashSet::new();
-        for parsed in &updated.records {
-            if !memory_ids.insert(parsed.record.memory_id.clone()) {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!(
-                        "duplicate memory_id {} in user scope",
-                        parsed.record.memory_id
-                    ),
-                ));
-            }
-        }
-        let mut other_source_ids = HashSet::new();
-        for ids in memory_ids.iter().collect::<Vec<_>>().chunks(500) {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT memory_id FROM memory_entries WHERE user_id = ",
-            );
-            query
-                .push_bind(user_id)
-                .push(" AND source_path <> ")
-                .push_bind(source_path)
-                .push(" AND memory_id IN (");
-            let mut separated = query.separated(", ");
-            for memory_id in ids {
-                separated.push_bind(memory_id);
-            }
-            separated.push_unseparated(")");
-            other_source_ids.extend(
-                query
-                    .build_query_scalar::<String>()
-                    .fetch_all(&self.pool)
-                    .await
-                    .map_err(storage_error("validate memory id uniqueness"))?,
-            );
-        }
-        for parsed in &updated.records {
-            let record = &parsed.record;
-            if other_source_ids.contains(&record.memory_id) {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!("duplicate memory_id {} in user scope", record.memory_id),
-                ));
-            }
-            let Some(existing) = current_by_id.get(record.memory_id.as_str()) else {
-                if record.source_from_seq.is_some() {
-                    return Err(TalosError::public(
-                        talos_error::ErrorCode::Conflict,
-                        "new generated memory blocks must use the memory writer".to_string(),
-                    ));
-                }
-                continue;
-            };
-            if existing.occurred_at != record.occurred_at
-                || existing.session_id != record.session_id
-                || existing.source_from_seq != record.source_from_seq
-                || existing.source_until_seq != record.source_until_seq
-            {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!("memory provenance is immutable for {}", record.memory_id),
-                ));
-            }
-        }
+            .map_err(storage_error("commit memory rebuild"))?;
+        clear_index_stale_marker(&scope.workspace_root)?;
         Ok(())
     }
 
     /// Replace one parsed source in the derived index after its Markdown file is committed.
-    pub async fn sync_source(
+    pub(super) async fn sync_source(
         &self,
-        user_id: &str,
+        scope: &MemoryScope,
         source_path: &str,
         content: &str,
         timezone: Tz,
     ) -> TalosResult<()> {
-        let source = parse_source(user_id, source_path, content, timezone)?;
+        let index_scope = MemoryIndexScope::from_scope(scope)?;
+        let source = source_from_markdown(
+            &scope.agent_id,
+            &scope.user_id,
+            source_path,
+            content,
+            timezone,
+        )?;
         let mut transaction = self
             .pool
             .begin()
             .await
             .map_err(storage_error("begin memory source sync"))?;
-        replace_source(&mut transaction, user_id, &source).await?;
+        replace_source(&mut transaction, &index_scope, &source).await?;
         transaction
             .commit()
             .await
@@ -287,84 +230,28 @@ impl MemoryStore {
     /// Count canonical records in one source using the same parser as rebuild and search.
     pub fn source_section_count(
         &self,
+        agent_id: &str,
         user_id: &str,
-        source_path: &str,
+        source_date: DreamMemoryDate,
         content: &str,
         timezone: Tz,
     ) -> TalosResult<usize> {
-        Ok(parse_source(user_id, source_path, content, timezone)?
-            .records
-            .len())
-    }
-
-    pub(super) async fn validate_batch_append(
-        &self,
-        user_id: &str,
-        source_path: &str,
-        session_id: &str,
-        source_from_seq: u64,
-        source_until_seq: u64,
-        memory_ids: &[String],
-    ) -> TalosResult<()> {
-        let source_from_seq = i64::try_from(source_from_seq).map_err(|_| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "memory source range exceeds SQLite bounds".to_string(),
-            )
-        })?;
-        let source_until_seq = i64::try_from(source_until_seq).map_err(|_| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "memory source range exceeds SQLite bounds".to_string(),
-            )
-        })?;
-        let overlapping = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM memory_entries WHERE user_id = ? AND session_id = ? AND source_from_seq <= ? AND source_until_seq >= ? AND NOT (source_path = ? AND source_from_seq = ? AND source_until_seq = ?)",
+        let source_path = format!("{source_date}.md");
+        Ok(
+            source_from_markdown(agent_id, user_id, &source_path, content, timezone)?
+                .records
+                .len(),
         )
-        .bind(user_id)
-        .bind(session_id)
-        .bind(source_until_seq)
-        .bind(source_from_seq)
-        .bind(source_path)
-        .bind(source_from_seq)
-        .bind(source_until_seq)
-        .fetch_one(&self.pool)
-        .await
-        .map_err(storage_error("validate memory source range"))?;
-        if overlapping > 0 {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                "memory write batch overlaps an existing session range".to_string(),
-            ));
-        }
-        for memory_id in memory_ids {
-            let conflicting_source = sqlx::query_scalar::<_, String>(
-                "SELECT source_path FROM memory_entries WHERE user_id = ? AND memory_id = ? AND source_path <> ? LIMIT 1",
-            )
-            .bind(user_id)
-            .bind(memory_id)
-            .bind(source_path)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(storage_error("validate generated memory id uniqueness"))?;
-            if conflicting_source.is_some() {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!("duplicate memory_id {memory_id} in user scope"),
-                ));
-            }
-        }
-        Ok(())
     }
 }
 
 pub(super) async fn load_sources(
-    user_id: &str,
-    workspace_root: &Path,
+    scope: &MemoryScope,
     memory_dirname: &str,
     timezone: Tz,
 ) -> TalosResult<Vec<ParsedMemorySource>> {
-    let memory_dir = workspace_root.join(memory_dirname);
+    MemoryIndexScope::from_scope(scope)?;
+    let memory_dir = scope.workspace_root.join(memory_dirname);
     let Some(entries) = talos_fs::read_directory(&memory_dir)? else {
         return Ok(Vec::new());
     };
@@ -373,11 +260,11 @@ pub(super) async fn load_sources(
         .filter(|entry| entry.metadata.is_file)
         .filter_map(|entry| {
             let path = entry.path;
-            let is_daily_memory = path
+            let is_dream_memory = path
                 .file_name()
                 .and_then(|value| value.to_str())
                 .is_some_and(|name| name.len() == 13 && name.ends_with(".md"));
-            is_daily_memory.then_some(path)
+            is_dream_memory.then_some(path)
         })
         .collect::<Vec<_>>();
     paths.sort();
@@ -396,9 +283,90 @@ pub(super) async fn load_sources(
         let content = talos_fs::read_file(&path)
             .await?
             .ok_or_else(|| TalosError::internal(format!("memory source missing: {source_path}")))?;
-        sources.push(parse_source(user_id, &source_path, &content, timezone)?);
+        sources.push(source_from_markdown(
+            &scope.agent_id,
+            &scope.user_id,
+            &source_path,
+            &content,
+            timezone,
+        )?);
     }
     Ok(sources)
+}
+
+pub(super) fn validate_scope_sources(sources: &[ParsedMemorySource]) -> TalosResult<()> {
+    let mut memory_ids = HashSet::new();
+    let mut generated = Vec::new();
+    for source in sources {
+        for parsed in &source.records {
+            let record = &parsed.record;
+            if !memory_ids.insert(&record.memory_id) {
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    format!(
+                        "duplicate memory_id {} in user scope",
+                        record.memory_id.as_str()
+                    ),
+                ));
+            }
+            if let DreamMemoryProvenance::Generated {
+                session_id,
+                source_range,
+            } = &record.provenance
+            {
+                validate_sqlite_source_range(&record.memory_id, *source_range)?;
+                generated.push(GeneratedSourceRange {
+                    session_id,
+                    source_range: *source_range,
+                });
+            }
+        }
+    }
+    for (index, range) in generated.iter().enumerate() {
+        for other in &generated[index + 1..] {
+            if range.session_id == other.session_id
+                && range.source_range != other.source_range
+                && range.source_range.overlaps(other.source_range)
+            {
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Conflict,
+                    "Dream Memory entries contain overlapping session ranges".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+struct GeneratedSourceRange<'a> {
+    session_id: &'a MemorySessionId,
+    source_range: DreamMemorySourceRange,
+}
+
+fn validate_sqlite_source_range(
+    memory_id: &talos_memory::MemoryId,
+    source_range: DreamMemorySourceRange,
+) -> TalosResult<()> {
+    if i64::try_from(source_range.from_seq()).is_err()
+        || i64::try_from(source_range.until_seq()).is_err()
+    {
+        return Err(TalosError::public(
+            talos_error::ErrorCode::InvalidRequest,
+            format!(
+                "memory {} source range exceeds SQLite integer bounds",
+                memory_id.as_str()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// Returns the single lock target for every Dream Memory mutation in one user workspace.
+///
+/// This is public only for the one-time legacy converter.
+/// TODO(dream-memory-okf): Reduce visibility after removing the converter in the next release.
+pub fn memory_scope_lock_path(workspace_root: &Path) -> PathBuf {
+    workspace_root.join(".dream-memory-scope")
 }
 
 fn is_sqlite_corruption(error: &sqlx::Error) -> bool {
@@ -431,72 +399,89 @@ async fn remove_index_files(path: &Path) -> TalosResult<()> {
 
 async fn replace_source(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    user_id: &str,
+    scope: &MemoryIndexScope,
     source: &ParsedMemorySource,
 ) -> TalosResult<()> {
-    sqlx::query("DELETE FROM memory_entries WHERE user_id = ? AND source_path = ?")
-        .bind(user_id)
+    sqlx::query("DELETE FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+        .bind(scope.agent_id())
+        .bind(scope.user_id())
+        .bind(scope.workspace_root())
         .bind(&source.source_path)
         .execute(&mut **transaction)
         .await
         .map_err(storage_error("replace memory source entries"))?;
     for parsed in &source.records {
         let record = &parsed.record;
-        let source_from_seq = record
-            .source_from_seq
-            .map(i64::try_from)
-            .transpose()
-            .map_err(|_| {
-                TalosError::public(
-                    talos_error::ErrorCode::InvalidRequest,
-                    format!(
-                        "memory {} source_from_seq exceeds SQLite integer bounds",
-                        record.memory_id
-                    ),
-                )
-            })?;
-        let source_until_seq = record
-            .source_until_seq
-            .map(i64::try_from)
-            .transpose()
-            .map_err(|_| {
-                TalosError::public(
-                    talos_error::ErrorCode::InvalidRequest,
-                    format!(
-                        "memory {} source_until_seq exceeds SQLite integer bounds",
-                        record.memory_id
-                    ),
-                )
-            })?;
+        let provenance = SqliteProvenance::from_domain(&record.provenance)?;
         sqlx::query(
-            "INSERT INTO memory_entries (user_id, memory_id, title, body, kind, importance, occurred_at, session_id, source_from_seq, source_until_seq, source_path, source_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO memory_entries (agent_id, user_id, workspace_root, memory_id, title, body, kind, importance, occurred_at, session_id, source_from_seq, source_until_seq, source_path, source_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(user_id)
-        .bind(&record.memory_id)
+        .bind(scope.agent_id())
+        .bind(scope.user_id())
+        .bind(scope.workspace_root())
+        .bind(record.memory_id.as_str())
         .bind(&record.title)
         .bind(&record.body)
         .bind(memory_kind_as_str(record.kind))
         .bind(memory_importance_as_str(record.importance))
         .bind(record.occurred_at)
-        .bind(&record.session_id)
-        .bind(source_from_seq)
-        .bind(source_until_seq)
-        .bind(&parsed.source_path)
-        .bind(&record.source_date)
+        .bind(provenance.session_id)
+        .bind(provenance.source_from_seq)
+        .bind(provenance.source_until_seq)
+        .bind(&source.source_path)
+        .bind(record.source_date.to_string())
         .execute(&mut **transaction)
         .await
         .map_err(storage_error("insert memory entry"))?;
     }
     sqlx::query(
-        "INSERT INTO memory_sources (user_id, source_path, fingerprint) VALUES (?, ?, ?) ON CONFLICT(user_id, source_path) DO UPDATE SET fingerprint = excluded.fingerprint",
+        "INSERT INTO memory_sources (agent_id, user_id, workspace_root, source_path, fingerprint) VALUES (?, ?, ?, ?, ?) ON CONFLICT(agent_id, user_id, workspace_root, source_path) DO UPDATE SET fingerprint = excluded.fingerprint",
     )
-    .bind(user_id)
+    .bind(scope.agent_id())
+    .bind(scope.user_id())
+    .bind(scope.workspace_root())
     .bind(&source.source_path)
     .bind(&source.fingerprint)
     .execute(&mut **transaction)
     .await
     .map_err(storage_error("update memory source fingerprint"))?;
     Ok(())
+}
+
+struct SqliteProvenance<'a> {
+    session_id: Option<&'a str>,
+    source_from_seq: Option<i64>,
+    source_until_seq: Option<i64>,
+}
+
+impl<'a> SqliteProvenance<'a> {
+    fn from_domain(provenance: &'a DreamMemoryProvenance) -> TalosResult<Self> {
+        match provenance {
+            DreamMemoryProvenance::Generated {
+                session_id,
+                source_range,
+            } => Ok(Self {
+                session_id: Some(session_id.as_str()),
+                source_from_seq: Some(i64::try_from(source_range.from_seq()).map_err(|_| {
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "Dream Memory source range exceeds SQLite integer bounds".to_string(),
+                    )
+                })?),
+                source_until_seq: Some(i64::try_from(source_range.until_seq()).map_err(|_| {
+                    TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        "Dream Memory source range exceeds SQLite integer bounds".to_string(),
+                    )
+                })?),
+            }),
+            DreamMemoryProvenance::UserAuthored => Ok(Self {
+                session_id: None,
+                source_from_seq: None,
+                source_until_seq: None,
+            }),
+        }
+    }
 }
 
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {

@@ -16,6 +16,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
 mod mcp_e2e;
+mod memory_e2e;
 mod message_queue_e2e;
 mod request;
 mod scenario;
@@ -57,6 +58,7 @@ async fn main() -> Result<()> {
         Scenario::TurnSmoke => turn_smoke(&mut client).await?,
         Scenario::ActiveTurnConflict => active_turn_conflict(&mut client).await?,
         Scenario::ResourceMatrix => resource_matrix(&mut client).await?,
+        Scenario::MemoryE2e => memory_e2e::run(&mut client).await?,
         Scenario::CloudSessionCache => cloud_session_cache(&mut client).await?,
         Scenario::SkillsE2e => skills_e2e(&mut client).await?,
         Scenario::McpE2e => mcp_e2e(&mut client).await?,
@@ -229,13 +231,22 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
     )?;
     list_memory_files(client).await?;
 
-    eprintln!("resource-matrix workspace doc read/conflict");
-    let read_workspace = read_workspace_doc(client, WorkspaceDocKind::Memory)
+    eprintln!("resource-matrix workspace memory canonical create/read/conflict");
+    let mut read_workspace = read_workspace_doc(client, WorkspaceDocKind::Memory)
         .await?
         .doc;
     if !read_workspace.exists {
-        return Err(anyhow!("expected bootstrap workspace memory doc to exist"));
+        let template = memory_e2e::canonical_memory_template()?;
+        read_workspace = write_workspace_doc(
+            client,
+            WorkspaceDocKind::Memory,
+            template,
+            ExpectedFileVersion::MustNotExist,
+        )
+        .await?
+        .doc;
     }
+    memory_e2e::validate_memory_markdown(&read_workspace.content)?;
     expect_conflict(
         write_workspace_doc(
             client,
@@ -724,11 +735,11 @@ fn is_replayable_event(event: &TimelineEventEnvelope) -> bool {
 }
 
 fn ensure_turn_event_flow(events: &[TimelineEventEnvelope]) -> Result<()> {
-    if events
-        .iter()
-        .any(|event| event.event.event_type == AgentEventType::TurnError)
-    {
-        return Err(anyhow!("turn failed during app-server e2e"));
+    if let Some(error) = events.iter().find_map(|event| match &event.event.payload {
+        AgentEventPayload::TurnError(error) => Some(&error.error),
+        _ => None,
+    }) {
+        return Err(anyhow!("turn failed during app-server e2e: {error:?}"));
     }
     for required in [
         "timeline.turn.started",

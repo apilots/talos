@@ -10,6 +10,7 @@ members = [
     "crates/common/llm/ollama",
     "crates/common/llm/openai",
     "crates/common/fs",
+    "crates/common/knowledge-format",
     "crates/common/prompt",
     "crates/common/types",
     # Infra
@@ -117,6 +118,8 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 sha2 = "0.10"
 moka = { version = "0.12", features = ["sync"] }
+okf-core = "=0.2.4"
+okf-validator = "=0.2.4"
 
 # HTTP
 reqwest = { version = "0.12", features = ["json"] }
@@ -128,6 +131,7 @@ cloud-sdk-rs = { path = "../../talos-cloud/cloud-rs/crates/cloud-sdk-rs" }
 # Internal crates
 talos-error = { path = "crates/infra/error" }
 talos-fs = { path = "crates/common/fs" }
+talos-knowledge-format = { path = "crates/common/knowledge-format" }
 talos-types = { path = "crates/common/types" }
 talos-mcp = { path = "crates/action/mcp" }
 talos-plugin = { path = "crates/action/plugin" }

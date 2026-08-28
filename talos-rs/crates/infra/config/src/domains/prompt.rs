@@ -42,9 +42,6 @@ pub struct AgentKernelBootstrapPromptConfig {
 
     #[serde(default = "default_true")]
     pub include_heartbeat: bool,
-
-    #[serde(default = "default_true")]
-    pub include_memory: bool,
 }
 
 fn default_prompt_bootstrap_max_chars_per_file() -> usize {
@@ -67,7 +64,6 @@ impl Default for AgentKernelBootstrapPromptConfig {
             include_identity: true,
             include_user: true,
             include_heartbeat: true,
-            include_memory: true,
         }
     }
 }

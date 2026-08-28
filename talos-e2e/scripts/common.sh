@@ -431,6 +431,28 @@ if context_compaction_max_bytes:
         context_compaction_max_bytes,
     )
 
+inner_model_provider = os.environ.get("TALOS_TEST_INNER_MODEL_PROVIDER")
+inner_model_id = os.environ.get("TALOS_TEST_INNER_MODEL_ID")
+if bool(inner_model_provider) != bool(inner_model_id):
+    raise SystemExit(
+        "TALOS_TEST_INNER_MODEL_PROVIDER and TALOS_TEST_INNER_MODEL_ID must be set together"
+    )
+if inner_model_provider and inner_model_id:
+    text = replace_nested_section_value(
+        text,
+        "agent",
+        "inner_model",
+        "provider",
+        json.dumps(inner_model_provider),
+    )
+    text = replace_nested_section_value(
+        text,
+        "agent",
+        "inner_model",
+        "id",
+        json.dumps(inner_model_id),
+    )
+
 text = add_e2e_skill_root(text, talos_home)
 
 cloud_api_base_url = os.environ.get("TALOS_TEST_CLOUD_API_BASE_URL")

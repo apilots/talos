@@ -1,6 +1,7 @@
+mod legacy_converter;
 mod maintenance;
 mod service;
 mod types;
 
-pub use maintenance::{MemoryDailyMaintenance, MemoryDailyMaintenanceReport};
+pub use maintenance::{DreamMemoryMaintenance, DreamMemoryMaintenanceReport};
 pub use service::MemoryService;

@@ -25,7 +25,7 @@ async fn test_prompt_builder_creates_and_injects_bootstrap_static_sections() {
         .await
         .expect("prompt build should succeed");
 
-    for name in ["SOUL.md", "USER.md", "MEMORY.md"] {
+    for name in ["SOUL.md", "USER.md"] {
         assert!(
             workspace_dir.join(name).exists(),
             "expected {} to exist",
@@ -41,7 +41,9 @@ async fn test_prompt_builder_creates_and_injects_bootstrap_static_sections() {
         .join("\n\n");
     assert!(static_text.contains("# Bootstrap: AGENTS.md"));
     assert!(static_text.contains("# Bootstrap: SOUL.md"));
-    assert!(static_text.contains("# Bootstrap: MEMORY.md"));
+    assert!(!workspace_dir.join("MEMORY.md").exists());
+    assert!(!static_text.contains("# Bootstrap: MEMORY.md"));
+    assert!(static_text.contains("# User Workspace Memory Policy"));
 }
 
 #[tokio::test]
@@ -79,7 +81,7 @@ async fn test_prompt_builder_minimal_mode_filters_bootstrap_files() {
     assert!(static_text.contains("# Bootstrap: AGENTS.md"));
     assert!(static_text.contains("# Bootstrap: SOUL.md"));
     assert!(static_text.contains("# Bootstrap: USER.md"));
-    assert!(static_text.contains("# Bootstrap: MEMORY.md"));
+    assert!(!static_text.contains("# Bootstrap: MEMORY.md"));
     assert!(!static_text.contains("# Bootstrap: HEARTBEAT.md"));
     assert!(!static_text.contains("# Bootstrap: IDENTITY.md"));
 }
@@ -140,23 +142,38 @@ async fn test_prompt_builder_uses_absent_placeholder_for_missing_bootstrap_slot(
 }
 
 #[tokio::test]
-async fn test_prompt_builder_rejects_oversized_memory() {
-    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
-    std::fs::write(
-        workspace_dir.join("MEMORY.md"),
-        "x".repeat(talos_types::MEMORY_FILE_MAX_CHARS + 1),
-    )
-    .expect("memory file should write");
-    let mut config = PromptBuildConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-
-    let error = PromptBuilder::new()
-        .config(config)
+async fn test_dynamic_user_workspace_memory_is_required_bounded_and_does_not_change_static_cache() {
+    let first = PromptBuilder::new()
+        .user_workspace_memory(UserWorkspaceMemoryPromptContext {
+            file_state: UserWorkspaceMemoryPromptFileState::Valid,
+            version_token: Some("revision-1".to_string()),
+            content: "first memory".to_string(),
+        })
         .user_input("bootstrap")
         .assemble()
         .await
-        .expect_err("oversized memory should fail prompt build");
+        .expect("first prompt should build");
+    let second = PromptBuilder::new()
+        .user_workspace_memory(UserWorkspaceMemoryPromptContext {
+            file_state: UserWorkspaceMemoryPromptFileState::Invalid,
+            version_token: Some("revision-2".to_string()),
+            content: "x".repeat(talos_types::MEMORY_FILE_MAX_CHARS + 100),
+        })
+        .user_input("bootstrap")
+        .assemble()
+        .await
+        .expect("second prompt should build");
 
-    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    let memory = second
+        .dynamic_suffix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::UserWorkspaceMemory)
+        .expect("dynamic memory should be required");
+    assert!(memory.payload.contains("file_state: invalid"));
+    assert!(memory.payload.contains("revision-2"));
+    assert!(memory.payload.chars().count() <= talos_types::MEMORY_FILE_MAX_CHARS + 100);
+    assert_eq!(
+        first.cache_state.static_prefix_fingerprint,
+        second.cache_state.static_prefix_fingerprint
+    );
 }

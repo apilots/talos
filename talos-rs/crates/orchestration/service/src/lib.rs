@@ -17,6 +17,7 @@ mod subagent;
 mod timeline;
 pub mod turn;
 pub mod user_action;
+mod user_workspace_memory;
 mod workspace;
 mod workspace_docs;
 
@@ -28,7 +29,7 @@ pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook, RuntimeConfigReloadTrigger};
 pub use file::{FileByteStream, FileService};
 pub use history::SessionHistoryService;
-pub use memory::{MemoryDailyMaintenance, MemoryDailyMaintenanceReport, MemoryService};
+pub use memory::{DreamMemoryMaintenance, DreamMemoryMaintenanceReport, MemoryService};
 pub use message_queue::SessionMessageQueueService;
 pub use plugin::PluginManagerService;
 pub use profile::{ProfileService, ProfileUsageRetention};
@@ -45,5 +46,6 @@ pub use timeline::{
 pub use turn::{
     turn_submission_hash, AgentDispatchTurnExecutor, TurnExecutor, TurnRetryParams, TurnService,
 };
+pub use user_workspace_memory::UserWorkspaceMemoryService;
 pub use workspace::{AgentWorkspaceInfo, EffectiveAgentWorkspace, EffectiveWorkspaceResolver};
 pub use workspace_docs::WorkspaceDocService;

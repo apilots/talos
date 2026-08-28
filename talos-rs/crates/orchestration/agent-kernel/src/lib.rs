@@ -27,7 +27,7 @@ pub use general_turn::{
     build_general_turn_step_request, compact_session_memory, emit_general_turn_finalization_stream,
     execute_general_turn_loop, execute_general_turn_loop_with_policy,
     execute_general_turn_loop_with_resume, execute_general_turn_step,
-    execute_general_turn_tool_batch, finalize_general_turn_artifacts, form_daily_session_memory,
+    execute_general_turn_tool_batch, finalize_general_turn_artifacts, form_dream_session_memory,
     persist_general_turn_artifacts, prepare_general_turn, run_general_turn,
     run_general_turn_with_resume, BuiltInGeneralTurnPolicy, ExecutedTurnArtifacts,
     GeneralTurnLoopState, GeneralTurnOutcome, GeneralTurnPolicy, GeneralTurnPolicyStop,

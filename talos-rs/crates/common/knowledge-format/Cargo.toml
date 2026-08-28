@@ -1,0 +1,16 @@
+[package]
+name = "talos-knowledge-format"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Talos - Open Knowledge Format facade and managed knowledge documents"
+repository.workspace = true
+
+[dependencies]
+okf-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+okf-validator.workspace = true
+tempfile = "3"

@@ -111,7 +111,6 @@ fn test_nested_config_defaults() {
     assert!(config.compaction.compacted_tool_exchange_max_chars > 0);
     assert!(config.compaction.retrieved_memories_keep > 0);
     assert!(config.compaction.compacted_retrieved_memory_max_chars > 0);
-    assert!(config.prompt.bootstrap.include_memory);
 }
 
 /// Tests that config can be cloned and remains independent.

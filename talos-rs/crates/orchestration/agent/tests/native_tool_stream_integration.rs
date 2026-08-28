@@ -12,25 +12,124 @@ use talos_llm_provider::{
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
     ModelBlockStreamEvent, ModelOutputPhase, ReasoningContinuation, ReasoningOutput, Role, Usage,
 };
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_memory::{
+    DreamMemoryFormationStore, MemoryAgentId, MemoryScope, UserWorkspaceMemoryDocument,
+    UserWorkspaceMemoryEntry, UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate,
+    UserWorkspaceMemoryProducer, UserWorkspaceMemoryReader, UserWorkspaceMemorySnapshot,
+    UserWorkspaceMemoryWriter,
+};
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::talos::{
     AgentEventPayload, TalosInputItem, TalosProvider, TalosSourceType, TalosTimelineDelta,
     TalosTimelineItemKind,
 };
-use talos_types::{ModelRef, ModelSelection, SessionContext, SessionState, TalosSession};
+use talos_types::{
+    ExpectedFileVersion, ModelRef, ModelSelection, SessionContext, SessionState, TalosSession,
+};
 use tokio::sync::mpsc;
 
 static SESSION_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 struct TestMemoryWriter;
+struct TestUserWorkspaceMemory;
 
-impl MemoryWriter for TestMemoryWriter {
+fn missing_user_workspace_memory_snapshot() -> UserWorkspaceMemorySnapshot {
+    UserWorkspaceMemorySnapshot::Missing {
+        template: UserWorkspaceMemoryDocument::template(UserWorkspaceMemoryProducer::new(
+            MemoryAgentId::parse("agent-1").unwrap(),
+            1_784_251_800,
+        ))
+        .unwrap(),
+    }
+}
+
+impl UserWorkspaceMemoryReader for TestUserWorkspaceMemory {
+    fn read<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = TalosResult<UserWorkspaceMemorySnapshot>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(missing_user_workspace_memory_snapshot()) })
+    }
+
+    fn get_entry<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _key: &'a str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = TalosResult<Option<UserWorkspaceMemoryEntry>>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(None) })
+    }
+
+    fn list_entries<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        _query: UserWorkspaceMemoryEntryQuery,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = TalosResult<Vec<UserWorkspaceMemoryEntry>>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+macro_rules! test_user_workspace_memory_write {
+    ($name:ident($($arg:ident: $ty:ty),*)) => {
+        fn $name<'a>(
+            &'a self,
+            _scope: &'a MemoryScope,
+            $($arg: $ty),*
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<UserWorkspaceMemorySnapshot>> + Send + 'a>> {
+            Box::pin(async { Ok(missing_user_workspace_memory_snapshot()) })
+        }
+    };
+}
+
+impl UserWorkspaceMemoryWriter for TestUserWorkspaceMemory {
+    test_user_workspace_memory_write!(create_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(update_entry(_key: &'a str, _update: UserWorkspaceMemoryEntryUpdate));
+    test_user_workspace_memory_write!(upsert_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(replace_entry(_entry: UserWorkspaceMemoryEntry));
+    test_user_workspace_memory_write!(remove_entry(_key: &'a str));
+    test_user_workspace_memory_write!(replace_document(_content: String, _base_version: ExpectedFileVersion));
+}
+
+impl DreamMemoryFormationStore for TestMemoryWriter {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = talos_error::TalosResult<talos_memory::DreamMemoryDaySnapshot>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                Vec::new(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
+        _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
     > {
@@ -445,7 +544,9 @@ fn create_agent_with_tool(state: Arc<IntegrationState>) -> AgentHarnessImpl {
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(TestMemoryWriter),
+        dream_memory_store: Arc::new(TestMemoryWriter),
+        user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
+        user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
     })
     .expect("agent harness should build")

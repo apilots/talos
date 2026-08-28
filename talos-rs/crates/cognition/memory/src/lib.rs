@@ -1,2 +1,10 @@
+mod dream_memory;
 mod ports;
-pub use ports::{MemoryCandidate, MemoryReader, MemoryScope, MemoryWriteBatch, MemoryWriter};
+mod workspace_memory;
+pub use dream_memory::*;
+pub use ports::{
+    DreamMemoryDayRevision, DreamMemoryDaySnapshot, DreamMemoryFormationStore,
+    DreamMemoryRevisionToken, DreamMemoryWriteRequest, MemoryCandidate, MemoryReader, MemoryScope,
+    MemoryWriteBatch,
+};
+pub use workspace_memory::*;

@@ -1,7 +1,6 @@
 timezone: Asia/Shanghai
 
 memory:
-  root_memory_filename: MEMORY.md
   memory_dirname: memory
   file_list_default_limit: 20
   file_list_max_limit: 90
@@ -11,7 +10,7 @@ automation:
     retention_days: 366
     batch_size: 1000
     max_batches: 10
-  memory_daily_maintenance:
+  dream_memory_maintenance:
     cron: "0 30 3 * * *"
     batch_size: 50
     max_batches: 10
@@ -112,7 +111,6 @@ agent:
         include_identity: true
         include_user: true
         include_heartbeat: true
-        include_memory: true
     output:
       max_tokens: 32000
       upper_limit: 64000

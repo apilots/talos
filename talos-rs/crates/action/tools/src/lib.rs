@@ -63,6 +63,7 @@ pub mod tools {
     pub(super) mod subagent;
     pub mod todo_write;
     pub mod tool_search;
+    pub mod user_workspace_memory_update;
     pub mod web_fetch;
     pub mod web_search;
     pub mod write;
@@ -76,7 +77,8 @@ mod memory_tools_tests;
 pub use tools::{
     ask_user_question::AskUserQuestionTool, bash::BashTool, edit::EditTool, glob::GlobTool,
     grep::GrepTool, memory_get::MemoryGetTool, memory_search::MemorySearchTool, read::ReadTool,
-    todo_write::TodoWriteTool, tool_search::ToolSearchTool, web_fetch::WebFetchTool,
+    todo_write::TodoWriteTool, tool_search::ToolSearchTool,
+    user_workspace_memory_update::UserWorkspaceMemoryUpdateTool, web_fetch::WebFetchTool,
     web_search::WebSearchTool, write::WriteTool,
 };
 
@@ -94,6 +96,7 @@ pub fn register_core_local_tools(registry: &ToolRegistry) {
     // Memory tools
     registry.register(Arc::new(MemorySearchTool));
     registry.register(Arc::new(MemoryGetTool));
+    registry.register(Arc::new(UserWorkspaceMemoryUpdateTool));
     // Catalog and workflow tools
     registry.register(Arc::new(ToolSearchTool));
     registry.register(Arc::new(TodoWriteTool));

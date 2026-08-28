@@ -1,192 +1,118 @@
 use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
-use serde::Serialize;
 use talos_error::{TalosError, TalosResult};
-use talos_memory::MemoryWriteBatch;
+use talos_memory::{
+    DreamMemoryAppendResult, DreamMemoryBundleEventKind, DreamMemoryDate, DreamMemoryDayRevision,
+    DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryWriteRequest, MemoryAgentId,
+    MemoryScope, MemoryTimezone, MemoryUserId,
+};
 
-use super::parser::{normalize_text, parse_source, sha256_hex};
-use super::types::{memory_importance_as_str, memory_kind_as_str, MemoryRecord};
-use super::MemoryStore;
-
-#[derive(Serialize)]
-struct MemoryIdKey<'a> {
-    schema_version: u8,
-    user_id: &'a str,
-    session_id: &'a str,
-    source_from_seq: u64,
-    source_until_seq: u64,
-    candidate_ordinal: usize,
-}
+use super::bundle::current_memory_date;
+use super::consistency::{clear_index_stale_marker, mark_index_stale};
+use super::source::{map_dream_memory_error, source_from_markdown};
+use super::store::{load_sources, validate_scope_sources};
+use super::{memory_scope_lock_path, MemoryStore};
 
 impl MemoryStore {
-    /// Atomically append one idempotent formation batch and synchronize its index source.
+    /// Atomically append one idempotent formation batch and synchronize its derived index.
     pub async fn write_batch(
         &self,
-        user_id: &str,
-        workspace_root: &std::path::Path,
+        scope: &MemoryScope,
         memory_dirname: &str,
         timezone: Tz,
-        batch: &MemoryWriteBatch,
+        request: &DreamMemoryWriteRequest,
     ) -> TalosResult<()> {
-        validate_batch(user_id, batch)?;
+        let batch = request.batch();
         let timestamp = Utc
             .timestamp_opt(batch.occurred_at, 0)
             .single()
             .ok_or_else(|| {
                 TalosError::public(
                     talos_error::ErrorCode::InvalidRequest,
-                    "invalid memory occurred_at".to_string(),
+                    "invalid Dream Memory occurred_at".to_string(),
                 )
             })?;
         let source_date = timestamp
             .with_timezone(&timezone)
             .format("%Y-%m-%d")
             .to_string();
+        if request.date().to_string() != source_date {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "Dream Memory write date does not match occurred_at".to_string(),
+            ));
+        }
         let source_path = format!("{memory_dirname}/{source_date}.md");
-        let file_path = workspace_root.join(&source_path);
+        let file_path = scope.workspace_root.join(&source_path);
+        let lock_path = memory_scope_lock_path(&scope.workspace_root);
 
-        talos_fs::with_file_lock(&file_path, || async {
-            let current = talos_fs::read_file(&file_path).await?.unwrap_or_default();
-            let parsed = parse_source(user_id, &source_path, &current, timezone)?;
-            if parsed.records.iter().any(|parsed| {
-                parsed.record.session_id.as_deref() == Some(batch.session_id.as_str())
-                    && parsed.record.source_from_seq == Some(batch.source_from_seq)
-                    && parsed.record.source_until_seq == Some(batch.source_until_seq)
-            }) {
-                return self
-                    .sync_source(user_id, &source_path, &current, timezone)
-                    .await;
-            }
-            if batch.candidates.is_empty() {
-                return Ok(());
-            }
-            let expected = expected_records(user_id, &source_date, batch)?;
-            let expected_ids = expected
-                .iter()
-                .map(|record| record.memory_id.clone())
-                .collect::<Vec<_>>();
-            if parsed.records.iter().any(|parsed| {
-                parsed.record.session_id.as_deref() == Some(batch.session_id.as_str())
-                    && parsed.record.source_from_seq.is_some_and(|from| {
-                        from <= batch.source_until_seq
-                            && parsed
-                                .record
-                                .source_until_seq
-                                .is_some_and(|until| until >= batch.source_from_seq)
-                    })
-                    && !(parsed.record.source_from_seq == Some(batch.source_from_seq)
-                        && parsed.record.source_until_seq == Some(batch.source_until_seq))
-            }) {
+        talos_fs::with_file_lock(&lock_path, || async {
+            self.recover_scope_index_unlocked(scope, memory_dirname, timezone)
+                .await?;
+            let current = talos_fs::read_file(&file_path).await?;
+            if &DreamMemoryDayRevision::from_content(current.as_deref()) != request.base_revision()
+            {
                 return Err(TalosError::public(
                     talos_error::ErrorCode::Conflict,
-                    "memory write batch overlaps an existing session range".to_string(),
+                    "Dream Memory day revision mismatch".to_string(),
                 ));
             }
-            self.validate_batch_append(
-                user_id,
-                &source_path,
-                &batch.session_id,
-                batch.source_from_seq,
-                batch.source_until_seq,
-                &expected_ids,
-            )
-            .await?;
+            let context = DreamMemoryDocumentContext::new(
+                MemoryAgentId::parse(scope.agent_id.clone()).map_err(map_dream_memory_error)?,
+                MemoryUserId::parse(scope.user_id.clone()).map_err(map_dream_memory_error)?,
+                DreamMemoryDate::parse(&source_date).map_err(map_dream_memory_error)?,
+                MemoryTimezone::new(timezone),
+            );
+            let mut document = match current.as_deref() {
+                Some(markdown) => DreamMemoryDocument::parse(context, markdown),
+                None => DreamMemoryDocument::new(context, batch.occurred_at),
+            }
+            .map_err(map_dream_memory_error)?;
+            match document
+                .append_batch(batch)
+                .map_err(map_dream_memory_error)?
+            {
+                DreamMemoryAppendResult::AlreadyApplied => {
+                    if let Some(markdown) = current.as_deref() {
+                        self.sync_source(scope, &source_path, markdown, timezone)
+                            .await?;
+                    }
+                    Ok(())
+                }
+                DreamMemoryAppendResult::Appended => {
+                    let updated = document.render().map_err(map_dream_memory_error)?;
+                    let updated_source = source_from_markdown(
+                        &scope.agent_id,
+                        &scope.user_id,
+                        &source_path,
+                        &updated,
+                        timezone,
+                    )?;
+                    let mut sources = load_sources(scope, memory_dirname, timezone).await?;
+                    sources.retain(|source| source.source_path != source_path);
+                    sources.push(updated_source);
+                    validate_scope_sources(&sources)?;
 
-            let mut updated = current;
-            if !updated.is_empty() && !updated.ends_with('\n') {
-                updated.push('\n');
+                    mark_index_stale(&scope.workspace_root).await?;
+                    talos_fs::write_file(&file_path, &updated).await?;
+                    self.sync_bundle_unlocked(
+                        scope,
+                        memory_dirname,
+                        &sources,
+                        if current.is_some() {
+                            DreamMemoryBundleEventKind::Update
+                        } else {
+                            DreamMemoryBundleEventKind::Creation
+                        },
+                        current_memory_date(timezone)?,
+                    )
+                    .await?;
+                    self.sync_source(scope, &source_path, &updated, timezone)
+                        .await?;
+                    clear_index_stale_marker(&scope.workspace_root)
+                }
             }
-            for record in &expected {
-                updated.push_str(&render_record(record, timezone)?);
-            }
-            parse_source(user_id, &source_path, &updated, timezone)?;
-            talos_fs::write_file(&file_path, &updated).await?;
-            self.sync_source(user_id, &source_path, &updated, timezone)
-                .await
         })
         .await
     }
-}
-
-fn validate_batch(user_id: &str, batch: &MemoryWriteBatch) -> TalosResult<()> {
-    if user_id.trim().is_empty()
-        || batch.session_id.trim().is_empty()
-        || batch.source_from_seq > batch.source_until_seq
-        || batch.candidates.len() > 8
-        || batch.candidates.iter().any(|candidate| {
-            let title = normalize_text(&candidate.title);
-            let body = normalize_text(&candidate.body);
-            title.is_empty()
-                || body.is_empty()
-                || title.chars().count() > 160
-                || body.chars().count() > 1_000
-        })
-    {
-        return Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "invalid memory write batch".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn expected_records(
-    user_id: &str,
-    source_date: &str,
-    batch: &MemoryWriteBatch,
-) -> TalosResult<Vec<MemoryRecord>> {
-    batch
-        .candidates
-        .iter()
-        .enumerate()
-        .map(|(ordinal, candidate)| {
-            let key = MemoryIdKey {
-                schema_version: 1,
-                user_id,
-                session_id: &batch.session_id,
-                source_from_seq: batch.source_from_seq,
-                source_until_seq: batch.source_until_seq,
-                candidate_ordinal: ordinal,
-            };
-            let bytes = serde_json::to_vec(&key)
-                .map_err(|error| TalosError::internal(format!("serialize memory id: {error}")))?;
-            Ok(MemoryRecord {
-                memory_id: format!("mem_{}", &sha256_hex(&bytes)[..32]),
-                title: normalize_text(&candidate.title),
-                body: normalize_text(&candidate.body),
-                kind: candidate.kind,
-                importance: candidate.importance,
-                occurred_at: batch.occurred_at,
-                source_date: source_date.to_string(),
-                session_id: Some(batch.session_id.clone()),
-                source_from_seq: Some(batch.source_from_seq),
-                source_until_seq: Some(batch.source_until_seq),
-            })
-        })
-        .collect()
-}
-
-fn render_record(record: &MemoryRecord, timezone: Tz) -> TalosResult<String> {
-    let timestamp = Utc
-        .timestamp_opt(record.occurred_at, 0)
-        .single()
-        .ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "invalid memory occurred_at".to_string(),
-            )
-        })?;
-    Ok(format!(
-        "## [{}] {}\nmemory_id: {}\noccurred_at: {}\nsession: {}\nkind: {}\nimportance: {}\nsource_from_seq: {}\nsource_until_seq: {}\n\n{}\n\n",
-        timestamp.with_timezone(&timezone).format("%H:%M"),
-        record.title,
-        record.memory_id,
-        record.occurred_at,
-        record.session_id.as_deref().unwrap_or_default(),
-        memory_kind_as_str(record.kind),
-        memory_importance_as_str(record.importance),
-        record.source_from_seq.unwrap_or_default(),
-        record.source_until_seq.unwrap_or_default(),
-        record.body,
-    ))
 }

@@ -127,6 +127,7 @@ fn build_tool_context(
         ctx
     };
     let ctx = ctx.with_memory_scope(MemoryScope {
+        agent_id: execution_context.agent_id.clone(),
         user_id: execution_context.user_id.clone(),
         workspace_root: execution_context.kernel_config.workspace_dir.clone().into(),
     });

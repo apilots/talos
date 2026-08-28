@@ -222,6 +222,16 @@ impl TalosService {
         }
     }
 
+    /// Reuses one application-owned User Workspace Memory service across model and document APIs.
+    #[must_use]
+    pub fn with_user_workspace_memory(
+        mut self,
+        memory: Arc<crate::UserWorkspaceMemoryService>,
+    ) -> Self {
+        self.workspace_docs = self.workspace_docs.with_user_workspace_memory(memory);
+        self
+    }
+
     pub fn new_with_session_store(
         turn_executor: Arc<dyn TurnExecutor>,
         session_runtime: Arc<dyn SessionRuntime>,

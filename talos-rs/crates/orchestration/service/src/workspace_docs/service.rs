@@ -1,11 +1,12 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use talos_error::{TalosError, TalosResult};
+use talos_memory::MemoryScope;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocInfo, WorkspaceDocKind,
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceInfoRequest, WorkspaceInfoResponse,
-    MEMORY_FILE_MAX_CHARS,
 };
 
 use crate::access::Actor;
@@ -13,17 +14,27 @@ use crate::workspace::file::{
     ensure_workspace_write_version, resolve_workspace_root, workspace_revision,
 };
 use crate::workspace::{AgentWorkspaceInfo, EffectiveWorkspaceResolver};
+use crate::UserWorkspaceMemoryService;
 
 #[derive(Clone)]
 pub struct WorkspaceDocService {
     resolver: EffectiveWorkspaceResolver,
+    memory: Arc<UserWorkspaceMemoryService>,
 }
 
 impl WorkspaceDocService {
     pub fn new(base_config: TalosConfig) -> Self {
         Self {
             resolver: EffectiveWorkspaceResolver::new(base_config),
+            memory: Arc::new(UserWorkspaceMemoryService::new()),
         }
+    }
+
+    /// Reuses the application-owned User Workspace Memory service.
+    #[must_use]
+    pub fn with_user_workspace_memory(mut self, memory: Arc<UserWorkspaceMemoryService>) -> Self {
+        self.memory = memory;
+        self
     }
 
     pub fn parse_kind(raw: &str) -> TalosResult<WorkspaceDocKind> {
@@ -88,6 +99,17 @@ impl WorkspaceDocService {
         kind: WorkspaceDocKind,
     ) -> TalosResult<WorkspaceDocInfo> {
         let workspace = self.resolver.resolve_for_actor(actor)?;
+        if kind == WorkspaceDocKind::Memory {
+            let snapshot = self.memory.read(&memory_scope(&workspace)).await?;
+            return Ok(WorkspaceDocInfo {
+                kind,
+                path: kind.file_name().to_string(),
+                exists: snapshot.exists(),
+                updated_at: snapshot.updated_at(),
+                version_token: snapshot.version_token().map(str::to_string),
+                content: snapshot.raw_content().to_string(),
+            });
+        }
         let path = self.doc_path(&workspace.config, kind);
         let content = talos_fs::read_file(&path).await?;
         let updated_at = talos_fs::get_file_metadata(&path)
@@ -127,16 +149,26 @@ impl WorkspaceDocService {
         kind: WorkspaceDocKind,
         request: DocUpdateRequest,
     ) -> TalosResult<WorkspaceDocInfo> {
-        if kind == WorkspaceDocKind::Memory
-            && request.content.chars().count() > MEMORY_FILE_MAX_CHARS
-        {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                format!("MEMORY.md exceeds the {MEMORY_FILE_MAX_CHARS} character limit"),
-            ));
-        }
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.resolver.write_profile_snapshot(&workspace).await?;
+        if kind == WorkspaceDocKind::Memory {
+            let snapshot = self
+                .memory
+                .replace_document(
+                    &memory_scope(&workspace),
+                    request.content,
+                    request.base_version,
+                )
+                .await?;
+            return Ok(WorkspaceDocInfo {
+                kind,
+                path: kind.file_name().to_string(),
+                exists: true,
+                updated_at: snapshot.updated_at(),
+                version_token: snapshot.version_token().map(str::to_string),
+                content: snapshot.raw_content().to_string(),
+            });
+        }
         let path = self.doc_path(&workspace.config, kind);
         talos_fs::with_file_lock(&path, || async {
             let existing = talos_fs::read_file(&path).await?;
@@ -166,6 +198,14 @@ impl WorkspaceDocService {
 
     fn doc_path(&self, config: &TalosConfig, kind: WorkspaceDocKind) -> PathBuf {
         resolve_workspace_root(config).join(kind.file_name())
+    }
+}
+
+fn memory_scope(workspace: &crate::workspace::EffectiveAgentWorkspace) -> MemoryScope {
+    MemoryScope {
+        agent_id: workspace.agent_id.clone(),
+        user_id: workspace.user_id.clone(),
+        workspace_root: workspace.user_workspace_dir.clone(),
     }
 }
 

@@ -30,6 +30,28 @@ pub struct CompactionMemoryOutput {
     pub memory_candidates: Vec<talos_memory::MemoryCandidate>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub(super) enum DreamMemoryModelOutput {
+    Compaction {
+        title: String,
+        #[serde(default)]
+        facts: Vec<String>,
+        #[serde(default)]
+        preferences: Vec<String>,
+        #[serde(default)]
+        open_tasks: Vec<String>,
+        #[serde(default)]
+        risks: Vec<String>,
+        #[serde(default)]
+        memory_candidates: Vec<talos_memory::MemoryCandidate>,
+    },
+    Maintenance {
+        #[serde(default)]
+        memory_candidates: Vec<talos_memory::MemoryCandidate>,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionCompactionStatus {

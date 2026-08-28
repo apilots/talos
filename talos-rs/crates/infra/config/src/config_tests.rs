@@ -24,6 +24,16 @@ fn test_default_config() {
 }
 
 #[test]
+fn memory_config_rejects_removed_root_memory_filename() {
+    let error = serde_yaml::from_str::<MemoryConfig>(
+        "root_memory_filename: MEMORY.md\nmemory_dirname: memory\n",
+    )
+    .expect_err("removed root memory filename must not be silently ignored");
+
+    assert!(error.to_string().contains("root_memory_filename"));
+}
+
+#[test]
 fn message_queue_config_parses_custom_capacity() {
     let config: Config = serde_yaml::from_str(
         r#"
@@ -309,7 +319,6 @@ fn test_kernel_defaults() {
         config.agent.kernel.prompt.bootstrap.max_chars_per_file,
         8_000
     );
-    assert!(config.agent.kernel.prompt.bootstrap.include_memory);
     assert_eq!(config.timezone, "UTC");
     assert_eq!(
         config.automation.profile_usage_retention.cron,
@@ -320,10 +329,10 @@ fn test_kernel_defaults() {
         366
     );
     assert_eq!(
-        config.automation.memory_daily_maintenance.cron,
+        config.automation.dream_memory_maintenance.cron,
         "0 30 3 * * *"
     );
-    assert_eq!(config.automation.memory_daily_maintenance.batch_size, 50);
+    assert_eq!(config.automation.dream_memory_maintenance.batch_size, 50);
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
         config.agent.kernel.workspace_dir,
@@ -333,7 +342,6 @@ fn test_kernel_defaults() {
             .to_string_lossy()
             .to_string()
     );
-    assert_eq!(config.memory.root_memory_filename, "MEMORY.md");
     assert_eq!(config.memory.file_list_default_limit, 20);
     assert_eq!(config.memory.file_list_max_limit, 90);
     assert_eq!(config.logging.level, "info");

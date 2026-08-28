@@ -7,7 +7,9 @@ use talos_config::{
 };
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
-use talos_memory::MemoryWriter;
+use talos_memory::{
+    DreamMemoryFormationStore, UserWorkspaceMemoryReader, UserWorkspaceMemoryWriter,
+};
 use talos_store::session::{SessionArtifactStore, SessionStore};
 use talos_tools::ToolRegistry;
 use talos_types::ModelSelection;
@@ -172,7 +174,9 @@ pub struct AgentHarnessFactory {
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     session_store: Arc<dyn SessionStore>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
+    user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     attachment_reader: Arc<dyn AttachmentReader>,
     inner_model: Arc<crate::InnerModelClient>,
 }
@@ -184,7 +188,9 @@ pub struct AgentHarnessFactoryParams {
     pub skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     pub session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub session_store: Arc<dyn SessionStore>,
-    pub memory_writer: Arc<dyn MemoryWriter>,
+    pub dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
+    pub user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    pub user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     pub attachment_reader: Arc<dyn AttachmentReader>,
     pub inner_model: Arc<crate::InnerModelClient>,
 }
@@ -198,7 +204,9 @@ impl AgentHarnessFactory {
             skill_roots_resolver,
             session_artifact_store,
             session_store,
-            memory_writer,
+            dream_memory_store,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
             inner_model,
         } = params;
@@ -208,7 +216,9 @@ impl AgentHarnessFactory {
             skill_roots_resolver,
             session_artifact_store,
             session_store,
-            memory_writer,
+            dream_memory_store,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
             inner_model,
         }
@@ -239,7 +249,9 @@ impl AgentHarnessFactory {
                     skill_roots_resolver: self.skill_roots_resolver.clone(),
                     session_artifact_store: self.session_artifact_store.clone(),
                     session_store: self.session_store.clone(),
-                    memory_writer: self.memory_writer.clone(),
+                    dream_memory_store: self.dream_memory_store.clone(),
+                    user_workspace_memory_reader: self.user_workspace_memory_reader.clone(),
+                    user_workspace_memory_writer: self.user_workspace_memory_writer.clone(),
                     attachment_reader: self.attachment_reader.clone(),
                 })
             }

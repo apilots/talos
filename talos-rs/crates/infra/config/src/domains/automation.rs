@@ -8,27 +8,27 @@ pub struct AutomationConfig {
     #[serde(default)]
     pub profile_usage_retention: ProfileUsageRetentionConfig,
     #[serde(default)]
-    pub memory_daily_maintenance: MemoryDailyMaintenanceConfig,
+    pub dream_memory_maintenance: DreamMemoryMaintenanceConfig,
 }
 
-/// Bounded global schedule for daily memory formation.
+/// Bounded global schedule for Dream Memory formation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct MemoryDailyMaintenanceConfig {
-    #[serde(default = "default_memory_daily_maintenance_cron")]
+pub struct DreamMemoryMaintenanceConfig {
+    #[serde(default = "default_dream_memory_maintenance_cron")]
     pub cron: String,
-    #[serde(default = "default_memory_daily_maintenance_batch_size")]
+    #[serde(default = "default_dream_memory_maintenance_batch_size")]
     pub batch_size: usize,
-    #[serde(default = "default_memory_daily_maintenance_max_batches")]
+    #[serde(default = "default_dream_memory_maintenance_max_batches")]
     pub max_batches: usize,
 }
 
-impl Default for MemoryDailyMaintenanceConfig {
+impl Default for DreamMemoryMaintenanceConfig {
     fn default() -> Self {
         Self {
-            cron: default_memory_daily_maintenance_cron(),
-            batch_size: default_memory_daily_maintenance_batch_size(),
-            max_batches: default_memory_daily_maintenance_max_batches(),
+            cron: default_dream_memory_maintenance_cron(),
+            batch_size: default_dream_memory_maintenance_batch_size(),
+            max_batches: default_dream_memory_maintenance_max_batches(),
         }
     }
 }
@@ -65,15 +65,15 @@ fn default_profile_usage_retention_cron() -> String {
     "0 15 3 * * 1".to_string()
 }
 
-fn default_memory_daily_maintenance_cron() -> String {
+fn default_dream_memory_maintenance_cron() -> String {
     "0 30 3 * * *".to_string()
 }
 
-fn default_memory_daily_maintenance_batch_size() -> usize {
+fn default_dream_memory_maintenance_batch_size() -> usize {
     50
 }
 
-fn default_memory_daily_maintenance_max_batches() -> usize {
+fn default_dream_memory_maintenance_max_batches() -> usize {
     10
 }
 

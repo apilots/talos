@@ -19,6 +19,7 @@ mod tests;
 #[cfg(test)]
 #[path = "agent/timeline_status_tests.rs"]
 mod timeline_status_tests;
+mod user_workspace_memory;
 
 pub use mock::MockAgent;
 
@@ -40,7 +41,9 @@ use talos_agent_kernel::{AttachmentReader, TimelineBuilder};
 use talos_config::{AgentKernelConfig, PlannerMode};
 use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::LlmProviderRouter;
-use talos_memory::MemoryWriter;
+use talos_memory::{
+    DreamMemoryFormationStore, UserWorkspaceMemoryReader, UserWorkspaceMemoryWriter,
+};
 use talos_run_control::{
     CancellationMode, CancellationPolicy, CleanupReport, RunTaskCompletion, RunTaskError,
     RunTermination, SettlementKind, SpawnError,
@@ -73,7 +76,7 @@ pub struct AgentHarnessImpl {
     /// Shared client for Agent-owned auxiliary model calls.
     inner_model: Arc<crate::InnerModelClient>,
     /// Long-term memory persistence injected by the composition root.
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     /// Recoverable session artifact persistence injected by the composition root.
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     /// Session state persistence used for memory formation cursors.
@@ -116,7 +119,11 @@ pub struct AgentHarnessParams {
     /// Session state persistence.
     pub session_store: Arc<dyn SessionStore>,
     /// Long-term memory persistence.
-    pub memory_writer: Arc<dyn MemoryWriter>,
+    pub dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
+    /// Current User Workspace Memory reader.
+    pub user_workspace_memory_reader: Arc<dyn UserWorkspaceMemoryReader>,
+    /// User Workspace Memory mutation capability.
+    pub user_workspace_memory_writer: Arc<dyn UserWorkspaceMemoryWriter>,
     /// Authorized file content reader used only for the active model turn.
     pub attachment_reader: Arc<dyn AttachmentReader>,
 }
@@ -136,7 +143,9 @@ impl AgentHarnessImpl {
             skill_roots_resolver,
             session_artifact_store,
             session_store,
-            memory_writer,
+            dream_memory_store,
+            user_workspace_memory_reader,
+            user_workspace_memory_writer,
             attachment_reader,
         } = params;
         let kernel_config = Self::normalized_kernel_config(kernel_config);
@@ -148,8 +157,8 @@ impl AgentHarnessImpl {
             description: description.clone(),
             llm_provider_router: llm_provider_router.clone(),
             model_selection: model_selection.clone(),
-            inner_model,
-            memory_writer: memory_writer.clone(),
+            inner_model: inner_model.clone(),
+            dream_memory_store: dream_memory_store.clone(),
             session_artifact_store: session_artifact_store.clone(),
             session_store: session_store.clone(),
             tool_registry: tool_registry.clone(),
@@ -167,7 +176,10 @@ impl AgentHarnessImpl {
                 skill_roots_resolver,
                 session_artifact_store,
                 session_store,
-                memory_writer,
+                dream_memory_store,
+                user_workspace_memory_reader,
+                user_workspace_memory_writer,
+                inner_model,
                 attachment_reader,
             }),
         })

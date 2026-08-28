@@ -1,70 +1,70 @@
-use std::collections::BTreeSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use talos_agent::{InnerModelChatParams, InnerModelClient};
-use talos_config::{resolve_effective_kernel_workspace, MemoryDailyMaintenanceConfig};
+use talos_agent::{AgentDefinition, InnerModelClient};
+use talos_config::{
+    resolve_effective_kernel_workspace, AgentKernelConfig, AgentRuntimeConfig,
+    DreamMemoryMaintenanceConfig,
+};
 use talos_error::{TalosError, TalosResult};
-use talos_llm_provider::ChatMessage;
 use talos_memory::MemoryScope;
 use talos_store::session::{
     ActiveTurnStatus, ActiveTurnStore, SessionArtifactStore, SessionPageCursor, SessionQuery,
     SessionStore,
 };
-use talos_types::{ModelUsageKind, TalosConfig, MEMORY_FILE_MAX_CHARS};
+use talos_types::ModelUsageKind;
 
 use super::MemoryService;
 
-const MANAGED_START: &str = "<!-- talos:managed-memory:start -->";
-const MANAGED_END: &str = "<!-- talos:managed-memory:end -->";
-const HIGH_MEMORY_PROMPT_MAX_CHARS: usize = 6_000;
-const MANAGED_MEMORY_PROMPT: &str = r#"Rewrite the managed long-term memory section from the supplied high-importance memories.
-Return only concise Markdown bullet points. Preserve durable facts, preferences, decisions, and open tasks. Do not include markers or code fences."#;
-
-/// Result of one bounded global daily-memory maintenance run.
+/// Result of one bounded global Dream Memory maintenance run.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct MemoryDailyMaintenanceReport {
+pub struct DreamMemoryMaintenanceReport {
     pub processed_sessions: u64,
     pub failed_sessions: u64,
-    pub updated_users: u64,
-    pub failed_users: u64,
 }
 
 /// Processes bounded session tails through the shared memory formation path.
 #[derive(Clone)]
-pub struct MemoryDailyMaintenance {
+pub struct DreamMemoryMaintenance {
     session_store: Arc<dyn SessionStore>,
     active_turn_store: Arc<dyn ActiveTurnStore>,
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     memory_service: MemoryService,
     inner_model: Arc<InnerModelClient>,
-    base_config: TalosConfig,
-    config: MemoryDailyMaintenanceConfig,
+    agent_kernel_configs: Arc<HashMap<String, AgentKernelConfig>>,
+    config: DreamMemoryMaintenanceConfig,
 }
 
-impl MemoryDailyMaintenance {
+impl DreamMemoryMaintenance {
     pub fn new(
         session_store: Arc<dyn SessionStore>,
         active_turn_store: Arc<dyn ActiveTurnStore>,
         session_artifact_store: Arc<dyn SessionArtifactStore>,
         memory_service: MemoryService,
         inner_model: Arc<InnerModelClient>,
-        base_config: TalosConfig,
-        config: MemoryDailyMaintenanceConfig,
+        agent_definitions: &[AgentDefinition],
+        config: DreamMemoryMaintenanceConfig,
     ) -> Self {
+        let agent_kernel_configs = agent_definitions
+            .iter()
+            .filter(|definition| definition.enabled)
+            .map(|definition| match &definition.runtime_config {
+                AgentRuntimeConfig::Kernel { kernel } => (definition.id.clone(), kernel.clone()),
+            })
+            .collect();
         Self {
             session_store,
             active_turn_store,
             session_artifact_store,
             memory_service,
             inner_model,
-            base_config,
+            agent_kernel_configs: Arc::new(agent_kernel_configs),
             config,
         }
     }
 
-    pub async fn run(&self) -> TalosResult<MemoryDailyMaintenanceReport> {
-        let mut report = MemoryDailyMaintenanceReport::default();
-        let mut users = BTreeSet::new();
+    pub async fn run(&self) -> TalosResult<DreamMemoryMaintenanceReport> {
+        let mut report = DreamMemoryMaintenanceReport::default();
         let mut after = None;
         for _ in 0..self.config.max_batches {
             let records = self
@@ -82,28 +82,17 @@ impl MemoryDailyMaintenance {
             });
             for record in records {
                 let session_id = record.id.clone();
-                users.insert(record.user_id.clone());
                 match self.process_session(record).await {
                     Ok(true) => report.processed_sessions += 1,
                     Ok(false) => {}
                     Err(error) => {
                         report.failed_sessions += 1;
-                        tracing::warn!(session_id, error = %error, "daily memory session processing failed");
+                        tracing::warn!(session_id, error = %error, "Dream Memory session processing failed");
                     }
                 }
             }
             if record_count < self.config.batch_size {
                 break;
-            }
-        }
-        for user_id in users {
-            match self.refresh_managed_memory(&user_id).await {
-                Ok(true) => report.updated_users += 1,
-                Ok(false) => {}
-                Err(error) => {
-                    report.failed_users += 1;
-                    tracing::warn!(user_id, error = %error, "managed memory update failed");
-                }
             }
         }
         Ok(report)
@@ -126,9 +115,17 @@ impl MemoryDailyMaintenance {
         ) {
             return Ok(false);
         }
+        let agent_kernel_config =
+            self.agent_kernel_configs
+                .get(&record.agent_id)
+                .ok_or_else(|| {
+                    TalosError::public(
+                        talos_error::ErrorCode::ResourceNotFound,
+                        format!("Dream Memory Agent not found: {}", record.agent_id),
+                    )
+                })?;
         let kernel_config =
-            resolve_effective_kernel_workspace(&self.base_config.agent.kernel, &record.user_id)?
-                .kernel_config;
+            resolve_effective_kernel_workspace(agent_kernel_config, &record.user_id)?.kernel_config;
         let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
         if self
             .session_artifact_store
@@ -145,15 +142,16 @@ impl MemoryDailyMaintenance {
         )?;
         let selected_model = self.inner_model.model_ref().id;
         let scope = MemoryScope {
+            agent_id: record.agent_id,
             user_id: record.user_id,
             workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
         };
-        let result = talos_agent_kernel::form_daily_session_memory(
+        let result = talos_agent_kernel::form_dream_session_memory(
             talos_agent_kernel::MemoryFormationParams {
                 session_id: &record.id,
                 selected_model: &selected_model,
                 llm_provider: provider,
-                memory_writer: &self.memory_service,
+                dream_memory_store: &self.memory_service,
                 memory_scope: &scope,
                 session_artifact_store: self.session_artifact_store.as_ref(),
                 session_store: self.session_store.as_ref(),
@@ -163,119 +161,6 @@ impl MemoryDailyMaintenance {
         .await?;
         Ok(result.covers_until_seq.is_some())
     }
-
-    async fn refresh_managed_memory(&self, user_id: &str) -> TalosResult<bool> {
-        let memories = self.memory_service.recent_high(user_id).await?;
-        if memories.is_empty() {
-            return Ok(false);
-        }
-        let kernel_config =
-            resolve_effective_kernel_workspace(&self.base_config.agent.kernel, user_id)?
-                .kernel_config;
-        let path = std::path::PathBuf::from(&kernel_config.workspace_dir)
-            .join(&self.base_config.memory.root_memory_filename);
-        let current = talos_fs::read_file(&path).await?.unwrap_or_default();
-        let existing_managed = managed_content(&current)?;
-        let source = render_high_memories(&memories);
-        let response = self
-            .inner_model
-            .chat(InnerModelChatParams {
-                user_id: user_id.to_string(),
-                session_id: None,
-                usage_kind: ModelUsageKind::Memory,
-                messages: vec![
-                    ChatMessage::system(MANAGED_MEMORY_PROMPT),
-                    ChatMessage::user(format!(
-                        "Current managed memory:\n{existing_managed}\n\nHigh-importance memories:\n{source}"
-                    )),
-                ],
-            })
-            .await?;
-        let managed = response.content.trim();
-        if managed.is_empty() || managed.chars().count() > MEMORY_FILE_MAX_CHARS {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "managed memory output is empty or too large".to_string(),
-            ));
-        }
-        let updated = replace_managed_content(&current, managed)?;
-        let changed = updated != current;
-        talos_fs::with_file_lock(&path, || async {
-            let latest = talos_fs::read_file(&path).await?.unwrap_or_default();
-            if latest != current {
-                return Err(TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    "MEMORY.md changed during managed update".to_string(),
-                ));
-            }
-            talos_fs::write_file(&path, &updated).await
-        })
-        .await?;
-        tracing::info!(
-            user_id,
-            usage_kind = ModelUsageKind::Memory.as_str(),
-            model = %response.model,
-            input_tokens = response.usage.prompt_tokens,
-            output_tokens = response.usage.completion_tokens,
-            total_tokens = response.usage.total_tokens,
-            cache_creation_input_tokens = ?response.usage.cache_creation_input_tokens,
-            cache_read_input_tokens = ?response.usage.cache_read_input_tokens,
-            memory_count = memories.len(),
-            managed_chars = managed.chars().count(),
-            changed,
-            path = %path.display(),
-            "managed MEMORY.md maintenance completed"
-        );
-        Ok(true)
-    }
-}
-
-fn render_high_memories(memories: &[talos_types::MemoryInfo]) -> String {
-    let mut output = String::new();
-    for memory in memories {
-        let entry = format!("- {}: {}\n", memory.title.trim(), memory.body.trim());
-        if output.chars().count() + entry.chars().count() > HIGH_MEMORY_PROMPT_MAX_CHARS {
-            break;
-        }
-        output.push_str(&entry);
-    }
-    output
-}
-
-fn managed_content(content: &str) -> TalosResult<&str> {
-    let starts = content.match_indices(MANAGED_START).collect::<Vec<_>>();
-    let ends = content.match_indices(MANAGED_END).collect::<Vec<_>>();
-    match (starts.as_slice(), ends.as_slice()) {
-        ([], []) => Ok(""),
-        ([(start, _)], [(end, _)]) if start < end => {
-            Ok(content[start + MANAGED_START.len()..*end].trim())
-        }
-        _ => Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "MEMORY.md has invalid managed section markers".to_string(),
-        )),
-    }
-}
-
-fn replace_managed_content(content: &str, managed: &str) -> TalosResult<String> {
-    managed_content(content)?;
-    let section = format!("{MANAGED_START}\n{managed}\n{MANAGED_END}");
-    let updated = match (content.find(MANAGED_START), content.find(MANAGED_END)) {
-        (Some(start), Some(end)) => {
-            let suffix = end + MANAGED_END.len();
-            format!("{}{}{}", &content[..start], section, &content[suffix..])
-        }
-        (None, None) if content.trim().is_empty() => format!("{section}\n"),
-        (None, None) => format!("{}\n\n{section}\n", content.trim_end()),
-        _ => unreachable!("managed_content validates marker pairs"),
-    };
-    if updated.chars().count() > MEMORY_FILE_MAX_CHARS {
-        return Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "MEMORY.md exceeds the 8000 character limit".to_string(),
-        ));
-    }
-    Ok(updated)
 }
 
 #[cfg(test)]

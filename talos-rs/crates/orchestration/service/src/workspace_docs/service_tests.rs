@@ -104,19 +104,62 @@ async fn put_doc_allows_regular_actor() {
 #[tokio::test]
 async fn put_doc_rejects_oversized_memory() {
     let (service, workspace_dir) = test_service();
+    let mut content = talos_memory::UserWorkspaceMemoryDocument::template(
+        talos_memory::UserWorkspaceMemoryProducer::new(
+            talos_memory::MemoryAgentId::parse("default").expect("agent id"),
+            1_784_251_800,
+        ),
+    )
+    .expect("template should build")
+    .render()
+    .expect("template should render");
+    content.push_str(&"x".repeat(talos_types::MEMORY_FILE_MAX_CHARS));
 
     let error = service
         .put_doc(
             &Actor::regular("member"),
             WorkspaceDocKind::Memory,
             DocUpdateRequest {
-                content: "x".repeat(talos_types::MEMORY_FILE_MAX_CHARS + 1),
+                content,
                 base_version: ExpectedFileVersion::MustNotExist,
             },
         )
         .await
         .expect_err("oversized memory should be rejected");
 
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    let _ = talos_fs::remove_directory(&workspace_dir).await;
+}
+
+#[tokio::test]
+async fn memory_doc_write_requires_canonical_okf_but_read_preserves_invalid_raw_content() {
+    let (service, workspace_dir) = test_service();
+    let actor = Actor::regular("member");
+    let user_dir = workspace_dir.join("users").join("member");
+    talos_fs::create_directory(&user_dir, true).expect("user workspace should exist");
+    talos_fs::write_file(&user_dir.join("MEMORY.md"), "legacy memory")
+        .await
+        .expect("legacy memory should write");
+
+    let read = service
+        .get_doc(&actor, WorkspaceDocKind::Memory)
+        .await
+        .expect("invalid memory remains readable");
+    assert_eq!(read.content, "legacy memory");
+
+    let error = service
+        .put_doc(
+            &actor,
+            WorkspaceDocKind::Memory,
+            DocUpdateRequest {
+                content: "arbitrary markdown".to_string(),
+                base_version: ExpectedFileVersion::Match {
+                    version_token: read.version_token.expect("raw revision should exist"),
+                },
+            },
+        )
+        .await
+        .expect_err("non-canonical memory should be rejected");
     assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     let _ = talos_fs::remove_directory(&workspace_dir).await;
 }

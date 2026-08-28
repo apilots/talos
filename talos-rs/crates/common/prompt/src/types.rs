@@ -130,18 +130,11 @@ pub enum WorkspaceBootstrapFileKind {
     Identity,
     User,
     Heartbeat,
-    Memory,
 }
 
 impl WorkspaceBootstrapFileKind {
     pub(crate) fn workspace_files() -> &'static [Self] {
-        &[
-            Self::Soul,
-            Self::Identity,
-            Self::User,
-            Self::Heartbeat,
-            Self::Memory,
-        ]
+        &[Self::Soul, Self::Identity, Self::User, Self::Heartbeat]
     }
 
     pub(crate) fn project_files() -> &'static [Self] {
@@ -155,7 +148,6 @@ impl WorkspaceBootstrapFileKind {
             Self::Identity => "IDENTITY.md",
             Self::User => "USER.md",
             Self::Heartbeat => "HEARTBEAT.md",
-            Self::Memory => "MEMORY.md",
         }
     }
 
@@ -176,9 +168,6 @@ impl WorkspaceBootstrapFileKind {
             Self::Heartbeat => {
                 "# HEARTBEAT\n\nUse this file for long-running task update expectations.\n\n## Policy\n- Add cadence or escalation expectations for long tasks.\n"
             }
-            Self::Memory => {
-                "# MEMORY\n\nUse this file for durable user-written memory.\n\n## Preferences\n- Add long-term user preferences here.\n\n## Constraints\n- Add important constraints and rules here.\n\n## Ongoing Goals\n- Track current long-running goals here.\n\n## Notes\n- Keep stable facts and project context here.\n"
-            }
         }
     }
 
@@ -193,7 +182,6 @@ impl WorkspaceBootstrapFileKind {
             Self::Identity => prompt_config.bootstrap.include_identity,
             Self::User => prompt_config.bootstrap.include_user,
             Self::Heartbeat => prompt_config.bootstrap.include_heartbeat,
-            Self::Memory => prompt_config.bootstrap.include_memory,
         };
         if !include_by_kind {
             return false;
@@ -201,14 +189,14 @@ impl WorkspaceBootstrapFileKind {
         match mode {
             PromptMode::Full => true,
             PromptMode::Minimal => {
-                matches!(self, Self::Agents | Self::Soul | Self::User | Self::Memory)
+                matches!(self, Self::Agents | Self::Soul | Self::User)
             }
             PromptMode::None => false,
         }
     }
 
     pub(crate) fn should_auto_create(self) -> bool {
-        matches!(self, Self::Soul | Self::User | Self::Memory)
+        matches!(self, Self::Soul | Self::User)
     }
 }
 
@@ -241,13 +229,14 @@ pub enum PromptSectionKind {
     ActiveSkillInstructions,
     TaskProtocolLibrary,
     CommunicationPolicy,
+    UserWorkspaceMemoryPolicy,
     PlanningInstruction,
     BootstrapSoul,
     BootstrapIdentity,
     BootstrapUser,
     BootstrapHeartbeat,
-    BootstrapMemory,
     BootstrapAgents,
+    UserWorkspaceMemory,
     RecentTaskContinuity,
     SessionSummary,
     RecentMessages,
@@ -262,6 +251,33 @@ pub enum BudgetTier {
     Critical,
     Important,
     Supplemental,
+}
+
+/// Prompt-owned state of the dynamic User Workspace Memory file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UserWorkspaceMemoryPromptFileState {
+    Missing,
+    Valid,
+    Invalid,
+}
+
+impl UserWorkspaceMemoryPromptFileState {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Valid => "valid",
+            Self::Invalid => "invalid",
+        }
+    }
+}
+
+/// Bounded dynamic input supplied by the Agent assembly layer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserWorkspaceMemoryPromptContext {
+    pub file_state: UserWorkspaceMemoryPromptFileState,
+    pub version_token: Option<String>,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

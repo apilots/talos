@@ -53,3 +53,18 @@ fn collaboration_tools_are_selected_independently_of_prompt_language() {
         assert!(names.contains("list_agents"));
     }
 }
+
+#[test]
+fn user_workspace_memory_update_is_always_available_to_the_model() {
+    let registry = ToolRegistry::new();
+    register_core_local_tools(&registry);
+
+    let names = registry
+        .select_tools(&ToolSelectionRequest::default().with_user_input("ordinary request"))
+        .model_definitions()
+        .into_iter()
+        .map(|definition| definition.name)
+        .collect::<BTreeSet<_>>();
+
+    assert!(names.contains("UserWorkspaceMemoryUpdate"));
+}

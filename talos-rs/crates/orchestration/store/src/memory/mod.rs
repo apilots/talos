@@ -1,10 +1,13 @@
-mod parser;
+mod bundle;
+mod consistency;
 mod search;
+mod source;
 mod store;
 mod types;
 mod writer;
 
-pub use store::MemoryStore;
+pub use consistency::DreamMemorySourceReplace;
+pub use store::{memory_scope_lock_path, MemoryStore};
 pub use types::{
     MemoryImportance, MemoryKind, MemoryRecord, MemorySearchQuery, MemorySearchRecord,
 };

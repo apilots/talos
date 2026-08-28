@@ -1,6 +1,6 @@
 use crate::sandbox_labels::{sandbox_mode_label, user_permission_mode_label};
 use crate::{
-    bootstrap, budget, diagnostics, regions, BootstrapFileDiagnostic, ContinuityAnswerMode,
+    bootstrap, budget, diagnostics, memory, regions, BootstrapFileDiagnostic, ContinuityAnswerMode,
     ContinuityToolOutcome, DynamicTrimPolicy, PromptAssembly, PromptBuilder, PromptCacheState,
     PromptDiagnostics, PromptMode, PromptPhase, PromptSection, PromptSectionKind,
     PromptWindowUsage, RequestContextInjection, WorkspaceBootstrapFile,
@@ -555,32 +555,17 @@ fn build_static_prefix_sections(
             PromptSectionKind::CommunicationPolicy,
             build_communication_policy_payload(),
         ),
+        section(
+            PromptSectionKind::UserWorkspaceMemoryPolicy,
+            memory::policy_payload(),
+        ),
     ];
 
     let mut diagnostics = Vec::new();
     if builder.mode != PromptMode::None && builder.config.prompt.bootstrap.enabled {
         let per_file_limit = builder.config.prompt.bootstrap.max_chars_per_file.max(1);
         for file in bootstrap_files {
-            let file_limit = if file.kind == crate::WorkspaceBootstrapFileKind::Memory {
-                let raw_chars = file
-                    .content
-                    .as_deref()
-                    .map(|content| content.chars().count())
-                    .unwrap_or(0);
-                if raw_chars > talos_types::MEMORY_FILE_MAX_CHARS {
-                    return Err(TalosError::public(
-                        ErrorCode::InvalidRequest,
-                        format!(
-                            "MEMORY.md exceeds the {} character limit",
-                            talos_types::MEMORY_FILE_MAX_CHARS
-                        ),
-                    ));
-                }
-                talos_types::MEMORY_FILE_MAX_CHARS
-            } else {
-                per_file_limit
-            };
-            let (payload, diagnostic) = build_bootstrap_payload(file, file_limit);
+            let (payload, diagnostic) = build_bootstrap_payload(file, per_file_limit);
             diagnostics.push(diagnostic);
             sections.push(section(regions::bootstrap_section_kind(file.kind), payload));
         }
@@ -671,6 +656,11 @@ async fn load_dynamic_sections(builder: &PromptBuilder<'_>) -> TalosResult<Vec<P
     if let Some(payload) = build_planning_instruction_payload(builder) {
         sections.push(section(PromptSectionKind::PlanningInstruction, payload));
     }
+
+    sections.push(section(
+        PromptSectionKind::UserWorkspaceMemory,
+        memory::prompt_payload(builder),
+    ));
 
     if let Some(payload) = build_recent_task_continuity_payload(builder) {
         sections.push(section(PromptSectionKind::RecentTaskContinuity, payload));

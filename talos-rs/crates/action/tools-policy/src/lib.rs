@@ -36,6 +36,7 @@ impl Default for ToolPolicy {
                 // Memory tools
                 "MemorySearch".to_string(),
                 "MemoryGet".to_string(),
+                "UserWorkspaceMemoryUpdate".to_string(),
                 // Network tools
                 "WebFetch".to_string(),
                 "WebSearch".to_string(),

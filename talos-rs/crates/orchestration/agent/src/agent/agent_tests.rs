@@ -2338,10 +2338,9 @@ impl LlmProvider for MockLlmProvider {
         let content = if request.messages.iter().any(|message| {
             message
                 .content
-                .contains("Extract durable memory from this conversation as JSON.")
+                .contains("Form Talos Dream Memory and return only valid JSON")
         }) {
-            "{\"title\":\"Durable Memory\",\"facts\":[\"User prefers tea over coffee\"]}"
-                .to_string()
+            "{\"mode\":\"compaction\",\"title\":\"Durable Memory\",\"facts\":[\"User prefers tea over coffee\"]}".to_string()
         } else {
             "Test response".to_string()
         };

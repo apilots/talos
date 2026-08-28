@@ -104,7 +104,7 @@ impl InnerModelClient {
         Ok(response)
     }
 
-    /// Adapts this client to the plain `LlmProvider` boundary required by Daily Memory formation.
+    /// Adapts this client to the plain `LlmProvider` boundary required by Dream Memory formation.
     ///
     /// The Agent Kernel memory API predates `InnerModelClient` and accepts only an
     /// `Arc<dyn LlmProvider>`. This narrow adapter preserves that stable boundary while attaching
@@ -168,7 +168,7 @@ impl LlmProvider for ScopedInnerModelProvider {
             .await
     }
 
-    /// Rejects streaming because the current Daily Memory caller only supports plain chat.
+    /// Rejects streaming because the current Dream Memory caller only supports plain chat.
     async fn stream(&self, _request: ChatRequest) -> TalosResult<ChatStream> {
         Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,

@@ -1,26 +1,31 @@
 use sqlx::sqlite::SqliteRow;
 use sqlx::{QueryBuilder, Row, Sqlite};
 use talos_error::{TalosError, TalosResult};
+use talos_memory::{
+    DreamMemoryDate, DreamMemoryProvenance, DreamMemorySourceRange, MemoryId, MemoryScope,
+    MemorySessionId,
+};
 
 use super::store::{storage_error, MemoryStore};
 use super::types::{
-    memory_kind_as_str, parse_memory_importance, parse_memory_kind, MemoryRecord,
+    memory_kind_as_str, parse_memory_importance, parse_memory_kind, MemoryIndexScope, MemoryRecord,
     MemorySearchQuery, MemorySearchRecord,
 };
 
 impl MemoryStore {
     /// Search one user scope with deterministic ranking and bounded results.
-    pub async fn search(
+    pub(super) async fn search(
         &self,
-        user_id: &str,
+        scope: &MemoryScope,
         query: &MemorySearchQuery,
     ) -> TalosResult<Vec<MemorySearchRecord>> {
-        validate_search_query(user_id, query)?;
+        let index_scope = MemoryIndexScope::from_scope(scope)?;
+        validate_search_query(query)?;
         let text = query.text.trim();
         let rows = if text.chars().count() < 3 {
-            self.search_short(user_id, query).await?
+            self.search_short(&index_scope, query).await?
         } else {
-            self.search_fts(user_id, query).await?
+            self.search_fts(&index_scope, query).await?
         };
         rows.into_iter()
             .enumerate()
@@ -36,18 +41,25 @@ impl MemoryStore {
     }
 
     /// Read one stable memory ID from a user scope.
-    pub async fn get(&self, user_id: &str, memory_id: &str) -> TalosResult<Option<MemoryRecord>> {
-        if user_id.trim().is_empty() || memory_id.trim().is_empty() {
+    pub(super) async fn get(
+        &self,
+        scope: &MemoryScope,
+        memory_id: &str,
+    ) -> TalosResult<Option<MemoryRecord>> {
+        let index_scope = MemoryIndexScope::from_scope(scope)?;
+        if memory_id.trim().is_empty() {
             return Err(TalosError::public(
                 talos_error::ErrorCode::InvalidRequest,
-                "memory user_id and memory_id are required".to_string(),
+                "memory_id is required".to_string(),
             ));
         }
         sqlx::query(&format!(
-            "SELECT {} FROM memory_entries WHERE user_id = ? AND memory_id = ?",
+            "SELECT {} FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND memory_id = ?",
             record_columns()
         ))
-        .bind(user_id)
+        .bind(index_scope.agent_id())
+        .bind(index_scope.user_id())
+        .bind(index_scope.workspace_root())
         .bind(memory_id)
         .fetch_optional(&self.pool)
         .await
@@ -56,33 +68,9 @@ impl MemoryStore {
         .transpose()
     }
 
-    /// List bounded high-importance records for managed MEMORY.md maintenance.
-    pub async fn list_recent_high(
-        &self,
-        user_id: &str,
-        limit: u32,
-    ) -> TalosResult<Vec<MemoryRecord>> {
-        if user_id.trim().is_empty() || !(1..=20).contains(&limit) {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                "memory user_id and limit are required".to_string(),
-            ));
-        }
-        let rows = sqlx::query(&format!(
-            "SELECT {} FROM memory_entries WHERE user_id = ? AND importance = 'high' ORDER BY occurred_at DESC, memory_id ASC LIMIT ?",
-            record_columns()
-        ))
-        .bind(user_id)
-        .bind(i64::from(limit))
-        .fetch_all(&self.pool)
-        .await
-        .map_err(storage_error("list recent high memory"))?;
-        rows.iter().map(record_from_row).collect()
-    }
-
     async fn search_fts(
         &self,
-        user_id: &str,
+        scope: &MemoryIndexScope,
         query: &MemorySearchQuery,
     ) -> TalosResult<Vec<SqliteRow>> {
         let mut sql = QueryBuilder::<Sqlite>::new(format!(
@@ -90,7 +78,7 @@ impl MemoryStore {
             record_columns_with_alias("e")
         ));
         sql.push_bind(fts_literal(query.text.trim()));
-        push_search_filters(&mut sql, user_id, query);
+        push_search_filters(&mut sql, scope, query);
         sql.push(
             " ORDER BY bm25(memory_entries_fts, 2.0, 1.0) * CASE e.importance WHEN 'high' THEN 1.2 WHEN 'low' THEN 0.8 ELSE 1.0 END ASC, e.occurred_at DESC, e.memory_id ASC LIMIT ",
         );
@@ -103,7 +91,7 @@ impl MemoryStore {
 
     async fn search_short(
         &self,
-        user_id: &str,
+        scope: &MemoryIndexScope,
         query: &MemorySearchQuery,
     ) -> TalosResult<Vec<SqliteRow>> {
         let mut sql = QueryBuilder::<Sqlite>::new(format!(
@@ -114,7 +102,7 @@ impl MemoryStore {
         sql.push(")) > 0 OR instr(lower(e.body), lower(");
         sql.push_bind(query.text.trim());
         sql.push(")) > 0)");
-        push_search_filters(&mut sql, user_id, query);
+        push_search_filters(&mut sql, scope, query);
         sql.push(" ORDER BY CASE WHEN instr(lower(e.title), lower(");
         sql.push_bind(query.text.trim());
         sql.push(")) > 0 THEN 0 ELSE 1 END ASC, CASE WHEN instr(lower(e.title), lower(");
@@ -134,10 +122,15 @@ impl MemoryStore {
 
 fn push_search_filters<'a>(
     sql: &mut QueryBuilder<'a, Sqlite>,
-    user_id: &'a str,
+    scope: &'a MemoryIndexScope,
     query: &MemorySearchQuery,
 ) {
-    sql.push(" AND e.user_id = ").push_bind(user_id);
+    sql.push(" AND e.agent_id = ")
+        .push_bind(scope.agent_id())
+        .push(" AND e.user_id = ")
+        .push_bind(scope.user_id())
+        .push(" AND e.workspace_root = ")
+        .push_bind(scope.workspace_root());
     if let Some(kinds) = &query.kinds {
         sql.push(" AND e.kind IN (");
         let mut separated = sql.separated(", ");
@@ -154,10 +147,9 @@ fn push_search_filters<'a>(
     }
 }
 
-fn validate_search_query(user_id: &str, query: &MemorySearchQuery) -> TalosResult<()> {
+fn validate_search_query(query: &MemorySearchQuery) -> TalosResult<()> {
     let text = query.text.trim();
-    if user_id.trim().is_empty()
-        || text.is_empty()
+    if text.is_empty()
         || text.chars().count() > 512
         || text.chars().any(char::is_control)
         || !(1..=20).contains(&query.limit)
@@ -216,10 +208,19 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<MemoryRecord> {
     let importance = row
         .try_get::<String, _>("importance")
         .map_err(storage_error("decode memory importance"))?;
+    let memory_id = row
+        .try_get::<String, _>("memory_id")
+        .map_err(storage_error("decode memory_id"))?;
+    let source_date = row
+        .try_get::<String, _>("source_date")
+        .map_err(storage_error("decode memory source date"))?;
+    let session_id = row
+        .try_get::<Option<String>, _>("session_id")
+        .map_err(storage_error("decode memory session"))?;
+    let source_from_seq = optional_u64(row, "source_from_seq")?;
+    let source_until_seq = optional_u64(row, "source_until_seq")?;
     Ok(MemoryRecord {
-        memory_id: row
-            .try_get("memory_id")
-            .map_err(storage_error("decode memory_id"))?,
+        memory_id: MemoryId::parse(memory_id).map_err(invalid_stored_memory)?,
         title: row
             .try_get("title")
             .map_err(storage_error("decode memory title"))?,
@@ -234,15 +235,33 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<MemoryRecord> {
         occurred_at: row
             .try_get("occurred_at")
             .map_err(storage_error("decode memory occurred_at"))?,
-        source_date: row
-            .try_get("source_date")
-            .map_err(storage_error("decode memory source date"))?,
-        session_id: row
-            .try_get("session_id")
-            .map_err(storage_error("decode memory session"))?,
-        source_from_seq: optional_u64(row, "source_from_seq")?,
-        source_until_seq: optional_u64(row, "source_until_seq")?,
+        source_date: DreamMemoryDate::parse(&source_date).map_err(invalid_stored_memory)?,
+        provenance: decode_provenance(session_id, source_from_seq, source_until_seq)?,
     })
+}
+
+fn decode_provenance(
+    session_id: Option<String>,
+    source_from_seq: Option<u64>,
+    source_until_seq: Option<u64>,
+) -> TalosResult<DreamMemoryProvenance> {
+    match (session_id, source_from_seq, source_until_seq) {
+        (None, None, None) => Ok(DreamMemoryProvenance::UserAuthored),
+        (Some(session_id), Some(from_seq), Some(until_seq)) => {
+            Ok(DreamMemoryProvenance::Generated {
+                session_id: MemorySessionId::parse(session_id).map_err(invalid_stored_memory)?,
+                source_range: DreamMemorySourceRange::new(from_seq, until_seq)
+                    .map_err(invalid_stored_memory)?,
+            })
+        }
+        _ => Err(TalosError::internal(
+            "stored Dream Memory provenance is incomplete".to_string(),
+        )),
+    }
+}
+
+fn invalid_stored_memory(error: talos_memory::DreamMemoryError) -> TalosError {
+    TalosError::internal(format!("invalid stored Dream Memory: {error}"))
 }
 
 fn optional_u64(row: &SqliteRow, column: &str) -> TalosResult<Option<u64>> {

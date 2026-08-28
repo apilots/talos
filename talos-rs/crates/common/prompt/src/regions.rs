@@ -61,17 +61,18 @@ pub const STATIC_PREFIX_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::FailureRecoveryPolicy,
     PromptSectionKind::TaskProtocolLibrary,
     PromptSectionKind::CommunicationPolicy,
+    PromptSectionKind::UserWorkspaceMemoryPolicy,
     PromptSectionKind::BootstrapSoul,
     PromptSectionKind::BootstrapIdentity,
     PromptSectionKind::BootstrapUser,
     PromptSectionKind::BootstrapHeartbeat,
-    PromptSectionKind::BootstrapMemory,
     PromptSectionKind::BootstrapAgents,
 ];
 
 pub const DYNAMIC_SUFFIX_ORDER: &[PromptSectionKind] = &[
     PromptSectionKind::RequestedToolPreferenceHint,
     PromptSectionKind::PlanningInstruction,
+    PromptSectionKind::UserWorkspaceMemory,
     PromptSectionKind::RecentTaskContinuity,
     PromptSectionKind::SessionSummary,
     PromptSectionKind::RecentMessages,
@@ -101,7 +102,6 @@ pub fn bootstrap_section_kind(kind: WorkspaceBootstrapFileKind) -> PromptSection
         WorkspaceBootstrapFileKind::Identity => PromptSectionKind::BootstrapIdentity,
         WorkspaceBootstrapFileKind::User => PromptSectionKind::BootstrapUser,
         WorkspaceBootstrapFileKind::Heartbeat => PromptSectionKind::BootstrapHeartbeat,
-        WorkspaceBootstrapFileKind::Memory => PromptSectionKind::BootstrapMemory,
         WorkspaceBootstrapFileKind::Agents => PromptSectionKind::BootstrapAgents,
     }
 }
@@ -262,6 +262,20 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             RegionEnvelopePolicy::PlainTextRequired,
             None
         ),
+        PromptSectionKind::UserWorkspaceMemoryPolicy => template!(
+            PromptSectionKind::UserWorkspaceMemoryPolicy,
+            "user_workspace_memory_policy",
+            "# User Workspace Memory Policy",
+            RegionPriority::High,
+            RegionPlacement::StaticPrefixRequired,
+            "durable_memory_policy",
+            "This section defines when the model may update durable cross-session memory.\nApply it conservatively and keep only current conclusions.",
+            SectionCacheScope::StaticPrefixEligible,
+            BudgetTier::Important,
+            true,
+            RegionEnvelopePolicy::PlainTextRequired,
+            None
+        ),
         PromptSectionKind::PlanningInstruction => template!(
             PromptSectionKind::PlanningInstruction,
             "planning_instruction",
@@ -274,6 +288,20 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             BudgetTier::Critical,
             true,
             RegionEnvelopePolicy::PlainTextRequired,
+            None
+        ),
+        PromptSectionKind::UserWorkspaceMemory => template!(
+            PromptSectionKind::UserWorkspaceMemory,
+            "user_workspace_memory",
+            "# User Workspace Memory",
+            RegionPriority::MediumHigh,
+            RegionPlacement::DynamicSuffixRequired,
+            "durable_cross_session_context",
+            "This section contains current durable memory scoped to this agent and user.\nUse it across Sessions and update it through UserWorkspaceMemoryUpdate when a durable conclusion changes.",
+            SectionCacheScope::DynamicOnly,
+            BudgetTier::Important,
+            true,
+            RegionEnvelopePolicy::XmlEnvelopeRequired,
             None
         ),
         PromptSectionKind::RecentTaskContinuity => template!(
@@ -415,20 +443,6 @@ pub fn region_template(kind: PromptSectionKind) -> PromptSectionTemplate {
             false,
             RegionEnvelopePolicy::PlainTextRequired,
             Some(WorkspaceBootstrapFileKind::Heartbeat)
-        ),
-        PromptSectionKind::BootstrapMemory => template!(
-            PromptSectionKind::BootstrapMemory,
-            "bootstrap_memory",
-            "# Bootstrap: MEMORY.md",
-            RegionPriority::MediumHigh,
-            RegionPlacement::StaticPrefixRequired,
-            "static_bootstrap_instruction",
-            "This section contains durable workspace bootstrap instructions loaded from MEMORY.md.\nTreat it as stable static guidance.\nIt remains part of the cacheable static prefix.",
-            SectionCacheScope::WorkspaceStable,
-            BudgetTier::Important,
-            false,
-            RegionEnvelopePolicy::PlainTextRequired,
-            Some(WorkspaceBootstrapFileKind::Memory)
         ),
         PromptSectionKind::BootstrapAgents => template!(
             PromptSectionKind::BootstrapAgents,
