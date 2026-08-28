@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 mod audit;
+mod environment;
 mod facade;
 mod file_system;
 mod manager;
@@ -8,6 +9,7 @@ mod permission;
 mod process;
 mod risk;
 
+pub use environment::filter_inherited_tool_environment;
 pub use facade::{
     SandboxRuntimePaths, TalosSandboxError, TalosSandboxErrorCategory, ToolSandbox,
     ToolSandboxDiagnostics, ToolSandboxEnforcement, ToolSandboxProviderDiagnostic,

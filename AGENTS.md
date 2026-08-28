@@ -7,7 +7,6 @@
 - 本文件是 Talos 项目的根级工程规范，适用于 `talos-rs`、前端、插件、SDK、协议层、运行时和文档。
 - 子目录存在更具体的 `AGENTS.md` 时，以更近的子目录规则为准。
 - 当规则之间看似冲突时，优先执行更严格、更能保护架构边界和用户行为一致性的规则。
-- Codex 项目中沉淀出的 Rust、TUI、Agent、MCP、API 和测试细则应作为 Talos 迭代原则吸收，但不能机械复制 Codex 的目录名、crate 名或专用命令。
 - 对外说明、Agent 输出和推理过程使用中文；代码命名、注释、提交信息中的技术标识和公开 API 使用英文。
 
 ## 1. 先理解边界，再动手实现
@@ -176,7 +175,7 @@
 - 未来类型可以扩展，但当前类型必须明确。
 - 不要为了“以后可能用”保留现在没有真实语义的代码。
 
-## 19. talos-rs / Rust 细则（Codex 对齐）
+## 19. talos-rs / Rust 细则
 
 - `talos-rs` 下 Rust crate 命名应统一使用项目约定前缀；如果已有 `talos-*` 命名模式，新 crate 必须延续该模式。
 - 仓库依赖的命令（例如 `just`、`rg`、`cargo-insta`、schema 生成器、lint 工具）缺失时，应先安装或说明缺失，不要跳过对应流程。
@@ -199,7 +198,7 @@
 - 异步 tracing 应优先标注在函数或方法定义上，例如 `#[tracing::instrument(...)]`，不要在调用点给 future 临时 `.instrument(...)`。
 - 添加 instrumentation 前，先检查被调函数或直接代理的实现方法是否已经 instrumented，避免重复 span。
 
-## 20. 核心 crate 与模块规模（Codex 对齐）
+## 20. 核心 crate 与模块规模
 
 - 必须抵制把新能力默认加到核心 crate；核心 crate 只能承载稳定、必要、跨模块复用的模型和能力。
 - 新增概念、功能或 API 前，必须先判断是否存在比核心 crate 更合适的现有 crate。
@@ -213,7 +212,7 @@
 - 从大模块抽取代码时，相关测试、模块文档、类型文档和不变量说明要靠近新实现。
 - 前端大页面、弹窗、列表、搜索、表单、运行状态区域、TUI 面板都必须按职责拆组件或模块。
 
-## 21. Agent 上下文规则（Codex 对齐）
+## 21. Agent 上下文规则
 
 - Agent 发送给模型的 context 必须增量构建，禁止重写历史。
 - 避免频繁改变 context 结构或内容顺序，防止不必要的缓存失效。
@@ -223,7 +222,7 @@
 - 所有注入片段必须定义为明确结构体或 domain object，并实现/遵循项目的上下文注入接口；禁止散落字符串拼接。
 - 上下文对象必须记录来源、边界、裁剪策略和 token 成本假设。
 
-## 22. MCP / Tool Call 规则（Codex 对齐）
+## 22. MCP / Tool Call 规则
 
 - 修改 MCP tool call 行为时，应优先使用现有 MCP connection manager / tool call manager 边界处理工具和调用状态 mutation。
 - 目标是最小化改动面，复用已有抽象，不要把 tool mutation 逻辑穿透多层函数参数。
@@ -233,7 +232,7 @@
 - 对任意外部 MCP server 的启动命令、环境变量、工作目录和权限边界必须显式保存并可审计。
 - 不允许用 fallback 吃掉 MCP 初始化失败、tool schema 不匹配、transport 断开或权限错误。
 
-## 23. 测试编写规则（Codex 对齐）
+## 23. 测试编写规则
 
 - 写测试时优先比较完整对象相等，而不是逐字段断言。
 - Rust 测试应优先使用清晰 diff 的断言工具；如果项目使用 `pretty_assertions::assert_eq`，新增测试应沿用。
@@ -250,7 +249,7 @@
 - 需要启动 workspace 内二进制时，路径解析必须兼容不同构建系统和工作目录；不要依赖当前 shell 的相对路径偶然正确。
 - 修复 bug 时必须补能暴露原 bug 的测试，而不是只验证返回 OK。
 
-## 24. 快照、TUI 与文本输出（Codex 对齐）
+## 24. 快照、TUI 与文本输出
 
 - 任何影响用户可见 UI 或文本输出的变更，都必须包含对应 snapshot、视觉测试或端到端覆盖。
 - 如果项目使用 `insta`，UI/TUI 输出变更必须生成、检查并接受对应 snapshot。
@@ -263,7 +262,7 @@
 - 需要缩进 wrapped lines 时，优先使用统一 wrapping options，而不是自己拼前缀。
 - 对列表批量加前缀时，优先使用统一 line utility，避免每处重新实现。
 
-## 25. App Server / JSON-RPC API 规则（Codex 对齐）
+## 25. App Server / JSON-RPC API 规则
 
 - 活跃 API 开发只能发生在当前主版本协议；不要给旧版本协议增加新 API surface。
 - talos-rs API 类型命名必须按边界区分：Service / Gateway / SDK 等对外公共方法 DTO 使用 `*Request` / `*Response`；JSON-RPC method params 使用 `*Params`，response 使用 `*Response`；Coordinator / AgentHarness / AgentRuntime SPI 等内部执行 API 使用 `*Params` / `*Result`。
@@ -286,7 +285,7 @@
 - 新增 list 方法默认实现 cursor pagination：request 包含 `cursor`、`limit`，response 包含 `data`、`next_cursor`。
 - API 行为变化时必须更新对应 docs、README、schema fixture 和示例。
 
-## 26. 配置、依赖与构建规则（Codex 对齐）
+## 26. 配置、依赖与构建规则
 
 - 修改配置结构或嵌套配置类型时，必须运行项目对应 schema 生成命令并提交 schema 更新。
 - 修改 app-server / JSON-RPC API shape 时，必须运行项目对应 schema 生成命令，并同时更新 experimental schema（如果涉及实验 API）。
@@ -298,7 +297,7 @@
 - 不要使用 `--no-verify` 跳过 hook。
 - 不要禁用测试、lint 或编译检查来让变更通过。
 
-## 27. 运行命令与验证规则（Codex 对齐）
+## 27. 运行命令与验证规则
 
 - Rust 改动完成后，应在仓库根目录运行项目约定 formatter：`just fmt`。
 - 不要直接运行裸 `cargo test` 代替项目约定命令；Talos Rust 测试默认使用根目录 `just test`，该命令通过 `cargo-nextest` 执行。
@@ -311,14 +310,14 @@
 - Rust 命令可能因为锁或构建缓存较慢，应耐心等待，不要用 PID 强杀。
 - 无法运行某个必要命令时，必须说明原因、影响和剩余风险。
 
-## 28. Breaking Change 审查（Codex 对齐）
+## 28. Breaking Change 审查
 
 - 每次变更都要主动搜索外部集成面的 breaking change。
 - 必查范围包括 app-server API、JSON-RPC 方法、HTTP API、SDK 类型、CLI 参数、配置加载、会话恢复、raw event、TUI/前端事件和插件协议。
 - 即使 API 标记 experimental，只要已有外部调用，也要按 breaking change 审查。
 - 删除字段、重命名字段、改变默认值、改变错误码、改变通知顺序、改变状态机时，都必须写清兼容影响。
 
-## 29. Review 清单（Codex 对齐）
+## 29. Review 清单
 
 - Crate API surface 是否最小？是否暴露了 test-only helper？
 - 是否把新逻辑放入核心 crate，而没有评估更合适的 crate / 模块？

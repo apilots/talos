@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +16,7 @@ use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientHandler, RoleClient};
 use serde_json::Value;
 use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_tools_sandbox::filter_inherited_tool_environment;
 use talos_types::{
     McpCallToolRequest, McpCallToolResponse, McpContent, McpReadResourceRequest,
     McpReadResourceResponse, McpResourceContents, McpResourceDescriptor,
@@ -24,6 +26,10 @@ use talos_types::{
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::time;
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -368,16 +374,7 @@ async fn connect_service(server: &McpServerDefinition) -> TalosResult<RmcpServic
             env,
             cwd,
         } => {
-            let mut cmd = Command::new(command);
-            cmd.kill_on_drop(true)
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .args(args)
-                .envs(env);
-            if let Some(cwd) = cwd {
-                cmd.current_dir(cwd);
-            }
+            let cmd = build_stdio_command(command, args, env, cwd.as_deref());
             let (transport, _stderr) = TokioChildProcess::builder(cmd).spawn().map_err(|err| {
                 TalosError::public(
                     talos_error::ErrorCode::ToolExecutionFailed,
@@ -506,6 +503,27 @@ fn map_call_tool_result(result: rmcp::model::CallToolResult) -> McpCallToolRespo
         is_error: result.is_error.unwrap_or(false),
         structured_content: result.structured_content,
     }
+}
+
+fn build_stdio_command(
+    command: &str,
+    args: &[String],
+    env: &std::collections::BTreeMap<String, String>,
+    cwd: Option<&Path>,
+) -> Command {
+    let mut cmd = Command::new(command);
+    cmd.kill_on_drop(true)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .args(args)
+        .env_clear()
+        .envs(filter_inherited_tool_environment(std::env::vars()))
+        .envs(env);
+    if let Some(cwd) = cwd {
+        cmd.current_dir(cwd);
+    }
+    cmd
 }
 
 fn map_content(content: rmcp::model::Content) -> McpContent {

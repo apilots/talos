@@ -35,6 +35,15 @@ async fn test_prompt_builder_basic() {
         .static_prefix_sections
         .iter()
         .any(|section| section.kind == PromptSectionKind::IdentityCore));
+    let evidence_policy = assembly
+        .static_prefix_sections
+        .iter()
+        .find(|section| section.kind == PromptSectionKind::EvidenceToolingPolicy)
+        .expect("evidence policy should exist");
+    assert!(evidence_policy.payload.contains("Do not read `.env`"));
+    assert!(evidence_policy
+        .payload
+        .contains("Never print sensitive values"));
     assert_eq!(assembly.user_input, "hello");
     assert!(assembly
         .request_context_injection

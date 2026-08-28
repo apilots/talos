@@ -36,7 +36,7 @@ fn build_evidence_tooling_policy_payload() -> String {
         "- evidence_order: code -> files -> tool output -> summaries",
         "- dedicated_tool_priority: Grep > Read > Glob > Bash",
         "- shell_fallback: use shell only when dedicated tools cannot answer directly",
-        "- verification_rule: stop exploring once enough evidence exists to answer",
+        "- verification_rule: stop exploring once enough evidence exists to answer\n- sensitive_file_rule: Do not read `.env` or `.env.*` files, search their contents, or ask tools to expose them\n- sensitive_output_rule: Never print sensitive values such as API keys, tokens, or secrets in model responses, tool arguments, tool output, logs, memory, or session content",
     ]
     .join("\n")
 }

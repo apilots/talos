@@ -536,7 +536,9 @@ async fn runtime_carries_session_workspace_and_project_into_sandbox_environment(
                 .starts_with(readable_root.as_path())
         })
     }));
-    assert!(environment.denied_roots.is_empty());
+    assert!(environment.denied_roots.iter().any(|denied_root| {
+        denied_root.as_path().file_name() == Some(std::ffi::OsStr::new(".env"))
+    }));
     std::fs::remove_dir_all(root).expect("sandbox fixtures should be removed");
 }
 
