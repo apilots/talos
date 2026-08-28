@@ -55,7 +55,7 @@ data dir/memory-index.sqlite ---> search ---> get(memory_id)
 
 | 模块 | 唯一职责 | 不应承载 |
 | --- | --- | --- |
-| `talos-memory` | `MemoryReader`、`MemoryWriter`、`MemoryScope`、`MemoryCandidate`、`MemoryWriteBatch` | SQL、filesystem、LLM、Session 状态、transport |
+| `talos-memory` | `MemoryReader`、`DreamMemoryFormationStore`、`MemoryScope`、`MemoryCandidate`、`MemoryWriteBatch` | SQL、filesystem、LLM、Session 状态、transport |
 | `talos-store::memory` | daily Markdown 解析/写入、SQLite schema、sync/rebuild、record search/get | actor scope、Agent 判断、公开 DTO |
 | `talos-service::memory` | 注入 user/workspace scope，提供文件 API 与 search/get，编排 daily maintenance | Prompt 构建、Session event、Memory DB Record 外泄 |
 | `talos-store::session` | turn/transcript/summary artifact、真实 seq、memory processing cursor | daily Markdown、FTS5、长期记忆 API |
@@ -72,7 +72,7 @@ talos-base
   `--> MemoryStore --> MemoryService
                          +--> MemoryReader --> Tools
                          +--> search/get --> Gateway / SDK / UI
-                         +--> MemoryWriter --> Agent Kernel
+                         +--> DreamMemoryFormationStore --> Agent Kernel
                          `--> daily maintenance --> Automation
 ```
 
@@ -202,10 +202,10 @@ pub struct MemoryGetResponse {
 ```rust
 MemoryReader::search(scope, request) -> MemorySearchResponse
 MemoryReader::get(scope, request) -> MemoryGetResponse
-MemoryWriter::write(scope, batch) -> ()
+DreamMemoryFormationStore::write(scope, batch) -> ()
 ```
 
-`MemoryScope { user_id, workspace_root }` 由 Runtime/Service 注入，模型和公共请求不能覆盖。
+`MemoryScope { agent_id, user_id, workspace_root }` 由 Runtime/Service 注入，模型和公共请求不能覆盖。
 
 Transport 只做 envelope 差异：
 
@@ -223,7 +223,7 @@ Turn execution
   -> emit existing timeline terminal with artifact_seq
   -> compaction or daily maintenance reads a bounded contiguous artifact window
   -> one structured LLM response returns up to 8 MemoryCandidate values
-  -> MemoryWriter writes one idempotent MemoryWriteBatch
+  -> DreamMemoryFormationStore writes one idempotent MemoryWriteBatch
   -> Kernel advances memory_processed_until_seq with existing SessionStore CAS
 ```
 
@@ -234,7 +234,7 @@ Turn execution
 - 写入顺序固定为 Markdown 后 SQLite。SQLite 失败时 Markdown 仍保留；同 range retry 或下次启动补齐索引后再推进 cursor。
 - 同一 session source range 已存在于 Markdown 时，以 canonical Markdown 为准重新同步索引；不再比较重试时重新生成的 candidate 内容。
 - 空 candidates 合法：不写文件，仍可推进已处理 cursor，避免重复调用 LLM。
-- `MemoryWriter` 不持有 SessionStore；Kernel 在 writer 成功后单独推进 cursor，避免 Memory 反向依赖 Session。
+- `DreamMemoryFormationStore` 不持有 SessionStore；Kernel 在 writer 成功后单独推进 cursor，避免 Memory 反向依赖 Session。
 - 不使用进程级全局 Memory mutex。相同 daily 文件由既有 file lock 串行；SQLite 由 transaction 保证 source sync。
 
 ### 6.2 Compaction、daily 与 close
@@ -342,10 +342,9 @@ Compaction summary 解析失败允许唯一例外：使用已有 deterministic t
 
 只保留当前行为需要的配置：
 
-- `memory.root_memory_filename`
 - `memory.memory_dirname`
 - memory file list limits
-- `automation.memory_daily_maintenance.{cron,batch_size,max_batches}`
+- `automation.dream_memory_maintenance.{cron,batch_size,max_batches}`
 - 现有 compaction source/context hard caps
 
 删除旧 PageIndex、close flush、tool enable、search source switch 和 session-memory store 配置。SQLite 路径从 Talos data dir 派生，不复用或改写 `storage.connection_string`；Markdown 始终位于用户个人 workspace。
@@ -382,5 +381,5 @@ Compaction summary 解析失败允许唯一例外：使用已有 deterministic t
 5. Importance 只作固定权重：可解释、可测试，不引入隐藏 rerank 或第二次 LLM。
 6. `MEMORY.md` 与 daily 分层：每轮只加载少量核心事实，大量历史按需搜索。
 7. 复用 Tool Loop 和 timeline：Agentic Search 与 compaction 状态都由已有基础设施表达，不发明新框架。
-8. cursor 归 Session/Kernel：MemoryWriter 只提交 canonical + index，避免 MemoryService 依赖 Session 生命周期。
+8. cursor 归 Session/Kernel：`DreamMemoryFormationStore` 只提交 canonical + index，避免 MemoryService 依赖 Session 生命周期。
 9. 简单恢复优先：SQLite 是派生数据，删除重建已满足安全目标，不需要复杂换库协议。

@@ -61,12 +61,12 @@ Talos 新增纯格式库 `talos-knowledge-format`：完整实现 OKF v0.2 produc
 2. `PromptBuilder` 在每次 Prompt assembly 时从有效 `workspace_dir` 读取 Workspace bootstrap 文件。
 3. `MEMORY.md` 当前由 `WorkspaceBootstrapFileKind::Memory` 表示，以 `BootstrapMemory` 放入静态前缀，并参与 bootstrap fingerprint。
 4. `WorkspaceDocService` 已经为 `WorkspaceDocKind::Memory` 提供 actor scope 下的读取和带版本校验的整文件写入。
-5. `MemoryScope { user_id, workspace_root }` 已经承载 Tool 和 Runtime 使用的可信用户及有效 Workspace 边界。
+5. `MemoryScope { agent_id, user_id, workspace_root }` 承载 Tool 和 Runtime 使用的可信 Agent、用户及有效 Workspace 边界。
 6. `ToolContext` 已经支持应用层注入的 Memory capability 和可信 `MemoryScope`。
 7. `talos_fs::with_file_lock` 提供 sidecar 文件锁，`talos_fs::write_file` 使用安全的原子替换。
 8. `AgentHarnessImpl` 已经持有 `InnerModelClient`，`ModelUsageKind::Memory` 已经标识 User Workspace Memory 辅助模型调用。
 9. `MemoryDailyMaintenance` 当前会重写每个有效用户 Workspace 中 `MEMORY.md` 的旧自动维护区域；该路径与 Session 驱动更新冲突，必须删除。
-10. 现有 `talos-memory::MemoryReader/MemoryWriter`、`MemoryService` 和 `MemoryStore` 面向 `memory/YYYY-MM-DD.md`：Writer 写入形成批次并同步 SQLite，Reader 通过 Store 执行 `search/get`。它们不是 User Workspace Memory 的文档 API。
+10. 现有 `talos-memory::MemoryReader/DreamMemoryFormationStore`、`MemoryService` 和 `MemoryStore` 面向 `memory/YYYY-MM-DD.md`：Writer 写入形成批次并同步 SQLite，Reader 通过 Store 执行 `search/get`。它们不是 User Workspace Memory 的文档 API。
 11. 现有 `WorkspaceDocService` 对 `MEMORY.md` 只提供整文件读取和带版本校验的写入，没有稳定 key Entry CRUD；新 Service 必须复用其 effective workspace、revision、文件锁和原子写入基础设施。
 12. `WorkspaceBootstrapFileKind::Memory` 当前受 `bootstrap.enabled`、`bootstrap.include_memory` 和 `PromptMode` 控制，并由 Prompt Builder 自动创建旧版无 frontmatter 模板；该路径与 required dynamic Memory 和 Missing 状态冲突。
 13. Tool 执行还受 `talos-tools-policy` allow-list 约束；`AlwaysLoad` 只保证 Tool 选择可见性，不授予执行权限。
@@ -76,7 +76,7 @@ Talos 新增纯格式库 `talos-knowledge-format`：完整实现 OKF v0.2 produc
 
 ## 5. 规范文件格式
 
-默认模板和 Replace 模板保持现有内容结构；唯一格式修正是把非标准 `status: active` 改为 OKF v0.2 的 `status: stable`。该模板作为 User Workspace Memory Profile 的规范模板：
+默认模板和 Replace 模板保持现有内容结构，并使用 OKF v0.2 的 `status: stable` 与完整 `generated` producer metadata。该模板作为 User Workspace Memory Profile 的规范模板：
 
 ```markdown
 ---
@@ -88,6 +88,9 @@ tags:
   - agent
   - user-memory
 status: stable
+generated:
+  by: talos-agent/talos
+  at: 2026-08-28T09:30:00Z
 ---
 
 # User Workspace Memory
@@ -398,6 +401,11 @@ pub enum UserWorkspaceMemorySection {
     ActiveContext,
 }
 
+pub struct UserWorkspaceMemoryProducer {
+    agent_id: MemoryAgentId,
+    generated_at: i64,
+}
+
 pub struct UserWorkspaceMemoryEntry {
     pub key: String,
     pub section: UserWorkspaceMemorySection,
@@ -467,7 +475,7 @@ pub enum UserWorkspaceMemorySnapshot {
 }
 ```
 
-`OptionalField<T>` 明确区分可选字段的“不修改”“设置”和“清空”。`UserWorkspaceMemoryEntry`、`UserWorkspaceMemoryEntryUpdate` 和 `UserWorkspaceMemoryEntryQuery` 均提供 Builder。`UserWorkspaceMemoryDocument` 封装通用 `KnowledgeDocument`，负责强类型 Entry 与 Markdown body 的双向转换，并提供 `template`、`parse`、`get_entry`、`list_entries`、`render` 和 `prompt_view`。
+`OptionalField<T>` 明确区分可选字段的“不修改”“设置”和“清空”。`UserWorkspaceMemoryEntry`、`UserWorkspaceMemoryEntryUpdate` 和 `UserWorkspaceMemoryEntryQuery` 均提供 Builder。`UserWorkspaceMemoryProducer` 提供首次创建所需的强类型 Agent identity 和时间；`UserWorkspaceMemoryDocument::template(producer)` 写入完整 `generated`，后续 parse 和 Entry mutation 保留首次值。`UserWorkspaceMemoryDocument` 封装通用 `KnowledgeDocument`，负责强类型 Entry 与 Markdown body 的双向转换，并提供 `template`、`parse`、`get_entry`、`list_entries`、`render` 和 `prompt_view`。
 
 `get_entry` 和 `list_entries` 在 Invalid 状态返回 `InvalidDocument`，不会对 raw content 做启发式解析。
 
@@ -487,7 +495,7 @@ UserWorkspaceMemoryWriter::replace_document(scope, content, base_version)
     -> UserWorkspaceMemorySnapshot
 ```
 
-文件不存在时，`read` 返回 `Missing { template }`，模板仅驻留内存，读取不得创建 `MEMORY.md`。规范文件返回 `Valid` 及原始内容、revision 和解析后的 Document。非规范或损坏文件返回 `Invalid` 及原始内容、revision 和 diagnostic，保证 Workspace Doc API 能查看并通过带 CAS 的 `replace_document` 修复。互斥 enum 从类型层禁止 Missing 携带 revision、Valid 缺少 Document 等非法组合。
+文件不存在时，`read` 使用可信 `MemoryScope.agent_id` 和当前时间构建 `Missing { template }`，模板仅驻留内存，读取不得创建 `MEMORY.md`；第一次 Entry mutation 使用同一 producer 语义持久化。规范文件返回 `Valid` 及原始内容、revision 和解析后的 Document。缺失或不完整的 `generated` 与其他格式损坏一样返回 `Invalid`，并只能通过带 CAS 的 `replace_document` 修复。互斥 enum 从类型层禁止 Missing 携带 revision、Valid 缺少 Document 等非法组合。
 
 Workspace revision 始终根据磁盘原始内容计算，不进入 `talos-knowledge-format` 或 `UserWorkspaceMemoryDocument`。Workspace Doc 的 Memory read 继续返回 raw content、mtime 和 raw revision；整文件 write 从“任意 Markdown”收紧为“通过 User Workspace Memory Profile 校验的规范 OKF Replace”，API shape 不变但写入行为属于显式 breaking change。
 
@@ -691,7 +699,7 @@ version_token: <workspace-revision-or-none>
 - 枚举有上限的 Session tail；
 - 跳过 active Session；
 - 使用 `ModelUsageKind::Dream` 形成 Daily Memory candidate；
-- 通过现有 `MemoryWriter` 写入 `memory/YYYY-MM-DD.md`；
+- 通过现有 `DreamMemoryFormationStore` 写入 `memory/YYYY-MM-DD.md`；
 - 推进现有 processing cursor。
 
 删除以下 root-memory 行为：
