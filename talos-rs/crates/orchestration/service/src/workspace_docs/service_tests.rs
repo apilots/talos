@@ -104,10 +104,15 @@ async fn put_doc_allows_regular_actor() {
 #[tokio::test]
 async fn put_doc_rejects_oversized_memory() {
     let (service, workspace_dir) = test_service();
-    let mut content = talos_memory::UserWorkspaceMemoryDocument::template()
-        .expect("template should build")
-        .render()
-        .expect("template should render");
+    let mut content = talos_memory::UserWorkspaceMemoryDocument::template(
+        talos_memory::UserWorkspaceMemoryProducer::new(
+            talos_memory::MemoryAgentId::parse("default").expect("agent id"),
+            1_784_251_800,
+        ),
+    )
+    .expect("template should build")
+    .render()
+    .expect("template should render");
     content.push_str(&"x".repeat(talos_types::MEMORY_FILE_MAX_CHARS));
 
     let error = service

@@ -1,14 +1,28 @@
 use super::*;
 
 #[tokio::test]
-async fn daily_memory_processes_each_session_tail_once() {
+async fn dream_memory_processes_each_session_tail_once() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace).expect("workspace");
     let memory_store = TestMemoryStore::new(workspace.clone());
+    memory_store.set_day_entries(vec![talos_memory::DreamMemoryEntry::builder()
+        .memory_id(
+            talos_memory::MemoryId::parse("mem_0123456789abcdef0123456789abcdef")
+                .expect("memory id"),
+        )
+        .title("Existing preference")
+        .body("The user already prefers concise architecture.")
+        .occurred_at(Utc::now().timestamp())
+        .kind(talos_types::MemoryKind::Preference)
+        .importance(talos_types::MemoryImportance::High)
+        .provenance(talos_memory::DreamMemoryProvenance::UserAuthored)
+        .build()
+        .expect("Dream Memory entry")]);
     seed_recent_user_message(&memory_store).await;
     let session_artifact_store = talos_store::session::FileSessionArtifactStore::default();
     let session_store = talos_store::session::MockSessionStore::new();
     let provider = Arc::new(SummaryProvider::new(vec![r#"{
+            "mode":"maintenance",
             "memory_candidates":[{
                 "title":"Concise architecture",
                 "body":"The user prefers concise architecture.",
@@ -22,38 +36,55 @@ async fn daily_memory_processes_each_session_tail_once() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
+        agent_id: "agent-1".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
-    let first = crate::form_daily_session_memory(MemoryFormationParams {
+    let first = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
         selected_model: "summary-model",
         llm_provider: provider.clone(),
-        memory_writer: &memory_store,
+        dream_memory_store: &memory_store,
         memory_scope: &scope,
         session_artifact_store: &session_artifact_store,
         session_store: &session_store,
         kernel_config: &config,
     })
     .await
-    .expect("daily memory should succeed");
-    let second = crate::form_daily_session_memory(MemoryFormationParams {
+    .expect("Dream Memory should succeed");
+    let second = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
         selected_model: "summary-model",
-        llm_provider: provider,
-        memory_writer: &memory_store,
+        llm_provider: provider.clone(),
+        dream_memory_store: &memory_store,
         memory_scope: &scope,
         session_artifact_store: &session_artifact_store,
         session_store: &session_store,
         kernel_config: &config,
     })
     .await
-    .expect("daily memory retry should succeed");
+    .expect("Dream Memory retry should succeed");
 
     assert_eq!(first.covers_until_seq, Some(1));
     assert_eq!(second.covers_until_seq, None);
     assert_eq!(memory_store.writes().len(), 1);
+    {
+        let requests = provider
+            .requests
+            .lock()
+            .expect("summary provider requests mutex should lock");
+        assert_eq!(
+            requests[0].messages[0].content,
+            super::super::dream_memory_prompt::DREAM_MEMORY_FORMATION_PROMPT
+        );
+        assert!(requests[0].messages[1]
+            .content
+            .contains("Mode: maintenance"));
+        assert!(requests[0].messages[1]
+            .content
+            .contains("Existing preference"));
+    }
     assert_eq!(
         session_store
             .get_session_record("s1")
@@ -67,7 +98,7 @@ async fn daily_memory_processes_each_session_tail_once() {
 }
 
 #[tokio::test]
-async fn daily_memory_does_not_advance_cursor_when_write_fails() {
+async fn dream_memory_does_not_advance_cursor_when_write_fails() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace).expect("workspace");
     let artifacts = TestMemoryStore::new(workspace.clone());
@@ -75,6 +106,7 @@ async fn daily_memory_does_not_advance_cursor_when_write_fails() {
     let session_artifact_store = talos_store::session::FileSessionArtifactStore::default();
     let session_store = talos_store::session::MockSessionStore::new();
     let provider = Arc::new(SummaryProvider::new(vec![r#"{
+            "mode":"maintenance",
             "memory_candidates":[]
         }"#
     .to_string()]));
@@ -83,22 +115,23 @@ async fn daily_memory_does_not_advance_cursor_when_write_fails() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
+        agent_id: "agent-1".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
-    let error = crate::form_daily_session_memory(MemoryFormationParams {
+    let error = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
         selected_model: "summary-model",
         llm_provider: provider,
-        memory_writer: &FailingMemoryWriter,
+        dream_memory_store: &FailingMemoryWriter,
         memory_scope: &scope,
         session_artifact_store: &session_artifact_store,
         session_store: &session_store,
         kernel_config: &config,
     })
     .await
-    .expect_err("failed write should fail daily memory");
+    .expect_err("failed write should fail Dream Memory");
 
     assert!(error.is_internal());
     assert_eq!(
@@ -114,7 +147,7 @@ async fn daily_memory_does_not_advance_cursor_when_write_fails() {
 }
 
 #[tokio::test]
-async fn daily_memory_bounds_long_messages_and_still_advances() {
+async fn dream_memory_bounds_long_messages_and_still_advances() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace).expect("workspace");
     let memory_store = TestMemoryStore::new(workspace.clone());
@@ -137,29 +170,30 @@ async fn daily_memory_bounds_long_messages_and_still_advances() {
     let session_artifact_store = talos_store::session::FileSessionArtifactStore::default();
     let session_store = talos_store::session::MockSessionStore::new();
     let provider = Arc::new(SummaryProvider::new(vec![
-        r#"{"memory_candidates":[]}"#.to_string()
+        r#"{"mode":"maintenance","memory_candidates":[]}"#.to_string(),
     ]));
     let config = AgentKernelConfig {
         workspace_dir: workspace.to_string_lossy().to_string(),
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
+        agent_id: "agent-1".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
-    let report = crate::form_daily_session_memory(MemoryFormationParams {
+    let report = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
         selected_model: "summary-model",
         llm_provider: provider.clone(),
-        memory_writer: &memory_store,
+        dream_memory_store: &memory_store,
         memory_scope: &scope,
         session_artifact_store: &session_artifact_store,
         session_store: &session_store,
         kernel_config: &config,
     })
     .await
-    .expect("bounded daily memory should succeed");
+    .expect("bounded Dream Memory should succeed");
 
     let requests = provider
         .requests

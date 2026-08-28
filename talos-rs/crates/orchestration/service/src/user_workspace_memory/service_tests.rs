@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use talos_memory::{
-    MemoryScope, OptionalField, UserWorkspaceMemoryEntry, UserWorkspaceMemoryEntryQuery,
-    UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemorySection, UserWorkspaceMemorySnapshot,
+    MemoryAgentId, MemoryScope, OptionalField, UserWorkspaceMemoryEntry,
+    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryProducer,
+    UserWorkspaceMemorySection, UserWorkspaceMemorySnapshot,
 };
 use talos_types::{ExpectedFileVersion, MemoryKind};
 
@@ -10,6 +11,7 @@ use super::UserWorkspaceMemoryService;
 
 fn scope(root: &std::path::Path) -> MemoryScope {
     MemoryScope {
+        agent_id: "agent-1".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: root.to_path_buf(),
     }
@@ -62,7 +64,11 @@ async fn invalid_file_requires_versioned_replace_before_entry_crud() {
         .await
         .expect_err("entry CRUD should reject invalid documents");
 
-    let replacement = talos_memory::UserWorkspaceMemoryDocument::template()
+    let replacement =
+        talos_memory::UserWorkspaceMemoryDocument::template(UserWorkspaceMemoryProducer::new(
+            MemoryAgentId::parse("agent-1").expect("agent id"),
+            1_784_251_800,
+        ))
         .expect("template should build")
         .render()
         .expect("template should render");
@@ -238,6 +244,7 @@ async fn service_keeps_distinct_effective_workspace_scopes_isolated() {
     let service = UserWorkspaceMemoryService::new();
     let first_scope = scope(first.path());
     let second_scope = MemoryScope {
+        agent_id: "agent-2".to_string(),
         user_id: "user-2".to_string(),
         workspace_root: second.path().to_path_buf(),
     };

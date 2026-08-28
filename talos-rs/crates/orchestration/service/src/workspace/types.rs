@@ -4,6 +4,7 @@ use talos_types::TalosConfig;
 
 #[derive(Debug, Clone)]
 pub struct EffectiveAgentWorkspace {
+    pub agent_id: String,
     pub user_id: String,
     pub username: Option<String>,
     pub base_workspace_dir: PathBuf,

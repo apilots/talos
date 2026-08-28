@@ -126,9 +126,42 @@ PY
 
 create_memory_payload="$(python3 - <<PY
 import json
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+occurred_at = int(datetime.strptime("${MEMORY_DATE} 09:30", "%Y-%m-%d %H:%M").replace(tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+generated_at = datetime.fromtimestamp(occurred_at, timezone.utc).isoformat().replace("+00:00", "Z")
+content = f"""---
+type: DreamMemory
+title: Dream Memory ${MEMORY_DATE}
+description: Durable memories formed for ${MEMORY_DATE}.
+tags: [talos, dream-memory]
+status: stable
+generated:
+  by: talos-agent/default
+  at: "{generated_at}"
+---
+
+# Dream Memory ${MEMORY_DATE}
+
+<!-- talos:dream-memory:start -->
+
+## Memories
+
+<!-- talos:dream-memory:entry key="mem_0123456789abcdef0123456789abcdef" -->
+### Memory get fixture
+
+- **Occurred At:** {occurred_at}
+- **Kind:** fact
+- **Importance:** normal
+
+${MEMORY_MARKER}
+
+<!-- talos:dream-memory:end -->
+"""
 print(json.dumps({
     "date": "${MEMORY_DATE}",
-    "content": "## [09:30] Memory get fixture\\n\\n${MEMORY_MARKER}\\n",
+    "content": content,
 }))
 PY
 )"

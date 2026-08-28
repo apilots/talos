@@ -15,6 +15,11 @@ pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
 
+type PreparedSessionCompaction = Option<(
+    Option<talos_prompt::PromptAssembly>,
+    SessionHistoryCompaction,
+)>;
+
 fn build_tool_selection_request(
     session_id: &str,
     input: &str,
@@ -237,7 +242,7 @@ async fn compact_session_history_if_needed(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     memory_scope: &MemoryScope,
     session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
     session_store: Arc<dyn talos_store::session::SessionStore>,
@@ -252,12 +257,7 @@ async fn compact_session_history_if_needed(
     session_continuity: Option<SessionContinuity>,
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     skill_options: Option<GeneralTurnSkillOptions>,
-) -> TalosResult<
-    Option<(
-        Option<talos_prompt::PromptAssembly>,
-        SessionHistoryCompaction,
-    )>,
-> {
+) -> TalosResult<PreparedSessionCompaction> {
     let Some(trigger) = determine_history_compaction_trigger(prompt_assembly, kernel_config) else {
         return Ok(None);
     };
@@ -271,7 +271,7 @@ async fn compact_session_history_if_needed(
             session_id,
             selected_model,
             llm_provider,
-            memory_writer: memory_writer.as_ref(),
+            dream_memory_store: dream_memory_store.as_ref(),
             memory_scope,
             session_artifact_store: session_artifact_store.as_ref(),
             session_store: session_store.as_ref(),
@@ -498,7 +498,7 @@ pub async fn prepare_general_turn(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
@@ -586,8 +586,9 @@ pub async fn prepare_general_turn(
         input,
         llm_provider.clone(),
         tool_definition_provider.clone(),
-        memory_writer,
+        dream_memory_store,
         &MemoryScope {
+            agent_id: ctx.agent_id.clone(),
             user_id: ctx.user_id.clone(),
             workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
         },

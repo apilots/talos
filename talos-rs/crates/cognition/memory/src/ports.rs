@@ -3,15 +3,19 @@ use std::path::PathBuf;
 use std::pin::Pin;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use talos_error::TalosResult;
 use talos_types::{
     MemoryGetRequest, MemoryGetResponse, MemoryImportance, MemoryKind, MemorySearchRequest,
     MemorySearchResponse,
 };
 
-/// Internal user and workspace boundary supplied by the runtime or service.
+use crate::{DreamMemoryDate, DreamMemoryEntry};
+
+/// Trusted Agent, user, and effective workspace boundary supplied by the runtime or service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryScope {
+    pub agent_id: String,
     pub user_id: String,
     pub workspace_root: PathBuf,
 }
@@ -50,11 +54,119 @@ pub struct MemoryWriteBatch {
     pub candidates: Vec<MemoryCandidate>,
 }
 
-/// Long-term memory persistence used by the agent runtime and maintenance flow.
-pub trait MemoryWriter: Send + Sync {
+/// Revision of one date-partitioned Dream Memory document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DreamMemoryDayRevision {
+    Missing,
+    Present(DreamMemoryRevisionToken),
+}
+
+/// Opaque content revision used only for Dream Memory compare-and-swap writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DreamMemoryRevisionToken(String);
+
+impl DreamMemoryDayRevision {
+    /// Computes the revision represented by an exact optional Markdown source.
+    #[must_use]
+    pub fn from_content(content: Option<&str>) -> Self {
+        match content {
+            Some(content) => {
+                let token = Sha256::digest(content.as_bytes())
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect();
+                Self::Present(DreamMemoryRevisionToken(token))
+            }
+            None => Self::Missing,
+        }
+    }
+}
+
+/// Typed same-day context observed before one Dream Memory formation request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DreamMemoryDaySnapshot {
+    date: DreamMemoryDate,
+    revision: DreamMemoryDayRevision,
+    entries: Vec<DreamMemoryEntry>,
+}
+
+impl DreamMemoryDaySnapshot {
+    #[must_use]
+    pub const fn new(
+        date: DreamMemoryDate,
+        revision: DreamMemoryDayRevision,
+        entries: Vec<DreamMemoryEntry>,
+    ) -> Self {
+        Self {
+            date,
+            revision,
+            entries,
+        }
+    }
+
+    #[must_use]
+    pub const fn date(&self) -> DreamMemoryDate {
+        self.date
+    }
+
+    #[must_use]
+    pub fn revision(&self) -> &DreamMemoryDayRevision {
+        &self.revision
+    }
+
+    #[must_use]
+    pub fn entries(&self) -> &[DreamMemoryEntry] {
+        &self.entries
+    }
+}
+
+/// Compare-and-swap append request produced from one observed day snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DreamMemoryWriteRequest {
+    date: DreamMemoryDate,
+    base_revision: DreamMemoryDayRevision,
+    batch: MemoryWriteBatch,
+}
+
+impl DreamMemoryWriteRequest {
+    #[must_use]
+    pub fn from_snapshot(snapshot: &DreamMemoryDaySnapshot, batch: MemoryWriteBatch) -> Self {
+        Self {
+            date: snapshot.date,
+            base_revision: snapshot.revision.clone(),
+            batch,
+        }
+    }
+
+    #[must_use]
+    pub const fn date(&self) -> DreamMemoryDate {
+        self.date
+    }
+
+    #[must_use]
+    pub fn base_revision(&self) -> &DreamMemoryDayRevision {
+        &self.base_revision
+    }
+
+    #[must_use]
+    pub const fn batch(&self) -> &MemoryWriteBatch {
+        &self.batch
+    }
+}
+
+/// Dream Memory formation persistence used by the Agent runtime and maintenance flow.
+pub trait DreamMemoryFormationStore: Send + Sync {
+    /// Reads the exact typed day state that a formation request will compare against.
+    fn read_day<'a>(
+        &'a self,
+        scope: &'a MemoryScope,
+        date: DreamMemoryDate,
+    ) -> Pin<Box<dyn Future<Output = TalosResult<DreamMemoryDaySnapshot>> + Send + 'a>>;
+
+    /// Appends a formed batch only when its observed day revision is still current.
     fn write<'a>(
         &'a self,
         scope: &'a MemoryScope,
-        batch: MemoryWriteBatch,
+        request: DreamMemoryWriteRequest,
     ) -> Pin<Box<dyn Future<Output = TalosResult<()>> + Send + 'a>>;
 }

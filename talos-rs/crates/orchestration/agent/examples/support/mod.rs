@@ -3,9 +3,10 @@ use std::sync::Arc;
 use talos_agent::InnerModelClient;
 use talos_llm_provider::LlmProviderRouter;
 use talos_memory::{
-    MemoryScope, MemoryWriteBatch, MemoryWriter, UserWorkspaceMemoryDocument,
+    DreamMemoryFormationStore, MemoryAgentId, MemoryScope, UserWorkspaceMemoryDocument,
     UserWorkspaceMemoryEntry, UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate,
-    UserWorkspaceMemoryReader, UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
+    UserWorkspaceMemoryProducer, UserWorkspaceMemoryReader, UserWorkspaceMemorySnapshot,
+    UserWorkspaceMemoryWriter,
 };
 use talos_types::{ExpectedFileVersion, ModelInfo, ModelSelection};
 
@@ -14,8 +15,11 @@ pub struct NoopUserWorkspaceMemory;
 
 fn missing_snapshot() -> UserWorkspaceMemorySnapshot {
     UserWorkspaceMemorySnapshot::Missing {
-        template: UserWorkspaceMemoryDocument::template()
-            .expect("example User Workspace Memory template should build"),
+        template: UserWorkspaceMemoryDocument::template(UserWorkspaceMemoryProducer::new(
+            MemoryAgentId::parse("example-agent").expect("example Agent id should be valid"),
+            1_784_251_800,
+        ))
+        .expect("example User Workspace Memory template should build"),
     }
 }
 
@@ -85,11 +89,32 @@ impl UserWorkspaceMemoryWriter for NoopUserWorkspaceMemory {
     noop_user_workspace_memory_write!(replace_document(_content: String, _base_version: ExpectedFileVersion));
 }
 
-impl MemoryWriter for NoopMemoryWriter {
+impl DreamMemoryFormationStore for NoopMemoryWriter {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = talos_error::TalosResult<talos_memory::DreamMemoryDaySnapshot>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                Vec::new(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
+        _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
     > {

@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use talos_memory::{
-    MemoryScope, UserWorkspaceMemoryDocument, UserWorkspaceMemoryEntry,
-    UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
+    MemoryAgentId, MemoryScope, UserWorkspaceMemoryDocument, UserWorkspaceMemoryEntry,
+    UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryProducer, UserWorkspaceMemorySnapshot,
+    UserWorkspaceMemoryWriter,
 };
 use talos_types::ExpectedFileVersion;
 
@@ -15,7 +16,11 @@ struct RecordingWriter {
 }
 
 fn valid_snapshot() -> UserWorkspaceMemorySnapshot {
-    let document = UserWorkspaceMemoryDocument::template().unwrap();
+    let document = UserWorkspaceMemoryDocument::template(UserWorkspaceMemoryProducer::new(
+        MemoryAgentId::parse("agent-1").unwrap(),
+        1_784_251_800,
+    ))
+    .unwrap();
     UserWorkspaceMemorySnapshot::Valid {
         raw_content: document.render().unwrap(),
         updated_at: None,
@@ -80,6 +85,7 @@ impl UserWorkspaceMemoryWriter for RecordingWriter {
 async fn update_tool_uses_only_the_trusted_context_scope() {
     let writer = Arc::new(RecordingWriter::default());
     let scope = MemoryScope {
+        agent_id: "trusted-agent".to_string(),
         user_id: "trusted-user".to_string(),
         workspace_root: std::path::PathBuf::from("/trusted/workspace"),
     };
@@ -128,6 +134,7 @@ fn update_tool_schema_exposes_operation_specific_contracts() {
 async fn update_tool_maps_direct_fields_and_explicit_clears_to_domain_update() {
     let writer = Arc::new(RecordingWriter::default());
     let scope = MemoryScope {
+        agent_id: "trusted-agent".to_string(),
         user_id: "trusted-user".to_string(),
         workspace_root: std::path::PathBuf::from("/trusted/workspace"),
     };

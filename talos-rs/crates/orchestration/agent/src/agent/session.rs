@@ -207,6 +207,7 @@ impl AgentHarnessImpl {
             let selected_model = Self::session_model(&session)?;
             let llm_provider = self.llm_provider_for_session(&session)?;
             let memory_scope = talos_memory::MemoryScope {
+                agent_id: self.id.clone(),
                 user_id: session.user_id.clone(),
                 workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
             };
@@ -231,7 +232,7 @@ impl AgentHarnessImpl {
                                     session_id: &task_session_id,
                                     selected_model: &selected_model,
                                     llm_provider,
-                                    memory_writer: this.memory_writer.as_ref(),
+                                    dream_memory_store: this.dream_memory_store.as_ref(),
                                     memory_scope: &memory_scope,
                                     session_artifact_store: this.session_artifact_store.as_ref(),
                                     session_store: this.session_store.as_ref(),

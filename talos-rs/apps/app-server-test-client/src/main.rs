@@ -236,10 +236,7 @@ async fn resource_matrix(client: &mut AppServerClient) -> Result<()> {
         .await?
         .doc;
     if !read_workspace.exists {
-        let template = talos_memory::UserWorkspaceMemoryDocument::template()
-            .map_err(|error| anyhow!("build canonical User Workspace Memory template: {error}"))?
-            .render()
-            .map_err(|error| anyhow!("render canonical User Workspace Memory template: {error}"))?;
+        let template = memory_e2e::canonical_memory_template()?;
         read_workspace = write_workspace_doc(
             client,
             WorkspaceDocKind::Memory,

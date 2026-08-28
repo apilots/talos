@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(NoopMemoryWriter),
+        dream_memory_store: Arc::new(NoopMemoryWriter),
         user_workspace_memory_reader: Arc::new(NoopUserWorkspaceMemory),
         user_workspace_memory_writer: Arc::new(NoopUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),

@@ -1,40 +1,70 @@
+use chrono::{SecondsFormat, TimeZone, Utc};
 use talos_knowledge_format::{
     KnowledgeDocument, KnowledgeEntry, KnowledgeEntryQuery, KnowledgeEntryUpdate,
-    KnowledgeFormatError, KnowledgeFormatErrorKind, KnowledgeFormatResult,
+    KnowledgeFormatError, KnowledgeFormatErrorKind, KnowledgeFormatResult, OkfActor, OkfDateTime,
+    OkfDocument, OkfGenerated,
 };
 use talos_types::MemoryKind;
 
 use super::{
     user_workspace_memory_profile, validate_memory_key, OptionalField, UserWorkspaceMemoryEntry,
-    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemorySection,
+    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryProducer,
+    UserWorkspaceMemorySection,
 };
 
 /// Typed User Workspace Memory document backed by the shared format engine.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UserWorkspaceMemoryDocument {
+    generated: OkfGenerated,
     document: KnowledgeDocument,
 }
 
 impl UserWorkspaceMemoryDocument {
     /// Creates the canonical empty in-memory template.
-    pub fn template() -> KnowledgeFormatResult<Self> {
-        let profile = user_workspace_memory_profile()?;
+    pub fn template(producer: UserWorkspaceMemoryProducer) -> KnowledgeFormatResult<Self> {
+        let generated = generated(producer)?;
+        let profile = user_workspace_memory_profile(generated.clone())?;
         let document = KnowledgeDocument::builder(&profile)
             .create_document()
             .build()?;
-        Ok(Self { document })
+        Ok(Self {
+            generated,
+            document,
+        })
     }
 
     /// Parses and fully validates one canonical User Workspace Memory file.
     pub fn parse(content: &str) -> KnowledgeFormatResult<Self> {
-        let profile = user_workspace_memory_profile()?;
+        let parsed = OkfDocument::parse(content)?;
+        let generated = parsed.generated().ok_or_else(|| {
+            KnowledgeFormatError::new(
+                KnowledgeFormatErrorKind::InvalidDocument,
+                "User Workspace Memory generated metadata is required",
+            )
+        })?;
+        if generated.by.is_none()
+            || generated
+                .at
+                .as_ref()
+                .and_then(talos_knowledge_format::OkfDateTimeValue::parsed)
+                .is_none()
+        {
+            return Err(KnowledgeFormatError::new(
+                KnowledgeFormatErrorKind::InvalidDocument,
+                "User Workspace Memory generated metadata must be complete",
+            ));
+        }
+        let profile = user_workspace_memory_profile(generated.clone())?;
         let document = KnowledgeDocument::builder(&profile)
             .from_markdown(content)
             .build()?;
         for entry in document.list_entries(KnowledgeEntryQuery::all()) {
             from_knowledge_entry(entry)?;
         }
-        Ok(Self { document })
+        Ok(Self {
+            generated,
+            document,
+        })
     }
 
     /// Creates a new entry and rejects an existing key.
@@ -133,12 +163,38 @@ impl UserWorkspaceMemoryDocument {
             talos_knowledge_format::KnowledgeDocumentBuilder,
         >,
     ) -> KnowledgeFormatResult<Self> {
-        let profile = user_workspace_memory_profile()?;
+        let profile = user_workspace_memory_profile(self.generated.clone())?;
         let current = self.document.render()?;
         let builder = KnowledgeDocument::builder(&profile).from_markdown(current);
         let document = operation(builder)?.build()?;
-        Ok(Self { document })
+        Ok(Self {
+            generated: self.generated,
+            document,
+        })
     }
+}
+
+fn generated(producer: UserWorkspaceMemoryProducer) -> KnowledgeFormatResult<OkfGenerated> {
+    let timestamp = Utc
+        .timestamp_opt(producer.generated_at(), 0)
+        .single()
+        .ok_or_else(|| {
+            KnowledgeFormatError::new(
+                KnowledgeFormatErrorKind::InvalidDocument,
+                "User Workspace Memory generated_at is invalid",
+            )
+        })?;
+    let value = timestamp.to_rfc3339_opts(SecondsFormat::Secs, true);
+    let at = OkfDateTime::parse(&value).ok_or_else(|| {
+        KnowledgeFormatError::new(
+            KnowledgeFormatErrorKind::InvalidDocument,
+            "User Workspace Memory generated_at cannot be represented as OKF",
+        )
+    })?;
+    Ok(OkfGenerated::new(
+        OkfActor::parse(format!("talos-agent/{}", producer.agent_id().as_str())),
+        at,
+    ))
 }
 
 fn to_knowledge_entry(entry: UserWorkspaceMemoryEntry) -> KnowledgeFormatResult<KnowledgeEntry> {

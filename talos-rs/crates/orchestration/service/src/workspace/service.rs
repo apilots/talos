@@ -1,6 +1,9 @@
 use chrono::Utc;
 use serde_json::{json, Value};
-use talos_config::{resolve_effective_kernel_workspace, validate_session_workspace_user};
+use talos_config::{
+    resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
+    AgentRuntimeConfig,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_types::{TalosConfig, TalosSession};
 
@@ -10,11 +13,38 @@ use crate::access::Actor;
 #[derive(Clone)]
 pub struct EffectiveWorkspaceResolver {
     base_config: TalosConfig,
+    default_agent_id: String,
+    default_kernel_config: AgentKernelConfig,
 }
 
 impl EffectiveWorkspaceResolver {
     pub fn new(base_config: TalosConfig) -> Self {
-        Self { base_config }
+        let (default_agent_id, default_kernel_config) = base_config
+            .agent
+            .agents
+            .iter()
+            .find(|definition| definition.enabled)
+            .map(|definition| {
+                let kernel_config = match &definition.runtime_config {
+                    Some(AgentRuntimeConfig::Kernel { kernel }) => kernel.clone(),
+                    None => base_config.agent.kernel.clone(),
+                };
+                (definition.id.trim().to_string(), kernel_config)
+            })
+            .unwrap_or_else(|| ("default".to_string(), base_config.agent.kernel.clone()));
+        Self {
+            base_config,
+            default_agent_id,
+            default_kernel_config,
+        }
+    }
+
+    pub fn default_agent_id(&self) -> &str {
+        &self.default_agent_id
+    }
+
+    pub fn default_kernel_config(&self) -> &AgentKernelConfig {
+        &self.default_kernel_config
     }
 
     pub fn resolve_for_actor(&self, actor: &Actor) -> TalosResult<EffectiveAgentWorkspace> {
@@ -55,11 +85,12 @@ impl EffectiveWorkspaceResolver {
         user_id: &str,
         username: Option<String>,
     ) -> TalosResult<EffectiveAgentWorkspace> {
-        let resolved = resolve_effective_kernel_workspace(&self.base_config.agent.kernel, user_id)?;
+        let resolved = resolve_effective_kernel_workspace(&self.default_kernel_config, user_id)?;
         let mut config = self.base_config.clone();
         config.agent.kernel = resolved.kernel_config.clone();
 
         Ok(EffectiveAgentWorkspace {
+            agent_id: self.default_agent_id.clone(),
             user_id: resolved.user_id,
             username,
             base_workspace_dir: resolved.base_workspace_dir,

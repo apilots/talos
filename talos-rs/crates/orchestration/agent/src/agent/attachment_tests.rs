@@ -116,7 +116,7 @@ async fn run_resolves_file_ids_with_session_owner_and_project_before_model_call(
         skill_roots_resolver: crate::empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(TestMemoryWriter),
+        dream_memory_store: Arc::new(TestMemoryWriter),
         user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
         user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: reader.clone(),

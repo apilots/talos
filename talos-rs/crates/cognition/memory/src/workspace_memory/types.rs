@@ -4,6 +4,35 @@ use talos_knowledge_format::{
 };
 use talos_types::{ExpectedFileVersion, MemoryKind};
 
+use crate::MemoryAgentId;
+
+/// Producer identity and creation time for one persisted User Workspace Memory document.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserWorkspaceMemoryProducer {
+    agent_id: MemoryAgentId,
+    generated_at: i64,
+}
+
+impl UserWorkspaceMemoryProducer {
+    #[must_use]
+    pub const fn new(agent_id: MemoryAgentId, generated_at: i64) -> Self {
+        Self {
+            agent_id,
+            generated_at,
+        }
+    }
+
+    #[must_use]
+    pub fn agent_id(&self) -> &MemoryAgentId {
+        &self.agent_id
+    }
+
+    #[must_use]
+    pub const fn generated_at(&self) -> i64 {
+        self.generated_at
+    }
+}
+
 /// Canonical sections in User Workspace Memory.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]

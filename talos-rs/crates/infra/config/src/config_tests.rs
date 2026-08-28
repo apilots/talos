@@ -329,10 +329,10 @@ fn test_kernel_defaults() {
         366
     );
     assert_eq!(
-        config.automation.memory_daily_maintenance.cron,
+        config.automation.dream_memory_maintenance.cron,
         "0 30 3 * * *"
     );
-    assert_eq!(config.automation.memory_daily_maintenance.batch_size, 50);
+    assert_eq!(config.automation.dream_memory_maintenance.batch_size, 50);
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
         config.agent.kernel.workspace_dir,

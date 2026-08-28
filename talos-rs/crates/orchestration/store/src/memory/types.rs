@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use talos_error::{TalosError, TalosResult};
+use talos_memory::{DreamMemoryDate, DreamMemoryProvenance, MemoryId, MemoryScope};
 pub use talos_types::{MemoryImportance, MemoryKind};
 
 pub(super) fn memory_kind_as_str(kind: MemoryKind) -> &'static str {
@@ -33,26 +34,23 @@ pub(super) fn memory_importance_as_str(importance: MemoryImportance) -> &'static
 pub(super) fn parse_memory_importance(value: &str) -> Option<MemoryImportance> {
     match value {
         "low" => Some(MemoryImportance::Low),
-        "medium" => Some(MemoryImportance::Normal),
         "normal" => Some(MemoryImportance::Normal),
         "high" => Some(MemoryImportance::High),
         _ => None,
     }
 }
 
-/// Store-owned representation of one indexed daily-memory block.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+/// Store-owned typed representation of one indexed Dream Memory entry.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryRecord {
-    pub memory_id: String,
+    pub memory_id: MemoryId,
     pub title: String,
     pub body: String,
     pub kind: MemoryKind,
     pub importance: MemoryImportance,
     pub occurred_at: i64,
-    pub source_date: String,
-    pub session_id: Option<String>,
-    pub source_from_seq: Option<u64>,
-    pub source_until_seq: Option<u64>,
+    pub source_date: DreamMemoryDate,
+    pub provenance: DreamMemoryProvenance,
 }
 
 /// Validated query consumed only by the memory store.
@@ -66,22 +64,66 @@ pub struct MemorySearchQuery {
 }
 
 /// Ranked store result converted to public DTOs by the service layer.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemorySearchRecord {
     pub memory: MemoryRecord,
     pub preview: String,
     pub rank: u32,
 }
 
+/// Validated identity used by every derived-index query and mutation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct MemoryIndexScope {
+    agent_id: String,
+    user_id: String,
+    workspace_root: String,
+}
+
+impl MemoryIndexScope {
+    pub(super) fn from_scope(scope: &MemoryScope) -> TalosResult<Self> {
+        let agent_id = scope.agent_id.trim();
+        let user_id = scope.user_id.trim();
+        let workspace_root = scope.workspace_root.to_str().ok_or_else(|| {
+            TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "memory workspace_root must be valid UTF-8".to_string(),
+            )
+        })?;
+        if agent_id.is_empty() || user_id.is_empty() || workspace_root.trim().is_empty() {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                "memory agent_id, user_id, and workspace_root are required".to_string(),
+            ));
+        }
+        Ok(Self {
+            agent_id: agent_id.to_string(),
+            user_id: user_id.to_string(),
+            workspace_root: workspace_root.to_string(),
+        })
+    }
+
+    pub(super) fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    pub(super) fn user_id(&self) -> &str {
+        &self.user_id
+    }
+
+    pub(super) fn workspace_root(&self) -> &str {
+        &self.workspace_root
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct ParsedMemoryRecord {
     pub record: MemoryRecord,
-    pub source_path: String,
 }
 
 #[derive(Debug, Clone)]
 pub(super) struct ParsedMemorySource {
     pub source_path: String,
+    pub source_date: DreamMemoryDate,
     pub fingerprint: String,
     pub records: Vec<ParsedMemoryRecord>,
 }

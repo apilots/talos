@@ -1,5 +1,23 @@
 use super::*;
 
+pub(super) fn canonical_memory_template() -> Result<String> {
+    let agent_id = talos_memory::MemoryAgentId::parse("app-server-test-client")
+        .map_err(|error| anyhow!("build test Agent id: {error}"))?;
+    let generated_at = i64::try_from(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| anyhow!("read current time: {error}"))?
+            .as_secs(),
+    )
+    .map_err(|error| anyhow!("current time exceeds i64: {error}"))?;
+    talos_memory::UserWorkspaceMemoryDocument::template(
+        talos_memory::UserWorkspaceMemoryProducer::new(agent_id, generated_at),
+    )
+    .map_err(|error| anyhow!("build canonical User Workspace Memory template: {error}"))?
+    .render()
+    .map_err(|error| anyhow!("render canonical User Workspace Memory template: {error}"))
+}
+
 pub(super) async fn run(client: &mut AppServerClient) -> Result<()> {
     let key = format!("e2e-response-marker-{}", uuid::Uuid::new_v4().simple());
     let first_marker = "Cerulean Comet";

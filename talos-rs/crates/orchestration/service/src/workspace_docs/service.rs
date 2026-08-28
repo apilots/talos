@@ -203,6 +203,7 @@ impl WorkspaceDocService {
 
 fn memory_scope(workspace: &crate::workspace::EffectiveAgentWorkspace) -> MemoryScope {
     MemoryScope {
+        agent_id: workspace.agent_id.clone(),
         user_id: workspace.user_id.clone(),
         workspace_root: workspace.user_workspace_dir.clone(),
     }

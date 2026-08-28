@@ -117,11 +117,11 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         ));
     }
 
-    let memory_maintenance = &config.automation.memory_daily_maintenance;
+    let memory_maintenance = &config.automation.dream_memory_maintenance;
     if memory_maintenance.cron.trim().is_empty() {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
-            "automation.memory_daily_maintenance.cron must not be empty".to_string(),
+            "automation.dream_memory_maintenance.cron must not be empty".to_string(),
         ));
     }
     let mut cron = croner::Cron::new(&memory_maintenance.cron);
@@ -129,19 +129,19 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     cron.parse().map_err(|error| {
         TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
-            format!("automation.memory_daily_maintenance.cron is invalid: {error}"),
+            format!("automation.dream_memory_maintenance.cron is invalid: {error}"),
         )
     })?;
     if memory_maintenance.batch_size == 0 {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
-            "automation.memory_daily_maintenance.batch_size must be > 0".to_string(),
+            "automation.dream_memory_maintenance.batch_size must be > 0".to_string(),
         ));
     }
     if memory_maintenance.max_batches == 0 {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
-            "automation.memory_daily_maintenance.max_batches must be > 0".to_string(),
+            "automation.dream_memory_maintenance.max_batches must be > 0".to_string(),
         ));
     }
 

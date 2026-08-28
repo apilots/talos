@@ -2,11 +2,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use talos_automation::{Automation, AutomationJob};
-use talos_config::{MemoryDailyMaintenanceConfig, ProfileUsageRetentionConfig, TalosTimezone};
+use talos_config::{DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig, TalosTimezone};
 use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
-use talos_service::{MemoryDailyMaintenance, ProfileUsageRetention};
+use talos_service::{DreamMemoryMaintenance, ProfileUsageRetention};
 use talos_store::profile::ProfileStore;
 use tokio::signal;
 use tracing::{error, info, warn};
@@ -61,8 +61,8 @@ impl TalosApplicationRuntime {
 pub(super) async fn start_maintenance(
     profiles: Arc<dyn ProfileStore>,
     profile_config: ProfileUsageRetentionConfig,
-    memory: MemoryDailyMaintenance,
-    memory_config: MemoryDailyMaintenanceConfig,
+    memory: DreamMemoryMaintenance,
+    memory_config: DreamMemoryMaintenanceConfig,
     timezone: TalosTimezone,
 ) -> TalosResult<Automation> {
     let retention = ProfileUsageRetention::new(profiles, profile_config.clone());
@@ -77,7 +77,7 @@ pub(super) async fn start_maintenance(
             },
         ),
         AutomationJob::cron(
-            "memory-daily-maintenance",
+            "dream-memory-maintenance",
             memory_config.cron,
             timezone,
             move || {

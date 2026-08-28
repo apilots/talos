@@ -143,6 +143,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let memory_database = config.talos_paths().data_dir.join("memory-index.sqlite");
     let memory_store = Arc::new(MemoryStore::open(&memory_database).await?);
     let memory_service = MemoryService::new(config.clone(), memory_store)?;
+    // TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
+    memory_service.convert_legacy_known_scopes().await?;
     memory_service.rebuild_known_scopes().await?;
     tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
@@ -154,7 +156,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         skill_roots_resolver,
         session_artifact_store: session_artifact_store.clone(),
         session_store: session_store_impl.clone(),
-        memory_writer: Arc::new(memory_service.clone()),
+        dream_memory_store: Arc::new(memory_service.clone()),
         user_workspace_memory_reader: user_workspace_memory.clone(),
         user_workspace_memory_writer: user_workspace_memory.clone(),
         attachment_reader: file_service.clone(),
@@ -163,12 +165,12 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
 
     let coordinator = Arc::new(CoordinatorImpl::new(router));
 
-    for definition in agent_definitions {
+    for definition in &agent_definitions {
         if !definition.enabled {
             continue;
         }
         let agent_id = definition.id.clone();
-        let agent: Arc<dyn AgentHarness> = Arc::new(agent_factory.build(&definition)?);
+        let agent: Arc<dyn AgentHarness> = Arc::new(agent_factory.build(definition)?);
         coordinator.register_agent(&agent_id, agent).await?;
     }
 
@@ -244,20 +246,20 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
-    let memory_maintenance = talos_service::MemoryDailyMaintenance::new(
+    let dream_memory_maintenance = talos_service::DreamMemoryMaintenance::new(
         session_store_impl,
         active_turn_store,
         session_artifact_store,
         memory_service,
         inner_model,
-        config.clone(),
-        config.automation.memory_daily_maintenance.clone(),
+        &agent_definitions,
+        config.automation.dream_memory_maintenance.clone(),
     );
     let automation = application_automation::start_maintenance(
         profile_store,
         config.automation.profile_usage_retention.clone(),
-        memory_maintenance,
-        config.automation.memory_daily_maintenance.clone(),
+        dream_memory_maintenance,
+        config.automation.dream_memory_maintenance.clone(),
         talos_config::parse_timezone(&config.timezone)?,
     )
     .await?;

@@ -44,7 +44,7 @@ pub use domains::agent::{
     PlannerMode,
 };
 pub use domains::automation::{
-    AutomationConfig, MemoryDailyMaintenanceConfig, ProfileUsageRetentionConfig,
+    AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
 };
 pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};

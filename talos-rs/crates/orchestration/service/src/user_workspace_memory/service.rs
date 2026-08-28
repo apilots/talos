@@ -1,11 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use chrono::Utc;
 use talos_error::{TalosError, TalosResult};
 use talos_knowledge_format::{KnowledgeFormatError, KnowledgeFormatErrorKind};
 use talos_memory::{
-    MemoryScope, UserWorkspaceMemoryDocument, UserWorkspaceMemoryEntry,
-    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryReader,
-    UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
+    MemoryAgentId, MemoryScope, UserWorkspaceMemoryDocument, UserWorkspaceMemoryEntry,
+    UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryProducer,
+    UserWorkspaceMemoryReader, UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
 };
 use talos_types::{DocUpdateRequest, ExpectedFileVersion};
 
@@ -24,7 +25,7 @@ impl UserWorkspaceMemoryService {
 
     /// Reads raw and parsed state without creating a missing file.
     pub async fn read(&self, scope: &MemoryScope) -> TalosResult<UserWorkspaceMemorySnapshot> {
-        snapshot_from_path(&memory_path(scope)).await
+        snapshot_from_scope(scope).await
     }
 
     /// Reads one typed entry.
@@ -139,7 +140,8 @@ impl UserWorkspaceMemoryService {
         talos_fs::with_file_lock(&path, || async {
             let existing = talos_fs::read_file(&path).await?;
             let document = match existing.as_deref() {
-                None => UserWorkspaceMemoryDocument::template().map_err(map_format_error)?,
+                None => UserWorkspaceMemoryDocument::template(producer(scope)?)
+                    .map_err(map_format_error)?,
                 Some(content) => {
                     UserWorkspaceMemoryDocument::parse(content).map_err(map_format_error)?
                 }
@@ -260,13 +262,15 @@ fn memory_path(scope: &MemoryScope) -> PathBuf {
     scope.workspace_root.join("MEMORY.md")
 }
 
-async fn snapshot_from_path(path: &Path) -> TalosResult<UserWorkspaceMemorySnapshot> {
-    let Some(content) = talos_fs::read_file(path).await? else {
+async fn snapshot_from_scope(scope: &MemoryScope) -> TalosResult<UserWorkspaceMemorySnapshot> {
+    let path = memory_path(scope);
+    let Some(content) = talos_fs::read_file(&path).await? else {
         return Ok(UserWorkspaceMemorySnapshot::Missing {
-            template: UserWorkspaceMemoryDocument::template().map_err(map_format_error)?,
+            template: UserWorkspaceMemoryDocument::template(producer(scope)?)
+                .map_err(map_format_error)?,
         });
     };
-    let updated_at = talos_fs::get_file_metadata(path)
+    let updated_at = talos_fs::get_file_metadata(&path)
         .await?
         .and_then(|metadata| metadata.modified_at_ms);
     match UserWorkspaceMemoryDocument::parse(&content) {
@@ -283,6 +287,15 @@ async fn snapshot_from_path(path: &Path) -> TalosResult<UserWorkspaceMemorySnaps
             updated_at,
         }),
     }
+}
+
+fn producer(scope: &MemoryScope) -> TalosResult<UserWorkspaceMemoryProducer> {
+    Ok(UserWorkspaceMemoryProducer::new(
+        MemoryAgentId::parse(scope.agent_id.clone()).map_err(|error| {
+            TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+        })?,
+        Utc::now().timestamp(),
+    ))
 }
 
 async fn valid_snapshot(

@@ -475,19 +475,46 @@ fn okf_index_log_and_v01_fallback_remain_consumable() {
         .expect("v0.1-compatible bundle should build");
     let index = OkfIndex::generate(concepts.concepts());
     let rendered_index = index.render();
+    assert!(rendered_index.starts_with("---\nokf_version: \"0.2\"\n---"));
     assert!(rendered_index.contains("# Guide"));
     assert_eq!(
-        OkfIndex::parse(&format!("---\ntype: Index\n---\n\n{rendered_index}"))
+        OkfIndex::parse(&rendered_index)
             .expect("index should parse")
             .entries
             .len(),
         1
     );
 
-    let log = OkfLog::parse(
-        "---\ntype: Log\n---\n\n# Changes\n\n## 2026-08-27\n* **Update**: Added memory format.\n",
-    );
+    let mut log = OkfLog::builder()
+        .title("Changes")
+        .build()
+        .expect("log should build");
+    assert!(log
+        .append_entry(
+            OkfDate::parse("2026-08-27").expect("log date"),
+            OkfLogEntry::new(Some("Update".to_string()), "Added memory format.")
+                .expect("log entry"),
+        )
+        .expect("log append"));
+    assert!(!log
+        .append_entry(
+            OkfDate::parse("2026-08-27").expect("log date"),
+            OkfLogEntry::new(Some("Update".to_string()), "Added memory format.")
+                .expect("log entry"),
+        )
+        .expect("duplicate log append"));
+    let rendered_log = log.render();
+    let log = OkfLog::parse_strict(&rendered_log).expect("rendered log should parse strictly");
     assert_eq!(log.days.len(), 1);
-    assert!(log.render().contains("Added memory format"));
-    assert!(concepts.validate().is_conformant());
+    assert!(rendered_log.contains("Added memory format"));
+    let produced_bundle = OkfBundle::builder()
+        .file(OkfBundleFile::new(
+            "guide.md",
+            "---\ntype: Guide\ntitle: Guide\ntimestamp: 2026-01-01T00:00:00Z\n---\n\n# Citations\n\n1. [Reference](https://example.com)\n",
+        ))
+        .file(OkfBundleFile::new("index.md", rendered_index))
+        .file(OkfBundleFile::new("log.md", rendered_log))
+        .build()
+        .expect("produced bundle should build");
+    assert!(produced_bundle.validate().is_conformant());
 }

@@ -1,5 +1,5 @@
 use talos_knowledge_format::{
-    KnowledgeDocumentProfile, KnowledgeFormatResult, OkfFrontmatter, OkfStatus,
+    KnowledgeDocumentProfile, KnowledgeFormatResult, OkfFrontmatter, OkfGenerated, OkfStatus,
 };
 use talos_types::MEMORY_FILE_MAX_CHARS;
 
@@ -7,13 +7,16 @@ use talos_types::MEMORY_FILE_MAX_CHARS;
 pub const USER_WORKSPACE_MEMORY_NAMESPACE: &str = "talos:user-workspace-memory";
 
 /// Builds the canonical User Workspace Memory managed document profile.
-pub fn user_workspace_memory_profile() -> KnowledgeFormatResult<KnowledgeDocumentProfile> {
+pub fn user_workspace_memory_profile(
+    generated: OkfGenerated,
+) -> KnowledgeFormatResult<KnowledgeDocumentProfile> {
     let frontmatter = OkfFrontmatter::builder()
         .concept_type("UserWorkspaceMemory")
         .title("User Workspace Memory")
         .description("Durable cross-session memory scoped to one agent and one user.")
         .tags(["talos", "agent", "user-memory"])
         .status(OkfStatus::Stable)
+        .generated(generated)
         .build()?;
     KnowledgeDocumentProfile::builder()
         .frontmatter(frontmatter)

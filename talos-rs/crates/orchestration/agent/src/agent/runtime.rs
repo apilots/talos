@@ -31,7 +31,7 @@ use talos_config::{
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
-use talos_memory::MemoryWriter;
+use talos_memory::DreamMemoryFormationStore;
 use talos_run_control::{RunTask, RunTaskCompletion, RunTaskGroup};
 use talos_store::session::{SessionArtifactStore, SessionStore};
 
@@ -127,7 +127,7 @@ pub(crate) struct KernelAgent {
     skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub(super) session_store: Arc<dyn SessionStore>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     pub(super) user_workspace_memory_reader: Arc<dyn talos_memory::UserWorkspaceMemoryReader>,
     pub(super) user_workspace_memory_writer: Arc<dyn talos_memory::UserWorkspaceMemoryWriter>,
     pub(super) inner_model: Arc<crate::InnerModelClient>,
@@ -147,7 +147,7 @@ impl KernelAgent {
             skill_roots_resolver: params.skill_roots_resolver,
             session_artifact_store: params.session_artifact_store,
             session_store: params.session_store,
-            memory_writer: params.memory_writer,
+            dream_memory_store: params.dream_memory_store,
             user_workspace_memory_reader: params.user_workspace_memory_reader,
             user_workspace_memory_writer: params.user_workspace_memory_writer,
             inner_model: params.inner_model,
@@ -352,7 +352,7 @@ impl KernelAgent {
             llm_provider,
             self.tool_registry.clone(),
             self.tool_registry.clone(),
-            self.memory_writer.clone(),
+            self.dream_memory_store.clone(),
             user_workspace_memory,
             &kernel_config,
             resume,
@@ -516,7 +516,7 @@ impl KernelAgent {
                                     llm_provider,
                                     this.tool_registry.clone(),
                                     this.tool_registry.clone(),
-                                    this.memory_writer.clone(),
+                                    this.dream_memory_store.clone(),
                                     user_workspace_memory,
                                     &kernel_config,
                                     resume,
@@ -1161,7 +1161,7 @@ pub(crate) struct KernelAgentParams {
     pub(crate) skill_roots_resolver: Arc<dyn SkillRootsResolver>,
     pub(crate) session_artifact_store: Arc<dyn SessionArtifactStore>,
     pub(crate) session_store: Arc<dyn SessionStore>,
-    pub(crate) memory_writer: Arc<dyn MemoryWriter>,
+    pub(crate) dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     pub(crate) user_workspace_memory_reader: Arc<dyn talos_memory::UserWorkspaceMemoryReader>,
     pub(crate) user_workspace_memory_writer: Arc<dyn talos_memory::UserWorkspaceMemoryWriter>,
     pub(crate) inner_model: Arc<crate::InnerModelClient>,

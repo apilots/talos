@@ -1,44 +1,24 @@
+use super::dream_memory_prompt::{
+    date_for_timestamp, formation_user_prompt, DreamMemoryFormationMode,
+    DREAM_MEMORY_FORMATION_PROMPT,
+};
 use super::memory_summary::{
     compact_summary_coverage, render_transcript, trim_transcript_units_to_budget,
     validate_memory_candidates,
 };
 use super::*;
 
-const DAILY_MEMORY_TRANSCRIPT_MAX_CHARS: usize = 4_000;
+const DREAM_MEMORY_TRANSCRIPT_MAX_CHARS: usize = 4_000;
 
-const DAILY_MEMORY_FORMATION_PROMPT: &str = r#"Extract durable memory candidates from this conversation as JSON.
-Return ONLY valid JSON, no markdown fences, no explanation.
-
-Schema:
-{
-  "memory_candidates": [
-    {
-      "title": "durable memory title",
-      "body": "durable fact, preference, decision, task, or episode",
-      "kind": "preference" | "fact" | "decision" | "task" | "episode",
-      "importance": "low" | "normal" | "high"
-    }
-  ]
-}
-
-Return at most 8 memory_candidates. Exclude transient logs and unstable details.
-Use the same language as the conversation transcript for all field values."#;
-
-#[derive(serde::Deserialize)]
-struct DailyMemoryOutput {
-    #[serde(default)]
-    memory_candidates: Vec<talos_memory::MemoryCandidate>,
-}
-
-/// Forms one bounded, contiguous daily-memory batch for a session tail.
-pub async fn form_daily_session_memory(
+/// Forms one bounded, contiguous Dream Memory batch for a session tail.
+pub async fn form_dream_session_memory(
     params: MemoryFormationParams<'_>,
 ) -> TalosResult<MemoryFormationReport> {
     let MemoryFormationParams {
         session_id,
         selected_model,
         llm_provider,
-        memory_writer,
+        dream_memory_store,
         memory_scope,
         session_artifact_store,
         session_store,
@@ -88,7 +68,7 @@ pub async fn form_daily_session_memory(
     let transcript_max_chars = kernel_config
         .compaction
         .recent_messages_max_chars
-        .clamp(1, DAILY_MEMORY_TRANSCRIPT_MAX_CHARS);
+        .clamp(1, DREAM_MEMORY_TRANSCRIPT_MAX_CHARS);
     let message_max_chars = transcript_max_chars.saturating_sub(64).div_ceil(2).max(1);
     for message in &mut context.recent_messages {
         if message.text.chars().count() > message_max_chars {
@@ -122,11 +102,13 @@ pub async fn form_daily_session_memory(
             talos_error::TalosError::public(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
-                    "missing persisted timestamp for daily memory session seq {}",
+                    "missing persisted timestamp for Dream Memory session seq {}",
                     coverage.covers_until_seq
                 ),
             )
         })?;
+    let date = date_for_timestamp(occurred_at, &kernel_config.timezone)?;
+    let snapshot = dream_memory_store.read_day(memory_scope, date).await?;
     let model = kernel_config
         .compaction
         .model
@@ -137,30 +119,44 @@ pub async fn form_daily_session_memory(
             ChatRequest::builder()
                 .model(model.to_string())
                 .messages(vec![
-                    ChatMessage::system(DAILY_MEMORY_FORMATION_PROMPT),
-                    ChatMessage::user(format!("Conversation transcript:\n{transcript}")),
+                    ChatMessage::system(DREAM_MEMORY_FORMATION_PROMPT),
+                    ChatMessage::user(formation_user_prompt(
+                        DreamMemoryFormationMode::Maintenance,
+                        &transcript,
+                        &snapshot,
+                    )?),
                 ])
                 .build(),
         )
         .await?;
-    let output =
-        serde_json::from_str::<DailyMemoryOutput>(response.content.trim()).map_err(|error| {
+    let output = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
+        |error| {
             talos_error::TalosError::memory_error(
                 talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-                format!("parse daily memory json for session '{session_id}': {error}"),
+                format!("parse Dream Memory json for session '{session_id}': {error}"),
             )
-        })?;
-    validate_memory_candidates(&output.memory_candidates)?;
-    memory_writer
+        },
+    )?;
+    let DreamMemoryModelOutput::Maintenance { memory_candidates } = output else {
+        return Err(talos_error::TalosError::memory_error(
+            talos_error::TalosMemoryErrorKind::SummaryParseFailed,
+            format!("Dream Memory mode mismatch for session '{session_id}'"),
+        ));
+    };
+    validate_memory_candidates(&memory_candidates)?;
+    dream_memory_store
         .write(
             memory_scope,
-            MemoryWriteBatch {
-                session_id: session_id.to_string(),
-                occurred_at,
-                source_from_seq: coverage.covers_from_seq,
-                source_until_seq: coverage.covers_until_seq,
-                candidates: output.memory_candidates,
-            },
+            talos_memory::DreamMemoryWriteRequest::from_snapshot(
+                &snapshot,
+                MemoryWriteBatch {
+                    session_id: session_id.to_string(),
+                    occurred_at,
+                    source_from_seq: coverage.covers_from_seq,
+                    source_until_seq: coverage.covers_until_seq,
+                    candidates: memory_candidates,
+                },
+            ),
         )
         .await?;
     session_store

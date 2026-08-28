@@ -29,7 +29,7 @@ pub use account::AccountService;
 pub use config::{ConfigService, RuntimeConfigReloadHook, RuntimeConfigReloadTrigger};
 pub use file::{FileByteStream, FileService};
 pub use history::SessionHistoryService;
-pub use memory::{MemoryDailyMaintenance, MemoryDailyMaintenanceReport, MemoryService};
+pub use memory::{DreamMemoryMaintenance, DreamMemoryMaintenanceReport, MemoryService};
 pub use message_queue::SessionMessageQueueService;
 pub use plugin::PluginManagerService;
 pub use profile::{ProfileService, ProfileUsageRetention};

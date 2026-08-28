@@ -45,6 +45,7 @@ impl KernelAgent {
         let snapshot = self
             .user_workspace_memory_reader
             .read(&MemoryScope {
+                agent_id: self.id.clone(),
                 user_id: user_id.to_string(),
                 workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
             })
@@ -127,6 +128,7 @@ impl KernelAgent {
         }
 
         let scope = MemoryScope {
+            agent_id: self.id.clone(),
             user_id: user_id.to_string(),
             workspace_root: std::path::PathBuf::from(workspace_root),
         };

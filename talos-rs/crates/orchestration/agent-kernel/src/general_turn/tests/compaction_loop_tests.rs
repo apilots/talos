@@ -126,7 +126,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
     let provider = Arc::new(SummaryProvider {
         requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
-            "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+            "{\"mode\":\"compaction\",\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -300,7 +300,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
     let provider = Arc::new(SummaryProvider {
         requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
-            "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+            "{\"mode\":\"compaction\",\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -387,7 +387,7 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
 #[tokio::test]
 async fn test_run_general_turn_updates_compaction_state_to_recovery_after_success() {
     let provider = Arc::new(SummaryProvider::new(vec![
-        "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+        "{\"mode\":\"compaction\",\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
         "ok".to_string(),
     ]));
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -476,7 +476,7 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
     let provider = Arc::new(SummaryProvider {
         requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
-            "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+            "{\"mode\":\"compaction\",\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -703,7 +703,7 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     let provider = Arc::new(SummaryProvider {
         requests: std::sync::Mutex::new(Vec::new()),
         responses: std::sync::Mutex::new(std::collections::VecDeque::from(vec![
-            "{\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
+            "{\"mode\":\"compaction\",\"title\":\"Prompt Compact\",\"facts\":[\"history condensed\"],\"open_tasks\":[\"continue the current turn\"]}".to_string(),
         ])),
     });
     let tool_registry = Arc::new(ToolRegistry::new());

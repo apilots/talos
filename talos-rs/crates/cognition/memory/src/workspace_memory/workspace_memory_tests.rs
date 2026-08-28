@@ -1,6 +1,14 @@
 use talos_types::MemoryKind;
 
 use super::*;
+use crate::MemoryAgentId;
+
+fn producer() -> UserWorkspaceMemoryProducer {
+    UserWorkspaceMemoryProducer::new(
+        MemoryAgentId::parse("agent-1").expect("agent id"),
+        1_784_251_800,
+    )
+}
 
 fn entry() -> UserWorkspaceMemoryEntry {
     UserWorkspaceMemoryEntry::builder()
@@ -10,18 +18,20 @@ fn entry() -> UserWorkspaceMemoryEntry {
         .kind(MemoryKind::Decision)
         .summary("Session model exclusively maintains User Workspace Memory.")
         .why("Scheduled rewriting conflicts with concurrent Session updates.")
-        .apply("Daily maintenance only writes Daily Memory.")
+        .apply("Dream maintenance only writes Dream Memory.")
         .build()
         .expect("entry should build")
 }
 
 #[test]
 fn template_is_canonical_okf_memory_document() {
-    let document = UserWorkspaceMemoryDocument::template().expect("template should build");
+    let document =
+        UserWorkspaceMemoryDocument::template(producer()).expect("template should build");
     let markdown = document.render().expect("template should render");
 
     assert!(markdown.contains("type: UserWorkspaceMemory"));
     assert!(markdown.contains("status: stable"));
+    assert!(markdown.contains("generated:"));
     assert!(markdown.contains("<!-- talos:user-workspace-memory:start -->"));
     assert!(markdown.contains("## Interaction Guidance"));
     assert!(markdown.contains("## Key Knowledge"));
@@ -31,7 +41,7 @@ fn template_is_canonical_okf_memory_document() {
 
 #[test]
 fn typed_entry_round_trips_through_standard_document_api() {
-    let created = UserWorkspaceMemoryDocument::template()
+    let created = UserWorkspaceMemoryDocument::template(producer())
         .expect("template should build")
         .upsert_entry(entry())
         .expect("entry should upsert");
@@ -51,7 +61,7 @@ fn typed_entry_round_trips_through_standard_document_api() {
 
 #[test]
 fn optional_field_clear_removes_existing_value() {
-    let document = UserWorkspaceMemoryDocument::template()
+    let document = UserWorkspaceMemoryDocument::template(producer())
         .expect("template should build")
         .create_entry(entry())
         .expect("entry should create")
@@ -105,7 +115,7 @@ fn document_rejects_directly_constructed_invalid_entry() {
     let mut invalid = entry();
     invalid.summary = "first line\nsecond line".to_string();
 
-    let error = UserWorkspaceMemoryDocument::template()
+    let error = UserWorkspaceMemoryDocument::template(producer())
         .expect("template should build")
         .upsert_entry(invalid)
         .expect_err("document boundary should validate direct values");
@@ -115,11 +125,11 @@ fn document_rejects_directly_constructed_invalid_entry() {
     );
 
     for error in [
-        UserWorkspaceMemoryDocument::template()
+        UserWorkspaceMemoryDocument::template(producer())
             .expect("template should build")
             .update_entry("Invalid Key", UserWorkspaceMemoryEntryUpdate::default())
             .expect_err("invalid update key should fail"),
-        UserWorkspaceMemoryDocument::template()
+        UserWorkspaceMemoryDocument::template(producer())
             .expect("template should build")
             .remove_entry("Invalid Key")
             .expect_err("invalid remove key should fail"),

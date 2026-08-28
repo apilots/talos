@@ -8,7 +8,7 @@ use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter, ReasoningOutput, Usage,
 };
 use talos_memory::{
-    MemoryScope, MemoryWriteBatch, MemoryWriter, UserWorkspaceMemoryEntry,
+    DreamMemoryFormationStore, MemoryScope, UserWorkspaceMemoryEntry,
     UserWorkspaceMemoryEntryQuery, UserWorkspaceMemoryEntryUpdate, UserWorkspaceMemoryReader,
     UserWorkspaceMemorySnapshot, UserWorkspaceMemoryWriter,
 };
@@ -24,11 +24,32 @@ struct TestLlmProvider;
 struct TestMemoryWriter;
 struct TestUserWorkspaceMemory;
 
-impl MemoryWriter for TestMemoryWriter {
+impl DreamMemoryFormationStore for TestMemoryWriter {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = talos_error::TalosResult<talos_memory::DreamMemoryDaySnapshot>,
+                > + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                Vec::new(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
+        _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = talos_error::TalosResult<()>> + Send + 'a>,
     > {
@@ -263,7 +284,7 @@ fn factory_rejects_disabled_definition() {
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(TestMemoryWriter),
+        dream_memory_store: Arc::new(TestMemoryWriter),
         user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
         user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),
@@ -290,7 +311,7 @@ fn factory_builds_kernel_agent_with_descriptor() {
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(FileSessionArtifactStore::default()),
         session_store: Arc::new(talos_store::session::MockSessionStore::new()),
-        memory_writer: Arc::new(TestMemoryWriter),
+        dream_memory_store: Arc::new(TestMemoryWriter),
         user_workspace_memory_reader: Arc::new(TestUserWorkspaceMemory),
         user_workspace_memory_writer: Arc::new(TestUserWorkspaceMemory),
         attachment_reader: Arc::new(talos_agent_kernel::RejectingAttachmentReader),

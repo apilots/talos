@@ -4,6 +4,7 @@ use talos_store::session::{SessionArtifactStore, SessionStore, TalosTurn};
 struct TestMemoryStore {
     workspace_dir: PathBuf,
     writes: Mutex<Vec<MemoryWriteBatch>>,
+    day_entries: Mutex<Vec<talos_memory::DreamMemoryEntry>>,
 }
 
 impl TestMemoryStore {
@@ -11,6 +12,7 @@ impl TestMemoryStore {
         Self {
             workspace_dir,
             writes: Mutex::new(Vec::new()),
+            day_entries: Mutex::new(Vec::new()),
         }
     }
 
@@ -24,19 +26,49 @@ impl TestMemoryStore {
             .expect("test memory writes mutex should lock")
             .clone()
     }
+
+    fn set_day_entries(&self, entries: Vec<talos_memory::DreamMemoryEntry>) {
+        *self
+            .day_entries
+            .lock()
+            .expect("test day entries mutex should lock") = entries;
+    }
 }
 
-impl MemoryWriter for TestMemoryStore {
+impl DreamMemoryFormationStore for TestMemoryStore {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = TalosResult<talos_memory::DreamMemoryDaySnapshot>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                self.day_entries
+                    .lock()
+                    .expect("test day entries mutex should lock")
+                    .clone(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        batch: MemoryWriteBatch,
+        request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
         Box::pin(async move {
             self.writes
                 .lock()
                 .expect("test memory writes mutex should lock")
-                .push(batch);
+                .push(request.batch().clone());
             Ok(())
         })
     }
@@ -44,11 +76,31 @@ impl MemoryWriter for TestMemoryStore {
 
 struct FailingMemoryWriter;
 
-impl MemoryWriter for FailingMemoryWriter {
+impl DreamMemoryFormationStore for FailingMemoryWriter {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = TalosResult<talos_memory::DreamMemoryDaySnapshot>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                Vec::new(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
+        _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
         Box::pin(async { Err(TalosError::internal("memory write failed".to_string())) })
     }
@@ -128,7 +180,7 @@ async fn run_general_turn(
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     kernel_config: &AgentKernelConfig,
     skill_options: GeneralTurnSkillOptions,
 ) -> TalosResult<GeneralTurnResult> {
@@ -140,7 +192,7 @@ async fn run_general_turn(
         llm_provider,
         tool_definition_provider,
         tool_executor_port,
-        memory_writer,
+        dream_memory_store,
         missing_user_workspace_memory(),
         kernel_config,
         skill_options,
@@ -157,7 +209,7 @@ async fn prepare_general_turn(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    memory_writer: Arc<dyn MemoryWriter>,
+    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<PreparedGeneralTurn> {
@@ -168,7 +220,7 @@ async fn prepare_general_turn(
         input,
         llm_provider,
         tool_definition_provider,
-        memory_writer,
+        dream_memory_store,
         missing_user_workspace_memory(),
         kernel_config,
         skill_options,
@@ -179,7 +231,7 @@ async fn prepare_general_turn(
 
 mod attachment_tests;
 mod compaction_loop_tests;
-mod daily_memory_tests;
+mod dream_memory_tests;
 mod final_response_tests;
 mod memory_summary_tests;
 mod memory_tool_loop_tests;

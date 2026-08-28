@@ -34,6 +34,12 @@ impl OkfExtensionFields {
 pub struct OkfVersion(String);
 
 impl OkfVersion {
+    /// Returns the OKF version implemented by this facade.
+    #[must_use]
+    pub fn current() -> Self {
+        Self(okf_core::OKF_VERSION.to_string())
+    }
+
     /// Parses a supported OKF version.
     pub fn parse(value: impl Into<String>) -> Option<Self> {
         let value = value.into();
@@ -62,6 +68,16 @@ impl OkfDate {
     #[must_use]
     pub fn parse(value: &str) -> Option<Self> {
         okf_core::Date::parse(value).map(Into::into)
+    }
+}
+
+impl std::fmt::Display for OkfDate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{:04}-{:02}-{:02}",
+            self.year, self.month, self.day
+        )
     }
 }
 

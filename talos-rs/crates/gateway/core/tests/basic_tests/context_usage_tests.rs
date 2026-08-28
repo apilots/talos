@@ -2,6 +2,7 @@ use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use talos_agent::{empty_skill_roots_resolver, AgentHarnessImpl, AgentHarnessParams};
 use talos_agent_kernel::RejectingAttachmentReader;
+use talos_config::{ModelInputKind, ProviderModelConfig};
 use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -9,12 +10,12 @@ use talos_llm_provider::{
     ModelBlockDelta, ModelBlockStarted, ModelBlockStream, ModelBlockStreamEvent, ModelOutputPhase,
     ReasoningOutput, Usage,
 };
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_memory::{DreamMemoryFormationStore, MemoryScope};
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
 use talos_types::{
-    ModelRef, ModelSelection, RecoverTimelineRequest, SessionActiveTurnRequest, SessionGetRequest,
-    TimelineActiveTurnStatus,
+    ModelInfo, ModelRef, ModelSelection, RecoverTimelineRequest, SessionActiveTurnRequest,
+    SessionGetRequest, TimelineActiveTurnStatus,
 };
 
 const AGENT_ID: &str = "context-usage-agent";
@@ -175,11 +176,31 @@ impl Tool for EchoTool {
 
 struct NoopMemoryWriter;
 
-impl MemoryWriter for NoopMemoryWriter {
+impl DreamMemoryFormationStore for NoopMemoryWriter {
+    fn read_day<'a>(
+        &'a self,
+        _scope: &'a MemoryScope,
+        date: talos_memory::DreamMemoryDate,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = TalosResult<talos_memory::DreamMemoryDaySnapshot>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            Ok(talos_memory::DreamMemoryDaySnapshot::new(
+                date,
+                talos_memory::DreamMemoryDayRevision::Missing,
+                Vec::new(),
+            ))
+        })
+    }
+
     fn write<'a>(
         &'a self,
         _scope: &'a MemoryScope,
-        _batch: MemoryWriteBatch,
+        _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
         Box::pin(async { Ok(()) })
     }
@@ -190,23 +211,52 @@ fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> AgentH
         "echo_usage",
     ])));
     registry.register(Arc::new(EchoTool));
+    let provider_router: Arc<dyn LlmProviderRouter> = Arc::new(StaticProviderRouter {
+        provider: Arc::new(TwoRoundProvider::default()),
+    });
+    let model_selection = ModelSelection::without_reasoning(ModelRef {
+        provider: config.llm.provider.clone(),
+        id: config.llm.model.clone(),
+    });
+    let inner_model = Arc::new(
+        talos_agent::InnerModelClient::builder()
+            .configured_model(None)
+            .agent_default_model(model_selection.model_ref.clone())
+            .model_catalog(vec![ModelInfo::from_provider_model(
+                model_selection.model_ref.provider.clone(),
+                ProviderModelConfig {
+                    id: model_selection.model_ref.id.clone(),
+                    name: model_selection.model_ref.id.clone(),
+                    context_window: 128_000,
+                    reasoning: false,
+                    reasoning_effort: Default::default(),
+                    speed: Default::default(),
+                    input: vec![ModelInputKind::Text],
+                    cost: Default::default(),
+                },
+            )])
+            .provider_router(provider_router.clone())
+            .profile_store(Arc::new(talos_store::profile::MockProfileStore::default()))
+            .profile_timezone("UTC".to_string())
+            .build()
+            .expect("inner model should build"),
+    );
+    let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
     AgentHarnessImpl::new(AgentHarnessParams {
         id: AGENT_ID.to_string(),
         name: "Context Usage Agent".to_string(),
         description: "Context usage integration test agent".to_string(),
-        llm_provider_router: Arc::new(StaticProviderRouter {
-            provider: Arc::new(TwoRoundProvider::default()),
-        }),
-        model_selection: ModelSelection::without_reasoning(ModelRef {
-            provider: config.llm.provider.clone(),
-            id: config.llm.model.clone(),
-        }),
+        llm_provider_router: provider_router,
+        model_selection,
+        inner_model,
         tool_registry: registry,
         kernel_config: config.agent.kernel.clone(),
         skill_roots_resolver: empty_skill_roots_resolver(),
         session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
         session_store: store,
-        memory_writer: Arc::new(NoopMemoryWriter),
+        dream_memory_store: Arc::new(NoopMemoryWriter),
+        user_workspace_memory_reader: user_workspace_memory.clone(),
+        user_workspace_memory_writer: user_workspace_memory,
         attachment_reader: Arc::new(RejectingAttachmentReader),
     })
     .expect("integration agent should build")

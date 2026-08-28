@@ -191,13 +191,6 @@ impl OkfFrontmatterBuilder {
         self
     }
 
-    /// Sets the legacy v0.1 timestamp for producer compatibility.
-    #[must_use]
-    pub fn legacy_timestamp(mut self, value: crate::OkfDateTime) -> Self {
-        self.set_string("timestamp", value.to_iso8601());
-        self
-    }
-
     /// Sets the runtime for an Attested Computation concept.
     #[must_use]
     pub fn computation_runtime(mut self, value: impl Into<String>) -> Self {

@@ -1,5 +1,8 @@
 use super::*;
-use talos_memory::{UserWorkspaceMemoryEntry, UserWorkspaceMemorySection};
+use talos_memory::{
+    MemoryAgentId, UserWorkspaceMemoryEntry, UserWorkspaceMemoryProducer,
+    UserWorkspaceMemorySection,
+};
 use talos_types::MemoryKind;
 
 #[test]
@@ -66,10 +69,12 @@ fn reflection_skips_semantically_unchanged_updates() {
         .summary("Keep responses concise.")
         .build()
         .unwrap();
-    let document = talos_memory::UserWorkspaceMemoryDocument::template()
-        .unwrap()
-        .upsert_entry(entry.clone())
-        .unwrap();
+    let document = talos_memory::UserWorkspaceMemoryDocument::template(
+        UserWorkspaceMemoryProducer::new(MemoryAgentId::parse("agent-1").unwrap(), 1_784_251_800),
+    )
+    .unwrap()
+    .upsert_entry(entry.clone())
+    .unwrap();
     let snapshot = UserWorkspaceMemorySnapshot::Valid {
         raw_content: document.render().unwrap(),
         updated_at: None,

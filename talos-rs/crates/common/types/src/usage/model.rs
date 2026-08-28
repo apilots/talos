@@ -14,7 +14,7 @@ pub enum ModelUsageKind {
     Title,
     /// Agent-owned User Workspace Memory reflection.
     Memory,
-    /// Agent-owned Daily Memory candidate formation.
+    /// Agent-owned Dream Memory candidate formation.
     Dream,
 }
 

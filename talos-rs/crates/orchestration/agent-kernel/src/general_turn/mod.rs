@@ -22,7 +22,7 @@ use talos_llm_provider::{
     ModelBlockStreamEvent, ModelOutputPhase, ModelSpeed, ReasoningContinuation, ReasoningEffort,
     ReasoningOutput, ToolChoice, ToolDefinition,
 };
-use talos_memory::{MemoryScope, MemoryWriteBatch, MemoryWriter};
+use talos_memory::{DreamMemoryFormationStore, MemoryScope, MemoryWriteBatch};
 use talos_prompt::{
     CompactionTrimUnitKind, ContinuityAnswerMode, PromptBuildConfig, PromptBuilder,
     PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
@@ -39,35 +39,12 @@ use talos_types::talos::{
 use talos_types::MemoryGetResponse;
 use tokio::sync::mpsc;
 use tracing::warn;
-use types::CompactionMemoryOutput;
+use types::{CompactionMemoryOutput, DreamMemoryModelOutput};
 use uuid::Uuid;
 
-const MEMORY_COMPACTION_PROMPT: &str = r#"Extract durable memory from this conversation as JSON.
-Return ONLY valid JSON, no markdown fences, no explanation.
-
-Schema:
-{
-  "title": "one-line core topic, max 12 words, no trailing punctuation",
-  "facts": ["..."],
-  "preferences": ["..."],
-  "open_tasks": ["..."],
-  "risks": ["..."],
-  "memory_candidates": [
-    {
-      "title": "durable memory title",
-      "body": "durable fact, preference, decision, task, or episode",
-      "kind": "preference" | "fact" | "decision" | "task" | "episode",
-      "importance": "low" | "normal" | "high"
-    }
-  ]
-}
-
-Omit any field whose array would be empty. Keep total under 200 words.
-Return at most 8 memory_candidates. Exclude transient logs and unstable details.
-Use the same language as the conversation transcript for all field values."#;
-
 mod attachments;
-mod daily_memory;
+mod dream_memory;
+mod dream_memory_prompt;
 mod finalize;
 mod guard;
 mod loop_run;
@@ -92,7 +69,7 @@ mod working_context_tests;
 
 pub use attachments::build_active_turn_input;
 
-pub use daily_memory::form_daily_session_memory;
+pub use dream_memory::form_dream_session_memory;
 pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{

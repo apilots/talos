@@ -8,6 +8,10 @@ use talos_llm_provider::{
     ChatChunk, ChatRequest, ChatResponse, ChatStream, LlmProvider, LlmProviderRouter,
     ReasoningOutput, Usage,
 };
+use talos_memory::{
+    DreamMemoryDate, DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryProvenance,
+    MemoryAgentId, MemoryTimezone, MemoryUserId,
+};
 use talos_storage::SqliteStorage;
 use talos_store::profile::{MockProfileStore, ProfileUsageUpdate};
 use talos_store::session::{DatabaseSessionStore, SessionArtifactStore, SessionRecord, TalosTurn};
@@ -16,7 +20,7 @@ use talos_types::talos::{
 };
 use talos_types::{
     resolve_default_model_selection, resolve_model_catalog, ModelRef, ModelSelection,
-    ModelUsageKind, SessionConf,
+    ModelUsageKind, SessionConf, TalosConfig,
 };
 use tokio::sync::mpsc;
 
@@ -72,10 +76,25 @@ impl LlmProviderRouter for TestRouter {
 }
 
 #[tokio::test]
-async fn daily_maintenance_processes_two_user_scopes() {
+async fn dream_maintenance_processes_two_user_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
+    let base_workspace = tempfile::tempdir().expect("base workspace");
     let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    config.agent.kernel.workspace_dir = base_workspace.path().to_string_lossy().to_string();
+    let mut agent_kernel = config.agent.kernel.clone();
+    agent_kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    agent_kernel.timezone = "Asia/Shanghai".to_string();
+    config.agent.agents = vec![talos_config::AgentDefinitionConfig {
+        id: "dream-agent".to_string(),
+        name: "Dream Agent".to_string(),
+        kind: talos_config::AgentKind::Kernel,
+        enabled: true,
+        description: None,
+        default_workspace_id: None,
+        runtime_config: Some(talos_config::AgentRuntimeConfig::Kernel {
+            kernel: agent_kernel.clone(),
+        }),
+    }];
     config.llm.provider = "anthropic".to_string();
     config.llm.model = "default-maintenance-model".to_string();
     config.llm.anthropic.models = vec![
@@ -106,6 +125,9 @@ async fn daily_maintenance_processes_two_user_scopes() {
     });
     let default_selection =
         resolve_default_model_selection(&config.llm).expect("default model selection");
+    let agent_definitions =
+        talos_agent::AgentDefinitionLoader::load(&config.agent, &default_selection)
+            .expect("agent definitions");
     let storage = Arc::new(SqliteStorage::new(":memory:").await.expect("storage"));
     run_test_migrations(storage.pool()).await;
     let sessions = Arc::new(
@@ -123,7 +145,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
             .insert_session_record(&record, "test")
             .await
             .expect("insert session");
-        let kernel_config = resolve_effective_kernel_workspace(&config.agent.kernel, user_id)
+        let kernel_config = resolve_effective_kernel_workspace(&agent_kernel, user_id)
             .expect("user workspace")
             .kernel_config;
         artifacts
@@ -179,17 +201,17 @@ async fn daily_maintenance_processes_two_user_scopes() {
             .build()
             .expect("inner model client"),
     );
-    let maintenance = MemoryDailyMaintenance::new(
+    let maintenance = DreamMemoryMaintenance::new(
         sessions.clone(),
         sessions.clone(),
         artifacts.clone(),
         memory,
         inner_model,
-        config.clone(),
-        MemoryDailyMaintenanceConfig {
+        &agent_definitions,
+        DreamMemoryMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
-            ..MemoryDailyMaintenanceConfig::default()
+            ..DreamMemoryMaintenanceConfig::default()
         },
     );
 
@@ -197,28 +219,41 @@ async fn daily_maintenance_processes_two_user_scopes() {
 
     assert_eq!(
         report,
-        MemoryDailyMaintenanceReport {
+        DreamMemoryMaintenanceReport {
             processed_sessions: 2,
             failed_sessions: 0,
         }
     );
     for user_id in ["u1", "u2"] {
+        let user_workspace = workspace.path().join("users").join(user_id);
         assert!(
-            !workspace
-                .path()
-                .join("users")
-                .join(user_id)
-                .join("MEMORY.md")
-                .exists(),
-            "Daily Maintenance must not create User Workspace Memory"
+            !user_workspace.join("MEMORY.md").exists(),
+            "Dream Memory maintenance must not create User Workspace Memory"
         );
+        let content = std::fs::read_to_string(user_workspace.join("memory/2026-07-17.md"))
+            .expect("read formed Dream Memory");
+        let context = DreamMemoryDocumentContext::new(
+            MemoryAgentId::parse("dream-agent").expect("agent id"),
+            MemoryUserId::parse(user_id).expect("user id"),
+            DreamMemoryDate::parse("2026-07-17").expect("date"),
+            MemoryTimezone::new(
+                talos_config::parse_timezone(&agent_kernel.timezone).expect("timezone"),
+            ),
+        );
+        let document =
+            DreamMemoryDocument::parse(context, &content).expect("canonical Dream Memory");
+        assert_eq!(document.entries().len(), 1);
+        assert!(matches!(
+            document.entries()[0].provenance(),
+            DreamMemoryProvenance::Generated { .. }
+        ));
     }
 
     let second_report = maintenance.run().await.expect("second daily maintenance");
 
     assert_eq!(
         second_report,
-        MemoryDailyMaintenanceReport {
+        DreamMemoryMaintenanceReport {
             processed_sessions: 0,
             failed_sessions: 0,
         }
@@ -282,7 +317,7 @@ async fn daily_maintenance_processes_two_user_scopes() {
     maintenance
         .process_session(record_before_failure.clone())
         .await
-        .expect_err("daily memory must fail when usage recording fails");
+        .expect_err("Dream Memory must fail when usage recording fails");
     let record_after_failure = sessions
         .get_session_record("s1")
         .await
@@ -295,14 +330,14 @@ async fn daily_maintenance_processes_two_user_scopes() {
 
     assert!(
         !memory_path.exists(),
-        "Daily Maintenance failure must not create User Workspace Memory"
+        "Dream Memory maintenance failure must not create User Workspace Memory"
     );
 }
 
 fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> SessionRecord {
     SessionRecord {
         id: session_id.to_string(),
-        agent_id: "talos".to_string(),
+        agent_id: "dream-agent".to_string(),
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
         workspace_id: None,
         title: "Memory test".to_string(),
@@ -339,6 +374,6 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
 
 fn candidate_response(title: &str) -> String {
     format!(
-        r#"{{"memory_candidates":[{{"title":"{title}","body":"durable memory","kind":"fact","importance":"high"}}]}}"#
+        r#"{{"mode":"maintenance","memory_candidates":[{{"title":"{title}","body":"durable memory","kind":"fact","importance":"high"}}]}}"#
     )
 }

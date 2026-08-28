@@ -1,3 +1,7 @@
+use super::dream_memory_prompt::{
+    date_for_timestamp, formation_user_prompt, DreamMemoryFormationMode,
+    DREAM_MEMORY_FORMATION_PROMPT,
+};
 use super::*;
 use talos_error::TalosMemoryErrorKind;
 use talos_llm_provider::Usage;
@@ -77,7 +81,7 @@ pub struct MemoryFormationParams<'a> {
     /// Provider used for the single structured extraction request.
     pub llm_provider: Arc<dyn LlmProvider>,
     /// Long-term memory write boundary.
-    pub memory_writer: &'a dyn MemoryWriter,
+    pub dream_memory_store: &'a dyn DreamMemoryFormationStore,
     /// User-scoped long-term memory destination.
     pub memory_scope: &'a MemoryScope,
     /// Persisted transcript and summary boundary.
@@ -411,20 +415,25 @@ async fn request_compaction_output(
     session_id: &str,
     selected_model: &str,
     llm_provider: Arc<dyn LlmProvider>,
-    user_prompt: String,
+    transcript: &str,
+    snapshot: &talos_memory::DreamMemoryDaySnapshot,
 ) -> TalosResult<(CompactionMemoryOutput, Usage)> {
     let response = llm_provider
         .chat(
             ChatRequest::builder()
                 .model(selected_model.to_string())
                 .messages(vec![
-                    ChatMessage::system(MEMORY_COMPACTION_PROMPT),
-                    ChatMessage::user(user_prompt),
+                    ChatMessage::system(DREAM_MEMORY_FORMATION_PROMPT),
+                    ChatMessage::user(formation_user_prompt(
+                        DreamMemoryFormationMode::Compaction,
+                        transcript,
+                        snapshot,
+                    )?),
                 ])
                 .build(),
         )
         .await?;
-    let parsed = serde_json::from_str::<CompactionMemoryOutput>(response.content.trim()).map_err(
+    let parsed = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
         |error| {
             talos_error::TalosError::memory_error(
                 TalosMemoryErrorKind::SummaryParseFailed,
@@ -432,6 +441,28 @@ async fn request_compaction_output(
             )
         },
     )?;
+    let DreamMemoryModelOutput::Compaction {
+        title,
+        facts,
+        preferences,
+        open_tasks,
+        risks,
+        memory_candidates,
+    } = parsed
+    else {
+        return Err(talos_error::TalosError::memory_error(
+            TalosMemoryErrorKind::SummaryParseFailed,
+            format!("Dream Memory mode mismatch for session '{session_id}'"),
+        ));
+    };
+    let parsed = CompactionMemoryOutput {
+        title,
+        facts,
+        preferences,
+        open_tasks,
+        risks,
+        memory_candidates,
+    };
     if parsed.title.trim().is_empty() {
         return Err(talos_error::TalosError::memory_error(
             TalosMemoryErrorKind::SummaryParseFailed,
@@ -470,7 +501,7 @@ pub async fn compact_session_memory(
         session_id,
         selected_model,
         llm_provider,
-        memory_writer,
+        dream_memory_store,
         memory_scope,
         session_artifact_store,
         session_store,
@@ -586,22 +617,6 @@ pub async fn compact_session_memory(
         return Ok(usage_report);
     }
 
-    let selected_model = kernel_config
-        .compaction
-        .model
-        .clone()
-        .unwrap_or_else(|| selected_model.to_string());
-    let llm_provider_for_summary = llm_provider.clone();
-    let transcript_prompt = format!("Conversation transcript:\n{}", transcript);
-    let (summary, summary_usage) = request_compaction_output(
-        session_id,
-        &selected_model,
-        llm_provider_for_summary,
-        transcript_prompt,
-    )
-    .await?;
-    usage_report.record_usage(&summary_usage);
-    let session_summary_content = render_session_summary_content(&summary);
     let turns = session_artifact_store
         .load_turn_window(
             std::path::Path::new(&kernel_config.workspace_dir),
@@ -646,17 +661,37 @@ pub async fn compact_session_memory(
                 ),
             )
         })?;
+    let date = date_for_timestamp(occurred_at, &kernel_config.timezone)?;
+    let snapshot = dream_memory_store.read_day(memory_scope, date).await?;
+    let selected_model = kernel_config
+        .compaction
+        .model
+        .clone()
+        .unwrap_or_else(|| selected_model.to_string());
+    let (summary, summary_usage) = request_compaction_output(
+        session_id,
+        &selected_model,
+        llm_provider,
+        &transcript,
+        &snapshot,
+    )
+    .await?;
+    usage_report.record_usage(&summary_usage);
+    let session_summary_content = render_session_summary_content(&summary);
     if memory_processed_until_seq == previous_covers_until_seq {
-        memory_writer
+        dream_memory_store
             .write(
                 memory_scope,
-                MemoryWriteBatch {
-                    session_id: session_id.to_string(),
-                    occurred_at,
-                    source_from_seq: coverage.covers_from_seq,
-                    source_until_seq: coverage.covers_until_seq,
-                    candidates: summary.memory_candidates,
-                },
+                talos_memory::DreamMemoryWriteRequest::from_snapshot(
+                    &snapshot,
+                    MemoryWriteBatch {
+                        session_id: session_id.to_string(),
+                        occurred_at,
+                        source_from_seq: coverage.covers_from_seq,
+                        source_until_seq: coverage.covers_until_seq,
+                        candidates: summary.memory_candidates,
+                    },
+                ),
             )
             .await?;
         session_store
