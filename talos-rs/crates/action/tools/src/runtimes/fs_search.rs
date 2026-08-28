@@ -8,7 +8,7 @@ use talos_tools_sandbox::{SandboxStdin, ToolProcessCommand};
 use talos_types::talos::TalosToolSearchMatch;
 use tokio::io::AsyncReadExt;
 
-use crate::runtimes::fs_read::resolve_tool_path;
+use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
 use crate::runtimes::{map_sandbox_process_error, process_environment, resolve_executable};
 use crate::ToolContext;
 
@@ -98,7 +98,7 @@ pub async fn run(
     }
 
     let search_path = if let Some(path) = request.path.as_deref() {
-        resolve_tool_path(path, context)?
+        normalize_existing_tool_path(&resolve_tool_path(path, context)?)?.into_path_buf()
     } else {
         crate::runtimes::resolve_base_dir(context)?
     };

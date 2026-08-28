@@ -95,12 +95,23 @@ async fn grep_rejects_explicit_dotenv_files_in_full_access_mode() {
     let context = crate::test_support::full_access_process_context(
         crate::ToolContext::new("session", "user").with_project_root(dir.path()),
     );
+    let env_file = dir.path().join(".env");
+    let env_variant = dir.path().join(".env.local");
+    tokio::fs::write(&env_file, "SECRET=canary\n")
+        .await
+        .expect("env fixture should write");
+    tokio::fs::write(&env_variant, "SECRET=canary\n")
+        .await
+        .expect("env variant fixture should write");
+    let mut files = vec![env_file, env_variant];
+    #[cfg(unix)]
+    {
+        let link = dir.path().join("visible-link");
+        std::os::unix::fs::symlink(&files[0], &link).expect("env symlink should create");
+        files.push(link);
+    }
 
-    for file_name in [".env", ".env.local"] {
-        let file = dir.path().join(file_name);
-        tokio::fs::write(&file, "SECRET=canary\n")
-            .await
-            .expect("env fixture should write");
+    for file in files {
         let error = run(
             &GrepFilesRequest {
                 pattern: "canary".to_string(),
