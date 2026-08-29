@@ -41,7 +41,6 @@ payload = {
             "text": os.environ["INPUT_TEXT"]
         }
     ],
-    "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

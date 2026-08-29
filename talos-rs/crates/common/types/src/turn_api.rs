@@ -14,9 +14,6 @@ pub struct StartTurnRequest {
     pub input: Vec<TalosInputItem>,
     #[serde(default)]
     #[ts(optional)]
-    pub workspace_id: Option<String>,
-    #[serde(default)]
-    #[ts(optional)]
     pub context: Option<TalosContext>,
     #[serde(default)]
     #[ts(optional)]
@@ -40,12 +37,10 @@ pub struct StartTurnRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
 pub struct RetryTurnRequest {
     pub session_id: String,
     pub input: Vec<TalosInputItem>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub workspace_id: Option<String>,
     pub client_message_id: String,
     pub retry_of_message_id: String,
 }

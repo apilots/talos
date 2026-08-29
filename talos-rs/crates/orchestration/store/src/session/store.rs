@@ -144,11 +144,16 @@ impl DatabaseSessionStore {
                 TalosError::internal(format!("session '{id}' is missing its agent binding"))
             })?;
 
+        let workspace_id = Self::normalized_optional_string(row.get_string("workspace_id"))
+            .ok_or_else(|| {
+                TalosError::internal(format!("session '{id}' is missing its workspace binding"))
+            })?;
+
         Ok(SessionRecord {
             id,
             agent_id,
             tree_identity,
-            workspace_id: Self::normalized_optional_string(row.get_string("workspace_id")),
+            workspace_id,
             title: row
                 .get_string("title")
                 .filter(|title| !title.trim().is_empty())
@@ -243,35 +248,21 @@ impl DatabaseSessionStore {
             vec![
                 "last_activity".to_string(),
                 "title".to_string(),
-                "context_json".to_string(),
                 "model".to_string(),
                 "message_count".to_string(),
                 "latest_turn_seq".to_string(),
                 "usage_json".to_string(),
                 "conf_json".to_string(),
-                "workspace_id".to_string(),
-                "project_id".to_string(),
                 "current_directory".to_string(),
             ],
             vec![
                 Value::Number(serde_json::Number::from(record.last_activity)),
                 Value::String(record.title.clone()),
-                Value::String(Self::build_context_json(&record.context)?),
                 Value::String(record.model.clone()),
                 Value::Number(serde_json::Number::from(record.message_count)),
                 Value::Number(serde_json::Number::from(record.latest_turn_seq)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
-                record
-                    .workspace_id
-                    .clone()
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
-                record
-                    .project_id
-                    .clone()
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
                 record
                     .current_directory
                     .clone()
@@ -362,11 +353,7 @@ impl SessionStore for DatabaseSessionStore {
                 Value::Number(serde_json::Number::from(record.memory_processed_until_seq)),
                 Value::String(Self::build_usage_json(&record.usage)?),
                 Value::String(Self::build_conf_json(&record.conf)?),
-                record
-                    .workspace_id
-                    .clone()
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
+                Value::String(record.workspace_id.clone()),
                 record
                     .project_id
                     .clone()

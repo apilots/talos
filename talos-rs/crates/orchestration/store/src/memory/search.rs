@@ -54,10 +54,10 @@ impl MemoryStore {
             ));
         }
         sqlx::query(&format!(
-            "SELECT {} FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND memory_id = ?",
+            "SELECT {} FROM memory_entries WHERE workspace_id = ? AND user_id = ? AND workspace_root = ? AND memory_id = ?",
             record_columns()
         ))
-        .bind(index_scope.agent_id())
+        .bind(index_scope.workspace_id())
         .bind(index_scope.user_id())
         .bind(index_scope.workspace_root())
         .bind(memory_id)
@@ -125,8 +125,8 @@ fn push_search_filters<'a>(
     scope: &'a MemoryIndexScope,
     query: &MemorySearchQuery,
 ) {
-    sql.push(" AND e.agent_id = ")
-        .push_bind(scope.agent_id())
+    sql.push(" AND e.workspace_id = ")
+        .push_bind(scope.workspace_id())
         .push(" AND e.user_id = ")
         .push_bind(scope.user_id())
         .push(" AND e.workspace_root = ")

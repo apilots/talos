@@ -1,6 +1,6 @@
 {
   "name": "@talos/sdk-browser",
-  "version": "0.1.7",
+  "version": "0.1.8-SNAPSHOT",
   "private": true,
   "type": "module",
   "exports": {

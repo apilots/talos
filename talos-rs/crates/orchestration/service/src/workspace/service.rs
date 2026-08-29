@@ -1,67 +1,41 @@
 use chrono::Utc;
 use serde_json::{json, Value};
-use talos_config::{
-    resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
-    AgentRuntimeConfig,
-};
+use talos_config::validate_session_workspace_user;
 use talos_error::{TalosError, TalosResult};
 use talos_types::{TalosConfig, TalosSession};
 
-use super::types::EffectiveAgentWorkspace;
+use super::types::EffectiveUserWorkspace;
 use crate::access::Actor;
 
 #[derive(Clone)]
 pub struct EffectiveWorkspaceResolver {
     base_config: TalosConfig,
-    default_agent_id: String,
-    default_kernel_config: AgentKernelConfig,
 }
 
 impl EffectiveWorkspaceResolver {
     pub fn new(base_config: TalosConfig) -> Self {
-        let (default_agent_id, default_kernel_config) = base_config
-            .agent
-            .agents
-            .iter()
-            .find(|definition| definition.enabled)
-            .map(|definition| {
-                let kernel_config = match &definition.runtime_config {
-                    Some(AgentRuntimeConfig::Kernel { kernel }) => kernel.clone(),
-                    None => base_config.agent.kernel.clone(),
-                };
-                (definition.id.trim().to_string(), kernel_config)
-            })
-            .unwrap_or_else(|| ("default".to_string(), base_config.agent.kernel.clone()));
-        Self {
-            base_config,
-            default_agent_id,
-            default_kernel_config,
-        }
+        Self { base_config }
     }
 
-    pub fn default_agent_id(&self) -> &str {
-        &self.default_agent_id
-    }
-
-    pub fn default_kernel_config(&self) -> &AgentKernelConfig {
-        &self.default_kernel_config
-    }
-
-    pub fn resolve_for_actor(&self, actor: &Actor) -> TalosResult<EffectiveAgentWorkspace> {
-        self.resolve_for_user_id(&actor.user_id, actor.username.clone())
+    pub fn resolve_for_actor(&self, actor: &Actor) -> TalosResult<EffectiveUserWorkspace> {
+        self.resolve_for_user_id(
+            &actor.user_id,
+            actor.username.clone(),
+            self.base_config.default_workspace_id(),
+        )
     }
 
     pub fn resolve_for_session(
         &self,
         session: &TalosSession,
-    ) -> TalosResult<EffectiveAgentWorkspace> {
+    ) -> TalosResult<EffectiveUserWorkspace> {
         ensure_session_user_consistency(session)?;
-        self.resolve_for_user_id(&session.user_id, None)
+        self.resolve_for_user_id(&session.user_id, None, &session.context.workspace_id)
     }
 
     pub async fn write_profile_snapshot(
         &self,
-        workspace: &EffectiveAgentWorkspace,
+        workspace: &EffectiveUserWorkspace,
     ) -> TalosResult<()> {
         let path = workspace.user_workspace_dir.join("profile.json");
         if profile_snapshot_matches(&path, workspace).await? {
@@ -84,17 +58,18 @@ impl EffectiveWorkspaceResolver {
         &self,
         user_id: &str,
         username: Option<String>,
-    ) -> TalosResult<EffectiveAgentWorkspace> {
-        let resolved = resolve_effective_kernel_workspace(&self.default_kernel_config, user_id)?;
+        workspace_id: &str,
+    ) -> TalosResult<EffectiveUserWorkspace> {
+        let resolved = self.base_config.resolve_workspace(workspace_id, user_id)?;
         let mut config = self.base_config.clone();
-        config.agent.kernel = resolved.kernel_config.clone();
+        config.agent.kernel.workspace_dir = resolved.root.to_string_lossy().into_owned();
 
-        Ok(EffectiveAgentWorkspace {
-            agent_id: self.default_agent_id.clone(),
+        Ok(EffectiveUserWorkspace {
+            workspace_id: resolved.workspace_id,
             user_id: resolved.user_id,
             username,
-            base_workspace_dir: resolved.base_workspace_dir,
-            user_workspace_dir: resolved.user_workspace_dir,
+            base_workspace_dir: self.base_config.workspace_root_prefix(workspace_id)?,
+            user_workspace_dir: resolved.root,
             config,
         })
     }
@@ -107,7 +82,7 @@ pub fn ensure_session_user_consistency(session: &TalosSession) -> TalosResult<()
 
 async fn profile_snapshot_matches(
     path: &std::path::Path,
-    workspace: &EffectiveAgentWorkspace,
+    workspace: &EffectiveUserWorkspace,
 ) -> TalosResult<bool> {
     let Some(content) = talos_fs::read_file(path).await? else {
         return Ok(false);

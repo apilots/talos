@@ -94,8 +94,8 @@ pub use upgrade::{
     ConfigUpgradeReport,
 };
 pub use workspace::{
-    resolve_effective_kernel_workspace, validate_session_workspace_user,
-    validate_user_workspace_segment, EffectiveKernelWorkspace,
+    validate_session_workspace_user, validate_user_workspace_segment, EffectiveWorkspace,
+    WorkspaceConfig, WorkspaceDefinition, DEFAULT_WORKSPACE_ID,
 };
 
 /// 主配置结构
@@ -104,6 +104,9 @@ pub use workspace::{
 pub struct Config {
     #[serde(skip)]
     source_path: Option<PathBuf>,
+
+    #[serde(skip)]
+    runtime_paths: Option<TalosPaths>,
 
     /// Global timezone used for user-visible time rendering.
     #[serde(default = "default_timezone")]
@@ -116,6 +119,10 @@ pub struct Config {
     /// Long-term memory file layout and file-list limits.
     #[serde(default)]
     pub memory: MemoryConfig,
+
+    /// Product-managed logical Workspace definitions and default routing.
+    #[serde(default)]
+    pub workspaces: WorkspaceConfig,
 
     /// Agent 配置
     #[serde(default)]
@@ -174,9 +181,11 @@ impl Default for Config {
     fn default() -> Self {
         let mut config = Self {
             source_path: None,
+            runtime_paths: None,
             timezone: default_timezone(),
             automation: AutomationConfig::default(),
             memory: MemoryConfig::default(),
+            workspaces: WorkspaceConfig::default(),
             agent: AgentConfig::default(),
             gateway: GatewayConfig::default(),
             cloud: CloudConfig::default(),
@@ -211,7 +220,42 @@ impl Config {
     }
 
     pub fn talos_paths(&self) -> TalosPaths {
-        TalosPaths::resolve()
+        self.runtime_paths
+            .clone()
+            .unwrap_or_else(TalosPaths::resolve)
+    }
+
+    pub fn default_workspace_id(&self) -> &str {
+        &self.workspaces.default_workspace_id
+    }
+
+    pub fn resolve_workspace(
+        &self,
+        workspace_id: &str,
+        user_id: &str,
+    ) -> TalosResult<EffectiveWorkspace> {
+        self.workspaces
+            .resolve(&self.talos_paths(), workspace_id, user_id)
+    }
+
+    pub fn workspace_root_prefix(&self, workspace_id: &str) -> TalosResult<PathBuf> {
+        self.workspaces
+            .root_prefix(&self.talos_paths(), workspace_id)
+    }
+
+    /// Replace configured Workspace definitions for an embedded runtime or test.
+    pub fn with_workspace_definition(mut self, definition: WorkspaceDefinition) -> Self {
+        self.workspaces = WorkspaceConfig {
+            default_workspace_id: definition.workspace_id.clone(),
+            definitions: vec![definition],
+        };
+        self
+    }
+
+    /// Override runtime filesystem roots for an embedded runtime or test.
+    pub fn with_runtime_paths(mut self, paths: TalosPaths) -> Self {
+        self.runtime_paths = Some(paths);
+        self
     }
 
     pub fn apply_derived_paths(&mut self) {
@@ -234,10 +278,6 @@ impl Config {
             };
         }
         self.agent.kernel.timezone = self.timezone.clone();
-        self.agent.kernel.workspace_dir = paths
-            .workspace_dir_for_agent(&self.agent.name)
-            .to_string_lossy()
-            .to_string();
     }
 
     pub fn current_provider_config(&self) -> Option<&ProviderConfig> {

@@ -837,7 +837,6 @@ fn turn_start_request() -> String {
             "params": {
                 "session_id": "s1",
                 "input": [{ "type": "text", "text": "hello" }],
-                "workspace_id": null,
                 "client_request_id": "request-1"
             }
         })

@@ -84,8 +84,7 @@ use self::skills::{
 use self::state::HttpApiState;
 use self::user_profile::{current_user_handler, logout_handler};
 use self::workspace_docs::{
-    get_workspace_doc_handler, get_workspace_info_handler, list_workspace_docs_handler,
-    put_workspace_doc_handler,
+    get_workspace_doc_handler, list_workspace_docs_handler, put_workspace_doc_handler,
 };
 use errors::ApiError;
 use talos_auth::AuthService;
@@ -228,7 +227,6 @@ impl HttpServer {
             .route("/v1/memory/search", get(search_memory_files_handler))
             .route("/v1/memory/entries/:memory_id", get(get_memory_handler))
             .route("/v1/workspace/docs", get(list_workspace_docs_handler))
-            .route("/v1/workspace/info", get(get_workspace_info_handler))
             .route(
                 "/v1/plugin/sources",
                 get(list_plugin_sources_handler).post(add_plugin_source_handler),

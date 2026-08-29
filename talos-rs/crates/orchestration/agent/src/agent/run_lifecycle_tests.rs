@@ -17,7 +17,7 @@ async fn dropping_stream_receiver_does_not_cancel_server_run() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let session = build_test_session("session-disconnected", "workspace-a");
+    let session = build_test_session("session-disconnected", "default");
     let turn_id = "turn-disconnected";
 
     let stream = agent

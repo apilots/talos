@@ -1,5 +1,35 @@
 use super::*;
 
+fn canonical_memory(body: &str) -> String {
+    let timezone = talos_config::parse_timezone("Asia/Shanghai").expect("timezone");
+    let context = talos_memory::DreamMemoryDocumentContext::new(
+        talos_memory::MemoryAgentId::parse("default").expect("workspace id"),
+        talos_memory::MemoryUserId::parse("static-token").expect("user id"),
+        talos_memory::DreamMemoryDate::parse("2026-04-04").expect("date"),
+        talos_memory::MemoryTimezone::new(timezone),
+    );
+    let mut document = talos_memory::DreamMemoryDocument::new(context, 1_775_268_000)
+        .expect("Dream Memory document");
+    document
+        .create_entry(
+            talos_memory::DreamMemoryEntry::builder()
+                .memory_id(
+                    talos_memory::MemoryId::parse("mem_0123456789abcdef0123456789abcdef")
+                        .expect("memory id"),
+                )
+                .title("Example")
+                .body(body)
+                .occurred_at(1_775_268_000)
+                .kind(talos_types::MemoryKind::Fact)
+                .importance(talos_types::MemoryImportance::Normal)
+                .provenance(talos_memory::DreamMemoryProvenance::UserAuthored)
+                .build()
+                .expect("memory entry"),
+        )
+        .expect("create memory entry");
+    document.render().expect("render Dream Memory")
+}
+
 async fn test_state_with_config_and_plugin_manager(
     config: talos_types::TalosConfig,
     plugin_manager: talos_service::PluginManagerService,
@@ -418,32 +448,6 @@ async fn test_get_workspace_doc_handler_returns_exists_false_for_missing_file() 
 }
 
 #[tokio::test]
-async fn test_get_workspace_info_handler_returns_effective_paths() {
-    let (config, workspace_dir) = isolated_test_config();
-    let state = test_state_with_config(config, false).await;
-
-    let response = get_workspace_info_handler(State(state), axum::extract::Extension(test_auth()))
-        .await
-        .expect("get workspace info should succeed");
-
-    let data = expect_success(response.0);
-    assert_eq!(
-        data.base_workspace_dir,
-        workspace_dir.to_string_lossy().to_string()
-    );
-    assert_eq!(data.user_id, "static-token");
-    assert_eq!(
-        data.user_workspace_dir,
-        workspace_dir
-            .join("users")
-            .join("static-token")
-            .to_string_lossy()
-            .to_string()
-    );
-    let _ = std::fs::remove_dir_all(workspace_dir);
-}
-
-#[tokio::test]
 async fn test_put_and_get_memory_file_handlers_roundtrip() {
     let (config, workspace_dir) = isolated_test_config();
     let state = test_state_with_config(config, false).await;
@@ -454,8 +458,7 @@ async fn test_put_and_get_memory_file_handlers_roundtrip() {
         Path("2026-04-04".to_string()),
         Json(talos_types::MemoryFileWriteRequest {
             date: "2026-04-04".to_string(),
-            content: "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n"
-                .to_string(),
+            content: canonical_memory("stable fact"),
             expected_version: None,
         }),
     )
@@ -512,9 +515,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         Path("2026-04-04".to_string()),
         Json(talos_types::MemoryFileWriteRequest {
             date: "2026-04-04".to_string(),
-            content:
-                "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- shared service fact\n"
-                    .to_string(),
+            content: canonical_memory("shared service fact"),
             expected_version: None,
         }),
     )
@@ -681,14 +682,11 @@ Use this skill for protocol contract verification.
 #[tokio::test]
 async fn test_search_memory_files_handler_returns_matching_data() {
     let (config, workspace_dir) = isolated_test_config();
-    let memory_dir = workspace_dir
-        .join("users")
-        .join("static-token")
-        .join("memory");
+    let memory_dir = workspace_dir.join("static-token").join("memory");
     std::fs::create_dir_all(&memory_dir).expect("memory dir should exist");
     std::fs::write(
         memory_dir.join("2026-04-04.md"),
-        "## [10:00] Example\nsession: session-1\n\n**Facts:**\n- stable fact\n",
+        canonical_memory("stable fact"),
     )
     .expect("memory file should write");
     let state = test_state_with_config(config, false).await;

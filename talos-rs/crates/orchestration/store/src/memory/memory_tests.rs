@@ -14,18 +14,25 @@ use talos_memory::{
     MemorySessionId, MemoryTimezone, MemoryUserId, MemoryWriteBatch,
 };
 
+#[path = "workspace_scope_tests.rs"]
+mod workspace_scope_tests;
+
 async fn test_store(root: &std::path::Path) -> MemoryStore {
     let database = root.join("memory-index.sqlite");
     MemoryStore::open(&database).await.expect("memory store")
 }
 
 fn memory_scope(root: &std::path::Path, user_id: &str) -> MemoryScope {
-    memory_scope_for_agent(root, "agent-1", user_id)
+    memory_scope_for_workspace(root, "default", user_id)
 }
 
-fn memory_scope_for_agent(root: &std::path::Path, agent_id: &str, user_id: &str) -> MemoryScope {
+fn memory_scope_for_workspace(
+    root: &std::path::Path,
+    workspace_id: &str,
+    user_id: &str,
+) -> MemoryScope {
     MemoryScope {
-        agent_id: agent_id.to_string(),
+        workspace_id: workspace_id.to_string(),
         user_id: user_id.to_string(),
         workspace_root: root.to_path_buf(),
     }
@@ -39,6 +46,14 @@ fn write_memory_file(root: &std::path::Path, date: &str, content: &str) {
 
 fn dream_write_request(
     root: &std::path::Path,
+    batch: &MemoryWriteBatch,
+) -> DreamMemoryWriteRequest {
+    dream_write_request_for_agent(root, "agent-1", batch)
+}
+
+fn dream_write_request_for_agent(
+    root: &std::path::Path,
+    producer_agent_id: &str,
     batch: &MemoryWriteBatch,
 ) -> DreamMemoryWriteRequest {
     let date = Utc
@@ -55,6 +70,7 @@ fn dream_write_request(
             DreamMemoryDayRevision::from_content(content.as_deref()),
             Vec::new(),
         ),
+        MemoryAgentId::parse(producer_agent_id).expect("producer agent id"),
         batch.clone(),
     )
 }
@@ -81,16 +97,16 @@ struct TestMemoryEntry<'a> {
 }
 
 fn canonical_memory(date: &str, entries: &[TestMemoryEntry<'_>]) -> String {
-    canonical_memory_for_agent("agent-1", date, entries)
+    canonical_memory_for_workspace("default", date, entries)
 }
 
-fn canonical_memory_for_agent(
-    agent_id: &str,
+fn canonical_memory_for_workspace(
+    workspace_id: &str,
     date: &str,
     entries: &[TestMemoryEntry<'_>],
 ) -> String {
     let context = DreamMemoryDocumentContext::new(
-        MemoryAgentId::parse(agent_id).expect("agent id"),
+        MemoryAgentId::parse(workspace_id).expect("workspace id"),
         MemoryUserId::parse("user-1").expect("user id"),
         DreamMemoryDate::parse(date).expect("memory date"),
         MemoryTimezone::new(UTC),
@@ -406,7 +422,7 @@ async fn search_preview_uses_the_same_case_insensitive_match_as_search() {
 }
 
 #[tokio::test]
-async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scopes() {
+async fn rebuild_replaces_changed_sources_and_isolates_workspace_user_root_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
     let other_workspace = tempfile::tempdir().expect("other workspace");
     write_memory_file(
@@ -422,8 +438,9 @@ async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scop
         ),
     );
     let store = test_store(workspace.path()).await;
-    let other_agent_scope = memory_scope_for_agent(workspace.path(), "agent-2", "user-1");
-    let other_workspace_scope = memory_scope(other_workspace.path(), "user-1");
+    let other_workspace_id_scope =
+        memory_scope_for_workspace(workspace.path(), "other-workspace", "user-1");
+    let other_root_scope = memory_scope(other_workspace.path(), "user-1");
     store
         .rebuild_scope(&memory_scope(workspace.path(), "user-1"), "memory", UTC)
         .await
@@ -435,8 +452,8 @@ async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scop
     write_memory_file(
         workspace.path(),
         "2026-07-17",
-        &canonical_memory_for_agent(
-            "agent-2",
+        &canonical_memory_for_workspace(
+            "other-workspace",
             "2026-07-17",
             &[test_entry(
                 "mem_0123456789abcdef0123456789abcdef",
@@ -446,9 +463,9 @@ async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scop
         ),
     );
     store
-        .rebuild_scope(&other_agent_scope, "memory", UTC)
+        .rebuild_scope(&other_workspace_id_scope, "memory", UTC)
         .await
-        .expect("other Agent rebuild");
+        .expect("other workspace id rebuild");
     write_memory_file(
         other_workspace.path(),
         "2026-07-17",
@@ -462,7 +479,7 @@ async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scop
         ),
     );
     store
-        .rebuild_scope(&other_workspace_scope, "memory", UTC)
+        .rebuild_scope(&other_root_scope, "memory", UTC)
         .await
         .expect("other workspace rebuild");
 
@@ -505,15 +522,15 @@ async fn rebuild_replaces_changed_sources_and_isolates_agent_user_workspace_scop
     );
     assert_eq!(
         store
-            .search(&other_agent_scope, &search("alpha"))
+            .search(&other_workspace_id_scope, &search("alpha"))
             .await
-            .expect("other Agent search")
+            .expect("other workspace id search")
             .len(),
         1
     );
     assert_eq!(
         store
-            .search(&other_workspace_scope, &search("gamma"))
+            .search(&other_root_scope, &search("gamma"))
             .await
             .expect("other workspace search")
             .len(),

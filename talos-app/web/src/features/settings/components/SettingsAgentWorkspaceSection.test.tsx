@@ -2,13 +2,11 @@
 
 import { createElement, type PropsWithChildren } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import "@/shared/i18n/setup";
-import { SettingsAgentWorkspaceSection } from "./SettingsAgentWorkspaceSection";
-
-const getWorkspaceInfo = vi.fn();
+import { SettingsPersonalizationSection } from "./SettingsPersonalizationSection";
 
 vi.mock("@/features/connection", () => ({
   useConnectionSettings: () => ({
@@ -26,14 +24,6 @@ vi.mock("@/features/connection", () => ({
 
 vi.mock("@/features/chat", () => ({
   useConnectionKey: () => "settings-test-connection",
-}));
-
-vi.mock("@/shared/api/client", () => ({
-  getTalosClient: () => ({
-    workspaceDocs: {
-      info: getWorkspaceInfo,
-    },
-  }),
 }));
 
 vi.mock("@/features/workspace-docs", () => ({
@@ -105,43 +95,32 @@ function createWrapper() {
   };
 }
 
-describe("SettingsAgentWorkspaceSection", () => {
+describe("SettingsPersonalizationSection", () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
   });
 
-  it("shows server-provided workspace path content on the general tab", async () => {
-    getWorkspaceInfo.mockResolvedValue({
-      user_id: "alice",
-      username: "Alice",
-      base_workspace_dir: "/srv/talos/workspace-talos",
-      user_workspace_dir: "/srv/talos/workspace-talos/users/alice",
-    });
+  it("does not expose workspace paths", () => {
+    render(<SettingsPersonalizationSection />, { wrapper: createWrapper() });
 
-    render(<SettingsAgentWorkspaceSection />, { wrapper: createWrapper() });
-
-    expect(screen.getByText("Workspace path")).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("/srv/talos/workspace-talos")).toBeTruthy();
-      expect(screen.getByDisplayValue("/srv/talos/workspace-talos/users/alice")).toBeTruthy();
-    });
-    expect(screen.queryByText("2026-05-06")).toBeNull();
-    expect(screen.queryByText("MEMORY.md")).toBeNull();
+    expect(screen.queryByText("Workspace path")).toBeNull();
+    expect(screen.queryByDisplayValue("/srv/talos/workspace-talos")).toBeNull();
+    expect(screen.getAllByText("MEMORY.md").length).toBeGreaterThan(0);
   });
 
-  it("exposes and updates the selected workspace mode", () => {
-    render(<SettingsAgentWorkspaceSection />, { wrapper: createWrapper() });
+  it("switches between instructions and memory", () => {
+    render(<SettingsPersonalizationSection />, { wrapper: createWrapper() });
 
-    const generalTab = screen.getByRole("button", { name: "General" });
     const instructionsTab = screen.getByRole("button", { name: "Instructions" });
+    const memoryTab = screen.getByRole("button", { name: "Memory" });
 
-    expect(generalTab.getAttribute("aria-pressed")).toBe("true");
-    expect(instructionsTab.getAttribute("aria-pressed")).toBe("false");
-
-    fireEvent.click(instructionsTab);
-
-    expect(generalTab.getAttribute("aria-pressed")).toBe("false");
     expect(instructionsTab.getAttribute("aria-pressed")).toBe("true");
+    expect(memoryTab.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(memoryTab);
+
+    expect(instructionsTab.getAttribute("aria-pressed")).toBe("false");
+    expect(memoryTab.getAttribute("aria-pressed")).toBe("true");
   });
 });

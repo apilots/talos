@@ -12,8 +12,7 @@ use talos_sdk::{
     SessionHistorySnapshot, SessionInfo, SessionListRequest, SessionPatchRequest, SkillSuggestion,
     SkillsSuggestRequest, StartTurnRequest, StartTurnResponse, SubmitUserActionRequest,
     SubmitUserActionResponse, SubscribeTimelineRequest, TimelineActiveTurnSnapshot,
-    TimelineEventEnvelope, TimelineRecoveryResponse, UserPermissionMode, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    TimelineEventEnvelope, TimelineRecoveryResponse, UserPermissionMode,
 };
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -57,7 +56,6 @@ impl Drop for MessageQueueSubscription {
 pub trait GatewayClient: Send + Sync {
     async fn list_models(&self) -> TalosResult<ModelListResponse>;
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse>;
-    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse>;
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>>;
     /// Uploads one composer attachment and returns its stable file metadata.
     async fn upload_file(
@@ -163,11 +161,6 @@ where
     async fn read_auth_session(&self) -> TalosResult<AuthSessionReadResponse> {
         let mut client = self.lock().await;
         SdkGatewayClient::read_auth_session(&mut *client, AuthSessionReadRequest {}).await
-    }
-
-    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse> {
-        let mut client = self.lock().await;
-        SdkGatewayClient::workspace_info(&mut *client, WorkspaceInfoRequest {}).await
     }
 
     async fn suggest_skills(&self, query: &str) -> TalosResult<Vec<SkillSuggestion>> {
@@ -350,7 +343,6 @@ where
                     model_selection: Some(model_selection.clone()),
                     ..SessionConf::default()
                 }),
-                project_id: None,
                 current_directory: None,
             },
         )
@@ -372,7 +364,6 @@ where
                     user_permission_mode: Some(mode),
                     ..SessionConf::default()
                 }),
-                project_id: None,
                 current_directory: None,
             },
         )

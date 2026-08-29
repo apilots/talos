@@ -1,6 +1,5 @@
 //! Legacy Dream Memory parser used only by the one-time OKF converter.
 //!
-//! TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
 
 use chrono::{NaiveDate, NaiveTime, TimeZone};
 use serde::Serialize;

@@ -6,8 +6,11 @@ fn test_service() -> (WorkspaceDocService, std::path::PathBuf) {
     let workspace_dir =
         std::env::temp_dir().join(format!("talos-workspace-doc-test-{}", uuid::Uuid::new_v4()));
     talos_fs::create_directory(&workspace_dir, true).expect("workspace dir should exist");
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let config =
+        TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+            talos_config::DEFAULT_WORKSPACE_ID,
+            workspace_dir.clone(),
+        ));
     (WorkspaceDocService::new(config), workspace_dir)
 }
 
@@ -30,7 +33,7 @@ async fn put_doc_creates_missing_doc() {
     assert!(detail.exists);
     assert_eq!(detail.content, "soul content");
     assert_eq!(
-        talos_fs::read_file(&workspace_dir.join("users").join("admin").join("SOUL.md"))
+        talos_fs::read_file(&workspace_dir.join("admin").join("SOUL.md"))
             .await
             .expect("workspace doc should read")
             .expect("workspace doc should exist on disk"),
@@ -42,7 +45,7 @@ async fn put_doc_creates_missing_doc() {
 #[tokio::test]
 async fn put_doc_rejects_stale_version() {
     let (service, workspace_dir) = test_service();
-    let user_dir = workspace_dir.join("users").join("admin");
+    let user_dir = workspace_dir.join("admin");
     talos_fs::create_directory(&user_dir, true).expect("user workspace should exist");
     talos_fs::write_file(&user_dir.join("IDENTITY.md"), "current version")
         .await
@@ -135,7 +138,7 @@ async fn put_doc_rejects_oversized_memory() {
 async fn memory_doc_write_requires_canonical_okf_but_read_preserves_invalid_raw_content() {
     let (service, workspace_dir) = test_service();
     let actor = Actor::regular("member");
-    let user_dir = workspace_dir.join("users").join("member");
+    let user_dir = workspace_dir.join("member");
     talos_fs::create_directory(&user_dir, true).expect("user workspace should exist");
     talos_fs::write_file(&user_dir.join("MEMORY.md"), "legacy memory")
         .await

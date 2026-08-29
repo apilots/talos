@@ -95,7 +95,6 @@ impl SubagentService {
                     input: vec![TalosInputItem::Text {
                         text: request.prompt,
                     }],
-                    workspace_id: None,
                     context: None,
                     model_selection: None,
                     user_permission_mode: None,

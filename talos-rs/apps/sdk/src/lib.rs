@@ -52,10 +52,10 @@ pub use talos_types::{
     MessageQueueListRequest, MessageQueueReorderRequest, MessageQueueStartRequest,
     MessageQueueSteerRequest, MessageQueueUpdateRequest, ModelCostConfig, ModelInfo,
     ModelInputKind, ModelListRequest, ModelListResponse, ModelReadiness, ModelRef, ModelSelection,
-    ModelSpeed, OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, PendingUserAction,
-    ProfileDailyUsage, ProfileModelUsage, ProfileReadRequest, ProfileReadResponse,
-    ProjectCreateRequest, ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse,
-    ProjectInfo, ProjectListRequest, ProjectListResponse, ProjectPatch, ProjectPatchRequest,
+    ModelSpeed, OptionalCurrentDirectoryPatch, PendingUserAction, ProfileDailyUsage,
+    ProfileModelUsage, ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest,
+    ProjectCreateResponse, ProjectDeleteRequest, ProjectDeleteResponse, ProjectInfo,
+    ProjectListRequest, ProjectListResponse, ProjectPatch, ProjectPatchRequest,
     ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse, ProjectStatus,
     ProjectStatusState, ProjectUnavailableReason, ProviderConfig, ProviderKeyStatus,
     ProviderModelConfig, ProviderProtocolCapabilities, QuestionAnswer, QuestionOption,
@@ -75,7 +75,7 @@ pub use talos_types::{
     UserActionState, UserCurrentRequest, UserCurrentResponse, UserPermissionMode, WorkspaceDocInfo,
     WorkspaceDocKind, WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocReadResponse, WorkspaceDocSummary, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocWriteResponse,
 };
 pub use talos_types::{
     MarketplaceSource, MarketplaceSourceInput, Plugin, PluginDefinition, PluginDisableRequest,

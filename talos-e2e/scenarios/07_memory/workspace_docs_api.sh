@@ -24,13 +24,7 @@ export TALOS_HOME="${TEST_TALOS_HOME}"
 start_server
 trap cleanup EXIT
 
-workspace_info_json="$(curl -sS "${GATEWAY_URL}/v1/workspace/info")"
-WORKSPACE_DIR="$(api_json_get "${workspace_info_json}" "user_workspace_dir")"
-if [[ -z "${WORKSPACE_DIR}" ]]; then
-  echo "CASE workspace_info FAIL response=${workspace_info_json}"
-  exit 1
-fi
-echo "CASE workspace_info PASS user_workspace_dir=${WORKSPACE_DIR}"
+WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/anonymous"
 MEMORY_DATE="$(date '+%Y-%m-%d')"
 MEMORY_FILE="${WORKSPACE_DIR}/memory/${MEMORY_DATE}.md"
 MEMORY_BUNDLE_INDEX="${WORKSPACE_DIR}/memory/index.md"
@@ -169,7 +163,7 @@ generated_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().rep
 content = """---
 type: UserWorkspaceMemory
 title: User Workspace Memory
-description: Durable cross-session memory scoped to one agent and one user.
+description: Durable cross-session memory scoped to one workspace and one user.
 tags:
   - talos
   - agent

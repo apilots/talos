@@ -1,7 +1,7 @@
 //! One-time adapter that converts legacy date-partitioned memory Markdown to Dream Memory OKF.
 //!
-//! This module is intentionally outside every normal read/write path and has one assembly call.
-//! TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
+//! This module is intentionally outside every normal read/write path and is called only by the
+//! versioned Product Upgrade task.
 
 mod parser;
 
@@ -17,8 +17,6 @@ use talos_memory::{
 use talos_store::memory::memory_scope_lock_path;
 
 use self::parser::{legacy_partition_start, parse_legacy_entries};
-use crate::workspace::file::workspace_revision;
-
 const DREAM_MEMORY_MARKER: &str = "talos:dream-memory";
 
 struct SourceRevision {
@@ -39,9 +37,8 @@ impl LegacyDreamMemoryConversion {
 
 /// Converts one user scope through a staged directory switch when legacy files are present.
 ///
-/// TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
 pub(super) async fn convert_legacy_scope(
-    agent_id: &str,
+    workspace_id: &str,
     user_id: &str,
     workspace_root: &Path,
     memory_dirname: &str,
@@ -89,7 +86,7 @@ pub(super) async fn convert_legacy_scope(
             version: workspace_revision(&content),
         });
         let staged = if let Some(date) = memory_file_date(name) {
-            let context = document_context(agent_id, user_id, date, timezone)?;
+            let context = document_context(workspace_id, user_id, date, timezone)?;
             match DreamMemoryDocument::parse(context.clone(), &content) {
                 Ok(document) => document.render().map_err(map_domain_error)?,
                 Err(_) if content.contains(DREAM_MEMORY_MARKER) => {
@@ -153,6 +150,15 @@ pub(super) async fn convert_legacy_scope(
     })
     .await?;
     Ok(Some(LegacyDreamMemoryConversion { backup_dir }))
+}
+
+fn workspace_revision(content: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in content.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
 }
 
 fn switch_memory_directories(
@@ -237,13 +243,13 @@ fn memory_file_date(name: &str) -> Option<&str> {
 }
 
 fn document_context(
-    agent_id: &str,
+    workspace_id: &str,
     user_id: &str,
     date: &str,
     timezone: TalosTimezone,
 ) -> TalosResult<DreamMemoryDocumentContext> {
     Ok(DreamMemoryDocumentContext::new(
-        MemoryAgentId::parse(agent_id.to_string()).map_err(map_domain_error)?,
+        MemoryAgentId::parse(workspace_id.to_string()).map_err(map_domain_error)?,
         MemoryUserId::parse(user_id.to_string()).map_err(map_domain_error)?,
         DreamMemoryDate::parse(date).map_err(map_domain_error)?,
         MemoryTimezone::new(timezone),

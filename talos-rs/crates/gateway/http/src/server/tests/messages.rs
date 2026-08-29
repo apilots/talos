@@ -11,7 +11,6 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
     let body = serde_json::json!({
         "session_id": "mock-session",
         "input": [{ "type": "text", "text": "hello" }],
-        "workspace_id": null,
         "context": null,
         "project_id": null,
         "current_directory": null,
@@ -86,7 +85,6 @@ async fn test_start_turn_handler_accepts_shared_request() {
     let body = serde_json::json!({
         "session_id": "mock-session",
         "input": [{ "type": "text", "text": "hello" }],
-        "workspace_id": null,
         "context": null,
         "project_id": null,
         "current_directory": null,
@@ -132,7 +130,6 @@ async fn test_start_turn_handler_rejects_empty_input_before_session_creation() {
     let body = serde_json::json!({
         "session_id": "empty-input-session",
         "input": [],
-        "workspace_id": null,
         "context": {
             "source_type": "http",
             "provider": "http",
@@ -181,7 +178,6 @@ async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
     let first_body = serde_json::json!({
         "session_id": "mock-session",
         "input": [{ "type": "text", "text": "hello" }],
-        "workspace_id": null,
         "context": null,
         "project_id": null,
         "current_directory": null,
@@ -191,7 +187,6 @@ async fn test_start_turn_handler_rejects_idempotency_hash_conflict() {
     let second_body = serde_json::json!({
         "session_id": "mock-session",
         "input": [{ "type": "text", "text": "different" }],
-        "workspace_id": null,
         "context": null,
         "project_id": null,
         "current_directory": null,
@@ -249,7 +244,6 @@ async fn test_start_turn_handler_timeout_stores_failed_idempotency() {
     let body = serde_json::json!({
         "session_id": "mock-session",
         "input": [{ "type": "text", "text": "hello" }],
-        "workspace_id": null,
         "context": null,
         "project_id": null,
         "current_directory": null,
@@ -328,7 +322,6 @@ async fn test_retry_turn_rejects_running_active_turn() {
                         "client_message_id": "client-1",
                         "retry_of_message_id": "msg-running",
                         "input": [{"type": "text", "text": "retry"}],
-                        "workspace_id": null
                     })
                     .to_string(),
                 ))
@@ -379,7 +372,6 @@ async fn test_retry_turn_rejects_completed_active_turn() {
                         "client_message_id": "client-1",
                         "retry_of_message_id": "msg-completed",
                         "input": [{"type": "text", "text": "retry"}],
-                        "workspace_id": null
                     })
                     .to_string(),
                 ))
@@ -423,7 +415,6 @@ async fn test_retry_turn_allows_failed_active_turn() {
                         "client_message_id": "client-1",
         "retry_of_message_id": "msg-failed",
         "input": [{"type": "text", "text": "retry"}],
-        "workspace_id": null
     })
     .to_string();
 

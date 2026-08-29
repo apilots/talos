@@ -164,28 +164,6 @@ export async function updateProjectName(projectId: string, name: string) {
   return mapProjectView(response.project);
 }
 
-export async function updateSessionProject(sessionId: string, project?: ProjectView) {
-  const request: SessionPatchRequest = project && !isUnboundProject(project.id)
-    ? {
-        session_id: sessionId,
-        conf: null,
-        project_id: {
-          type: "set",
-          project_id: project.id,
-        },
-        current_directory: null,
-      }
-    : {
-        session_id: sessionId,
-        conf: null,
-        project_id: {
-          type: "clear",
-        },
-        current_directory: null,
-      };
-  await getTalosClient().sessions.patch(request);
-}
-
 export async function updateSessionModel(sessionId: string, modelSelection: ModelSelection) {
   const request: SessionPatchRequest = {
     session_id: sessionId,
@@ -193,7 +171,6 @@ export async function updateSessionModel(sessionId: string, modelSelection: Mode
       modelSelection,
       userPermissionMode: null,
     },
-    project_id: null,
     current_directory: null,
   };
   await getTalosClient().sessions.patch(request);
@@ -209,7 +186,6 @@ export async function updateSessionPermissionMode(
       modelSelection: null,
       userPermissionMode,
     },
-    project_id: null,
     current_directory: null,
   };
   const response = await getTalosClient().sessions.patch(request);

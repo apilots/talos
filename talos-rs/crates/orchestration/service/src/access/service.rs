@@ -9,8 +9,8 @@ use talos_store::profile::{ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdat
 use talos_store::project::ProjectRecord;
 use talos_store::session::{SessionPatchAck, SessionQuery};
 use talos_types::{
-    CancelActiveTurnParams, ModelSelection, ModelUsageKind, OptionalProjectIdPatch, ProjectPatch,
-    SessionConf, SessionListRequest, SessionPatch, TalosSession, UserPermissionMode,
+    CancelActiveTurnParams, ModelSelection, ModelUsageKind, ProjectPatch, SessionConf,
+    SessionListRequest, SessionPatch, TalosSession, UserPermissionMode,
 };
 
 use super::types::Actor;
@@ -31,7 +31,6 @@ pub struct CreateSessionRequest {
     pub context: talos_types::talos::TalosContext,
     pub model_selection: Option<ModelSelection>,
     pub user_permission_mode: Option<UserPermissionMode>,
-    pub workspace_id: Option<String>,
     pub project_id: Option<String>,
     pub current_directory: Option<PathBuf>,
 }
@@ -57,7 +56,22 @@ impl ResourceAccessService {
         params: CreateSessionRequest,
     ) -> TalosResult<TalosSession> {
         match self.get_session(actor, &params.session_id).await {
-            Ok(session) => return Ok(session),
+            Ok(session) => {
+                if params
+                    .project_id
+                    .as_deref()
+                    .is_some_and(|project_id| session.project_id.as_deref() != Some(project_id))
+                {
+                    return Err(TalosError::public(
+                        talos_error::ErrorCode::InvalidRequest,
+                        format!(
+                            "session '{}' project binding is immutable",
+                            params.session_id
+                        ),
+                    ));
+                }
+                return Ok(session);
+            }
             Err(error) if error.is_code(talos_error::ErrorCode::ResourceNotFound) => {}
             Err(error) => return Err(error),
         }
@@ -86,7 +100,7 @@ impl ResourceAccessService {
                         user_permission_mode: Some(user_permission_mode),
                         ..Default::default()
                     }),
-                workspace_id: params.workspace_id,
+                workspace_id: self.sessions.default_workspace_id(),
                 project_id: params.project_id,
                 current_directory: params.current_directory,
             })
@@ -148,9 +162,6 @@ impl ResourceAccessService {
         patch: SessionPatch,
     ) -> TalosResult<SessionPatchAck> {
         let _session = self.get_session(actor, session_id).await?;
-        if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
-            self.ensure_project_access(actor, project_id).await?;
-        }
         let ack = self.sessions.patch_session(session_id, patch).await?;
         if !ack.success {
             return Err(TalosError::public(

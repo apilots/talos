@@ -69,7 +69,7 @@ text = (
     "Do not call any other tool and do not wait before calling Bash. "
     "After the tool result, respond with exactly TURN_CANCEL_UNEXPECTED_COMPLETION."
 )
-payload = {"input": [{"type": "text", "text": text}], "workspace_id": None}
+payload = {"input": [{"type": "text", "text": text}]}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }

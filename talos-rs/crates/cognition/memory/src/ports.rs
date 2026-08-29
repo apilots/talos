@@ -10,12 +10,12 @@ use talos_types::{
     MemorySearchResponse,
 };
 
-use crate::{DreamMemoryDate, DreamMemoryEntry};
+use crate::{DreamMemoryDate, DreamMemoryEntry, MemoryAgentId};
 
-/// Trusted Agent, user, and effective workspace boundary supplied by the runtime or service.
+/// Trusted logical workspace, user, and effective root supplied by the runtime or service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MemoryScope {
-    pub agent_id: String,
+    pub workspace_id: String,
     pub user_id: String,
     pub workspace_root: PathBuf,
 }
@@ -125,15 +125,21 @@ impl DreamMemoryDaySnapshot {
 pub struct DreamMemoryWriteRequest {
     date: DreamMemoryDate,
     base_revision: DreamMemoryDayRevision,
+    producer_agent_id: MemoryAgentId,
     batch: MemoryWriteBatch,
 }
 
 impl DreamMemoryWriteRequest {
     #[must_use]
-    pub fn from_snapshot(snapshot: &DreamMemoryDaySnapshot, batch: MemoryWriteBatch) -> Self {
+    pub fn from_snapshot(
+        snapshot: &DreamMemoryDaySnapshot,
+        producer_agent_id: MemoryAgentId,
+        batch: MemoryWriteBatch,
+    ) -> Self {
         Self {
             date: snapshot.date,
             base_revision: snapshot.revision.clone(),
+            producer_agent_id,
             batch,
         }
     }
@@ -146,6 +152,11 @@ impl DreamMemoryWriteRequest {
     #[must_use]
     pub fn base_revision(&self) -> &DreamMemoryDayRevision {
         &self.base_revision
+    }
+
+    #[must_use]
+    pub fn producer_agent_id(&self) -> &MemoryAgentId {
+        &self.producer_agent_id
     }
 
     #[must_use]

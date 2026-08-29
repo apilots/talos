@@ -298,7 +298,6 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
                 input: vec![TalosInputItem::Text {
                     text: "Use the tool, then answer.".to_string(),
                 }],
-                workspace_id: None,
                 context: Some(request_context()),
                 model_selection: None,
                 user_permission_mode: None,

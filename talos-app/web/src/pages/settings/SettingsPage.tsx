@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate, useParams } from "react-router-dom";
 
 import {
-  SettingsAgentWorkspaceSection,
+  SettingsPersonalizationSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
   SettingsMcpServersSection,
@@ -79,7 +79,7 @@ export function SettingsPage() {
 
             {activeSection === "models" ? <SettingsModelsSection /> : null}
 
-            {activeSection === "agent-workspace" ? <SettingsAgentWorkspaceSection /> : null}
+            {activeSection === "personalization" ? <SettingsPersonalizationSection /> : null}
 
             {activeSection === "appearance" ? (
               <SettingsAppearanceSection

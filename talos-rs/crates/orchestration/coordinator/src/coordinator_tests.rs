@@ -47,6 +47,7 @@ struct RecordingStreamAgent {
     resume_stream_requests: Arc<Mutex<Vec<AgentResumeParams>>>,
     interrupt_requests: Arc<Mutex<Vec<AgentInterruptParams>>>,
     input_requests: Arc<Mutex<Vec<AgentInputParams>>>,
+    lifecycle_requests: Arc<Mutex<Vec<&'static str>>>,
 }
 
 impl RecordingStreamAgent {
@@ -64,6 +65,7 @@ impl RecordingStreamAgent {
             resume_stream_requests: Arc::new(Mutex::new(Vec::new())),
             interrupt_requests: Arc::new(Mutex::new(Vec::new())),
             input_requests: Arc::new(Mutex::new(Vec::new())),
+            lifecycle_requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -78,11 +80,12 @@ impl RecordingStreamAgent {
 fn test_session(session_id: &str, context: TalosContext) -> TalosSession {
     let config = TalosConfig::default();
     TalosSession {
+        agent_id: "test_agent".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: context.user_id.clone(),
         context: SessionContext {
             session_id: session_id.to_string(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             source_type: context.source_type,
             provider: context.provider,
             user_id: context.user_id,
@@ -227,6 +230,7 @@ impl AgentHarness for RecordingStreamAgent {
     }
 
     async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+        self.lifecycle_requests.lock().unwrap().push("close");
         Ok(())
     }
 
@@ -234,14 +238,17 @@ impl AgentHarness for RecordingStreamAgent {
         &self,
         _params: talos_agent::AgentSessionCompactionParams,
     ) -> TalosResult<TokenUsage> {
+        self.lifecycle_requests.lock().unwrap().push("compact");
         Ok(TokenUsage::default())
     }
 
     async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
+        self.lifecycle_requests.lock().unwrap().push("clear");
         Ok(())
     }
 
     fn has_active_turn(&self, _session_id: &str) -> bool {
+        self.lifecycle_requests.lock().unwrap().push("active");
         false
     }
 
@@ -451,25 +458,29 @@ async fn exact_agent_binding_bypasses_mutable_router_for_all_runtime_operations(
     let routed_streams = routed.stream_requests.clone();
     let routed_inputs = routed.input_requests.clone();
     let routed_interrupts = routed.interrupt_requests.clone();
+    let routed_lifecycle = routed.lifecycle_requests.clone();
     coordinator.register_agent("routed", routed).await.unwrap();
 
     let persisted = Arc::new(RecordingStreamAgent::with_id("persisted"));
     let persisted_streams = persisted.stream_requests.clone();
     let persisted_inputs = persisted.input_requests.clone();
     let persisted_interrupts = persisted.interrupt_requests.clone();
+    let persisted_lifecycle = persisted.lifecycle_requests.clone();
     coordinator
         .register_agent("persisted", persisted)
         .await
         .unwrap();
 
     let mut dispatch = test_dispatch_params("child-1", "turn-1");
+    dispatch.session.agent_id = "persisted".to_string();
     dispatch.binding = DispatchBinding::Exact {
         agent_id: "persisted".to_string(),
     };
     let _stream = AgentDispatchRuntime::handle_stream(&coordinator, dispatch)
         .await
         .unwrap();
-    let session = test_session("child-1", test_context("message-input"));
+    let mut session = test_session("child-1", test_context("message-input"));
+    session.agent_id = "persisted".to_string();
     AgentDispatchRuntime::submit_input(
         &coordinator,
         AgentDispatchInputParams {
@@ -498,19 +509,52 @@ async fn exact_agent_binding_bypasses_mutable_router_for_all_runtime_operations(
             binding: DispatchBinding::Exact {
                 agent_id: "persisted".to_string(),
             },
-            session,
+            session: session.clone(),
             turn_id: "turn-1".to_string(),
         },
     )
     .await
     .unwrap();
 
+    let (event_tx, _event_rx) = mpsc::channel(1);
+    SessionRuntime::compact_session(
+        &coordinator,
+        talos_agent::AgentSessionCompactionParams {
+            session: session.clone(),
+            identity: talos_agent::AgentSessionCompactionIdentity {
+                request_id: "request-compact".to_string(),
+                turn_id: "turn-compact".to_string(),
+                message_id: "message-compact".to_string(),
+            },
+            event_tx,
+        },
+    )
+    .await
+    .unwrap();
+    SessionRuntime::clear_session(&coordinator, session.clone())
+        .await
+        .unwrap();
+    SessionRuntime::close_session(&coordinator, session.clone())
+        .await
+        .unwrap();
+    assert!(!SessionRuntime::has_active_turn(&coordinator, &session)
+        .await
+        .unwrap());
+    SessionRuntime::prepare_delete_session(&coordinator, session)
+        .await
+        .unwrap();
+
     assert_eq!(persisted_streams.lock().unwrap().len(), 1);
     assert_eq!(persisted_inputs.lock().unwrap().len(), 1);
     assert_eq!(persisted_interrupts.lock().unwrap().len(), 1);
+    assert_eq!(
+        persisted_lifecycle.lock().unwrap().as_slice(),
+        ["compact", "clear", "close", "active", "active", "clear"]
+    );
     assert!(routed_streams.lock().unwrap().is_empty());
     assert!(routed_inputs.lock().unwrap().is_empty());
     assert!(routed_interrupts.lock().unwrap().is_empty());
+    assert!(routed_lifecycle.lock().unwrap().is_empty());
 }
 
 #[path = "tests/core.rs"]

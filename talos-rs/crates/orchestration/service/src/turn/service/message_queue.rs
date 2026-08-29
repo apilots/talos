@@ -111,11 +111,7 @@ impl TurnService {
         let result = self
             .submit_turn(
                 session,
-                TurnSubmission {
-                    input,
-                    workspace_id: None,
-                    binding,
-                },
+                TurnSubmission { input, binding },
                 None,
                 Some(auto_dispatch_rx),
             )

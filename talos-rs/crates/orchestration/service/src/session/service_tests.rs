@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use talos_error::{TalosError, TalosResult};
-use talos_store::project::MockProjectStore;
+use talos_store::project::{MockProjectStore, ProjectRecord};
 use talos_store::session::{
     MockSessionStore, SessionQuery, SessionRecord, SessionStore, SessionSummary,
     SessionTreeIdentity,
@@ -15,6 +15,19 @@ use talos_types::{
 };
 
 use super::{CreateSessionParams, SessionService};
+
+fn project_record(project_id: &str, user_id: &str) -> ProjectRecord {
+    ProjectRecord {
+        project_id: project_id.to_string(),
+        name: "Project".to_string(),
+        user_id: user_id.to_string(),
+        directory: std::path::PathBuf::from("/tmp/project"),
+        status: talos_types::ProjectStatus::default(),
+        created_at: 0,
+        updated_at: 0,
+        session_count: 0,
+    }
+}
 
 #[derive(Default)]
 struct RecordingSessionStore {
@@ -210,7 +223,7 @@ fn create_session_params(
         target_agent: target_agent.to_string(),
         model_selection,
         conf: None,
-        workspace_id: None,
+        workspace_id: "default".to_string(),
         project_id: None,
         current_directory: None,
     }
@@ -499,7 +512,7 @@ async fn session_without_explicit_model_selection_is_rejected_without_writing() 
 }
 
 #[tokio::test]
-async fn create_session_preserves_workspace_routing_key() {
+async fn create_session_preserves_required_default_workspace_binding() {
     let service = SessionService::new(
         Arc::new(MockSessionStore::new()),
         Arc::new(MockProjectStore::new()),
@@ -508,16 +521,106 @@ async fn create_session_preserves_workspace_routing_key() {
 
     let session = service
         .create_session(CreateSessionParams {
-            workspace_id: Some("workspace-alpha".to_string()),
+            workspace_id: "default".to_string(),
             ..create_session_params(context(), "default", None)
         })
         .await
         .expect("session should be created");
 
-    assert_eq!(
-        session.context.workspace_id,
-        Some("workspace-alpha".to_string())
+    assert_eq!(session.context.workspace_id, "default".to_string());
+}
+
+#[tokio::test]
+async fn create_session_uses_a_non_default_configured_workspace_definition() {
+    let mut config = config_with_model("anthropic", "claude-3-5-sonnet");
+    config.workspaces = talos_config::WorkspaceConfig {
+        default_workspace_id: "team".to_string(),
+        definitions: vec![talos_config::WorkspaceDefinition::new(
+            "team",
+            "workspace-team",
+        )],
+    };
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config,
     );
+
+    let session = service
+        .create_session(CreateSessionParams {
+            workspace_id: service.default_workspace_id(),
+            ..create_session_params(context(), "default", None)
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(session.context.workspace_id, "team");
+    assert!(session
+        .config
+        .resolve_workspace("team", "user-1")
+        .unwrap()
+        .root
+        .ends_with("workspace-team/user-1"));
+}
+
+#[tokio::test]
+async fn create_session_rejects_an_empty_workspace_binding() {
+    let service = SessionService::new(
+        Arc::new(MockSessionStore::new()),
+        Arc::new(MockProjectStore::new()),
+        config_with_model("anthropic", "claude-3-5-sonnet"),
+    );
+
+    let error = service
+        .create_session(CreateSessionParams {
+            workspace_id: String::new(),
+            ..create_session_params(context(), "default", None)
+        })
+        .await
+        .expect_err("empty workspace binding must be rejected");
+
+    assert!(error.to_string().contains("unsupported workspace_id"));
+}
+
+#[tokio::test]
+async fn create_session_persists_an_optional_owned_project_binding() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let projects = MockProjectStore::new().with_project(project_record("project-1", "user-1"));
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(projects),
+        config_with_model("anthropic", "claude-3-5-sonnet"),
+    );
+    let mut params = create_session_params(context(), "default", None);
+    params.project_id = Some("project-1".to_string());
+
+    let session = service.create_session(params).await.unwrap();
+
+    assert_eq!(session.project_id.as_deref(), Some("project-1"));
+    assert_eq!(session.context.project_id.as_deref(), Some("project-1"));
+    assert_eq!(
+        store.records.lock().unwrap()[0].project_id.as_deref(),
+        Some("project-1")
+    );
+}
+
+#[tokio::test]
+async fn create_session_rejects_missing_or_cross_user_project_bindings() {
+    let store = Arc::new(RecordingSessionStore::default());
+    let projects = MockProjectStore::new().with_project(project_record("project-1", "user-2"));
+    let service = SessionService::new(
+        store.clone(),
+        Arc::new(projects),
+        config_with_model("anthropic", "claude-3-5-sonnet"),
+    );
+
+    for project_id in ["missing", "project-1"] {
+        let mut params = create_session_params(context(), "default", None);
+        params.project_id = Some(project_id.to_string());
+        let error = service.create_session(params).await.unwrap_err();
+        assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
+    }
+    assert!(store.records.lock().unwrap().is_empty());
 }
 
 #[tokio::test]

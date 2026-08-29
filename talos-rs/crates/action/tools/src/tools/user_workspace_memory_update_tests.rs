@@ -85,7 +85,7 @@ impl UserWorkspaceMemoryWriter for RecordingWriter {
 async fn update_tool_uses_only_the_trusted_context_scope() {
     let writer = Arc::new(RecordingWriter::default());
     let scope = MemoryScope {
-        agent_id: "trusted-agent".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "trusted-user".to_string(),
         workspace_root: std::path::PathBuf::from("/trusted/workspace"),
     };
@@ -134,7 +134,7 @@ fn update_tool_schema_exposes_operation_specific_contracts() {
 async fn update_tool_maps_direct_fields_and_explicit_clears_to_domain_update() {
     let writer = Arc::new(RecordingWriter::default());
     let scope = MemoryScope {
-        agent_id: "trusted-agent".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "trusted-user".to_string(),
         workspace_root: std::path::PathBuf::from("/trusted/workspace"),
     };

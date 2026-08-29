@@ -16,7 +16,6 @@ export {
   updateProjectName,
   updateSessionModel,
   updateSessionPermissionMode,
-  updateSessionProject,
 } from "./api";
 export { ChatComposer } from "./components/ChatComposer";
 export type { ChatComposerProps } from "./components/ChatComposer.types";
@@ -59,7 +58,6 @@ export {
   useUpdateProjectNameMutation,
   useUpdateSessionModelMutation,
   useUpdateSessionPermissionModeMutation,
-  useUpdateSessionProjectMutation,
   useSubmitUserActionMutation,
 } from "./hooks/useChatQueries";
 export { useSessionBlocks } from "./hooks/useSessionBlocks";

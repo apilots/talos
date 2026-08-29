@@ -9,7 +9,7 @@ use talos_memory::{
 use super::types::{MemoryRecord, ParsedMemoryRecord, ParsedMemorySource};
 
 pub(super) fn source_from_markdown(
-    agent_id: &str,
+    workspace_id: &str,
     user_id: &str,
     source_path: &str,
     content: &str,
@@ -17,7 +17,7 @@ pub(super) fn source_from_markdown(
 ) -> TalosResult<ParsedMemorySource> {
     let source_date = source_date(source_path)?;
     let context = DreamMemoryDocumentContext::new(
-        MemoryAgentId::parse(agent_id.to_string()).map_err(map_dream_memory_error)?,
+        MemoryAgentId::parse(workspace_id.to_string()).map_err(map_dream_memory_error)?,
         MemoryUserId::parse(user_id.to_string()).map_err(map_dream_memory_error)?,
         source_date,
         MemoryTimezone::new(timezone),

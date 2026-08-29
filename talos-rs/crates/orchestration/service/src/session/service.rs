@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 
-use talos_config::{provider_config_for_llm, resolve_runtime_path, LlmConfig};
+use talos_config::{provider_config_for_llm, LlmConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_store::project::ProjectStore;
 use talos_store::session::{
@@ -12,8 +12,8 @@ use talos_types::talos::{TalosConnectionMode, TalosContext};
 use talos_types::{
     connection_mode_from_context, normalize_current_directory, resolve_default_model_selection,
     resolve_effective_project_root, AgentTurnRef, ModelInfo, ModelSelection,
-    OptionalCurrentDirectoryPatch, OptionalProjectIdPatch, SessionConfigOverridePolicy,
-    SessionContext, SessionPatch, SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
+    OptionalCurrentDirectoryPatch, SessionConfigOverridePolicy, SessionContext, SessionPatch,
+    SessionState, TalosConfig, TalosSession, DEFAULT_SESSION_TITLE,
 };
 
 use super::CreateSessionParams;
@@ -25,7 +25,6 @@ pub struct SessionService {
     session_store: Arc<dyn SessionStore>,
     project_store: Arc<dyn ProjectStore>,
     base_config: Arc<RwLock<TalosConfig>>,
-    default_workspace_id: String,
 }
 
 impl SessionService {
@@ -38,13 +37,7 @@ impl SessionService {
             session_store,
             project_store,
             base_config: Arc::new(RwLock::new(base_config)),
-            default_workspace_id: "default".to_string(),
         }
-    }
-
-    pub fn with_default_workspace_id(mut self, workspace_id: impl Into<String>) -> Self {
-        self.default_workspace_id = workspace_id.into();
-        self
     }
 
     fn base_model_selection(&self) -> TalosResult<ModelSelection> {
@@ -109,32 +102,25 @@ impl SessionService {
             .expect("session base config write lock") = config;
     }
 
-    fn workspace_root(&self) -> Option<PathBuf> {
-        let base_config = self.base_config_snapshot();
-        let workspace_dir = base_config.agent.kernel.workspace_dir.trim();
-        if workspace_dir.is_empty() {
-            return None;
-        }
-
-        let candidate = resolve_runtime_path(workspace_dir);
-        candidate.exists().then_some(candidate)
+    /// Return the Workspace selected by the current product routing policy.
+    pub fn default_workspace_id(&self) -> String {
+        self.base_config_snapshot()
+            .default_workspace_id()
+            .to_string()
     }
 
-    fn build_session(
-        &self,
-        record: &SessionRecord,
-        workspace_id: Option<String>,
-    ) -> TalosResult<TalosSession> {
+    fn build_session(&self, record: &SessionRecord) -> TalosResult<TalosSession> {
         let base_config = self.base_config_snapshot();
         let effective_user_permission_mode =
             SessionConfigOverridePolicy::resolve_user_permission_mode(&base_config, &record.conf);
         let config = SessionConfigOverridePolicy::apply_to_config(&base_config, &record.conf)?;
         Ok(TalosSession {
+            agent_id: record.agent_id.clone(),
             title: record.title.clone(),
             user_id: record.user_id.clone(),
             context: SessionContext {
                 session_id: record.id.clone(),
-                workspace_id: record.workspace_id.clone().or(workspace_id),
+                workspace_id: record.workspace_id.clone(),
                 source_type: record.context.source_type.clone(),
                 provider: record.context.provider.clone(),
                 user_id: record.context.user_id.clone(),
@@ -178,19 +164,32 @@ impl SessionService {
         } else {
             None
         };
+        let workspace_root = session
+            .config
+            .resolve_workspace(&session.context.workspace_id, &session.user_id)?
+            .root;
         Ok(resolve_effective_project_root(
             session,
             project_directory,
-            self.workspace_root(),
+            workspace_root.exists().then_some(workspace_root),
         ))
     }
 
-    async fn validate_project_id(&self, project_id: &str) -> TalosResult<()> {
-        let exists = self.project_store.get_project(project_id).await?.is_some();
-        if !exists {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::InvalidRequest,
-                format!("project {} not found", project_id),
+    async fn validate_project_binding(&self, project_id: &str, user_id: &str) -> TalosResult<()> {
+        let project = self
+            .project_store
+            .get_project(project_id)
+            .await?
+            .filter(|project| project.user_id == user_id)
+            .ok_or_else(|| {
+                TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("project {project_id}"),
+                )
+            })?;
+        if project.project_id.trim().is_empty() {
+            return Err(TalosError::internal(
+                "project store returned an empty project_id".to_string(),
             ));
         }
         Ok(())
@@ -225,13 +224,14 @@ impl SessionService {
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<TalosSession> {
         if let Some(project_id) = params.project_id.as_deref() {
-            self.validate_project_id(project_id).await?;
+            self.validate_project_binding(project_id, &params.context.user_id)
+                .await?;
         }
         params.context.project_root = None;
         params.current_directory =
             normalize_current_directory(&params.context, params.current_directory)?;
         let record = self.build_session_record(params, tree_identity)?;
-        let mut session = self.build_session(&record, Some(self.default_workspace_id.clone()))?;
+        let mut session = self.build_session(&record)?;
         session.context.project_root = self.resolve_effective_root(&session).await?;
         self.session_store
             .insert_session_record(&record, API_SESSION_SCOPE)
@@ -244,8 +244,7 @@ impl SessionService {
         let mut sessions = Vec::with_capacity(records.len());
         for record in &records {
             self.validate_persisted_model_selection(record)?;
-            let mut session =
-                self.build_session(record, Some(self.default_workspace_id.clone()))?;
+            let mut session = self.build_session(record)?;
             session.context.project_root = self.resolve_effective_root(&session).await?;
             sessions.push(session);
         }
@@ -257,8 +256,7 @@ impl SessionService {
     }
 
     pub async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
-        self.load_session(session_id, Some(self.default_workspace_id.clone()))
-            .await
+        self.load_session(session_id).await
     }
 
     pub(crate) async fn get_session_record(
@@ -303,19 +301,12 @@ impl SessionService {
             .await
     }
 
-    pub async fn load_session(
-        &self,
-        session_id: &str,
-        workspace_id: Option<String>,
-    ) -> TalosResult<Option<TalosSession>> {
+    pub async fn load_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>> {
         let Some(record) = self.session_store.get_session_record(session_id).await? else {
             return Ok(None);
         };
         self.validate_persisted_model_selection(&record)?;
-        let mut session = self.build_session(
-            &record,
-            workspace_id.or_else(|| Some(self.default_workspace_id.clone())),
-        )?;
+        let mut session = self.build_session(&record)?;
         session.context.project_root = self.resolve_effective_root(&session).await?;
         Ok(Some(session))
     }
@@ -330,9 +321,6 @@ impl SessionService {
         };
         self.validate_persisted_model_selection(&record)?;
         let patch = self.normalize_session_patch(record.context.clone(), patch)?;
-        if let Some(OptionalProjectIdPatch::Set { project_id }) = patch.project_id.as_ref() {
-            self.validate_project_id(project_id).await?;
-        }
         self.apply_session_patch(record, patch).await
     }
 
@@ -501,6 +489,8 @@ impl SessionService {
         params: CreateSessionParams,
         tree_identity: SessionTreeIdentity,
     ) -> TalosResult<SessionRecord> {
+        self.base_config_snapshot()
+            .resolve_workspace(&params.workspace_id, &params.context.user_id)?;
         let session_id = params
             .session_id
             .unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
@@ -563,16 +553,6 @@ impl SessionService {
         }
         if next_selection != previous_selection {
             record.usage.context = None;
-        }
-        if let Some(project_id_patch) = &patch.project_id {
-            match project_id_patch {
-                OptionalProjectIdPatch::Set { project_id } => {
-                    record.project_id = Some(project_id.clone());
-                }
-                OptionalProjectIdPatch::Clear => {
-                    record.project_id = None;
-                }
-            }
         }
         if let Some(current_directory_patch) = &patch.current_directory {
             match current_directory_patch {

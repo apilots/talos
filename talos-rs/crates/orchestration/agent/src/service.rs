@@ -3,7 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use talos_config::{resolve_talos_home, AgentConfig, AgentKernelConfig, LlmConfig, ProviderConfig};
+use talos_config::{
+    resolve_talos_home, AgentConfig, AgentKernelConfig, EffectiveWorkspace, LlmConfig,
+    ProviderConfig,
+};
 use talos_error::TalosResult;
 use talos_skills::SkillRoots;
 use talos_types::agent_dispatch::AgentDispatchResumeContext;
@@ -61,9 +64,8 @@ pub struct AgentRunContext {
     /// Optional execution user id prepared by Service or Coordinator.
     #[serde(default)]
     pub user_id: Option<String>,
-    /// Optional workspace routing key, not a filesystem path.
-    #[serde(default)]
-    pub workspace_id: Option<String>,
+    /// Required logical and physical workspace scope resolved from the session binding.
+    pub workspace: EffectiveWorkspace,
     /// Optional resolved project root for the run.
     #[serde(default)]
     pub project_root: Option<PathBuf>,
@@ -77,19 +79,26 @@ pub struct AgentRunContext {
 
 impl AgentRunContext {
     /// Build the minimal Agent run context from a prepared Talos session.
-    pub fn from_session(session: &TalosSession, turn_id: String, agent_id: String) -> Self {
-        Self {
+    pub fn from_session(
+        session: &TalosSession,
+        turn_id: String,
+        agent_id: String,
+    ) -> TalosResult<Self> {
+        let workspace = session
+            .config
+            .resolve_workspace(&session.context.workspace_id, &session.user_id)?;
+        Ok(Self {
             agent_id,
             session_id: session.context.session_id.clone(),
             turn_id,
             message_id: session.context.message_id.clone(),
             owner_user_id: session.user_id.clone(),
             user_id: Some(session.context.user_id.clone()),
-            workspace_id: session.context.workspace_id.clone(),
+            workspace,
             project_root: session.context.project_root.clone(),
             project_id: session.project_id.clone(),
             environment: session.context.environment.clone(),
-        }
+        })
     }
 }
 

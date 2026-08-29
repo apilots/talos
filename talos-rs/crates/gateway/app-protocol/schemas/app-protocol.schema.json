@@ -681,7 +681,6 @@
         "workspace.doc.list",
         "workspace.doc.read",
         "workspace.doc.write",
-        "workspace.info",
         "skills.list",
         "skills.refresh",
         "skills.suggest",
@@ -1602,24 +1601,6 @@
             },
             "params": {
               "$ref": "#/definitions/WorkspaceDocWriteRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "workspace.info"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/WorkspaceInfoRequest"
             }
           },
           "required": [
@@ -3859,42 +3840,6 @@
         }
       ]
     },
-    "OptionalProjectIdPatch": {
-      "oneOf": [
-        {
-          "properties": {
-            "project_id": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "set"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "project_id",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "clear"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "PendingUserAction": {
       "description": "Current user action exposed across Service, protocol, SDK, and client boundaries.",
       "properties": {
@@ -4689,6 +4634,7 @@
       "type": "object"
     },
     "RetryTurnRequest": {
+      "additionalProperties": false,
       "properties": {
         "client_message_id": {
           "type": "string"
@@ -4704,13 +4650,6 @@
         },
         "session_id": {
           "type": "string"
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -5475,6 +5414,7 @@
       "type": "object"
     },
     "SessionPatchRequest": {
+      "additionalProperties": false,
       "properties": {
         "conf": {
           "anyOf": [
@@ -5491,17 +5431,6 @@
           "anyOf": [
             {
               "$ref": "#/definitions/OptionalCurrentDirectoryPatch"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "project_id": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/OptionalProjectIdPatch"
             },
             {
               "type": "null"
@@ -5683,13 +5612,6 @@
           ],
           "default": null,
           "description": "Permission override used only when this request creates a missing session."
-        },
-        "workspace_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -8163,9 +8085,6 @@
         "content",
         "kind"
       ],
-      "type": "object"
-    },
-    "WorkspaceInfoRequest": {
       "type": "object"
     }
   },

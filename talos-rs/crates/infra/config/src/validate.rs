@@ -6,6 +6,8 @@ use talos_error::TalosResult;
 use crate::{Config, DatabaseType};
 
 const REQUIRED_CONFIG_PATHS: &[&str] = &[
+    "workspaces.default_workspace_id",
+    "workspaces.definitions",
     "agent.name",
     "gateway.host",
     "gateway.port",
@@ -82,6 +84,7 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
     use talos_error::TalosError;
 
     crate::parse_timezone(&config.timezone)?;
+    config.workspaces.validate(&config.talos_paths())?;
 
     let profile_retention = &config.automation.profile_usage_retention;
     if profile_retention.cron.trim().is_empty() {
@@ -189,22 +192,6 @@ pub(crate) fn validate_runtime_config(config: &Config) -> TalosResult<()> {
         return Err(TalosError::public(
             talos_error::ErrorCode::InvalidRequest,
             "agent.kernel.context_compaction_max_bytes must be > 0".to_string(),
-        ));
-    }
-    if config.agent.kernel.default_workspace_id.trim().is_empty()
-        || is_unresolved_placeholder(&config.agent.kernel.default_workspace_id)
-    {
-        return Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "agent.kernel.default_workspace_id is empty or unresolved placeholder".to_string(),
-        ));
-    }
-    if config.agent.kernel.workspace_dir.trim().is_empty()
-        || is_unresolved_placeholder(&config.agent.kernel.workspace_dir)
-    {
-        return Err(TalosError::public(
-            talos_error::ErrorCode::InvalidRequest,
-            "agent.kernel.workspace_dir is empty or unresolved placeholder".to_string(),
         ));
     }
     if config.memory.file_list_default_limit == 0 {

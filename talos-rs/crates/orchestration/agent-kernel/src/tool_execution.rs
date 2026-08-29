@@ -24,6 +24,7 @@ pub struct ToolExecutionContext {
     pub session_id: String,
     pub turn_id: String,
     pub agent_id: String,
+    pub workspace_id: String,
     pub user_id: String,
     pub project_root: Option<PathBuf>,
     pub kernel_config: Arc<AgentKernelConfig>,
@@ -41,6 +42,7 @@ impl fmt::Debug for ToolExecutionContext {
             .field("session_id", &self.session_id)
             .field("turn_id", &self.turn_id)
             .field("agent_id", &self.agent_id)
+            .field("workspace_id", &self.workspace_id)
             .field("user_id", &self.user_id)
             .field("project_root", &self.project_root)
             .field(
@@ -128,7 +130,7 @@ fn build_tool_context(
         ctx
     };
     let ctx = ctx.with_memory_scope(MemoryScope {
-        agent_id: execution_context.agent_id.clone(),
+        workspace_id: execution_context.workspace_id.clone(),
         user_id: execution_context.user_id.clone(),
         workspace_root: execution_context.kernel_config.workspace_dir.clone().into(),
     });

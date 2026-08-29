@@ -156,7 +156,7 @@ async fn running_turn_message_is_included_in_the_next_model_request() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let session = build_test_session("session-message", "workspace-a");
+    let session = build_test_session("session-message", "default");
     let turn_id = "turn-message";
     let mut stream = agent
         .run_streamed(agent_run_params(

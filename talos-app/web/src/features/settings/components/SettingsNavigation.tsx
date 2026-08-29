@@ -49,7 +49,7 @@ const personalNavigation: SettingsNavigationItem[] = [
   { id: "account", icon: UserCircle, external: true },
   { id: "appearance", icon: Brush },
   { id: "models", icon: Bot },
-  { id: "agent-workspace", icon: UserRoundCog },
+  { id: "personalization", icon: UserRoundCog },
 ];
 
 const extensionNavigation: SettingsNavigationItem[] = [

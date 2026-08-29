@@ -949,7 +949,12 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
     ));
     let registry = Arc::new(ToolRegistry::new());
     talos_tools::register_core_local_tools(registry.as_ref());
-    let config = Arc::new(AgentKernelConfig::default());
+    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
+    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
+    let config = Arc::new(AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().into_owned(),
+        ..AgentKernelConfig::default()
+    });
 
     let result = stream_round(
         provider,
@@ -965,6 +970,7 @@ async fn streamed_tool_blocks_execute_in_model_index_order() {
                 session_id: "ordered-stream".to_string(),
                 turn_id: "turn-ordered-stream".to_string(),
                 agent_id: "agent-1".to_string(),
+                workspace_id: "default".to_string(),
                 user_id: "user-1".to_string(),
                 project_root: None,
                 kernel_config: config,
@@ -1221,6 +1227,7 @@ async fn test_stream_round_executes_tools_during_stream_and_emits_lifecycle_even
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-a1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "talos".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),

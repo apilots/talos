@@ -6,15 +6,17 @@ use talos_types::{
 };
 
 fn test_config() -> TalosConfig {
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = "/tmp/talos-workspace".to_string();
-    config
+    TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        PathBuf::from("/tmp/talos-workspace"),
+    ))
 }
 
 fn test_config_with_workspace(path: &std::path::Path) -> TalosConfig {
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = path.to_string_lossy().to_string();
-    config
+    TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        path.to_path_buf(),
+    ))
 }
 
 #[test]
@@ -29,9 +31,7 @@ fn resolves_cloud_user_workspace() {
 
     assert_eq!(
         workspace.user_workspace_dir,
-        PathBuf::from("/tmp/talos-workspace")
-            .join("users")
-            .join("user_0123456789abcdef0123456789abcdef")
+        PathBuf::from("/tmp/talos-workspace").join("user_0123456789abcdef0123456789abcdef")
     );
     assert_eq!(
         workspace.config.agent.kernel.workspace_dir,
@@ -50,7 +50,37 @@ fn resolves_anonymous_workspace() {
 
     assert!(workspace
         .user_workspace_dir
-        .ends_with(PathBuf::from("users").join("anonymous")));
+        .ends_with(PathBuf::from("anonymous")));
+}
+
+#[test]
+fn agent_definitions_do_not_change_user_workspace_resolution() {
+    let mut config = test_config();
+    let mut agent_kernel = config.agent.kernel.clone();
+    agent_kernel.workspace_dir = "/agent-owned-path-must-be-ignored".to_string();
+    config.agent.agents = vec![talos_config::AgentDefinitionConfig {
+        id: "alternate-agent".to_string(),
+        name: "Alternate".to_string(),
+        kind: talos_config::AgentKind::Kernel,
+        enabled: true,
+        description: None,
+        runtime_config: Some(talos_config::AgentRuntimeConfig::Kernel {
+            kernel: agent_kernel,
+        }),
+    }];
+
+    let workspace = EffectiveWorkspaceResolver::new(config)
+        .resolve_for_actor(&Actor::regular("user_1"))
+        .expect("workspace should resolve independently from Agent definitions");
+
+    assert_eq!(
+        workspace.user_workspace_dir,
+        PathBuf::from("/tmp/talos-workspace/user_1")
+    );
+    assert_eq!(
+        workspace.config.agent.kernel.workspace_dir,
+        "/tmp/talos-workspace/user_1"
+    );
 }
 
 #[test]
@@ -148,16 +178,23 @@ async fn profile_snapshot_updates_when_username_changes() {
 
 fn test_session(user_id: &str) -> TalosSession {
     TalosSession {
+        agent_id: "default".to_string(),
         title: "Test".to_string(),
         user_id: user_id.to_string(),
         context: SessionContext {
             session_id: "session-1".to_string(),
+            workspace_id: "default".to_string(),
             source_type: TalosSourceType::Http,
             provider: TalosProvider::Http,
             user_id: user_id.to_string(),
             message_id: "message-1".to_string(),
             trace_id: "trace-1".to_string(),
-            ..SessionContext::default()
+            channel_id: None,
+            thread_id: None,
+            project_id: None,
+            current_directory: None,
+            project_root: None,
+            environment: None,
         },
         conf: Default::default(),
         project_id: None,

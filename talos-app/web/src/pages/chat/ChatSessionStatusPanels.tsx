@@ -11,7 +11,7 @@ export function ChatSessionMessageActions() {
   return (
     <>
       <Button onClick={() => navigate("/files")} variant="secondary">{t("openFiles")}</Button>
-      <Button onClick={() => navigate("/settings/agent-workspace")} variant="secondary">{t("openMemory")}</Button>
+      <Button onClick={() => navigate("/settings/personalization")} variant="secondary">{t("openMemory")}</Button>
       <Button onClick={() => navigate("/settings")} variant="secondary">{t("openSettings")}</Button>
     </>
   );

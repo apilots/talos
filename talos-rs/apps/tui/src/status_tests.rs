@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use talos_sdk::{
     AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ModelRef,
-    ModelSelection, ReasoningEffort, SessionInfo, UserRole, WorkspaceInfoResponse,
+    ModelSelection, ReasoningEffort, SessionInfo, UserRole,
 };
 use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
 
@@ -64,15 +64,6 @@ fn auth_session() -> AuthSessionReadResponse {
     }
 }
 
-fn workspace_info() -> WorkspaceInfoResponse {
-    WorkspaceInfoResponse {
-        user_id: "status-user".to_string(),
-        username: Some("status".to_string()),
-        base_workspace_dir: "/tmp/talos-workspace".to_string(),
-        user_workspace_dir: "/tmp/talos-workspace".to_string(),
-    }
-}
-
 #[test]
 fn test_status_snapshot_renders_card_from_real_state() {
     let mut app = TuiApp::build(None);
@@ -99,15 +90,12 @@ fn test_status_snapshot_renders_card_from_real_state() {
     let mut session = session_info();
     session.model_selection.model_ref.provider = "bailian".to_string();
     session.model_selection.reasoning_effort = Some(ReasoningEffort::Light);
-    let snapshot =
-        TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session(), &workspace_info())
-            .unwrap();
+    let snapshot = TuiStatusSnapshot::from_app(&app, Some(&session), &auth_session()).unwrap();
     let card = render_status_card(&snapshot);
 
     assert!(!card.lines().any(|line| line == "/status"));
     assert!(card.contains("Talos TUI"));
     assert!(card.contains("Model:            qwen-plus (bailian, reasoning light, summaries auto)"));
-    assert!(card.contains("Agent Workspace:  /tmp/talos-workspace"));
     assert!(card.contains("Directory:        /tmp/talos-project"));
     assert!(card.contains("Account:          status@example.com"));
     assert!(card.contains("Session:          sess-status"));
@@ -126,8 +114,7 @@ fn test_status_snapshot_rejects_missing_model_metadata() {
     app.available_model_info = vec![mock_model_info("other-model", 128_000)];
     app.current_model = "qwen-plus".to_string();
 
-    let err =
-        TuiStatusSnapshot::from_app(&app, None, &auth_session(), &workspace_info()).unwrap_err();
+    let err = TuiStatusSnapshot::from_app(&app, None, &auth_session()).unwrap_err();
 
     assert!(err
         .to_string()

@@ -74,14 +74,14 @@ pub struct MemorySearchRecord {
 /// Validated identity used by every derived-index query and mutation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct MemoryIndexScope {
-    agent_id: String,
+    workspace_id: String,
     user_id: String,
     workspace_root: String,
 }
 
 impl MemoryIndexScope {
     pub(super) fn from_scope(scope: &MemoryScope) -> TalosResult<Self> {
-        let agent_id = scope.agent_id.trim();
+        let workspace_id = scope.workspace_id.trim();
         let user_id = scope.user_id.trim();
         let workspace_root = scope.workspace_root.to_str().ok_or_else(|| {
             TalosError::public(
@@ -89,21 +89,21 @@ impl MemoryIndexScope {
                 "memory workspace_root must be valid UTF-8".to_string(),
             )
         })?;
-        if agent_id.is_empty() || user_id.is_empty() || workspace_root.trim().is_empty() {
+        if workspace_id.is_empty() || user_id.is_empty() || workspace_root.trim().is_empty() {
             return Err(TalosError::public(
                 talos_error::ErrorCode::InvalidRequest,
-                "memory agent_id, user_id, and workspace_root are required".to_string(),
+                "memory workspace_id, user_id, and workspace_root are required".to_string(),
             ));
         }
         Ok(Self {
-            agent_id: agent_id.to_string(),
+            workspace_id: workspace_id.to_string(),
             user_id: user_id.to_string(),
             workspace_root: workspace_root.to_string(),
         })
     }
 
-    pub(super) fn agent_id(&self) -> &str {
-        &self.agent_id
+    pub(super) fn workspace_id(&self) -> &str {
+        &self.workspace_id
     }
 
     pub(super) fn user_id(&self) -> &str {

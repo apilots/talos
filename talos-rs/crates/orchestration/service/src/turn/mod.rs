@@ -225,14 +225,9 @@ async fn record_completed_turn_progress(
 #[path = "turn_tests.rs"]
 mod tests;
 
-pub fn turn_submission_hash(
-    session_id: &str,
-    input: &[TalosInputItem],
-    workspace_id: &Option<String>,
-) -> TalosResult<String> {
+pub fn turn_submission_hash(session_id: &str, input: &[TalosInputItem]) -> TalosResult<String> {
     let canonical = serde_json::json!({
         "session_id": session_id,
-        "workspace_id": workspace_id,
         "input": input,
     });
     let bytes =

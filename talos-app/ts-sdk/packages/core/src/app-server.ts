@@ -52,7 +52,6 @@ import type {
   AuthSessionReadResponse,
   CloudLoginCancelResponse,
   SessionCloseResponse,
-  WorkspaceInfoResponse,
   WorkspaceDocKind,
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
@@ -483,10 +482,6 @@ export class AppServerClient {
 
   listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {
     return this.transport.request<WorkspaceDocListResponse>("workspace.doc.list", {});
-  }
-
-  getWorkspaceInfo(): Promise<WorkspaceInfoResponse> {
-    return this.transport.request("workspace.info", {});
   }
 
   readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocReadResponse> {

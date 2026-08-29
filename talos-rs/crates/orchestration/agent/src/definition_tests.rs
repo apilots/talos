@@ -151,10 +151,6 @@ fn inner_model() -> Arc<crate::InnerModelClient> {
 fn loader_builds_synthesized_default_definition() {
     let config = AgentConfig {
         name: "Talos".to_string(),
-        kernel: AgentKernelConfig {
-            default_workspace_id: "workspace-default".to_string(),
-            ..Default::default()
-        },
         ..Default::default()
     };
 
@@ -166,19 +162,12 @@ fn loader_builds_synthesized_default_definition() {
     assert_eq!(definition.id, "default");
     assert_eq!(definition.name, "Talos");
     assert_eq!(definition.kind, AgentKind::Kernel);
-    assert_eq!(
-        definition.default_workspace_id.as_deref(),
-        Some("workspace-default")
-    );
     assert_eq!(definition.model_selection, default_model_selection());
 }
 
 #[test]
 fn loader_resolves_explicit_agent_definition() {
-    let kernel = AgentKernelConfig {
-        default_workspace_id: "base-workspace".to_string(),
-        ..Default::default()
-    };
+    let kernel = AgentKernelConfig::default();
     let config = AgentConfig {
         kernel: kernel.clone(),
         agents: vec![AgentDefinitionConfig {
@@ -187,7 +176,6 @@ fn loader_resolves_explicit_agent_definition() {
             kind: ConfigAgentKind::Kernel,
             enabled: true,
             description: None,
-            default_workspace_id: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel { kernel }),
         }],
         ..Default::default()
@@ -201,10 +189,6 @@ fn loader_resolves_explicit_agent_definition() {
     assert_eq!(definition.id, "reviewer");
     assert_eq!(definition.name, "Reviewer");
     assert_eq!(definition.description, "Reviewer agent");
-    assert_eq!(
-        definition.default_workspace_id.as_deref(),
-        Some("base-workspace")
-    );
     assert_eq!(definition.model_selection, default_model_selection());
 }
 
@@ -218,7 +202,6 @@ fn loader_rejects_duplicate_agent_ids() {
                 kind: ConfigAgentKind::Kernel,
                 enabled: true,
                 description: None,
-                default_workspace_id: None,
                 runtime_config: None,
             },
             AgentDefinitionConfig {
@@ -227,7 +210,6 @@ fn loader_rejects_duplicate_agent_ids() {
                 kind: ConfigAgentKind::Kernel,
                 enabled: true,
                 description: None,
-                default_workspace_id: None,
                 runtime_config: None,
             },
         ],
@@ -249,7 +231,6 @@ fn loader_rejects_kind_runtime_mismatch() {
             kind: ConfigAgentKind::Codex,
             enabled: true,
             description: None,
-            default_workspace_id: None,
             runtime_config: None,
         }],
         ..Default::default()
@@ -270,7 +251,6 @@ fn factory_rejects_disabled_definition() {
             kind: ConfigAgentKind::Kernel,
             enabled: false,
             description: None,
-            default_workspace_id: None,
             runtime_config: None,
         }],
         ..Default::default()

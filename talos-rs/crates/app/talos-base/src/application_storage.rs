@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::Path;
 use std::sync::Arc;
 
 use opendal::services::{Fs, S3};
@@ -8,30 +7,33 @@ use talos_config::{Config, FileStorageBackendConfig, FileStorageConfig};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{create_storage, SqliteStorage, StorageConfig};
 use talos_store::file::{DatabaseFileStore, FileStore};
-use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 
-/// Builds the SQLite-backed stores required by application composition.
-pub(crate) async fn build_application_storage(
+/// Connect the SQLite storage used by startup upgrades and application stores.
+pub(crate) async fn connect_application_storage(
     config: &Config,
-    migration_dir: &Path,
-) -> TalosResult<(
-    Arc<SqliteStorage>,
-    Arc<dyn ProfileStore>,
-    Arc<dyn FileStore>,
-)> {
-    let storage = create_storage(&StorageConfig {
+) -> TalosResult<Arc<SqliteStorage>> {
+    create_storage(&StorageConfig {
         database_type: config.storage.database_type,
         connection_string: config.storage.connection_string.clone(),
         max_connections: config.storage.max_connections,
     })
-    .await?;
-    run_migrations(storage.pool(), migration_dir).await?;
-    let storage = Arc::new(storage);
+    .await
+    .map(Arc::new)
+}
+
+/// Build database stores only after every startup upgrade has succeeded.
+pub(crate) fn build_database_stores(
+    storage: &Arc<SqliteStorage>,
+) -> (
+    Arc<SqliteStorage>,
+    Arc<dyn ProfileStore>,
+    Arc<dyn FileStore>,
+) {
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
     let file_store: Arc<dyn FileStore> = Arc::new(DatabaseFileStore::new(storage.pool().clone()));
-    Ok((storage, profile_store, file_store))
+    (storage.clone(), profile_store, file_store)
 }
 
 /// Builds the configured OpenDAL operators keyed by persistent storage ID.

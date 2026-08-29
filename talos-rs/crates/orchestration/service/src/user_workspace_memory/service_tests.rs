@@ -11,7 +11,7 @@ use super::UserWorkspaceMemoryService;
 
 fn scope(root: &std::path::Path) -> MemoryScope {
     MemoryScope {
-        agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: root.to_path_buf(),
     }
@@ -244,7 +244,7 @@ async fn service_keeps_distinct_effective_workspace_scopes_isolated() {
     let service = UserWorkspaceMemoryService::new();
     let first_scope = scope(first.path());
     let second_scope = MemoryScope {
-        agent_id: "agent-2".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-2".to_string(),
         workspace_root: second.path().to_path_buf(),
     };

@@ -356,12 +356,7 @@ impl TuiApp {
                     None
                 };
                 let auth = client.read_auth_session().await?;
-                let workspace = client.workspace_info().await?;
-                Ok(StatusLoad {
-                    session,
-                    auth,
-                    workspace,
-                })
+                Ok(StatusLoad { session, auth })
             }
             .await;
             CommandUpdate::StatusLoaded(Box::new(result))

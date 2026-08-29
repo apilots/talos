@@ -145,7 +145,6 @@ pub(crate) struct SessionHistoryLoad {
 pub(crate) struct StatusLoad {
     pub(crate) session: Option<SessionInfo>,
     pub(crate) auth: talos_sdk::AuthSessionReadResponse,
-    pub(crate) workspace: talos_sdk::WorkspaceInfoResponse,
 }
 
 pub(crate) struct SessionCloseUpdate {

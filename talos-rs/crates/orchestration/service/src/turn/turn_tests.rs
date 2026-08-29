@@ -305,7 +305,6 @@ async fn submit_start_turn_preserves_executor_error_semantics() {
                 input: vec![TalosInputItem::Text {
                     text: "hello".to_string(),
                 }],
-                workspace_id: None,
                 context: None,
                 model_selection: None,
                 user_permission_mode: None,
@@ -571,11 +570,12 @@ fn test_config() -> TalosConfig {
 
 fn test_session() -> TalosSession {
     TalosSession {
+        agent_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "user-1".to_string(),
         context: SessionContext {
             session_id: "s1".to_string(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             source_type: TalosSourceType::Http,
             provider: TalosProvider::Http,
             user_id: "user-1".to_string(),
@@ -602,7 +602,7 @@ fn test_session() -> TalosSession {
 
 async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
     let session = test_session();
-    let record = talos_store::session::SessionRecord::from_session(&session, "default");
+    let record = talos_store::session::SessionRecord::from_session(&session);
     store
         .insert_session_record(&record, "api")
         .await
@@ -812,7 +812,6 @@ async fn submit_start_turn_records_completed_turn_progress() {
                 input: vec![TalosInputItem::Text {
                     text: "hello".to_string(),
                 }],
-                workspace_id: None,
                 context: None,
                 model_selection: None,
                 user_permission_mode: None,
@@ -861,7 +860,6 @@ async fn cancelled_turn_does_not_advance_session_progress() {
                 input: vec![TalosInputItem::Text {
                     text: "hello".to_string(),
                 }],
-                workspace_id: None,
                 context: None,
                 model_selection: None,
                 user_permission_mode: None,
@@ -893,7 +891,6 @@ async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result(
         input: vec![TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        workspace_id: None,
         context: None,
         model_selection: None,
         user_permission_mode: None,
@@ -901,7 +898,7 @@ async fn submit_start_turn_fails_when_existing_idempotency_record_has_no_result(
         current_directory: None,
         client_request_id: None,
     };
-    let request_hash = turn_submission_hash("s1", &request.input, &request.workspace_id).unwrap();
+    let request_hash = turn_submission_hash("s1", &request.input).unwrap();
     store
         .reserve(
             "s1",
@@ -942,7 +939,6 @@ async fn submit_start_turn_persists_agent_title_update() {
                 input: vec![TalosInputItem::Text {
                     text: "hello".to_string(),
                 }],
-                workspace_id: None,
                 context: None,
                 model_selection: None,
                 user_permission_mode: None,

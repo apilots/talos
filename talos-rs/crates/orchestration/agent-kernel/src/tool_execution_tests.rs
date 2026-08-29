@@ -9,6 +9,16 @@ use talos_tools::{register_core_local_tools, Tool, ToolContext, ToolOutputPayloa
 use tokio::sync::{mpsc, Notify};
 use tokio::time::{sleep, Duration};
 
+fn test_kernel_config() -> Arc<AgentKernelConfig> {
+    let workspace =
+        std::env::temp_dir().join(format!("talos-agent-kernel-test-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&workspace).expect("test workspace should exist");
+    Arc::new(AgentKernelConfig {
+        workspace_dir: workspace.to_string_lossy().into_owned(),
+        ..AgentKernelConfig::default()
+    })
+}
+
 struct ObservedDelayTool {
     name: &'static str,
     concurrent: Arc<AtomicUsize>,
@@ -255,9 +265,10 @@ async fn tool_execution_context_propagates_the_trusted_agent_id() {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "reviewer".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
@@ -291,13 +302,14 @@ async fn tool_execution_context_propagates_resolved_permission_mode() {
     registry.register(Arc::new(PermissionModeTool {
         observed_mode: observed_mode.clone(),
     }));
-    let mut kernel_config = AgentKernelConfig::default();
+    let mut kernel_config = (*test_kernel_config()).clone();
     kernel_config.tools.sandbox_policy.user_permission_mode =
         talos_config::ToolUserPermissionModeConfig::AskForApproval;
     let execution_context = ToolExecutionContext {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "reviewer".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
         kernel_config: Arc::new(kernel_config),
@@ -384,9 +396,10 @@ fn test_execution_context() -> ToolExecutionContext {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
@@ -599,9 +612,10 @@ async fn test_parallel_tool_executor_preserves_input_order() {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
@@ -661,9 +675,10 @@ async fn test_parallel_tool_executor_falls_back_for_mutating_batch() {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
@@ -709,9 +724,10 @@ async fn test_streaming_scheduler_forwards_tool_progress() {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),
@@ -771,9 +787,10 @@ async fn test_streaming_scheduler_limits_parallel_safe_tools() {
         session_id: "s1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "u1".to_string(),
         project_root: None,
-        kernel_config: Arc::new(AgentKernelConfig::default()),
+        kernel_config: test_kernel_config(),
         dynamic_tool_results: HashMap::new(),
         user_action_responses: HashMap::new(),
         sandbox_approval_fingerprints: HashMap::new(),

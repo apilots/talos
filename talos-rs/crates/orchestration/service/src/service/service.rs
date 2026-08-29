@@ -123,13 +123,11 @@ impl TalosService {
         user_service: Arc<dyn UserService>,
         reload_hook: Option<RuntimeConfigReloadHook>,
     ) -> Self {
-        let mut sessions = SessionService::new(
+        let sessions = SessionService::new(
             session_store.clone(),
             project_store.clone(),
             base_config.clone(),
         );
-        sessions = sessions
-            .with_default_workspace_id(base_config.agent.kernel.default_workspace_id.clone());
         let sessions = Arc::new(sessions);
         let projects = Arc::new(ProjectService::new(project_store.clone()));
         let reload_hook: Option<RuntimeConfigReloadHook> = {
@@ -370,7 +368,6 @@ impl TalosService {
                             context,
                             model_selection: request.model_selection.clone(),
                             user_permission_mode: request.user_permission_mode,
-                            workspace_id: request.workspace_id.clone(),
                             project_id: request.project_id.clone(),
                             current_directory: request.current_directory.clone(),
                         },
@@ -404,6 +401,19 @@ impl TalosService {
         session: TalosSession,
         request: &StartTurnRequest,
     ) -> ServiceResult<TalosSession> {
+        if request
+            .project_id
+            .as_deref()
+            .is_some_and(|project_id| session.project_id.as_deref() != Some(project_id))
+        {
+            return Err(talos_error::TalosError::public(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "session '{}' project binding is immutable",
+                    session.context.session_id
+                ),
+            ));
+        }
         let mut patch = SessionPatch::default();
         if let Some(selection) = request.model_selection.as_ref() {
             patch.conf = Some(SessionConfigOverridePolicy::single_model_selection_conf(
@@ -530,7 +540,6 @@ impl TalosService {
                 &session_id,
                 TurnRetryParams {
                     input: request.input,
-                    workspace_id: request.workspace_id,
                     client_message_id: request.client_message_id,
                     retry_of_message_id: request.retry_of_message_id,
                 },

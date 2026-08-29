@@ -69,7 +69,6 @@ impl TurnExecutor for AgentDispatchTurnExecutor {
 #[derive(Debug, Clone)]
 pub struct TurnRetryParams {
     pub input: Vec<TalosInputItem>,
-    pub workspace_id: Option<String>,
     pub client_message_id: String,
     pub retry_of_message_id: String,
 }

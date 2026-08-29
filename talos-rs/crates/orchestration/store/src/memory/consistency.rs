@@ -83,7 +83,7 @@ impl MemoryStore {
         let current = current_content
             .map(|content| {
                 source_from_markdown(
-                    &edit.scope.agent_id,
+                    &edit.scope.workspace_id,
                     &edit.scope.user_id,
                     source_path,
                     content,
@@ -92,7 +92,7 @@ impl MemoryStore {
             })
             .transpose()?;
         let updated = source_from_markdown(
-            &edit.scope.agent_id,
+            &edit.scope.workspace_id,
             &edit.scope.user_id,
             source_path,
             edit.updated,

@@ -3,7 +3,6 @@ use talos_service::Actor;
 use talos_types::{
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
     WorkspaceDocReadResponse, WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
-    WorkspaceInfoRequest, WorkspaceInfoResponse,
 };
 
 use crate::gateway_service::ServiceGateway;
@@ -44,15 +43,5 @@ impl ServiceGateway {
             .write_doc_with_request(actor, request)
             .await?;
         Ok(WorkspaceDocWriteResponse { doc })
-    }
-
-    pub(crate) async fn workspace_info(
-        &self,
-        actor: &Actor,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        self.service
-            .workspace_docs
-            .workspace_info_with_request(actor, request)
     }
 }

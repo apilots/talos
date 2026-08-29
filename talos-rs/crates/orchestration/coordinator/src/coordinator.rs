@@ -12,7 +12,7 @@ use talos_agent::{
     AgentResumeParams, AgentRunConfig, AgentRunContext, AgentRunOptions, AgentRunParams,
     AgentRunSessionState,
 };
-use talos_error::TalosResult;
+use talos_error::{TalosError, TalosResult};
 use talos_router::Router;
 use talos_types::agent_dispatch::{
     AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, AgentDispatchResult,
@@ -80,7 +80,7 @@ impl CoordinatorImpl {
         let mut turn_session = request.session.clone();
         turn_session.context.message_id = message_id;
 
-        let context = AgentRunContext::from_session(&turn_session, turn_id, agent_id);
+        let context = AgentRunContext::from_session(&turn_session, turn_id, agent_id)?;
         let config = AgentRunConfig::from_session(&turn_session);
         let session_state = AgentRunSessionState::from_session(&turn_session);
         let options = AgentRunOptions::from_config(&config);
@@ -106,22 +106,15 @@ impl CoordinatorImpl {
         &self,
         session: &TalosSession,
     ) -> TalosResult<(String, Arc<dyn AgentHarness>)> {
-        let route_context = TalosContext {
-            source_type: session.context.source_type.clone(),
-            provider: session.context.provider.clone(),
-            user_id: session.context.user_id.clone(),
-            message_id: session.context.message_id.clone(),
-            trace_id: session.context.trace_id.clone(),
-            channel_id: session.context.channel_id.clone(),
-            thread_id: session.context.thread_id.clone(),
-            project_root: session.context.project_root.clone(),
-            environment: session.context.environment.clone(),
-        };
-        let selection = self
-            .agent_router
-            .resolve_agent(AgentSelectionParams::for_context(route_context))
-            .await?;
-        Ok((selection.agent_id, selection.registration.harness))
+        let agent_id = session.agent_id.trim();
+        if agent_id.is_empty() {
+            return Err(TalosError::internal(format!(
+                "session '{}' is missing its agent binding",
+                session.context.session_id
+            )));
+        }
+        let registration = Self::map_agent_result(self.registry.get(agent_id).await)?;
+        Ok((agent_id.to_string(), registration.harness))
     }
 
     async fn resolve_bound_agent(
@@ -131,8 +124,13 @@ impl CoordinatorImpl {
     ) -> TalosResult<(String, Arc<dyn AgentHarness>)> {
         match binding {
             DispatchBinding::Exact { agent_id } => {
-                let registration = Self::map_agent_result(self.registry.get(agent_id).await)?;
-                Ok((agent_id.clone(), registration.harness))
+                if agent_id != &session.agent_id {
+                    return Err(TalosError::internal(format!(
+                        "session '{}' is bound to agent '{}', but dispatch requested '{}'",
+                        session.context.session_id, session.agent_id, agent_id
+                    )));
+                }
+                self.resolve_session_agent(session).await
             }
             DispatchBinding::Routed => self.resolve_session_agent(session).await,
         }

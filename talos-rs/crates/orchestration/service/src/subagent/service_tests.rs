@@ -270,8 +270,10 @@ async fn test_services_uninitialized() -> TestServices {
     run_test_migrations(storage.pool()).await;
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let workspace = tempfile::tempdir().unwrap();
-    let mut config = test_config();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    let config = test_config().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        workspace.path().to_path_buf(),
+    ));
     let sessions = Arc::new(SessionService::new(
         store.clone(),
         Arc::new(MockProjectStore::new()),
@@ -284,10 +286,7 @@ async fn test_services_uninitialized() -> TestServices {
         TimelineEventRetentionConfig::default(),
     ));
     let executor = Arc::new(RecordingTurnExecutor::default());
-    let user_workspace =
-        talos_config::resolve_effective_kernel_workspace(&config.agent.kernel, "user-1")
-            .unwrap()
-            .user_workspace_dir;
+    let user_workspace = config.resolve_workspace("default", "user-1").unwrap().root;
     *executor.artifact_workspace.lock().unwrap() = Some(user_workspace.clone());
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
@@ -376,7 +375,7 @@ async fn create_parent_with_agent(
                 id: "test-model".to_string(),
             })),
             conf: Some(SessionConf::default()),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             project_id: None,
             current_directory: None,
         })
@@ -437,7 +436,7 @@ async fn create_running_child_named(
                     id: "test-model".to_string(),
                 })),
                 conf: None,
-                workspace_id: None,
+                workspace_id: "default".to_string(),
                 project_id: None,
                 current_directory: None,
             },

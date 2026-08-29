@@ -7,6 +7,11 @@ use talos_skills::{SkillRoots, SkillSelector};
 use talos_types::talos::ToolArguments;
 use talos_types::{UserActionParams, UserActionResponse};
 
+pub(super) type PreparedSessionCompaction = Option<(
+    Option<talos_prompt::PromptAssembly>,
+    SessionHistoryCompaction,
+)>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCallRecord {
     pub call_id: String,
@@ -127,6 +132,7 @@ pub struct PreparedGeneralTurn {
     pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
+    pub workspace_id: String,
     pub project_root: Option<PathBuf>,
     pub selected_model: String,
     pub max_output_tokens: Option<u32>,

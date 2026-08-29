@@ -13,7 +13,7 @@ vi.mock("@/features/settings", async () => {
   const actual = await vi.importActual<typeof import("@/features/settings")>("@/features/settings");
   return {
     ...actual,
-    SettingsAgentWorkspaceSection: () => <div>Agent workspace content</div>,
+    SettingsPersonalizationSection: () => <div>Personalization content</div>,
     SettingsAppearanceSection: () => <div>Appearance content</div>,
     SettingsGeneralSection: () => <div>General content</div>,
     SettingsMcpServersSection: () => <div>MCP servers content</div>,
@@ -79,21 +79,21 @@ describe("SettingsPage", () => {
     renderSettings("/settings/models", "authenticated", "admin");
 
     expect(screen.getByText("Models content")).toBeTruthy();
-    expect(screen.getByText("Agent Workspace")).toBeTruthy();
+    expect(screen.getByText("Personalization")).toBeTruthy();
   });
 
   it("only marks the exact routed settings item as current for regular users", () => {
-    renderSettings("/settings/agent-workspace");
+    renderSettings("/settings/personalization");
 
     expect(screen.getByRole("link", { name: "General" }).getAttribute("aria-current")).toBeNull();
-    expect(screen.getByRole("link", { name: "Agent Workspace" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Personalization" }).getAttribute("aria-current")).toBe("page");
   });
 
-  it("allows admin users to access their personal agent workspace settings", () => {
-    renderSettings("/settings/agent-workspace", "authenticated", "admin");
+  it("allows admin users to access their personalization settings", () => {
+    renderSettings("/settings/personalization", "authenticated", "admin");
 
-    expect(screen.getByText("Agent workspace content")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Agent Workspace" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByText("Personalization content")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Personalization" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("hides model settings for regular authenticated users", () => {

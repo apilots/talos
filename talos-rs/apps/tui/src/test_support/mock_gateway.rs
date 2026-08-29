@@ -25,7 +25,6 @@ pub(crate) struct MockGatewayState {
     pub(crate) submitted_user_actions: Vec<SubmitUserActionRequest>,
     pub(crate) current_project_root: Option<PathBuf>,
     pub(crate) auth_email: Option<String>,
-    pub(crate) workspace_root: PathBuf,
     pub(crate) updated_model: Option<String>,
     pub(crate) stream_counter: u64,
     pub(crate) list_models_failures_remaining: u8,

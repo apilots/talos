@@ -6,14 +6,14 @@ use talos_memory::MemoryScope;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, TalosConfig, WorkspaceDocInfo, WorkspaceDocKind,
     WorkspaceDocListRequest, WorkspaceDocListResponse, WorkspaceDocReadRequest,
-    WorkspaceDocSummary, WorkspaceDocWriteRequest, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocSummary, WorkspaceDocWriteRequest,
 };
 
 use crate::access::Actor;
 use crate::workspace::file::{
     ensure_workspace_write_version, resolve_workspace_root, workspace_revision,
 };
-use crate::workspace::{AgentWorkspaceInfo, EffectiveWorkspaceResolver};
+use crate::workspace::EffectiveWorkspaceResolver;
 use crate::UserWorkspaceMemoryService;
 
 #[derive(Clone)]
@@ -73,24 +73,6 @@ impl WorkspaceDocService {
     ) -> TalosResult<WorkspaceDocListResponse> {
         let docs = self.list_docs(actor).await?;
         Ok(WorkspaceDocListResponse { data: docs })
-    }
-
-    pub fn workspace_info(&self, actor: &Actor) -> TalosResult<AgentWorkspaceInfo> {
-        Ok(self.resolver.resolve_for_actor(actor)?.into())
-    }
-
-    pub fn workspace_info_with_request(
-        &self,
-        actor: &Actor,
-        _request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        let info = self.workspace_info(actor)?;
-        Ok(WorkspaceInfoResponse {
-            user_id: info.user_id,
-            username: info.username,
-            base_workspace_dir: info.base_workspace_dir,
-            user_workspace_dir: info.user_workspace_dir,
-        })
     }
 
     pub async fn get_doc(
@@ -201,9 +183,9 @@ impl WorkspaceDocService {
     }
 }
 
-fn memory_scope(workspace: &crate::workspace::EffectiveAgentWorkspace) -> MemoryScope {
+fn memory_scope(workspace: &crate::workspace::EffectiveUserWorkspace) -> MemoryScope {
     MemoryScope {
-        agent_id: workspace.agent_id.clone(),
+        workspace_id: workspace.workspace_id.clone(),
         user_id: workspace.user_id.clone(),
         workspace_root: workspace.user_workspace_dir.clone(),
     }

@@ -44,8 +44,7 @@ use talos_types::{
     SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
     TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
     WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
 };
 use tokio::sync::mpsc;
 
@@ -456,11 +455,6 @@ pub trait GatewayClient: Send {
         &mut self,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse>;
-
-    async fn workspace_info(
-        &mut self,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse>;
 
     async fn shutdown(&mut self) -> TalosResult<()>;
 }

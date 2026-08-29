@@ -12,13 +12,11 @@ import {
   supportedAttachmentKinds,
   useConfiguredSessionModelSelection,
   useUpdateSessionModelMutation,
-  useUpdateSessionProjectMutation,
   type ChatComposerProps,
   type useChatSession,
   type useProjectsView,
 } from "@/features/chat";
 import { useAppStore } from "@/shared/store/app-store";
-import { UNBOUND_PROJECT_ID } from "@/shared/types/domain";
 import type { ReasoningLevel } from "@/shared/types/ui";
 import type { SessionLocationState } from "./chatSessionLocation";
 import { useSessionCommands } from "./useSessionCommands";
@@ -51,7 +49,6 @@ export function useChatSessionComposer({
     locationState?.initialProjectId,
   );
   const { mutate: updateSessionModel } = useUpdateSessionModelMutation(sessionId);
-  const updateProject = useUpdateSessionProjectMutation(sessionId);
   const connection = useAppStore((state) => state.connection);
   const setConnection = useAppStore((state) => state.setConnection);
   const activeSessionModelSelection = useConfiguredSessionModelSelection({
@@ -155,11 +152,6 @@ export function useChatSessionComposer({
       projectsView.setActiveProjectId(projectId);
       if (!session) {
         setDraftProjectId(projectId);
-        return;
-      }
-      const project = projectsView.projects.find((entry) => entry.id === projectId);
-      if (project || projectId === UNBOUND_PROJECT_ID) {
-        updateProject.mutate(project);
       }
     },
     onReasoningLevelChange: (level) => {

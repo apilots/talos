@@ -14,6 +14,7 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
+        workspace_id: "default".to_string(),
         project_root: None,
         selected_model: "length-finish".to_string(),
         max_output_tokens: Some(16),

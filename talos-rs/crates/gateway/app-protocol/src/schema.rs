@@ -262,8 +262,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_types::WorkspaceDocReadResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocWriteRequest>());
     output.push_str(&export::<talos_types::WorkspaceDocWriteResponse>());
-    output.push_str(&export::<talos_types::WorkspaceInfoRequest>());
-    output.push_str(&export::<talos_types::WorkspaceInfoResponse>());
     output.push_str(&export::<talos_types::WorkspaceDocKind>());
     output.push_str(&export::<talos_types::WorkspaceDocSummary>());
     output.push_str(&export::<talos_types::WorkspaceDocInfo>());
@@ -386,7 +384,6 @@ pub fn generate_typescript() -> String {
     output.push_str(&export::<talos_auth::UserRole>());
     output.push_str(&export::<talos_auth::UserType>());
     output.push_str(&export::<talos_auth::UserDto>());
-    output.push_str(&export::<talos_types::OptionalProjectIdPatch>());
     output.push_str(&export::<talos_types::OptionalCurrentDirectoryPatch>());
     output.push_str(&export::<talos_types::SessionConf>());
     output.push_str(&export::<talos_types::talos::AgentEvent>());

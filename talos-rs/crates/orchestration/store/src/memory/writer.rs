@@ -3,8 +3,8 @@ use chrono_tz::Tz;
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{
     DreamMemoryAppendResult, DreamMemoryBundleEventKind, DreamMemoryDate, DreamMemoryDayRevision,
-    DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryWriteRequest, MemoryAgentId,
-    MemoryScope, MemoryTimezone, MemoryUserId,
+    DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryWriteRequest, MemoryScope,
+    MemoryTimezone, MemoryUserId,
 };
 
 use super::bundle::current_memory_date;
@@ -58,7 +58,7 @@ impl MemoryStore {
                 ));
             }
             let context = DreamMemoryDocumentContext::new(
-                MemoryAgentId::parse(scope.agent_id.clone()).map_err(map_dream_memory_error)?,
+                request.producer_agent_id().clone(),
                 MemoryUserId::parse(scope.user_id.clone()).map_err(map_dream_memory_error)?,
                 DreamMemoryDate::parse(&source_date).map_err(map_dream_memory_error)?,
                 MemoryTimezone::new(timezone),
@@ -82,7 +82,7 @@ impl MemoryStore {
                 DreamMemoryAppendResult::Appended => {
                     let updated = document.render().map_err(map_dream_memory_error)?;
                     let updated_source = source_from_markdown(
-                        &scope.agent_id,
+                        &scope.workspace_id,
                         &scope.user_id,
                         &source_path,
                         &updated,

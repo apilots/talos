@@ -12,7 +12,7 @@ async fn compaction_persists_candidates_and_summary_from_one_response() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
-        agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
@@ -34,6 +34,7 @@ async fn compaction_persists_candidates_and_summary_from_one_response() {
     let report = crate::general_turn::memory_summary::compact_session_memory(
         MemoryFormationParams {
             session_id: "s1",
+            producer_agent_id: "agent-1",
             selected_model: "summary-model",
             llm_provider: provider.clone(),
             dream_memory_store: &memory_store,
@@ -98,6 +99,7 @@ async fn compaction_does_not_advance_cursor_or_summary_when_memory_write_fails()
     let error = crate::compact_session_memory(
         MemoryFormationParams {
             session_id: "s1",
+            producer_agent_id: "agent-1",
             selected_model: "summary-model",
             llm_provider: Arc::new(SummaryProvider::new(vec![r#"{
                     "mode":"compaction",
@@ -107,7 +109,7 @@ async fn compaction_does_not_advance_cursor_or_summary_when_memory_write_fails()
             .to_string()])),
             dream_memory_store: &FailingMemoryWriter,
             memory_scope: &MemoryScope {
-                agent_id: "agent-1".to_string(),
+                workspace_id: "default".to_string(),
                 user_id: "user-1".to_string(),
                 workspace_root: workspace.clone(),
             },

@@ -38,8 +38,16 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     config: Config,
     migration_dir: &Path,
 ) -> TalosResult<TalosApplicationRuntime> {
+    let storage_connection = application_storage::connect_application_storage(&config).await?;
+    let upgrade_report = talos_upgrade::run_startup_upgrades(talos_upgrade::StartupUpgradeParams {
+        config: &config,
+        database_pool: storage_connection.pool(),
+        database_migration_dir: migration_dir,
+    })
+    .await?;
+    tracing::info!(report = ?upgrade_report, "startup upgrades completed");
     let (storage_impl, profile_store, file_store) =
-        application_storage::build_application_storage(&config, migration_dir).await?;
+        application_storage::build_database_stores(&storage_connection);
     let storage: Arc<dyn talos_storage::Storage> = storage_impl;
     let session_store_impl = Arc::new(DatabaseSessionStore::new(storage.clone()).await?);
     let project_store_impl = Arc::new(StorageProjectStore::new(storage.clone()).await?);
@@ -143,8 +151,6 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let memory_database = config.talos_paths().data_dir.join("memory-index.sqlite");
     let memory_store = Arc::new(MemoryStore::open(&memory_database).await?);
     let memory_service = MemoryService::new(config.clone(), memory_store)?;
-    // TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
-    memory_service.convert_legacy_known_scopes().await?;
     memory_service.rebuild_known_scopes().await?;
     tool_registry.set_memory_reader(Arc::new(memory_service.clone()));
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
@@ -253,6 +259,8 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         memory_service,
         inner_model,
         &agent_definitions,
+        config.workspaces.clone(),
+        config.talos_paths(),
         config.automation.dream_memory_maintenance.clone(),
     );
     let automation = application_automation::start_maintenance(

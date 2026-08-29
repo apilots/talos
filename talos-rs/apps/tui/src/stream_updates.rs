@@ -142,12 +142,8 @@ impl TuiApp {
                     if let Some(info) = status.session.as_ref() {
                         self.apply_session_snapshot(info);
                     }
-                    let snapshot = TuiStatusSnapshot::from_app(
-                        self,
-                        status.session.as_ref(),
-                        &status.auth,
-                        &status.workspace,
-                    );
+                    let snapshot =
+                        TuiStatusSnapshot::from_app(self, status.session.as_ref(), &status.auth);
                     match snapshot {
                         Ok(snapshot) => {
                             let status_card = render_status_card(&snapshot);

@@ -138,9 +138,9 @@ impl MemoryStore {
             .await
             .map_err(storage_error("begin memory rebuild"))?;
         let existing = sqlx::query(
-            "SELECT source_path, fingerprint FROM memory_sources WHERE agent_id = ? AND user_id = ? AND workspace_root = ?",
+            "SELECT source_path, fingerprint FROM memory_sources WHERE workspace_id = ? AND user_id = ? AND workspace_root = ?",
         )
-                .bind(index_scope.agent_id())
+                .bind(index_scope.workspace_id())
                 .bind(index_scope.user_id())
                 .bind(index_scope.workspace_root())
                 .fetch_all(&mut *transaction)
@@ -164,16 +164,16 @@ impl MemoryStore {
             if current_paths.contains(source_path.as_str()) {
                 continue;
             }
-            sqlx::query("DELETE FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
-                .bind(index_scope.agent_id())
+            sqlx::query("DELETE FROM memory_entries WHERE workspace_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+                .bind(index_scope.workspace_id())
                 .bind(index_scope.user_id())
                 .bind(index_scope.workspace_root())
                 .bind(source_path)
                 .execute(&mut *transaction)
                 .await
                 .map_err(storage_error("delete removed memory entries"))?;
-            sqlx::query("DELETE FROM memory_sources WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
-                .bind(index_scope.agent_id())
+            sqlx::query("DELETE FROM memory_sources WHERE workspace_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+                .bind(index_scope.workspace_id())
                 .bind(index_scope.user_id())
                 .bind(index_scope.workspace_root())
                 .bind(source_path)
@@ -209,7 +209,7 @@ impl MemoryStore {
     ) -> TalosResult<()> {
         let index_scope = MemoryIndexScope::from_scope(scope)?;
         let source = source_from_markdown(
-            &scope.agent_id,
+            &scope.workspace_id,
             &scope.user_id,
             source_path,
             content,
@@ -230,7 +230,7 @@ impl MemoryStore {
     /// Count canonical records in one source using the same parser as rebuild and search.
     pub fn source_section_count(
         &self,
-        agent_id: &str,
+        workspace_id: &str,
         user_id: &str,
         source_date: DreamMemoryDate,
         content: &str,
@@ -238,7 +238,7 @@ impl MemoryStore {
     ) -> TalosResult<usize> {
         let source_path = format!("{source_date}.md");
         Ok(
-            source_from_markdown(agent_id, user_id, &source_path, content, timezone)?
+            source_from_markdown(workspace_id, user_id, &source_path, content, timezone)?
                 .records
                 .len(),
         )
@@ -284,7 +284,7 @@ pub(super) async fn load_sources(
             .await?
             .ok_or_else(|| TalosError::internal(format!("memory source missing: {source_path}")))?;
         sources.push(source_from_markdown(
-            &scope.agent_id,
+            &scope.workspace_id,
             &scope.user_id,
             &source_path,
             &content,
@@ -402,8 +402,8 @@ async fn replace_source(
     scope: &MemoryIndexScope,
     source: &ParsedMemorySource,
 ) -> TalosResult<()> {
-    sqlx::query("DELETE FROM memory_entries WHERE agent_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
-        .bind(scope.agent_id())
+    sqlx::query("DELETE FROM memory_entries WHERE workspace_id = ? AND user_id = ? AND workspace_root = ? AND source_path = ?")
+        .bind(scope.workspace_id())
         .bind(scope.user_id())
         .bind(scope.workspace_root())
         .bind(&source.source_path)
@@ -414,9 +414,9 @@ async fn replace_source(
         let record = &parsed.record;
         let provenance = SqliteProvenance::from_domain(&record.provenance)?;
         sqlx::query(
-            "INSERT INTO memory_entries (agent_id, user_id, workspace_root, memory_id, title, body, kind, importance, occurred_at, session_id, source_from_seq, source_until_seq, source_path, source_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO memory_entries (workspace_id, user_id, workspace_root, memory_id, title, body, kind, importance, occurred_at, session_id, source_from_seq, source_until_seq, source_path, source_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
-        .bind(scope.agent_id())
+        .bind(scope.workspace_id())
         .bind(scope.user_id())
         .bind(scope.workspace_root())
         .bind(record.memory_id.as_str())
@@ -435,9 +435,9 @@ async fn replace_source(
         .map_err(storage_error("insert memory entry"))?;
     }
     sqlx::query(
-        "INSERT INTO memory_sources (agent_id, user_id, workspace_root, source_path, fingerprint) VALUES (?, ?, ?, ?, ?) ON CONFLICT(agent_id, user_id, workspace_root, source_path) DO UPDATE SET fingerprint = excluded.fingerprint",
+        "INSERT INTO memory_sources (workspace_id, user_id, workspace_root, source_path, fingerprint) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, workspace_root, source_path) DO UPDATE SET fingerprint = excluded.fingerprint",
     )
-    .bind(scope.agent_id())
+    .bind(scope.workspace_id())
     .bind(scope.user_id())
     .bind(scope.workspace_root())
     .bind(&source.source_path)
@@ -487,3 +487,7 @@ impl<'a> SqliteProvenance<'a> {
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
     move |error| TalosError::internal(format!("{action}: {error}"))
 }
+
+#[cfg(test)]
+#[path = "store_tests.rs"]
+mod tests;

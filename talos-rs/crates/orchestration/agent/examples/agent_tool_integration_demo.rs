@@ -36,7 +36,8 @@ fn agent_run_params_from_session(
     input: Vec<TalosInputItem>,
 ) -> AgentRunParams {
     let context =
-        AgentRunContext::from_session(session, turn_id.to_string(), "demo_agent_1".to_string());
+        AgentRunContext::from_session(session, turn_id.to_string(), "demo_agent_1".to_string())
+            .expect("workspace should resolve");
     let config = AgentRunConfig::from_session(session);
     let session_state = AgentRunSessionState::from_session(session);
     let options = AgentRunOptions::from_config(&config);
@@ -141,6 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         cost: Default::default(),
     }];
     let session = TalosSession {
+        agent_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "demo-user".to_string(),
         conf: talos_types::SessionConf {
@@ -154,7 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         current_directory: None,
         context: SessionContext {
             session_id: "demo-session".to_string(),
-            workspace_id: Some("default".to_string()),
+            workspace_id: "default".to_string(),
             project_id: None,
             current_directory: None,
             project_root: None,

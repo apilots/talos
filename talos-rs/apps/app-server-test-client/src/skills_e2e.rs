@@ -267,7 +267,6 @@ async fn run_selected_skill_turn(
                     path: skill.path.to_string_lossy().to_string(),
                 },
             ],
-            workspace_id: None,
             context: Some(super::test_talos_context()),
             model_selection: super::test_model_ref().map(ModelSelection::without_reasoning),
             user_permission_mode: None,

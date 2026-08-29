@@ -1,9 +1,7 @@
 use super::AgentHarnessImpl;
 use std::sync::Arc;
 use talos_agent_kernel::StopReason;
-use talos_config::{
-    resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
-};
+use talos_config::{validate_session_workspace_user, AgentKernelConfig};
 use talos_error::TalosResult;
 use talos_llm_provider::LlmProvider;
 use talos_types::talos::StopReason as TalosStopReason;
@@ -18,8 +16,12 @@ impl AgentHarnessImpl {
         session: &TalosSession,
     ) -> TalosResult<AgentKernelConfig> {
         validate_session_workspace_user(&session.user_id, &session.context.user_id)?;
-        let kernel_config = Self::normalized_kernel_config(session.config.agent.kernel.clone());
-        Ok(resolve_effective_kernel_workspace(&kernel_config, &session.user_id)?.kernel_config)
+        let mut kernel_config = Self::normalized_kernel_config(session.config.agent.kernel.clone());
+        let workspace = session
+            .config
+            .resolve_workspace(&session.context.workspace_id, &session.user_id)?;
+        kernel_config.workspace_dir = workspace.root.to_string_lossy().into_owned();
+        Ok(kernel_config)
     }
 
     pub(crate) fn runtime_kernel_config_for_session(
@@ -42,10 +44,6 @@ impl AgentHarnessImpl {
 }
 
 pub(crate) fn normalized_kernel_config(mut kernel_config: AgentKernelConfig) -> AgentKernelConfig {
-    if kernel_config.workspace_dir.trim().is_empty() {
-        kernel_config.workspace_dir = AgentKernelConfig::default().workspace_dir;
-    }
-
     kernel_config.tool_parallelism = kernel_config.tool_parallelism.max(1);
     kernel_config.tool_result_max_bytes = kernel_config.tool_result_max_bytes.max(1024);
     kernel_config.context_compaction_max_bytes =

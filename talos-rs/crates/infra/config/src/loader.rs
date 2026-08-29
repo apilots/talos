@@ -86,10 +86,6 @@ pub(crate) fn load_config_from_path(path: Option<&str>) -> TalosResult<Config> {
     config.source_path = Some(config_path);
     config.apply_derived_paths();
     config.attach_runtime_env(runtime_env);
-    config
-        .talos_paths()
-        .ensure_agent_workspace(&config.agent.name)?;
-
     Ok(config)
 }
 

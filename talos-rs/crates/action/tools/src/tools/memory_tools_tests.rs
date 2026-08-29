@@ -39,7 +39,7 @@ impl MemoryReader for TestMemoryReader {
 async fn memory_tools_return_shared_dtos() {
     let context = ToolContext::new("session-1", "user-1")
         .with_memory_scope(MemoryScope {
-            agent_id: "agent-1".to_string(),
+            workspace_id: "default".to_string(),
             user_id: "user-1".to_string(),
             workspace_root: std::env::temp_dir(),
         })

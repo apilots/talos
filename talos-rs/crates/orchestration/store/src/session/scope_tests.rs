@@ -48,7 +48,7 @@ fn record(
         memory_processed_until_seq: 0,
         usage: talos_types::SessionUsage::default(),
         conf: SessionConf::default(),
-        workspace_id: Some("workspace-alpha".to_string()),
+        workspace_id: "workspace-alpha".to_string(),
         project_id,
         current_directory,
     }
@@ -212,13 +212,20 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             )
             .await
             .unwrap();
+        storage
+            .execute(
+                "INSERT INTO user_actions (session_id, turn_id, action_id, action_json, state, version, updated_at) VALUES (?, 'turn-1', 'action-1', '{}', 'pending', 0, 1)",
+                &[session_id],
+            )
+            .await
+            .unwrap();
     }
 
     assert!(store.delete_session_tree(&root.id).await.unwrap());
 
     let counts = storage
         .query(
-            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM timeline_events) AS events, (SELECT COUNT(*) FROM active_turns) AS active_turns, (SELECT COUNT(*) FROM message_idempotency_keys) AS idempotency_keys",
+            "SELECT (SELECT COUNT(*) FROM sessions) AS sessions, (SELECT COUNT(*) FROM timeline_events) AS events, (SELECT COUNT(*) FROM active_turns) AS active_turns, (SELECT COUNT(*) FROM message_idempotency_keys) AS idempotency_keys, (SELECT COUNT(*) FROM user_actions) AS user_actions",
             &[],
         )
         .await
@@ -229,8 +236,9 @@ async fn delete_session_tree_removes_descendants_and_runtime_rows() {
             counts[0].get_i64("events"),
             counts[0].get_i64("active_turns"),
             counts[0].get_i64("idempotency_keys"),
+            counts[0].get_i64("user_actions"),
         ),
-        (Some(0), Some(0), Some(0), Some(0))
+        (Some(0), Some(0), Some(0), Some(0), Some(0))
     );
 }
 
@@ -267,9 +275,9 @@ async fn test_get_session_record_reports_invalid_conf_json() {
 }
 
 #[tokio::test]
-async fn test_update_session_record_persists_fields() {
+async fn test_update_session_record_persists_mutable_fields_and_keeps_binding_immutable() {
     let store = store().await;
-    let mut record = record("session-1", "user-1", None, None);
+    let mut record = record("session-1", "user-1", Some("project-1".to_string()), None);
     store.insert_session_record(&record, "api").await.unwrap();
     store
         .advance_memory_processed_until_seq("session-1", 0, 3)
@@ -286,6 +294,11 @@ async fn test_update_session_record_persists_fields() {
     };
     record.usage.context = talos_types::ContextUsage::new(7, 100, 80, 12);
     record.model = "gpt-5.4".to_string();
+    record.user_id = "user-2".to_string();
+    record.context.user_id = "user-2".to_string();
+    record.agent_id = "agent-b".to_string();
+    record.workspace_id = "workspace-beta".to_string();
+    record.project_id = Some("project-2".to_string());
     assert!(store.update_session_record(&record).await.unwrap());
 
     let loaded = store
@@ -299,6 +312,11 @@ async fn test_update_session_record_persists_fields() {
     assert_eq!(loaded.latest_turn_seq, 3);
     assert_eq!(loaded.usage, record.usage);
     assert_eq!(loaded.model, "gpt-5.4");
+    assert_eq!(loaded.user_id, "user-1");
+    assert_eq!(loaded.context.user_id, "user-1");
+    assert_eq!(loaded.agent_id, "agent-a");
+    assert_eq!(loaded.workspace_id, "workspace-alpha");
+    assert_eq!(loaded.project_id.as_deref(), Some("project-1"));
 }
 
 #[tokio::test]

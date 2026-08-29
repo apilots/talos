@@ -201,7 +201,7 @@ impl ChannelServer {
             account_id,
             abort_signal: tokio_util::sync::CancellationToken::new(),
             event_tx: self.event_tx.clone(),
-            get_status: Arc::new(|| Default::default()),
+            get_status: Arc::new(Default::default),
             set_status: Arc::new(|_| {}),
         }
     }
@@ -346,7 +346,6 @@ fn build_start_turn_request(
 
     StartTurnRequest {
         session_id,
-        workspace_id: None,
         input,
         context: Some(context),
         model_selection: None,

@@ -146,6 +146,7 @@ fn upgrade_adds_missing_current_defaults() {
     };
     map.remove(YamlValue::String("memory".to_string()));
     map.remove(YamlValue::String("automation".to_string()));
+    map.remove(YamlValue::String("workspaces".to_string()));
     write_existing(&paths, &old);
 
     let report = upgrade_default_config_from_template(&paths, &template_path)
@@ -154,9 +155,11 @@ fn upgrade_adds_missing_current_defaults() {
     assert!(report.changed);
     assert!(report.added_paths.iter().any(|path| path == "memory"));
     assert!(report.added_paths.iter().any(|path| path == "automation"));
+    assert!(report.added_paths.iter().any(|path| path == "workspaces"));
     let normalized = read_yaml_file(&paths.config_file).expect("normalized config should read");
     assert!(get_path_for_test(&normalized, &["memory"]).is_some());
     assert!(get_path_for_test(&normalized, &["automation"]).is_some());
+    assert!(get_path_for_test(&normalized, &["workspaces"]).is_some());
     validate_config_value(&normalized).expect("normalized config should strict-load");
 }
 

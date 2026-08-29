@@ -48,8 +48,7 @@ fi
 echo "CASE session_id PASS session_id=${session_id}"
 
 first_message_payload='{
-  "input": [{"type":"text","text":"Reply with exactly SESSION_READY."}],
-  "workspace_id": null
+  "input": [{"type":"text","text":"Reply with exactly SESSION_READY."}]
 }'
 first_message_json="$(send_message_response "${session_id}" "${first_message_payload}" "session_lifecycle_first_message")"
 log_case_json "first_message" "${first_message_payload}" "${first_message_json}"

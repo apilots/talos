@@ -15,11 +15,6 @@ pub(crate) const SESSION_CONTINUITY_STATE_KEY: &str = "session_continuity";
 pub(crate) const PROMPT_WARNING_STATE_KEY: &str = "prompt_warning_state";
 pub(crate) const LAST_PROMPT_DIAGNOSTICS_STATE_KEY: &str = "last_prompt_diagnostics";
 
-type PreparedSessionCompaction = Option<(
-    Option<talos_prompt::PromptAssembly>,
-    SessionHistoryCompaction,
-)>;
-
 fn build_tool_selection_request(
     session_id: &str,
     input: &str,
@@ -237,6 +232,7 @@ async fn rebuild_prompt_assembly(
 #[allow(clippy::too_many_arguments)]
 async fn compact_session_history_if_needed(
     prompt_assembly: &talos_prompt::PromptAssembly,
+    agent_id: &str,
     agent_name: &str,
     agent_description: &str,
     input: &str,
@@ -257,7 +253,7 @@ async fn compact_session_history_if_needed(
     session_continuity: Option<SessionContinuity>,
     user_workspace_memory: talos_prompt::UserWorkspaceMemoryPromptContext,
     skill_options: Option<GeneralTurnSkillOptions>,
-) -> TalosResult<PreparedSessionCompaction> {
+) -> TalosResult<super::types::PreparedSessionCompaction> {
     let Some(trigger) = determine_history_compaction_trigger(prompt_assembly, kernel_config) else {
         return Ok(None);
     };
@@ -269,6 +265,7 @@ async fn compact_session_history_if_needed(
     let compaction_usage = match compact_session_memory(
         MemoryFormationParams {
             session_id,
+            producer_agent_id: agent_id,
             selected_model,
             llm_provider,
             dream_memory_store: dream_memory_store.as_ref(),
@@ -581,6 +578,7 @@ pub async fn prepare_general_turn(
     }
     let compaction_result = compact_session_history_if_needed(
         &prompt_assembly,
+        &agent_id,
         agent_name,
         agent_description,
         input,
@@ -588,7 +586,7 @@ pub async fn prepare_general_turn(
         tool_definition_provider.clone(),
         dream_memory_store,
         &MemoryScope {
-            agent_id: ctx.agent_id.clone(),
+            workspace_id: ctx.workspace_id.clone(),
             user_id: ctx.user_id.clone(),
             workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
         },
@@ -863,6 +861,7 @@ pub async fn prepare_general_turn(
         message_id,
         invocation_id,
         agent_id,
+        workspace_id: ctx.workspace_id.clone(),
         project_root: ctx.project_root.clone(),
         selected_model,
         max_output_tokens,

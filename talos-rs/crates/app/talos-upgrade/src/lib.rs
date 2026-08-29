@@ -1,100 +1,153 @@
-use talos_config::{
-    Config, ConfigTemplateRefreshReport, ConfigUpgradeReport, DatabaseMigrationsInstallReport,
-};
-use talos_error::TalosResult;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-const TALOS_CONFIG_ENV: &str = "TALOS_CONFIG";
+use sqlx::SqlitePool;
+use talos_config::Config;
+use talos_error::{ErrorCode, TalosError, TalosResult};
 
-/// Upgrade work completed before strict config loading.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct BeforeUpgradeReport {
-    pub default_config_template: Option<ConfigTemplateRefreshReport>,
-    pub default_config: Option<ConfigUpgradeReport>,
-    pub skipped_explicit_config: bool,
+use runner::UpgradeRunner;
+
+mod database_migration;
+mod dream_memory;
+mod preparation;
+mod runner;
+mod workspace_layout;
+
+pub use database_migration::DatabaseMigrationReport;
+pub use preparation::{BeforeConfigLoadReport, RuntimeResourcesReport};
+pub use runner::UpgradeRunReport;
+
+/// Inputs for the serial upgrade boundary executed before runtime assembly.
+pub struct StartupUpgradeParams<'a> {
+    pub config: &'a Config,
+    pub database_pool: &'a SqlitePool,
+    pub database_migration_dir: &'a Path,
 }
 
-/// Upgrade work completed after strict config loading and runtime validation.
+/// Complete result of all startup migrations and product upgrade tasks.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AfterUpgradeReport {
-    pub database_migrations: DatabaseMigrationsInstallReport,
+pub struct StartupUpgradeReport {
+    pub database: DatabaseMigrationReport,
+    pub product: UpgradeRunReport,
+    pub workspace_prefix: PathBuf,
 }
 
-/// Run product-managed upgrades that must happen before strict config loading.
-pub fn upgrade_before() -> TalosResult<BeforeUpgradeReport> {
-    upgrade_before_with_explicit_config(std::env::var_os(TALOS_CONFIG_ENV).is_some())
+/// Run all startup migrations serially before any Service or Agent is built.
+///
+/// Database SQL migrations keep their SQLx ledger. Non-database product tasks
+/// use generic UpgradeTask state. Success authorizes runtime assembly.
+pub async fn run_startup_upgrades(
+    params: StartupUpgradeParams<'_>,
+) -> TalosResult<StartupUpgradeReport> {
+    run_startup_upgrades_for_version(params, env!("CARGO_PKG_VERSION")).await
 }
 
-/// Run product-managed upgrades that require a validated config object.
-pub fn upgrade_after(config: &Config) -> TalosResult<AfterUpgradeReport> {
-    tracing::info!("upgrade_after started");
-    let database_migrations = talos_config::install_database_migrations(config)?;
+async fn run_startup_upgrades_for_version(
+    params: StartupUpgradeParams<'_>,
+    current_version: &str,
+) -> TalosResult<StartupUpgradeReport> {
+    let started_at = Instant::now();
     tracing::info!(
-        source = %database_migrations.source_dir.display(),
-        target = %database_migrations.target_dir.display(),
-        backend = %database_migrations.backend_dir.display(),
-        database_type = %database_migrations.database_type,
-        changed = database_migrations.changed,
-        "database migration resources installed"
+        migration_dir = %params.database_migration_dir.display(),
+        "startup upgrade sequence started"
     );
-    tracing::info!(
-        report = ?database_migrations,
-        "upgrade_after completed"
-    );
-    Ok(AfterUpgradeReport {
-        database_migrations,
-    })
-}
-
-fn upgrade_before_with_explicit_config(explicit_config: bool) -> TalosResult<BeforeUpgradeReport> {
-    tracing::info!("upgrade_before started");
-    if explicit_config {
-        tracing::info!(
-            env = TALOS_CONFIG_ENV,
-            "default config upgrade skipped because explicit config is set"
+    let database_started_at = Instant::now();
+    let database = database_migration::DatabaseMigrationRunner::new(
+        params.database_pool,
+        params.database_migration_dir,
+    )
+    .run()
+    .await
+    .map_err(|error| {
+        tracing::error!(
+            migration_dir = %params.database_migration_dir.display(),
+            elapsed_ms = database_started_at.elapsed().as_millis(),
+            error = %error,
+            "database migration phase failed"
         );
-        let report = BeforeUpgradeReport {
-            default_config_template: None,
-            default_config: None,
-            skipped_explicit_config: true,
-        };
-        tracing::info!(report = ?report, "upgrade_before completed");
-        return Ok(report);
-    }
-
-    let default_config_template = talos_config::refresh_default_config_template()?;
+        error
+    })?;
     tracing::info!(
-        source = %default_config_template.source_path.display(),
-        target = %default_config_template.target_path.display(),
-        changed = default_config_template.changed,
-        "default config template refreshed"
+        report = ?database,
+        elapsed_ms = database_started_at.elapsed().as_millis(),
+        "database migration phase completed"
     );
-
-    let default_config = talos_config::upgrade_default_config()?;
-    if default_config.changed {
+    if database.applied_versions.is_empty() {
         tracing::info!(
-            path = %default_config.source_path.display(),
-            backup = ?default_config.backup_path,
-            added = ?default_config.added_paths,
-            removed = ?default_config.removed_paths,
-            defaulted = ?default_config.defaulted_paths,
-            "default config upgraded"
+            total_applied = database.total_applied_count,
+            "database migrations already current"
         );
     } else {
         tracing::info!(
-            path = %default_config.source_path.display(),
-            "default config already current"
+            applied_versions = ?database.applied_versions,
+            total_applied = database.total_applied_count,
+            "database migrations applied"
         );
     }
-
-    let report = BeforeUpgradeReport {
-        default_config_template: Some(default_config_template),
-        default_config: Some(default_config),
-        skipped_explicit_config: false,
+    let tasks = [
+        dream_memory::upgrade_task(),
+        workspace_layout::upgrade_task(),
+    ];
+    let product = runner::ProductUpgradeRunner::for_version(
+        params.config,
+        &tasks,
+        workspace_layout::legacy_installation_exists,
+        current_version,
+    )?
+    .run()
+    .await?;
+    tracing::info!(report = ?product, "product upgrade task phase completed");
+    let workspace_task_deferred = product
+        .deferred
+        .iter()
+        .any(|task_id| task_id == workspace_layout::WORKSPACE_LAYOUT_V1_UPGRADE_ID);
+    if workspace_task_deferred {
+        let paths = params.config.talos_paths();
+        let context = runner::UpgradeContext {
+            config: params.config,
+            paths: &paths,
+        };
+        if workspace_layout::legacy_installation_exists(&context)? {
+            return Err(TalosError::public(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "workspace layout upgrade requires Talos 0.1.8; current version is {current_version}"
+                ),
+            ));
+        }
+    }
+    let workspace_prefix =
+        workspace_layout::initialize_workspace_layout(params.config).map_err(|error| {
+            tracing::error!(error = %error, "workspace layout initialization failed");
+            error
+        })?;
+    tracing::info!(
+        workspace_prefix = %workspace_prefix.display(),
+        "workspace layout initialized"
+    );
+    let report = StartupUpgradeReport {
+        database,
+        product,
+        workspace_prefix,
     };
-    tracing::info!(report = ?report, "upgrade_before completed");
+    tracing::info!(
+        report = ?report,
+        elapsed_ms = started_at.elapsed().as_millis(),
+        "startup upgrade sequence completed"
+    );
     Ok(report)
 }
 
+/// Prepare product-managed resources needed before strict config loading.
+pub fn prepare_before_config_load() -> TalosResult<BeforeConfigLoadReport> {
+    preparation::prepare_before_config_load()
+}
+
+/// Prepare database migration resources after strict config loading.
+pub fn prepare_runtime_resources(config: &Config) -> TalosResult<RuntimeResourcesReport> {
+    preparation::prepare_runtime_resources(config)
+}
+
 #[cfg(test)]
-#[path = "lib_tests.rs"]
+#[path = "startup_tests.rs"]
 mod tests;

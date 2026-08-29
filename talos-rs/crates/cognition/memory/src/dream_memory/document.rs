@@ -10,7 +10,7 @@ use super::profile::dream_memory_profile;
 use super::{
     DreamMemoryAppendResult, DreamMemoryDocumentContext, DreamMemoryEntry, DreamMemoryError,
     DreamMemoryErrorKind, DreamMemoryProvenance, DreamMemoryResult, DreamMemorySourceRange,
-    MemoryId, MemorySessionId,
+    MemoryAgentId, MemoryId, MemorySessionId,
 };
 use crate::MemoryWriteBatch;
 
@@ -51,7 +51,7 @@ impl DreamMemoryDocument {
                 "Dream Memory generated metadata is required",
             )
         })?;
-        validate_generated(&context, &generated)?;
+        validate_generated(&generated)?;
         let profile = dream_memory_profile(context.date(), generated.clone())?;
         let document = KnowledgeDocument::builder(&profile)
             .from_markdown(markdown)
@@ -200,14 +200,13 @@ fn generated(
     ))
 }
 
-fn validate_generated(
-    context: &DreamMemoryDocumentContext,
-    generated: &OkfGenerated,
-) -> DreamMemoryResult<()> {
-    let complete = generated
+fn validate_generated(generated: &OkfGenerated) -> DreamMemoryResult<()> {
+    let producer_is_valid = generated
         .by
         .as_ref()
-        .is_some_and(|actor| actor.as_str() == producer_actor(context))
+        .and_then(|actor| actor.as_str().strip_prefix("talos-agent/"))
+        .is_some_and(|agent_id| MemoryAgentId::parse(agent_id.to_string()).is_ok());
+    let complete = producer_is_valid
         && generated
             .at
             .as_ref()
@@ -216,7 +215,7 @@ fn validate_generated(
     if !complete {
         return Err(DreamMemoryError::new(
             DreamMemoryErrorKind::InvalidDocument,
-            "Dream Memory generated metadata must identify its owning Agent and timestamp",
+            "Dream Memory generated metadata must identify a producer Agent and timestamp",
         ));
     }
     Ok(())

@@ -26,8 +26,7 @@ use talos_agent_kernel::{
     ToolStreamKey, TurnFileScope, UserInput, UserInputEventData,
 };
 use talos_config::{
-    resolve_effective_kernel_workspace, validate_session_workspace_user, AgentKernelConfig,
-    ToolUserPermissionModeConfig,
+    validate_session_workspace_user, AgentKernelConfig, ToolUserPermissionModeConfig,
 };
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{LlmProvider, LlmProviderRouter};
@@ -175,10 +174,9 @@ impl KernelAgent {
             .as_deref()
             .unwrap_or(context.owner_user_id.as_str());
         validate_session_workspace_user(&context.owner_user_id, execution_user_id)?;
-        let kernel_config = kernel::normalized_kernel_config(self.kernel_config.clone());
-        let mut kernel_config =
-            resolve_effective_kernel_workspace(&kernel_config, &context.owner_user_id)?
-                .kernel_config;
+        let mut kernel_config = kernel::normalized_kernel_config(self.kernel_config.clone());
+        validate_session_workspace_user(&context.owner_user_id, &context.workspace.user_id)?;
+        kernel_config.workspace_dir = context.workspace.root.to_string_lossy().into_owned();
         kernel_config.tools.sandbox_policy.user_permission_mode = match user_permission_mode {
             talos_types::UserPermissionMode::AskForApproval => {
                 ToolUserPermissionModeConfig::AskForApproval
@@ -228,11 +226,7 @@ impl KernelAgent {
     ) -> TalosResult<InvocationContext> {
         let session_id = agent_request.context.session_id.clone();
         let message_id = agent_request.context.message_id.clone();
-        let workspace_id = agent_request
-            .context
-            .workspace_id
-            .clone()
-            .unwrap_or_default();
+        let workspace_id = agent_request.context.workspace.workspace_id.clone();
         let resolved_attachments = self
             .attachment_reader
             .read(
@@ -341,7 +335,7 @@ impl KernelAgent {
             )
             .await?;
         let user_workspace_memory = self
-            .load_user_workspace_memory_prompt_context(&context.user_id, &kernel_config)
+            .load_user_memory_prompt(&context.workspace_id, &context.user_id, &kernel_config)
             .await?;
 
         let result = run_general_turn_with_resume(
@@ -365,6 +359,7 @@ impl KernelAgent {
         context_usage::persist_context_usage(self.session_store.as_ref(), &session_id, &result)
             .await?;
         self.reflect_user_workspace_memory(
+            &context.workspace_id,
             &context.user_id,
             &session_id,
             &input.text,
@@ -486,7 +481,8 @@ impl KernelAgent {
                             }
                         };
                     let user_workspace_memory = match this
-                        .load_user_workspace_memory_prompt_context(
+                        .load_user_memory_prompt(
+                            &kernel_ctx.workspace_id,
                             &kernel_ctx.user_id,
                             &kernel_config,
                         )
@@ -500,6 +496,7 @@ impl KernelAgent {
                     };
 
                     let reflection_user_id = kernel_ctx.user_id.clone();
+                    let reflection_workspace_id = kernel_ctx.workspace_id.clone();
                     let reflection_input = input.text.clone();
                     let reflection_workspace_root = kernel_config.workspace_dir.clone();
                     let mut context = kernel_ctx;
@@ -573,6 +570,7 @@ impl KernelAgent {
                                 return Err(err.into());
                             }
                             this.reflect_user_workspace_memory(
+                                &reflection_workspace_id,
                                 &reflection_user_id,
                                 &session_id,
                                 &reflection_input,

@@ -70,7 +70,6 @@ pub struct TurnService {
 
 struct TurnSubmission {
     input: Vec<TalosInputItem>,
-    workspace_id: Option<String>,
     binding: DispatchBinding,
 }
 
@@ -120,17 +119,6 @@ impl TurnService {
             base_config,
             user_actions,
         }
-    }
-
-    fn session_for_turn_dispatch(
-        session: &TalosSession,
-        workspace_id_override: Option<String>,
-    ) -> TalosSession {
-        let mut dispatch_session = session.clone();
-        if let Some(workspace_id) = workspace_id_override {
-            dispatch_session.context.workspace_id = Some(workspace_id);
-        }
-        dispatch_session
     }
 
     fn session_for_resume_dispatch(session: &TalosSession, message_id: String) -> TalosSession {
@@ -337,7 +325,6 @@ impl TurnService {
             session,
             TurnSubmission {
                 input: request.input,
-                workspace_id: request.workspace_id,
                 binding,
             },
             idempotency_key,
@@ -355,8 +342,7 @@ impl TurnService {
     ) -> TalosResult<MessageCommandResult> {
         validate_user_input(&submission.input)?;
         let session_id = session.context.session_id.clone();
-        let request_hash =
-            turn_submission_hash(&session_id, &submission.input, &submission.workspace_id)?;
+        let request_hash = turn_submission_hash(&session_id, &submission.input)?;
         let now_ms = chrono::Utc::now().timestamp_millis();
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let turn_id = format!("turn_{}", Uuid::new_v4().simple());
@@ -403,7 +389,7 @@ impl TurnService {
         let dispatch_request = AgentDispatchParams {
             turn_id: turn_id.clone(),
             binding: submission.binding.clone(),
-            session: Self::session_for_turn_dispatch(&session, submission.workspace_id.clone()),
+            session: session.clone(),
             resume_context: None,
             input: submission.input.clone(),
         };
@@ -522,8 +508,7 @@ impl TurnService {
         validate_retry_request(&request)?;
         validate_user_input(&request.input)?;
         let session_id = session.context.session_id.clone();
-        let request_hash =
-            turn_submission_hash(&session_id, &request.input, &request.workspace_id)?;
+        let request_hash = turn_submission_hash(&session_id, &request.input)?;
         let idempotency_key = retry_idempotency_key(&request);
         if let Some(record) = self
             .idempotency_store
@@ -546,7 +531,6 @@ impl TurnService {
             session,
             TurnSubmission {
                 input: request.input,
-                workspace_id: request.workspace_id,
                 binding,
             },
             Some(idempotency_key),

@@ -102,6 +102,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
         session_id: "agent-a1".to_string(),
         turn_id: "turn-1".to_string(),
         agent_id: "agent-a1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "talos".to_string(),
         project_root: None,
         kernel_config: Arc::new(AgentKernelConfig::default()),

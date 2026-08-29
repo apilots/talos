@@ -14,7 +14,6 @@ fn start_turn_request(
         input: vec![TalosInputItem::Text {
             text: "hello".to_string(),
         }],
-        workspace_id: None,
         context: Some(TalosContext {
             source_type: TalosSourceType::Cli,
             provider: TalosProvider::Cli,

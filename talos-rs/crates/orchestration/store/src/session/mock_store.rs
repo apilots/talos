@@ -60,7 +60,7 @@ impl SessionStore for MockSessionStore {
             memory_processed_until_seq: self.memory_processed_until_seq.load(Ordering::SeqCst),
             usage: talos_types::SessionUsage::default(),
             conf: SessionConf::default(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             project_id: None,
             current_directory: None,
         }))

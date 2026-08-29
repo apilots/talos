@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use talos_config::{parse_timezone, AgentKernelConfig, AgentRuntimeConfig, TalosTimezone};
+use talos_config::{parse_timezone, validate_user_workspace_segment, TalosTimezone};
 use talos_error::{TalosError, TalosResult};
 use talos_memory::{
     DreamMemoryDate, DreamMemoryDayRevision, DreamMemoryDaySnapshot, DreamMemoryDocument,
@@ -20,7 +20,6 @@ use talos_types::{
     MemorySearchResponse, MemorySourceInfo, TalosConfig,
 };
 
-use super::legacy_converter::convert_legacy_scope;
 use super::types::MemoryDate;
 use crate::access::Actor;
 use crate::workspace::file::{
@@ -37,13 +36,13 @@ const MAX_QUERY_CHARS: usize = 512;
 pub struct MemoryService {
     resolver: EffectiveWorkspaceResolver,
     store: Arc<MemoryStore>,
-    agent_workspaces: Arc<Vec<AgentMemoryWorkspace>>,
+    workspace_indexes: Arc<Vec<WorkspaceMemoryIndex>>,
     memory_dirname: String,
 }
 
 #[derive(Debug, Clone)]
-struct AgentMemoryWorkspace {
-    agent_id: String,
+struct WorkspaceMemoryIndex {
+    workspace_id: String,
     users_root: PathBuf,
     timezone: TalosTimezone,
 }
@@ -51,47 +50,21 @@ struct AgentMemoryWorkspace {
 impl MemoryService {
     pub fn new(base_config: TalosConfig, store: Arc<MemoryStore>) -> TalosResult<Self> {
         let resolver = EffectiveWorkspaceResolver::new(base_config.clone());
-        let agent_workspaces = resolve_agent_memory_workspaces(&base_config)?;
+        let workspace_indexes = resolve_workspace_memory_indexes(&base_config)?;
         let memory_dirname = base_config.memory.memory_dirname.clone();
         Ok(Self {
             resolver,
             store,
-            agent_workspaces: Arc::new(agent_workspaces),
+            workspace_indexes: Arc::new(workspace_indexes),
             memory_dirname,
         })
     }
 
-    /// Runs the release-scoped legacy conversion before normal Dream Memory startup rebuild.
-    ///
-    /// TODO(dream-memory-okf): Remove this one-time legacy converter in the next release.
-    pub async fn convert_legacy_known_scopes(&self) -> TalosResult<()> {
-        for agent_workspace in self.agent_workspaces.iter() {
-            for scope in known_user_scopes(agent_workspace)? {
-                let Some(conversion) = convert_legacy_scope(
-                    &scope.agent_id,
-                    &scope.user_id,
-                    &scope.workspace_root,
-                    &self.memory_dirname,
-                    agent_workspace.timezone,
-                )
-                .await?
-                else {
-                    continue;
-                };
-                self.store
-                    .rebuild_scope(&scope, &self.memory_dirname, agent_workspace.timezone)
-                    .await?;
-                conversion.finish().await?;
-            }
-        }
-        Ok(())
-    }
-
     pub async fn rebuild_known_scopes(&self) -> TalosResult<()> {
-        for agent_workspace in self.agent_workspaces.iter() {
-            for scope in known_user_scopes(agent_workspace)? {
+        for workspace_index in self.workspace_indexes.iter() {
+            for scope in known_user_scopes(workspace_index)? {
                 self.store
-                    .rebuild_scope(&scope, &self.memory_dirname, agent_workspace.timezone)
+                    .rebuild_scope(&scope, &self.memory_dirname, workspace_index.timezone)
                     .await?;
             }
         }
@@ -134,7 +107,7 @@ impl MemoryService {
             let Some(detail) = self
                 .load_detail(
                     &workspace.config,
-                    &workspace.agent_id,
+                    &workspace.workspace_id,
                     &workspace.user_id,
                     date,
                 )
@@ -156,7 +129,7 @@ impl MemoryService {
         let workspace = self.resolver.resolve_for_actor(actor)?;
         self.load_detail(
             &workspace.config,
-            &workspace.agent_id,
+            &workspace.workspace_id,
             &workspace.user_id,
             date,
         )
@@ -208,7 +181,7 @@ impl MemoryService {
 
         self.load_detail(
             &workspace.config,
-            &workspace.agent_id,
+            &workspace.workspace_id,
             &workspace.user_id,
             date,
         )
@@ -263,7 +236,7 @@ impl MemoryService {
     async fn load_detail(
         &self,
         config: &TalosConfig,
-        agent_id: &str,
+        workspace_id: &str,
         user_id: &str,
         date: MemoryDate,
     ) -> TalosResult<Option<MemoryFileDetail>> {
@@ -279,7 +252,7 @@ impl MemoryService {
                 Ok(MemoryFileDetail {
                     date: date.file_stem(),
                     section_count: self.store.source_section_count(
-                        agent_id,
+                        workspace_id,
                         user_id,
                         source_date,
                         &content,
@@ -294,14 +267,14 @@ impl MemoryService {
     }
 
     fn timezone_for_scope(&self, scope: &MemoryScope) -> TalosResult<TalosTimezone> {
-        self.agent_workspaces
+        self.workspace_indexes
             .iter()
-            .find(|workspace| workspace.agent_id == scope.agent_id)
+            .find(|workspace| workspace.workspace_id == scope.workspace_id)
             .map(|workspace| workspace.timezone)
             .ok_or_else(|| {
                 TalosError::public(
                     talos_error::ErrorCode::InvalidRequest,
-                    format!("unknown memory agent_id: {}", scope.agent_id),
+                    format!("unknown memory workspace_id: {}", scope.workspace_id),
                 )
             })
     }
@@ -373,7 +346,7 @@ impl DreamMemoryFormationStore for MemoryService {
             let entries = match content.as_deref() {
                 Some(markdown) => {
                     let context = DreamMemoryDocumentContext::new(
-                        MemoryAgentId::parse(scope.agent_id.clone())
+                        MemoryAgentId::parse(scope.workspace_id.clone())
                             .map_err(memory_domain_error)?,
                         MemoryUserId::parse(scope.user_id.clone()).map_err(memory_domain_error)?,
                         date,
@@ -497,53 +470,34 @@ fn memory_source(record: &MemoryRecord) -> MemorySourceInfo {
     }
 }
 
-fn memory_scope(workspace: &crate::workspace::EffectiveAgentWorkspace) -> MemoryScope {
+fn memory_scope(workspace: &crate::workspace::EffectiveUserWorkspace) -> MemoryScope {
     MemoryScope {
-        agent_id: workspace.agent_id.clone(),
+        workspace_id: workspace.workspace_id.clone(),
         user_id: workspace.user_id.clone(),
         workspace_root: workspace.user_workspace_dir.clone(),
     }
 }
 
-fn resolve_agent_memory_workspaces(config: &TalosConfig) -> TalosResult<Vec<AgentMemoryWorkspace>> {
-    if config.agent.agents.is_empty() {
-        return Ok(vec![agent_memory_workspace(
-            config,
-            "default",
-            &config.agent.kernel,
-        )?]);
-    }
+fn resolve_workspace_memory_indexes(
+    config: &TalosConfig,
+) -> TalosResult<Vec<WorkspaceMemoryIndex>> {
+    let timezone = parse_timezone(&config.agent.kernel.timezone)?;
     config
-        .agent
-        .agents
+        .workspaces
+        .definitions
         .iter()
-        .filter(|definition| definition.enabled)
         .map(|definition| {
-            let kernel = match &definition.runtime_config {
-                Some(AgentRuntimeConfig::Kernel { kernel }) => kernel,
-                None => &config.agent.kernel,
-            };
-            agent_memory_workspace(config, definition.id.trim(), kernel)
+            Ok(WorkspaceMemoryIndex {
+                workspace_id: definition.workspace_id.clone(),
+                users_root: config.workspace_root_prefix(&definition.workspace_id)?,
+                timezone,
+            })
         })
         .collect()
 }
 
-fn agent_memory_workspace(
-    config: &TalosConfig,
-    agent_id: &str,
-    kernel: &AgentKernelConfig,
-) -> TalosResult<AgentMemoryWorkspace> {
-    let mut scoped_config = config.clone();
-    scoped_config.agent.kernel = kernel.clone();
-    Ok(AgentMemoryWorkspace {
-        agent_id: agent_id.to_string(),
-        users_root: resolve_workspace_root(&scoped_config).join("users"),
-        timezone: parse_timezone(&kernel.timezone)?,
-    })
-}
-
-fn known_user_scopes(agent_workspace: &AgentMemoryWorkspace) -> TalosResult<Vec<MemoryScope>> {
-    let Some(entries) = talos_fs::read_directory(&agent_workspace.users_root)? else {
+fn known_user_scopes(workspace_index: &WorkspaceMemoryIndex) -> TalosResult<Vec<MemoryScope>> {
+    let Some(entries) = talos_fs::read_directory(&workspace_index.users_root)? else {
         return Ok(Vec::new());
     };
     Ok(entries
@@ -551,8 +505,11 @@ fn known_user_scopes(agent_workspace: &AgentMemoryWorkspace) -> TalosResult<Vec<
         .filter(|entry| entry.metadata.is_dir && !entry.metadata.is_symlink)
         .filter_map(|entry| {
             let user_id = entry.path.file_name()?.to_str()?.to_string();
+            if user_id == "orphaned" || validate_user_workspace_segment(&user_id).is_err() {
+                return None;
+            }
             Some(MemoryScope {
-                agent_id: agent_workspace.agent_id.clone(),
+                workspace_id: workspace_index.workspace_id.clone(),
                 user_id,
                 workspace_root: entry.path,
             })

@@ -141,7 +141,6 @@ export function createDesktopTalosClient(
         client.patchSession({
           session_id: request.session_id,
           conf: toProtocolSessionConf(request.conf),
-          project_id: toProtocolProjectPatch(request.project_id),
           current_directory: toProtocolDirectoryPatch(request.current_directory),
         }),
       close: (request: Parameters<TalosWebClient["sessions"]["close"]>[0]) =>
@@ -213,7 +212,6 @@ export function createDesktopTalosClient(
       getEntry: (request: MemoryGetRequest) => client.getMemory(request),
     },
     workspaceDocs: {
-      info: () => client.getWorkspaceInfo(),
       list: () => client.listWorkspaceDocs(),
       get: (kind: WorkspaceDocKind) => client.readWorkspaceDoc(kind),
       put: (kind: WorkspaceDocKind, request: DocUpdateRequest) =>
@@ -454,17 +452,6 @@ function toTimelineEnvelope(event: AppProtocol.TimelineEventEnvelope): TimelineE
 
 function isTerminalEvent(event: TimelineEventEnvelope): boolean {
   return event.event.event_type === "turn_completed" || event.event.event_type === "turn_error";
-}
-
-function toProtocolProjectPatch(
-  patch: SessionPatchRequest["project_id"] | undefined | null,
-): AppProtocol.OptionalProjectIdPatch | null {
-  if (!patch) {
-    return null;
-  }
-  return patch.type === "set"
-    ? { type: "set", project_id: patch.project_id }
-    : { type: "clear" };
 }
 
 function toProtocolDirectoryPatch(

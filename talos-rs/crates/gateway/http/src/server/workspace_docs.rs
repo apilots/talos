@@ -8,7 +8,7 @@ use talos_service::WorkspaceDocService;
 use talos_types::{
     DocUpdateRequest, ExpectedFileVersion, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocWriteResponse,
 };
 
 use super::access::shared_actor;
@@ -26,19 +26,6 @@ pub(super) async fn list_workspace_docs_handler(
         .await
         .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
-}
-
-pub(super) async fn get_workspace_info_handler(
-    State(state): State<Arc<HttpApiState>>,
-    auth: axum::extract::Extension<RequestIdentity>,
-) -> Result<JsonResponse<WorkspaceInfoResponse>, ApiError> {
-    let actor = shared_actor(&auth.0);
-    let info = state
-        .gateway
-        .workspace_info(&actor, WorkspaceInfoRequest {})
-        .await
-        .map_err(ApiError::from_talos_error)?;
-    Ok(api_success(info))
 }
 
 pub(super) async fn get_workspace_doc_handler(

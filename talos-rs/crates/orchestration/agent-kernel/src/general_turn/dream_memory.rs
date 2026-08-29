@@ -16,6 +16,7 @@ pub async fn form_dream_session_memory(
 ) -> TalosResult<MemoryFormationReport> {
     let MemoryFormationParams {
         session_id,
+        producer_agent_id,
         selected_model,
         llm_provider,
         dream_memory_store,
@@ -149,6 +150,9 @@ pub async fn form_dream_session_memory(
             memory_scope,
             talos_memory::DreamMemoryWriteRequest::from_snapshot(
                 &snapshot,
+                talos_memory::MemoryAgentId::parse(producer_agent_id.to_string()).map_err(
+                    |error| TalosError::internal(format!("invalid producer Agent id: {error}")),
+                )?,
                 MemoryWriteBatch {
                     session_id: session_id.to_string(),
                     occurred_at,

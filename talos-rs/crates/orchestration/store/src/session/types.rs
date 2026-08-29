@@ -11,8 +11,7 @@ pub struct SessionRecord {
     pub id: String,
     pub agent_id: String,
     pub tree_identity: SessionTreeIdentity,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub title: String,
     pub user_id: String,
     pub context: TalosContext,
@@ -48,12 +47,12 @@ pub enum SessionTreeIdentity {
 }
 
 impl SessionRecord {
-    pub fn from_session(session: &TalosSession, agent_id: impl Into<String>) -> Self {
+    pub fn from_session(session: &TalosSession) -> Self {
         let effective_model = session.config.llm.model.clone();
 
         Self {
             id: session.context.session_id.clone(),
-            agent_id: agent_id.into(),
+            agent_id: session.agent_id.clone(),
             tree_identity: SessionTreeIdentity::Primary,
             workspace_id: session.context.workspace_id.clone(),
             title: session.title.clone(),

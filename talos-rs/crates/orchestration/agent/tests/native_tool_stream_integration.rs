@@ -559,6 +559,10 @@ fn build_request(input: &str) -> AgentRunParams {
     );
     let turn_id = format!("turn-{session_id}");
     let mut config = talos_config::Config::default();
+    config = config.with_workspace_definition(talos_config::WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        std::env::temp_dir().join(format!("talos-agent-integration-{}", uuid::Uuid::new_v4())),
+    ));
     config.llm.openai.models = vec![talos_config::ProviderModelConfig {
         id: "mock-model".to_string(),
         name: "mock-model".to_string(),
@@ -570,6 +574,7 @@ fn build_request(input: &str) -> AgentRunParams {
         cost: Default::default(),
     }];
     let session = TalosSession {
+        agent_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "talos-test-integration-user".to_string(),
         conf: talos_types::SessionConf {
@@ -583,7 +588,7 @@ fn build_request(input: &str) -> AgentRunParams {
         current_directory: None,
         context: SessionContext {
             session_id: session_id.clone(),
-            workspace_id: Some("default".to_string()),
+            workspace_id: "default".to_string(),
             project_id: None,
             current_directory: None,
             project_root: None,
@@ -600,7 +605,8 @@ fn build_request(input: &str) -> AgentRunParams {
         effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
         state: SessionState::default(),
     };
-    let context = AgentRunContext::from_session(&session, turn_id, "integration_agent".to_string());
+    let context = AgentRunContext::from_session(&session, turn_id, "integration_agent".to_string())
+        .expect("workspace should resolve");
     let config = AgentRunConfig::from_session(&session);
     let session_state = AgentRunSessionState::from_session(&session);
     let options = AgentRunOptions::from_config(&config);

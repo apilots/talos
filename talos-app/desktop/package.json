@@ -1,7 +1,7 @@
 {
   "name": "talos-desktop",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.1.8-SNAPSHOT",
   "description": "Talos desktop shell for the shared WebUI and local app-server runtime.",
   "author": "Talos",
   "type": "module",

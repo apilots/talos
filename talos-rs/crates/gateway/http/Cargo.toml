@@ -35,6 +35,7 @@ opendal = { workspace = true, features = ["services-memory"] }
 sqlx = { workspace = true }
 talos-app-server = { workspace = true }
 talos-coordinator = { path = "../../orchestration/coordinator" }
+talos-memory = { workspace = true }
 talos-plugin = { workspace = true }
 talos-store = { workspace = true }
 talos-storage = { workspace = true }

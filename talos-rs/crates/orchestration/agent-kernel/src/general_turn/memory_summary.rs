@@ -76,6 +76,8 @@ impl MemoryCompactionPolicy {
 pub struct MemoryFormationParams<'a> {
     /// Session whose persisted transcript is processed.
     pub session_id: &'a str,
+    /// Agent that produced new canonical Dream Memory content.
+    pub producer_agent_id: &'a str,
     /// Session-selected model used when no compaction override exists.
     pub selected_model: &'a str,
     /// Provider used for the single structured extraction request.
@@ -499,6 +501,7 @@ pub async fn compact_session_memory(
 ) -> TalosResult<MemoryFormationReport> {
     let MemoryFormationParams {
         session_id,
+        producer_agent_id,
         selected_model,
         llm_provider,
         dream_memory_store,
@@ -684,6 +687,9 @@ pub async fn compact_session_memory(
                 memory_scope,
                 talos_memory::DreamMemoryWriteRequest::from_snapshot(
                     &snapshot,
+                    talos_memory::MemoryAgentId::parse(producer_agent_id.to_string()).map_err(
+                        |error| TalosError::internal(format!("invalid producer Agent id: {error}")),
+                    )?,
                     MemoryWriteBatch {
                         session_id: session_id.to_string(),
                         occurred_at,

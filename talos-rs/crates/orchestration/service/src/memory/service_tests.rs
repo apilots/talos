@@ -72,8 +72,11 @@ fn date_range_applies_before_date_after_primary_range_filter() {
 #[tokio::test]
 async fn dream_markdown_is_written_to_the_actor_workspace() {
     let workspace = tempfile::tempdir().expect("workspace");
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    let mut config =
+        TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+            talos_config::DEFAULT_WORKSPACE_ID,
+            workspace.path().to_path_buf(),
+        ));
     config.memory.memory_dirname = "journal".to_string();
     let service = MemoryService::new(
         config,
@@ -116,9 +119,9 @@ async fn dream_markdown_is_written_to_the_actor_workspace() {
     let snapshot = DreamMemoryFormationStore::read_day(
         &service,
         &MemoryScope {
-            agent_id: "default".to_string(),
+            workspace_id: "default".to_string(),
             user_id: "user-1".to_string(),
-            workspace_root: workspace.path().join("users/user-1"),
+            workspace_root: workspace.path().join("user-1"),
         },
         DreamMemoryDate::parse("2026-07-17").expect("date"),
     )
@@ -126,7 +129,7 @@ async fn dream_markdown_is_written_to_the_actor_workspace() {
     .expect("read typed day snapshot");
     assert_eq!(snapshot.entries().len(), 2);
     assert_eq!(
-        std::fs::read_to_string(workspace.path().join("users/user-1/journal/2026-07-17.md"))
+        std::fs::read_to_string(workspace.path().join("user-1/journal/2026-07-17.md"))
             .expect("read user Dream Memory"),
         content
     );
@@ -135,8 +138,11 @@ async fn dream_markdown_is_written_to_the_actor_workspace() {
 #[tokio::test]
 async fn file_list_reads_only_the_requested_latest_files() {
     let workspace = tempfile::tempdir().expect("workspace");
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    let config =
+        TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+            talos_config::DEFAULT_WORKSPACE_ID,
+            workspace.path().to_path_buf(),
+        ));
     let service = MemoryService::new(
         config,
         Arc::new(
@@ -165,7 +171,7 @@ async fn file_list_reads_only_the_requested_latest_files() {
         )
         .await
         .expect("write latest memory");
-    let memory_dir = workspace.path().join("users/user-1/memory");
+    let memory_dir = workspace.path().join("user-1/memory");
     std::fs::write(memory_dir.join("2026-07-17.md"), "invalid older memory")
         .expect("write older memory");
 

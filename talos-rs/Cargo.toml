@@ -62,7 +62,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8-SNAPSHOT"
 edition = "2021"
 authors = ["Liu Xi"]
 license = "MIT"
@@ -83,6 +83,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
 ts-rs = "10"
+semver = { version = "1", features = ["serde"] }
 
 # Error handling
 thiserror = "1"

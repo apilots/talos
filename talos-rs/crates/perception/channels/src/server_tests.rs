@@ -41,7 +41,7 @@ use talos_types::{
     SubscribeTimelineResponse, TimelineRecoveryResponse, TurnCommandStatus, UserCurrentRequest,
     UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocWriteResponse,
 };
 
 use crate::traits::{ChannelCapabilities, ChannelDefinition, DeliveryResult, OutboundAdapter};
@@ -639,14 +639,6 @@ impl Gateway for MockGateway {
         _request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
         unused_gateway("write_workspace_doc")
-    }
-
-    async fn workspace_info(
-        &self,
-        _actor: &Actor,
-        _request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        unused_gateway("workspace_info")
     }
 
     async fn logout(

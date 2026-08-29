@@ -233,11 +233,12 @@ impl SessionService for MockSessionService {
         }
         let session_cleared = *self.session_cleared.lock().expect("session state lock");
         Ok(Some(talos_types::TalosSession {
+            agent_id: "default".to_string(),
             title: "Untitled Session".to_string(),
             user_id: "static-token".to_string(),
             context: talos_types::SessionContext {
                 session_id: "mock-session".to_string(),
-                workspace_id: None,
+                workspace_id: "default".to_string(),
                 source_type: TalosSourceType::Http,
                 provider: TalosProvider::Http,
                 user_id: "static-token".to_string(),

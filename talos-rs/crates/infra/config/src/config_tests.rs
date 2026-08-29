@@ -17,6 +17,11 @@ fn test_default_config() {
     assert!(!config.gateway.auth);
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
     assert!(config.storage.connection_string.ends_with("/data/talos.db"));
+    assert_eq!(config.workspaces.default_workspace_id, "default");
+    assert_eq!(
+        config.workspaces.definitions,
+        vec![WorkspaceDefinition::new("default", "workspace-talos")]
+    );
     assert_eq!(
         config.logging.file.as_deref(),
         Some(config.talos_paths().log_file.to_string_lossy().as_ref())
@@ -145,7 +150,6 @@ agent:
       kind: kernel
       enabled: true
       description: Review-focused agent
-      default_workspace_id: default
       runtime_config:
         type: kernel
         kernel:
@@ -170,7 +174,6 @@ llm:
     assert_eq!(definition.id, "reviewer");
     assert_eq!(definition.name, "Reviewer");
     assert_eq!(definition.kind, AgentKind::Kernel);
-    assert_eq!(definition.default_workspace_id.as_deref(), Some("default"));
     match definition
         .runtime_config
         .as_ref()
@@ -210,7 +213,7 @@ fn test_kernel_defaults() {
     let config = Config::default();
     assert_eq!(config.agent.kernel.tool_result_max_bytes, 64 * 1024);
     assert_eq!(config.agent.kernel.context_compaction_max_bytes, 256 * 1024);
-    assert_eq!(config.agent.kernel.default_workspace_id, "default");
+    assert!(config.agent.kernel.workspace_dir.is_empty());
     assert_eq!(config.agent.kernel.planner_mode, PlannerMode::BuiltIn);
     assert_eq!(config.agent.kernel.output.max_tokens, 32_000);
     assert_eq!(config.agent.kernel.output.upper_limit, 64_000);
@@ -335,17 +338,35 @@ fn test_kernel_defaults() {
     assert_eq!(config.automation.dream_memory_maintenance.batch_size, 50);
     assert_eq!(config.agent.kernel.timezone, config.timezone);
     assert_eq!(
-        config.agent.kernel.workspace_dir,
         config
-            .talos_paths()
-            .workspace_dir_for_agent("talos")
-            .to_string_lossy()
-            .to_string()
+            .workspace_root_prefix(config.default_workspace_id())
+            .unwrap(),
+        config.talos_paths().workspace_prefix()
     );
     assert_eq!(config.memory.file_list_default_limit, 20);
     assert_eq!(config.memory.file_list_max_limit, 90);
     assert_eq!(config.logging.level, "info");
     assert_eq!(config.storage.database_type, DatabaseType::Sqlite);
+}
+
+#[test]
+fn workspace_config_is_serialized_as_a_real_config_object() {
+    let config = Config::default();
+
+    let value = serde_yaml::to_value(config).expect("config should encode");
+
+    assert_eq!(
+        value["workspaces"]["default_workspace_id"].as_str(),
+        Some("default")
+    );
+    assert_eq!(
+        value["workspaces"]["definitions"][0]["workspace_id"].as_str(),
+        Some("default")
+    );
+    assert_eq!(
+        value["workspaces"]["definitions"][0]["root_prefix"].as_str(),
+        Some("workspace-talos")
+    );
 }
 
 #[test]
@@ -716,6 +737,11 @@ fn test_load_from_path_fails_when_required_keys_missing() {
 #[test]
 fn test_load_from_path_uses_prompt_defaults_when_prompt_block_is_missing() {
     let yaml = r#"
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
 agent:
   name: talos
 gateway:
@@ -873,6 +899,11 @@ llm:
 #[test]
 fn test_load_from_path_uses_optional_block_defaults_when_omitted() {
     let yaml = r#"
+workspaces:
+  default_workspace_id: default
+  definitions:
+    - workspace_id: default
+      root_prefix: workspace-talos
 agent:
   name: talos
 gateway:

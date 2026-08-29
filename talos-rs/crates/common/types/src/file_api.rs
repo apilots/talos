@@ -249,19 +249,6 @@ pub struct WorkspaceDocWriteResponse {
     pub doc: WorkspaceDocInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq, Default)]
-pub struct WorkspaceInfoRequest {}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
-pub struct WorkspaceInfoResponse {
-    pub user_id: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub username: Option<String>,
-    pub base_workspace_dir: String,
-    pub user_workspace_dir: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct WorkspaceDocSummary {
     pub kind: WorkspaceDocKind,

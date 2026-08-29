@@ -1,4 +1,3 @@
-mod legacy_converter;
 mod maintenance;
 mod service;
 mod types;

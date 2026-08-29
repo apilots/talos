@@ -202,7 +202,6 @@ print(json.dumps({
         {"type": "text", "text": "Inspect the attached image."},
         {"type": "files", "fileIds": [os.environ["FILE_ID"]]},
     ],
-    "workspace_id": None,
 }, separators=(",", ":")))
 PY
 )"

@@ -5,7 +5,6 @@ const mocks = {
   sendTurn: vi.fn(),
   setDraft: vi.fn(),
   mutateModel: vi.fn(),
-  mutateProject: vi.fn(),
   mutatePermissionMode: vi.fn(),
   submitUserAction: vi.fn(),
   compactSession: vi.fn(),
@@ -129,7 +128,6 @@ export async function createChatFeatureMock(
       isPending: false,
       mutate: mocks.mutatePermissionMode,
     }),
-    useUpdateSessionProjectMutation: () => ({ mutate: mocks.mutateProject }),
     useSubmitUserActionMutation: () => ({
       error: undefined,
       isPending: false,

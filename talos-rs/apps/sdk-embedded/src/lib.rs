@@ -46,8 +46,7 @@ use talos_types::{
     SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
     TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
     WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
 };
 use tokio::task::JoinHandle;
 
@@ -816,16 +815,6 @@ impl GatewayClient for EmbeddedServerClient {
         self.runtime
             .gateway
             .write_workspace_doc(&self.actor, request)
-            .await
-    }
-
-    async fn workspace_info(
-        &mut self,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        self.runtime
-            .gateway
-            .workspace_info(&self.actor, request)
             .await
     }
 

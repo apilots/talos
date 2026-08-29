@@ -22,19 +22,20 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
-DOC_DIR="${WORKSPACE_DIR}/docs"
-SRC_DIR="${WORKSPACE_DIR}/src"
+GLOB_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-glob-user"
+GREP_WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-grep-user"
+DOC_DIR="${GLOB_WORKSPACE_DIR}/docs"
+SRC_DIR="${GREP_WORKSPACE_DIR}/src"
 mkdir -p "${DOC_DIR}" "${SRC_DIR}"
 GLOB_FILE="docs/alpha.md"
 GREP_FILE="src/search_target.txt"
 GREP_MARKER="grep-marker-$(date '+%Y%m%d%H%M%S')-$$"
 
-cat > "${WORKSPACE_DIR}/${GLOB_FILE}" <<'EOF'
+cat > "${GLOB_WORKSPACE_DIR}/${GLOB_FILE}" <<'EOF'
 # Alpha
 glob fixture
 EOF
-cat > "${WORKSPACE_DIR}/${GREP_FILE}" <<EOF
+cat > "${GREP_WORKSPACE_DIR}/${GREP_FILE}" <<EOF
 search fixture
 ${GREP_MARKER}
 EOF
@@ -85,7 +86,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

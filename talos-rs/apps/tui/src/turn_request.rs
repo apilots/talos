@@ -21,7 +21,6 @@ impl TerminalTurnRequest {
         StartTurnRequest {
             session_id: self.session_id,
             input,
-            workspace_id: None,
             context: self.context,
             model_selection: self.model_selection.filter(|selection| {
                 !selection.model_ref.provider.is_empty() && !selection.model_ref.id.is_empty()

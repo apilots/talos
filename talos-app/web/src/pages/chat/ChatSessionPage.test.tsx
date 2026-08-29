@@ -81,7 +81,6 @@ describe("ChatSessionPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Project" }));
 
     expect(mocks.mutateModel).not.toHaveBeenCalled();
-    expect(mocks.mutateProject).not.toHaveBeenCalled();
   });
 
   it("hides runtime mode selector on the session detail composer", () => {

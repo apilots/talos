@@ -1,6 +1,25 @@
 use super::*;
 
 #[test]
+fn turn_requests_reject_workspace_override() {
+    let start = serde_json::json!({
+        "session_id": "session-1",
+        "input": [{"type": "text", "text": "hello"}],
+        "workspace_id": "workspace-other"
+    });
+    let retry = serde_json::json!({
+        "session_id": "session-1",
+        "input": [{"type": "text", "text": "hello"}],
+        "workspace_id": "workspace-other",
+        "client_message_id": "message-1",
+        "retry_of_message_id": "message-0"
+    });
+
+    assert!(serde_json::from_value::<StartTurnRequest>(start).is_err());
+    assert!(serde_json::from_value::<RetryTurnRequest>(retry).is_err());
+}
+
+#[test]
 fn user_permission_mode_uses_product_wire_values() {
     assert_eq!(
         serde_json::to_value([
@@ -365,11 +384,12 @@ fn test_desktop_source_type_roundtrip() {
 #[test]
 fn test_talos_session_apply_turn_progress_updates_state_and_model() {
     let mut session = TalosSession {
+        agent_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "user-1".to_string(),
         context: SessionContext {
             session_id: "session-progress".to_string(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             source_type: talos::TalosSourceType::Im,
             provider: talos::TalosProvider::Telegram,
             user_id: "user-1".to_string(),
@@ -621,12 +641,9 @@ fn test_session_title_policy_falls_back_to_first_user_text() {
 }
 
 #[test]
-fn test_session_patch_roundtrip_with_project_binding_fields() {
+fn test_session_patch_roundtrip_with_current_directory() {
     let patch = SessionPatch {
         conf: None,
-        project_id: Some(OptionalProjectIdPatch::Set {
-            project_id: "project-1".to_string(),
-        }),
         current_directory: Some(OptionalCurrentDirectoryPatch::Set {
             path: std::path::PathBuf::from("/repo"),
         }),
@@ -635,12 +652,6 @@ fn test_session_patch_roundtrip_with_project_binding_fields() {
     let encoded = serde_json::to_string(&patch).unwrap();
     let decoded: SessionPatch = serde_json::from_str(&encoded).unwrap();
 
-    assert_eq!(
-        decoded.project_id,
-        Some(OptionalProjectIdPatch::Set {
-            project_id: "project-1".to_string(),
-        })
-    );
     assert_eq!(
         decoded.current_directory,
         Some(OptionalCurrentDirectoryPatch::Set {
@@ -652,11 +663,12 @@ fn test_session_patch_roundtrip_with_project_binding_fields() {
 #[test]
 fn test_resolve_effective_project_root_prefers_project_directory() {
     let session = TalosSession {
+        agent_id: "default".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: "user-1".to_string(),
         context: SessionContext {
             session_id: "session-root".to_string(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             source_type: talos::TalosSourceType::Http,
             provider: talos::TalosProvider::Http,
             user_id: "user-1".to_string(),
@@ -694,11 +706,12 @@ fn test_resolve_effective_project_root_prefers_project_directory() {
 #[test]
 fn test_resolve_effective_project_root_uses_embedded_current_directory() {
     let session = TalosSession {
+        agent_id: "default".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: "user-1".to_string(),
         context: SessionContext {
             session_id: "session-root".to_string(),
-            workspace_id: None,
+            workspace_id: "default".to_string(),
             source_type: talos::TalosSourceType::Http,
             provider: talos::TalosProvider::Http,
             user_id: "user-1".to_string(),
@@ -739,11 +752,12 @@ fn test_resolve_effective_project_root_uses_embedded_current_directory() {
 #[test]
 fn test_resolve_effective_project_root_uses_workspace_root() {
     let session = TalosSession {
+        agent_id: "default".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: "user-1".to_string(),
         context: SessionContext {
             session_id: "session-root".to_string(),
-            workspace_id: Some("workspace-alpha".to_string()),
+            workspace_id: "workspace-alpha".to_string(),
             source_type: talos::TalosSourceType::Http,
             provider: talos::TalosProvider::Http,
             user_id: "user-1".to_string(),

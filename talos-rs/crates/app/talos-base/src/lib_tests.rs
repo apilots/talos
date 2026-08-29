@@ -11,6 +11,7 @@ use std::sync::{
 };
 use talos_config::{
     AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol, ProviderModelConfig,
+    TalosPaths,
 };
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
@@ -143,6 +144,9 @@ fn canonical(path: PathBuf) -> PathBuf {
 fn isolate_runtime_workspace(config: &mut Config, label: &str) -> PathBuf {
     let workspace = temp_test_dir(label);
     config.agent.kernel.workspace_dir = workspace.to_string_lossy().to_string();
+    *config = config
+        .clone()
+        .with_runtime_paths(TalosPaths::from_home(workspace.clone()));
     workspace
 }
 
@@ -210,6 +214,26 @@ async fn application_runtime_builds_when_model_key_is_missing() {
     let _ = fs::remove_dir_all(workspace);
 }
 
+#[tokio::test]
+async fn database_migration_failure_stops_before_product_upgrades_and_runtime() {
+    let mut config = Config::default();
+    let workspace = isolate_runtime_workspace(&mut config, "runtime-migration-failure");
+    config.gateway.auth = false;
+    config.storage.connection_string = ":memory:".to_string();
+    let missing_migrations = workspace.join("missing-migrations");
+
+    let error =
+        match build_application_runtime_with_migration_dir(config, &missing_migrations).await {
+            Ok(_) => panic!("database migration failure must stop startup"),
+            Err(error) => error,
+        };
+
+    assert!(error.to_string().contains("load store migrations"));
+    assert!(!workspace.join("upgrades/state.json").exists());
+    assert!(!workspace.join("workspace-talos/anonymous").exists());
+    let _ = fs::remove_dir_all(workspace);
+}
+
 #[test]
 fn runtime_config_rejects_invalid_profile_usage_retention() {
     let mut config = Config::default();
@@ -239,7 +263,6 @@ async fn application_runtime_registers_configured_default_agent() {
         kind: AgentKind::Kernel,
         enabled: true,
         description: Some("Review agent".to_string()),
-        default_workspace_id: Some("default".to_string()),
         runtime_config: Some(AgentRuntimeConfig::Kernel {
             kernel: config.agent.kernel.clone(),
         }),
@@ -276,7 +299,6 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             kind: AgentKind::Kernel,
             enabled: false,
             description: None,
-            default_workspace_id: None,
             runtime_config: None,
         },
         AgentDefinitionConfig {
@@ -285,7 +307,6 @@ async fn application_runtime_skips_disabled_agent_definitions() {
             kind: AgentKind::Kernel,
             enabled: true,
             description: None,
-            default_workspace_id: None,
             runtime_config: Some(AgentRuntimeConfig::Kernel {
                 kernel: config.agent.kernel.clone(),
             }),

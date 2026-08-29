@@ -23,7 +23,6 @@ pub(crate) use talos_sdk::{
     TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TimelineActiveTurnSnapshot,
     TimelineActiveTurnStatus, TimelineCursorStatus, TimelineEventEnvelope,
     TimelineRecoveryResponse, TimelineReplay, TurnExecutionMetrics, UserPermissionMode, UserRole,
-    WorkspaceInfoResponse,
 };
 pub(crate) use talos_types::TimelineRecoverySnapshot;
 
@@ -608,7 +607,6 @@ impl MockGatewayClient {
                 submitted_user_actions: Vec::new(),
                 current_project_root: None,
                 auth_email: Some("talos@example.com".to_string()),
-                workspace_root: PathBuf::from("/tmp/talos-workspace"),
                 updated_model: None,
                 stream_counter: 0,
                 list_models_failures_remaining: 0,
@@ -727,16 +725,6 @@ impl GatewayClient for MockGatewayClient {
                     r#type: Default::default(),
                 },
             }),
-        })
-    }
-
-    async fn workspace_info(&self) -> TalosResult<WorkspaceInfoResponse> {
-        let state = self.state.lock().unwrap();
-        Ok(WorkspaceInfoResponse {
-            user_id: "test-user".to_string(),
-            username: Some("talos-user".to_string()),
-            base_workspace_dir: state.workspace_root.to_string_lossy().to_string(),
-            user_workspace_dir: state.workspace_root.to_string_lossy().to_string(),
         })
     }
 

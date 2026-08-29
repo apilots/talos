@@ -8,6 +8,20 @@ description = "Talos startup upgrade coordinator"
 repository.workspace = true
 
 [dependencies]
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+semver = { workspace = true }
+sha2 = { workspace = true }
+sqlx = { workspace = true }
 talos-config = { workspace = true }
 talos-error = { workspace = true }
+talos-fs = { workspace = true }
+talos-memory = { workspace = true }
+talos-store = { workspace = true }
+talos-types = { workspace = true }
 tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { workspace = true }

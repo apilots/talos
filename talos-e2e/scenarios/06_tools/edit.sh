@@ -22,7 +22,7 @@ cleanup() {
 }
 export TALOS_HOME="${TEST_TALOS_HOME}"
 
-WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
+WORKSPACE_DIR="${TALOS_HOME}/workspace-talos/tool-edit-user"
 FIXTURE_DIR="${WORKSPACE_DIR}/notes"
 FIXTURE_FILE="${FIXTURE_DIR}/edit_target.txt"
 OLD_MARKER="old-marker-$(date '+%Y%m%d%H%M%S')-$$"
@@ -78,7 +78,6 @@ import os
 
 payload = {
     "input": [{"type": "text", "text": os.environ["INPUT_TEXT"]}],
-    "workspace_id": None,
 }
 print(json.dumps(payload, ensure_ascii=False))
 PY

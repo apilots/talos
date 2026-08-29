@@ -121,7 +121,6 @@ import type {
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
   WorkspaceDocWriteResponse,
-  WorkspaceInfoResponse,
 } from "./types";
 
 interface RequestControlOptions {
@@ -548,8 +547,6 @@ export class TalosClient {
   };
 
   workspaceDocs = {
-    info: () =>
-      this.http.request<WorkspaceInfoResponse>(this.url("/v1/workspace/info")),
     list: (): Promise<WorkspaceDocListResponse> =>
       this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
     get: (kind: WorkspaceDocKind) =>

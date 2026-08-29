@@ -106,7 +106,7 @@ text = (
     "id direct, label Direct, description Execute immediately. "
     f"After receiving the answer, respond with exactly {marker}"
 )
-payload = {"input": [{"type": "text", "text": text}], "workspace_id": None}
+payload = {"input": [{"type": "text", "text": text}]}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
@@ -123,7 +123,7 @@ text = (
     f"{os.environ['COMMAND']}. Do not call any other tool. "
     f"After the tool result, respond with exactly {os.environ['MARKER']}"
 )
-payload = {"input": [{"type": "text", "text": text}], "workspace_id": None}
+payload = {"input": [{"type": "text", "text": text}]}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
@@ -147,7 +147,7 @@ text = (
     + ". Do not call any other tool. After all three tool results, respond with exactly "
     + os.environ["MARKER"]
 )
-payload = {"input": [{"type": "text", "text": text}], "workspace_id": None}
+payload = {"input": [{"type": "text", "text": text}]}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
@@ -166,7 +166,7 @@ text = (
     f"{os.environ['MODE_SMOKE_FILE_3']}. Do not call any other tool. "
     f"After the tool result, respond with exactly {os.environ['MARKER']}"
 )
-payload = {"input": [{"type": "text", "text": text}], "workspace_id": None}
+payload = {"input": [{"type": "text", "text": text}]}
 print(json.dumps(payload, ensure_ascii=False))
 PY
 }
@@ -248,7 +248,7 @@ session_id="$(new_session_id)"
 remember_session_context "${session_id}" "$(build_session_context)"
 echo "CASE user_action_session_id PASS session_id=${session_id}"
 
-bootstrap_payload='{"input":[{"type":"text","text":"Reply with exactly INTERACTION_SESSION_READY"}],"workspace_id":null}'
+bootstrap_payload='{"input":[{"type":"text","text":"Reply with exactly INTERACTION_SESSION_READY"}]}'
 bootstrap_json="$(send_message_response "${session_id}" "${bootstrap_payload}" "interaction_session_bootstrap")"
 if [[ "$(extract_output_text "${bootstrap_json}")" != "INTERACTION_SESSION_READY" ]]; then
   echo "CASE user_action_session_bootstrap FAIL response=${bootstrap_json}"

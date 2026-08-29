@@ -78,11 +78,12 @@ impl LlmProviderRouter for TestRouter {
 #[tokio::test]
 async fn dream_maintenance_processes_two_user_scopes() {
     let workspace = tempfile::tempdir().expect("workspace");
-    let base_workspace = tempfile::tempdir().expect("base workspace");
-    let mut config = TalosConfig::default();
-    config.agent.kernel.workspace_dir = base_workspace.path().to_string_lossy().to_string();
+    let mut config =
+        TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
+            talos_config::DEFAULT_WORKSPACE_ID,
+            workspace.path().to_path_buf(),
+        ));
     let mut agent_kernel = config.agent.kernel.clone();
-    agent_kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
     agent_kernel.timezone = "Asia/Shanghai".to_string();
     config.agent.agents = vec![talos_config::AgentDefinitionConfig {
         id: "dream-agent".to_string(),
@@ -90,7 +91,6 @@ async fn dream_maintenance_processes_two_user_scopes() {
         kind: talos_config::AgentKind::Kernel,
         enabled: true,
         description: None,
-        default_workspace_id: None,
         runtime_config: Some(talos_config::AgentRuntimeConfig::Kernel {
             kernel: agent_kernel.clone(),
         }),
@@ -145,12 +145,12 @@ async fn dream_maintenance_processes_two_user_scopes() {
             .insert_session_record(&record, "test")
             .await
             .expect("insert session");
-        let kernel_config = resolve_effective_kernel_workspace(&agent_kernel, user_id)
-            .expect("user workspace")
-            .kernel_config;
+        let effective_workspace = config
+            .resolve_workspace("default", user_id)
+            .expect("user workspace");
         artifacts
             .append_turn(
-                std::path::Path::new(&kernel_config.workspace_dir),
+                &effective_workspace.root,
                 &TalosTurn {
                     turn_id: format!("turn-{session_id}"),
                     message_id: format!("message-{session_id}"),
@@ -208,6 +208,8 @@ async fn dream_maintenance_processes_two_user_scopes() {
         memory,
         inner_model,
         &agent_definitions,
+        config.workspaces.clone(),
+        config.talos_paths(),
         DreamMemoryMaintenanceConfig {
             batch_size: 1,
             max_batches: 2,
@@ -225,7 +227,7 @@ async fn dream_maintenance_processes_two_user_scopes() {
         }
     );
     for user_id in ["u1", "u2"] {
-        let user_workspace = workspace.path().join("users").join(user_id);
+        let user_workspace = workspace.path().join(user_id);
         assert!(
             !user_workspace.join("MEMORY.md").exists(),
             "Dream Memory maintenance must not create User Workspace Memory"
@@ -286,7 +288,7 @@ async fn dream_maintenance_processes_two_user_scopes() {
         .iter()
         .all(|(_, model_ref)| model_ref == &expected_inner_model));
 
-    let u1_workspace = workspace.path().join("users").join("u1");
+    let u1_workspace = workspace.path().join("u1");
     let memory_path = u1_workspace.join("MEMORY.md");
     artifacts
         .append_turn(
@@ -339,7 +341,7 @@ fn session_record(session_id: &str, user_id: &str, last_activity: u64) -> Sessio
         id: session_id.to_string(),
         agent_id: "dream-agent".to_string(),
         tree_identity: talos_store::session::SessionTreeIdentity::Primary,
-        workspace_id: None,
+        workspace_id: "default".to_string(),
         title: "Memory test".to_string(),
         user_id: user_id.to_string(),
         context: TalosContext {

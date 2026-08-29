@@ -12,7 +12,7 @@ export {
 } from "./hooks/useWebSearchConfigQuery";
 export { profileKey, useProfileQuery } from "./hooks/useProfileQuery";
 export {
-  SettingsAgentWorkspaceSection,
+  SettingsPersonalizationSection,
   SettingsAppearanceSection,
   SettingsGeneralSection,
   SettingsMcpServersSection,

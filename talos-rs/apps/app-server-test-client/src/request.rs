@@ -12,7 +12,6 @@ pub(super) fn start_turn_request(
         input: vec![TalosInputItem::Text {
             text: text.to_string(),
         }],
-        workspace_id: None,
         context: Some(test_talos_context()),
         model_selection: test_model_ref().map(ModelSelection::without_reasoning),
         user_permission_mode: None,

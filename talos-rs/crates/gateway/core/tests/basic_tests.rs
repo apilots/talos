@@ -280,7 +280,6 @@ async fn gateway_start_turn_delegates_to_service() {
                 input: vec![TalosInputItem::Text {
                     text: "hello".to_string(),
                 }],
-                workspace_id: None,
                 context: Some(request_context()),
                 model_selection: None,
                 user_permission_mode: None,
@@ -306,7 +305,6 @@ async fn gateway_start_turn_rejects_invalid_request() {
             StartTurnRequest {
                 session_id: "session-1".to_string(),
                 input: Vec::new(),
-                workspace_id: None,
                 context: Some(request_context()),
                 model_selection: None,
                 user_permission_mode: None,
@@ -382,7 +380,6 @@ async fn gateway_patch_session_rejects_missing_session_id() {
             SessionPatchRequest {
                 session_id: String::new(),
                 conf: None,
-                project_id: None,
                 current_directory: None,
             },
         )

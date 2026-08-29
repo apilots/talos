@@ -18,7 +18,7 @@ export TALOS_TEST_CONTEXT_COMPACTION_MAX_BYTES=1024
 prepare_talos_home
 
 WORKSPACE_DIR="${TALOS_HOME}/workspace-talos"
-USER_WORKSPACE_DIR="${WORKSPACE_DIR}/users/local"
+USER_WORKSPACE_DIR="${WORKSPACE_DIR}/local"
 DATABASE_PATH="${TALOS_HOME}/data/talos.db"
 TALOS_LOG_FILE="${TALOS_HOME}/logs/talos.log"
 PANE_SNAPSHOT="$(scenario_report_path "tui_session_controls_pane.txt")"

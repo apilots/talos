@@ -16,7 +16,6 @@ impl TurnService {
             session,
             TurnSubmission {
                 input: request.input,
-                workspace_id: None,
                 binding: DispatchBinding::Exact { agent_id },
             },
             None,

@@ -64,8 +64,7 @@ PY
 }
 
 msg_payload='{
-  "input": [{"type":"text","text":"please answer with one short sentence"}],
-  "workspace_id": null
+  "input": [{"type":"text","text":"please answer with one short sentence"}]
 }'
 msg_json="$(send_message_response "${session_id}" "${msg_payload}" "msg")"
 log_case_json "messages_non_stream" "${msg_payload}" "${msg_json}"
@@ -146,8 +145,7 @@ echo "CASE messages_session_usage_after_non_stream PASS total_tokens=${session_u
 
 sse_log="$(scenario_report_path sse_events.log)"
 sse_payload='{
-  "input": [{"type":"text","text":"please answer with one short sentence"}],
-  "workspace_id": null
+  "input": [{"type":"text","text":"please answer with one short sentence"}]
 }'
 send_message_sse_log "${session_id}" "${sse_payload}" "${sse_log}"
 log_case_json "messages_sse_stream" "${sse_payload}" "$(cat "${sse_log}")"

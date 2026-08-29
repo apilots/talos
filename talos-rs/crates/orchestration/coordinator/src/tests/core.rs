@@ -41,11 +41,13 @@ async fn test_handle_stream_returns_agent_events() {
         project_root: None,
         environment: None,
     };
+    let mut session = test_session("test-session", context.clone());
+    session.agent_id = "mock".to_string();
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-stream".to_string(),
             binding: talos_types::agent_dispatch::DispatchBinding::Routed,
-            session: test_session("test-session", context.clone()),
+            session,
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
@@ -89,11 +91,13 @@ async fn test_handle_request_uses_prepared_session() {
         .await
         .expect("agent registration should succeed");
 
+    let mut session = test_session("test-session", context.clone());
+    session.agent_id = "test_agent".to_string();
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-title".to_string(),
             binding: talos_types::agent_dispatch::DispatchBinding::Routed,
-            session: test_session("test-session", context.clone()),
+            session,
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
@@ -188,13 +192,15 @@ async fn test_handle_request_prefers_exact_agent_binding() {
         .await
         .expect("reviewer agent registration should succeed");
 
+    let mut session = test_session("test-session", context.clone());
+    session.agent_id = "default".to_string();
     let response = coordinator
         .handle(AgentDispatchParams {
             turn_id: "turn-routed".to_string(),
             binding: talos_types::agent_dispatch::DispatchBinding::Exact {
                 agent_id: "default".to_string(),
             },
-            session: test_session("test-session", context.clone()),
+            session,
             resume_context: None,
             input: vec![TalosInputItem::Text {
                 text: "hello".to_string(),
@@ -237,7 +243,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
         environment: None,
     };
     let mut session = test_session("test-session", context);
-    session.context.workspace_id = Some("workspace-alpha".to_string());
+    session.context.workspace_id = "default".to_string();
     let mut stream = coordinator
         .handle_stream(AgentDispatchParams {
             turn_id: "turn-original".to_string(),
@@ -267,10 +273,7 @@ async fn test_handle_stream_preserves_resume_turn_and_message() {
     assert_eq!(request.run.turn_id(), "turn-original");
     assert_eq!(request.run.context.turn_id, "turn-original");
     assert_eq!(request.run.context.message_id, "message-original");
-    assert_eq!(
-        request.run.context.workspace_id.as_deref(),
-        Some("workspace-alpha")
-    );
+    assert_eq!(request.run.context.workspace.workspace_id, "default");
     assert!(request.run.input.is_empty());
     assert!(request.run.resume_context.is_some());
 }

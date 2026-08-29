@@ -27,6 +27,18 @@ fn decodes_typed_request_params() {
 }
 
 #[test]
+fn session_patch_rejects_immutable_binding_fields() {
+    for field in ["user_id", "workspace_id", "agent_id", "project_id"] {
+        let mut params = json!({ "session_id": "s1" });
+        params[field] = json!("forbidden");
+        let error = ClientRequest::decode("session.patch", Some(params))
+            .expect_err("immutable Session bindings must be rejected");
+
+        assert!(error.to_string().contains("unknown field"));
+    }
+}
+
+#[test]
 fn decodes_canonical_user_action_submission() {
     let request = ClientRequest::decode(
         "userAction/submit",

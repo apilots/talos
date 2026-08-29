@@ -43,7 +43,7 @@ use talos_types::{
     SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
     UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocWriteResponse,
 };
 use tracing::info;
 
@@ -604,14 +604,6 @@ impl Gateway for ServiceGateway {
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
         ServiceGateway::write_workspace_doc(self, actor, request).await
-    }
-
-    async fn workspace_info(
-        &self,
-        actor: &Actor,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        ServiceGateway::workspace_info(self, actor, request).await
     }
 
     async fn logout(

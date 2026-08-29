@@ -36,7 +36,6 @@ describe("desktop IPC guard", () => {
       assertDesktopRendererInvoke("turn.start", {
         session_id: "session-1",
         input: [{ type: "text", text: "hello" }],
-        workspace_id: null,
         client_request_id: "request-1",
       }),
     ).not.toThrow();
@@ -169,6 +168,10 @@ describe("desktop IPC guard", () => {
   });
 
   it("rejects malformed params before they reach app-server", () => {
+    expect(isDesktopRendererMethod("workspace.info")).toBe(false);
+    expect(() => assertDesktopRendererInvoke("workspace.info", {})).toThrow(
+      "Desktop renderer method is not allowed: workspace.info",
+    );
     expect(() => assertDesktopRendererInvoke("session.get", {})).toThrow(
       "Invalid desktop renderer params for method: session.get",
     );

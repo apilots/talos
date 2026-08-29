@@ -303,8 +303,8 @@ pub struct AgentKernelConfig {
     #[serde(skip)]
     pub runtime_env: RuntimeEnv,
 
-    /// Effective agent workspace root for prompt, memory, sessions, and file tool fallback.
-    #[serde(default = "default_kernel_workspace_dir")]
+    /// Runtime-only effective workspace root injected for one execution.
+    #[serde(skip)]
     pub workspace_dir: String,
 
     /// Maximum parallel tool executions
@@ -322,10 +322,6 @@ pub struct AgentKernelConfig {
     /// Runtime timezone propagated from top-level config.
     #[serde(default = "default_timezone")]
     pub timezone: String,
-
-    /// Default workspace id when request does not provide one
-    #[serde(default = "default_workspace_id")]
-    pub default_workspace_id: String,
 
     /// Planner mode used by the general turn policy.
     #[serde(default = "default_kernel_planner_mode")]
@@ -368,23 +364,12 @@ fn default_kernel_tool_parallelism() -> usize {
     3
 }
 
-fn default_kernel_workspace_dir() -> String {
-    crate::TalosPaths::resolve()
-        .workspace_dir_for_agent("talos")
-        .to_string_lossy()
-        .to_string()
-}
-
 fn default_kernel_tool_result_max_bytes() -> usize {
     64 * 1024
 }
 
 fn default_kernel_context_compaction_max_bytes() -> usize {
     256 * 1024
-}
-
-fn default_workspace_id() -> String {
-    "default".to_string()
 }
 
 fn default_kernel_planner_mode() -> PlannerMode {
@@ -395,12 +380,11 @@ impl Default for AgentKernelConfig {
     fn default() -> Self {
         Self {
             runtime_env: RuntimeEnv::default(),
-            workspace_dir: default_kernel_workspace_dir(),
+            workspace_dir: String::new(),
             tool_parallelism: default_kernel_tool_parallelism(),
             tool_result_max_bytes: default_kernel_tool_result_max_bytes(),
             context_compaction_max_bytes: default_kernel_context_compaction_max_bytes(),
             timezone: default_timezone(),
-            default_workspace_id: default_workspace_id(),
             planner_mode: default_kernel_planner_mode(),
             prompt: AgentKernelPromptConfig::default(),
             output: AgentKernelOutputConfig::default(),

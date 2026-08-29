@@ -41,7 +41,7 @@ use talos_types::{
     SubscribeTimelineRequest, SubscribeTimelineResponse, TimelineRecoveryResponse,
     UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
     WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
-    WorkspaceDocWriteResponse, WorkspaceInfoRequest, WorkspaceInfoResponse,
+    WorkspaceDocWriteResponse,
 };
 
 #[async_trait]
@@ -459,12 +459,6 @@ pub trait Gateway: Send + Sync {
         actor: &Actor,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse>;
-
-    async fn workspace_info(
-        &self,
-        actor: &Actor,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse>;
 
     async fn logout(
         &self,

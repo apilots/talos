@@ -44,17 +44,14 @@ impl TalosPaths {
         }
     }
 
-    pub fn workspace_dir_for_agent(&self, agent_name: &str) -> PathBuf {
+    pub fn workspace_prefix(&self) -> PathBuf {
+        self.talos_home.join("workspace-talos")
+    }
+
+    /// Return one legacy Agent-owned workspace root for layout upgrades only.
+    pub fn legacy_workspace_dir_for_agent(&self, agent_name: &str) -> PathBuf {
         self.talos_home
             .join(format!("workspace-{}", sanitize_agent_name(agent_name)))
-    }
-
-    pub fn sessions_dir_for_agent(&self, agent_name: &str) -> PathBuf {
-        self.workspace_dir_for_agent(agent_name).join("sessions")
-    }
-
-    pub fn memory_dir_for_agent(&self, agent_name: &str) -> PathBuf {
-        self.workspace_dir_for_agent(agent_name).join("memory")
     }
 
     /// Return the product-managed migration directory for one configured database backend.
@@ -81,28 +78,6 @@ impl TalosPaths {
                 ))
             })?;
         }
-        Ok(())
-    }
-
-    pub fn ensure_agent_workspace(&self, agent_name: &str) -> TalosResult<()> {
-        use talos_error::TalosError;
-
-        let workspace_dir = self.workspace_dir_for_agent(agent_name);
-        std::fs::create_dir_all(&workspace_dir).map_err(|err| {
-            TalosError::internal(format!(
-                "create agent workspace dir {}: {}",
-                workspace_dir.display(),
-                err
-            ))
-        })?;
-        let dir = workspace_dir.join("users").join("anonymous");
-        std::fs::create_dir_all(&dir).map_err(|err| {
-            TalosError::internal(format!(
-                "create agent workspace dir {}: {}",
-                dir.display(),
-                err
-            ))
-        })?;
         Ok(())
     }
 }

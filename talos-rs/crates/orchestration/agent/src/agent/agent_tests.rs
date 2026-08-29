@@ -14,7 +14,7 @@ use talos_agent_kernel::{
     KernelThinkingSource, KernelThinkingStage, ThinkingDeltaStreamData, ToolArgsDeltaStreamData,
     ToolCallStartStreamData, ToolResultStreamData, ToolStreamKey, UserActionRequestStreamData,
 };
-use talos_config::{AgentKernelConfig, ProviderModelConfig};
+use talos_config::{AgentKernelConfig, ProviderModelConfig, WorkspaceDefinition};
 use talos_llm_provider::{
     ChatRequest, ChatResponse, ChatStream, FunctionCall, LlmProvider, LlmProviderRouter,
     ModelBlockCompleted, ModelBlockDelta, ModelBlockStarted, ModelBlockStream,
@@ -566,7 +566,11 @@ fn build_temp_agent() -> (TempDir, AgentHarnessImpl) {
 }
 
 fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
-    let mut config = talos_config::Config::default();
+    let mut config =
+        talos_config::Config::default().with_workspace_definition(WorkspaceDefinition::new(
+            talos_config::DEFAULT_WORKSPACE_ID,
+            std::env::temp_dir().join(format!("talos-agent-test-{}", uuid::Uuid::new_v4())),
+        ));
     config.llm.openai.models = [
         "gpt-4o",
         "agent-model",
@@ -579,6 +583,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     .collect();
     config.llm.deepseek.models = vec![provider_model("secondary-model")];
     TalosSession {
+        agent_id: "default".to_string(),
         title: "Untitled Session".to_string(),
         user_id: "talos-test-local-user".to_string(),
         conf: SessionConf {
@@ -589,7 +594,7 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
         current_directory: None,
         context: SessionContext {
             session_id: session_id.to_string(),
-            workspace_id: Some(workspace_id.to_string()),
+            workspace_id: workspace_id.to_string(),
             project_id: None,
             current_directory: None,
             project_root: None,
@@ -613,24 +618,14 @@ fn build_test_session(session_id: &str, workspace_id: &str) -> TalosSession {
     }
 }
 
-#[test]
-fn agent_run_config_carries_resolved_permission_mode() {
-    let mut session = build_test_session("session-mode", "workspace-mode");
-    session.effective_user_permission_mode = talos_types::UserPermissionMode::AskForApproval;
-
-    assert_eq!(
-        AgentRunConfig::from_session(&session).user_permission_mode,
-        talos_types::UserPermissionMode::AskForApproval
-    );
-}
-
 fn agent_run_params(
     session: TalosSession,
     turn_id: &str,
     input: Vec<TalosInputItem>,
 ) -> AgentRunParams {
     let context =
-        AgentRunContext::from_session(&session, turn_id.to_string(), "test_agent".to_string());
+        AgentRunContext::from_session(&session, turn_id.to_string(), "test_agent".to_string())
+            .expect("workspace should resolve");
     let config = AgentRunConfig::from_session(&session);
     let session_state = AgentRunSessionState::from_session(&session);
     let options = AgentRunOptions::from_config(&config);
@@ -1259,7 +1254,7 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
     )
     .expect("agent harness should build");
 
-    let mut session = build_test_session("session-kernel-override", "workspace-1");
+    let mut session = build_test_session("session-kernel-override", "default");
     session.config.agent.kernel.output.max_tokens = 123;
     session.conf.model_selection = Some(model_selection("session-model"));
 
@@ -1291,7 +1286,7 @@ async fn test_run_uses_agent_runtime_config_and_session_model() {
 #[tokio::test]
 async fn test_run_generates_title_update_for_first_turn() {
     let agent = build_test_agent();
-    let mut session = build_test_session("session-title", "workspace-1");
+    let mut session = build_test_session("session-title", "default");
     session.state.message_count = 0;
     session.title = DEFAULT_SESSION_TITLE.to_string();
 
@@ -1315,7 +1310,7 @@ async fn test_run_generates_title_update_for_first_turn() {
 #[tokio::test]
 async fn title_generation_accepts_user_input_before_final_assistant_output() {
     let agent = build_test_agent();
-    let mut session = build_test_session("session-title-waiting", "workspace-1");
+    let mut session = build_test_session("session-title-waiting", "default");
     session.state.message_count = 0;
     session.title = DEFAULT_SESSION_TITLE.to_string();
     let session_state = AgentRunSessionState::from_session(&session);
@@ -1344,7 +1339,7 @@ async fn title_generation_falls_back_when_provider_is_unavailable() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let mut session = build_test_session("session-title-fallback", "workspace-1");
+    let mut session = build_test_session("session-title-fallback", "default");
     session.title = DEFAULT_SESSION_TITLE.to_string();
     let session_state = AgentRunSessionState::from_session(&session);
     let title = session_title::generate(
@@ -1366,11 +1361,16 @@ async fn title_generation_falls_back_when_provider_is_unavailable() {
 #[tokio::test]
 async fn test_session_workspace_resolution_does_not_write_profile_snapshot() {
     let guard = tempfile::tempdir().expect("temp dir should be created");
-    let mut session = build_test_session("session-profile-snapshot", "workspace-profile");
-    session.config.agent.kernel.workspace_dir = guard.path().display().to_string();
+    let mut session = build_test_session("session-profile-snapshot", "default");
+    session.config =
+        session
+            .config
+            .with_workspace_definition(talos_config::WorkspaceDefinition::new(
+                talos_config::DEFAULT_WORKSPACE_ID,
+                guard.path().to_path_buf(),
+            ));
     let profile_path = guard
         .path()
-        .join("users")
         .join("talos-test-local-user")
         .join("profile.json");
     std::fs::create_dir_all(profile_path.parent().expect("profile parent should exist"))
@@ -1393,7 +1393,6 @@ async fn test_session_workspace_resolution_does_not_write_profile_snapshot() {
         kernel_config.workspace_dir,
         guard
             .path()
-            .join("users")
             .join("talos-test-local-user")
             .to_string_lossy()
             .to_string()
@@ -1403,23 +1402,11 @@ async fn test_session_workspace_resolution_does_not_write_profile_snapshot() {
     assert_eq!(profile["updated_at_ms"], 1);
 }
 
-#[test]
-fn test_planner_mode_comes_from_kernel_config() {
-    let mut agent = build_test_agent();
-    agent
-        .set_default_planner_mode("built_in")
-        .expect("planner mode should parse");
-    assert_eq!(
-        agent.kernel_config.planner_mode,
-        talos_config::PlannerMode::BuiltIn
-    );
-}
-
 #[tokio::test]
 async fn test_submit_dynamic_tool_result_rejects_replay() {
     let (_temp_dir, agent) = build_temp_agent();
     let session_id = "session-dynamic-replay";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
     let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
         .expect("session workspace should resolve");
@@ -1489,7 +1476,7 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
     let (_temp_dir, mut agent) = build_temp_agent();
     agent.kernel_config.tools.dynamic.response_timeout_ms = 1;
     let session_id = "session-dynamic-timeout";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
     session
         .config
@@ -1544,7 +1531,7 @@ async fn test_submit_dynamic_tool_result_rejects_timeout() {
 async fn test_submit_dynamic_tool_result_rejects_wrong_turn_without_writing_response() {
     let (_temp_dir, agent) = build_temp_agent();
     let session_id = "session-dynamic-wrong-turn";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = _temp_dir.path().display().to_string();
     let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
         .expect("session workspace should resolve");
@@ -1636,7 +1623,7 @@ async fn test_resume_streamed_rejects_wrong_turn_without_model_call() {
     )
     .expect("agent harness should build");
     let session_id = "session-dynamic-resume-wrong-turn";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
     let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
@@ -1748,7 +1735,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
         kernel_config,
     )
     .expect("agent harness should build");
-    let mut session = build_test_session("session-missing-tool-call", "workspace-1");
+    let mut session = build_test_session("session-missing-tool-call", "default");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
 
@@ -1779,7 +1766,7 @@ async fn test_resume_streamed_rejects_missing_tool_call_without_model_call() {
 #[tokio::test]
 async fn test_resume_streamed_rejects_missing_resume_context() {
     let agent = build_test_agent();
-    let session = build_test_session("session-no-resume-context", "workspace-1");
+    let session = build_test_session("session-no-resume-context", "default");
     let request = agent_run_params(session, "turn-no-resume-context", Vec::new());
 
     let error = match agent.resume_streamed(AgentResumeParams::new(request)).await {
@@ -1794,7 +1781,7 @@ async fn test_resume_streamed_rejects_missing_resume_context() {
 #[tokio::test]
 async fn test_run_streamed_rejects_resume_context() {
     let agent = build_test_agent();
-    let session = build_test_session("session-stream-with-resume-context", "workspace-1");
+    let session = build_test_session("session-stream-with-resume-context", "default");
     let mut request = agent_run_params(session, "turn-stream-with-resume-context", Vec::new());
     request.resume_context = Some(AgentDispatchResumeContext {
         pending_call_id: "call-dynamic".to_string(),
@@ -1837,7 +1824,7 @@ async fn test_resume_streamed_rejects_missing_request_without_model_call() {
     )
     .expect("agent harness should build");
     let session_id = "session-missing-dynamic-request";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
     let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
@@ -1911,7 +1898,7 @@ async fn test_interrupt_aborts_only_current_session_turn() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let session = build_test_session("session-cancel", "workspace-a");
+    let session = build_test_session("session-cancel", "default");
 
     let mut first_stream = agent
         .run_streamed(agent_run_params(
@@ -1974,7 +1961,7 @@ async fn test_interrupt_aborts_only_current_session_turn() {
 async fn clear_session_advances_memory_cursor_and_preserves_turn_sequence() {
     let (workspace, agent) = build_temp_agent();
     let session_id = "clear-session";
-    let mut session = build_test_session(session_id, "workspace-a");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = workspace.path().display().to_string();
     let kernel_config = AgentHarnessImpl::kernel_config_for_session(&session)
         .expect("session workspace should resolve");
@@ -2044,7 +2031,7 @@ async fn test_run_streamed_rejects_second_active_turn_for_same_session() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let session = build_test_session("session-busy", "workspace-a");
+    let session = build_test_session("session-busy", "default");
 
     let mut first_stream = agent
         .run_streamed(agent_run_params(
@@ -2100,8 +2087,8 @@ async fn test_run_streamed_allows_different_sessions_concurrently() {
         Default::default(),
     )
     .expect("agent harness should build");
-    let first_session = build_test_session("session-active", "workspace-a");
-    let second_session = build_test_session("session-independent", "workspace-a");
+    let first_session = build_test_session("session-active", "default");
+    let second_session = build_test_session("session-independent", "default");
 
     let mut first_stream = agent
         .run_streamed(agent_run_params(
@@ -2147,7 +2134,7 @@ async fn test_run_streamed_allows_different_sessions_concurrently() {
 #[tokio::test]
 async fn test_run_streamed_emits_user_input_and_single_final_answer() {
     let agent = build_test_agent();
-    let session = build_test_session("session-timeline", "workspace-a");
+    let session = build_test_session("session-timeline", "default");
 
     let mut stream = agent
         .run_streamed(agent_run_params(
@@ -2252,7 +2239,7 @@ async fn test_run_rejects_second_active_turn_for_same_session() {
     )
     .expect("agent harness should build");
     let agent = Arc::new(agent);
-    let session = build_test_session("session-run-queue", "workspace-a");
+    let session = build_test_session("session-run-queue", "default");
 
     let first_agent = agent.clone();
     let first_session = session.clone();

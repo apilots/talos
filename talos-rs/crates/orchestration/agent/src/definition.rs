@@ -97,8 +97,6 @@ pub struct AgentDefinition {
     pub enabled: bool,
     /// Human-readable description for management surfaces.
     pub description: String,
-    /// Default execution workspace key, not a filesystem path and not an Agent selector.
-    pub default_workspace_id: Option<String>,
     /// Concrete model and reasoning policy used to initialize this Agent runtime.
     pub model_selection: ModelSelection,
     /// Typed runtime configuration matched with kind.
@@ -298,7 +296,6 @@ fn synthesized_default_definition(
         kind: AgentKind::Kernel,
         enabled: true,
         description: "Default AI assistant".to_string(),
-        default_workspace_id: Some(config.kernel.default_workspace_id.clone()),
         model_selection: default_model_selection.clone(),
         runtime_config: AgentRuntimeConfig::Kernel {
             kernel: config.kernel.clone(),
@@ -346,10 +343,6 @@ fn definition_from_config(
             .description
             .clone()
             .unwrap_or_else(|| format!("{} agent", non_empty_or(&definition.name, id))),
-        default_workspace_id: definition
-            .default_workspace_id
-            .clone()
-            .or_else(|| Some(config.kernel.default_workspace_id.clone())),
         model_selection: default_model_selection.clone(),
         runtime_config,
     })

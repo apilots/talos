@@ -672,7 +672,6 @@ async fn test_status_command_displays_cache_usage_metrics() {
     assert!(
         status_text.contains("Model:            qwen-plus (mock, reasoning off, summaries auto)")
     );
-    assert!(status_text.contains("Agent Workspace:  /tmp/talos-workspace"));
     assert!(status_text.contains("Account:          talos@example.com"));
     assert!(status_text.contains("Session:          sess-test"));
     assert!(status_text.contains("Runtime:          embedded ● connected"));

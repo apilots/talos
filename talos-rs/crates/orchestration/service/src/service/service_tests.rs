@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{resolve_effective_kernel_workspace, ConfigStore, InMemoryLlmConfigStore};
+use talos_config::{ConfigStore, InMemoryLlmConfigStore, WorkspaceDefinition};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
@@ -444,7 +444,6 @@ fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
         input: vec![TalosInputItem::Text {
             text: text.to_string(),
         }],
-        workspace_id: None,
         context: Some(request_context()),
         model_selection: None,
         user_permission_mode: None,
@@ -498,7 +497,6 @@ fn create_session_params(
         context,
         model_selection: None,
         user_permission_mode: None,
-        workspace_id: None,
         project_id: None,
         current_directory,
     }
@@ -550,8 +548,10 @@ async fn delete_session_clears_its_message_queue() {
 #[tokio::test]
 async fn session_history_reads_artifacts_from_the_session_user_workspace() {
     let workspace = tempfile::tempdir().expect("temp workspace");
-    let mut config = configured_test_config();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
+    let config = configured_test_config().with_workspace_definition(WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        workspace.path().to_path_buf(),
+    ));
     let (service, _store) = test_application(
         Arc::new(TestTurnExecutor {
             mode: TestTurnExecutorMode::Closed,
@@ -568,9 +568,10 @@ async fn session_history_reads_artifacts_from_the_session_user_workspace() {
         )
         .await
         .expect("session should be created");
-    let user_workspace = resolve_effective_kernel_workspace(&config.agent.kernel, "member-user")
+    let user_workspace = config
+        .resolve_workspace("default", "member-user")
         .expect("user workspace")
-        .user_workspace_dir;
+        .root;
     FileSessionArtifactStore::default()
         .append_turn(
             &user_workspace,
@@ -682,6 +683,56 @@ async fn existing_session_start_turn_does_not_change_permission_mode() {
             session.effective_user_permission_mode,
         ),
         (None, talos_types::UserPermissionMode::FullAccess)
+    );
+}
+
+#[tokio::test]
+async fn existing_session_start_turn_rejects_a_project_override() {
+    let (service, _store) = test_application(
+        Arc::new(TestTurnExecutor {
+            mode: TestTurnExecutorMode::Closed,
+        }),
+        configured_test_config(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    let first_directory = tempfile::tempdir().unwrap();
+    let second_directory = tempfile::tempdir().unwrap();
+    let first_project = service
+        .create_project(
+            &actor,
+            "First Project".to_string(),
+            first_directory.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
+    let second_project = service
+        .create_project(
+            &actor,
+            "Second Project".to_string(),
+            second_directory.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
+    let mut params = create_session_params("session-project-binding", request_context(), None);
+    params.project_id = Some(first_project.project_id.clone());
+    service
+        .create_session(&actor, params)
+        .await
+        .expect("project session should be created");
+
+    let mut request = start_turn_request("session-project-binding", "hello");
+    request.project_id = Some(second_project.project_id);
+    let error = service.start_turn(&actor, request, None).await.unwrap_err();
+
+    assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
+    assert_eq!(
+        service
+            .get_session(&actor, "session-project-binding")
+            .await
+            .unwrap()
+            .project_id,
+        Some(first_project.project_id)
     );
 }
 

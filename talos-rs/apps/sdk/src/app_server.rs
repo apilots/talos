@@ -53,8 +53,7 @@ use talos_types::{
     SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
     TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
     WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse, WorkspaceInfoRequest,
-    WorkspaceInfoResponse,
+    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
@@ -913,13 +912,6 @@ impl GatewayClient for AppServerClient {
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
         self.request_typed("workspace.doc.write", request).await
-    }
-
-    async fn workspace_info(
-        &mut self,
-        request: WorkspaceInfoRequest,
-    ) -> TalosResult<WorkspaceInfoResponse> {
-        self.request_typed("workspace.info", request).await
     }
 
     async fn shutdown(&mut self) -> TalosResult<()> {

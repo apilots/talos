@@ -2,9 +2,7 @@ use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
 use talos_sdk::UserPermissionMode;
-use talos_sdk::{
-    AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo, WorkspaceInfoResponse,
-};
+use talos_sdk::{AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo};
 use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
 
 use crate::utils::{text_display_width, APP_VERSION};
@@ -19,7 +17,6 @@ const CONTEXT_BAR_WIDTH: usize = 20;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TuiStatusSnapshot {
     model: StatusModel,
-    agent_workspace: PathBuf,
     directory: PathBuf,
     account: String,
     session_id: Option<String>,
@@ -57,7 +54,6 @@ impl TuiStatusSnapshot {
         app: &TuiApp,
         session: Option<&SessionInfo>,
         auth: &AuthSessionReadResponse,
-        workspace: &WorkspaceInfoResponse,
     ) -> TalosResult<TuiStatusSnapshot> {
         let model_ref = session
             .map(|session| &session.model_selection.model_ref)
@@ -89,7 +85,6 @@ impl TuiStatusSnapshot {
         let directory = session
             .and_then(|session| session.current_directory.clone())
             .unwrap_or_else(|| app.startup_directory.clone());
-        let agent_workspace = PathBuf::from(&workspace.user_workspace_dir);
         let account = status_account(auth)
             .or_else(|| session.map(|session| session.user_id.clone()))
             .unwrap_or_else(current_account);
@@ -126,7 +121,6 @@ impl TuiStatusSnapshot {
                             .unwrap_or(model_info.model.reasoning_effort)
                     }),
             },
-            agent_workspace,
             directory,
             account,
             session_id,
@@ -156,10 +150,6 @@ pub(crate) fn render_status_card(snapshot: &TuiStatusSnapshot) -> String {
     rows.push(format!(">_  Talos TUI ({APP_VERSION})"));
     rows.push(String::new());
     rows.push(status_row("Model:", &format_model(&snapshot.model)));
-    rows.push(status_row(
-        "Agent Workspace:",
-        &format_path(&snapshot.agent_workspace),
-    ));
     rows.push(status_row("Directory:", &format_path(&snapshot.directory)));
     rows.push(status_row("Account:", &snapshot.account));
     rows.push(status_row(

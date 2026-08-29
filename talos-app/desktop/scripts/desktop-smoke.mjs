@@ -12,7 +12,7 @@ const smokeHome = path.join(artifactDir, "home");
 const talosHome = path.join(smokeHome, ".talos");
 const talosConfig = path.join(repoRoot, "conf/talos-dev.yaml");
 const modeSmokeFiles = [1, 2, 3].map((index) =>
-  path.join(talosHome, "workspace-talos", `desktop-mode-smoke-${index}.txt`)
+  path.join(talosHome, "workspace-talos", "anonymous", `desktop-mode-smoke-${index}.txt`)
 );
 const explicitAppServerBin = process.env.TALOS_APP_SERVER_BIN;
 const appServerBin = explicitAppServerBin ?? path.resolve(repoRoot, "talos-rs/target/debug/app-server");
@@ -44,7 +44,7 @@ if (!appExecutable || explicitAppServerBin) {
 
 function configureSmokeHome() {
   const confRoot = path.join(talosHome, "conf");
-  const workspaceRoot = path.join(talosHome, "workspace-talos");
+  const workspaceRoot = path.join(talosHome, "workspace-talos", "anonymous");
   const skillRoot = path.join(smokeHome, ".agents", "skills", "desktop-smoke");
   mkdirSync(confRoot, { recursive: true });
   mkdirSync(workspaceRoot, { recursive: true });
@@ -157,7 +157,7 @@ try {
 
   const settingsRoutes = [
     ["settings-models", "#/settings/models"],
-    ["settings-agent-workspace", "#/settings/agent-workspace"],
+    ["settings-personalization", "#/settings/personalization"],
     ["settings-appearance", "#/settings/appearance"],
     ["settings-server", "#/settings/server"],
   ];
@@ -422,7 +422,12 @@ async function runInteractionSmoke(cdp, outputDir) {
   await waitForUserActionClosed(cdp, 60_000);
   await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
 
-  const approvalMarker = path.join(talosHome, "workspace-talos", "desktop-approval-marker");
+  const approvalMarker = path.join(
+    talosHome,
+    "workspace-talos",
+    "anonymous",
+    "desktop-approval-marker",
+  );
   await evaluate(
     cdp,
     `window.__talosSmokeInvoke('session.patch', {

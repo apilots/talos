@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use talos_config::resolve_effective_kernel_workspace;
 use talos_error::TalosResult;
 use talos_store::session::{SessionArtifactStore, SessionTurnWindow, TimelineEventId};
 use talos_types::talos::{SessionHistoryMessage, SessionHistorySnapshot, TalosTimelineItem};
@@ -34,9 +33,10 @@ impl SessionHistoryService {
 
     pub async fn snapshot(&self, session: &TalosSession) -> TalosResult<SessionHistorySnapshot> {
         let session_id = &session.context.session_id;
-        let workspace_root =
-            resolve_effective_kernel_workspace(&session.config.agent.kernel, &session.user_id)?
-                .user_workspace_dir;
+        let workspace_root = session
+            .config
+            .resolve_workspace(&session.context.workspace_id, &session.user_id)?
+            .root;
         let turns = self
             .session_artifact_store
             .load_turns(&workspace_root, session_id)
@@ -67,9 +67,10 @@ impl SessionHistoryService {
         expected_message_id: &str,
     ) -> TalosResult<Vec<TalosTimelineItem>> {
         let session_id = &session.context.session_id;
-        let workspace_root =
-            resolve_effective_kernel_workspace(&session.config.agent.kernel, &session.user_id)?
-                .user_workspace_dir;
+        let workspace_root = session
+            .config
+            .resolve_workspace(&session.context.workspace_id, &session.user_id)?
+            .root;
         let turns = self
             .session_artifact_store
             .load_turn_window(&workspace_root, session_id, SessionTurnWindow::Latest, 1)

@@ -36,13 +36,14 @@ async fn dream_memory_processes_each_session_tail_once() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
-        agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
     let first = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
+        producer_agent_id: "agent-1",
         selected_model: "summary-model",
         llm_provider: provider.clone(),
         dream_memory_store: &memory_store,
@@ -55,6 +56,7 @@ async fn dream_memory_processes_each_session_tail_once() {
     .expect("Dream Memory should succeed");
     let second = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
+        producer_agent_id: "agent-1",
         selected_model: "summary-model",
         llm_provider: provider.clone(),
         dream_memory_store: &memory_store,
@@ -115,13 +117,14 @@ async fn dream_memory_does_not_advance_cursor_when_write_fails() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
-        agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
     let error = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
+        producer_agent_id: "agent-1",
         selected_model: "summary-model",
         llm_provider: provider,
         dream_memory_store: &FailingMemoryWriter,
@@ -177,13 +180,14 @@ async fn dream_memory_bounds_long_messages_and_still_advances() {
         ..AgentKernelConfig::default()
     };
     let scope = MemoryScope {
-        agent_id: "agent-1".to_string(),
+        workspace_id: "default".to_string(),
         user_id: "user-1".to_string(),
         workspace_root: workspace.clone(),
     };
 
     let report = crate::form_dream_session_memory(MemoryFormationParams {
         session_id: "s1",
+        producer_agent_id: "agent-1",
         selected_model: "summary-model",
         llm_provider: provider.clone(),
         dream_memory_store: &memory_store,

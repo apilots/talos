@@ -8,7 +8,7 @@ export type SettingsSection =
   | "general"
   | "appearance"
   | "models"
-  | "agent-workspace"
+  | "personalization"
   | "web-search"
   | "mcp-servers"
   | "server";
@@ -18,7 +18,7 @@ export const settingsSections: SettingsSection[] = [
   "general",
   "appearance",
   "models",
-  "agent-workspace",
+  "personalization",
   "web-search",
   "mcp-servers",
   "server",

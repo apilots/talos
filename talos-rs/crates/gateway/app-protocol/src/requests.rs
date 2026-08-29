@@ -24,7 +24,7 @@ use talos_types::{
     SessionGetRequest, SessionHistoryRequest, SessionListRequest, SessionPatchRequest,
     StartTurnRequest, SubmitDynamicToolResultRequest, SubmitUserActionRequest,
     SubscribeTimelineRequest, UserCurrentRequest, WorkspaceDocListRequest, WorkspaceDocReadRequest,
-    WorkspaceDocWriteRequest, WorkspaceInfoRequest,
+    WorkspaceDocWriteRequest,
 };
 pub use talos_types::{
     SkillDocument, SkillLoadError, SkillMetadata, SkillScope, SkillSelector, SkillSuggestion,
@@ -142,8 +142,6 @@ pub enum ClientMethod {
     WorkspaceDocRead,
     #[serde(rename = "workspace.doc.write")]
     WorkspaceDocWrite,
-    #[serde(rename = "workspace.info")]
-    WorkspaceInfo,
     #[serde(rename = "skills.list")]
     SkillsList,
     #[serde(rename = "skills.refresh")]
@@ -250,7 +248,6 @@ impl ClientMethod {
             Self::WorkspaceDocList => "workspace.doc.list",
             Self::WorkspaceDocRead => "workspace.doc.read",
             Self::WorkspaceDocWrite => "workspace.doc.write",
-            Self::WorkspaceInfo => "workspace.info",
             Self::SkillsList => "skills.list",
             Self::SkillsRefresh => "skills.refresh",
             Self::SkillsSuggest => "skills.suggest",
@@ -341,7 +338,6 @@ impl FromStr for ClientMethod {
             "workspace.doc.list" => Ok(Self::WorkspaceDocList),
             "workspace.doc.read" => Ok(Self::WorkspaceDocRead),
             "workspace.doc.write" => Ok(Self::WorkspaceDocWrite),
-            "workspace.info" => Ok(Self::WorkspaceInfo),
             "skills.list" => Ok(Self::SkillsList),
             "skills.refresh" => Ok(Self::SkillsRefresh),
             "skills.suggest" => Ok(Self::SkillsSuggest),
@@ -474,8 +470,6 @@ pub enum ClientRequestParams {
     WorkspaceDocRead(WorkspaceDocReadRequest),
     #[serde(rename = "workspace.doc.write")]
     WorkspaceDocWrite(WorkspaceDocWriteRequest),
-    #[serde(rename = "workspace.info")]
-    WorkspaceInfo(WorkspaceInfoRequest),
     #[serde(rename = "skills.list")]
     SkillsList(SkillsListRequest),
     #[serde(rename = "skills.refresh")]
@@ -655,9 +649,6 @@ impl ClientRequest {
             }
             ClientMethod::WorkspaceDocWrite => {
                 ClientRequestParams::WorkspaceDocWrite(decode(params_value)?)
-            }
-            ClientMethod::WorkspaceInfo => {
-                ClientRequestParams::WorkspaceInfo(decode(params_value)?)
             }
             ClientMethod::SkillsList => ClientRequestParams::SkillsList(decode(params_value)?),
             ClientMethod::SkillsRefresh => {

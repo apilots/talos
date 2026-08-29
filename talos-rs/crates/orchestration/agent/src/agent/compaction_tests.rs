@@ -111,7 +111,7 @@ async fn test_compact_session_rejects_an_existing_session_reservation() {
 
     let error = agent
         .compact_session(crate::AgentSessionCompactionParams {
-            session: build_test_session("reserved-session", "workspace-a"),
+            session: build_test_session("reserved-session", "default"),
             identity: crate::AgentSessionCompactionIdentity {
                 request_id: "req-compact".to_string(),
                 turn_id: "turn-compact".to_string(),
@@ -132,7 +132,7 @@ async fn explicit_compaction_streams_a_no_changes_maintenance_turn() {
 
     let usage = agent
         .compact_session(crate::AgentSessionCompactionParams {
-            session: build_test_session("compact-session", "workspace-a"),
+            session: build_test_session("compact-session", "default"),
             identity: crate::AgentSessionCompactionIdentity {
                 request_id: "req-compact".to_string(),
                 turn_id: "turn-compact".to_string(),
@@ -216,7 +216,7 @@ async fn explicit_compaction_can_be_interrupted_through_the_existing_turn_lifecy
     )
     .expect("build agent");
     let session_id = "compact-cancel";
-    let mut session = build_test_session(session_id, "workspace-a");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = workspace.path().display().to_string();
     let kernel_config =
         AgentHarnessImpl::kernel_config_for_session(&session).expect("resolve session workspace");
@@ -299,7 +299,7 @@ async fn explicit_compaction_can_be_interrupted_through_the_existing_turn_lifecy
 async fn explicit_compaction_persists_recovery_for_the_next_prompt() {
     let (workspace, agent) = build_temp_agent();
     let session_id = "compact-recovery";
-    let mut session = build_test_session(session_id, "workspace-a");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.workspace_dir = workspace.path().display().to_string();
     let kernel_config =
         AgentHarnessImpl::kernel_config_for_session(&session).expect("resolve session workspace");

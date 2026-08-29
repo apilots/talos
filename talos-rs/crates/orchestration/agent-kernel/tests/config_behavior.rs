@@ -58,10 +58,6 @@ fn test_boundary_validation() {
     );
 
     assert!(
-        !config.default_workspace_id.trim().is_empty(),
-        "default_workspace_id must be non-empty"
-    );
-    assert!(
         config.prompt.bootstrap.enabled,
         "prompt.bootstrap.enabled should default to true"
     );

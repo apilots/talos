@@ -291,7 +291,7 @@ async fn snapshot_from_scope(scope: &MemoryScope) -> TalosResult<UserWorkspaceMe
 
 fn producer(scope: &MemoryScope) -> TalosResult<UserWorkspaceMemoryProducer> {
     Ok(UserWorkspaceMemoryProducer::new(
-        MemoryAgentId::parse(scope.agent_id.clone()).map_err(|error| {
+        MemoryAgentId::parse(scope.workspace_id.clone()).map_err(|error| {
             TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
         })?,
         Utc::now().timestamp(),

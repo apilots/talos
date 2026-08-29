@@ -92,10 +92,6 @@ pub struct AgentDefinitionConfig {
     #[serde(default)]
     pub description: Option<String>,
 
-    /// Default execution workspace key, not a filesystem path.
-    #[serde(default)]
-    pub default_workspace_id: Option<String>,
-
     /// Optional runtime-specific configuration matched with kind.
     #[serde(default)]
     pub runtime_config: Option<AgentRuntimeConfig>,
@@ -108,10 +104,6 @@ pub struct AgentConfig {
     /// Agent name
     #[serde(default = "default_agent_name")]
     pub name: String,
-
-    /// Workspace path
-    #[serde(default)]
-    pub workspace: Option<String>,
 
     /// Persona file
     #[serde(default)]
@@ -142,7 +134,6 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             name: default_agent_name(),
-            workspace: None,
             identity: None,
             inner_model: None,
             message_queue: MessageQueueConfig::default(),

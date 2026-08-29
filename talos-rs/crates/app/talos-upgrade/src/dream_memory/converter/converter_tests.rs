@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use talos_memory::{
     DreamMemoryDate, DreamMemoryDocument, DreamMemoryDocumentContext, DreamMemoryEntry,
     DreamMemoryProvenance, DreamMemorySourceRange, MemoryAgentId, MemoryId, MemorySessionId,
@@ -8,10 +6,9 @@ use talos_memory::{
 use talos_types::{MemoryImportance, MemoryKind};
 
 use super::{
-    convert_legacy_scope, switch_memory_directories, verify_source_revisions, SourceRevision,
+    convert_legacy_scope, switch_memory_directories, verify_source_revisions, workspace_revision,
+    SourceRevision,
 };
-use crate::memory::MemoryService;
-use crate::workspace::file::workspace_revision;
 
 fn timezone() -> talos_config::TalosTimezone {
     talos_config::parse_timezone("UTC").expect("timezone")
@@ -20,7 +17,7 @@ fn timezone() -> talos_config::TalosTimezone {
 #[tokio::test]
 async fn conversion_preserves_generated_data_and_converts_plain_entries() {
     let workspace = tempfile::tempdir().expect("workspace");
-    let user_workspace = workspace.path().join("users/user-1");
+    let user_workspace = workspace.path().join("user-1");
     let memory_dir = user_workspace.join("memory");
     talos_fs::create_directory(&memory_dir, true).expect("memory directory");
     let legacy = r#"## [09:30] Generated memory
@@ -56,21 +53,13 @@ User-authored body.
         .await
         .expect("partial staging file");
 
-    let mut config = talos_types::TalosConfig::default();
-    config.agent.kernel.workspace_dir = workspace.path().to_string_lossy().to_string();
-    let service = MemoryService::new(
-        config,
-        Arc::new(
-            talos_store::memory::MemoryStore::in_memory()
-                .await
-                .expect("memory store"),
-        ),
-    )
-    .expect("memory service");
-    service
-        .convert_legacy_known_scopes()
+    convert_legacy_scope("default", "user-1", &user_workspace, "memory", timezone())
         .await
-        .expect("convert known scopes");
+        .expect("convert known scope")
+        .expect("legacy conversion")
+        .finish()
+        .await
+        .expect("finish conversion");
     let content = talos_fs::read_file(&memory_dir.join("2026-07-17.md"))
         .await
         .expect("read canonical source")

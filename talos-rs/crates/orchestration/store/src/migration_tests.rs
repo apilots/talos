@@ -5,6 +5,86 @@ use talos_storage::SqliteStorage;
 use super::{run_migrations, test_migrations_dir};
 
 #[tokio::test]
+async fn migration_backfills_and_requires_session_workspace_binding() {
+    let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
+        .await
+        .unwrap();
+    let pool = storage.pool().clone();
+    let migration_dir = test_migrations_dir();
+    let all_migrations = sqlx::migrate::Migrator::new(migration_dir.clone())
+        .await
+        .unwrap();
+    let legacy_migrations = sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(
+            all_migrations
+                .iter()
+                .filter(|migration| migration.version < 202608290001)
+                .cloned()
+                .collect(),
+        ),
+        ..sqlx::migrate::Migrator::DEFAULT
+    };
+    legacy_migrations.run(&pool).await.unwrap();
+    sqlx::query(
+        r#"
+        INSERT INTO sessions (
+            session_key, user_id, channel, scope, peer_id, agent_id,
+            created_at, last_activity, workspace_id
+        ) VALUES
+            ('session-unbound', 'user-1', 'http', 'api', 'user-1', 'agent-a', 1, 1, NULL),
+            ('session-bound', 'user-1', 'http', 'api', 'user-1', 'agent-b', 1, 1, 'workspace-alpha')
+        "#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    run_migrations(&pool, &migration_dir).await.unwrap();
+
+    let bindings = sqlx::query_as::<_, (String, String, String)>(
+        "SELECT session_key, agent_id, workspace_id FROM sessions ORDER BY session_key",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        bindings,
+        vec![
+            (
+                "session-bound".to_string(),
+                "agent-b".to_string(),
+                "workspace-alpha".to_string(),
+            ),
+            (
+                "session-unbound".to_string(),
+                "agent-a".to_string(),
+                "default".to_string(),
+            ),
+        ]
+    );
+
+    let workspace_column = sqlx::query("PRAGMA table_info(sessions)")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|row| row.get::<String, _>("name") == "workspace_id")
+        .unwrap();
+    assert_eq!(workspace_column.get::<i64, _>("notnull"), 1);
+    assert_eq!(
+        workspace_column.get::<Option<String>, _>("dflt_value"),
+        None
+    );
+    let table_sql: String = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sessions'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read rebuilt sessions schema");
+    assert!(table_sql.contains("CHECK (length(trim(workspace_id)) > 0)"));
+}
+
+#[tokio::test]
 async fn migration_wraps_legacy_session_token_usage_without_losing_totals() {
     let storage = SqliteStorage::new_with_max_connections(":memory:", 1)
         .await

@@ -128,7 +128,6 @@ describe("AppServerClient", () => {
           reasoningEffort: null,
         },
       },
-      project_id: null,
       current_directory: null,
     });
     await client.listProjects({});
@@ -183,7 +182,6 @@ describe("AppServerClient", () => {
               reasoningEffort: null,
             },
           },
-          project_id: null,
           current_directory: null,
         },
       },

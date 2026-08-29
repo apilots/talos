@@ -194,7 +194,6 @@ const DESKTOP_RENDERER_METHOD_GUARDS = {
   "workspace.doc.list": emptyParams,
   "workspace.doc.read": (params) => hasString(params, "kind"),
   "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),
-  "workspace.info": emptyParams,
 } satisfies Record<DesktopRendererMethod, ParamGuard>;
 
 export function assertDesktopRendererInvoke(

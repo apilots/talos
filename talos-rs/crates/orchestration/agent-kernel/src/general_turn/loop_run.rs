@@ -107,6 +107,7 @@ pub async fn execute_general_turn_loop_with_policy(
                     session_id: prepared.session_id.clone(),
                     turn_id: prepared.invocation_id.clone(),
                     agent_id: prepared.agent_id.clone(),
+                    workspace_id: prepared.workspace_id.clone(),
                     user_id: prepared.user_id.clone(),
                     project_root: prepared.project_root.clone(),
                     kernel_config: kernel_config.clone(),

@@ -9,11 +9,12 @@ use super::AgentHarnessImpl;
 #[test]
 fn runtime_kernel_config_uses_session_runtime_env() {
     let mut session = TalosSession {
+        agent_id: "default".to_string(),
         title: DEFAULT_SESSION_TITLE.to_string(),
         user_id: "talos-test-local-user".to_string(),
         context: SessionContext {
             session_id: "runtime-env-session".to_string(),
-            workspace_id: Some("default".to_string()),
+            workspace_id: "default".to_string(),
             source_type: TalosSourceType::Cli,
             provider: TalosProvider::Cli,
             user_id: "talos-test-local-user".to_string(),

@@ -330,7 +330,7 @@ fn record_for(
         memory_processed_until_seq: 0,
         usage: talos_types::SessionUsage::default(),
         conf,
-        workspace_id: None,
+        workspace_id: "default".to_string(),
         project_id,
         current_directory,
     }
@@ -449,7 +449,6 @@ async fn creating_session_uses_actor_user_id() {
                 context,
                 model_selection: None,
                 user_permission_mode: None,
-                workspace_id: None,
                 project_id: None,
                 current_directory: None,
             },
@@ -463,4 +462,43 @@ async fn creating_session_uses_actor_user_id() {
         store.records.lock().unwrap()[0].context.user_id,
         "member-user"
     );
+}
+
+#[tokio::test]
+async fn existing_session_rejects_a_project_override() {
+    let store = Arc::new(RecordingSessionStore::default());
+    store
+        .records
+        .lock()
+        .unwrap()
+        .push(record_for("member-user", "session-existing", None, None));
+    let access = recording_access_service(Arc::new(NoopSessionRuntime), store);
+    let context = TalosContext {
+        source_type: TalosSourceType::Http,
+        provider: TalosProvider::Http,
+        user_id: "member-user".to_string(),
+        message_id: "message-2".to_string(),
+        trace_id: "trace-2".to_string(),
+        channel_id: None,
+        thread_id: None,
+        project_root: None,
+        environment: None,
+    };
+
+    let error = access
+        .get_or_create_session(
+            &Actor::regular("member-user"),
+            CreateSessionRequest {
+                session_id: "session-existing".to_string(),
+                context,
+                model_selection: None,
+                user_permission_mode: None,
+                project_id: Some("project-2".to_string()),
+                current_directory: None,
+            },
+        )
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("project binding is immutable"));
 }

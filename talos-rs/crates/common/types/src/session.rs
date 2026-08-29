@@ -46,11 +46,10 @@ pub fn session_title_or_fallback(generated: String, first_user_text: &str) -> St
         .unwrap_or_else(|| deterministic_session_title(first_user_text))
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionContext {
     pub session_id: String,
-    #[serde(default)]
-    pub workspace_id: Option<String>,
+    pub workspace_id: String,
     pub source_type: talos::TalosSourceType,
     pub provider: talos::TalosProvider,
     pub user_id: String,
@@ -127,6 +126,7 @@ impl ContextUsage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TalosSession {
+    pub agent_id: String,
     pub title: String,
     pub user_id: String,
     pub context: SessionContext,
@@ -372,13 +372,12 @@ pub struct SessionHistoryResponse {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
 pub struct SessionPatchRequest {
     #[serde(default)]
     pub session_id: String,
     #[serde(default)]
     pub conf: Option<SessionConf>,
-    #[serde(default)]
-    pub project_id: Option<OptionalProjectIdPatch>,
     #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
@@ -387,7 +386,6 @@ impl SessionPatchRequest {
     pub fn into_patch(self) -> SessionPatch {
         SessionPatch {
             conf: self.conf,
-            project_id: self.project_id,
             current_directory: self.current_directory,
         }
     }
@@ -423,8 +421,6 @@ pub struct SessionPatch {
     #[serde(default)]
     pub conf: Option<SessionConf>,
     #[serde(default)]
-    pub project_id: Option<OptionalProjectIdPatch>,
-    #[serde(default)]
     pub current_directory: Option<OptionalCurrentDirectoryPatch>,
 }
 
@@ -433,13 +429,6 @@ impl SessionPatch {
         let conf = self.conf.as_ref().cloned().unwrap_or_default();
         SessionConfigOverridePolicy::extract_model_selection(&conf)
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum OptionalProjectIdPatch {
-    Set { project_id: String },
-    Clear,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]

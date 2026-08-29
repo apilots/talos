@@ -60,7 +60,7 @@ async fn run_uses_session_provider_for_llm_routing() {
     )
     .expect("agent harness should build");
 
-    let mut session = build_test_session("session-provider-routing", "workspace-1");
+    let mut session = build_test_session("session-provider-routing", "default");
     session.title = "Existing title".to_string();
     session.conf.model_selection = Some(ModelSelection::without_reasoning(ModelRef {
         provider: "deepseek".to_string(),
@@ -122,7 +122,7 @@ async fn run_resolves_file_ids_with_session_owner_and_project_before_model_call(
         attachment_reader: reader.clone(),
     })
     .expect("agent harness should build");
-    let mut session = build_test_session("session-files", "workspace-1");
+    let mut session = build_test_session("session-files", "default");
     session.project_id = Some("project-7".to_string());
 
     let error = agent

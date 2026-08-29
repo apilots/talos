@@ -1,4 +1,4 @@
-export { SettingsAgentWorkspaceSection } from "./SettingsAgentWorkspaceSection";
+export { SettingsPersonalizationSection } from "./SettingsPersonalizationSection";
 export { SettingsAppearanceSection } from "./SettingsAppearanceSection";
 export { SettingsGeneralSection } from "./SettingsGeneralSection";
 export { SettingsMcpServersSection } from "./SettingsMcpServersSection";

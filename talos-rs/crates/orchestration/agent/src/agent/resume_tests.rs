@@ -42,7 +42,7 @@ async fn test_resume_streamed_replays_dynamic_resume_into_model_loop() {
     )
     .expect("agent harness should build");
     let session_id = "session-dynamic-main-resume";
-    let mut session = build_test_session(session_id, "workspace-1");
+    let mut session = build_test_session(session_id, "default");
     session.config.agent.kernel.prompt.bootstrap.enabled = false;
     session.config.agent.kernel.workspace_dir = temp_dir.path().display().to_string();
     session.config.agent.kernel.output.max_tokens = 256;

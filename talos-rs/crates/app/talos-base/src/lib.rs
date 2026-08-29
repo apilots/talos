@@ -247,7 +247,7 @@ pub async fn run_server() -> TalosResult<()> {
 /// Starts the product-managed in-process app-server runtime.
 ///
 /// This entrypoint owns the full startup lifecycle for embedded clients: startup logging,
-/// pre-config upgrades, runtime config loading, post-config upgrades, and runtime assembly.
+/// resource preparation, config loading, serial upgrades, and runtime assembly.
 /// Lower-level runtime builders must not repeat startup lifecycle work.
 pub async fn run_embedded_app_server(
     options: Option<&TalosServerOptions>,
@@ -626,7 +626,7 @@ async fn build_application_runtime_after_startup(
 ) -> TalosResult<TalosApplicationRuntime> {
     application_runtime::build_application_runtime_with_migration_dir(
         config,
-        &startup_report.upgrade.database_migrations.backend_dir,
+        &startup_report.resources.database_migrations.backend_dir,
     )
     .await
 }

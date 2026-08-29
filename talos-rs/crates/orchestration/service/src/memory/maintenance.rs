@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use talos_agent::{AgentDefinition, InnerModelClient};
 use talos_config::{
-    resolve_effective_kernel_workspace, AgentKernelConfig, AgentRuntimeConfig,
-    DreamMemoryMaintenanceConfig,
+    AgentKernelConfig, AgentRuntimeConfig, DreamMemoryMaintenanceConfig, TalosPaths,
+    WorkspaceConfig,
 };
 use talos_error::{TalosError, TalosResult};
 use talos_memory::MemoryScope;
@@ -32,6 +32,8 @@ pub struct DreamMemoryMaintenance {
     memory_service: MemoryService,
     inner_model: Arc<InnerModelClient>,
     agent_kernel_configs: Arc<HashMap<String, AgentKernelConfig>>,
+    workspaces: WorkspaceConfig,
+    workspace_paths: TalosPaths,
     config: DreamMemoryMaintenanceConfig,
 }
 
@@ -43,6 +45,8 @@ impl DreamMemoryMaintenance {
         memory_service: MemoryService,
         inner_model: Arc<InnerModelClient>,
         agent_definitions: &[AgentDefinition],
+        workspaces: WorkspaceConfig,
+        workspace_paths: TalosPaths,
         config: DreamMemoryMaintenanceConfig,
     ) -> Self {
         let agent_kernel_configs = agent_definitions
@@ -59,6 +63,8 @@ impl DreamMemoryMaintenance {
             memory_service,
             inner_model,
             agent_kernel_configs: Arc::new(agent_kernel_configs),
+            workspaces,
+            workspace_paths,
             config,
         }
     }
@@ -124,9 +130,14 @@ impl DreamMemoryMaintenance {
                         format!("Dream Memory Agent not found: {}", record.agent_id),
                     )
                 })?;
-        let kernel_config =
-            resolve_effective_kernel_workspace(agent_kernel_config, &record.user_id)?.kernel_config;
-        let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
+        let workspace = self.workspaces.resolve(
+            &self.workspace_paths,
+            &record.workspace_id,
+            &record.user_id,
+        )?;
+        let mut kernel_config = agent_kernel_config.clone();
+        kernel_config.workspace_dir = workspace.root.to_string_lossy().into_owned();
+        let workspace_root = workspace.root.as_path();
         if self
             .session_artifact_store
             .latest_seq(workspace_root, &record.id)
@@ -142,13 +153,14 @@ impl DreamMemoryMaintenance {
         )?;
         let selected_model = self.inner_model.model_ref().id;
         let scope = MemoryScope {
-            agent_id: record.agent_id,
+            workspace_id: record.workspace_id,
             user_id: record.user_id,
-            workspace_root: std::path::PathBuf::from(&kernel_config.workspace_dir),
+            workspace_root: workspace.root,
         };
         let result = talos_agent_kernel::form_dream_session_memory(
             talos_agent_kernel::MemoryFormationParams {
                 session_id: &record.id,
+                producer_agent_id: &record.agent_id,
                 selected_model: &selected_model,
                 llm_provider: provider,
                 dream_memory_store: &self.memory_service,

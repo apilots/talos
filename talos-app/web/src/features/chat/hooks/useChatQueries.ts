@@ -24,7 +24,6 @@ import {
   updateProjectName,
   updateSessionModel,
   updateSessionPermissionMode,
-  updateSessionProject,
 } from "../api";
 import { useAppStore } from "@/shared/store/app-store";
 import { normalizeProjects } from "@/shared/store/ui-slice";
@@ -142,18 +141,6 @@ export function useSessionHistoryQuery(sessionId: string, enabled = true) {
     queryFn: () => getSessionHistory(sessionId),
     enabled: Boolean(sessionId) && enabled,
     retry: false,
-  });
-}
-
-export function useUpdateSessionProjectMutation(sessionId: string) {
-  const connectionKey = useConnectionKey();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: updateSessionProject.bind(null, sessionId),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
-      await queryClient.invalidateQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
-    },
   });
 }
 

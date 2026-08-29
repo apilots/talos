@@ -307,8 +307,6 @@ export type {
   WorkspaceDocReadResponse,
   WorkspaceDocWriteRequest,
   WorkspaceDocWriteResponse,
-  WorkspaceInfoRequest,
-  WorkspaceInfoResponse,
   MemorySearchResponse,
 } from "./generated/app-protocol";
 
@@ -422,7 +420,6 @@ export interface PaginatedResponse<T> {
 }
 
 export type SessionConf = import("./generated/app-protocol").SessionConf;
-export type OptionalProjectIdPatch = import("./generated/app-protocol").OptionalProjectIdPatch;
 export type OptionalCurrentDirectoryPatch = import("./generated/app-protocol").OptionalCurrentDirectoryPatch;
 
 export type ExpectedFileVersion = ProtocolExpectedFileVersion;

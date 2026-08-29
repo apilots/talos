@@ -220,10 +220,12 @@ fn test_model_info() -> ModelInfo {
 
 fn test_config() -> talos_types::TalosConfig {
     let mut config = talos_types::TalosConfig::default();
-    config.agent.kernel.workspace_dir = std::env::temp_dir()
-        .join(format!("talos-http-test-{}", uuid::Uuid::new_v4()))
-        .to_string_lossy()
-        .to_string();
+    let workspace_root =
+        std::env::temp_dir().join(format!("talos-http-test-{}", uuid::Uuid::new_v4()));
+    config = config.with_workspace_definition(talos_config::WorkspaceDefinition::new(
+        talos_config::DEFAULT_WORKSPACE_ID,
+        workspace_root,
+    ));
     config.llm.provider = "bailian".to_string();
     config.llm.model = "qwen-plus".to_string();
     config.llm.bailian.models = vec![test_model_info().model];
@@ -232,7 +234,9 @@ fn test_config() -> talos_types::TalosConfig {
 
 fn isolated_test_config() -> (talos_types::TalosConfig, std::path::PathBuf) {
     let config = test_config();
-    let workspace_dir = std::path::PathBuf::from(&config.agent.kernel.workspace_dir);
+    let workspace_dir = config
+        .workspace_root_prefix(config.default_workspace_id())
+        .unwrap();
     std::fs::create_dir_all(&workspace_dir).expect("workspace dir should exist");
     (config, workspace_dir)
 }
@@ -439,7 +443,7 @@ impl SessionStoreAdapter {
     }
 
     fn to_record(&self, session: TalosSession) -> talos_error::TalosResult<SessionRecord> {
-        Ok(SessionRecord::from_session(&session, "default"))
+        Ok(SessionRecord::from_session(&session))
     }
 }
 
