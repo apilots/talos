@@ -8,13 +8,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 042 |
 | `fix` | 007 |
-| `refactor` | 043 |
+| `refactor` | 044 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| refactor-043 | `refactor-043-workspace-agent-session-isolation` | implemented |
 | refactor-042 | `refactor-042-dream-memory-okf` | implemented |
 | refactor-041 | `refactor-041-user-workspace-memory` | implemented |
 | feat-041 | `feat-041-agent-inner-model` | verified |
