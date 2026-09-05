@@ -1,11 +1,13 @@
 use std::sync::Arc;
 
 use crate::session::{CreateSessionParams, SessionService};
-use crate::{SessionHistoryService, TimelineEventService, TurnService};
+use crate::turn::TurnService;
+use crate::TimelineEventService;
 use talos_error::{TalosError, TalosResult};
-use talos_types::talos::{TalosContext, TalosInputItem, TalosProvider, TalosSourceType};
+use talos_types::talos::SessionSource;
 use talos_types::{
-    AgentTurnRef, SpawnSubagentRequest, StartTurnRequest, SubagentRef, SubagentSpawnResult,
+    AgentTurnRef, AgentUserContent, AgentUserInput, SpawnSubagentRequest, StartTurnRequest,
+    SubagentRef, SubagentSpawnResult,
 };
 
 const MAX_SUBAGENT_PROMPT_BYTES: usize = 32 * 1024;
@@ -19,7 +21,6 @@ pub(crate) struct SubagentService {
     pub(super) sessions: Arc<SessionService>,
     pub(super) turns: Arc<TurnService>,
     pub(super) timeline: Arc<TimelineEventService>,
-    pub(super) history: SessionHistoryService,
 }
 
 impl SubagentService {
@@ -27,13 +28,11 @@ impl SubagentService {
         sessions: Arc<SessionService>,
         turns: Arc<TurnService>,
         timeline: Arc<TimelineEventService>,
-        history: SessionHistoryService,
     ) -> Self {
         Self {
             sessions,
             turns,
             timeline,
-            history,
         }
     }
 
@@ -48,7 +47,7 @@ impl SubagentService {
         let child_path = caller.path.join(&request.task_name)?;
         let parent = self
             .sessions
-            .get_session(&request.caller.session_id)
+            .load_record(&request.caller.session_id)
             .await?
             .ok_or_else(|| {
                 TalosError::public(
@@ -56,26 +55,19 @@ impl SubagentService {
                     format!("parent session {}", request.caller.session_id),
                 )
             })?;
+        let mut child_source = SessionSource::system();
+        child_source.environment = parent.environment.clone();
         let child = self
             .sessions
             .create_subagent_session(
                 CreateSessionParams {
                     session_id: None,
-                    context: TalosContext {
-                        source_type: TalosSourceType::System,
-                        provider: TalosProvider::System,
-                        user_id: parent.user_id.clone(),
-                        message_id: format!("msg_{}", uuid::Uuid::new_v4().simple()),
-                        trace_id: parent.context.trace_id.clone(),
-                        channel_id: None,
-                        thread_id: None,
-                        project_root: None,
-                        environment: parent.context.environment.clone(),
-                    },
+                    source: child_source,
+                    user_id: parent.user_id.clone(),
                     target_agent: agent_id.clone(),
                     model_selection: parent.conf.model_selection.clone(),
                     conf: None,
-                    workspace_id: parent.context.workspace_id.clone(),
+                    workspace_id: parent.workspace_id.clone(),
                     project_id: parent.project_id.clone(),
                     current_directory: parent.current_directory.clone(),
                 },
@@ -84,18 +76,20 @@ impl SubagentService {
                 child_path.clone(),
             )
             .await?;
-        let child_id = child.context.session_id.clone();
+        let child_id = child.id.clone();
         let child_agent_id = agent_id.clone();
+        let cleanup_session = child.clone();
         let start_result = self
             .turns
             .submit_subagent_turn(
                 child,
                 StartTurnRequest {
                     session_id: child_id.clone(),
-                    input: vec![TalosInputItem::Text {
-                        text: request.prompt,
-                    }],
-                    context: None,
+                    input: AgentUserInput {
+                        content: vec![AgentUserContent::Text {
+                            text: request.prompt,
+                        }],
+                    },
                     model_selection: None,
                     user_permission_mode: None,
                     project_id: None,
@@ -108,9 +102,9 @@ impl SubagentService {
         let start_result = match start_result {
             Ok(result) => result,
             Err(start_error) => {
-                let cleanup = self.sessions.delete_subagent_session(&child_id).await;
+                let cleanup = self.sessions.delete_subagent_session(cleanup_session).await;
                 return match cleanup {
-                    Ok(result) if result.success => Err(start_error),
+                    Ok(true) => Err(start_error),
                     Ok(_) => Err(TalosError::internal(format!(
                         "subagent start failed and child session '{child_id}' was not removed: {start_error}"
                     ))),

@@ -1,737 +1,313 @@
-use super::super::{
-    recovery::reject_expired_cursor,
-    types::{
-        TimelineCursorStatus, TimelineSubscribeCommand, TimelineSubscriptionCloseReason,
-        TimelineSubscriptionMessage,
-    },
-};
-use super::TimelineSubscriptionService;
-use crate::{TimelineEventRetentionConfig, TimelineEventService};
-use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
+
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentMessage, AgentMessageRole, AgentMessageStatus,
+    AgentStopReason, AgentTurnCompleted, AgentTurnRef, TimelineCursorStatus,
+};
+use talos_storage::SqliteStorage;
 use talos_store::session::{
-    ActiveTurnRecord, ActiveTurnStore, ActiveTurnUpdate, TimelineEventId, TimelineEventStore,
-    UserActionRecord, UserActionStore,
+    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore,
 };
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosItemDeltaEvent,
-    TalosTimelineDelta, TalosTurnCompletedEvent, TalosTurnMetricsEvent, TalosTurnStartedEvent,
-    TimelineEventEnvelope, TokenUsage, TurnExecutionMetrics,
+
+use super::TimelineSubscriptionService;
+use crate::test_support::{commit_test_running_turn, run_test_migrations};
+use crate::timeline::TimelineEventId;
+use crate::{
+    TimelineEventService, TimelineSubscribeCommand, TimelineSubscriptionCloseReason,
+    TimelineSubscriptionMessage,
 };
-use talos_types::{
-    PendingUserAction, QuestionOption, QuestionParams, TimelineUserActionEvent, UserActionParams,
-    UserActionState,
-};
-use tokio::sync::{broadcast, mpsc};
 
-#[test]
-fn replay_cursor_rejects_retention_gap() {
-    let first_replay_event = event_record(5);
-
-    let err = reject_expired_cursor(
-        Some(&TimelineEventId::from_seq(1)),
-        Some(&first_replay_event),
-        Some(&TimelineEventId::from_seq(5)),
-    )
-    .expect_err("cursor gap should be rejected");
-
-    assert!(err.is_code(talos_error::ErrorCode::ResourceExpired));
+async fn fixture() -> (
+    Arc<DatabaseSessionStore>,
+    Arc<TimelineEventService>,
+    TimelineSubscriptionService,
+) {
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .expect("test storage should open"),
+    );
+    run_test_migrations(storage.pool()).await;
+    let store = Arc::new(
+        DatabaseSessionStore::new(storage)
+            .await
+            .expect("Session Store should initialize"),
+    );
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
+    let subscription_service = TimelineSubscriptionService::new(event_service.clone());
+    (store, event_service, subscription_service)
 }
 
-#[test]
-fn replay_cursor_rejects_empty_retention_gap() {
-    let err = reject_expired_cursor(
-        Some(&TimelineEventId::from_seq(1)),
-        None,
-        Some(&TimelineEventId::from_seq(5)),
-    )
-    .expect_err("cursor older than oldest retained event should be rejected");
-
-    assert!(err.is_code(talos_error::ErrorCode::ResourceExpired));
-}
-
-fn event_record(event_seq: i64) -> AgentEvent {
-    AgentEvent {
-        event_seq: Some(event_seq),
-        event_id: Some(TimelineEventId::from_seq(event_seq).to_string()),
-        created_at_ms: Some(1),
-        event_type: AgentEventType::TurnStarted,
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: "s1".to_string(),
-        sequence: 0,
-        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            started_at_ms: 1,
-        }),
+fn user_message(identity: &AgentTurnRef) -> AgentMessage {
+    AgentMessage {
+        message_id: "message-1".to_string(),
+        turn_id: identity.turn_id.clone(),
+        role: AgentMessageRole::User,
+        status: AgentMessageStatus::Completed,
+        blocks: Vec::new(),
+        created_at: 10,
+        completed_at: Some(10),
     }
-}
-
-fn unpersisted_event(sequence: u64) -> AgentEvent {
-    unpersisted_event_for_turn(sequence, "turn-1")
-}
-
-fn unpersisted_event_for_turn(sequence: u64, turn_id: &str) -> AgentEvent {
-    AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: Some(100 + sequence as i64),
-        event_type: AgentEventType::TurnStarted,
-        turn_id: turn_id.to_string(),
-        message_id: format!("msg-{turn_id}"),
-        session_id: "s1".to_string(),
-        sequence,
-        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-            request_id: "req-1".to_string(),
-            turn_id: turn_id.to_string(),
-            started_at_ms: 1,
-        }),
-    }
-}
-
-fn terminal_event(sequence: u64) -> AgentEvent {
-    AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: Some(100 + sequence as i64),
-        event_type: AgentEventType::TurnCompleted,
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: "s1".to_string(),
-        sequence,
-        payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 1,
-            stop_reason: StopReason::EndTurn,
-            usage: TokenUsage::default(),
-            metrics: None,
-            artifact_seq: None,
-        }),
-    }
-}
-
-fn metrics_event(sequence: u64) -> AgentEvent {
-    AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: Some(100 + sequence as i64),
-        event_type: AgentEventType::TurnMetrics,
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: "s1".to_string(),
-        sequence,
-        payload: AgentEventPayload::TurnMetrics(TalosTurnMetricsEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            metrics: TurnExecutionMetrics::default(),
-        }),
-    }
-}
-
-fn service() -> (TimelineEventService, Arc<MockStore>) {
-    let store = Arc::new(MockStore::default());
-    let event_store: Arc<dyn TimelineEventStore> = store.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
-    (
-        TimelineEventService::new(
-            event_store,
-            active_turn_store,
-            store.clone() as Arc<dyn talos_store::session::UserActionStore>,
-            TimelineEventRetentionConfig::default(),
-        ),
-        store,
-    )
 }
 
 #[tokio::test]
-async fn subscribe_returns_replay_and_live_envelopes() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    let first = timeline
-        .record_talos_event(unpersisted_event(1))
-        .await
-        .unwrap();
-    let first_event_id = first.event_id.clone();
+async fn replay_returns_canonical_events_and_an_active_turn_projection() {
+    let (store, _events, subscriptions) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let admission =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
 
-    let mut subscription = events
-        .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: None,
-            after_event_id: None,
-            replay_limit: 32,
-            close_when_idle: false,
-            close_on_terminal: false,
-        })
+    let recovered = subscriptions
+        .recover_timeline("session-1", None, 10)
         .await
-        .unwrap();
+        .expect("Timeline should recover");
 
-    assert_eq!(subscription.replay.events.len(), 1);
+    assert_eq!(recovered.replay.events.len(), admission.events.len());
     assert_eq!(
-        subscription.replay.cursor_status,
+        recovered.replay.cursor_status,
         TimelineCursorStatus::FromBeginning
     );
+    let active = recovered
+        .active_turn
+        .expect("admitted Turn should remain active");
+    assert_eq!(active.identity, identity);
     assert_eq!(
-        subscription.replay.high_water_mark_event_id,
-        Some(TimelineEventId::from_seq(1))
+        active.last_event_id,
+        TimelineEventId::from_seq(admission.active_turn.last_event_seq).to_string()
     );
-    assert_eq!(subscription.replay.events[0].event_id, first_event_id);
-
-    let second = timeline
-        .record_talos_event(unpersisted_event(2))
-        .await
-        .unwrap();
-    let replay = recv_event(&mut subscription.events).await;
-    let live = recv_event(&mut subscription.events).await;
-    assert_eq!(replay.event_id, first_event_id);
-    assert_eq!(live.event_id, second.event_id);
-    assert!(live.event_seq > subscription.replay.last_replay_seq);
 }
 
 #[tokio::test]
-async fn live_metrics_events_are_not_replayed_or_used_as_cursor_progress() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    let first = timeline
-        .record_talos_event(unpersisted_event(1))
+async fn recovery_exposes_the_next_cursor_until_the_captured_high_water_mark() {
+    let (store, _events, subscriptions) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let admission =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
+
+    let first = subscriptions
+        .recover_timeline("session-1", None, 1)
         .await
-        .unwrap();
-
-    let mut subscription = events
-        .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: None,
-            after_event_id: None,
-            replay_limit: 32,
-            close_when_idle: false,
-            close_on_terminal: false,
-        })
-        .await
-        .unwrap();
-
-    timeline.record_talos_event(metrics_event(2)).await.unwrap();
-    let second = timeline
-        .record_talos_event(unpersisted_event(3))
-        .await
-        .unwrap();
-
-    let replay = recv_event(&mut subscription.events).await;
-    let metrics = recv_event(&mut subscription.events).await;
-    let live = recv_event(&mut subscription.events).await;
-
-    assert_eq!(replay.event_id, first.event_id);
-    assert!(matches!(
-        metrics.event.payload,
-        AgentEventPayload::TurnMetrics(_)
-    ));
-    assert_eq!(live.event_id, second.event_id);
-
-    let recovered = events.recover_timeline("s1", None, 32).await.unwrap();
-    assert_eq!(recovered.replay.events.len(), 2);
-    assert!(recovered
+        .expect("first Timeline page should recover");
+    let first_cursor = first
         .replay
-        .events
-        .iter()
-        .all(|event| !matches!(event.event.payload, AgentEventPayload::TurnMetrics(_))));
-}
-
-#[tokio::test]
-async fn turn_scoped_subscription_filters_replay_and_live_events() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    timeline
-        .record_talos_event(unpersisted_event_for_turn(1, "turn-old"))
-        .await
-        .unwrap();
-    let replay_match = timeline
-        .record_talos_event(unpersisted_event_for_turn(2, "turn-current"))
-        .await
-        .unwrap();
-
-    let mut subscription = events
-        .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: Some("turn-current".to_string()),
-            after_event_id: None,
-            replay_limit: 32,
-            close_when_idle: false,
-            close_on_terminal: false,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(subscription.replay.events.len(), 1);
+        .next_cursor
+        .clone()
+        .expect("truncated recovery should expose its next cursor");
+    assert_eq!(first.replay.events.len(), 1);
     assert_eq!(
-        subscription.replay.events[0].event_id,
-        replay_match.event_id
+        first.replay.high_water_mark_event_id,
+        admission
+            .events
+            .last()
+            .map(|event| TimelineEventId::from_seq(event.event_seq).to_string())
+    );
+    assert_ne!(
+        first.replay.high_water_mark_event_id.as_deref(),
+        Some(first_cursor.as_str())
     );
 
-    timeline
-        .record_talos_event(unpersisted_event_for_turn(3, "turn-other"))
+    let second = subscriptions
+        .recover_timeline("session-1", Some(&TimelineEventId::from(first_cursor)), 10)
         .await
-        .unwrap();
-    let live_match = timeline
-        .record_talos_event(unpersisted_event_for_turn(4, "turn-current"))
-        .await
-        .unwrap();
-
-    let replay = recv_event(&mut subscription.events).await;
-    let live = recv_event(&mut subscription.events).await;
-    assert_eq!(replay.event_id, replay_match.event_id);
-    assert_eq!(live.event_id, live_match.event_id);
+        .expect("remaining Timeline page should recover");
+    assert_eq!(second.replay.events.len(), admission.events.len() - 1);
+    assert_eq!(second.replay.next_cursor, None);
+    assert_eq!(
+        second.replay.events.last().map(|event| &event.event_id),
+        second.replay.high_water_mark_event_id.as_ref()
+    );
 }
 
 #[tokio::test]
-async fn session_scoped_subscription_continues_after_terminal_event() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
+async fn subscription_drains_sparse_turn_pages_before_live_handoff() {
+    let (store, events, subscriptions) = fixture().await;
+    let first_identity = AgentTurnRef::new("session-1", "turn-1");
+    let first_admission = commit_test_running_turn(
+        store.as_ref(),
+        first_identity.clone(),
+        user_message(&first_identity),
+    )
+    .await;
+    store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity: first_identity,
+                sequence: first_admission
+                    .events
+                    .last()
+                    .expect("first admission should persist events")
+                    .sequence
+                    + 1,
+                occurred_at: 11,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: first_admission.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .expect("first Turn should complete");
 
-    let mut subscription = events
+    let second_identity = AgentTurnRef::new("session-1", "turn-2");
+    let second_admission = commit_test_running_turn(
+        store.as_ref(),
+        second_identity.clone(),
+        user_message(&second_identity),
+    )
+    .await;
+    let mut subscription = subscriptions
         .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: None,
+            session_id: "session-1".to_string(),
+            turn_id: Some("turn-2".to_string()),
             after_event_id: None,
-            replay_limit: 32,
+            replay_limit: 1,
             close_when_idle: false,
             close_on_terminal: false,
         })
         .await
-        .unwrap();
+        .expect("filtered Timeline subscription should open");
 
-    let terminal = timeline
-        .record_talos_event(terminal_event(1))
-        .await
-        .unwrap();
-    let next_turn = timeline
-        .record_talos_event(unpersisted_event(2))
-        .await
-        .unwrap();
+    for expected in &second_admission.events {
+        let message = tokio::time::timeout(Duration::from_secs(1), subscription.events.recv())
+            .await
+            .expect("filtered replay should not stall")
+            .expect("filtered replay stream should remain open");
+        let TimelineSubscriptionMessage::Event(actual) = message else {
+            panic!("filtered replay should contain only Timeline events");
+        };
+        assert_eq!(
+            actual.event_id,
+            TimelineEventId::from_seq(expected.event_seq).to_string()
+        );
+        assert_eq!(actual.event.identity, second_identity);
+    }
 
-    let first = recv_event(&mut subscription.events).await;
-    let second = recv_event(&mut subscription.events).await;
-    assert_eq!(first.event_id, terminal.event_id);
-    assert_eq!(second.event_id, next_turn.event_id);
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity: second_identity.clone(),
+                sequence: second_admission
+                    .events
+                    .last()
+                    .expect("second admission should persist events")
+                    .sequence
+                    + 1,
+                occurred_at: 12,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: second_admission.active_turn.last_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .expect("second Turn should complete");
+    let terminal_id = terminal.event_seq;
+    events.publish_committed([terminal]);
+
+    let message = tokio::time::timeout(Duration::from_secs(1), subscription.events.recv())
+        .await
+        .expect("live handoff should not stall")
+        .expect("live Timeline stream should remain open");
+    assert!(matches!(
+        message,
+        TimelineSubscriptionMessage::Event(event)
+            if event.event_seq == terminal_id
+                && event.event.identity == second_identity
+                && matches!(event.event.payload, AgentEventPayload::TurnCompleted(_))
+    ));
 }
 
 #[tokio::test]
-async fn close_on_terminal_closes_after_replayed_terminal_event() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    let terminal = timeline
-        .record_talos_event(terminal_event(1))
+async fn subscription_after_high_water_receives_one_terminal_then_closes() {
+    let (store, events, subscriptions) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let admission =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
+    let cursor = subscriptions
+        .latest_event_id("session-1")
         .await
-        .unwrap();
-
-    let mut subscription = events
+        .expect("latest event should load");
+    let mut subscription = subscriptions
         .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
+            session_id: "session-1".to_string(),
             turn_id: Some("turn-1".to_string()),
-            after_event_id: None,
-            replay_limit: 32,
+            after_event_id: cursor,
+            replay_limit: 10,
             close_when_idle: false,
             close_on_terminal: true,
         })
         .await
-        .unwrap();
-
-    let replay = recv_event(&mut subscription.events).await;
-    assert_eq!(replay.event_id, terminal.event_id);
-    let message = subscription.events.recv().await.expect("close message");
-    let TimelineSubscriptionMessage::Closed(closed) = message else {
-        panic!("expected subscription close message");
-    };
-    assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
-}
-
-#[tokio::test]
-async fn lagged_subscription_closes_without_sending_later_events() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-
-    let mut subscription = events
-        .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: None,
-            after_event_id: None,
-            replay_limit: 32,
-            close_when_idle: false,
-            close_on_terminal: false,
-        })
-        .await
-        .unwrap();
-
-    for sequence in 1..=1300 {
-        timeline
-            .record_talos_event(unpersisted_event(sequence))
-            .await
-            .unwrap();
-    }
-
-    let mut received = Vec::new();
-    loop {
-        match tokio::time::timeout(Duration::from_secs(1), subscription.events.recv()).await {
-            Ok(Some(TimelineSubscriptionMessage::Event(event))) => received.push(event.event_seq),
-            Ok(Some(TimelineSubscriptionMessage::MessageQueueChanged(change))) => {
-                panic!("unexpected message queue change: {change:?}")
-            }
-            Ok(Some(TimelineSubscriptionMessage::Closed(closed))) => {
-                assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Lagged);
-                break;
-            }
-            Ok(None) => break,
-            Err(_) => panic!("lagged subscription did not close"),
-        }
-    }
-
-    if !received.is_empty() {
-        assert_eq!(received, (1..=received.len() as i64).collect::<Vec<_>>());
-    }
-}
-
-#[tokio::test]
-async fn idle_scoped_subscription_reports_completed_close() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-
-    let mut subscription = events
-        .subscribe(TimelineSubscribeCommand {
-            session_id: "s1".to_string(),
-            turn_id: None,
-            after_event_id: None,
-            replay_limit: 32,
-            close_when_idle: true,
-            close_on_terminal: false,
-        })
-        .await
-        .unwrap();
-
-    let message = subscription.events.recv().await.expect("close message");
-    let TimelineSubscriptionMessage::Closed(closed) = message else {
-        panic!("expected subscription close message");
-    };
-    assert_eq!(closed.reason, TimelineSubscriptionCloseReason::Completed);
-}
-
-#[tokio::test]
-async fn session_subscription_receives_only_live_matching_queue_changes() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline));
-    let (queue_changes, _) = broadcast::channel(8);
-    let _stale_receiver = queue_changes.subscribe();
-    queue_changes
-        .send(talos_types::MessageQueueChangedNotification {
-            session_id: "s1".to_string(),
-            revision: 1,
-        })
-        .expect("pre-subscription notification");
-
-    let mut subscription = events
-        .subscribe_with_queue_changes(
-            TimelineSubscribeCommand {
-                session_id: "s1".to_string(),
-                turn_id: None,
-                after_event_id: None,
-                replay_limit: 32,
-                close_when_idle: false,
-                close_on_terminal: false,
+        .expect("subscription should open");
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity,
+                sequence: admission
+                    .events
+                    .last()
+                    .expect("admission should persist events")
+                    .sequence
+                    + 1,
+                occurred_at: 11,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
             },
-            queue_changes.subscribe(),
-        )
-        .await
-        .unwrap();
-
-    queue_changes
-        .send(talos_types::MessageQueueChangedNotification {
-            session_id: "other".to_string(),
-            revision: 2,
+            expected_event_seq: admission.active_turn.last_event_seq,
+            completed_turn_metrics: None,
         })
-        .expect("other session notification");
-    let expected = talos_types::MessageQueueChangedNotification {
-        session_id: "s1".to_string(),
-        revision: 3,
-    };
-    queue_changes
-        .send(expected.clone())
-        .expect("matching notification");
+        .await
+        .expect("terminal event should commit");
+    events.publish_committed([terminal]);
 
-    let message = subscription.events.recv().await.expect("queue change");
-    let TimelineSubscriptionMessage::MessageQueueChanged(actual) = message else {
-        panic!("expected message queue change");
-    };
-    assert_eq!(actual, expected);
-}
-
-async fn recv_event(
-    events: &mut mpsc::Receiver<TimelineSubscriptionMessage>,
-) -> TimelineEventEnvelope {
-    match events.recv().await.expect("subscription message") {
-        TimelineSubscriptionMessage::Event(event) => event,
-        TimelineSubscriptionMessage::MessageQueueChanged(change) => {
-            panic!("unexpected message queue change: {change:?}")
-        }
-        TimelineSubscriptionMessage::Closed(closed) => {
-            panic!("unexpected subscription close: {closed:?}")
-        }
-    }
+    let event = subscription
+        .events
+        .recv()
+        .await
+        .expect("terminal event should arrive");
+    assert!(matches!(
+        event,
+        TimelineSubscriptionMessage::Event(event)
+            if matches!(event.event.payload, AgentEventPayload::TurnCompleted(_))
+    ));
+    let closed = subscription
+        .events
+        .recv()
+        .await
+        .expect("terminal event should close the subscription");
+    assert!(matches!(
+        closed,
+        TimelineSubscriptionMessage::Closed(closed)
+            if closed.reason == TimelineSubscriptionCloseReason::Completed
+    ));
 }
 
 #[tokio::test]
-async fn recover_timeline_returns_active_turn_snapshot() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    timeline
-        .record_talos_event(unpersisted_event(1))
-        .await
-        .unwrap();
-
-    let snapshot = events.recover_timeline("s1", None, 32).await.unwrap();
-
-    assert_eq!(snapshot.replay.events.len(), 1);
-    assert_eq!(snapshot.active_turn.session_id, "s1");
-    assert_eq!(snapshot.active_turn.turn_id.as_deref(), Some("turn-1"));
-}
-
-#[tokio::test]
-async fn recover_timeline_returns_the_canonical_question_action() {
-    let (timeline, _store) = service();
-    let events = TimelineSubscriptionService::new(Arc::new(timeline.clone()));
-    let action = PendingUserAction {
-        action_id: "action-question".to_string(),
-        call_id: "call-question".to_string(),
-        item_id: Some("item-question".to_string()),
-        state: UserActionState::Pending,
-        params: UserActionParams::Question(QuestionParams {
-            header: "Execution".to_string(),
-            question: "How should Talos proceed?".to_string(),
-            options: vec![
-                QuestionOption {
-                    id: "plan".to_string(),
-                    label: "Plan".to_string(),
-                    description: "Think first".to_string(),
-                },
-                QuestionOption {
-                    id: "direct".to_string(),
-                    label: "Direct".to_string(),
-                    description: "Act now".to_string(),
-                },
-            ],
-        }),
-    };
-    timeline
-        .record_talos_event(AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: Some(101),
-            event_type: AgentEventType::ItemDelta,
-            turn_id: "turn-1".to_string(),
-            message_id: "msg-1".to_string(),
-            session_id: "s1".to_string(),
-            sequence: 1,
-            payload: AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "req-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                item_id: "item-question".to_string(),
-                delta: TalosTimelineDelta::UserAction {
-                    event: TimelineUserActionEvent::Requested {
-                        action: action.clone(),
-                    },
-                },
-            }),
+async fn idle_subscription_closes_without_fabricating_a_terminal_event() {
+    let (_store, _events, subscriptions) = fixture().await;
+    let mut subscription = subscriptions
+        .subscribe(TimelineSubscribeCommand {
+            session_id: "session-1".to_string(),
+            turn_id: None,
+            after_event_id: None,
+            replay_limit: 10,
+            close_when_idle: true,
+            close_on_terminal: true,
         })
         .await
-        .unwrap();
+        .expect("idle subscription should open");
 
-    let snapshot = events.recover_timeline("s1", None, 32).await.unwrap();
-
-    assert_eq!(snapshot.active_turn.pending_user_action, Some(action));
-}
-
-#[derive(Default)]
-struct MockStore {
-    events: Mutex<Vec<AgentEvent>>,
-    active_turn: Mutex<Option<ActiveTurnRecord>>,
-    user_action: Mutex<Option<UserActionRecord>>,
-}
-
-#[async_trait]
-impl UserActionStore for MockStore {
-    async fn create(&self, record: UserActionRecord) -> talos_error::TalosResult<UserActionRecord> {
-        self.user_action
-            .lock()
-            .expect("user action lock")
-            .replace(record.clone());
-        Ok(record)
-    }
-
-    async fn get(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        action_id: &str,
-    ) -> talos_error::TalosResult<Option<UserActionRecord>> {
-        Ok(self
-            .user_action
-            .lock()
-            .expect("user action lock")
-            .clone()
-            .filter(|record| {
-                record.session_id == session_id
-                    && record.turn_id == turn_id
-                    && record.action.action_id == action_id
-            }))
-    }
-
-    async fn compare_and_set(
-        &self,
-        _expected: &UserActionRecord,
-        next: UserActionRecord,
-    ) -> talos_error::TalosResult<UserActionRecord> {
-        self.user_action
-            .lock()
-            .expect("user action lock")
-            .replace(next.clone());
-        Ok(next)
-    }
-}
-
-#[async_trait]
-impl TimelineEventStore for MockStore {
-    async fn append_event(&self, mut event: AgentEvent) -> talos_error::TalosResult<AgentEvent> {
-        let mut events = self.events.lock().expect("events lock");
-        let event_seq = events.len() as i64 + 1;
-        event.event_seq = Some(event_seq);
-        event.event_id = Some(TimelineEventId::from_seq(event_seq).to_string());
-        event.created_at_ms.get_or_insert(1000 + event_seq);
-        events.push(event.clone());
-        Ok(event)
-    }
-
-    async fn list_events_after(
-        &self,
-        session_id: &str,
-        after_event_id: Option<&TimelineEventId>,
-        limit: usize,
-    ) -> talos_error::TalosResult<Vec<AgentEvent>> {
-        let after_seq = after_event_id
-            .map(TimelineEventId::event_seq)
-            .transpose()?
-            .unwrap_or_default();
-        Ok(self
-            .events
-            .lock()
-            .expect("events lock")
-            .iter()
-            .filter(|event| {
-                event.session_id == session_id && event.event_seq.unwrap_or_default() > after_seq
-            })
-            .take(limit)
-            .cloned()
-            .collect())
-    }
-
-    async fn list_turn_events(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        limit: usize,
-    ) -> talos_error::TalosResult<Vec<AgentEvent>> {
-        let mut events = self
-            .events
-            .lock()
-            .expect("events lock")
-            .iter()
-            .rev()
-            .filter(|event| event.session_id == session_id && event.turn_id == turn_id)
-            .take(limit.max(1))
-            .cloned()
-            .collect::<Vec<_>>();
-        events.reverse();
-        Ok(events)
-    }
-
-    async fn latest_event_id(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<Option<TimelineEventId>> {
-        Ok(self
-            .events
-            .lock()
-            .expect("events lock")
-            .iter()
-            .rev()
-            .find(|event| event.session_id == session_id)
-            .and_then(|event| event.event_seq)
-            .map(TimelineEventId::from_seq))
-    }
-
-    async fn oldest_event_id(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<Option<TimelineEventId>> {
-        Ok(self
-            .events
-            .lock()
-            .expect("events lock")
-            .iter()
-            .find(|event| event.session_id == session_id)
-            .and_then(|event| event.event_seq)
-            .map(TimelineEventId::from_seq))
-    }
-
-    async fn delete_completed_events_before(
-        &self,
-        _before_timestamp_ms: i64,
-        _limit: usize,
-    ) -> talos_error::TalosResult<u64> {
-        Ok(0)
-    }
-
-    async fn delete_overflow_events_per_session(
-        &self,
-        _max_events_per_session: usize,
-        _limit: usize,
-    ) -> talos_error::TalosResult<u64> {
-        Ok(0)
-    }
-}
-
-#[async_trait]
-impl ActiveTurnStore for MockStore {
-    async fn upsert_active_turn(&self, update: ActiveTurnUpdate) -> talos_error::TalosResult<()> {
-        *self.active_turn.lock().expect("active turn lock") = Some(ActiveTurnRecord {
-            session_id: update.session_id,
-            turn_id: update.turn_id,
-            message_id: update.message_id,
-            status: update.status,
-            last_event_id: update.last_event_id,
-            current_action_id: update.current_action_id,
-            updated_at: update.updated_at,
-        });
-        Ok(())
-    }
-
-    async fn get_active_turn(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<Option<ActiveTurnRecord>> {
-        Ok(self
-            .active_turn
-            .lock()
-            .expect("active turn lock")
-            .clone()
-            .filter(|record| record.session_id == session_id))
-    }
-
-    async fn clear_active_turn(&self, session_id: &str) -> talos_error::TalosResult<()> {
-        let mut active = self.active_turn.lock().expect("active turn lock");
-        if active
-            .as_ref()
-            .is_some_and(|record| record.session_id == session_id)
-        {
-            *active = None;
-        }
-        Ok(())
-    }
+    let message = subscription
+        .events
+        .recv()
+        .await
+        .expect("idle subscription should close explicitly");
+    assert!(matches!(
+        message,
+        TimelineSubscriptionMessage::Closed(closed)
+            if closed.reason == TimelineSubscriptionCloseReason::Completed
+    ));
 }

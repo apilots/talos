@@ -544,7 +544,7 @@ impl TuiApp {
                 return;
             }
         };
-        let Some(turn_id) = active_turn.turn_id else {
+        let Some(turn_id) = active_turn.map(|active| active.identity.turn_id) else {
             self.show_status_hint("No active turn to cancel.", Duration::from_secs(2));
             return;
         };

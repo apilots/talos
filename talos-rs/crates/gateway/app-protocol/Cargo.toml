@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-agent-api = { workspace = true }
 talos-error = { workspace = true }
 talos-auth = { workspace = true }
 talos-skills = { workspace = true }

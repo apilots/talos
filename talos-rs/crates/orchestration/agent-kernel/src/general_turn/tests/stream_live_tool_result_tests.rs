@@ -135,7 +135,7 @@ async fn stream_round_emits_tool_result_when_model_stream_stays_open() {
             tokio::select! {
                 event = rx.recv() => {
                     let event = event.expect("stream event should arrive");
-                    if let KernelStreamEventData::ToolResult(data) = event.data {
+                    if let AgentKernelEventPayload::ToolResult(data) = event.payload {
                         break data.call_id == "call_delayed";
                     }
                 }

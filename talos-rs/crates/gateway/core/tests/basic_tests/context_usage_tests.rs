@@ -1,8 +1,14 @@
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use talos_agent::{empty_skill_roots_resolver, AgentHarnessImpl, AgentHarnessParams};
-use talos_agent_kernel::RejectingAttachmentReader;
-use talos_config::{ModelInputKind, ProviderModelConfig};
+use talos_agent::{
+    create_agent_harness, AgentHarness, AgentUserContentKind, AttachmentReader, ResolvedAttachment,
+    TurnFileScope,
+};
+use talos_agent_kernel::KernelMemoryProgressStore;
+use talos_agent_provider_kernel::{
+    empty_skill_roots_resolver, FileKernelSessionArtifactStore, KernelAgentProvider,
+    KernelAgentProviderParams,
+};
 use talos_coordinator::CoordinatorImpl;
 use talos_error::TalosResult;
 use talos_llm_provider::{
@@ -11,17 +17,65 @@ use talos_llm_provider::{
     ReasoningOutput, Usage,
 };
 use talos_memory::{DreamMemoryFormationStore, MemoryScope};
+use talos_store::session::SessionStore;
 use talos_tools::{Tool, ToolContext, ToolOutputPayload, ToolRegistry};
 use talos_tools_policy::ToolPolicy;
-use talos_types::{
-    ModelInfo, ModelRef, ModelSelection, RecoverTimelineRequest, SessionActiveTurnRequest,
-    SessionGetRequest, TimelineActiveTurnStatus,
-};
+use talos_types::{ModelRef, RecoverTimelineRequest, SessionActiveTurnRequest, SessionGetRequest};
+use tokio::sync::mpsc;
 
 const AGENT_ID: &str = "context-usage-agent";
 const SESSION_ID: &str = "context-usage-session";
 
 struct StaticRouter;
+
+struct EmptyAttachmentReader;
+
+impl AttachmentReader for EmptyAttachmentReader {
+    fn read<'a>(
+        &'a self,
+        _scope: &'a TurnFileScope,
+        _file_ids: &'a [String],
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = TalosResult<Vec<ResolvedAttachment>>> + Send + 'a>,
+    > {
+        Box::pin(async { Ok(Vec::new()) })
+    }
+}
+
+struct SessionMemoryProgress {
+    sessions: Arc<dyn SessionStore>,
+}
+
+#[async_trait]
+impl KernelMemoryProgressStore for SessionMemoryProgress {
+    async fn processed_until_event_seq(&self, session_id: &str) -> TalosResult<u64> {
+        self.sessions
+            .get_session_record(session_id)
+            .await?
+            .map(|record| record.memory_processed_until_event_seq)
+            .ok_or_else(|| {
+                talos_error::TalosError::public(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    session_id.to_string(),
+                )
+            })
+    }
+
+    async fn advance_processed_until_event_seq(
+        &self,
+        session_id: &str,
+        expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        self.sessions
+            .advance_memory_processed_until_event_seq(
+                session_id,
+                expected_until_seq,
+                next_until_seq,
+            )
+            .await
+    }
+}
 
 #[async_trait]
 impl talos_router::Router for StaticRouter {
@@ -206,7 +260,7 @@ impl DreamMemoryFormationStore for NoopMemoryWriter {
     }
 }
 
-fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> AgentHarnessImpl {
+fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> Arc<dyn AgentHarness> {
     let registry = Arc::new(ToolRegistry::new_with_policy(ToolPolicy::allow_list(vec![
         "echo_usage",
     ])));
@@ -214,78 +268,54 @@ fn build_agent(config: &TalosConfig, store: Arc<DatabaseSessionStore>) -> AgentH
     let provider_router: Arc<dyn LlmProviderRouter> = Arc::new(StaticProviderRouter {
         provider: Arc::new(TwoRoundProvider::default()),
     });
-    let model_selection = ModelSelection::without_reasoning(ModelRef {
-        provider: config.llm.provider.clone(),
-        id: config.llm.model.clone(),
-    });
-    let inner_model = Arc::new(
-        talos_agent::InnerModelClient::builder()
-            .configured_model(None)
-            .agent_default_model(model_selection.model_ref.clone())
-            .model_catalog(vec![ModelInfo::from_provider_model(
-                model_selection.model_ref.provider.clone(),
-                ProviderModelConfig {
-                    id: model_selection.model_ref.id.clone(),
-                    name: model_selection.model_ref.id.clone(),
-                    context_window: 128_000,
-                    reasoning: false,
-                    reasoning_effort: Default::default(),
-                    speed: Default::default(),
-                    input: vec![ModelInputKind::Text],
-                    cost: Default::default(),
-                },
-            )])
-            .provider_router(provider_router.clone())
-            .profile_store(Arc::new(talos_store::profile::MockProfileStore::default()))
-            .profile_timezone("UTC".to_string())
-            .build()
-            .expect("inner model should build"),
-    );
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
-    AgentHarnessImpl::new(AgentHarnessParams {
-        id: AGENT_ID.to_string(),
+    let session_history_reader = Arc::new(talos_service::SessionHistoryService::new(Arc::new(
+        talos_service::TimelineEventService::new(store.clone()),
+    )));
+    let provider = KernelAgentProvider::new(KernelAgentProviderParams {
+        agent_id: AGENT_ID.to_string(),
         name: "Context Usage Agent".to_string(),
         description: "Context usage integration test agent".to_string(),
         llm_provider_router: provider_router,
-        model_selection,
-        inner_model,
         tool_registry: registry,
         kernel_config: config.agent.kernel.clone(),
         skill_roots_resolver: empty_skill_roots_resolver(),
-        session_artifact_store: Arc::new(talos_store::session::FileSessionArtifactStore::default()),
-        session_store: store,
+        session_artifact_store: Arc::new(FileKernelSessionArtifactStore),
+        session_history_reader,
+        memory_progress_store: Arc::new(SessionMemoryProgress { sessions: store }),
         dream_memory_store: Arc::new(NoopMemoryWriter),
-        user_workspace_memory_reader: user_workspace_memory.clone(),
-        user_workspace_memory_writer: user_workspace_memory,
-        attachment_reader: Arc::new(RejectingAttachmentReader),
+        user_workspace_memory_reader: user_workspace_memory,
+        attachment_reader: Arc::new(EmptyAttachmentReader),
+        rich_input: vec![AgentUserContentKind::File],
     })
-    .expect("integration agent should build")
+    .expect("integration Provider should build");
+    create_agent_harness(AGENT_ID.to_string(), provider)
 }
 
 #[tokio::test]
 async fn multi_round_usage_persists_the_last_request_context_through_session_get() {
+    let workspace_root = tempfile::tempdir().expect("test Workspace should be created");
     let mut config = test_config();
+    config.workspaces.definitions = vec![talos_config::WorkspaceDefinition::new(
+        "default",
+        workspace_root.path(),
+    )];
     config.agent.kernel.prompt.bootstrap.enabled = false;
     config.agent.kernel.prompt.window.compaction_buffer_tokens = 8;
     config.agent.kernel.prompt.window.reserved_output_tokens =
         talos_config::ReservedOutputPolicy::Fixed { tokens: 32 };
     let (storage, store) = test_session_storage().await;
-    let agent = Arc::new(build_agent(&config, store.clone()));
+    let agent = build_agent(&config, store.clone());
     let coordinator = Arc::new(CoordinatorImpl::new(Arc::new(StaticRouter)));
     coordinator
-        .registry()
-        .register(AGENT_ID, agent)
+        .register_agent(AGENT_ID.to_string(), agent)
         .await
         .expect("integration agent should register");
-    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
-        coordinator.clone() as Arc<dyn AgentDispatchRuntime>
-    ));
-    let gateway = test_gateway_with_runtime(
+    let gateway = test_gateway_with_coordinator(
         config,
         storage,
         store,
-        turn_executor,
-        coordinator as Arc<dyn SessionRuntime>,
+        coordinator as Arc<dyn AgentCoordinator>,
     )
     .await;
     let actor = Actor::regular("user-1");
@@ -293,12 +323,14 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
     gateway
         .start_turn(
             &actor,
+            super::request_source(),
             StartTurnRequest {
                 session_id: SESSION_ID.to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "Use the tool, then answer.".to_string(),
-                }],
-                context: Some(request_context()),
+                input: AgentUserInput {
+                    content: vec![AgentUserContent::Text {
+                        text: "Use the tool, then answer.".to_string(),
+                    }],
+                },
                 model_selection: None,
                 user_permission_mode: None,
                 project_id: None,
@@ -310,7 +342,7 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
         .await
         .expect("turn should start");
 
-    let terminal = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
             let active = gateway
                 .get_active_turn(
@@ -321,31 +353,39 @@ async fn multi_round_usage_persists_the_last_request_context_through_session_get
                 )
                 .await
                 .expect("active turn should be readable");
-            if matches!(
-                active.active_turn.status,
-                TimelineActiveTurnStatus::Completed | TimelineActiveTurnStatus::Failed
-            ) {
-                break active.active_turn;
+            if active.active_turn.is_none() {
+                break;
             }
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("turn should complete");
-    if terminal.status != TimelineActiveTurnStatus::Completed {
-        let recovery = gateway
-            .recover_timeline(
-                &actor,
-                RecoverTimelineRequest {
-                    session_id: SESSION_ID.to_string(),
-                    after_event_id: None,
-                    replay_limit: Some(100),
+    let recovery = gateway
+        .recover_timeline(
+            &actor,
+            RecoverTimelineRequest {
+                session_id: SESSION_ID.to_string(),
+                after_event_id: None,
+                replay_limit: Some(100),
+            },
+        )
+        .await
+        .expect("terminal Timeline should be readable");
+    assert!(
+        matches!(
+            recovery.replay.events.last(),
+            Some(talos_agent_api::TimelineEvent {
+                event: talos_agent_api::AgentEvent {
+                    payload: talos_agent_api::AgentEventPayload::TurnCompleted(_),
+                    ..
                 },
-            )
-            .await
-            .expect("failed turn timeline should be readable");
-        panic!("turn failed: {recovery:?}");
-    }
+                ..
+            })
+        ),
+        "unexpected terminal trace: {:?}",
+        recovery.replay.events
+    );
 
     let session = gateway
         .get_session(

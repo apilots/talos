@@ -2,7 +2,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf};
 use ts_rs::TS;
-use uuid::Uuid;
 
 use crate::subagent::CollaborationToolResult;
 
@@ -10,7 +9,6 @@ pub use crate::event_api::{
     ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
     ContextCompactionTrigger,
 };
-pub use talos_error::ApiError;
 
 /// Talos gateway protocol types shared by server and client components.
 
@@ -91,23 +89,24 @@ impl std::fmt::Display for TalosJsonValue {
 macro_rules! semantic_json_value {
     ($name:ident) => {
         #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-        pub struct $name {
+        #[ts(type = "unknown")]
+        pub struct $name(
             #[schemars(schema_with = "crate::schema::json_value_schema")]
             #[ts(type = "unknown")]
-            value: serde_json::Value,
-        }
+            serde_json::Value,
+        );
 
         impl $name {
             pub fn new(value: serde_json::Value) -> Self {
-                Self { value }
+                Self(value)
             }
 
             pub fn into_inner(self) -> serde_json::Value {
-                self.value
+                self.0
             }
 
             pub fn as_inner(&self) -> &serde_json::Value {
-                &self.value
+                &self.0
             }
         }
 
@@ -143,7 +142,7 @@ macro_rules! semantic_json_value {
 
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}", self.value)
+                write!(f, "{}", self.0)
             }
         }
     };
@@ -164,7 +163,7 @@ pub struct TalosSessionEnvironment {
 /// High-level source category.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum TalosSourceType {
+pub enum SessionSourceType {
     Http,
     Desktop,
     Im,
@@ -174,7 +173,7 @@ pub enum TalosSourceType {
     System,
 }
 
-impl TalosSourceType {
+impl SessionSourceType {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Http => "http",
@@ -198,7 +197,7 @@ impl TalosSourceType {
     }
 }
 
-impl fmt::Display for TalosSourceType {
+impl fmt::Display for SessionSourceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -207,7 +206,7 @@ impl fmt::Display for TalosSourceType {
 /// Concrete source provider.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum TalosProvider {
+pub enum SessionSourceProvider {
     Http,
     Sdk,
     Cli,
@@ -217,7 +216,7 @@ pub enum TalosProvider {
     System,
 }
 
-impl TalosProvider {
+impl SessionSourceProvider {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Http => "http",
@@ -241,47 +240,33 @@ impl TalosProvider {
     }
 }
 
-impl fmt::Display for TalosProvider {
+impl fmt::Display for SessionSourceProvider {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
     }
 }
 
-/// Cross-channel request context.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TalosContext {
-    pub source_type: TalosSourceType,
-    pub provider: TalosProvider,
-    pub user_id: String,
-    pub message_id: String,
-    pub trace_id: String,
-    #[serde(default)]
+/// Trusted origin metadata used when a Service creates a Session.
+///
+/// Gateways construct this value from their transport or channel. It must not
+/// carry authenticated identity, request identity, paths, Agent selection, or
+/// execution policy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSource {
+    pub source_type: SessionSourceType,
+    pub source_provider: SessionSourceProvider,
     pub channel_id: Option<String>,
-    #[serde(default)]
     pub thread_id: Option<String>,
-    #[serde(default)]
-    pub project_root: Option<PathBuf>,
-    #[serde(default)]
     pub environment: Option<TalosSessionEnvironment>,
 }
 
-impl TalosContext {
-    pub fn new(
-        source_type: TalosSourceType,
-        provider: TalosProvider,
-        user_id: impl Into<String>,
-        message_id: impl Into<String>,
-        trace_id: impl Into<String>,
-    ) -> Self {
+impl SessionSource {
+    pub fn new(source_type: SessionSourceType, source_provider: SessionSourceProvider) -> Self {
         Self {
             source_type,
-            provider,
-            user_id: user_id.into(),
-            message_id: message_id.into(),
-            trace_id: trace_id.into(),
+            source_provider,
             channel_id: None,
             thread_id: None,
-            project_root: None,
             environment: None,
         }
     }
@@ -296,89 +281,38 @@ impl TalosContext {
         self
     }
 
-    pub fn with_project_root(mut self, project_root: impl Into<PathBuf>) -> Self {
-        self.project_root = Some(project_root.into());
-        self
-    }
-
     pub fn with_environment(mut self, environment: TalosSessionEnvironment) -> Self {
         self.environment = Some(environment);
         self
     }
 
-    pub fn http(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Http, TalosProvider::Http, user_id)
+    pub fn http() -> Self {
+        Self::new(SessionSourceType::Http, SessionSourceProvider::Http)
     }
 
-    pub fn sdk(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Http, TalosProvider::Sdk, user_id)
+    pub fn sdk() -> Self {
+        Self::new(SessionSourceType::Http, SessionSourceProvider::Sdk)
     }
 
-    pub fn desktop(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Desktop, TalosProvider::Sdk, user_id)
+    pub fn desktop() -> Self {
+        Self::new(SessionSourceType::Desktop, SessionSourceProvider::Sdk)
     }
 
-    pub fn cli(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Cli, TalosProvider::Cli, user_id)
+    pub fn cli() -> Self {
+        Self::new(SessionSourceType::Cli, SessionSourceProvider::Cli)
     }
 
-    pub fn ws(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Ws, TalosProvider::WebSocket, user_id)
+    pub fn ws() -> Self {
+        Self::new(SessionSourceType::Ws, SessionSourceProvider::WebSocket)
     }
 
-    pub fn im(provider: TalosProvider, user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::Im, provider, user_id)
+    pub fn im(source_provider: SessionSourceProvider) -> Self {
+        Self::new(SessionSourceType::Im, source_provider)
     }
 
-    pub fn system(user_id: impl Into<String>) -> Self {
-        Self::generated(TalosSourceType::System, TalosProvider::System, user_id)
+    pub fn system() -> Self {
+        Self::new(SessionSourceType::System, SessionSourceProvider::System)
     }
-
-    fn generated(
-        source_type: TalosSourceType,
-        provider: TalosProvider,
-        user_id: impl Into<String>,
-    ) -> Self {
-        Self::new(
-            source_type,
-            provider,
-            user_id,
-            format!("msg_{}", Uuid::new_v4().simple()),
-            format!("trace_{}", Uuid::new_v4().simple()),
-        )
-    }
-}
-
-/// Talos message input item.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosInputItem {
-    Text {
-        text: String,
-    },
-    SkillSelection {
-        name: String,
-        path: String,
-    },
-    Files {
-        #[serde(rename = "fileIds")]
-        #[ts(rename = "fileIds")]
-        file_ids: Vec<String>,
-    },
-    Voice {
-        #[serde(default)]
-        url: Option<String>,
-        #[serde(default)]
-        data_base64: Option<String>,
-        #[serde(default)]
-        mime_type: Option<String>,
-    },
-    Video {
-        #[serde(default)]
-        url: Option<String>,
-        #[serde(default)]
-        mime_type: Option<String>,
-    },
 }
 
 /// Talos content item for rich output blocks.
@@ -520,45 +454,6 @@ pub struct TalosToolSearchMatch {
     pub after: Vec<String>,
 }
 
-/// Structured item produced while executing an agent run.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum RunItem {
-    UserInput {
-        text: String,
-        #[serde(default, rename = "fileIds")]
-        #[ts(rename = "fileIds")]
-        file_ids: Vec<String>,
-    },
-    Reasoning {
-        text: String,
-    },
-    ExecutionSummary {
-        text: String,
-    },
-    OutputText {
-        text: String,
-    },
-    ToolCall {
-        call_id: String,
-        name: String,
-        arguments: ToolArguments,
-    },
-    ToolResult {
-        call_id: String,
-        tool_name: String,
-        content: Vec<TalosContentItem>,
-        #[serde(default)]
-        is_error: bool,
-    },
-}
-
-/// Reasoning block exposed to clients.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-pub struct TalosReasoning {
-    pub text: String,
-}
-
 pub use crate::usage::TokenUsage;
 
 /// Kernel-owned execution metrics for a turn.
@@ -575,339 +470,12 @@ pub struct TurnExecutionMetrics {
     pub duration_ms: Option<u64>,
 }
 
-/// Agent execution event lifecycle type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentEventType {
-    TurnStarted,
-    ItemStarted,
-    ItemDelta,
-    ItemCompleted,
-    AssistantTextCommitted,
-    TurnMetrics,
-    TurnCompleted,
-    TurnError,
-}
-
-/// Timeline item kind rendered by clients.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosTimelineItemKind {
-    UserInput,
-    Reasoning,
-    AssistantText,
-    ToolCall,
-    ExecutionSummary,
-    ContextCompaction,
-    SystemNotice,
-}
-
-/// Server-normalized display-layer union of model, assistant, and kernel execution phases.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosTimelinePhase {
-    Input,
-    Thinking,
-    Acting,
-    Unknown,
-    Commentary,
-    FinalAnswer,
-    System,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosTimelineItemStatus {
-    Queued,
-    Running,
-    WaitingUserAction,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum TalosTimelineNoticeLevel {
     Info,
     Warning,
     Error,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosToolProgressEntry {
-    pub progress_kind: TalosToolProgressKind,
-    pub text: String,
-    #[ts(type = "number")]
-    pub timestamp_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosToolResult {
-    pub content: Vec<TalosContentItem>,
-    pub is_error: bool,
-}
-
-/// Current full content for a timeline item.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosTimelineContent {
-    Empty,
-    Text {
-        text: String,
-    },
-    UserInput {
-        text: String,
-        #[serde(default, rename = "fileIds")]
-        #[ts(rename = "fileIds")]
-        file_ids: Vec<String>,
-    },
-    ToolCall {
-        call_id: String,
-        name: String,
-        arguments: String,
-        #[serde(default)]
-        progress: Vec<TalosToolProgressEntry>,
-        #[serde(default)]
-        result: Option<TalosToolResult>,
-    },
-    ExecutionSummary {
-        summary: String,
-    },
-    ContextCompaction {
-        trigger: ContextCompactionTrigger,
-        stage: ContextCompactionStage,
-        #[serde(default)]
-        #[ts(type = "ContextCompactionOutcome | null")]
-        outcome: Option<ContextCompactionOutcome>,
-        #[serde(default)]
-        #[ts(type = "ContextCompactionMetrics | null")]
-        metrics: Option<ContextCompactionMetrics>,
-        #[serde(default)]
-        #[ts(type = "string | null")]
-        message: Option<String>,
-    },
-    SystemNotice {
-        level: TalosTimelineNoticeLevel,
-        message: String,
-    },
-}
-
-/// Incremental update for an existing timeline item.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum TalosTimelineDelta {
-    Text {
-        text: String,
-    },
-    ToolArguments {
-        arguments_delta: String,
-    },
-    ToolProgress {
-        progress_kind: TalosToolProgressKind,
-        text_delta: String,
-    },
-    ToolResult {
-        content: Vec<TalosContentItem>,
-        is_error: bool,
-    },
-    UserAction {
-        event: crate::TimelineUserActionEvent,
-    },
-    ContextCompaction {
-        #[serde(default)]
-        #[ts(type = "ContextCompactionStage | null")]
-        stage: Option<ContextCompactionStage>,
-        #[serde(default)]
-        #[ts(type = "ContextCompactionOutcome | null")]
-        outcome: Option<ContextCompactionOutcome>,
-        #[serde(default)]
-        #[ts(type = "ContextCompactionMetrics | null")]
-        metrics: Option<ContextCompactionMetrics>,
-        #[serde(default)]
-        #[ts(type = "string | null")]
-        message: Option<String>,
-    },
-    Status {
-        status: TalosTimelineItemStatus,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTimelineItem {
-    pub item_id: String,
-    #[serde(default)]
-    pub parent_item_id: Option<String>,
-    pub kind: TalosTimelineItemKind,
-    pub phase: TalosTimelinePhase,
-    pub status: TalosTimelineItemStatus,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[ts(type = "number")]
-    pub started_at_ms: u64,
-    #[serde(default)]
-    #[ts(type = "number | null")]
-    pub completed_at_ms: Option<u64>,
-    pub content: TalosTimelineContent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTurnStartedEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    #[ts(type = "number")]
-    pub started_at_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosItemStartedEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub item: TalosTimelineItem,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosItemDeltaEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub delta: TalosTimelineDelta,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosItemCompletedEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub status: TalosTimelineItemStatus,
-    #[ts(type = "number")]
-    pub completed_at_ms: u64,
-    #[serde(default)]
-    pub final_content: Option<TalosTimelineContent>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosAssistantTextCommittedEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub item_id: String,
-    pub phase: TalosTimelinePhase,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTurnMetricsEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub metrics: TurnExecutionMetrics,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTurnCompletedEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    #[ts(type = "number")]
-    pub completed_at_ms: u64,
-    pub stop_reason: StopReason,
-    pub usage: TokenUsage,
-    #[serde(default)]
-    pub metrics: Option<TurnExecutionMetrics>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    #[ts(skip)]
-    pub artifact_seq: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TalosTurnErrorEvent {
-    pub request_id: String,
-    pub turn_id: String,
-    pub error: ApiError,
-    #[ts(type = "number")]
-    pub failed_at_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum AgentEventPayload {
-    TurnStarted(TalosTurnStartedEvent),
-    ItemStarted(TalosItemStartedEvent),
-    ItemDelta(TalosItemDeltaEvent),
-    ItemCompleted(TalosItemCompletedEvent),
-    AssistantTextCommitted(TalosAssistantTextCommittedEvent),
-    TurnMetrics(TalosTurnMetricsEvent),
-    TurnCompleted(TalosTurnCompletedEvent),
-    TurnError(TalosTurnErrorEvent),
-}
-
-/// Agent execution event.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct AgentEvent {
-    #[serde(default)]
-    #[ts(type = "number | null")]
-    pub event_seq: Option<i64>,
-    #[serde(default)]
-    pub event_id: Option<String>,
-    #[serde(default)]
-    #[ts(type = "number | null")]
-    pub created_at_ms: Option<i64>,
-    pub event_type: AgentEventType,
-    pub turn_id: String,
-    pub message_id: String,
-    pub session_id: String,
-    #[ts(type = "number")]
-    pub sequence: u64,
-    pub payload: AgentEventPayload,
-}
-
-/// Public recoverable timeline stream event.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct TimelineEventEnvelope {
-    pub event_id: String,
-    #[ts(type = "number")]
-    pub event_seq: i64,
-    #[ts(type = "number")]
-    pub created_at_ms: i64,
-    pub session_id: String,
-    pub turn_id: String,
-    pub message_id: String,
-    pub event: AgentEvent,
-}
-
-impl TimelineEventEnvelope {
-    pub fn from_persisted_event(event: AgentEvent) -> Option<Self> {
-        Some(Self {
-            event_id: event.event_id.clone()?,
-            event_seq: event.event_seq?,
-            created_at_ms: event.created_at_ms?,
-            session_id: event.session_id.clone(),
-            turn_id: event.turn_id.clone(),
-            message_id: event.message_id.clone(),
-            event,
-        })
-    }
-}
-
-/// Stable session history snapshot. This is not a replay cursor envelope.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct SessionHistorySnapshot {
-    pub session_id: String,
-    pub messages: Vec<SessionHistoryMessage>,
-    #[ts(type = "number")]
-    pub generated_at_ms: i64,
-    #[serde(default)]
-    pub last_stable_event_id: Option<String>,
-}
-
-/// Stable message view for session history.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
-pub struct SessionHistoryMessage {
-    pub message_id: String,
-    pub turn_id: String,
-    pub items: Vec<TalosTimelineItem>,
-    pub stop_reason: StopReason,
-    pub usage: TokenUsage,
-    #[serde(default)]
-    pub metrics: Option<TurnExecutionMetrics>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]

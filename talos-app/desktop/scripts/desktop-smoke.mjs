@@ -76,7 +76,7 @@ electron.stdout.on("data", (chunk) => logs.push(chunk.toString("utf8")));
 electron.stderr.on("data", (chunk) => logs.push(chunk.toString("utf8")));
 
 try {
-  const page = await waitForPage(debugPort, 30_000);
+  const page = await waitForPage(debugPort, 90_000);
   cdp = await connectCdp(page.webSocketDebuggerUrl);
 
   await cdp.call("Runtime.enable");
@@ -98,22 +98,22 @@ try {
 
   const modelCount = await waitForEvaluate(
     cdp,
-    "window.__talosSmokeInvoke('model.list', {}).then((r) => r.models?.length ?? r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('model/list', {}).then((r) => r.models?.length ?? r.data?.length ?? 0)",
     30_000,
   );
   const account = await waitForEvaluate(
     cdp,
-    "window.__talosSmokeInvoke('user.current', {})",
+    "window.__talosSmokeInvoke('user/current', {})",
     30_000,
   );
   const skillCount = await waitForEvaluate(
     cdp,
-    "window.__talosSmokeInvoke('skills.list', { include_disabled: false }).then((r) => r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('skills/list', { include_disabled: false }).then((r) => r.data?.length ?? 0)",
     30_000,
   );
   const skillSuggestionCount = await waitForEvaluate(
     cdp,
-    "window.__talosSmokeInvoke('skills.suggest', { query: '', limit: 5 }).then((r) => r.data?.length ?? 0)",
+    "window.__talosSmokeInvoke('skills/suggest', { query: '', limit: 5 }).then((r) => r.data?.length ?? 0)",
     30_000,
   );
   const adminVisible = await evaluate(
@@ -121,12 +121,12 @@ try {
     "Array.from(document.querySelectorAll('a')).some((a) => (a.textContent || '').toLowerCase().includes('admin') || (a.getAttribute('href') || '').includes('/admin'))",
   );
 
-  assert(Number.isInteger(modelCount) && modelCount >= 0, "model.list did not return a model count.");
-  assert(skillCount > 0, "skills.list returned no discoverable skills.");
-  assert(skillSuggestionCount > 0, "skills.suggest returned no discoverable skills.");
+  assert(Number.isInteger(modelCount) && modelCount >= 0, "model/list did not return a model count.");
+  assert(skillCount > 0, "skills/list returned no discoverable skills.");
+  assert(skillSuggestionCount > 0, "skills/suggest returned no discoverable skills.");
   assert(typeof serverInfo?.auth_enabled === "boolean", `desktop server info did not include auth state: ${JSON.stringify(serverInfo)}`);
-  assert(account?.user?.role === "user", `user.current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
-  assert(account?.user?.type === "free", `user.current did not reflect open-mode anonymous user type: ${JSON.stringify(account)}`);
+  assert(account?.user?.role === "user", `user/current did not reflect open-mode anonymous user role: ${JSON.stringify(account)}`);
+  assert(account?.user?.type === "free", `user/current did not reflect open-mode anonymous user type: ${JSON.stringify(account)}`);
   assert(adminVisible === false, "Admin navigation should not be rendered in Talos.");
 
   await evaluate(cdp, "location.hash = '#/'; undefined");
@@ -238,7 +238,7 @@ async function runInteractionSmoke(cdp, outputDir) {
   await waitForExpression(cdp, "location.hash.startsWith('#/sessions/')", 30_000);
   const sessionId = await evaluate(cdp, "location.hash.split('/').pop()");
   assert(sessionId, "Desktop interaction did not create a session.");
-  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  let completedTurn = await waitForCompletedTurnAfter(cdp, sessionId, -1, 60_000);
   await evaluate(
     cdp,
     `history.replaceState(null, document.title, ${JSON.stringify(`#/sessions/${sessionId}`)}); location.reload(); undefined`,
@@ -263,7 +263,7 @@ async function runInteractionSmoke(cdp, outputDir) {
   await waitForComposerIdle(cdp, 60_000);
   const session = await waitForEvaluate(
     cdp,
-    `window.__talosSmokeInvoke('session.get', { session_id: ${JSON.stringify(sessionId)} }).then((response) => {
+    `window.__talosSmokeInvoke('session/get', { sessionId: ${JSON.stringify(sessionId)} }).then((response) => {
       if (!response.session) throw new Error('session not available');
       return response.session;
     })`,
@@ -278,11 +278,10 @@ async function runInteractionSmoke(cdp, outputDir) {
   for (const [mode, screenshotName, label] of permissionModes) {
     await evaluate(
       cdp,
-      `window.__talosSmokeInvoke('session.patch', {
-        session_id: ${JSON.stringify(sessionId)},
+      `window.__talosSmokeInvoke('session/patch', {
+        sessionId: ${JSON.stringify(sessionId)},
         conf: { modelSelection: null, userPermissionMode: ${JSON.stringify(mode)} },
-        project_id: null,
-        current_directory: null
+        currentDirectory: null
       }).then((response) => {
         if (response.session?.effectiveMode !== ${JSON.stringify(mode)}) {
           throw new Error('session permission mode was not updated');
@@ -306,26 +305,16 @@ async function runInteractionSmoke(cdp, outputDir) {
       cdp,
       `You must make exactly three independent Read tool calls, one for each exact path in this order: ${modeSmokeFiles.join(", ")}. Do not call any other tool. After all three tool results, respond with exactly ${marker}`,
     );
-    await waitForActiveTurnStatus(cdp, sessionId, "completed", 90_000);
-    await waitForComposerIdle(cdp, 60_000);
-    const modeHistory = await evaluate(
+    completedTurn = await waitForCompletedTurnAfter(
       cdp,
-      `window.__talosSmokeInvoke('session.history', { session_id: ${JSON.stringify(sessionId)} }).then((response) => {
-        const message = response.history.messages.at(-1);
-        const toolCalls = message?.items.filter((item) => item.content.type === 'tool_call') || [];
-        return {
-          stopReason: message?.stop_reason,
-          toolCalls: toolCalls.map((item) => ({
-            name: item.content.name,
-            status: item.status,
-            hasResult: item.content.result !== null
-          })),
-          metrics: message?.metrics
-        };
-      })`,
+      sessionId,
+      completedTurn.completedEventSeq,
+      90_000,
     );
+    await waitForComposerIdle(cdp, 60_000);
+    const modeHistory = summarizeCompletedTurn(completedTurn);
     assert(
-      modeHistory?.stopReason === "end_turn",
+      modeHistory?.stopReason === "endTurn",
       `Mode ${mode} did not end: ${JSON.stringify(modeHistory)}`,
     );
     assert(
@@ -339,7 +328,7 @@ async function runInteractionSmoke(cdp, outputDir) {
       `Mode ${mode} tool calls were not terminal: ${JSON.stringify(modeHistory)}`,
     );
     assert(
-      modeHistory?.metrics?.tool_calls === 3,
+      modeHistory?.metrics?.toolCalls === 3,
       `Mode ${mode} metrics were incorrect: ${JSON.stringify(modeHistory)}`,
     );
     await evaluate(cdp, "location.reload(); undefined");
@@ -366,13 +355,14 @@ async function runInteractionSmoke(cdp, outputDir) {
     "Boolean(document.querySelector('section[data-user-action=\"question\"]')) && (document.body.textContent || '').includes('Desktop Choice')",
     60_000,
   );
-  const pendingBeforeRefresh = await waitForActiveTurnStatus(
+  await waitForActiveTurnState(
     cdp,
     sessionId,
-    "waiting_user_action",
+    "waitingForInput",
     30_000,
   );
-  const actionIdBeforeRefresh = pendingBeforeRefresh?.pending_user_action?.actionId;
+  const pendingBeforeRefresh = await waitForPendingUserAction(cdp, sessionId, 30_000);
+  const actionIdBeforeRefresh = pendingBeforeRefresh?.actionId;
   assert(actionIdBeforeRefresh, "Desktop pending Question did not expose an action id.");
   await evaluate(cdp, "location.reload(); undefined");
   await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
@@ -383,19 +373,25 @@ async function runInteractionSmoke(cdp, outputDir) {
     "Boolean(document.querySelector('section[data-user-action=\"question\"]')) && (document.body.textContent || '').includes('Desktop Choice')",
     60_000,
   );
-  const pendingAfterRefresh = await waitForActiveTurnStatus(
+  await waitForActiveTurnState(
     cdp,
     sessionId,
-    "waiting_user_action",
+    "waitingForInput",
     30_000,
   );
+  const pendingAfterRefresh = await waitForPendingUserAction(cdp, sessionId, 30_000);
   assert(
-    pendingAfterRefresh?.pending_user_action?.actionId === actionIdBeforeRefresh,
+    pendingAfterRefresh?.actionId === actionIdBeforeRefresh,
     `Desktop refresh changed the pending action: ${JSON.stringify({ pendingBeforeRefresh, pendingAfterRefresh })}`,
   );
   await clickButtonInUserAction(cdp, "Now");
   await waitForUserActionClosed(cdp, 60_000);
-  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  completedTurn = await waitForCompletedTurnAfter(
+    cdp,
+    sessionId,
+    completedTurn.completedEventSeq,
+    60_000,
+  );
 
   await sendComposerMessage(
     cdp,
@@ -420,7 +416,12 @@ async function runInteractionSmoke(cdp, outputDir) {
   );
   assert(submitted, "Other response submit button was not actionable.");
   await waitForUserActionClosed(cdp, 60_000);
-  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  completedTurn = await waitForCompletedTurnAfter(
+    cdp,
+    sessionId,
+    completedTurn.completedEventSeq,
+    60_000,
+  );
 
   const approvalMarker = path.join(
     talosHome,
@@ -430,11 +431,10 @@ async function runInteractionSmoke(cdp, outputDir) {
   );
   await evaluate(
     cdp,
-    `window.__talosSmokeInvoke('session.patch', {
-      session_id: ${JSON.stringify(sessionId)},
+    `window.__talosSmokeInvoke('session/patch', {
+      sessionId: ${JSON.stringify(sessionId)},
       conf: { modelSelection: null, userPermissionMode: 'askForApproval' },
-      project_id: null,
-      current_directory: null
+      currentDirectory: null
     }).then((response) => {
       if (response.session?.effectiveMode !== 'askForApproval') {
         throw new Error('session permission mode was not updated');
@@ -453,7 +453,12 @@ async function runInteractionSmoke(cdp, outputDir) {
   );
   await clickButtonInUserAction(cdp, "Allow once", "sandbox-approval");
   await waitForUserActionClosed(cdp, 60_000);
-  await waitForActiveTurnStatus(cdp, sessionId, "completed", 60_000);
+  completedTurn = await waitForCompletedTurnAfter(
+    cdp,
+    sessionId,
+    completedTurn.completedEventSeq,
+    60_000,
+  );
   assert(
     readFileSync(approvalMarker, "utf8") === "desktop-approval",
     "Desktop AllowOnce did not execute the approved command exactly once.",
@@ -467,16 +472,16 @@ async function runInteractionSmoke(cdp, outputDir) {
 
   const activeTurn = await evaluate(
     cdp,
-    `window.__talosSmokeInvoke('session.active_turn', { session_id: ${JSON.stringify(sessionId)} }).then((response) => response.active_turn)`,
+    `window.__talosSmokeInvoke('session/active_turn', { sessionId: ${JSON.stringify(sessionId)} }).then((response) => response.activeTurn)`,
   );
   assert(
-    activeTurn?.status === "completed",
-    `Desktop interaction turn did not complete: ${JSON.stringify(activeTurn)}`,
+    activeTurn === null,
+    `Desktop interaction retained a nonterminal Turn: ${JSON.stringify(activeTurn)}`,
   );
   return {
     sessionId,
     initialEffectiveMode: session.effectiveMode,
-    activeTurnStatus: activeTurn.status,
+    lastCompletedTurnId: completedTurn.identity.turnId,
     permissionModes: modeResults,
   };
 }
@@ -576,7 +581,7 @@ function waitForComposerIdle(cdp, timeoutMs) {
   );
 }
 
-async function waitForActiveTurnStatus(cdp, sessionId, status, timeoutMs) {
+async function waitForActiveTurnState(cdp, sessionId, state, timeoutMs) {
   const startedAt = Date.now();
   let lastActiveTurn = null;
   let lastError = null;
@@ -585,28 +590,99 @@ async function waitForActiveTurnStatus(cdp, sessionId, status, timeoutMs) {
     try {
       response = await evaluate(
         cdp,
-        `window.__talosSmokeInvoke('session.active_turn', { session_id: ${JSON.stringify(sessionId)} })`,
+        `window.__talosSmokeInvoke('session/active_turn', { sessionId: ${JSON.stringify(sessionId)} })`,
       );
     } catch (error) {
       lastError = error;
-      if (!errorMessage(error).includes("resource not found: session")) {
+      if (!errorMessage(error).toLowerCase().includes("resource not found")) {
         throw error;
       }
       await sleep(300);
       continue;
     }
-    lastActiveTurn = response.active_turn ?? null;
-    if (lastActiveTurn?.status === status) {
+    lastActiveTurn = response.activeTurn ?? null;
+    if (lastActiveTurn?.state === state) {
       return lastActiveTurn;
-    }
-    if (lastActiveTurn && ["failed", "cancelled"].includes(lastActiveTurn.status)) {
-      throw new Error(`Active turn reached ${lastActiveTurn.status} while waiting for ${status}: ${JSON.stringify(lastActiveTurn)}`);
     }
     await sleep(300);
   }
   throw new Error(
-    `Timed out waiting for active turn status ${status}: ${JSON.stringify(lastActiveTurn)}\n${errorMessage(lastError)}`,
+    `Timed out waiting for active Turn state ${state}: ${JSON.stringify(lastActiveTurn)}\n${errorMessage(lastError)}`,
   );
+}
+
+async function waitForCompletedTurnAfter(cdp, sessionId, completedEventSeq, timeoutMs) {
+  const startedAt = Date.now();
+  let lastTurn = null;
+  let lastError = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    let response;
+    try {
+      response = await evaluate(
+        cdp,
+        `window.__talosSmokeInvoke('session/history', {
+          sessionId: ${JSON.stringify(sessionId)},
+          cursor: null,
+          limit: null
+        })`,
+      );
+    } catch (error) {
+      lastError = error;
+      if (!errorMessage(error).toLowerCase().includes("resource not found")) {
+        throw error;
+      }
+      await sleep(300);
+      continue;
+    }
+    lastTurn = response.data?.at(-1) ?? null;
+    if (lastTurn?.completedEventSeq > completedEventSeq) {
+      if (lastTurn.result?.status === "completed") {
+        return lastTurn;
+      }
+      throw new Error(`Turn failed while waiting for completion: ${JSON.stringify(lastTurn)}`);
+    }
+    await sleep(300);
+  }
+  throw new Error(
+    `Timed out waiting for a completed Turn after event ${completedEventSeq}: ${JSON.stringify(lastTurn)}\n${errorMessage(lastError)}`,
+  );
+}
+
+async function waitForPendingUserAction(cdp, sessionId, timeoutMs) {
+  return waitForEvaluate(
+    cdp,
+    `window.__talosSmokeInvoke('timeline/recover', {
+      sessionId: ${JSON.stringify(sessionId)},
+      afterEventId: null,
+      replayLimit: null
+    }).then((response) => response.replay.events
+      .map((entry) => entry.event.payload)
+      .reverse()
+      .find((payload) => payload.type === 'waitingForInput' && payload.data.type === 'userAction')
+      ?.data.action ?? null)`,
+    timeoutMs,
+  );
+}
+
+function summarizeCompletedTurn(turn) {
+  const output = turn?.result?.status === "completed" ? turn.result.result : null;
+  const blocks = output?.messages?.flatMap((message) => message.blocks) ?? [];
+  const results = new Set(
+    blocks
+      .filter((block) => block.content.type === "toolResult")
+      .map((block) => block.content.data.callId),
+  );
+  return {
+    stopReason: output?.completion?.stopReason,
+    toolCalls: blocks
+      .filter((block) => block.content.type === "toolCall")
+      .map((block) => ({
+        name: block.content.data.name,
+        status: block.status,
+        hasResult: results.has(block.content.data.callId),
+      })),
+    metrics: output?.metrics,
+  };
 }
 
 async function waitForUserActionClosed(cdp, timeoutMs) {

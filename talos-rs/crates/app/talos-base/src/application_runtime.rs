@@ -1,33 +1,35 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use talos_agent::{
-    resolve_inner_model_ref, AgentDefinitionLoader, AgentHarness, AgentHarnessFactory,
-    AgentHarnessFactoryParams, InnerModelClient,
+    create_agent_harness, AgentDefinitionLoader, AgentUserContentKind, SessionHistoryReader,
+};
+use talos_agent_provider_kernel::{
+    FileKernelSessionArtifactStore, KernelAgentProvider, KernelAgentProviderParams,
+    KernelMemoryProgressStore, KernelSessionArtifactStore,
 };
 use talos_auth::{AuthService, CloudAuthService, OpenModeUserService, UserService};
-use talos_config::{Config, ConfigStore, YamlConfigStore};
-use talos_coordinator::{Coordinator, CoordinatorImpl, SessionRuntime};
+use talos_config::{AgentProviderConfig, Config, ConfigStore, YamlConfigStore};
+use talos_coordinator::CoordinatorImpl;
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::{Gateway, ServiceGateway};
 use talos_llm_provider::{LlmProviderRouter, ModelRef, ReloadableLlmProviderRouter};
 use talos_router::{Binding, MatchRule, Router, RouterImpl};
 use talos_service::{
-    AgentDispatchTurnExecutor, FileService, MemoryService, PluginManagerService, TalosService,
-    TimelineEventRetentionConfig, TimelineEventService,
+    resolve_inner_model_ref, FileService, InnerModelClient, MemoryService, PluginManagerService,
+    SessionHistoryService, TalosService, TimelineEventService,
 };
 use talos_store::memory::MemoryStore;
 use talos_store::project::{ProjectStore, StorageProjectStore};
-use talos_store::session::{
-    ActiveTurnStore, DatabaseSessionStore, FileSessionArtifactStore, MessageIdempotencyStore,
-    SessionArtifactStore, SessionStore, TimelineEventStore,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionStore};
+
+use crate::memory_progress::SessionMemoryProgress;
 use talos_tools::{
     register_core_local_tools, register_network_tools, register_subagent_tools, ToolRegistry,
 };
 use talos_tools_sandbox::{SandboxRuntimePaths, ToolSandbox};
-use talos_types::{resolve_default_model_selection, resolve_model_catalog, AgentDispatchRuntime};
-use tracing::error;
+use talos_types::{resolve_default_model_selection, resolve_model_catalog};
 
 use super::{
     application_automation, application_storage, create_llm_provider, AgentSkillRootsResolver,
@@ -60,24 +62,12 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         config.storage.files.clone(),
     )?);
     file_service.reconcile_incomplete().await?;
-    let event_store: Arc<dyn TimelineEventStore> = session_store_impl.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = session_store_impl.clone();
-    let user_action_store: Arc<dyn talos_store::session::UserActionStore> =
-        session_store_impl.clone();
-    let idempotency_store: Arc<dyn MessageIdempotencyStore> = session_store_impl.clone();
-    let event_service = Arc::new(TimelineEventService::new(
-        event_store,
-        active_turn_store.clone(),
-        user_action_store,
-        TimelineEventRetentionConfig {
-            retention_hours: config.agent.kernel.timeline_events.retention_hours,
-            max_events_per_session: config.agent.kernel.timeline_events.max_events_per_session,
-            gc_interval_minutes: config.agent.kernel.timeline_events.gc_interval_minutes,
-            gc_batch_size: config.agent.kernel.timeline_events.gc_batch_size,
-        },
-    ));
+    let agent_execution_store: Arc<dyn AgentExecutionStore> = session_store_impl.clone();
+    let event_service = Arc::new(TimelineEventService::new(agent_execution_store.clone()));
+    let session_history_reader: Arc<dyn SessionHistoryReader> =
+        Arc::new(SessionHistoryService::new(event_service.clone()));
     let default_model_selection = resolve_default_model_selection(&config.llm)?;
-    let agent_definitions = AgentDefinitionLoader::load(&config.agent, &default_model_selection)?;
+    let agent_definitions = AgentDefinitionLoader::load(&config.agent)?;
     let default_agent_id = agent_definitions
         .iter()
         .find(|definition| definition.enabled)
@@ -89,17 +79,14 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
             )
         })?;
     let router: Arc<dyn Router> = Arc::new(RouterImpl::new());
-    if let Err(err) = router
+    router
         .add_binding(Binding {
             id: "default_binding".to_string(),
-            agent_id: default_agent_id,
+            agent_id: default_agent_id.clone(),
             rule: MatchRule::Default,
             priority: 1,
         })
-        .await
-    {
-        error!("failed to create default routing: {}", err);
-    }
+        .await?;
 
     let initial_llm_provider = create_llm_provider(&config)?;
     let reloadable_llm_provider = Arc::new(ReloadableLlmProvider::new(initial_llm_provider));
@@ -146,8 +133,10 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let skill_roots_resolver = Arc::new(AgentSkillRootsResolver {
         plugins: plugin_manager_service.clone(),
     });
-    let session_artifact_store: Arc<dyn SessionArtifactStore> =
-        Arc::new(FileSessionArtifactStore::default());
+    let session_artifact_store: Arc<dyn KernelSessionArtifactStore> =
+        Arc::new(FileKernelSessionArtifactStore);
+    let memory_progress_store: Arc<dyn KernelMemoryProgressStore> =
+        Arc::new(SessionMemoryProgress::new(session_store_impl.clone()));
     let memory_database = config.talos_paths().data_dir.join("memory-index.sqlite");
     let memory_store = Arc::new(MemoryStore::open(&memory_database).await?);
     let memory_service = MemoryService::new(config.clone(), memory_store)?;
@@ -156,35 +145,44 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let user_workspace_memory = Arc::new(talos_service::UserWorkspaceMemoryService::new());
     tool_registry.set_user_workspace_memory_writer(user_workspace_memory.clone());
 
-    let agent_factory = AgentHarnessFactory::new(AgentHarnessFactoryParams {
-        llm_provider_router: llm_provider_router.clone(),
-        tool_registry: tool_registry.clone(),
-        skill_roots_resolver,
-        session_artifact_store: session_artifact_store.clone(),
-        session_store: session_store_impl.clone(),
-        dream_memory_store: Arc::new(memory_service.clone()),
-        user_workspace_memory_reader: user_workspace_memory.clone(),
-        user_workspace_memory_writer: user_workspace_memory.clone(),
-        attachment_reader: file_service.clone(),
-        inner_model: inner_model.clone(),
-    });
-
     let coordinator = Arc::new(CoordinatorImpl::new(router));
+    let mut kernel_providers = HashMap::new();
 
     for definition in &agent_definitions {
         if !definition.enabled {
             continue;
         }
-        let agent_id = definition.id.clone();
-        let agent: Arc<dyn AgentHarness> = Arc::new(agent_factory.build(definition)?);
-        coordinator.register_agent(&agent_id, agent).await?;
+        let provider = match &definition.provider {
+            AgentProviderConfig::Kernel { kernel } => {
+                KernelAgentProvider::new(KernelAgentProviderParams {
+                    agent_id: definition.id.clone(),
+                    name: definition.name.clone(),
+                    description: definition.description.clone(),
+                    llm_provider_router: llm_provider_router.clone(),
+                    tool_registry: tool_registry.clone(),
+                    kernel_config: kernel.clone(),
+                    skill_roots_resolver: skill_roots_resolver.clone(),
+                    session_artifact_store: session_artifact_store.clone(),
+                    session_history_reader: session_history_reader.clone(),
+                    memory_progress_store: memory_progress_store.clone(),
+                    dream_memory_store: Arc::new(memory_service.clone()),
+                    user_workspace_memory_reader: user_workspace_memory.clone(),
+                    attachment_reader: file_service.clone(),
+                    rich_input: vec![
+                        AgentUserContentKind::SkillSelection,
+                        AgentUserContentKind::File,
+                    ],
+                })
+                .map_err(talos_agent::AgentError::into_talos_error)?
+            }
+        };
+        kernel_providers.insert(definition.id.clone(), provider.clone());
+        let agent = create_agent_harness(definition.id.clone(), provider);
+        coordinator
+            .register_agent(definition.id.clone(), agent)
+            .await?;
     }
 
-    let agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime> = coordinator.clone();
-    let session_runtime: Arc<dyn SessionRuntime> = coordinator.clone();
-    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
-        agent_dispatch_runtime.clone(),
-    ));
     let cloud_auth = Arc::new(CloudAuthService::new(config.cloud.api_base_url.clone()));
     let auth_service: Arc<dyn AuthService> = cloud_auth.clone();
     let user_service: Arc<dyn UserService> = if config.gateway.auth {
@@ -202,8 +200,25 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     let provider_router_reloader = reloadable_llm_provider_router.clone();
     let provider_router_config_reloader = llm_router_config.clone();
     let inner_model_reloader = inner_model.clone();
-    let runtime_reload_hook: talos_service::RuntimeConfigReloadHook = Arc::new(move |_| {
-        let reloaded_config = Config::load()?;
+    let config_reload_hook: talos_service::ConfigReloadHook = Arc::new(move |trigger| {
+        let mut reloaded_config = Config::load()?;
+        if let talos_service::ConfigReloadTrigger::Updated(value) = trigger {
+            match value {
+                talos_types::ConfigValue::Llm(llm) => {
+                    let mut llm = *llm;
+                    talos_config::resolve_llm_update_for_runtime(&reloaded_config.llm, &mut llm);
+                    reloaded_config.llm = llm;
+                }
+                talos_types::ConfigValue::WebSearch(web_search) => {
+                    let mut web_search = *web_search;
+                    talos_config::resolve_web_search_update_for_runtime(
+                        &reloaded_config.agent.kernel.tools.web_search,
+                        &mut web_search,
+                    );
+                    reloaded_config.agent.kernel.tools.web_search = web_search;
+                }
+            }
+        }
         reloaded_config.validate_runtime()?;
         let reloaded_provider = create_llm_provider(&reloaded_config)?;
         let reloaded_default_selection = resolve_default_model_selection(&reloaded_config.llm)?;
@@ -217,34 +232,40 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         inner_provider_config.llm.provider = reloaded_inner_model_ref.provider.clone();
         inner_provider_config.llm.model = reloaded_inner_model_ref.id.clone();
         create_llm_provider(&inner_provider_config)?;
-        provider_reloader.reload(reloaded_provider);
-        *provider_router_config_reloader
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config.clone();
-        provider_router_reloader.reload();
-        inner_model_reloader.reload(reloaded_inner_model_ref);
-        Ok(reloaded_config)
+        let provider_reloader = provider_reloader.clone();
+        let provider_router_reloader = provider_router_reloader.clone();
+        let provider_router_config_reloader = provider_router_config_reloader.clone();
+        let inner_model_reloader = inner_model_reloader.clone();
+        Ok(talos_service::ConfigReloadPlan::new(
+            reloaded_config.clone(),
+            move || {
+                provider_reloader.reload(reloaded_provider);
+                *provider_router_config_reloader
+                    .write()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = reloaded_config;
+                provider_router_reloader.reload();
+                inner_model_reloader.reload(reloaded_inner_model_ref);
+            },
+        ))
     });
     let service = Arc::new(
-        TalosService::new_with_reload_hook(
-            turn_executor,
-            session_runtime,
+        TalosService::new(
+            coordinator.clone(),
             session_store,
-            session_artifact_store.clone(),
+            session_store_impl.clone(),
             project_store,
             profile_store.clone(),
             file_service,
             event_service.clone(),
-            idempotency_store,
             config.clone(),
             memory_service.clone(),
             config_store,
             model_catalog,
             auth_service.clone(),
             user_service,
-            Some(runtime_reload_hook),
+            config_reload_hook,
         )
-        .with_user_workspace_memory(user_workspace_memory),
+        .with_user_workspace_memory(user_workspace_memory, inner_model.clone()),
     );
     if config.agent.kernel.tools.enable_collaboration_tools {
         register_subagent_tools(tool_registry.as_ref());
@@ -252,13 +273,11 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
     }
 
     let gateway: Arc<dyn Gateway> = Arc::new(ServiceGateway::new(service.clone()));
-    let dream_memory_maintenance = talos_service::DreamMemoryMaintenance::new(
+    let dream_memory_maintenance = crate::dream_memory_maintenance::DreamMemoryMaintenance::new(
         session_store_impl,
-        active_turn_store,
-        session_artifact_store,
-        memory_service,
+        service.clone(),
+        kernel_providers,
         inner_model,
-        &agent_definitions,
         config.workspaces.clone(),
         config.talos_paths(),
         config.automation.dream_memory_maintenance.clone(),
@@ -278,7 +297,6 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         event_service,
         auth_service,
         gateway,
-        agent_dispatch_runtime,
         coordinator,
         tool_registry,
         automation,

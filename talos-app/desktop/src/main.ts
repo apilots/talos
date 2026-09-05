@@ -6,7 +6,7 @@ import { app, BrowserWindow } from "electron";
 import { resolveAppServerCommand } from "./app-server-binary";
 import { DesktopAppServerController } from "./app-server-controller";
 import {
-  broadcastApplicationEvent,
+  broadcastTimelineEvent,
   broadcastRuntimeState,
   broadcastSubscriptionTerminated,
   registerDesktopIpcHandlers,
@@ -35,8 +35,9 @@ async function createController(): Promise<DesktopAppServerController> {
     env,
     clientName: "talos-desktop",
     clientVersion: app.getVersion(),
-    onEvent: (envelope) => broadcastApplicationEvent(envelope),
-    onSubscriptionTerminated: (envelope) => broadcastSubscriptionTerminated(envelope),
+    clientKind: "desktop",
+    onEvent: (event) => broadcastTimelineEvent(event),
+    onSubscriptionTerminated: (notification) => broadcastSubscriptionTerminated(notification),
     onRuntimeState: (state) => broadcastRuntimeState(state),
     onServerRequest: (request) => handleDesktopServerRequest(request),
   });

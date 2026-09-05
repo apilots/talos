@@ -63,8 +63,8 @@ just clippy -p talos-service
 - Gateway 映射 transport；`TalosService` 负责产品生命周期语义。
 - Store Record 不跨越 Service、Protocol、SDK 或 UI 边界。
 - 多个 Agent Definition 注册为独立 Harness；Coordinator 按 Agent id 解析其中一个。
-- 每个 Harness 通过 `AgentRuntime` SPI 委托给对应的具体 Runtime family。
-- 本地 composition 默认使用当前 `KernelAgent`；云端 composition 未来默认使用同一 SPI 后的 `CloudAgent`。
+- 每个 Harness 通过 `AgentProvider` SPI 委托给 Provider 持有的 `AgentSession`。
+- 本地 composition 注册 `KernelAgentProvider`；新增 Provider 复用同一 SPI，不改变 Service 或 Gateway 语义。
 - Rust `AppServerClient` 与 `EmbeddedServerClient` 实现同一个 `GatewayClient` 能力 contract。
 - Tool、Skill、MCP、权限和沙箱错误必须显式保留。
 

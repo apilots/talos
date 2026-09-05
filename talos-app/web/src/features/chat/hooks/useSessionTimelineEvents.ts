@@ -3,6 +3,7 @@ import { AppProtocol, TalosApiError, TalosStreamTerminatedError } from "@talos/s
 
 import { recoverTimelineLiveTail, subscribeTimelineEvents } from "../api";
 import { applyStreamEvent, applyTimelineRecovery } from "../stream-events";
+import type { useSessionMessageQueue } from "./useSessionMessageQueue";
 import { useAppStore } from "@/shared/store/app-store";
 
 const RECONNECT_DELAYS_MS = [500, 1_000, 2_000, 4_000, 8_000, 12_000] as const;
@@ -13,10 +14,13 @@ export function useSessionTimelineEvents(
   afterEventId: string | undefined,
   enabled: boolean,
   onTerminalTurn?: () => void | Promise<void>,
+  queue?: Pick<ReturnType<typeof useSessionMessageQueue>, "onOpen" | "onDisconnect" | "onMessageQueueChanged">,
 ) {
   const [retryGeneration, setRetryGeneration] = useState(0);
   const onTerminalTurnRef = useRef(onTerminalTurn);
   onTerminalTurnRef.current = onTerminalTurn;
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
 
   useEffect(() => {
     if (!enabled) {
@@ -26,6 +30,8 @@ export function useSessionTimelineEvents(
     let controller = new AbortController();
     let reconnectTimer: number | undefined;
     let finishReconnectDelay: (() => void) | undefined;
+    let subscriptionCursor =
+      useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId;
 
     const subscribe = async () => {
       for (let attempt = 0; !disposed; attempt += 1) {
@@ -37,55 +43,56 @@ export function useSessionTimelineEvents(
             showReconnectControls: false,
           });
         }
+        let reconciliationError: unknown;
         try {
           await subscribeTimelineEvents(
             sessionId,
             (event) => {
+              subscriptionCursor = event.eventId;
               useAppStore.getState().setStreamError(sessionId, undefined);
               applyStreamEvent(sessionId, event);
               if (
-                event.event.payload.type === "turn_completed" &&
-                event.event.payload.stop_reason !== "waiting_user_action"
+                event.event.payload.type === "turnCompleted" ||
+                event.event.payload.type === "turnFailed"
               ) {
                 void onTerminalTurnRef.current?.();
               }
             },
             controller.signal,
-            useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId,
+            subscriptionCursor,
+            {
+              onOpen: () => queueRef.current?.onOpen((error) => {
+                reconciliationError = error;
+                controller.abort();
+              }),
+              onMessageQueueChanged: (change) => queueRef.current?.onMessageQueueChanged(change),
+            },
           );
-          return;
-        } catch (error: unknown) {
+          throw new Error("Session event subscription closed.");
+        } catch (caught: unknown) {
+          const error = reconciliationError ?? caught;
           if (disposed || (error instanceof Error && error.name === "AbortError")) {
             return;
           }
+          queueRef.current?.onDisconnect();
           let subscriptionError = error;
-          if (
-            error instanceof TalosApiError &&
-            error.code === EVENT_CURSOR_EXPIRED_CODE
-          ) {
+          const cursorExpired = error instanceof TalosApiError && error.code === EVENT_CURSOR_EXPIRED_CODE;
+          const lagged = error instanceof TalosStreamTerminatedError && error.reason === "lagged";
+          if (cursorExpired || lagged) {
             try {
-              const recovery = await recoverTimelineLiveTail(sessionId);
+              const recovery = cursorExpired
+                ? await recoverTimelineLiveTail(sessionId)
+                : await recoverTimelineLiveTail(sessionId, subscriptionCursor);
+              if (disposed) return;
               applyTimelineRecovery(sessionId, recovery);
-              const state = useAppStore.getState();
-              state.setStreamError(sessionId, undefined);
-              if (!state.streams[sessionId]?.isStreaming) {
-                return;
-              }
-              continue;
-            } catch (recoveryError: unknown) {
-              subscriptionError = recoveryError;
-            }
-          }
-          if (error instanceof TalosStreamTerminatedError && error.reason === "lagged") {
-            try {
-              const cursor = useAppStore.getState().streams[sessionId]?.lastEventId ?? afterEventId;
-              const recovery = await recoverTimelineLiveTail(sessionId, cursor);
-              applyTimelineRecovery(sessionId, recovery);
-              const state = useAppStore.getState();
-              state.setStreamError(sessionId, undefined);
-              if (!state.streams[sessionId]?.isStreaming) {
-                return;
-              }
+              subscriptionCursor =
+                recovery.replay.nextCursor ??
+                recovery.replay.highWaterMarkEventId ??
+                subscriptionCursor;
+              useAppStore.getState().setStreamError(sessionId, undefined);
+              await onTerminalTurnRef.current?.();
+              // The Session subscription must also survive an idle recovery:
+              // another client or the queue can start its next Turn.
               continue;
             } catch (recoveryError: unknown) {
               subscriptionError = recoveryError;
@@ -121,6 +128,7 @@ export function useSessionTimelineEvents(
     return () => {
       disposed = true;
       controller.abort();
+      queueRef.current?.onDisconnect();
       if (reconnectTimer !== undefined) {
         window.clearTimeout(reconnectTimer);
       }

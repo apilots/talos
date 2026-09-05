@@ -5,26 +5,33 @@ import type { DesktopRendererBridge } from "@talos/sdk-app-server/desktop";
 import { createDesktopTalosClient } from "./desktop-client";
 
 describe("createDesktopTalosClient", () => {
-  it("submits user actions through the app-server transport", async () => {
+  it("submits typed Turn input through the app-server transport", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge = bridgeWithInvoke(async function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
       calls.push({ method, params });
-      return { actionId: "action-1", state: "responseAccepted" } as T;
+      return {
+        requestId: "request-1",
+        identity: { sessionId: "session-1", turnId: "turn-1" },
+        messageId: "message-1",
+      } as T;
     });
     const client = createDesktopTalosClient(bridge);
-    const request: AppProtocol.SubmitUserActionRequest = {
-      sessionId: "session-1",
-      turnId: "turn-1",
-      actionId: "action-1",
-      response: { type: "question", response: { type: "selectedOption", optionId: "yes" } },
+    const request: AppProtocol.SubmitTurnInputRequest = {
+      identity: { sessionId: "session-1", turnId: "turn-1" },
+      input: {
+        type: "userActionResponse",
+        actionId: "action-1",
+        response: { type: "question", response: { type: "selectedOption", optionId: "yes" } },
+      },
+      clientRequestId: null,
     };
 
-    await client.userActions.submit(request);
+    await client.turns.input(request);
 
-    expect(calls).toEqual([{ method: "userAction/submit", params: request }]);
+    expect(calls).toEqual([{ method: "turn/input", params: request }]);
   });
 
   it("forwards request-object params without nesting session and project ids", async () => {
@@ -34,68 +41,48 @@ describe("createDesktopTalosClient", () => {
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
-        if (method === "session.get") {
+        if (method === "session/get") {
           return { session: { id: "session-1" } } as T;
         }
-        if (method === "session.history") {
+        if (method === "session/history") {
           return {
-            history: {
-              session_id: "session-1",
-              messages: [],
-              generated_at_ms: 1,
-              last_stable_event_id: null,
-            },
+            data: [],
+            nextCursor: null,
           } as T;
         }
-        if (method === "session.active_turn") {
-          return {
-            active_turn: {
-              session_id: "session-1",
-              status: "completed",
-              turn_id: null,
-              message_id: null,
-              last_event_id: null,
-              pending_user_action: null,
-              updated_at: 1,
-            },
-          } as T;
+        if (method === "session/active_turn") {
+          return { activeTurn: null } as T;
         }
-        if (method === "project.read") {
-          return { project: { project_id: "project-1" } } as T;
-        }
-        if (method === "project.delete") {
+        if (method === "project/delete") {
           return { success: true } as T;
         }
         throw new Error(`unexpected method: ${method} ${JSON.stringify(params)}`);
     });
     const client = createDesktopTalosClient(bridge);
 
-    await client.sessions.get({ session_id: "session-1" });
-    await expect(client.sessions.history({ session_id: "session-1" })).resolves.toMatchObject({
-      history: {
-        session_id: "session-1",
-      },
+    await client.sessions.get({ sessionId: "session-1" });
+    await expect(
+      client.sessions.history({ sessionId: "session-1", cursor: null, limit: null }),
+    ).resolves.toEqual({ data: [], nextCursor: null });
+    await expect(client.sessions.activeTurn({ sessionId: "session-1" })).resolves.toEqual({
+      activeTurn: null,
     });
-    await expect(client.sessions.activeTurn({ session_id: "session-1" })).resolves.toMatchObject({
-      active_turn: {
-        session_id: "session-1",
-      },
-    });
-    await client.projects.get({ project_id: "project-1" });
     await client.projects.delete({ project_id: "project-1" });
 
     expect(calls).toEqual([
-      { method: "session.get", params: { session_id: "session-1" } },
-      { method: "session.history", params: { session_id: "session-1" } },
-      { method: "session.active_turn", params: { session_id: "session-1" } },
-      { method: "project.read", params: { project_id: "project-1" } },
-      { method: "project.delete", params: { project_id: "project-1" } },
+      { method: "session/get", params: { sessionId: "session-1" } },
+      {
+        method: "session/history",
+        params: { sessionId: "session-1", cursor: null, limit: null },
+      },
+      { method: "session/active_turn", params: { sessionId: "session-1" } },
+      { method: "project/delete", params: { project_id: "project-1" } },
     ]);
   });
 
   it("keeps desktop fs, memory, and workspace document response envelopes aligned with HTTP client", async () => {
     const bridge = bridgeWithResponses({
-      "fs.directory.read": {
+      "fs/directory/read": {
             directory: {
               path: "/tmp/project",
               parent: "/tmp",
@@ -104,7 +91,7 @@ describe("createDesktopTalosClient", () => {
               writable: true,
             },
       },
-      "memory.file.read": {
+      "memory/file/read": {
             file: {
               date: "2026-06-24",
               section_count: 1,
@@ -113,7 +100,7 @@ describe("createDesktopTalosClient", () => {
               version_token: "memory-token",
             },
       },
-      "memory.file.write": {
+      "memory/file/write": {
             file: {
               date: "2026-06-24",
               section_count: 1,
@@ -122,7 +109,7 @@ describe("createDesktopTalosClient", () => {
               version_token: "memory-token-2",
             },
       },
-      "workspace.doc.read": {
+      "workspace/doc/read": {
             doc: {
               kind: "memory",
               path: "MEMORY.md",
@@ -132,7 +119,7 @@ describe("createDesktopTalosClient", () => {
               version_token: "doc-token",
             },
       },
-      "workspace.doc.write": {
+      "workspace/doc/write": {
             doc: {
               kind: "memory",
               path: "MEMORY.md",
@@ -200,10 +187,10 @@ describe("createDesktopTalosClient", () => {
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
-        if (method === "memory.file.read") {
+        if (method === "memory/file/read") {
           return { file: { date: "2026-06-24", content: "# Memory" } } as T;
         }
-        if (method === "memory.file.write") {
+        if (method === "memory/file/write") {
           return { file: { date: "2026-06-24", content: "# Updated memory" } } as T;
         }
         throw new Error(`unexpected method: ${method}`);
@@ -222,9 +209,9 @@ describe("createDesktopTalosClient", () => {
     });
 
     expect(calls).toEqual([
-      { method: "memory.file.read", params: { date: "2026-06-24" } },
+      { method: "memory/file/read", params: { date: "2026-06-24" } },
       {
-        method: "memory.file.write",
+        method: "memory/file/write",
         params: {
           date: "2026-06-24",
           content: "# Updated memory",
@@ -232,7 +219,7 @@ describe("createDesktopTalosClient", () => {
         },
       },
       {
-        method: "memory.file.write",
+        method: "memory/file/write",
         params: {
           date: "2026-06-25",
           content: "# New memory",
@@ -241,19 +228,19 @@ describe("createDesktopTalosClient", () => {
     ]);
   });
 
-  it("uses the desktop source type when starting desktop turns", async () => {
+  it("forwards the canonical start-turn request without source metadata", async () => {
     const calls: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
     const bridge = bridgeWithInvoke(async function <T>(
       method: AppProtocol.ClientMethod,
       params?: unknown,
     ): Promise<T> {
         calls.push({ method, params });
-        if (method === "turn.start") {
+        if (method === "turn/start") {
           return {
-            request_id: "req-1",
-            message_id: "message-1",
-            session_id: "session-1",
-            turn_id: "turn-1",
+            requestId: "req-1",
+            messageId: "message-1",
+            sessionId: "session-1",
+            turnId: "turn-1",
             status: "accepted",
           } as T;
         }
@@ -262,37 +249,27 @@ describe("createDesktopTalosClient", () => {
     const client = createDesktopTalosClient(bridge);
 
     await client.turns.start({
-      session_id: "session-1",
-      input: [{ type: "text", text: "hello" }],
-      context: {
-        source_type: "http",
-        provider: "sdk",
-        user_id: "anonymous",
-        channel_id: "web",
-        thread_id: null,
-        message_id: "msg-1",
-        trace_id: "trace-1",
-        project_root: null,
-        environment: null,
-      },
+      sessionId: "session-1",
+      input: { content: [{ type: "text", text: "hello" }] },
       modelSelection: {
         modelRef: { provider: "bailian", id: "kimi-k2.5" },
         reasoningEffort: null,
       },
+      userPermissionMode: null,
+      projectId: null,
+      currentDirectory: null,
+      clientRequestId: null,
     });
 
     expect(calls).toEqual([
       {
-        method: "turn.start",
+        method: "turn/start",
         params: expect.objectContaining({
-          session_id: "session-1",
-          context: expect.objectContaining({
-            source_type: "desktop",
-            provider: "sdk",
-            channel_id: "web",
-            message_id: "msg-1",
-            trace_id: "trace-1",
-          }),
+          sessionId: "session-1",
+          modelSelection: {
+            modelRef: { provider: "bailian", id: "kimi-k2.5" },
+            reasoningEffort: null,
+          },
         }),
       },
     ]);

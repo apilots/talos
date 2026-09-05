@@ -134,7 +134,7 @@ pub(crate) async fn run_forced_finalization_step(
     mut messages: Vec<ChatMessage>,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
-    stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pre_final_execution_summary: Option<String>,
     cause: ForcedFinalizationCause,
 ) -> TalosResult<GeneralTurnStepResult> {
@@ -190,7 +190,7 @@ async fn run_salvage_finalization_step(
     prior_step: GeneralTurnStepResult,
     model: String,
     llm_provider: Arc<dyn LlmProvider>,
-    stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pre_final_execution_summary: Option<String>,
 ) -> TalosResult<GeneralTurnStepResult> {
     messages.push(ChatMessage::user(SALVAGE_FINALIZATION_INSTRUCTION));

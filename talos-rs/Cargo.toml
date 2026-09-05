@@ -36,8 +36,10 @@ members = [
     "crates/action/linux-sandbox",
     "crates/action/windows-sandbox",
     # Orchestration
+    "crates/orchestration/agent-api",
     "crates/orchestration/run-control",
     "crates/orchestration/agent-kernel",
+    "crates/orchestration/agent-provider-kernel",
     "crates/orchestration/agent",
     "crates/orchestration/store",
     "crates/orchestration/service",
@@ -151,6 +153,9 @@ talos-gateway = { path = "crates/gateway/core" }
 talos-app-protocol = { path = "crates/gateway/app-protocol" }
 talos-app-server = { path = "crates/gateway/app-server" }
 talos-agent-kernel = { path = "crates/orchestration/agent-kernel" }
+talos-agent-provider-kernel = { path = "crates/orchestration/agent-provider-kernel" }
+talos-agent-api = { path = "crates/orchestration/agent-api" }
+talos-agent = { path = "crates/orchestration/agent" }
 talos-run-control = { path = "crates/orchestration/run-control" }
 talos-store = { path = "crates/orchestration/store" }
 talos-service = { path = "crates/orchestration/service" }

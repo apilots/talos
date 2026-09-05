@@ -1,5 +1,9 @@
-import type { ChatTurnMetrics, ChatTimelineItem, StreamSessionState } from "@/shared/types/ui";
-import type { TalosTimelinePhase } from "@talos/sdk-core";
+import type {
+  ChatTimelinePhase,
+  ChatTurnMetrics,
+  ChatTimelineItem,
+  StreamSessionState,
+} from "@/shared/types/ui";
 import type { ContextCompactionStage } from "@/shared/types/protocol";
 
 export type ChatContextCompactionItem = Extract<
@@ -65,16 +69,16 @@ export function activeContextCompaction(
   return undefined;
 }
 
-function timelineBlockPrefix(sessionId: string, messageId: string) {
-  return `timeline-${sessionId}-${messageId}-`;
+function timelineBlockPrefix(sessionId: string, turnId: string) {
+  return `timeline-${sessionId}-${turnId}-`;
 }
 
 function timelineBlockId(
   blocks: StreamSessionState["blocks"],
   sessionId: string,
-  messageId: string,
+  turnId: string,
 ) {
-  const userPrefix = `user-${messageId}-`;
+  const userPrefix = `user-${turnId}-`;
   let segmentId: string | undefined;
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const block = blocks[index];
@@ -84,19 +88,19 @@ function timelineBlockId(
     }
   }
   return segmentId
-    ? `${timelineBlockPrefix(sessionId, messageId)}${segmentId}`
-    : `timeline-${sessionId}-${messageId}`;
+    ? `${timelineBlockPrefix(sessionId, turnId)}${segmentId}`
+    : `timeline-${sessionId}-${turnId}`;
 }
 
-function isMessageTimelineBlock(
+function isTurnTimelineBlock(
   block: StreamSessionState["blocks"][number],
   sessionId: string,
-  messageId: string,
+  turnId: string,
 ): block is Extract<StreamSessionState["blocks"][number], { kind: "timeline" }> {
-  const baseId = `timeline-${sessionId}-${messageId}`;
+  const baseId = `timeline-${sessionId}-${turnId}`;
   return (
     block.kind === "timeline" &&
-    (block.id === baseId || block.id.startsWith(timelineBlockPrefix(sessionId, messageId)))
+    (block.id === baseId || block.id.startsWith(timelineBlockPrefix(sessionId, turnId)))
   );
 }
 
@@ -104,9 +108,9 @@ function ensureTimelineBlock(
   stream: StreamSessionState,
   blocks: StreamSessionState["blocks"],
   sessionId: string,
-  messageId: string,
+  turnId: string,
 ) {
-  const id = timelineBlockId(blocks, sessionId, messageId);
+  const id = timelineBlockId(blocks, sessionId, turnId);
   const existingIndex = blocks.findIndex((block) => block.kind === "timeline" && block.id === id);
   if (existingIndex >= 0) {
     return existingIndex;
@@ -124,19 +128,19 @@ function ensureTimelineBlock(
 function shouldCreateMetricsBlock(metrics: ChatTurnMetrics) {
   return (
     metrics.state !== "running" ||
-    metrics.model_rounds > 0 ||
-    metrics.tool_calls > 0 ||
-    metrics.tool_successes > 0 ||
-    metrics.tool_errors > 0 ||
+    metrics.modelRounds > 0 ||
+    metrics.toolCalls > 0 ||
+    metrics.toolSuccesses > 0 ||
+    metrics.toolErrors > 0 ||
     metrics.usage.total_tokens > 0 ||
-    metrics.duration_ms != null
+    metrics.durationMs != null
   );
 }
 
 function mergeTimelineItem(current: ChatTimelineItem, next: ChatTimelineItem): ChatTimelineItem {
   if (current.kind === "tool_call" && next.kind === "tool_call") {
     const status =
-      current.status === "waiting_user_action" && next.status === "running"
+      current.status === "waitingForInput" && next.status === "running"
         ? current.status
         : next.status;
     return {
@@ -177,20 +181,20 @@ function isSameTimelineSource(item: ChatTimelineItem, sourceItemId: string) {
 export function upsertTimelineItemInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   item: ChatTimelineItem,
 ) {
   const blocks = [...stream.blocks];
   const sourceItemId = timelineSourceId(item);
   const existingTimelineIndex = blocks.findIndex(
     (block) =>
-      isMessageTimelineBlock(block, sessionId, messageId) &&
+      isTurnTimelineBlock(block, sessionId, turnId) &&
       block.items.some((entry) => isSameTimelineSource(entry, sourceItemId)),
   );
   const timelineIndex =
     existingTimelineIndex >= 0
       ? existingTimelineIndex
-      : ensureTimelineBlock(stream, blocks, sessionId, messageId);
+      : ensureTimelineBlock(stream, blocks, sessionId, turnId);
   const timeline = blocks[timelineIndex];
   if (timeline.kind !== "timeline") {
     return stream;
@@ -206,10 +210,42 @@ export function upsertTimelineItemInStream(
   return { ...stream, isStreaming: true, blocks };
 }
 
+export function replaceTimelineItemInStream(
+  stream: StreamSessionState,
+  sessionId: string,
+  turnId: string,
+  item: ChatTimelineItem,
+) {
+  const sourceItemId = timelineSourceId(item);
+  const blocks = [...stream.blocks];
+  let replaced = false;
+  for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+    const block = blocks[blockIndex];
+    if (!isTurnTimelineBlock(block, sessionId, turnId)) {
+      continue;
+    }
+    const firstIndex = block.items.findIndex((entry) =>
+      isSameTimelineSource(entry, sourceItemId),
+    );
+    if (firstIndex < 0) {
+      continue;
+    }
+    const items = block.items.filter((entry) => !isSameTimelineSource(entry, sourceItemId));
+    if (!replaced) {
+      items.splice(firstIndex, 0, item);
+      replaced = true;
+    }
+    blocks[blockIndex] = { ...block, items };
+  }
+  return replaced
+    ? { ...stream, blocks }
+    : upsertTimelineItemInStream(stream, sessionId, turnId, item);
+}
+
 export function appendTimelineItemTextInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   sourceItem: ChatTimelineItem,
   chunk: string,
   sequence?: number,
@@ -218,13 +254,13 @@ export function appendTimelineItemTextInStream(
   const sourceItemId = timelineSourceId(sourceItem);
   const existingTimelineIndex = blocks.findIndex(
     (block) =>
-      isMessageTimelineBlock(block, sessionId, messageId) &&
+      isTurnTimelineBlock(block, sessionId, turnId) &&
       block.items.some((entry) => isSameTimelineSource(entry, sourceItemId)),
   );
   const timelineIndex =
     existingTimelineIndex >= 0
       ? existingTimelineIndex
-      : ensureTimelineBlock(stream, blocks, sessionId, messageId);
+      : ensureTimelineBlock(stream, blocks, sessionId, turnId);
   const timeline = blocks[timelineIndex];
   if (timeline.kind !== "timeline") {
     return stream;
@@ -251,12 +287,12 @@ export function appendTimelineItemTextInStream(
 export function commitTimelineAssistantTextInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   itemId: string,
-  phase: TalosTimelinePhase,
+  phase: ChatTimelinePhase,
 ) {
   const blocks = stream.blocks.map((block) => {
-    if (!isMessageTimelineBlock(block, sessionId, messageId)) {
+    if (!isTurnTimelineBlock(block, sessionId, turnId)) {
       return block;
     }
     return {
@@ -270,7 +306,7 @@ export function commitTimelineAssistantTextInStream(
           ...item,
           phase,
           replayFinalAnswer:
-            phase === "final_answer" && item.phase === "unknown" ? true : item.replayFinalAnswer,
+            phase === "final_answer" && item.phase === "pending" ? true : item.replayFinalAnswer,
         };
       }),
     };
@@ -281,12 +317,12 @@ export function commitTimelineAssistantTextInStream(
 export function updateTimelineToolInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   itemId: string,
   payload: Partial<Extract<ChatTimelineItem, { kind: "tool_call" }>>,
 ) {
   const blocks = stream.blocks.map((block) => {
-    if (!isMessageTimelineBlock(block, sessionId, messageId)) {
+    if (!isTurnTimelineBlock(block, sessionId, turnId)) {
       return block;
     }
     return {
@@ -306,13 +342,13 @@ export function updateTimelineToolInStream(
 export function completeTimelineItemInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   itemId: string,
   status: ChatTimelineItem["status"],
   completedAtMs: number,
 ) {
   const blocks = stream.blocks.map((block) => {
-    if (!isMessageTimelineBlock(block, sessionId, messageId)) {
+    if (!isTurnTimelineBlock(block, sessionId, turnId)) {
       return block;
     }
     return {
@@ -337,10 +373,10 @@ export function setTimelineLiveInStream(stream: StreamSessionState, live: boolea
 export function setTurnMetricsInStream(
   stream: StreamSessionState,
   sessionId: string,
-  messageId: string,
+  turnId: string,
   metrics: ChatTurnMetrics,
 ) {
-  const activeTimelineBlockId = timelineBlockId(stream.blocks, sessionId, messageId);
+  const activeTimelineBlockId = timelineBlockId(stream.blocks, sessionId, turnId);
   let foundTimeline = false;
   const blocks = stream.blocks.map((block) => {
     if (block.kind !== "timeline" || block.id !== activeTimelineBlockId) {

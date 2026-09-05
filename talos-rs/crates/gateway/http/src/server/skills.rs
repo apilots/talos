@@ -2,12 +2,11 @@ use std::sync::Arc;
 
 use axum::extract::{Query, State};
 use axum::Json as BodyJson;
-use talos_app_protocol::requests::{
-    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsResolveRequest,
-    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
-};
 use talos_auth::RequestIdentity;
-use talos_types::SkillsReadResponse;
+use talos_types::{
+    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsReadResponse,
+    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
+};
 
 use super::access::shared_actor;
 use super::errors::{api_success, ApiError, JsonResponse};

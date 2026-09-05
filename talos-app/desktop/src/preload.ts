@@ -14,15 +14,15 @@ const bridge: TalosDesktopBridge = {
   ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<T>,
   openExternal: (url: string) => ipcRenderer.invoke(TALOS_IPC.openExternal, url) as Promise<void>,
   onEvent: (handler) => {
-    const listener = (_event: IpcRendererEvent, timelineEvent: AppProtocol.TimelineEventEnvelope) => {
+    const listener = (_event: IpcRendererEvent, timelineEvent: AppProtocol.TimelineEvent) => {
       handler(timelineEvent);
     };
     ipcRenderer.on(TALOS_IPC.event, listener);
     return () => ipcRenderer.off(TALOS_IPC.event, listener);
   },
   onSubscriptionTerminated: (handler) => {
-    const listener = (_event: IpcRendererEvent, envelope: AppProtocol.SubscriptionTerminatedEnvelope) => {
-      handler(envelope);
+    const listener = (_event: IpcRendererEvent, notification: AppProtocol.SubscriptionTerminatedNotification) => {
+      handler(notification);
     };
     ipcRenderer.on(TALOS_IPC.subscriptionTerminated, listener);
     return () => ipcRenderer.off(TALOS_IPC.subscriptionTerminated, listener);

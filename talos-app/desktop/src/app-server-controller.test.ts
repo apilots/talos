@@ -13,8 +13,8 @@ class FakeBridge implements AppServerBridge {
   connected = false;
   closed = false;
   readonly requests: Array<{ method: AppProtocol.ClientMethod; params: unknown }> = [];
-  private eventHandler?: (envelope: AppProtocol.TimelineEventEnvelope) => void;
-  private subscriptionTerminatedHandler?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
+  private eventHandler?: (event: AppProtocol.TimelineEvent) => void;
+  private subscriptionTerminatedHandler?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
   private exitHandler?: (status: { code: number | null; signal: NodeJS.Signals | null }) => void;
 
   constructor(private readonly subscriptionPrefix = "sub") {}
@@ -39,25 +39,25 @@ class FakeBridge implements AppServerBridge {
 
   invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
-    if (method === "event.subscribe") {
+    if (method === "event/subscribe") {
       const request = params as AppProtocol.SubscribeTimelineRequest;
       return Promise.resolve({
-        subscription_id: `${this.subscriptionPrefix}-${this.requests.length}`,
-        session_id: request.session_id,
-        high_water_mark_event_id: request.since_event_id,
+        subscriptionId: `${this.subscriptionPrefix}-${this.requests.length}`,
+        sessionId: request.sessionId,
+        highWaterMarkEventId: request.sinceEventId,
       } satisfies AppProtocol.SubscribeTimelineResponse as T);
     }
     return Promise.resolve({} as T);
   }
 
-  onEvent(handler: (envelope: AppProtocol.TimelineEventEnvelope) => void): () => void {
+  onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void {
     this.eventHandler = handler;
     return () => {
       this.eventHandler = undefined;
     };
   }
 
-  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void {
+  onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void {
     this.subscriptionTerminatedHandler = handler;
     return () => {
       this.subscriptionTerminatedHandler = undefined;
@@ -83,16 +83,16 @@ class FakeBridge implements AppServerBridge {
     return () => undefined;
   }
 
-  emitEvent(envelope: AppProtocol.TimelineEventEnvelope): void {
-    this.eventHandler?.(envelope);
+  emitEvent(event: AppProtocol.TimelineEvent): void {
+    this.eventHandler?.(event);
   }
 
   emitExit(): void {
     this.exitHandler?.({ code: 1, signal: null });
   }
 
-  emitSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {
-    this.subscriptionTerminatedHandler?.(envelope);
+  emitSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
+    this.subscriptionTerminatedHandler?.(notification);
   }
 }
 
@@ -110,16 +110,16 @@ describe("DesktopAppServerController", () => {
     });
 
     await controller.connect();
-    await controller.invoke("event.subscribe", {
-      session_id: "session-1",
-      turn_id: null,
-      since_event_id: null,
-      replay_limit: 50,
-      close_when_idle: true,
-      close_on_terminal: true,
+    await controller.invoke("event/subscribe", {
+      sessionId: "session-1",
+      turnId: null,
+      sinceEventId: null,
+      replayLimit: 50,
+      closeWhenIdle: true,
+      closeOnTerminal: true,
     } satisfies AppProtocol.SubscribeTimelineRequest);
 
-    bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
+    bridges[0]?.emitEvent(createTimelineEvent("event-7", "session-1", "turnStarted"));
     bridges[0]?.emitExit();
 
     await vi.advanceTimersByTimeAsync(10);
@@ -128,14 +128,14 @@ describe("DesktopAppServerController", () => {
     expect(bridges[1]?.connected).toBe(true);
     expect(bridges[1]?.requests).toEqual([
       {
-        method: "event.subscribe",
+        method: "event/subscribe",
         params: {
-          session_id: "session-1",
-          turn_id: null,
-          since_event_id: "event-7",
-          replay_limit: 50,
-          close_when_idle: true,
-          close_on_terminal: true,
+          sessionId: "session-1",
+          turnId: null,
+          sinceEventId: "event-7",
+          replayLimit: 50,
+          closeWhenIdle: true,
+          closeOnTerminal: true,
         },
       },
     ]);
@@ -155,16 +155,16 @@ describe("DesktopAppServerController", () => {
     });
 
     await controller.connect();
-    const response = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event.subscribe", {
-      session_id: "session-1",
-      turn_id: null,
-      since_event_id: null,
-      replay_limit: 50,
-      close_when_idle: null,
-      close_on_terminal: null,
+    const response = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", {
+      sessionId: "session-1",
+      turnId: null,
+      sinceEventId: null,
+      replayLimit: 50,
+      closeWhenIdle: null,
+      closeOnTerminal: null,
     } satisfies AppProtocol.SubscribeTimelineRequest);
-    await controller.invoke("event.unsubscribe", {
-      subscription_id: response.subscription_id,
+    await controller.invoke("event/unsubscribe", {
+      subscriptionId: response.subscriptionId,
     } satisfies AppProtocol.EventUnsubscribeRequest);
 
     bridges[0]?.emitExit();
@@ -179,8 +179,8 @@ describe("DesktopAppServerController", () => {
     vi.useFakeTimers();
     const bridges: FakeBridge[] = [];
     const lifecycle: TalosRuntimeState[] = [];
-    const rendererHandlers = new Set<(envelope: AppProtocol.TimelineEventEnvelope) => void>();
-    const rendererEvents: AppProtocol.TimelineEventEnvelope[] = [];
+    const rendererHandlers = new Set<(event: AppProtocol.TimelineEvent) => void>();
+    const rendererEvents: AppProtocol.TimelineEvent[] = [];
     const controller = new DesktopAppServerController({
       restartDelayMs: 10,
       bridgeFactory: () => {
@@ -188,10 +188,10 @@ describe("DesktopAppServerController", () => {
         bridges.push(bridge);
         return bridge;
       },
-      onEvent: (envelope) => {
-        rendererEvents.push(envelope);
+      onEvent: (event) => {
+        rendererEvents.push(event);
         for (const handler of rendererHandlers) {
-          handler(envelope);
+          handler(event);
         }
       },
       onRuntimeState: (state) => lifecycle.push(state),
@@ -206,26 +206,26 @@ describe("DesktopAppServerController", () => {
       },
       onSubscriptionTerminated: () => () => undefined,
     });
-    const sdkEvents: AppProtocol.TimelineEventEnvelope[] = [];
-    const unsubscribe = rendererClient.onEvent((envelope) => sdkEvents.push(envelope));
+    const sdkEvents: AppProtocol.TimelineEvent[] = [];
+    const unsubscribe = rendererClient.onEvent((event) => sdkEvents.push(event));
 
     try {
       await controller.connect();
       await rendererClient.subscribeEvents({
-        session_id: "session-1",
-        turn_id: null,
-        since_event_id: null,
-        replay_limit: 50,
-        close_when_idle: null,
-        close_on_terminal: null,
+        sessionId: "session-1",
+        turnId: null,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: null,
+        closeOnTerminal: null,
       });
 
-      bridges[0]?.emitEvent(createEventEnvelope("event-7", "session-1", "turn_started"));
+      bridges[0]?.emitEvent(createTimelineEvent("event-7", "session-1", "turnStarted"));
       bridges[0]?.emitExit();
 
       await vi.advanceTimersByTimeAsync(10);
       bridges[1]?.emitEvent(
-        createEventEnvelope("event-8", "session-1", "turn_completed"),
+        createTimelineEvent("event-8", "session-1", "turnCompleted"),
       );
 
       expect(lifecycle.map((state) => state.kind)).toEqual([
@@ -238,19 +238,19 @@ describe("DesktopAppServerController", () => {
       expect(bridges).toHaveLength(2);
       expect(bridges[1]?.requests).toEqual([
         {
-          method: "event.subscribe",
+          method: "event/subscribe",
           params: {
-            session_id: "session-1",
-            turn_id: null,
-            since_event_id: "event-7",
-            replay_limit: 50,
-            close_when_idle: null,
-            close_on_terminal: null,
+            sessionId: "session-1",
+            turnId: null,
+            sinceEventId: "event-7",
+            replayLimit: 50,
+            closeWhenIdle: null,
+            closeOnTerminal: null,
           },
         },
       ]);
-      expect(sdkEvents.map((event) => event.event_id)).toEqual(["event-7", "event-8"]);
-      expect(rendererEvents.map((event) => event.event_id)).toEqual(["event-7", "event-8"]);
+      expect(sdkEvents.map((event) => event.eventId)).toEqual(["event-7", "event-8"]);
+      expect(rendererEvents.map((event) => event.eventId)).toEqual(["event-7", "event-8"]);
     } finally {
       unsubscribe();
       await controller.close();
@@ -265,49 +265,28 @@ describe("DesktopAppServerController", () => {
   });
 });
 
-function createEventEnvelope(
+function createTimelineEvent(
   eventId: string,
   sessionId: string,
-  eventType: "turn_started" | "turn_completed",
-): AppProtocol.TimelineEventEnvelope {
+  eventType: "turnStarted" | "turnCompleted",
+): AppProtocol.TimelineEvent {
   return {
-    event_seq: 1,
-    event_id: eventId,
-    created_at_ms: 1,
-    turn_id: "turn-1",
-    message_id: "message-1",
-    session_id: sessionId,
+    eventSeq: 1,
+    eventId,
+    persistedAt: 1,
     event: {
-      event_seq: 1,
-      event_id: eventId,
-      created_at_ms: 1,
-      turn_id: "turn-1",
-      event_type: eventType,
-      message_id: "message-1",
-      session_id: sessionId,
+      identity: { sessionId, turnId: "turn-1" },
       sequence: 0,
+      occurredAt: 1,
       payload:
-        eventType === "turn_started"
+        eventType === "turnStarted"
           ? {
-              type: "turn_started",
-              request_id: "request-1",
-              turn_id: "turn-1",
-              started_at_ms: 1,
+              type: "turnStarted",
+              data: {},
             }
           : {
-              type: "turn_completed",
-              request_id: "request-1",
-              turn_id: "turn-1",
-              completed_at_ms: 2,
-              stop_reason: "end_turn",
-              usage: {
-                input_tokens: 0,
-                output_tokens: 0,
-                total_tokens: 0,
-                cache_creation_input_tokens: null,
-                cache_read_input_tokens: null,
-              },
-              metrics: null,
+              type: "turnCompleted",
+              data: { stopReason: "endTurn" },
             },
     },
   };
@@ -320,8 +299,8 @@ interface DesktopSmokeArtifact {
   sdkEventIds: string[];
 }
 
-function eventIds(events: AppProtocol.TimelineEventEnvelope[]): string[] {
-  return events.map((event) => event.event_id);
+function eventIds(events: AppProtocol.TimelineEvent[]): string[] {
+  return events.map((event) => event.eventId);
 }
 
 function writeDesktopSmokeArtifact(artifact: DesktopSmokeArtifact): void {

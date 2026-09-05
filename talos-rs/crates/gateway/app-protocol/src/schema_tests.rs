@@ -2,40 +2,6 @@ use super::*;
 use std::path::PathBuf;
 
 #[test]
-fn schema_generation_is_stable_json() {
-    let schema = generate_json_schema();
-    assert!(schema.contains("AppProtocolSchemaRoot"));
-}
-
-#[test]
-fn typescript_generation_includes_jsonrpc_message() {
-    let typescript = generate_typescript();
-    assert!(typescript.contains("JsonRpcMessage"));
-}
-
-#[test]
-fn generated_protocol_includes_timeline_types() {
-    let schema = generate_json_schema();
-    assert!(schema.contains("AgentEvent"));
-    assert!(schema.contains("TalosTimelineItem"));
-
-    let typescript = generate_typescript();
-    assert!(typescript.contains("AgentEvent"));
-    assert!(typescript.contains("TalosTimelineDelta"));
-}
-
-#[test]
-fn generated_protocol_includes_subagent_result_types() {
-    let schema = generate_json_schema();
-    assert!(schema.contains("CollaborationToolResult"));
-    assert!(schema.contains("SubagentSnapshot"));
-
-    let typescript = generate_typescript();
-    assert!(typescript.contains("CollaborationToolResult"));
-    assert!(typescript.contains(r#""type": "subagent_result""#));
-}
-
-#[test]
 fn json_schema_fixture_is_current() {
     let expected = generate_json_schema();
     let actual = std::fs::read_to_string(schema_fixture_path())

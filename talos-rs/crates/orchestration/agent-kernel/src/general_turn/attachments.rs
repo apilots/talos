@@ -152,16 +152,10 @@ pub(super) fn render_prompt_messages(
     assembly: &PromptAssembly,
     input: &str,
     attachments: Vec<Attachment>,
-) -> TalosResult<(Vec<ChatMessage>, Vec<ChatMessage>)> {
+) -> TalosResult<Vec<ChatMessage>> {
     let mut messages = talos_prompt::render_prompt_assembly(assembly);
-    let prompt_prefix_messages = match messages.last() {
-        Some(message) if message.role == Role::User && message.content == input => {
-            messages[..messages.len().saturating_sub(1)].to_vec()
-        }
-        _ => messages.clone(),
-    };
     attach_to_current_user_message(&mut messages, input, attachments)?;
-    Ok((messages, prompt_prefix_messages))
+    Ok(messages)
 }
 
 fn token_overflow() -> TalosError {

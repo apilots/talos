@@ -3,12 +3,11 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Json, Response};
-use talos_auth::RequestIdentity;
-use talos_types::{
-    InterruptTurnRequest, InterruptTurnResponse, RetryTurnRequest, StartTurnRequest,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
-    SubmitUserActionResponse,
+use talos_agent_api::{
+    InterruptTurnRequest, InterruptTurnResponse, SubmitTurnInputRequest, SubmitTurnInputResponse,
 };
+use talos_auth::RequestIdentity;
+use talos_types::{RetryTurnRequest, StartTurnRequest};
 
 use super::access::shared_actor;
 use super::errors::{api_success, api_success_with_status, ApiError, JsonResponse};
@@ -23,7 +22,12 @@ pub(super) async fn start_turn_handler(
     let idempotency_key = start_turn_idempotency_key(&headers, request.client_request_id.clone())?;
     let ack = state
         .gateway
-        .start_turn(&shared_actor(&actor.0), request, idempotency_key)
+        .start_turn(
+            &shared_actor(&actor.0),
+            talos_types::talos::SessionSource::http(),
+            request,
+            idempotency_key,
+        )
         .await
         .map_err(map_turn_submit_error)?;
     Ok(api_success_with_status(StatusCode::ACCEPTED, ack))
@@ -83,27 +87,14 @@ fn start_turn_idempotency_key(
     Ok(header_key.or(client_request_id))
 }
 
-pub(super) async fn submit_dynamic_tool_result_handler(
+pub(super) async fn submit_turn_input_handler(
     State(state): State<Arc<HttpApiState>>,
     actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<SubmitDynamicToolResultRequest>,
-) -> Result<JsonResponse<SubmitDynamicToolResultResponse>, ApiError> {
+    Json(request): Json<SubmitTurnInputRequest>,
+) -> Result<JsonResponse<SubmitTurnInputResponse>, ApiError> {
     state
         .gateway
-        .submit_dynamic_tool_result(&shared_actor(&actor.0), request)
-        .await
-        .map(api_success)
-        .map_err(map_turn_submit_error)
-}
-
-pub(super) async fn submit_user_action_handler(
-    State(state): State<Arc<HttpApiState>>,
-    actor: axum::extract::Extension<RequestIdentity>,
-    Json(request): Json<SubmitUserActionRequest>,
-) -> Result<JsonResponse<SubmitUserActionResponse>, ApiError> {
-    state
-        .gateway
-        .submit_user_action(&shared_actor(&actor.0), request)
+        .submit_turn_input(&shared_actor(&actor.0), request)
         .await
         .map(api_success)
         .map_err(map_turn_submit_error)

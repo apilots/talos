@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-agent-api = { workspace = true }
 talos-gateway = { path = "../core" }
 talos-service = { workspace = true }
 talos-error = { path = "../../infra/error" }
@@ -31,6 +32,7 @@ async-trait = "0.1"
 bytes = { workspace = true }
 
 [dev-dependencies]
+talos-agent = { workspace = true }
 opendal = { workspace = true, features = ["services-memory"] }
 sqlx = { workspace = true }
 talos-app-server = { workspace = true }

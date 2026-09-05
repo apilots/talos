@@ -5,7 +5,7 @@ use serde_json::json;
 fn request_roundtrips() {
     let request = JsonRpcRequest::new(
         RequestId::Number(1),
-        "session.get",
+        "session/get",
         Some(json!({"session_id": "s1"})),
     );
     let value = serde_json::to_string(&request).unwrap();

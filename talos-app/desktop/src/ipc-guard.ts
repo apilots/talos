@@ -4,7 +4,7 @@ type ParamGuard = (params: unknown) => boolean;
 export type DesktopRendererMethod = Exclude<AppProtocol.ClientMethod, "initialize">;
 
 const emptyParams = (params: unknown) => isRecord(params);
-const sessionParams = (params: unknown) => hasString(params, "session_id");
+const sessionParams = (params: unknown) => hasString(params, "sessionId");
 const projectParams = (params: unknown) => hasString(params, "project_id");
 const fsDirectoryReadParams = (params: unknown) =>
   isRecord(params) && (params.path === undefined || params.path === null || typeof params.path === "string");
@@ -86,114 +86,124 @@ const pluginUpdateParams = (params: unknown) =>
     params.expected_source_commit === undefined ||
     typeof params.expected_source_commit === "string") &&
   ["reject_local_changes", "replace_local_changes"].includes(String(params.conflict_policy));
-const userActionSubmitParams = (params: unknown) =>
-  hasString(params, "sessionId") &&
-  hasString(params, "turnId") &&
-  hasString(params, "actionId") &&
-  isRecord(params) &&
-  isRecord(params.response) &&
-  ["question", "sandboxApproval", "dynamicToolResult"].includes(String(params.response.type));
+const turnIdentity = (value: unknown) =>
+  isRecord(value) && hasString(value, "sessionId") && hasString(value, "turnId");
+const agentUserInput = (value: unknown) => isRecord(value) && Array.isArray(value.content);
+const turnInput = (value: unknown) => {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (value.type === "message") {
+    return agentUserInput(value.input);
+  }
+  if (value.type === "queuedMessage") {
+    return typeof value.messageId === "string";
+  }
+  return value.type === "userActionResponse" &&
+    typeof value.actionId === "string" &&
+    isRecord(value.response) &&
+    ["question", "sandboxApproval", "dynamicToolResult"].includes(String(value.response.type));
+};
+const turnInputParams = (params: unknown) =>
+  isRecord(params) && turnIdentity(params.identity) && turnInput(params.input);
 const messageQueueSessionParams = (params: unknown) => hasString(params, "sessionId");
 const messageQueueMessageParams = (params: unknown) =>
   messageQueueSessionParams(params) && hasString(params, "messageId");
 
 const DESKTOP_RENDERER_METHOD_GUARDS = {
-  "auth.login.cancel": authLoginSessionParams,
-  "auth.login.start": authLoginStartParams,
-  "auth.login.status": authLoginSessionParams,
-  "auth.logout": emptyParams,
-  "auth.session.clear": emptyParams,
-  "auth.session.read": emptyParams,
-  "config.get": configGetParams,
-  "config.update": configWriteParams,
-  "config.delete": (params) => hasString(params, "path"),
-  "config.reload": emptyParams,
-  "event.subscribe": sessionParams,
-  "event.unsubscribe": (params) => hasString(params, "subscription_id"),
+  "auth/login/cancel": authLoginSessionParams,
+  "auth/login/start": authLoginStartParams,
+  "auth/login/status": authLoginSessionParams,
+  "auth/logout": emptyParams,
+  "auth/session/clear": emptyParams,
+  "auth/session/read": emptyParams,
+  "config/get": configGetParams,
+  "config/update": configWriteParams,
+  "config/delete": (params) => hasString(params, "path"),
+  "config/reload": emptyParams,
+  "event/subscribe": sessionParams,
+  "event/unsubscribe": (params) => hasString(params, "subscriptionId"),
   "file/upload": fileUploadParams,
   "file/list": emptyParams,
   "file/read": fileIdParams,
   "file/update": fileIdParams,
   "file/delete": fileIdParams,
-  "fs.directory.create": fsDirectoryCreateParams,
-  "fs.directory.read": fsDirectoryReadParams,
-  "memory.file.list": emptyParams,
-  "memory.file.read": (params) => hasString(params, "date"),
-  "memory.file.write": (params) => hasString(params, "date") && hasString(params, "content"),
+  "fs/directory/create": fsDirectoryCreateParams,
+  "fs/directory/read": fsDirectoryReadParams,
+  "memory/file/list": emptyParams,
+  "memory/file/read": (params) => hasString(params, "date"),
+  "memory/file/write": (params) => hasString(params, "date") && hasString(params, "content"),
   "memory/get": (params) => hasString(params, "memoryId"),
   "memory/search": (params) => hasString(params, "query"),
-  "messageQueue/add": (params) => messageQueueSessionParams(params) && hasArray(params, "input"),
+  "messageQueue/add": (params) =>
+    messageQueueSessionParams(params) && isRecord(params) && agentUserInput(params.input),
   "messageQueue/list": messageQueueSessionParams,
-  "messageQueue/update": (params) => messageQueueMessageParams(params) && hasArray(params, "input"),
+  "messageQueue/update": (params) =>
+    messageQueueMessageParams(params) && isRecord(params) && agentUserInput(params.input),
   "messageQueue/delete": messageQueueMessageParams,
   "messageQueue/reorder": (params) => messageQueueSessionParams(params) && hasArray(params, "messageIds"),
   "messageQueue/start": (params) =>
     messageQueueSessionParams(params) &&
     isRecord(params) &&
     (params.messageId === undefined || params.messageId === null || typeof params.messageId === "string"),
-  "messageQueue/steer": (params) => messageQueueMessageParams(params) && hasString(params, "turnId"),
-  "model.list": emptyParams,
-  "project.create": (params) => hasString(params, "name") && hasString(params, "directory"),
-  "project.delete": projectParams,
-  "project.list": emptyParams,
-  "project.patch": projectParams,
-  "project.read": projectParams,
-  "session.active_turn": sessionParams,
-  "session.clear": sessionParams,
-  "session.close": sessionParams,
-  "session.compact": sessionParams,
-  "session.delete": sessionParams,
-  "session.history": sessionParams,
-  "session.list": emptyParams,
-  "session.patch": sessionParams,
-  "session.get": sessionParams,
-  "timeline.recover": sessionParams,
-  "plugin.source.list": emptyParams,
-  "plugin.source.add": pluginSourceAddParams,
-  "plugin.source.refresh": pluginSourceIdParams,
-  "plugin.source.remove": pluginSourceIdParams,
-  "plugin.search": pluginSearchParams,
-  "plugin.list": pluginListParams,
-  "plugin.read": pluginReadParams,
-  "plugin.install": pluginInstallParams,
-  "plugin.update": pluginUpdateParams,
-  "plugin.uninstall": pluginInstallIdParams,
-  "plugin.enable": pluginInstallIdParams,
-  "plugin.disable": pluginInstallIdParams,
+  "model/list": emptyParams,
+  "project/create": (params) => hasString(params, "name") && hasString(params, "directory"),
+  "project/delete": projectParams,
+  "project/list": emptyParams,
+  "project/patch": projectParams,
+  "project/read": projectParams,
+  "session/active_turn": sessionParams,
+  "session/clear": sessionParams,
+  "session/close": sessionParams,
+  "session/compact": sessionParams,
+  "session/delete": sessionParams,
+  "session/history": sessionParams,
+  "session/list": emptyParams,
+  "session/patch": sessionParams,
+  "session/get": sessionParams,
+  "timeline/recover": sessionParams,
+  "plugin/source/list": emptyParams,
+  "plugin/source/add": pluginSourceAddParams,
+  "plugin/source/refresh": pluginSourceIdParams,
+  "plugin/source/remove": pluginSourceIdParams,
+  "plugin/search": pluginSearchParams,
+  "plugin/list": pluginListParams,
+  "plugin/read": pluginReadParams,
+  "plugin/install": pluginInstallParams,
+  "plugin/update": pluginUpdateParams,
+  "plugin/uninstall": pluginInstallIdParams,
+  "plugin/enable": pluginInstallIdParams,
+  "plugin/disable": pluginInstallIdParams,
   "profile/read": emptyParams,
-  "skills.list": emptyParams,
-  "skills.refresh": emptyParams,
-  "skills.suggest": (params) =>
+  "skills/list": emptyParams,
+  "skills/refresh": emptyParams,
+  "skills/suggest": (params) =>
     isRecord(params) &&
     typeof params.query === "string" &&
     (params.limit === undefined || typeof params.limit === "number"),
-  "skills.read": skillSelectorParams,
-  "skills.resolve": (params) =>
+  "skills/read": skillSelectorParams,
+  "skills/resolve": (params) =>
     isRecord(params) &&
     typeof params.text === "string" &&
     Array.isArray(params.selected) &&
     params.selected.every(skillSelector),
-  "tool.dynamic_result.submit": (params) =>
-    hasString(params, "session_id") &&
-    hasString(params, "call_id") &&
-    hasString(params, "tool_name") &&
-    hasString(params, "output") &&
-    hasBoolean(params, "success"),
-  "turn.interrupt": (params) => sessionParams(params) && hasString(params, "turn_id"),
-  "turn.retry": (params) =>
-    hasString(params, "session_id") &&
-    hasArray(params, "input") &&
-    hasString(params, "client_message_id") &&
-    hasString(params, "retry_of_message_id"),
-  "turn.start": (params) =>
-    hasString(params, "session_id") &&
-    hasArray(params, "input") &&
-    hasString(params, "client_request_id"),
-  "userAction/submit": userActionSubmitParams,
-  "user.current": emptyParams,
-  "workspace.doc.list": emptyParams,
-  "workspace.doc.read": (params) => hasString(params, "kind"),
-  "workspace.doc.write": (params) => hasString(params, "kind") && hasString(params, "content"),
+  "turn/input": turnInputParams,
+  "turn/interrupt": (params) => isRecord(params) && turnIdentity(params.identity),
+  "turn/retry": (params) =>
+    hasString(params, "sessionId") &&
+    isRecord(params) &&
+    agentUserInput(params.input) &&
+    hasString(params, "clientMessageId") &&
+    hasString(params, "retryOfMessageId"),
+  "turn/start": (params) =>
+    isRecord(params) &&
+    hasString(params, "sessionId") &&
+    agentUserInput(params.input) &&
+    (params.clientRequestId === null || hasString(params, "clientRequestId")),
+  "user/current": emptyParams,
+  "workspace/doc/list": emptyParams,
+  "workspace/doc/read": (params) => hasString(params, "kind"),
+  "workspace/doc/write": (params) => hasString(params, "kind") && hasString(params, "content"),
 } satisfies Record<DesktopRendererMethod, ParamGuard>;
 
 export function assertDesktopRendererInvoke(
@@ -228,10 +238,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasString(params: unknown, key: string): boolean {
   return isRecord(params) && typeof params[key] === "string";
-}
-
-function hasBoolean(params: unknown, key: string): boolean {
-  return isRecord(params) && typeof params[key] === "boolean";
 }
 
 function hasArray(params: unknown, key: string): boolean {

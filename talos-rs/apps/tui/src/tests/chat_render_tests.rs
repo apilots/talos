@@ -23,7 +23,7 @@ fn test_in_flight_activity_line_stays_visible_with_live_metrics() {
     let mut app = create_embedded_app();
     app.in_flight = true;
     app.turn_metrics_live = true;
-    app.turn_metrics = Some(TurnExecutionMetrics::default());
+    app.turn_metrics = Some(AgentRunMetrics::default());
     app.render_runtime
         .append_system_notice("I will inspect the files.");
 
@@ -99,7 +99,7 @@ fn test_composer_layout_is_stable_when_session_metrics_change() {
         .mark_terminal_blocks_synced(synced_block_ids);
     let without_metrics = app.inline_viewport_height(100, 30);
 
-    app.turn_metrics = Some(TurnExecutionMetrics::default());
+    app.turn_metrics = Some(AgentRunMetrics::default());
     let with_metrics = app.inline_viewport_height(100, 30);
 
     assert_eq!(with_metrics, without_metrics);

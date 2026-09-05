@@ -7,7 +7,7 @@ use base64::Engine;
 use bytes::Bytes;
 use futures_util::stream;
 use opendal::{services::Fs, Operator};
-use talos_agent_kernel::{AttachmentReader, TurnFileScope};
+use talos_agent::{AttachmentReader, TurnFileScope};
 use talos_config::{FileStorageConfig, FileStorageLimits};
 use talos_error::TalosFileErrorKind;
 use talos_storage::SqliteStorage;

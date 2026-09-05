@@ -1,25 +1,22 @@
-//! Server-owned projection from existing Turn, ActiveTurn, and history facts.
+//! Server-owned projection from canonical Agent Turn facts.
 //!
-//! This module formats bounded Subagent snapshots for Tool results. It does
-//! not own lifecycle state, persist a second status, or expose client APIs.
+//! This module formats bounded Subagent snapshots for Tool results. It owns no
+//! lifecycle state and reuses the Agent reducer instead of maintaining an item
+//! delta reducer or reading Provider artifacts.
 
-use talos_error::{TalosError, TalosResult};
-use talos_store::session::ActiveTurnStatus;
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, StopReason, TalosTimelineContent, TalosTimelineItem,
-    TalosTimelinePhase,
+use talos_agent::AgentEventReducer;
+use talos_agent_api::{
+    ActiveTurnState, AgentAssistantTextPhase, AgentEventPayload, AgentMessage,
+    AgentMessageBlockContent,
 };
+use talos_error::{TalosError, TalosResult};
 use talos_types::{
     SubagentOutcome, SubagentRef, SubagentSnapshot, SubagentUpdate, SubagentUpdateKind,
 };
 
-use crate::history::timeline_items_from_events;
-
 use super::service::SubagentService;
 
 const MAX_TERMINAL_OUTPUT_BYTES: usize = 2 * 1024;
-const MAX_SUBAGENT_TURN_EVENTS: usize = 256;
-
 impl SubagentService {
     pub(super) async fn snapshot(&self, subagent: SubagentRef) -> TalosResult<SubagentSnapshot> {
         let agent_id = self.subagent_agent_id(&subagent).await?;
@@ -31,34 +28,23 @@ impl SubagentService {
         subagent: SubagentRef,
         agent_id: String,
     ) -> TalosResult<SubagentSnapshot> {
-        let active = self
-            .timeline
-            .get_active_turn(&subagent.session_id)
-            .await?
-            .ok_or_else(|| {
-                TalosError::public(
-                    talos_error::ErrorCode::Conflict,
-                    format!("subagent '{}' has no turn state", subagent.session_id),
+        if let Some(active) = self.timeline.get_active_turn(&subagent.session_id).await? {
+            return self
+                .build_turn_snapshot(
+                    subagent,
+                    agent_id,
+                    active.identity.turn_id,
+                    Some(active.state),
                 )
-            })?;
-        let turn_events = self
-            .complete_turn_events(&subagent.session_id, &active.turn_id)
-            .await?;
-        let turn_items = self
-            .authoritative_turn_items(
-                &subagent.session_id,
-                active.status,
-                active.message_id.as_deref(),
-                &turn_events,
-            )
-            .await?;
-        let outcome = Self::build_outcome(active.status, active.turn_id, &turn_events, &turn_items);
-        Ok(Self::build_snapshot(
-            subagent,
-            agent_id,
-            &turn_items,
-            outcome,
-        ))
+                .await;
+        }
+        let terminal = self
+            .timeline
+            .get_latest_terminal_event(&subagent.session_id)
+            .await?
+            .ok_or_else(|| missing_turn_state(&subagent.session_id))?;
+        self.build_turn_snapshot(subagent, agent_id, terminal.event.identity.turn_id, None)
+            .await
     }
 
     pub(super) async fn snapshot_exact(
@@ -66,129 +52,114 @@ impl SubagentService {
         subagent: SubagentRef,
         turn_id: &str,
     ) -> TalosResult<SubagentSnapshot> {
-        let active = self.timeline.get_active_turn(&subagent.session_id).await?;
-        let active = active.ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                format!("subagent '{}' has no turn state", subagent.session_id),
-            )
-        })?;
-        if active.turn_id != turn_id {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                format!(
-                    "turn '{turn_id}' is not the current turn for subagent '{}'",
-                    subagent.session_id
-                ),
-            ));
-        }
-        let turn_events = self
-            .complete_turn_events(&subagent.session_id, turn_id)
-            .await?;
-        let turn_items = self
-            .authoritative_turn_items(
-                &subagent.session_id,
-                active.status,
-                active.message_id.as_deref(),
-                &turn_events,
-            )
-            .await?;
-        let outcome = Self::build_outcome(
-            active.status,
-            turn_id.to_string(),
-            &turn_events,
-            &turn_items,
-        );
+        let active_state = self
+            .timeline
+            .get_active_turn(&subagent.session_id)
+            .await?
+            .filter(|active| active.identity.turn_id == turn_id)
+            .map(|active| active.state);
         let agent_id = self.subagent_agent_id(&subagent).await?;
-        Ok(Self::build_snapshot(
-            subagent,
-            agent_id,
-            &turn_items,
-            outcome,
-        ))
+        self.build_turn_snapshot(subagent, agent_id, turn_id.to_string(), active_state)
+            .await
     }
 
-    fn build_outcome(
-        status: ActiveTurnStatus,
+    async fn build_turn_snapshot(
+        &self,
+        subagent: SubagentRef,
+        agent_id: String,
         turn_id: String,
-        turn_events: &[AgentEvent],
-        turn_items: &[TalosTimelineItem],
-    ) -> SubagentOutcome {
-        match status {
-            ActiveTurnStatus::Running => SubagentOutcome::Running { turn_id },
-            ActiveTurnStatus::WaitingUserAction => SubagentOutcome::WaitingUserAction { turn_id },
-            ActiveTurnStatus::Cancelling => SubagentOutcome::Cancelling { turn_id },
-            ActiveTurnStatus::Completed => {
-                let stop_reason = turn_events
-                    .iter()
-                    .rev()
-                    .find_map(|event| match &event.payload {
-                        AgentEventPayload::TurnCompleted(payload) => Some(payload.stop_reason),
-                        _ => None,
-                    });
-                if stop_reason == Some(StopReason::Cancelled) {
-                    SubagentOutcome::Interrupted { turn_id }
-                } else {
-                    let (output, truncated) =
-                        bounded_final_answer(turn_items, MAX_TERMINAL_OUTPUT_BYTES);
-                    SubagentOutcome::Completed {
-                        turn_id,
-                        output,
-                        truncated,
-                    }
-                }
-            }
-            ActiveTurnStatus::Failed => {
-                let error = turn_events
-                    .iter()
-                    .rev()
-                    .find_map(|event| match &event.payload {
-                        AgentEventPayload::TurnError(payload) => {
-                            Some(payload.error.message.clone())
-                        }
-                        _ => None,
-                    })
-                    .unwrap_or_else(|| "subagent turn failed".to_string());
-                let (error, truncated) = truncate_utf8(error, MAX_TERMINAL_OUTPUT_BYTES);
-                SubagentOutcome::Failed {
-                    error,
-                    turn_id,
-                    truncated,
-                }
-            }
-        }
+        active_state: Option<ActiveTurnState>,
+    ) -> TalosResult<SubagentSnapshot> {
+        let identity = talos_agent_api::AgentTurnRef::new(&subagent.session_id, &turn_id);
+        let mut reducer = AgentEventReducer::new(identity.clone());
+        let mut last_event = None;
+        self.timeline
+            .scan_turn_events(&identity, |record| {
+                let event = record.event;
+                reducer
+                    .apply(event.clone())
+                    .map_err(talos_agent::AgentError::into_talos_error)?;
+                last_event = Some(event);
+                Ok(())
+            })
+            .await?;
+        let last_event = last_event.ok_or_else(|| missing_turn_state(&subagent.session_id))?;
+        let messages = reducer.checkpoint().messages;
+        let outcome = build_outcome(active_state, turn_id, &last_event.payload, &messages)?;
+        Ok(SubagentSnapshot {
+            subagent,
+            agent_id,
+            latest_update: latest_update(&messages),
+            outcome,
+        })
     }
 
     async fn subagent_agent_id(&self, subagent: &SubagentRef) -> TalosResult<String> {
-        let record = self
-            .sessions
-            .get_session_record(&subagent.session_id)
+        self.sessions
+            .load_record(&subagent.session_id)
             .await?
+            .map(|record| record.agent_id)
             .ok_or_else(|| {
                 TalosError::public(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("subagent {}", subagent.session_id),
                 )
-            })?;
-        Ok(record.agent_id)
+            })
     }
+}
 
-    fn build_snapshot(
-        subagent: SubagentRef,
-        agent_id: String,
-        turn_items: &[TalosTimelineItem],
-        outcome: SubagentOutcome,
-    ) -> SubagentSnapshot {
-        let latest_update = turn_items.iter().rev().find_map(|item| {
-            let kind = match item.phase {
-                TalosTimelinePhase::Commentary => SubagentUpdateKind::Commentary,
-                TalosTimelinePhase::FinalAnswer => SubagentUpdateKind::FinalAnswer,
-                _ => return None,
-            };
-            let TalosTimelineContent::Text { text } = &item.content else {
+fn build_outcome(
+    active_state: Option<ActiveTurnState>,
+    turn_id: String,
+    last_event: &AgentEventPayload,
+    messages: &[AgentMessage],
+) -> TalosResult<SubagentOutcome> {
+    match last_event {
+        AgentEventPayload::TurnCompleted(_) => {
+            let (output, truncated) = bounded_final_answer(messages, MAX_TERMINAL_OUTPUT_BYTES);
+            Ok(SubagentOutcome::Completed {
+                turn_id,
+                output,
+                truncated,
+            })
+        }
+        AgentEventPayload::TurnFailed(failed) => {
+            if failed.error.code == talos_error::ErrorCode::Cancelled {
+                return Ok(SubagentOutcome::Interrupted { turn_id });
+            }
+            let (error, truncated) =
+                truncate_utf8(failed.error.message.clone(), MAX_TERMINAL_OUTPUT_BYTES);
+            Ok(SubagentOutcome::Failed {
+                error,
+                turn_id,
+                truncated,
+            })
+        }
+        _ => match active_state {
+            Some(ActiveTurnState::Running) => Ok(SubagentOutcome::Running { turn_id }),
+            Some(ActiveTurnState::WaitingForInput) => {
+                Ok(SubagentOutcome::WaitingUserAction { turn_id })
+            }
+            Some(ActiveTurnState::Cancelling) => Ok(SubagentOutcome::Cancelling { turn_id }),
+            None => Err(TalosError::internal(
+                "nonterminal Subagent history has no canonical active Turn",
+            )),
+        },
+    }
+}
+
+fn latest_update(messages: &[AgentMessage]) -> Option<SubagentUpdate> {
+    messages.iter().rev().find_map(|message| {
+        message.blocks.iter().rev().find_map(|block| {
+            let AgentMessageBlockContent::AssistantText(text) = &block.content else {
                 return None;
             };
-            let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let kind = match text.phase {
+                AgentAssistantTextPhase::Commentary => SubagentUpdateKind::Commentary,
+                AgentAssistantTextPhase::FinalAnswer => SubagentUpdateKind::FinalAnswer,
+                AgentAssistantTextPhase::Pending => return None,
+            };
+            let normalized = text.text.split_whitespace().collect::<Vec<_>>().join(" ");
             if normalized.is_empty() {
                 return None;
             }
@@ -198,74 +169,20 @@ impl SubagentService {
                 text,
                 truncated,
             })
-        });
-        SubagentSnapshot {
-            subagent,
-            agent_id,
-            latest_update,
-            outcome,
-        }
-    }
-
-    async fn complete_turn_events(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-    ) -> TalosResult<Vec<AgentEvent>> {
-        self.timeline
-            .list_turn_events(session_id, turn_id, MAX_SUBAGENT_TURN_EVENTS)
-            .await
-    }
-
-    async fn authoritative_turn_items(
-        &self,
-        session_id: &str,
-        status: ActiveTurnStatus,
-        message_id: Option<&str>,
-        tail_events: &[AgentEvent],
-    ) -> TalosResult<Vec<TalosTimelineItem>> {
-        if status != ActiveTurnStatus::Completed {
-            return Ok(timeline_items_from_events(tail_events));
-        }
-        let stop_reason = tail_events.iter().rev().find_map(|event| {
-            let AgentEventPayload::TurnCompleted(completed) = &event.payload else {
-                return None;
-            };
-            Some(completed.stop_reason)
-        });
-        if stop_reason == Some(StopReason::Cancelled) {
-            return Ok(timeline_items_from_events(tail_events));
-        }
-        let session = self
-            .sessions
-            .get_session(session_id)
-            .await?
-            .ok_or_else(|| {
-                TalosError::public(
-                    talos_error::ErrorCode::ResourceNotFound,
-                    format!("subagent {session_id}"),
-                )
-            })?;
-        let message_id = message_id.ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                format!(
-                    "completed subagent turn for session '{session_id}' has no message identity"
-                ),
-            )
-        })?;
-        self.history.latest_turn_items(&session, message_id).await
-    }
+        })
+    })
 }
 
-fn bounded_final_answer(turn_items: &[TalosTimelineItem], max_bytes: usize) -> (String, bool) {
+fn bounded_final_answer(messages: &[AgentMessage], max_bytes: usize) -> (String, bool) {
     let mut output = String::new();
-    for text in turn_items
+    for text in messages
         .iter()
-        .filter(|item| item.phase == TalosTimelinePhase::FinalAnswer)
-        .filter_map(|item| match &item.content {
-            TalosTimelineContent::Text { text } => Some(text.as_str()),
-            _ => None,
+        .flat_map(|message| &message.blocks)
+        .filter_map(|block| {
+            let AgentMessageBlockContent::AssistantText(text) = &block.content else {
+                return None;
+            };
+            (text.phase == AgentAssistantTextPhase::FinalAnswer).then_some(text.text.as_str())
         })
     {
         let separator = usize::from(!output.is_empty());
@@ -291,6 +208,13 @@ fn bounded_final_answer(turn_items: &[TalosTimelineItem], max_bytes: usize) -> (
         return (output, true);
     }
     (output, false)
+}
+
+fn missing_turn_state(session_id: &str) -> TalosError {
+    TalosError::public(
+        talos_error::ErrorCode::Conflict,
+        format!("subagent '{session_id}' has no turn state"),
+    )
 }
 
 fn truncate_utf8(value: String, max_bytes: usize) -> (String, bool) {

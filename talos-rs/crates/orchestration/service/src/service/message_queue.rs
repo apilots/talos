@@ -7,7 +7,7 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueAddRequest,
     ) -> ServiceResult<MessageQueue> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let _session = self.access.load_session(actor, &request.session_id).await?;
         TurnService::validate_message_queue_input(&request.input)?;
         self.message_queue.add(&request.session_id, request.input)?;
         if let Err(error) = self.turns.try_dispatch_next(&request.session_id).await {
@@ -26,7 +26,7 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueListRequest,
     ) -> ServiceResult<MessageQueue> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let _session = self.access.load_session(actor, &request.session_id).await?;
         self.message_queue.list(&request.session_id)
     }
 
@@ -36,7 +36,7 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueUpdateRequest,
     ) -> ServiceResult<MessageQueue> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let _session = self.access.load_session(actor, &request.session_id).await?;
         TurnService::validate_message_queue_input(&request.input)?;
         self.message_queue
             .update(&request.session_id, &request.message_id, request.input)
@@ -48,7 +48,7 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueDeleteRequest,
     ) -> ServiceResult<MessageQueue> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let _session = self.access.load_session(actor, &request.session_id).await?;
         self.message_queue
             .delete(&request.session_id, &request.message_id)
     }
@@ -59,7 +59,7 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueReorderRequest,
     ) -> ServiceResult<MessageQueue> {
-        let _session = self.access.get_session(actor, &request.session_id).await?;
+        let _session = self.access.load_session(actor, &request.session_id).await?;
         self.message_queue
             .reorder(&request.session_id, &request.message_ids)
     }
@@ -70,29 +70,9 @@ impl TalosService {
         actor: &Actor,
         request: MessageQueueStartRequest,
     ) -> ServiceResult<StartTurnResponse> {
-        let session = self.access.get_session(actor, &request.session_id).await?;
-        let result = self
-            .turns
-            .start_queued_message(session, request.message_id.as_deref())
-            .await?;
-        Ok(StartTurnResponse {
-            request_id: result.request_id,
-            message_id: result.message_id,
-            session_id: result.session_id,
-            turn_id: result.turn_id,
-            status: turn_command_status(result.status),
-        })
-    }
-
-    /// Submits one waiting text-and-files message to the exact active Turn.
-    pub async fn steer_queued_message(
-        &self,
-        actor: &Actor,
-        request: MessageQueueSteerRequest,
-    ) -> ServiceResult<MessageQueue> {
-        let session = self.access.get_session(actor, &request.session_id).await?;
+        let session = self.access.load_session(actor, &request.session_id).await?;
         self.turns
-            .steer_queued_message(session, &request.message_id, &request.turn_id)
+            .start_queued_message(session, request.message_id.as_deref())
             .await
     }
 }

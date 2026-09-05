@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
 use talos_sdk::{
-    AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot, ModelRef,
-    ModelSelection, ReasoningEffort, SessionInfo, UserRole,
+    AgentRunMetrics, AuthSessionReadResponse, AuthSessionSnapshot, AuthSessionUserSnapshot,
+    ModelRef, ModelSelection, ReasoningEffort, SessionInfo, UserRole,
 };
-use talos_types::talos::{StopReason, TokenUsage, TurnExecutionMetrics};
+use talos_types::talos::TokenUsage;
 
 use super::{render_status_card, TuiStatusSnapshot};
 use crate::test_support::{mock_model_info, set_test_model_info};
@@ -15,8 +15,8 @@ fn session_info() -> SessionInfo {
         id: "sess-status".to_string(),
         title: "Status Session".to_string(),
         user_id: "status-user".to_string(),
-        source_type: talos_types::talos::TalosSourceType::Cli,
-        provider: talos_types::talos::TalosProvider::Cli,
+        source_type: talos_types::talos::SessionSourceType::Cli,
+        source_provider: talos_types::talos::SessionSourceProvider::Cli,
         model_selection: ModelSelection {
             model_ref: ModelRef {
                 provider: "mock".to_string(),
@@ -77,13 +77,13 @@ fn test_status_snapshot_renders_card_from_real_state() {
     app.connection_status = "connected".to_string();
     app.current_project_root = Some(PathBuf::from("/tmp/talos-workspace"));
     app.trace_event_count = 128;
-    app.turn_metrics = Some(TurnExecutionMetrics {
+    app.turn_metrics = Some(AgentRunMetrics {
         model_rounds: 4,
         tool_calls: 7,
         tool_successes: 6,
         tool_errors: 1,
-        stop_reason: StopReason::EndTurn,
         usage: TokenUsage::default(),
+        context: None,
         duration_ms: Some(9_600),
     });
 

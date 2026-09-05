@@ -24,7 +24,7 @@ export interface TalosDesktopBridge {
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
   openExternal(url: string): Promise<void>;
-  onEvent(handler: (event: AppProtocol.TimelineEventEnvelope) => void): () => void;
-  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
+  onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
+  onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;
   onRuntimeState(handler: (state: TalosRuntimeState) => void): () => void;
 }

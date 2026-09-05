@@ -71,11 +71,15 @@ pub struct ContextCompactionMetrics {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct EventUnsubscribeRequest {
     pub subscription_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[ts(rename_all = "camelCase")]
 pub struct EventUnsubscribeResponse {
     pub subscription_id: String,
     pub unsubscribed: bool,

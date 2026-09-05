@@ -8,13 +8,14 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | --- | ---: |
 | `feat` | 042 |
 | `fix` | 007 |
-| `refactor` | 044 |
+| `refactor` | 045 |
 | `docs` | 001 |
 
 ## Active Specs
 
 | ID | Directory | Status |
 | --- | --- | --- |
+| refactor-044 | Merged into `refactor-040-agent-provider-api-standardization` | consolidated |
 | refactor-043 | `refactor-043-workspace-agent-session-isolation` | implemented |
 | refactor-042 | `refactor-042-dream-memory-okf` | implemented |
 | refactor-041 | `refactor-041-user-workspace-memory` | implemented |
@@ -25,7 +26,7 @@ This file owns spec ID allocation. Update it in the same change that creates, ar
 | feat-039 | `feat-039-tui-release-installer` | active |
 | feat-037 | `feat-037-tool-permission-user-interaction` | draft |
 | feat-036 | `feat-036-unified-tool-sandbox` | draft |
-| refactor-040 | `refactor-040-agent-runtime-message-event-api` | draft |
+| refactor-040 | `refactor-040-agent-provider-api-standardization` | verification |
 | feat-034 | `feat-034-web-search-settings` | implementing |
 | feat-035 | `feat-035-mcp-server-management-reliability` | draft |
 | feat-033 | `feat-033-user-file-storage-model-input` | draft |

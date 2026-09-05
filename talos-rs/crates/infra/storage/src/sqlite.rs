@@ -1,17 +1,25 @@
 //! SQLite Storage Implementation
 
-use super::{Row, Storage};
+use super::{Row, Storage, StorageTransaction};
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::sqlite::SqlitePoolOptions;
-use sqlx::{Column, Pool, Row as SqlxRow, Sqlite};
+use sqlx::pool::PoolConnection;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::{Column, Pool, Row as SqlxRow, Sqlite, SqliteConnection};
+use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::str::FromStr;
+use std::time::Duration;
 use talos_error::{TalosError, TalosResult};
+use tokio::sync::{Mutex, OwnedMutexGuard};
 use tracing::{debug, info};
+
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// SQLite Storage implementation
 pub struct SqliteStorage {
     pool: Pool<Sqlite>,
+    write_gate: std::sync::Arc<Mutex<()>>,
 }
 
 impl SqliteStorage {
@@ -41,15 +49,24 @@ impl SqliteStorage {
             }
         }
 
+        let connection_options = SqliteConnectOptions::from_str(&connection_string)
+            .map_err(|error| {
+                TalosError::internal(format!("Invalid SQLite connection string: {error}"))
+            })?
+            .busy_timeout(SQLITE_BUSY_TIMEOUT)
+            .journal_mode(SqliteJournalMode::Wal);
         let pool = SqlitePoolOptions::new()
             .max_connections(max_connections)
-            .connect(&connection_string)
+            .connect_with(connection_options)
             .await
             .map_err(|e| TalosError::internal(format!("Failed to connect to database: {}", e)))?;
 
         info!("SQLite connection established");
 
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            write_gate: std::sync::Arc::new(Mutex::new(())),
+        })
     }
 
     /// Get the connection pool
@@ -96,10 +113,182 @@ impl SqliteStorage {
 
         Path::new(database_path).parent()
     }
+
+    fn rows(rows: Vec<sqlx::sqlite::SqliteRow>) -> Vec<Row> {
+        rows.into_iter().map(sqlite_row).collect()
+    }
+}
+
+/// SQLite write transaction that acquires the database writer before its first read.
+///
+/// Store implementations use this boundary for read-modify-write operations so
+/// a deferred transaction cannot fail while upgrading a stale read snapshot.
+pub struct SqliteWriteTransaction {
+    connection: Option<PoolConnection<Sqlite>>,
+}
+
+impl SqliteWriteTransaction {
+    /// Acquire one pooled connection and begin an immediate SQLite transaction.
+    pub async fn begin(pool: &Pool<Sqlite>) -> TalosResult<Self> {
+        let mut connection = pool
+            .acquire()
+            .await
+            .map_err(|error| TalosError::internal(format!("acquire connection failed: {error}")))?;
+        sqlx::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await
+            .map_err(|error| TalosError::internal(format!("begin transaction failed: {error}")))?;
+        Ok(Self {
+            connection: Some(connection),
+        })
+    }
+
+    /// Commit the transaction and return its clean connection to the pool.
+    pub async fn commit(mut self) -> TalosResult<()> {
+        sqlx::query("COMMIT")
+            .execute(&mut **self.connection_mut()?)
+            .await
+            .map_err(|error| TalosError::internal(format!("transaction commit failed: {error}")))?;
+        self.connection.take();
+        Ok(())
+    }
+
+    /// Roll back the transaction and return its clean connection to the pool.
+    pub async fn rollback(mut self) -> TalosResult<()> {
+        sqlx::query("ROLLBACK")
+            .execute(&mut **self.connection_mut()?)
+            .await
+            .map_err(|error| {
+                TalosError::internal(format!("transaction rollback failed: {error}"))
+            })?;
+        self.connection.take();
+        Ok(())
+    }
+
+    fn connection_mut(&mut self) -> TalosResult<&mut PoolConnection<Sqlite>> {
+        self.connection
+            .as_mut()
+            .ok_or_else(|| TalosError::internal("transaction already finished"))
+    }
+}
+
+impl Deref for SqliteWriteTransaction {
+    type Target = SqliteConnection;
+
+    fn deref(&self) -> &Self::Target {
+        self.connection
+            .as_deref()
+            .expect("active SQLite transaction connection")
+    }
+}
+
+impl DerefMut for SqliteWriteTransaction {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.connection
+            .as_deref_mut()
+            .expect("active SQLite transaction connection")
+    }
+}
+
+impl Drop for SqliteWriteTransaction {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            drop(connection.detach());
+        }
+    }
+}
+
+struct SqliteStorageTransaction {
+    transaction: Option<SqliteWriteTransaction>,
+    _write_guard: OwnedMutexGuard<()>,
+}
+
+#[async_trait]
+impl StorageTransaction for SqliteStorageTransaction {
+    async fn query(&mut self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
+        let mut query = sqlx::query(sql);
+        for param in params {
+            query = query.bind(param);
+        }
+        let rows = query
+            .fetch_all(&mut **self.transaction_mut()?)
+            .await
+            .map_err(|error| TalosError::internal(format!("transaction query failed: {error}")))?;
+        Ok(SqliteStorage::rows(rows))
+    }
+
+    async fn execute(&mut self, sql: &str, params: &[&str]) -> TalosResult<u64> {
+        let mut query = sqlx::query(sql);
+        for param in params {
+            query = query.bind(param);
+        }
+        query
+            .execute(&mut **self.transaction_mut()?)
+            .await
+            .map(|result| result.rows_affected())
+            .map_err(|error| TalosError::internal(format!("transaction execute failed: {error}")))
+    }
+
+    async fn commit(mut self: Box<Self>) -> TalosResult<()> {
+        self.transaction
+            .take()
+            .expect("transaction can finish only once")
+            .commit()
+            .await
+    }
+
+    async fn rollback(mut self: Box<Self>) -> TalosResult<()> {
+        self.transaction
+            .take()
+            .expect("transaction can finish only once")
+            .rollback()
+            .await
+    }
+}
+
+impl SqliteStorageTransaction {
+    fn transaction_mut(&mut self) -> TalosResult<&mut SqliteWriteTransaction> {
+        self.transaction
+            .as_mut()
+            .ok_or_else(|| TalosError::internal("transaction already finished"))
+    }
+}
+
+fn sqlite_row(row: sqlx::sqlite::SqliteRow) -> Row {
+    let columns = row
+        .columns()
+        .iter()
+        .map(|column| column.name().to_string())
+        .collect::<Vec<_>>();
+    let values = (0..columns.len())
+        .map(|index| {
+            if let Ok(value) = row.try_get::<String, _>(index) {
+                Value::String(value)
+            } else if let Ok(value) = row.try_get::<i64, _>(index) {
+                Value::Number(value.into())
+            } else if let Ok(value) = row.try_get::<f64, _>(index) {
+                serde_json::Number::from_f64(value).map_or(Value::Null, Value::Number)
+            } else if let Ok(value) = row.try_get::<bool, _>(index) {
+                Value::Bool(value)
+            } else {
+                Value::Null
+            }
+        })
+        .collect();
+    Row::new(columns, values)
 }
 
 #[async_trait]
 impl Storage for SqliteStorage {
+    async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>> {
+        let write_guard = self.write_gate.clone().lock_owned().await;
+        let transaction = SqliteWriteTransaction::begin(&self.pool).await?;
+        Ok(Box::new(SqliteStorageTransaction {
+            transaction: Some(transaction),
+            _write_guard: write_guard,
+        }))
+    }
+
     async fn query(&self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>> {
         debug!("Executing query: {} with params: {:?}", sql, params);
 
@@ -113,31 +302,7 @@ impl Storage for SqliteStorage {
             .await
             .map_err(|e| TalosError::internal(format!("Query failed: {}", e)))?;
 
-        let mut result = Vec::new();
-        for row in rows {
-            let columns: Vec<String> = row.columns().iter().map(|c| c.name().to_string()).collect();
-            let mut values = Vec::new();
-
-            for i in 0..columns.len() {
-                let json_value = if let Ok(value) = row.try_get::<String, _>(i) {
-                    Value::String(value)
-                } else if let Ok(value) = row.try_get::<i64, _>(i) {
-                    Value::Number(value.into())
-                } else if let Ok(value) = row.try_get::<f64, _>(i) {
-                    match serde_json::Number::from_f64(value) {
-                        Some(num) => Value::Number(num),
-                        None => Value::Null,
-                    }
-                } else if let Ok(value) = row.try_get::<bool, _>(i) {
-                    Value::Bool(value)
-                } else {
-                    Value::Null
-                };
-                values.push(json_value);
-            }
-
-            result.push(Row::new(columns, values));
-        }
+        let result = Self::rows(rows);
 
         debug!("Query returned {} rows", result.len());
         Ok(result)
@@ -145,6 +310,7 @@ impl Storage for SqliteStorage {
 
     async fn execute(&self, sql: &str, params: &[&str]) -> TalosResult<u64> {
         debug!("Executing: {} with params: {:?}", sql, params);
+        let _write_guard = self.write_gate.lock().await;
 
         let mut query = sqlx::query(sql);
         for param in params {

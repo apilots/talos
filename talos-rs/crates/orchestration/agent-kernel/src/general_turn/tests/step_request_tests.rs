@@ -7,7 +7,6 @@ async fn test_build_general_turn_step_request() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
-        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "default".to_string(),
@@ -17,10 +16,8 @@ async fn test_build_general_turn_step_request() {
         reasoning_effort: Some(ReasoningEffort::Medium),
         speed: ModelSpeed::Fast,
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: vec![ChatMessage::user("current user input")],
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: Vec::new(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {
             mode: PromptMode::Full,
@@ -33,7 +30,6 @@ async fn test_build_general_turn_step_request() {
             window_usage: PromptWindowUsage::default(),
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,

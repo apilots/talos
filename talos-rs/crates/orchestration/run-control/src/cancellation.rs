@@ -19,6 +19,11 @@ impl Cancellation {
         self.requested.cancel();
     }
 
+    /// Return whether cooperative cancellation has already been requested.
+    pub fn is_requested(&self) -> bool {
+        self.requested.is_cancelled()
+    }
+
     /// Wait until cooperative cancellation is requested.
     pub fn requested(&self) -> impl Future<Output = ()> + Send + 'static {
         let requested = self.requested.clone();

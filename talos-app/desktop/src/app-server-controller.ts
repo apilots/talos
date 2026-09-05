@@ -15,8 +15,8 @@ export interface AppServerBridge {
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
   ): Promise<T>;
-  onEvent(handler: (event: AppProtocol.TimelineEventEnvelope) => void): () => void;
-  onSubscriptionTerminated(handler: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void): () => void;
+  onEvent(handler: (event: AppProtocol.TimelineEvent) => void): () => void;
+  onSubscriptionTerminated(handler: (notification: AppProtocol.SubscriptionTerminatedNotification) => void): () => void;
   onError(handler: (error: Error) => void): () => void;
   onExit(handler: (status: { code: number | null; signal: NodeJS.Signals | null }) => void): () => void;
   onStderr(handler: (chunk: string) => void): () => void;
@@ -27,8 +27,8 @@ export interface AppServerBridge {
 
 export interface DesktopAppServerControllerOptions extends AppServerClientOptions {
   bridgeFactory?: (options: AppServerClientOptions) => AppServerBridge;
-  onEvent?: (event: AppProtocol.TimelineEventEnvelope) => void;
-  onSubscriptionTerminated?: (envelope: AppProtocol.SubscriptionTerminatedEnvelope) => void;
+  onEvent?: (event: AppProtocol.TimelineEvent) => void;
+  onSubscriptionTerminated?: (notification: AppProtocol.SubscriptionTerminatedNotification) => void;
   onRuntimeState?: (state: TalosRuntimeState) => void;
   onServerRequest?: (request: AppProtocol.JsonRpcRequest) => Promise<unknown> | unknown;
   restartDelayMs?: number;
@@ -75,15 +75,15 @@ export class DesktopAppServerController {
       await this.reconnecting;
     }
 
-    const effectiveParams = method === "event.unsubscribe"
+    const effectiveParams = method === "event/unsubscribe"
       ? this.resolveUnsubscribeParams(params as AppProtocol.EventUnsubscribeRequest)
       : params;
     const result = await this.ensureBridge().invoke<T>(method, effectiveParams, options);
-    if (method === "event.subscribe") {
+    if (method === "event/subscribe") {
       this.recordSubscription(params as AppProtocol.SubscribeTimelineRequest, result as AppProtocol.SubscribeTimelineResponse);
     }
-    if (method === "event.unsubscribe") {
-      this.forgetSubscription((params as AppProtocol.EventUnsubscribeRequest).subscription_id);
+    if (method === "event/unsubscribe") {
+      this.forgetSubscription((params as AppProtocol.EventUnsubscribeRequest).subscriptionId);
     }
     return result;
   }
@@ -105,8 +105,8 @@ export class DesktopAppServerController {
     }
 
     const bridge = this.createBridge();
-    bridge.onEvent((envelope) => this.handleEvent(envelope));
-    bridge.onSubscriptionTerminated((envelope) => this.handleSubscriptionTerminated(envelope));
+    bridge.onEvent((event) => this.handleEvent(event));
+    bridge.onSubscriptionTerminated((notification) => this.handleSubscriptionTerminated(notification));
     bridge.onError((error) => this.handleError(error));
     bridge.onExit((status) => this.handleExit(status));
     bridge.onStderr((chunk) => {
@@ -127,17 +127,17 @@ export class DesktopAppServerController {
     return bridgeFactory(this.options);
   }
 
-  private handleEvent(event: AppProtocol.TimelineEventEnvelope): void {
-    const subscription = this.subscriptions.get(event.session_id);
+  private handleEvent(event: AppProtocol.TimelineEvent): void {
+    const subscription = this.subscriptions.get(event.event.identity.sessionId);
     if (subscription) {
-      subscription.lastEventId = event.event_id;
+      subscription.lastEventId = event.eventId;
     }
     this.options.onEvent?.(event);
   }
 
-  private handleSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {
-    this.forgetSubscription(envelope.subscription_id);
-    this.options.onSubscriptionTerminated?.(envelope);
+  private handleSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
+    this.forgetSubscription(notification.subscriptionId);
+    this.options.onSubscriptionTerminated?.(notification);
   }
 
   private handleError(error: Error): void {
@@ -180,23 +180,23 @@ export class DesktopAppServerController {
     const subscriptions = [...this.subscriptions.values()];
     for (const subscription of subscriptions) {
       const response = await this.ensureBridge().invoke<AppProtocol.SubscribeTimelineResponse>(
-        "event.subscribe",
+        "event/subscribe",
         {
-          session_id: subscription.sessionId,
-          turn_id: subscription.turnId,
-          since_event_id: subscription.lastEventId,
-          replay_limit: subscription.replayLimit,
-          close_when_idle: subscription.closeWhenIdle,
-          close_on_terminal: subscription.closeOnTerminal,
+          sessionId: subscription.sessionId,
+          turnId: subscription.turnId,
+          sinceEventId: subscription.lastEventId,
+          replayLimit: subscription.replayLimit,
+          closeWhenIdle: subscription.closeWhenIdle,
+          closeOnTerminal: subscription.closeOnTerminal,
         } satisfies AppProtocol.SubscribeTimelineRequest,
       );
       this.subscriptions.set(subscription.sessionId, {
         ...subscription,
-        subscriptionId: response.subscription_id,
-        lastEventId: response.high_water_mark_event_id ?? subscription.lastEventId,
+        subscriptionId: response.subscriptionId,
+        lastEventId: response.highWaterMarkEventId ?? subscription.lastEventId,
       });
       this.sessionsBySubscriptionId.set(subscription.subscriptionId, subscription.sessionId);
-      this.sessionsBySubscriptionId.set(response.subscription_id, subscription.sessionId);
+      this.sessionsBySubscriptionId.set(response.subscriptionId, subscription.sessionId);
     }
   }
 
@@ -204,24 +204,24 @@ export class DesktopAppServerController {
     params: AppProtocol.SubscribeTimelineRequest,
     response: AppProtocol.SubscribeTimelineResponse,
   ): void {
-    const previous = this.subscriptions.get(params.session_id);
+    const previous = this.subscriptions.get(params.sessionId);
     if (previous) {
       for (const [subscriptionId, sessionId] of this.sessionsBySubscriptionId) {
-        if (sessionId === params.session_id) {
+        if (sessionId === params.sessionId) {
           this.sessionsBySubscriptionId.delete(subscriptionId);
         }
       }
     }
-    this.subscriptions.set(params.session_id, {
-      sessionId: response.session_id,
-      turnId: params.turn_id ?? null,
-      subscriptionId: response.subscription_id,
-      replayLimit: params.replay_limit,
-      lastEventId: response.high_water_mark_event_id ?? params.since_event_id,
-      closeWhenIdle: params.close_when_idle ?? null,
-      closeOnTerminal: params.close_on_terminal ?? null,
+    this.subscriptions.set(params.sessionId, {
+      sessionId: response.sessionId,
+      turnId: params.turnId ?? null,
+      subscriptionId: response.subscriptionId,
+      replayLimit: params.replayLimit,
+      lastEventId: response.highWaterMarkEventId ?? params.sinceEventId,
+      closeWhenIdle: params.closeWhenIdle ?? null,
+      closeOnTerminal: params.closeOnTerminal ?? null,
     });
-    this.sessionsBySubscriptionId.set(response.subscription_id, params.session_id);
+    this.sessionsBySubscriptionId.set(response.subscriptionId, params.sessionId);
   }
 
   private forgetSubscription(subscriptionId: string): void {
@@ -240,12 +240,12 @@ export class DesktopAppServerController {
   private resolveUnsubscribeParams(
     params: AppProtocol.EventUnsubscribeRequest,
   ): AppProtocol.EventUnsubscribeRequest {
-    const sessionId = this.sessionsBySubscriptionId.get(params.subscription_id);
+    const sessionId = this.sessionsBySubscriptionId.get(params.subscriptionId);
     const currentSubscriptionId = sessionId
       ? this.subscriptions.get(sessionId)?.subscriptionId
       : undefined;
     return {
-      subscription_id: currentSubscriptionId ?? params.subscription_id,
+      subscriptionId: currentSubscriptionId ?? params.subscriptionId,
     };
   }
 

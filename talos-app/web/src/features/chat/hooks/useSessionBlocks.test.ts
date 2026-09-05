@@ -21,7 +21,8 @@ describe("buildSessionBlocks", () => {
       text: "single input",
       fileIds: [],
       clientMessageId: "client-1",
-      phase: "local",
+      serverMessageId: "msg-input-1",
+      phase: "accepted",
     });
     applyStreamEvent("sess-1", userInputStarted("input-1", "single input", 1));
     applyStreamEvent("sess-1", itemStarted("thinking-1", "assistant_text", "commentary", 2));
@@ -40,7 +41,7 @@ describe("buildSessionBlocks", () => {
     });
 
     expect(blocks.filter((block) => block.kind === "user")).toEqual([
-      expect.objectContaining({ id: "user-msg-1-input-1", text: "single input" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "single input" }),
     ]);
   });
 
@@ -68,14 +69,14 @@ describe("buildSessionBlocks", () => {
     });
 
     expect(blocks).toEqual([
-      expect.objectContaining({ id: "user-msg-1-input-1", text: "initial" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-1", text: "initial" }),
       expect.objectContaining({
-        id: "timeline-sess-1-msg-1-input-1",
+        id: "timeline-sess-1-turn-1-msg-input-1",
         items: [expect.objectContaining({ text: "before steer" })],
       }),
-      expect.objectContaining({ id: "user-msg-1-input-2", text: "steer" }),
+      expect.objectContaining({ id: "user-turn-1-msg-input-2", text: "steer" }),
       expect.objectContaining({
-        id: "timeline-sess-1-msg-1-input-2",
+        id: "timeline-sess-1-turn-1-msg-input-2",
         items: [expect.objectContaining({ text: "after steer" })],
       }),
     ]);

@@ -1,8 +1,6 @@
-import { useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 
-import { cancelActiveTurn, isActiveTurnRunningError } from "../api";
-import { useSessionMessageStream } from "./useSessionMessageStream";
+import { cancelActiveTurn, isActiveTurnRunningError, retryTimelineTurn, startTimelineTurn } from "../api";
 import { useSessionQueryInvalidation } from "./useSessionQueryInvalidation";
 import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
@@ -11,22 +9,13 @@ import type { StartTurnRequest } from "@talos/sdk-browser";
 
 export function useSessionStreaming(
   sessionId: string,
-  serverMessageCount?: number,
-  sessionTitle?: string,
 ) {
   const streamState = useAppStore((state) => state.streams[sessionId]);
   const setSessionStatus = useAppStore((state) => state.setSessionStatus);
   const resetStream = useAppStore((state) => state.resetStream);
   const setPendingInput = useAppStore((state) => state.setPendingInput);
-  const { eventMessage, cancelStream, retryMessage } = useSessionMessageStream(sessionId);
-  const { invalidateSessionQueries, refreshSessionTitleAfterTurn } =
+  const { invalidateSessionQueries } =
     useSessionQueryInvalidation(sessionId);
-
-  useEffect(() => {
-    return () => {
-      cancelStream();
-    };
-  }, [cancelStream]);
 
   const stopMutation = useMutation({
     mutationFn: async (turnId: string) => {
@@ -34,7 +23,6 @@ export function useSessionStreaming(
         isStreaming: true,
         connectionState: "cancelling",
       });
-      cancelStream();
       await cancelActiveTurn(sessionId, turnId);
     },
     onSuccess: async () => {
@@ -56,68 +44,63 @@ export function useSessionStreaming(
   const sendMutation = useMutation({
     mutationFn: async ({
       text,
-      appendUserInput = true,
       request,
     }: {
       text: string;
-      appendUserInput?: boolean;
       request?: StartTurnRequest;
     }) => {
       const clientMessageId = createClientMessageId();
       const input = turnUserInput(text, request);
+      const lastEventId = useAppStore.getState().streams[sessionId]?.lastEventId;
+      const lastEventSeq = useAppStore.getState().streams[sessionId]?.lastEventSeq;
       resetStream(sessionId);
-      if (appendUserInput && hasUserInput(input)) {
+      if (hasUserInput(input)) {
         setPendingInput(sessionId, { ...input, clientMessageId, phase: "local" });
       }
       useAppStore.getState().setStreamError(sessionId, undefined);
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
-        activeInput: appendUserInput ? input : undefined,
-        activeClientMessageId: appendUserInput ? clientMessageId : undefined,
+        lastEventId,
+        lastEventSeq,
+        activeInput: input,
+        activeClientMessageId: clientMessageId,
       });
       setSessionStatus(sessionId, "running");
-      await eventMessage(request ?? { session_id: sessionId, input: [{ type: "text", text }] }, (messageId) => {
+      await startTimelineTurn(request ?? {
+        sessionId,
+        input: { content: [{ type: "text", text }] },
+        modelSelection: null,
+        userPermissionMode: null,
+        projectId: null,
+        currentDirectory: null,
+        clientRequestId: null,
+      }, (messageId) => {
         markPendingInputAccepted(sessionId, clientMessageId, messageId);
-      });
-    },
-    onSuccess: async () => {
-      await invalidateSessionQueries();
-      const currentStream = useAppStore.getState().streams[sessionId];
-      if (currentStream?.pendingUserAction) {
-        setSessionStatus(sessionId, "running");
-        return;
-      }
-      useAppStore.getState().setStreamMeta(sessionId, {
-        isStreaming: false,
-        connectionState: "idle",
-      });
-      setSessionStatus(sessionId, undefined);
-      void refreshSessionTitleAfterTurn({
-        serverMessageCount,
-        title: sessionTitle,
       });
     },
     onError: async (error) => {
       const currentStream = useAppStore.getState().streams[sessionId];
       if (isActiveTurnRunningError(error)) {
         useAppStore.getState().setPendingInput(sessionId, undefined);
-        useAppStore.getState().setStreamError(sessionId, "Context compacting... Please wait.");
+        useAppStore.getState().setStreamError(
+          sessionId,
+          userVisibleErrorMessage(error, "A turn is already running."),
+        );
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: false,
           connectionState: "idle",
           activeMessageId: undefined,
         });
+        await invalidateSessionQueries();
         return;
       }
-      const errorName = error instanceof Error ? error.name : "";
-      const isAbort = errorName === "AbortError";
       const isCancelling = currentStream?.connectionState === "cancelling";
       if (isCancelling) {
         return;
       }
 
-      if (isAbort || (currentStream?.isStreaming && currentStream.activeMessageId)) {
+      if (currentStream?.isStreaming && currentStream.activeMessageId) {
         useAppStore.getState().setStreamError(sessionId, undefined);
         useAppStore.getState().setStreamMeta(sessionId, {
           isStreaming: true,
@@ -158,34 +141,24 @@ export function useSessionStreaming(
       useAppStore.getState().setStreamMeta(sessionId, {
         isStreaming: true,
         connectionState: "awaiting",
+        lastEventId: currentStream?.lastEventId,
+        lastEventSeq: currentStream?.lastEventSeq,
         activeInput: input,
         activeClientMessageId: clientMessageId,
       });
       setSessionStatus(sessionId, "running");
-      await retryMessage({
+      await retryTimelineTurn({
+        sessionId,
         clientMessageId,
         retryOfMessageId,
-        input,
-        onAcceptedMessageId: (messageId) => {
-          markPendingInputAccepted(sessionId, clientMessageId, messageId);
+        input: {
+          content: [
+            ...(input.text.trim() ? [{ type: "text" as const, text: input.text }] : []),
+            ...input.fileIds.map((fileId) => ({ type: "file" as const, fileId })),
+          ],
         },
-      });
-    },
-    onSuccess: async () => {
-      await invalidateSessionQueries();
-      const currentStream = useAppStore.getState().streams[sessionId];
-      if (currentStream?.pendingUserAction) {
-        setSessionStatus(sessionId, "running");
-        return;
-      }
-      useAppStore.getState().setStreamMeta(sessionId, {
-        isStreaming: false,
-        connectionState: "idle",
-      });
-      setSessionStatus(sessionId, undefined);
-      void refreshSessionTitleAfterTurn({
-        serverMessageCount,
-        title: sessionTitle,
+      }, (messageId) => {
+        markPendingInputAccepted(sessionId, clientMessageId, messageId);
       });
     },
     onError: async (error) => {
@@ -213,33 +186,30 @@ export function useSessionStreaming(
       }
       return stopMutation.mutateAsync(turnId);
     },
-    retryResponse: () => retryMutation.mutateAsync(),
+    retryResponse: () => retryMutation.isPending ? Promise.resolve() : retryMutation.mutateAsync(),
     canRetryResponse: Boolean(
-      streamState?.activeInput &&
+      !retryMutation.isPending && streamState?.activeInput &&
         hasUserInput(streamState.activeInput) &&
         streamState.activeMessageId,
     ),
     sendText: (text: string, request?: StartTurnRequest) => {
       const content = text.trim();
-      const hasFiles = request?.input.some(
-        (item) => item.type === "files" && item.fileIds.length > 0,
-      );
+      const hasFiles = request?.input.content.some((item) => item.type === "file");
       if (!content && !hasFiles) {
         return Promise.resolve();
       }
-      return sendMutation.mutateAsync({ text: content, appendUserInput: true, request });
+      return sendMutation.mutateAsync({ text: content, request });
     },
     isStreaming: streamState?.isStreaming ?? false,
     isCancelling:
       stopMutation.isPending ||
-      retryMutation.isPending ||
       streamState?.connectionState === "cancelling",
   };
 }
 
 function turnUserInput(text: string, request?: StartTurnRequest): ChatUserInput {
   const fileIds =
-    request?.input.flatMap((item) => (item.type === "files" ? item.fileIds : [])) ?? [];
+    request?.input.content.flatMap((item) => (item.type === "file" ? [item.fileId] : [])) ?? [];
   return { text, fileIds };
 }
 

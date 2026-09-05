@@ -2,17 +2,18 @@ import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 import type {
   ModelInfo,
   ModelSelection,
+  AgentUserContent,
+  AgentUserInput,
   ProjectInfo as ApiProjectInfo,
   RetryTurnRequest,
   StartTurnRequest,
   SessionInfo,
+  SessionEventStreamOptions,
+  SessionHistoryResponse,
   SessionPatchRequest,
-  SubmitUserActionRequest,
-  SubmitUserActionResponse,
-  TalosContext,
-  TalosInputItem,
-  TalosSessionHistorySnapshot,
-  TimelineEventEnvelope,
+  SubmitTurnInputRequest,
+  SubmitTurnInputResponse,
+  TimelineEvent,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 
@@ -25,21 +26,6 @@ const PROJECT_DELETE_CONFLICT_CODE = AppProtocol.ErrorCode.Conflict;
 
 export function isActiveTurnRunningError(error: unknown) {
   return error instanceof TalosApiError && error.code === ACTIVE_TURN_RUNNING_CODE;
-}
-
-function createContext(userId: string): TalosContext {
-  const randomPart = Math.random().toString(36).slice(2, 10);
-  return {
-    source_type: "http",
-    provider: "sdk",
-    user_id: userId,
-    message_id: `msg_${randomPart}`,
-    trace_id: `trace_${randomPart}`,
-    channel_id: "web",
-    thread_id: null,
-    project_root: null,
-    environment: null,
-  };
 }
 
 function mapProjectView(project: ApiProjectInfo): ProjectView {
@@ -80,7 +66,7 @@ export async function listSessions() {
 }
 
 export async function getSession(sessionId: string) {
-  const response = await getTalosClient().sessions.get({ session_id: sessionId });
+  const response = await getTalosClient().sessions.get({ sessionId });
   return response.session;
 }
 
@@ -100,24 +86,25 @@ interface InitialTurnOptions {
 
 export function createInitialTurnRequest(
   sessionId: string,
-  userId: string,
   text: string,
   options: InitialTurnOptions = {},
 ): StartTurnRequest {
   const fileIds = options.fileIds ?? [];
-  const input: TalosInputItem[] = [
+  const content: AgentUserContent[] = [
     ...(text ? [{ type: "text" as const, text }] : []),
-    ...(fileIds.length > 0 ? [{ type: "files" as const, fileIds }] : []),
+    ...fileIds.map((fileId) => ({ type: "file" as const, fileId })),
   ];
+  const input: AgentUserInput = { content };
   return {
-    session_id: sessionId,
+    sessionId,
     input,
-    context: createContext(userId),
-    modelSelection: options.modelSelection,
-    userPermissionMode: options.userPermissionMode,
-    project_id: options.project && !isUnboundProject(options.project.id)
+    modelSelection: options.modelSelection ?? null,
+    userPermissionMode: options.userPermissionMode ?? null,
+    projectId: options.project && !isUnboundProject(options.project.id)
       ? options.project.id
-      : undefined,
+      : null,
+    currentDirectory: null,
+    clientRequestId: null,
   };
 }
 
@@ -166,12 +153,12 @@ export async function updateProjectName(projectId: string, name: string) {
 
 export async function updateSessionModel(sessionId: string, modelSelection: ModelSelection) {
   const request: SessionPatchRequest = {
-    session_id: sessionId,
+    sessionId,
     conf: {
       modelSelection,
       userPermissionMode: null,
     },
-    current_directory: null,
+    currentDirectory: null,
   };
   await getTalosClient().sessions.patch(request);
 }
@@ -181,62 +168,63 @@ export async function updateSessionPermissionMode(
   userPermissionMode: NonNullable<SessionInfo["effectiveMode"]>,
 ) {
   const request: SessionPatchRequest = {
-    session_id: sessionId,
+    sessionId,
     conf: {
       modelSelection: null,
       userPermissionMode,
     },
-    current_directory: null,
+    currentDirectory: null,
   };
   const response = await getTalosClient().sessions.patch(request);
   return response.session;
 }
 
-export async function submitUserAction(
-  request: SubmitUserActionRequest,
-): Promise<SubmitUserActionResponse> {
-  return getTalosClient().userActions.submit(request);
+export async function submitTurnInput(
+  request: SubmitTurnInputRequest,
+): Promise<SubmitTurnInputResponse> {
+  return getTalosClient().turns.input(request);
 }
 
 export async function closeSession(sessionId: string) {
-  await getTalosClient().sessions.close({ session_id: sessionId });
+  await getTalosClient().sessions.close({ sessionId });
 }
 
 export async function deleteSession(sessionId: string) {
-  await getTalosClient().sessions.delete({ session_id: sessionId });
+  await getTalosClient().sessions.delete({ sessionId });
 }
 
 export async function cancelActiveTurn(sessionId: string, turnId: string) {
-  await getTalosClient().sessions.cancel({ session_id: sessionId, turn_id: turnId });
+  await getTalosClient().sessions.cancel({
+    identity: { sessionId, turnId },
+  });
 }
 
 export async function compactSession(sessionId: string) {
-  const response = await getTalosClient().sessions.compact({ session_id: sessionId });
+  const response = await getTalosClient().sessions.compact({ sessionId });
   return response.session;
 }
 
 export async function clearSession(sessionId: string) {
-  const response = await getTalosClient().sessions.clear({ session_id: sessionId });
+  const response = await getTalosClient().sessions.clear({ sessionId });
   return response.session;
 }
 
 export async function getActiveTurn(sessionId: string) {
-  const response = await getTalosClient().sessions.activeTurn({ session_id: sessionId });
-  return response.active_turn;
+  const response = await getTalosClient().sessions.activeTurn({ sessionId });
+  return response.activeTurn;
 }
 
 export async function getSessionHistory(sessionId: string) {
-  const response = await getTalosClient().sessions.history({ session_id: sessionId });
-  return response.history;
+  return getTalosClient().sessions.history({ sessionId, cursor: null, limit: null });
 }
 
 export async function recoverTimelineLiveTail(sessionId: string, afterEventId?: string) {
   const response = await getTalosClient().sessions.recoverTimeline({
-    session_id: sessionId,
-    after_event_id: afterEventId ?? null,
-    replay_limit: null,
+    sessionId,
+    afterEventId: afterEventId ?? null,
+    replayLimit: null,
   });
-  return response.snapshot;
+  return response;
 }
 
 export async function startTimelineTurn(
@@ -245,11 +233,11 @@ export async function startTimelineTurn(
 ): Promise<string> {
   const client = getTalosClient();
   const ack = await client.turns.start(request);
-  if (!ack.message_id) {
-    throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
+  if (!ack.messageId) {
+    throw new Error(`Message ack did not include messageId: ${ack.turnId}`);
   }
-  onAcceptedMessageId?.(ack.message_id);
-  return ack.message_id;
+  onAcceptedMessageId?.(ack.messageId);
+  return ack.messageId;
 }
 
 export async function retryTimelineTurn(
@@ -258,37 +246,38 @@ export async function retryTimelineTurn(
 ): Promise<string> {
   const client = getTalosClient();
   const ack = await client.turns.retry(request);
-  if (!ack.message_id) {
-    throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
+  if (!ack.messageId) {
+    throw new Error(`Retry ack did not include messageId: ${ack.turnId}`);
   }
-  onAcceptedMessageId?.(ack.message_id);
-  return ack.message_id;
+  onAcceptedMessageId?.(ack.messageId);
+  return ack.messageId;
 }
 
 export async function subscribeTimelineEvents(
   sessionId: string,
-  onEvent: (event: TimelineEventEnvelope) => void,
+  onEvent: (event: TimelineEvent) => void,
   signal?: AbortSignal,
   afterEventId?: string,
+  options?: SessionEventStreamOptions,
 ) {
   return getTalosClient().turns.events(
     sessionId,
     afterEventId,
     onEvent,
     signal,
-    { persistent: true },
+    { ...options, persistent: true },
   );
 }
 
 export function belongsToProject(session: SessionInfo, project?: ProjectView) {
   if (!project || isUnboundProject(project.id)) {
-    return !session.project_id;
+    return !session.projectId;
   }
-  return session.project_id === project.id;
+  return session.projectId === project.id;
 }
 
 export type ChatApiModel = ModelInfo;
 export type ChatApiSession = SessionInfo;
 export type ChatApiActiveTurn = Awaited<ReturnType<typeof getActiveTurn>>;
-export type ChatApiSessionHistory = TalosSessionHistorySnapshot;
+export type ChatApiSessionHistory = SessionHistoryResponse;
 export type ChatApiSessionDetail = SessionInfo;

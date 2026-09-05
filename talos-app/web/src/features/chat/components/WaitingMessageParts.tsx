@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { QueuedMessage, TalosInputItem } from "@talos/sdk-browser";
+import type { AgentUserContent, AgentUserInput, QueuedMessage } from "@talos/sdk-browser";
 
 export function WaitingMessageMenuButton({
   disabled,
@@ -26,35 +26,39 @@ export function WaitingMessageMenuButton({
 }
 
 export function queuedMessageText(message: QueuedMessage) {
-  return message.input
-    .filter((item): item is Extract<TalosInputItem, { type: "text" }> => item.type === "text")
+  return message.input.content
+    .filter((item): item is Extract<AgentUserContent, { type: "text" }> => item.type === "text")
     .map((item) => item.text)
     .join("\n");
 }
 
 export function replaceQueuedMessageText(
-  input: TalosInputItem[],
+  input: AgentUserInput,
   text: string,
-): TalosInputItem[] {
-  const nonText = input.filter((item) => item.type !== "text");
-  return text.trim() ? [{ type: "text", text: text.trim() }, ...nonText] : nonText;
+): AgentUserInput {
+  const nonText = input.content.filter((item) => item.type !== "text");
+  return {
+    content: text.trim() ? [{ type: "text", text: text.trim() }, ...nonText] : nonText,
+  };
 }
 
 export function queuedMessageSummary(
   message: QueuedMessage,
   t: (key: string, options?: Record<string, unknown>) => string,
 ) {
-  const parts = message.input.flatMap((item) => {
+  const parts = message.input.content.flatMap((item) => {
     switch (item.type) {
       case "text":
         return item.text.trim() ? [item.text.trim()] : [];
-      case "files":
-        return [t("queuedAttachments", { count: item.fileIds.length })];
-      case "skill_selection":
+      case "file":
+        return [t("queuedAttachments", { count: 1 })];
+      case "skillSelection":
         return [`$${item.name}`];
-      case "voice":
+      case "audio":
       case "video":
         return [t("queuedMedia")];
+      case "userActionResponse":
+        return [];
     }
   });
   return parts.join(" · ") || t("queuedMessage");

@@ -141,16 +141,15 @@ fn memory_directory_must_not_escape_the_workspace() {
 }
 
 #[test]
-fn test_agent_definition_config_parses_kernel_runtime() {
+fn test_agent_definition_config_parses_kernel_provider() {
     let yaml = r#"
 agent:
   agents:
     - id: reviewer
       name: Reviewer
-      kind: kernel
       enabled: true
       description: Review-focused agent
-      runtime_config:
+      provider:
         type: kernel
         kernel:
           tool_result_max_bytes: 4096
@@ -173,25 +172,23 @@ llm:
         .expect("agent definition should exist");
     assert_eq!(definition.id, "reviewer");
     assert_eq!(definition.name, "Reviewer");
-    assert_eq!(definition.kind, AgentKind::Kernel);
     match definition
-        .runtime_config
+        .provider
         .as_ref()
-        .expect("runtime config should exist")
+        .expect("Provider config should exist")
     {
-        AgentRuntimeConfig::Kernel { kernel } => assert_eq!(kernel.tool_result_max_bytes, 4096),
+        AgentProviderConfig::Kernel { kernel } => assert_eq!(kernel.tool_result_max_bytes, 4096),
     }
 }
 
 #[test]
-fn test_agent_definition_rejects_unsupported_runtime_config() {
+fn test_agent_definition_rejects_unsupported_provider_config() {
     let yaml = r#"
 agent:
   agents:
     - id: codex
       name: Codex
-      kind: codex
-      runtime_config:
+      provider:
         type: codex
 gateway:
   host: 127.0.0.1
@@ -204,7 +201,7 @@ llm:
     base_url: http://localhost:11434
 "#;
 
-    let err = serde_yaml::from_str::<Config>(yaml).expect_err("unsupported runtime must fail");
+    let err = serde_yaml::from_str::<Config>(yaml).expect_err("unsupported Provider must fail");
     assert!(err.to_string().contains("codex"));
 }
 

@@ -1,165 +1,104 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 use talos_sdk::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosItemCompletedEvent,
-    TalosTimelineContent, TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent,
-    TalosTurnErrorEvent, TimelineEventEnvelope, TokenUsage,
+    AgentAssistantText, AgentAssistantTextPhase, AgentErrorInfo, AgentEvent, AgentEventPayload,
+    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
+    AgentMessageBlockStatus, AgentStopReason, AgentTurnCompleted, AgentTurnFailed, AgentTurnRef,
+    ErrorCode, TimelineEvent,
 };
 
 #[test]
 fn parses_exec_command() {
-    let cli = Cli::try_parse_from(["talos", "exec", "hello"]);
-    assert!(cli.is_ok());
+    assert!(Cli::try_parse_from(["talos", "exec", "hello"]).is_ok());
 }
 
 #[test]
 fn parses_tui_default_command() {
-    let cli = Cli::try_parse_from(["talos"]);
-    assert!(cli.is_ok());
+    assert!(Cli::try_parse_from(["talos"]).is_ok());
 }
 
 #[test]
-fn render_event_keeps_exec_open_on_final_answer_completion() {
-    let mut item_phases = HashMap::from([("final-1".to_string(), TalosTimelinePhase::FinalAnswer)]);
-    let mut item_texts = HashMap::new();
-    let mut written_final_items = HashSet::new();
-    let mut output_text = String::new();
+fn render_event_keeps_exec_open_after_the_final_answer_block_completes() {
+    let mut phases = HashMap::from([("final-1".to_string(), AgentAssistantTextPhase::FinalAnswer)]);
+    let mut texts = HashMap::new();
+    let mut written = HashSet::new();
+    let mut output = String::new();
     let mut stdout = std::io::stdout();
-    let envelope = TimelineEventEnvelope {
-        event_id: "event-1".to_string(),
-        event_seq: 1,
-        created_at_ms: 1,
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        message_id: "message-1".to_string(),
-        event: AgentEvent {
-            event_seq: Some(1),
-            event_id: Some("event-1".to_string()),
-            created_at_ms: Some(1),
-            event_type: AgentEventType::ItemCompleted,
-            turn_id: "turn-1".to_string(),
+    let event = timeline_event(AgentEventPayload::MessageBlockCompleted(
+        AgentMessageBlockCompleted {
             message_id: "message-1".to_string(),
-            session_id: "session-1".to_string(),
-            sequence: 1,
-            payload: AgentEventPayload::ItemCompleted(TalosItemCompletedEvent {
-                request_id: "request-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                item_id: "final-1".to_string(),
-                status: TalosTimelineItemStatus::Completed,
-                completed_at_ms: 1,
-                final_content: Some(TalosTimelineContent::Text {
+            block: AgentMessageBlock {
+                block_id: "final-1".to_string(),
+                status: AgentMessageBlockStatus::Completed,
+                content: AgentMessageBlockContent::AssistantText(AgentAssistantText {
+                    phase: AgentAssistantTextPhase::FinalAnswer,
                     text: "done".to_string(),
                 }),
-            }),
+                started_at: 1,
+                completed_at: Some(1),
+            },
         },
-    };
+    ));
 
     let should_finish = render_event(
-        &envelope,
-        &mut item_phases,
-        &mut item_texts,
-        &mut written_final_items,
-        &mut output_text,
+        &event,
+        &mut phases,
+        &mut texts,
+        &mut written,
+        &mut output,
         &mut stdout,
     )
-    .expect("final answer completion should render");
+    .expect("final answer should render");
 
     assert!(!should_finish);
-    assert_eq!(output_text, "done");
+    assert_eq!(output, "done");
 }
 
 #[test]
 fn render_event_finishes_exec_on_turn_completed() {
-    let mut item_phases = HashMap::new();
-    let mut item_texts = HashMap::new();
-    let mut written_final_items = HashSet::new();
-    let mut output_text = String::new();
-    let mut stdout = std::io::stdout();
-    let envelope = TimelineEventEnvelope {
-        event_id: "event-1".to_string(),
-        event_seq: 1,
-        created_at_ms: 1,
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        message_id: "message-1".to_string(),
-        event: AgentEvent {
-            event_seq: Some(1),
-            event_id: Some("event-1".to_string()),
-            created_at_ms: Some(1),
-            event_type: AgentEventType::TurnCompleted,
-            turn_id: "turn-1".to_string(),
-            message_id: "message-1".to_string(),
-            session_id: "session-1".to_string(),
-            sequence: 1,
-            payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                request_id: "request-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                stop_reason: StopReason::EndTurn,
-                usage: TokenUsage::default(),
-                metrics: None,
-                artifact_seq: None,
-                completed_at_ms: 1,
-            }),
-        },
-    };
-
-    let should_finish = render_event(
-        &envelope,
-        &mut item_phases,
-        &mut item_texts,
-        &mut written_final_items,
-        &mut output_text,
-        &mut stdout,
-    )
+    let should_finish = render(AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+        stop_reason: AgentStopReason::EndTurn,
+    }))
     .expect("turn completion should finish");
 
     assert!(should_finish);
 }
 
 #[test]
-fn render_event_returns_turn_error() {
-    let mut item_phases = HashMap::new();
-    let mut item_texts = HashMap::new();
-    let mut written_final_items = HashSet::new();
-    let mut output_text = String::new();
-    let mut stdout = std::io::stdout();
-    let envelope = TimelineEventEnvelope {
-        event_id: "event-1".to_string(),
-        event_seq: 1,
-        created_at_ms: 1,
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        message_id: "message-1".to_string(),
-        event: AgentEvent {
-            event_seq: Some(1),
-            event_id: Some("event-1".to_string()),
-            created_at_ms: Some(1),
-            event_type: AgentEventType::TurnError,
-            turn_id: "turn-1".to_string(),
-            message_id: "message-1".to_string(),
-            session_id: "session-1".to_string(),
-            sequence: 1,
-            payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
-                request_id: "request-1".to_string(),
-                turn_id: "turn-1".to_string(),
-                error: talos_error::ApiError {
-                    code: talos_error::ErrorCode::ProviderUnavailable,
-                    message: "provider request failed".to_string(),
-                },
-                failed_at_ms: 1,
-            }),
+fn render_event_returns_the_canonical_turn_failure() {
+    let error = render(AgentEventPayload::TurnFailed(AgentTurnFailed {
+        error: AgentErrorInfo {
+            code: ErrorCode::ProviderUnavailable,
+            message: "provider request failed".to_string(),
+            retryable: true,
         },
-    };
-
-    let error = render_event(
-        &envelope,
-        &mut item_phases,
-        &mut item_texts,
-        &mut written_final_items,
-        &mut output_text,
-        &mut stdout,
-    )
-    .expect_err("turn error should fail exec mode");
+    }))
+    .expect_err("turn failure should fail exec mode");
 
     assert_eq!(error.to_string(), "provider request failed");
+}
+
+fn render(payload: AgentEventPayload) -> Result<bool, Box<dyn std::error::Error>> {
+    render_event(
+        &timeline_event(payload),
+        &mut HashMap::new(),
+        &mut HashMap::new(),
+        &mut HashSet::new(),
+        &mut String::new(),
+        &mut std::io::stdout(),
+    )
+}
+
+fn timeline_event(payload: AgentEventPayload) -> TimelineEvent {
+    TimelineEvent {
+        event_id: "event-1".to_string(),
+        event_seq: 1,
+        persisted_at: 1,
+        event: AgentEvent {
+            identity: AgentTurnRef::new("session-1", "turn-1"),
+            sequence: 1,
+            occurred_at: 1,
+            payload,
+        },
+    }
 }

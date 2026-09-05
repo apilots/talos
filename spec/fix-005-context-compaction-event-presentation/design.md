@@ -4,7 +4,7 @@ Status: implemented
 Owner: agent
 Created: 2026-08-21
 Updated: 2026-08-21
-Related: `feat-040-web-light-theme-chat-presentation`, `refactor-039-memory-storage-retrieval`, `refactor-040-agent-runtime-message-event-api`, `archive/2026/refactor-037-web-desktop-timeline-render-runtime`
+Related: `feat-040-web-light-theme-chat-presentation`, `refactor-039-memory-storage-retrieval`, `refactor-040-agent-provider-api-standardization`, `archive/2026/refactor-037-web-desktop-timeline-render-runtime`
 
 ## 1. Conclusion
 

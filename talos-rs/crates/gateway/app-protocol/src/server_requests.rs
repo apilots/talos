@@ -5,7 +5,7 @@ use ts_rs::TS;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 #[serde(tag = "method", content = "params", rename_all = "snake_case")]
 pub enum ServerRequest {
-    #[serde(rename = "client.user_input.request")]
+    #[serde(rename = "client/user_input/request")]
     ClientUserInputRequest(RequestUserInputParams),
 }
 

@@ -23,12 +23,12 @@ class RecoveryBridge implements AppServerBridge {
 
   invoke<T>(method: AppProtocol.ClientMethod, params: unknown): Promise<T> {
     this.requests.push({ method, params });
-    if (method === "event.subscribe") {
+    if (method === "event/subscribe") {
       const request = params as AppProtocol.SubscribeTimelineRequest;
       return Promise.resolve({
-        subscription_id: `${this.subscriptionPrefix}-${this.requests.length}`,
-        session_id: request.session_id,
-        high_water_mark_event_id: request.since_event_id,
+        subscriptionId: `${this.subscriptionPrefix}-${this.requests.length}`,
+        sessionId: request.sessionId,
+        highWaterMarkEventId: request.sinceEventId,
       } as T);
     }
     return Promise.resolve({} as T);
@@ -79,22 +79,22 @@ describe("DesktopAppServerController subscription recovery", () => {
 
     try {
       await controller.connect();
-      const subscription = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event.subscribe", {
-        session_id: "session-1",
-        turn_id: null,
-        since_event_id: null,
-        replay_limit: 50,
-        close_when_idle: true,
-        close_on_terminal: true,
+      const subscription = await controller.invoke<AppProtocol.SubscribeTimelineResponse>("event/subscribe", {
+        sessionId: "session-1",
+        turnId: null,
+        sinceEventId: null,
+        replayLimit: 50,
+        closeWhenIdle: true,
+        closeOnTerminal: true,
       });
 
       bridges[0]?.emitExit();
       await vi.advanceTimersByTimeAsync(10);
-      await controller.invoke("event.unsubscribe", { subscription_id: subscription.subscription_id });
+      await controller.invoke("event/unsubscribe", { subscriptionId: subscription.subscriptionId });
 
       expect(bridges[1]?.requests.at(-1)).toEqual({
-        method: "event.unsubscribe",
-        params: { subscription_id: "bridge-1-1" },
+        method: "event/unsubscribe",
+        params: { subscriptionId: "bridge-1-1" },
       });
     } finally {
       vi.useRealTimers();

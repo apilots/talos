@@ -3,15 +3,22 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { contextCompactionStarted, turnCompleted } from "../__tests__/streaming-fixtures";
+import {
+  contextCompactionStarted,
+  turnCompleted,
+  userInputStarted,
+  waitingForUserAction,
+} from "../__tests__/streaming-fixtures";
 import { activeContextCompaction } from "../timeline-state";
 import { useSessionTimelineEvents } from "./useSessionTimelineEvents";
+import { useSessionMessageQueue } from "./useSessionMessageQueue";
+import { resetTalosClientFactory, setTalosClientFactory, type TalosWebClient } from "@/shared/api/client";
 import { useAppStore } from "@/shared/store/app-store";
 import {
   AppProtocol,
   TalosApiError,
   TalosStreamTerminatedError,
-  type TimelineEventEnvelope,
+  type TimelineEvent,
 } from "@talos/sdk-browser";
 
 vi.hoisted(() => {
@@ -42,13 +49,13 @@ describe("useSessionTimelineEvents", () => {
     useAppStore.getState().resetStream("sess-1");
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); resetTalosClientFactory(); });
 
   it("applies session-scoped compaction events after the stable cursor", () => {
     renderHook(() => useSessionTimelineEvents("sess-1", "event-4", true));
     const [sessionId, onEvent, signal, afterEventId] = apiMocks.subscribeTimelineEvents.mock.calls[0] as [
       string,
-      (event: TimelineEventEnvelope) => void,
+      (event: TimelineEvent) => void,
       AbortSignal,
       string,
     ];
@@ -63,19 +70,58 @@ describe("useSessionTimelineEvents", () => {
     expect(activeContextCompaction(useAppStore.getState().streams["sess-1"])?.stage).toBe("preparing");
   });
 
+  it("uses the same connection for queue open, notifications, and disconnect", async () => {
+    vi.useFakeTimers();
+    const queue = { onOpen: vi.fn(), onMessageQueueChanged: vi.fn(), onDisconnect: vi.fn() };
+    apiMocks.subscribeTimelineEvents.mockImplementationOnce(async (_sessionId, _onEvent, _signal, _cursor, options) => {
+      options.onOpen();
+      options.onMessageQueueChanged({ sessionId: "sess-1", revision: 2 });
+      throw new Error("connection lost");
+    });
+    renderHook(() => useSessionTimelineEvents("sess-1", undefined, true, undefined, queue));
+    await act(async () => { await Promise.resolve(); });
+    expect(queue.onOpen).toHaveBeenCalledOnce();
+    expect(queue.onMessageQueueChanged).toHaveBeenCalledWith({ sessionId: "sess-1", revision: 2 });
+    expect(queue.onDisconnect).toHaveBeenCalledOnce();
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledOnce();
+  });
+
   it("requests authoritative reconciliation after a terminal turn", () => {
     const onTerminalTurn = vi.fn();
     renderHook(() =>
       useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
     );
     const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
-      | ((event: TimelineEventEnvelope) => void)
+      | ((event: TimelineEvent) => void)
       | undefined;
 
     expect(onEvent).toBeDefined();
-    act(() => onEvent?.(turnCompleted(5, 46)));
+    act(() => onEvent?.(turnCompleted(5)));
 
     expect(onTerminalTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it("reconnects the shared connection when queue reconciliation fails", async () => {
+    vi.useFakeTimers();
+    const queue = { revision: 2, maxMessages: 10, messages: [] };
+    const list = vi.fn().mockRejectedValueOnce(new Error("queue unavailable")).mockResolvedValue(queue);
+    setTalosClientFactory(() => ({ messageQueue: { list } }) as unknown as TalosWebClient);
+    apiMocks.subscribeTimelineEvents.mockImplementation((_sessionId, _onEvent, signal, _cursor, options) => {
+      options.onOpen();
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+    const { result } = renderHook(() => {
+      const messages = useSessionMessageQueue("sess-1");
+      useSessionTimelineEvents("sess-1", undefined, true, undefined, messages);
+      return messages;
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(result.current.error).toBe("queue unavailable");
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect({ queue: result.current.queue, error: result.current.error }).toEqual({ queue, error: undefined });
+    expect(apiMocks.subscribeTimelineEvents).toHaveBeenCalledTimes(2);
   });
 
   it("does not reconcile stable history while a turn waits for user action", () => {
@@ -84,10 +130,10 @@ describe("useSessionTimelineEvents", () => {
       useSessionTimelineEvents("sess-1", "event-4", true, onTerminalTurn),
     );
     const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[0]?.[1] as
-      | ((event: TimelineEventEnvelope) => void)
+      | ((event: TimelineEvent) => void)
       | undefined;
 
-    act(() => onEvent?.(turnCompleted(5, 0, "waiting_user_action")));
+    act(() => onEvent?.(waitingForUserAction(5)));
 
     expect(onTerminalTurn).not.toHaveBeenCalled();
   });
@@ -124,18 +170,17 @@ describe("useSessionTimelineEvents", () => {
     apiMocks.recoverTimelineLiveTail.mockResolvedValue({
       replay: {
         events: [],
-        high_water_mark_event_id: "event-9",
-        last_replay_seq: 9,
-        cursor_status: "fromBeginning",
+        highWaterMarkEventId: "event-9",
+        nextCursor: null,
+        lastEventSeq: 9,
+        cursorStatus: "fromBeginning",
       },
-      active_turn: {
-        session_id: "sess-1",
-        turn_id: "turn-1",
-        message_id: "message-1",
-        status: "running",
-        last_event_id: "event-9",
-        pending_user_action: null,
-        updated_at: 1,
+      activeTurn: {
+        identity: { sessionId: "sess-1", turnId: "turn-1" },
+        initialMessageId: "message-1",
+        state: "running",
+        lastEventId: "event-9",
+        updatedAt: 1,
       },
     });
     useAppStore.getState().setStreamMeta("sess-1", {
@@ -157,12 +202,12 @@ describe("useSessionTimelineEvents", () => {
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
       activeMessageId: "message-1",
       isStreaming: true,
-      lastEventId: "event-9",
+      lastEventId: "event-1",
       error: undefined,
     });
   });
 
-  it("recovers a lagged live subscription from the last received event", async () => {
+  it("recovers a lagged terminal and remains subscribed for the next Turn", async () => {
     apiMocks.subscribeTimelineEvents
       .mockRejectedValueOnce(
         new TalosStreamTerminatedError({
@@ -173,20 +218,13 @@ describe("useSessionTimelineEvents", () => {
       .mockImplementationOnce(() => new Promise(() => undefined));
     apiMocks.recoverTimelineLiveTail.mockResolvedValue({
       replay: {
-        events: [],
-        high_water_mark_event_id: "event-11",
-        last_replay_seq: 11,
-        cursor_status: "replayed",
+        events: [turnCompleted(11)],
+        highWaterMarkEventId: "event-11",
+        nextCursor: null,
+        lastEventSeq: 11,
+        cursorStatus: "replayed",
       },
-      active_turn: {
-        session_id: "sess-1",
-        turn_id: "turn-1",
-        message_id: "message-1",
-        status: "running",
-        last_event_id: "event-11",
-        pending_user_action: null,
-        updated_at: 1,
-      },
+      activeTurn: null,
     });
     useAppStore.getState().setStreamMeta("sess-1", {
       activeMessageId: "message-1",
@@ -206,10 +244,13 @@ describe("useSessionTimelineEvents", () => {
     expect(apiMocks.subscribeTimelineEvents.mock.calls[1]?.[3]).toBe("event-11");
     expect(useAppStore.getState().streams["sess-1"]).toMatchObject({
       activeMessageId: "message-1",
-      isStreaming: true,
-      lastEventId: "event-11",
+      isStreaming: false,
+      lastEventId: "ev_11",
       error: undefined,
     });
+    const onEvent = apiMocks.subscribeTimelineEvents.mock.calls[1]?.[1] as (event: TimelineEvent) => void;
+    act(() => onEvent(userInputStarted("next", "next question", 12)));
+    expect(useAppStore.getState().streams["sess-1"]?.isStreaming).toBe(true);
   });
 
   it("continues reconnecting with the maximum delay after the initial attempts", async () => {

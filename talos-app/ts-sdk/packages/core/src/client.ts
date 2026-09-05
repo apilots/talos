@@ -2,8 +2,7 @@ import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
 import type {
   DocUpdateRequest,
   ConfigPath,
-  ConfigGetResponse,
-  ConfigUpdateResponse,
+  ConfigResponse,
   ConfigValue,
   LlmConfig,
   MemoryFileListRequest,
@@ -23,7 +22,6 @@ import type {
   MessageQueueListRequest,
   MessageQueueReorderRequest,
   MessageQueueStartRequest,
-  MessageQueueSteerRequest,
   MessageQueueUpdateRequest,
   ModelListResponse,
   ProfileReadResponse,
@@ -105,8 +103,8 @@ import type {
   SessionListRequest,
   SessionListResponse,
   SessionUpdateResponse,
-  SubmitUserActionRequest,
-  SubmitUserActionResponse,
+  SubmitTurnInputRequest,
+  SubmitTurnInputResponse,
   InterruptTurnResponse,
   InterruptTurnRequest,
   RetryTurnRequest,
@@ -114,9 +112,8 @@ import type {
   SubscriptionTerminatedEvent,
   StartTurnRequest,
   StartTurnResponse,
-  TimelineEventEnvelope,
-  RetryTurnResponse,
-  TimelineRecoveryResponse,
+  TimelineEvent,
+  RecoverTimelineResponse,
   WorkspaceDocKind,
   WorkspaceDocListResponse,
   WorkspaceDocReadResponse,
@@ -190,11 +187,11 @@ export class TalosClient {
   };
 
   llm = {
-    get: (): Promise<ConfigGetResponse> => {
-      return this.http.request<ConfigGetResponse>(this.url("/v1/llm"));
+    get: (): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.url("/v1/llm"));
     },
-    update: (config: LlmConfig): Promise<ConfigUpdateResponse> => {
-      return this.http.request<ConfigUpdateResponse>(this.url("/v1/llm"), {
+    update: (config: LlmConfig): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.url("/v1/llm"), {
         method: "PUT",
         body: JSON.stringify(config),
       });
@@ -202,11 +199,11 @@ export class TalosClient {
   };
 
   config = {
-    get: (path: ConfigPath = "llm"): Promise<ConfigGetResponse> => {
-      return this.http.request<ConfigGetResponse>(this.url(`/v1/config/${path}`));
+    get: (path: ConfigPath = "llm"): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.url(`/v1/config/${path}`));
     },
-    update: (value: ConfigValue): Promise<ConfigUpdateResponse> => {
-      return this.http.request<ConfigUpdateResponse>(this.url("/v1/config"), {
+    update: (value: ConfigValue): Promise<ConfigResponse> => {
+      return this.http.request<ConfigResponse>(this.url("/v1/config"), {
         method: "PUT",
         body: JSON.stringify(value),
       });
@@ -307,16 +304,16 @@ export class TalosClient {
     list: (query?: SessionListRequest): Promise<SessionListResponse> =>
       this.http.request<SessionListResponse>(this.urlWithQuery("/v1/sessions", query)),
     get: (request: SessionGetRequest): Promise<SessionGetResponse> =>
-      this.http.request<SessionGetResponse>(this.url(`/v1/sessions/${request.session_id}`)),
+      this.http.request<SessionGetResponse>(this.url(`/v1/sessions/${request.sessionId}`)),
     getById: (sessionId: string): Promise<SessionGetResponse> =>
-      this.sessions.get({ session_id: sessionId }),
+      this.sessions.get({ sessionId }),
     patch: (request: SessionPatchRequest): Promise<SessionUpdateResponse> =>
-      this.http.request<SessionUpdateResponse>(this.url(`/v1/sessions/${request.session_id}`), {
+      this.http.request<SessionUpdateResponse>(this.url(`/v1/sessions/${request.sessionId}`), {
         method: "PATCH",
         body: JSON.stringify(request),
       }),
     close: async (request: SessionCloseRequest): Promise<SessionCloseResponse> => {
-      const response = await this.http.request<SessionCloseResponse>(this.url(`/v1/sessions/${request.session_id}/close`), {
+      const response = await this.http.request<SessionCloseResponse>(this.url(`/v1/sessions/${request.sessionId}/close`), {
         method: "POST",
       });
       if (!response.success) {
@@ -325,9 +322,9 @@ export class TalosClient {
       return response;
     },
     closeById: (sessionId: string): Promise<SessionCloseResponse> =>
-      this.sessions.close({ session_id: sessionId }),
+      this.sessions.close({ sessionId }),
     delete: async (request: SessionDeleteRequest): Promise<SessionDeleteResponse> => {
-      const response = await this.http.request<SessionDeleteResponse>(this.url(`/v1/sessions/${request.session_id}`), {
+      const response = await this.http.request<SessionDeleteResponse>(this.url(`/v1/sessions/${request.sessionId}`), {
         method: "DELETE",
       });
       if (!response.success) {
@@ -336,7 +333,7 @@ export class TalosClient {
       return response;
     },
     deleteById: (sessionId: string): Promise<SessionDeleteResponse> =>
-      this.sessions.delete({ session_id: sessionId }),
+      this.sessions.delete({ sessionId }),
     cancel: async (request: InterruptTurnRequest): Promise<InterruptTurnResponse> => {
       const response = await this.http.request<InterruptTurnResponse>(
         this.url("/v1/turns/interrupt"),
@@ -345,41 +342,43 @@ export class TalosClient {
           body: JSON.stringify(request),
         },
       );
-      if (!response.success) {
-        throw new Error("Session cancel did not succeed.");
-      }
       return response;
     },
     cancelById: (sessionId: string, turnId: string): Promise<InterruptTurnResponse> =>
-      this.sessions.cancel({ session_id: sessionId, turn_id: turnId }),
+      this.sessions.cancel({
+        identity: { sessionId, turnId },
+      }),
     compact: (request: SessionCompactRequest) =>
-      this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${request.session_id}/compact`), {
+      this.http.request<SessionCompactResponse>(this.url(`/v1/sessions/${request.sessionId}/compact`), {
         method: "POST",
       }),
     compactById: (sessionId: string): Promise<SessionCompactResponse> =>
-      this.sessions.compact({ session_id: sessionId }),
+      this.sessions.compact({ sessionId }),
     clear: (request: SessionClearRequest) =>
-      this.http.request<SessionClearResponse>(this.url(`/v1/sessions/${request.session_id}/clear`), {
+      this.http.request<SessionClearResponse>(this.url(`/v1/sessions/${request.sessionId}/clear`), {
         method: "POST",
       }),
     clearById: (sessionId: string): Promise<SessionClearResponse> =>
-      this.sessions.clear({ session_id: sessionId }),
+      this.sessions.clear({ sessionId }),
     activeTurn: (request: SessionActiveTurnRequest) =>
-      this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.session_id}/active-turn`)),
+      this.http.request<SessionActiveTurnResponse>(this.url(`/v1/sessions/${request.sessionId}/active-turn`)),
     activeTurnById: (sessionId: string): Promise<SessionActiveTurnResponse> =>
-      this.sessions.activeTurn({ session_id: sessionId }),
+      this.sessions.activeTurn({ sessionId }),
     history: async (request: SessionHistoryRequest): Promise<SessionHistoryResponse> => {
       return this.http.request<SessionHistoryResponse>(
-        this.url(`/v1/sessions/${request.session_id}/history`),
+        this.urlWithQuery(`/v1/sessions/${request.sessionId}/history`, {
+          cursor: request.cursor ?? undefined,
+          limit: request.limit ?? undefined,
+        }),
       );
     },
     historyById: (sessionId: string): Promise<SessionHistoryResponse> =>
-      this.sessions.history({ session_id: sessionId }),
-    recoverTimeline: async (request: RecoverTimelineRequest): Promise<TimelineRecoveryResponse> => {
-      return this.http.request<TimelineRecoveryResponse>(
-        this.urlWithQuery(`/v1/sessions/${request.session_id}/timeline/recovery`, {
-          after_event_id: request.after_event_id ?? undefined,
-          limit: request.replay_limit ?? undefined,
+      this.sessions.history({ sessionId, cursor: null, limit: null }),
+    recoverTimeline: async (request: RecoverTimelineRequest): Promise<RecoverTimelineResponse> => {
+      return this.http.request<RecoverTimelineResponse>(
+        this.urlWithQuery(`/v1/sessions/${request.sessionId}/timeline/recovery`, {
+          after_event_id: request.afterEventId ?? undefined,
+          limit: request.replayLimit ?? undefined,
         }),
       );
     },
@@ -387,11 +386,11 @@ export class TalosClient {
       sessionId: string,
       afterEventId?: string,
       replayLimit?: number,
-    ): Promise<TimelineRecoveryResponse> =>
+    ): Promise<RecoverTimelineResponse> =>
       this.sessions.recoverTimeline({
-        session_id: sessionId,
-        after_event_id: afterEventId ?? null,
-        replay_limit: replayLimit ?? null,
+        sessionId,
+        afterEventId: afterEventId ?? null,
+        replayLimit: replayLimit ?? null,
       }),
   };
 
@@ -538,14 +537,6 @@ export class TalosClient {
       ),
   };
 
-  userActions = {
-    submit: (request: SubmitUserActionRequest): Promise<SubmitUserActionResponse> =>
-      this.http.request<SubmitUserActionResponse>(this.url("/v1/user-actions/submit"), {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
-  };
-
   workspaceDocs = {
     list: (): Promise<WorkspaceDocListResponse> =>
       this.http.request<WorkspaceDocListResponse>(this.url("/v1/workspace/docs")),
@@ -589,16 +580,16 @@ export class TalosClient {
         method: "POST",
         body: JSON.stringify(request),
       }),
-    steer: (request: MessageQueueSteerRequest): Promise<MessageQueue> =>
-      this.http.request<MessageQueue>(this.url("/v1/message-queue/steer"), {
-        method: "POST",
-        body: JSON.stringify(request),
-      }),
   };
 
   turns = {
+    input: (request: SubmitTurnInputRequest): Promise<SubmitTurnInputResponse> =>
+      this.http.request<SubmitTurnInputResponse>(this.url("/v1/turns/input"), {
+        method: "POST",
+        body: JSON.stringify(request),
+      }),
     start: (request: StartTurnRequest) =>
-      this.turns.startWithIdempotencyKey(request, request.client_request_id ?? createIdempotencyKey()),
+      this.turns.startWithIdempotencyKey(request, request.clientRequestId ?? createIdempotencyKey()),
     startWithIdempotencyKey: (
       request: StartTurnRequest,
       idempotencyKey: string,
@@ -610,14 +601,14 @@ export class TalosClient {
         },
         body: JSON.stringify({
           ...request,
-          client_request_id: idempotencyKey,
+          clientRequestId: idempotencyKey,
         }),
       }),
     retryWithIdempotencyKey: (
       request: RetryTurnRequest,
       idempotencyKey: string,
     ) =>
-      this.http.request<RetryTurnResponse>(this.url("/v1/turns/retry"), {
+      this.http.request<StartTurnResponse>(this.url("/v1/turns/retry"), {
         method: "POST",
         headers: {
           "idempotency-key": idempotencyKey,
@@ -627,12 +618,12 @@ export class TalosClient {
     retry: (request: RetryTurnRequest) =>
       this.turns.retryWithIdempotencyKey(
         request,
-        `retry_${request.client_message_id}_${request.retry_of_message_id}`,
+        `retry_${request.clientMessageId}_${request.retryOfMessageId}`,
       ),
     events: (
       sessionId: string,
       afterEventId: string | undefined,
-      onEvent: (event: TimelineEventEnvelope) => void,
+      onEvent: (event: TimelineEvent) => void,
       signal?: AbortSignal,
       options?: SessionEventStreamOptions,
     ) => {
@@ -670,14 +661,14 @@ export class TalosClient {
             }
             throw new TalosStreamTerminatedError(terminated);
           }
-          onEvent(normalizeTimelineEnvelope(payload));
+          onEvent(parseTimelineEvent(payload));
         },
       );
     },
-    eventsForMessage: async (
+    eventsForTurn: async (
       sessionId: string,
-      messageId: string,
-      onEvent: (event: TimelineEventEnvelope) => void,
+      turnId: string,
+      onEvent: (event: TimelineEvent) => void,
       signal?: AbortSignal,
       afterEventId?: string,
     ): Promise<void> => {
@@ -695,7 +686,7 @@ export class TalosClient {
           sessionId,
           afterEventId,
           (record) => {
-            if (record.message_id !== messageId) {
+            if (record.event.identity.turnId !== turnId) {
               return;
             }
             onEvent(record);
@@ -716,30 +707,22 @@ export class TalosClient {
     },
     startEvents: async (
       request: StartTurnRequest,
-      onEvent: (event: TimelineEventEnvelope) => void,
+      onEvent: (event: TimelineEvent) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
       const ack = await this.turns.start({
         ...request,
-        client_request_id: request.client_request_id ?? createIdempotencyKey(),
+        clientRequestId: request.clientRequestId ?? createIdempotencyKey(),
       });
-      if (!ack.message_id) {
-        throw new Error(`Message ack did not include message_id: ${ack.turn_id}`);
-      }
-
-      await this.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
+      await this.turns.eventsForTurn(request.sessionId, ack.turnId, onEvent, signal);
     },
     retryEvents: async (
       request: RetryTurnRequest,
-      onEvent: (event: TimelineEventEnvelope) => void,
+      onEvent: (event: TimelineEvent) => void,
       signal?: AbortSignal,
     ): Promise<void> => {
       const ack = await this.turns.retry(request);
-      if (!ack.message_id) {
-        throw new Error(`Retry ack did not include message_id: ${ack.turn_id}`);
-      }
-
-      await this.turns.eventsForMessage(request.session_id, ack.message_id, onEvent, signal);
+      await this.turns.eventsForTurn(request.sessionId, ack.turnId, onEvent, signal);
     },
   };
 
@@ -752,8 +735,8 @@ function createIdempotencyKey() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function normalizeTimelineEnvelope(value: unknown): TimelineEventEnvelope {
-  return value as TimelineEventEnvelope;
+function parseTimelineEvent(value: unknown): TimelineEvent {
+  return value as TimelineEvent;
 }
 
 function normalizeSubscriptionTerminatedEvent(
@@ -782,6 +765,6 @@ function normalizeSubscriptionTerminatedEvent(
   };
 }
 
-function isTerminalTimelineEvent(envelope: TimelineEventEnvelope): boolean {
-  return envelope.event.event_type === "turn_completed" || envelope.event.event_type === "turn_error";
+function isTerminalTimelineEvent(event: TimelineEvent): boolean {
+  return event.event.payload.type === "turnCompleted" || event.event.payload.type === "turnFailed";
 }

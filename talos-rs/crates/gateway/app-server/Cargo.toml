@@ -12,6 +12,7 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+talos-agent-api = { workspace = true }
 talos-app-protocol = { workspace = true }
 talos-service = { workspace = true }
 talos-auth = { workspace = true }

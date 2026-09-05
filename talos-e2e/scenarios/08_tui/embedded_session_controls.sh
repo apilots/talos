@@ -171,7 +171,8 @@ import sys
 
 payload = json.loads(sys.argv[1] or "{}")
 usage = payload.get("usage") or {}
-usage_total = usage.get("total_tokens", usage.get("totalTokens", 0))
+tokens = usage.get("tokens") or {}
+usage_total = tokens.get("total_tokens", tokens.get("totalTokens", 0))
 valid = (
     payload.get("title") == "Untitled Session"
     and payload.get("message_count") == 0
@@ -184,19 +185,15 @@ PY
 assert_cleared_artifacts() {
   local session_dir="$1"
   python3 - "${session_dir}" <<'PY'
-import json
 import sys
 from pathlib import Path
 
 session_dir = Path(sys.argv[1])
-sequence_path = session_dir / "sequence.json"
-if not session_dir.is_dir() or not sequence_path.is_file():
+if not session_dir.is_dir():
     raise SystemExit(1)
 if any(session_dir.glob("*.jsonl")):
     raise SystemExit(1)
-state = json.loads(sequence_path.read_text(encoding="utf-8"))
-valid = state.get("version") == 1 and state.get("next_turn_seq", 0) > 1
-raise SystemExit(0 if valid else 1)
+raise SystemExit(0)
 PY
 }
 

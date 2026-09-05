@@ -23,12 +23,11 @@ const mocks = vi.hoisted(() => ({
   activeTurnQuery: vi.fn(),
   activeTurnRefetch: vi.fn().mockResolvedValue(undefined),
   createInitialTurnRequest: vi.fn(() => ({
-    session_id: "session-1",
-    input: [{ type: "files", fileIds: ["file-1"] }],
+    sessionId: "session-1",
+    input: { content: [{ type: "file", fileId: "file-1" }] },
   })),
   send: vi.fn(),
   sessionHistoryRefetch: vi.fn().mockResolvedValue(undefined),
-  liveRecoveryQuery: vi.fn(),
   messageQueueStart: vi.fn(),
   messageQueueHook: vi.fn(),
   timeline: vi.fn(),
@@ -51,20 +50,25 @@ vi.mock("./useChatQueries", () => ({
       refetch: mocks.activeTurnRefetch,
     };
   },
-  useLiveRecoveryQuery: (...args: unknown[]) => {
-    mocks.liveRecoveryQuery(...args);
-    return { data: undefined };
-  },
-  useSessionHistoryQuery: () => ({
-    data: { last_stable_event_id: null, messages: [] },
+  useSessionHistoryQuery: (_sessionId: string, enabled: boolean) => ({
+    data: { data: [], nextCursor: null },
     error: undefined,
-    isSuccess: true,
+    isSuccess: enabled,
     refetch: mocks.sessionHistoryRefetch,
   }),
 }));
 
 vi.mock("./useSessionBlocks", () => ({
   useSessionBlocks: () => [],
+}));
+
+vi.mock("./useSessionQueryInvalidation", () => ({
+  useSessionQueryInvalidation: () => ({
+    invalidateSessionQueries: async () => {
+      await mocks.sessionHistoryRefetch();
+      await mocks.activeTurnRefetch();
+    },
+  }),
 }));
 
 vi.mock("./useSessionMessageQueue", () => ({
@@ -112,7 +116,6 @@ describe("useChatSession", () => {
     mocks.activeTurnRefetch.mockClear();
     mocks.activeTurnQuery.mockClear();
     mocks.sessionHistoryRefetch.mockClear();
-    mocks.liveRecoveryQuery.mockClear();
     mocks.messageQueueStart.mockReset().mockResolvedValue(undefined);
     mocks.messageQueueHook.mockClear();
     mocks.timeline.mockClear();
@@ -138,6 +141,7 @@ describe("useChatSession", () => {
       undefined,
       false,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
 
     act(() => {
@@ -152,6 +156,7 @@ describe("useChatSession", () => {
       undefined,
       false,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
 
     act(() => {
@@ -167,6 +172,7 @@ describe("useChatSession", () => {
       undefined,
       true,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
   });
 
@@ -180,12 +186,13 @@ describe("useChatSession", () => {
       undefined,
       true,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
   });
 
   it("does not transfer idle maintenance observation to another session", () => {
     let sessionId = "session-1";
-    const { result, rerender } = renderHook(() => useChatSession(sessionId, 0));
+    const { result, rerender } = renderHook(() => useChatSession(sessionId));
 
     act(() => result.current.setCompactionObservationActive(true));
     sessionId = "session-2";
@@ -196,18 +203,17 @@ describe("useChatSession", () => {
       undefined,
       false,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
   });
 
   it("does not poll active turn snapshots while a local event stream is active", () => {
     mocks.activeTurn = {
-      session_id: "session-1",
-      turn_id: "turn-1",
-      message_id: "message-1",
-      status: "waiting_user_action",
-      last_event_id: "event-1",
-      pending_user_action: null,
-      updated_at: 1,
+      identity: { sessionId: "session-1", turnId: "turn-1" },
+      initialMessageId: "message-1",
+      state: "waitingForInput",
+      lastEventId: "event-1",
+      updatedAt: 1,
     };
     useAppStore.getState().setStreamMeta("session-1", {
       activeMessageId: "message-1",
@@ -217,31 +223,19 @@ describe("useChatSession", () => {
     renderHook(() => useChatSession("session-1", 1));
 
     expect(mocks.activeTurnQuery).toHaveBeenLastCalledWith("session-1", false);
-    expect(mocks.liveRecoveryQuery).toHaveBeenLastCalledWith(
-      "session-1",
-      undefined,
-      false,
-    );
   });
 
-  it("does not replay the timeline for a completed historical session", () => {
-    mocks.activeTurn = {
-      session_id: "session-1",
-      turn_id: "turn-1",
-      message_id: "message-1",
-      status: "completed",
-      last_event_id: "event-1",
-      pending_user_action: null,
-      updated_at: 1,
-    };
+  it("keeps session events subscribed across idle and active turns", () => {
+    mocks.activeTurn = undefined;
 
     renderHook(() => useChatSession("session-1", 1));
 
     expect(mocks.timeline).toHaveBeenLastCalledWith(
       "session-1",
       undefined,
-      false,
+      true,
       expect.any(Function),
+      expect.objectContaining({ start: mocks.messageQueueStart }),
     );
   });
 
@@ -258,29 +252,6 @@ describe("useChatSession", () => {
     expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
   });
 
-  it("refetches the active turn after starting a queued message", async () => {
-    const { result } = renderHook(() => useChatSession("session-1", 1));
-
-    await act(() => result.current.messageQueue.start("message-1"));
-
-    expect(mocks.messageQueueStart).toHaveBeenCalledWith("message-1");
-    expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
-    expect(mocks.sessionHistoryRefetch).toHaveBeenCalledTimes(1);
-  });
-
-  it("reconciles the active turn and history when the queue changes", async () => {
-    renderHook(() => useChatSession("session-1", 1));
-    const onQueueChanged = mocks.messageQueueHook.mock.lastCall?.[2] as
-      | (() => void)
-      | undefined;
-
-    expect(onQueueChanged).toBeDefined();
-    await act(async () => onQueueChanged?.());
-
-    expect(mocks.activeTurnRefetch).toHaveBeenCalledTimes(1);
-    expect(mocks.sessionHistoryRefetch).toHaveBeenCalledTimes(1);
-  });
-
   it("allows an attachment-only turn and forwards ordered file ids", async () => {
     const { result } = renderHook(() => useChatSession("session-1", 0));
 
@@ -288,7 +259,6 @@ describe("useChatSession", () => {
 
     expect(mocks.createInitialTurnRequest).toHaveBeenCalledWith(
       "session-1",
-      expect.any(String),
       "",
       {
         fileIds: ["file-2", "file-1"],

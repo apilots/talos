@@ -2,12 +2,16 @@ use std::collections::HashSet;
 use std::sync::{Arc, Barrier};
 
 use talos_error::ErrorCode;
-use talos_types::{MessageQueue, MessageQueueChangedNotification, TalosInputItem};
+use talos_types::{
+    AgentUserContent, AgentUserInput, MessageQueue, MessageQueueChangedNotification,
+};
 
 use super::*;
 
-fn text_input(text: impl Into<String>) -> Vec<TalosInputItem> {
-    vec![TalosInputItem::Text { text: text.into() }]
+fn text_input(text: impl Into<String>) -> AgentUserInput {
+    AgentUserInput {
+        content: vec![AgentUserContent::Text { text: text.into() }],
+    }
 }
 
 #[test]
@@ -158,7 +162,7 @@ fn reserved_message_rejects_competing_mutations_until_released() {
         .reserve_front("session-1")
         .expect("queue front should reserve")
         .expect("queue front should exist");
-    assert_eq!(reservation.input(), text_input("first"));
+    assert_eq!(reservation.input(), &text_input("first"));
 
     for error in [
         service
@@ -269,8 +273,8 @@ fn concurrent_adds_are_serialized_without_losing_messages() {
     let texts = queue
         .messages
         .iter()
-        .filter_map(|message| match &message.input[0] {
-            TalosInputItem::Text { text } => Some(text.clone()),
+        .filter_map(|message| match &message.input.content[0] {
+            AgentUserContent::Text { text } => Some(text.clone()),
             _ => None,
         })
         .collect::<HashSet<_>>();

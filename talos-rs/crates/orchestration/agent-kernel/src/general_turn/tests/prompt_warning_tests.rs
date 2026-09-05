@@ -11,7 +11,6 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
     let prepared = PreparedGeneralTurn {
         session_id: "s1".to_string(),
         user_id: "u1".to_string(),
-        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "default".to_string(),
@@ -21,10 +20,8 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
         reasoning_effort: None,
         speed: Default::default(),
         attachment_tokens: 0,
-        prompt_prefix_messages: Vec::new(),
         messages: Vec::new(),
         maintenance_usage: TokenUsage::default(),
-        tool_definitions: Vec::new(),
         tool_selection_request: talos_tools::ToolSelectionRequest::default().with_session_id("s1"),
         prompt_diagnostics: PromptDiagnostics {
             mode: PromptMode::Full,
@@ -37,7 +34,6 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
             window_usage: PromptWindowUsage::default(),
             session_history_compaction: None,
         },
-        warnings: Vec::new(),
         prompt_warning_state: None,
         stream_tx: None,
         message_rx: None,
@@ -58,48 +54,6 @@ async fn test_execute_general_turn_loop_reports_model_output_limit() {
 }
 
 #[tokio::test]
-async fn test_run_general_turn_emits_prompt_warning_event() {
-    let provider = Arc::new(NoopLlmProvider);
-    let tool_registry = Arc::new(ToolRegistry::new());
-    let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    std::fs::write(
-        workspace_dir.join("SOUL.md"),
-        "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
-    )
-    .expect("soul file should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
-    seed_recent_user_message(memory_store.as_ref()).await;
-    let mut config = AgentKernelConfig::default();
-    config.prompt.bootstrap.auto_create_missing_files = false;
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
-    configure_test_skill_root(&mut config, &workspace_dir);
-    let mut ctx = build_ctx_with_stream(None);
-
-    let result = run_general_turn(
-        &mut ctx,
-        "talos",
-        "assistant",
-        "hello",
-        provider,
-        tool_registry.clone(),
-        tool_registry,
-        memory_store,
-        &config,
-        skill_options_from_config(&workspace_dir, &config),
-    )
-    .await
-    .expect("general turn should succeed");
-
-    assert!(!result.warnings.is_empty());
-    assert!(ctx.events.iter().any(|event| {
-        matches!(event.event_type, KernelEventType::PromptWarning)
-            && matches!(event.label, KernelEventLabel::PromptWarning)
-            && matches!(event.data, KernelEventData::PromptWarning(_))
-    }));
-}
-
-#[tokio::test]
 async fn test_run_general_turn_streams_prompt_warning_event() {
     let provider = Arc::new(NoopLlmProvider);
     let tool_registry = Arc::new(ToolRegistry::new());
@@ -110,7 +64,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
         "# SOUL\n\n- Keep the run grounded in repo evidence.\n",
     )
     .expect("soul file should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     seed_recent_user_message(memory_store.as_ref()).await;
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.auto_create_missing_files = false;
@@ -136,9 +90,7 @@ async fn test_run_general_turn_streams_prompt_warning_event() {
 
     let mut saw_prompt_warning = false;
     while let Ok(event) = rx.try_recv() {
-        if matches!(event.event_type, KernelStreamEventType::PromptWarning)
-            && matches!(event.data, KernelStreamEventData::PromptWarning(_))
-        {
+        if matches!(event.payload, AgentKernelEventPayload::PromptWarning(_)) {
             saw_prompt_warning = true;
             break;
         }

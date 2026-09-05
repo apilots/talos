@@ -28,15 +28,15 @@ export function registerDesktopIpcHandlers(runtime: DesktopAppServerController):
   });
 }
 
-export function broadcastApplicationEvent(event: AppProtocol.TimelineEventEnvelope): void {
+export function broadcastTimelineEvent(event: AppProtocol.TimelineEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send(TALOS_IPC.event, event);
   }
 }
 
-export function broadcastSubscriptionTerminated(envelope: AppProtocol.SubscriptionTerminatedEnvelope): void {
+export function broadcastSubscriptionTerminated(notification: AppProtocol.SubscriptionTerminatedNotification): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(TALOS_IPC.subscriptionTerminated, envelope);
+    window.webContents.send(TALOS_IPC.subscriptionTerminated, notification);
   }
 }
 

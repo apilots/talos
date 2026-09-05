@@ -24,14 +24,10 @@ pub struct ConfigGetRequest {
     pub path: ConfigPath,
 }
 
-pub type ConfigGetResponse = ConfigResponse;
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq)]
 pub struct ConfigUpdateRequest {
     pub value: ConfigValue,
 }
-
-pub type ConfigUpdateResponse = ConfigResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, TS, PartialEq, Eq)]
 pub struct ConfigDeleteRequest {

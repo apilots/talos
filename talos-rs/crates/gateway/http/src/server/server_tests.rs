@@ -7,40 +7,39 @@ use axum::response::IntoResponse;
 use axum::Json;
 use serde::Deserialize;
 use serde_json::Value;
+use talos_agent::{
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentInputParams, AgentInterruptParams,
+    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSessionContext,
+};
+use talos_agent_api::{
+    ActiveTurnState, AgentEvent as CanonicalAgentEvent,
+    AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome, AgentRunMetrics,
+    AgentTurnCompleted, AgentTurnRef, AgentTurnStarted,
+};
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
 use talos_config::{ConfigStore, InMemoryLlmConfigStore};
-use talos_coordinator::SessionRuntime;
+use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::{TalosError, TalosResult};
-use talos_service::{TalosService, TurnExecutor};
-use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_service::TalosService;
+use talos_service::TimelineEventService;
 use talos_store::profile::{
     ProfileDailyUsageSummary, ProfileModelUsageSummary, ProfileStore, ProfileUsageSummary,
     ProfileUsageUpdate,
 };
 use talos_store::project::MockProjectStore;
-use talos_store::session::{
-    ActiveTurnRecord, ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, IdempotencyRecord,
-    IdempotencyReservation, IdempotencyStatus, MessageCommandResult, MessageIdempotencyStore,
-    SessionPatchAck, SessionQuery, SessionRecord, SessionStore, SessionSummary, TimelineEventId,
-    TimelineEventStore, UserActionRecord, UserActionStore,
-};
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, StopReason, TalosContext, TalosItemDeltaEvent,
-    TalosItemStartedEvent, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
-    TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase, TalosToolProgressKind,
-    TalosTurnCompletedEvent, TalosTurnStartedEvent, TokenUsage, TurnExecutionMetrics,
-};
+use talos_store::session::{AgentActiveTurnRecord, AgentExecutionStore};
+use talos_types::talos::TokenUsage;
 use talos_types::{
-    DynamicToolResultParams, ModelInfo, PendingUserAction, SessionListRequest, TalosSession,
-    UserActionParams, UserActionState,
+    DynamicToolResultParams, ModelInfo, PendingUserAction, SessionListRequest, UserActionParams,
+    UserActionState,
 };
 use tower::util::ServiceExt;
 
 use crate::server::events::{get_active_turn_handler, subscribe_timeline_events_handler};
 use crate::server::message_queue::{add_queued_message_handler, list_message_queue_handler};
 use crate::server::messages::{
-    interrupt_turn_handler, retry_turn_handler, start_turn_handler,
-    submit_dynamic_tool_result_handler,
+    interrupt_turn_handler, retry_turn_handler, start_turn_handler, submit_turn_input_handler,
 };
 use crate::server::misc::{get_config_handler, get_llm_handler, put_config_handler};
 
@@ -48,12 +47,28 @@ use crate::server::misc::{get_config_handler, get_llm_handler, put_config_handle
 mod support;
 use support::*;
 
+#[path = "tests/recording_execution_store.rs"]
+mod recording_execution_store;
+use recording_execution_store::RecordingAgentExecutionStore;
+
 fn expect_success<T>(response: talos_types::ApiResponse<T>) -> T {
     match response {
         talos_types::ApiResponse::Success { data } => data,
         talos_types::ApiResponse::Error { error } => {
             panic!("expected success response, got error: {error:?}")
         }
+    }
+}
+
+fn pending_dynamic_action(action_id: &str, call_id: &str, tool_name: &str) -> PendingUserAction {
+    PendingUserAction {
+        action_id: action_id.to_string(),
+        call_id: call_id.to_string(),
+        item_id: None,
+        state: UserActionState::Pending,
+        params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
+            tool_name: tool_name.to_string(),
+        }),
     }
 }
 
@@ -181,27 +196,6 @@ impl ProfileStore for EmptyProfileStore {
     }
 }
 
-#[async_trait]
-trait SessionService: Send + Sync {
-    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
-        Ok("default".to_string())
-    }
-
-    async fn list_sessions(&self, request: SessionListRequest) -> TalosResult<Vec<TalosSession>>;
-
-    async fn count_sessions(&self, request: SessionListRequest) -> TalosResult<usize>;
-
-    async fn get_session(&self, session_id: &str) -> TalosResult<Option<TalosSession>>;
-
-    async fn clear_session(&self, session_id: &str) -> TalosResult<TalosSession>;
-
-    async fn close_session(&self, session_id: &str) -> TalosResult<()>;
-
-    async fn delete_session(&self, session_id: &str) -> TalosResult<SessionPatchAck>;
-
-    async fn cancel_active_turn(&self, session_id: &str) -> TalosResult<()>;
-}
-
 fn test_model_info() -> ModelInfo {
     ModelInfo::from_provider_model(
         "bailian",
@@ -245,10 +239,8 @@ async fn test_state_with_lifecycle(
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
 ) -> Arc<HttpApiState> {
-    let event_store = Arc::new(RecordingEventStore::default());
+    let event_store = Arc::new(RecordingAgentExecutionStore::default());
     build_test_state(TestStateConfig {
-        turn_executor: Arc::new(MockGateway),
-        session_service: Arc::new(MockSessionService::default()),
         event_store,
         base_config: test_config(),
         auth_disabled,
@@ -259,9 +251,7 @@ async fn test_state_with_lifecycle(
 }
 
 struct TestStateConfig {
-    turn_executor: Arc<dyn TurnExecutor>,
-    session_service: Arc<dyn SessionService>,
-    event_store: Arc<RecordingEventStore>,
+    event_store: Arc<dyn AgentExecutionStore>,
     base_config: talos_types::TalosConfig,
     auth_disabled: bool,
     lifecycle: Arc<ServerLifecycle>,
@@ -269,6 +259,14 @@ struct TestStateConfig {
 }
 
 async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
+    let agent_execution_store = test_agent_execution_store().await;
+    build_test_state_with_agent_execution_store(config, agent_execution_store).await
+}
+
+async fn build_test_state_with_agent_execution_store(
+    config: TestStateConfig,
+    agent_execution_store: Arc<dyn AgentExecutionStore>,
+) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
     let event_service = event_service_from_store(config.event_store.clone());
     let config_store = config
@@ -286,24 +284,24 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
         config.base_config.storage.files.clone(),
     )
     .await;
-    let app = Arc::new(TalosService::new_with_session_store(
-        config.turn_executor,
-        Arc::new(SessionServiceRuntimeAdapter::new(
-            config.session_service.clone(),
-        )),
-        Arc::new(SessionStoreAdapter::new(config.session_service)),
-        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+    let session_store = test_session_store().await;
+    let coordinator = Arc::new(TestAgentCoordinator);
+    let reload_hook = test_config_reload_hook(config.base_config.clone());
+    let app = Arc::new(TalosService::new(
+        coordinator,
+        session_store,
+        agent_execution_store,
         project_store,
         Arc::new(EmptyProfileStore),
         files,
         event_service.clone(),
-        config.event_store,
         config.base_config.clone(),
         memory,
         config_store,
         vec![test_model_info()],
         auth_service.clone(),
         user_service,
+        reload_hook,
     ));
     Arc::new(HttpApiState::from_service(
         app,
@@ -315,6 +313,24 @@ async fn build_test_state(config: TestStateConfig) -> Arc<HttpApiState> {
     ))
 }
 
+async fn test_state_with_event_store_and_agent_execution_store(
+    auth_disabled: bool,
+    event_store: Arc<dyn AgentExecutionStore>,
+    agent_execution_store: Arc<dyn AgentExecutionStore>,
+) -> Arc<HttpApiState> {
+    build_test_state_with_agent_execution_store(
+        TestStateConfig {
+            event_store,
+            base_config: test_config(),
+            auth_disabled,
+            lifecycle: Arc::new(ServerLifecycle::new()),
+            config_store: None,
+        },
+        agent_execution_store,
+    )
+    .await
+}
+
 async fn test_state(auth_disabled: bool) -> Arc<HttpApiState> {
     test_state_with_lifecycle(auth_disabled, Arc::new(ServerLifecycle::new())).await
 }
@@ -323,10 +339,8 @@ async fn test_state_with_config(
     config: talos_types::TalosConfig,
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
-    let event_store = Arc::new(RecordingEventStore::default());
+    let event_store = Arc::new(RecordingAgentExecutionStore::default());
     build_test_state(TestStateConfig {
-        turn_executor: Arc::new(MockGateway),
-        session_service: Arc::new(MockSessionService::default()),
         event_store,
         base_config: config,
         auth_disabled,
@@ -336,40 +350,25 @@ async fn test_state_with_config(
     .await
 }
 
-fn event_service_from_store(store: Arc<RecordingEventStore>) -> Arc<TimelineEventService> {
-    let event_store: Arc<dyn TimelineEventStore> = store.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
-    Arc::new(TimelineEventService::new(
-        event_store,
-        active_turn_store,
-        store as Arc<dyn talos_store::session::UserActionStore>,
-        TimelineEventRetentionConfig::default(),
-    ))
+fn event_service_from_store(store: Arc<dyn AgentExecutionStore>) -> Arc<TimelineEventService> {
+    Arc::new(TimelineEventService::new(store))
 }
 
 async fn test_state_with_event_store(
     auth_disabled: bool,
-    store: Arc<RecordingEventStore>,
+    store: Arc<dyn AgentExecutionStore>,
 ) -> Arc<HttpApiState> {
-    test_state_with_gateway_event_store_config(
-        Arc::new(MockGateway),
-        auth_disabled,
-        store,
-        test_config(),
-    )
-    .await
+    test_state_with_gateway_event_store_config(auth_disabled, store, test_config()).await
 }
 
 async fn test_state_with_gateway_event_store_config(
-    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
-    store: Arc<RecordingEventStore>,
+    store: Arc<dyn AgentExecutionStore>,
     config: talos_types::TalosConfig,
 ) -> Arc<HttpApiState> {
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     test_state_with_gateway_event_store_config_and_lifecycle(
-        turn_executor,
         auth_disabled,
         store,
         config,
@@ -379,193 +378,93 @@ async fn test_state_with_gateway_event_store_config(
     .await
 }
 
-struct SessionServiceRuntimeAdapter {
-    service: Arc<dyn SessionService>,
-}
-
-impl SessionServiceRuntimeAdapter {
-    fn new(service: Arc<dyn SessionService>) -> Self {
-        Self { service }
-    }
-}
+struct TestAgentCoordinator;
 
 #[async_trait::async_trait]
-impl SessionRuntime for SessionServiceRuntimeAdapter {
-    async fn resolve_target_agent(
-        &self,
-        context: &TalosContext,
-    ) -> talos_error::TalosResult<String> {
-        self.service.resolve_target_agent(context).await
+impl AgentCoordinator for TestAgentCoordinator {
+    async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
+        let _ = params;
+        Ok("default".to_string())
     }
 
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> talos_error::TalosResult<talos_types::TokenUsage> {
-        Ok(talos_types::TokenUsage::default())
-    }
-
-    async fn clear_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
-        self.service
-            .clear_session(&session.context.session_id)
-            .await
-            .map(|_| ())
-    }
-
-    async fn close_session(&self, session: TalosSession) -> talos_error::TalosResult<()> {
-        self.service
-            .close_session(&session.context.session_id)
-            .await
-    }
-
-    async fn prepare_delete_session(&self, _session: TalosSession) -> talos_error::TalosResult<()> {
+    async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn cancel_active_turn(
-        &self,
-        params: talos_types::CancelActiveTurnParams,
-    ) -> talos_error::TalosResult<talos_types::CancelActiveTurnOutcome> {
-        self.service
-            .cancel_active_turn(&params.session.context.session_id)
-            .await
-            .map(|_| talos_types::CancelActiveTurnOutcome::Cancelled)
-    }
-}
-
-struct SessionStoreAdapter {
-    service: Arc<dyn SessionService>,
-}
-
-impl SessionStoreAdapter {
-    fn new(service: Arc<dyn SessionService>) -> Self {
-        Self { service }
+    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        mock_agent_execution(params).await
     }
 
-    fn to_record(&self, session: TalosSession) -> talos_error::TalosResult<SessionRecord> {
-        Ok(SessionRecord::from_session(&session))
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        unreachable!("HTTP handler fixtures do not own live Agent input")
     }
-}
 
-#[async_trait::async_trait]
-impl SessionStore for SessionStoreAdapter {
-    async fn insert_session_record(
-        &self,
-        _record: &SessionRecord,
-        _scope: &str,
-    ) -> talos_error::TalosResult<()> {
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        let _ = params;
+        Ok(AgentInterruptOutcome::Cancelled)
+    }
+
+    async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
+        let identity = params.identity();
+        let started = CanonicalAgentEvent {
+            identity: identity.clone(),
+            sequence: 1,
+            occurred_at: 1,
+            payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        };
+        let terminal = CanonicalAgentEvent {
+            identity,
+            sequence: 2,
+            occurred_at: 2,
+            payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+            }),
+        };
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
+        drop(progress_tx);
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: vec![started],
+                permit: AgentAdmissionPermit::new(async move {
+                    settlement_tx
+                        .send(Ok(AgentRunSettlement::Finished {
+                            event: terminal,
+                            messages: Vec::new(),
+                            metrics: AgentRunMetrics::default(),
+                        }))
+                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        let _ = params;
         Ok(())
     }
 
-    async fn get_session_record(
-        &self,
-        session_id: &str,
-    ) -> talos_error::TalosResult<Option<SessionRecord>> {
-        match self.service.get_session(session_id).await? {
-            Some(session) => Ok(Some(self.to_record(session)?)),
-            None => Ok(None),
-        }
-    }
-
-    async fn get_subagent_record(
-        &self,
-        _tree_root_session_id: &str,
-        _agent_path: &talos_types::AgentPath,
-    ) -> talos_error::TalosResult<Option<SessionRecord>> {
-        Ok(None)
-    }
-
-    async fn list_session_records(
-        &self,
-        query: &SessionQuery,
-    ) -> talos_error::TalosResult<Vec<SessionRecord>> {
-        let mut records = Vec::new();
-        for session in self
-            .service
-            .list_sessions(SessionListRequest {
-                project_id: query.project_id.clone(),
-                limit: query.limit,
-                offset: query.offset,
-            })
-            .await?
-        {
-            records.push(self.to_record(session)?);
-        }
-        Ok(records)
-    }
-
-    async fn count_session_records(&self, query: &SessionQuery) -> talos_error::TalosResult<usize> {
-        self.service
-            .count_sessions(SessionListRequest {
-                project_id: query.project_id.clone(),
-                limit: query.limit,
-                offset: query.offset,
-            })
-            .await
-    }
-
-    async fn summarize_sessions(&self, _user_id: &str) -> talos_error::TalosResult<SessionSummary> {
-        Ok(SessionSummary::default())
-    }
-
-    async fn has_active_subagent_turn(
-        &self,
-        _tree_root_session_id: &str,
-    ) -> talos_error::TalosResult<bool> {
-        Ok(false)
-    }
-
-    async fn update_session_record(
-        &self,
-        _record: &SessionRecord,
-    ) -> talos_error::TalosResult<bool> {
-        Ok(true)
-    }
-
-    async fn update_context_usage(
-        &self,
-        _session_id: &str,
-        _context_usage: &talos_types::ContextUsage,
-    ) -> talos_error::TalosResult<bool> {
-        Ok(true)
-    }
-
-    async fn advance_memory_processed_until_seq(
-        &self,
-        _session_id: &str,
-        _expected_until_seq: u64,
-        _next_until_seq: u64,
-    ) -> talos_error::TalosResult<()> {
+    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        let _ = params;
         Ok(())
     }
 
-    async fn delete_session_record(&self, session_id: &str) -> talos_error::TalosResult<bool> {
-        Ok(self.service.delete_session(session_id).await?.success)
-    }
-
-    async fn delete_session_tree(
-        &self,
-        tree_root_session_id: &str,
-    ) -> talos_error::TalosResult<bool> {
-        Ok(self
-            .service
-            .delete_session(tree_root_session_id)
-            .await?
-            .success)
+    async fn shutdown(&self, _timeout: std::time::Duration) -> TalosResult<()> {
+        Ok(())
     }
 }
 
 async fn test_state_with_gateway_event_store_config_and_lifecycle(
-    turn_executor: Arc<dyn TurnExecutor>,
     auth_disabled: bool,
-    store: Arc<RecordingEventStore>,
+    store: Arc<dyn AgentExecutionStore>,
     config: talos_types::TalosConfig,
     lifecycle: Arc<ServerLifecycle>,
     config_store: Arc<dyn ConfigStore>,
 ) -> Arc<HttpApiState> {
     build_test_state(TestStateConfig {
-        turn_executor,
-        session_service: Arc::new(MockSessionService::default()),
         event_store: store,
         base_config: config,
         auth_disabled,
@@ -573,405 +472,6 @@ async fn test_state_with_gateway_event_store_config_and_lifecycle(
         config_store: Some(config_store),
     })
     .await
-}
-
-#[derive(Default)]
-struct RecordingEventStore {
-    events: std::sync::Mutex<Vec<AgentEvent>>,
-    active_turns: std::sync::Mutex<std::collections::HashMap<String, ActiveTurnRecord>>,
-    idempotency_records:
-        std::sync::Mutex<std::collections::HashMap<(String, String), IdempotencyRecord>>,
-    user_actions:
-        std::sync::Mutex<std::collections::HashMap<(String, String, String), UserActionRecord>>,
-}
-
-fn pending_dynamic_record(
-    session_id: &str,
-    turn_id: &str,
-    action_id: &str,
-    item_id: Option<&str>,
-    call_id: &str,
-    tool_name: &str,
-) -> UserActionRecord {
-    UserActionRecord {
-        session_id: session_id.to_string(),
-        turn_id: turn_id.to_string(),
-        action: PendingUserAction {
-            action_id: action_id.to_string(),
-            call_id: call_id.to_string(),
-            item_id: item_id.map(str::to_string),
-            state: UserActionState::Pending,
-            params: UserActionParams::DynamicToolResult(DynamicToolResultParams {
-                tool_name: tool_name.to_string(),
-            }),
-        },
-        response: None,
-        version: 0,
-        updated_at: 125,
-    }
-}
-
-async fn record_pending_tool_events(
-    store: &RecordingEventStore,
-    session_id: &str,
-    turn_id: &str,
-    message_id: &str,
-    item_id: &str,
-    call_id: &str,
-    tool_name: &str,
-) {
-    let base_event = |sequence, event_type, payload| AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: None,
-        event_type,
-        turn_id: turn_id.to_string(),
-        message_id: message_id.to_string(),
-        session_id: session_id.to_string(),
-        sequence,
-        payload,
-    };
-    store
-        .append_event(base_event(
-            0,
-            AgentEventType::ItemStarted,
-            AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-                request_id: "request-dynamic".to_string(),
-                turn_id: turn_id.to_string(),
-                item: TalosTimelineItem {
-                    item_id: item_id.to_string(),
-                    parent_item_id: None,
-                    kind: TalosTimelineItemKind::ToolCall,
-                    phase: TalosTimelinePhase::Acting,
-                    status: TalosTimelineItemStatus::Running,
-                    title: None,
-                    started_at_ms: 1,
-                    completed_at_ms: None,
-                    content: TalosTimelineContent::ToolCall {
-                        call_id: call_id.to_string(),
-                        name: tool_name.to_string(),
-                        arguments: "{}".to_string(),
-                        progress: Vec::new(),
-                        result: None,
-                    },
-                },
-            }),
-        ))
-        .await
-        .expect("pending tool start event should persist");
-    store
-        .append_event(base_event(
-            1,
-            AgentEventType::ItemDelta,
-            AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
-                request_id: "request-dynamic".to_string(),
-                turn_id: turn_id.to_string(),
-                item_id: item_id.to_string(),
-                delta: TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingUserAction,
-                },
-            }),
-        ))
-        .await
-        .expect("pending tool status event should persist");
-    store
-        .append_event(base_event(
-            2,
-            AgentEventType::TurnCompleted,
-            AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                request_id: "request-dynamic".to_string(),
-                turn_id: turn_id.to_string(),
-                completed_at_ms: 1,
-                stop_reason: StopReason::WaitingUserAction,
-                usage: TokenUsage::default(),
-                metrics: Some(TurnExecutionMetrics {
-                    model_rounds: 1,
-                    tool_calls: 1,
-                    stop_reason: StopReason::WaitingUserAction,
-                    ..TurnExecutionMetrics::default()
-                }),
-                artifact_seq: Some(1),
-            }),
-        ))
-        .await
-        .expect("pending turn metrics should persist");
-}
-
-#[async_trait]
-impl UserActionStore for RecordingEventStore {
-    async fn create(&self, record: UserActionRecord) -> TalosResult<UserActionRecord> {
-        let key = (
-            record.session_id.clone(),
-            record.turn_id.clone(),
-            record.action.action_id.clone(),
-        );
-        let mut actions = self.user_actions.lock().unwrap();
-        match actions.get(&key) {
-            Some(current) if current == &record => Ok(current.clone()),
-            Some(_) => Err(TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                "user action already exists",
-            )),
-            None => {
-                actions.insert(key, record.clone());
-                Ok(record)
-            }
-        }
-    }
-
-    async fn get(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        action_id: &str,
-    ) -> TalosResult<Option<UserActionRecord>> {
-        Ok(self
-            .user_actions
-            .lock()
-            .unwrap()
-            .get(&(
-                session_id.to_string(),
-                turn_id.to_string(),
-                action_id.to_string(),
-            ))
-            .cloned())
-    }
-
-    async fn compare_and_set(
-        &self,
-        expected: &UserActionRecord,
-        next: UserActionRecord,
-    ) -> TalosResult<UserActionRecord> {
-        let key = (
-            expected.session_id.clone(),
-            expected.turn_id.clone(),
-            expected.action.action_id.clone(),
-        );
-        let mut actions = self.user_actions.lock().unwrap();
-        if actions.get(&key) != Some(expected) {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                "user action state or version changed",
-            ));
-        }
-        actions.insert(key, next.clone());
-        Ok(next)
-    }
-}
-
-#[async_trait::async_trait]
-impl TimelineEventStore for RecordingEventStore {
-    async fn append_event(&self, mut event: AgentEvent) -> TalosResult<AgentEvent> {
-        let mut events = self.events.lock().unwrap();
-        let event_seq = (events.len() as i64) + 1;
-        event.event_seq = Some(event_seq);
-        event.event_id = Some(TimelineEventId::from_seq(event_seq).to_string());
-        event.created_at_ms = Some(event.created_at_ms.unwrap_or(1000 + event_seq));
-        events.push(event.clone());
-        Ok(event)
-    }
-
-    async fn list_events_after(
-        &self,
-        session_id: &str,
-        after_event_id: Option<&TimelineEventId>,
-        limit: usize,
-    ) -> TalosResult<Vec<AgentEvent>> {
-        let after = match after_event_id {
-            Some(event_id) => event_id.event_seq()?,
-            None => 0,
-        };
-        Ok(self
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|event| {
-                event.session_id == session_id && event.event_seq.unwrap_or_default() > after
-            })
-            .take(limit)
-            .cloned()
-            .collect())
-    }
-
-    async fn list_turn_events(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        limit: usize,
-    ) -> TalosResult<Vec<AgentEvent>> {
-        let mut events = self
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .rev()
-            .filter(|event| event.session_id == session_id && event.turn_id == turn_id)
-            .take(limit.max(1))
-            .cloned()
-            .collect::<Vec<_>>();
-        events.reverse();
-        Ok(events)
-    }
-
-    async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
-        Ok(self
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .rev()
-            .find(|event| event.session_id == session_id)
-            .and_then(|event| event.event_id.clone())
-            .map(TimelineEventId::from))
-    }
-
-    async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
-        Ok(self
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|event| event.session_id == session_id)
-            .and_then(|event| event.event_id.clone())
-            .map(TimelineEventId::from))
-    }
-
-    async fn delete_completed_events_before(
-        &self,
-        _before_timestamp_ms: i64,
-        _limit: usize,
-    ) -> TalosResult<u64> {
-        Ok(0)
-    }
-
-    async fn delete_overflow_events_per_session(
-        &self,
-        _max_events_per_session: usize,
-        _limit: usize,
-    ) -> TalosResult<u64> {
-        Ok(0)
-    }
-}
-
-#[async_trait::async_trait]
-impl ActiveTurnStore for RecordingEventStore {
-    async fn upsert_active_turn(&self, update: ActiveTurnUpdate) -> TalosResult<()> {
-        self.active_turns.lock().unwrap().insert(
-            update.session_id.clone(),
-            ActiveTurnRecord {
-                session_id: update.session_id,
-                turn_id: update.turn_id,
-                message_id: update.message_id,
-                status: update.status,
-                last_event_id: update.last_event_id,
-                current_action_id: update.current_action_id,
-                updated_at: update.updated_at,
-            },
-        );
-        Ok(())
-    }
-
-    async fn get_active_turn(&self, session_id: &str) -> TalosResult<Option<ActiveTurnRecord>> {
-        Ok(self.active_turns.lock().unwrap().get(session_id).cloned())
-    }
-
-    async fn clear_active_turn(&self, session_id: &str) -> TalosResult<()> {
-        self.active_turns.lock().unwrap().remove(session_id);
-        Ok(())
-    }
-}
-
-#[async_trait::async_trait]
-impl MessageIdempotencyStore for RecordingEventStore {
-    async fn get(
-        &self,
-        session_id: &str,
-        idempotency_key: &str,
-    ) -> TalosResult<Option<IdempotencyRecord>> {
-        Ok(self
-            .idempotency_records
-            .lock()
-            .unwrap()
-            .get(&(session_id.to_string(), idempotency_key.to_string()))
-            .cloned())
-    }
-
-    async fn reserve(
-        &self,
-        session_id: &str,
-        idempotency_key: &str,
-        request_hash: &str,
-        turn_id: &str,
-        now_ms: i64,
-        expires_at_ms: Option<i64>,
-    ) -> TalosResult<IdempotencyReservation> {
-        let mut records = self.idempotency_records.lock().unwrap();
-        let key = (session_id.to_string(), idempotency_key.to_string());
-        if let Some(record) = records.get(&key) {
-            if record
-                .expires_at
-                .is_some_and(|expires_at| expires_at <= now_ms)
-            {
-                records.remove(&key);
-            } else {
-                return Ok(IdempotencyReservation::Existing(record.clone()));
-            }
-        }
-        let record = IdempotencyRecord {
-            session_id: session_id.to_string(),
-            idempotency_key: idempotency_key.to_string(),
-            request_hash: request_hash.to_string(),
-            turn_id: turn_id.to_string(),
-            message_id: None,
-            status: IdempotencyStatus::Pending,
-            result: None,
-            created_at: now_ms,
-            updated_at: now_ms,
-            expires_at: expires_at_ms,
-        };
-        records.insert(key, record.clone());
-        Ok(IdempotencyReservation::Reserved(record))
-    }
-
-    async fn complete(
-        &self,
-        session_id: &str,
-        idempotency_key: &str,
-        status: IdempotencyStatus,
-        message_id: Option<&str>,
-        result: &MessageCommandResult,
-        now_ms: i64,
-    ) -> TalosResult<()> {
-        let mut records = self.idempotency_records.lock().unwrap();
-        let key = (session_id.to_string(), idempotency_key.to_string());
-        if let Some(record) = records.get_mut(&key) {
-            record.status = status;
-            record.message_id = message_id.map(ToString::to_string);
-            record.result = Some(result.clone());
-            record.updated_at = now_ms;
-        }
-        Ok(())
-    }
-
-    async fn mark_stale_pending_failed(
-        &self,
-        older_than_ms: i64,
-        limit: usize,
-    ) -> TalosResult<u64> {
-        let mut changed = 0;
-        let mut records = self.idempotency_records.lock().unwrap();
-        for record in records.values_mut() {
-            if changed >= limit {
-                break;
-            }
-            if record.status == IdempotencyStatus::Pending && record.updated_at < older_than_ms {
-                record.status = IdempotencyStatus::FailedNoFirstEvent;
-                changed += 1;
-            }
-        }
-        Ok(changed as u64)
-    }
 }
 
 #[derive(Default)]

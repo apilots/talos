@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use talos_agent::SkillRootsResolver;
+use talos_agent_provider_kernel::SkillRootsResolver;
 use talos_app_server::BackgroundTaskDrain;
 use talos_auth::AuthService;
 use talos_automation::Automation;
@@ -11,7 +11,7 @@ use talos_config::{
     effective_llm_protocol, AgentKernelConfig, Config, LlmProtocol, McpTransportConfig,
     ProviderConfig,
 };
-use talos_coordinator::CoordinatorImpl;
+use talos_coordinator::{AgentCoordinator, CoordinatorImpl};
 use talos_error::{TalosError, TalosResult};
 use talos_gateway::Gateway;
 use talos_gateway_http::{HttpServer, ServerLifecycle, ServerLifecycleState};
@@ -26,10 +26,10 @@ use talos_logging::LogGuard;
 use talos_service::{PluginManagerService, TalosService, TimelineEventService};
 use talos_tools::{AgentControl, AgentControlFuture, McpConnectionManager, ToolRegistry};
 use talos_types::{
-    AgentDispatchRuntime, AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest,
-    ListSubagentsRequest, McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource,
-    McpTransportDefinition, SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest,
-    SubagentSnapshot, SubagentSpawnResult, WaitSubagentRequest,
+    AgentTreeSnapshot, FollowUpSubagentRequest, InterruptSubagentRequest, ListSubagentsRequest,
+    McpServerDefinition, McpServerRuntimeDescriptor, McpServerSource, McpTransportDefinition,
+    SendMessageResult, SendSubagentMessageRequest, SpawnSubagentRequest, SubagentSnapshot,
+    SubagentSpawnResult, WaitSubagentRequest,
 };
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -40,6 +40,8 @@ const TALOS_WEBUI_DIR_ENV: &str = "TALOS_WEBUI_DIR";
 mod application_automation;
 mod application_runtime;
 mod application_storage;
+mod dream_memory_maintenance;
+mod memory_progress;
 mod reloadable_llm_provider;
 mod startup;
 
@@ -57,7 +59,7 @@ impl SkillRootsResolver for AgentSkillRootsResolver {
         &self,
         kernel_config: &AgentKernelConfig,
     ) -> TalosResult<talos_skills::SkillRoots> {
-        self.plugins.skill_roots_for_kernel_config(kernel_config)
+        self.plugins.skill_roots(&kernel_config.skills)
     }
 }
 
@@ -152,7 +154,6 @@ pub struct TalosApplicationRuntime {
     pub event_service: Arc<TimelineEventService>,
     pub auth_service: Arc<dyn AuthService>,
     pub gateway: Arc<dyn Gateway>,
-    pub agent_dispatch_runtime: Arc<dyn AgentDispatchRuntime>,
     pub coordinator: Arc<CoordinatorImpl>,
     pub tool_registry: Arc<ToolRegistry>,
     automation: Automation,
@@ -388,7 +389,7 @@ struct CoordinatorDrain {
 #[async_trait::async_trait]
 impl BackgroundTaskDrain for CoordinatorDrain {
     async fn drain(&self, timeout: Duration) -> TalosResult<()> {
-        self.coordinator.drain_background_tasks(timeout).await
+        self.coordinator.shutdown(timeout).await
     }
 }
 
@@ -553,11 +554,8 @@ async fn start_server_after_startup(
         .and_then(|value| value.enable_channels)
         .unwrap_or(true);
     let channel_server = if enable_channels {
-        let mut channel_server = ChannelServer::new(
-            Arc::new(config.clone()),
-            runtime.gateway.clone(),
-            runtime.service.clone(),
-        );
+        let mut channel_server =
+            ChannelServer::new(Arc::new(config.clone()), runtime.service.clone());
         channel_server.register(Box::new(TelegramChannel::new()));
         Some(channel_server)
     } else {
@@ -592,7 +590,7 @@ async fn run_json_rpc_stdio_after_startup(
     .unwrap_or(usize::MAX);
     let runtime = build_application_runtime_after_startup(config.clone(), startup_report).await?;
     let automation = runtime.automation.clone();
-    let replay_limit = config.agent.kernel.timeline_events.replay_batch_size.max(1);
+    let replay_limit = config.agent.timeline_replay_batch_size.max(1);
     let service = runtime.service.clone();
     let app = Arc::new(
         talos_app_server::TalosApplicationAdapter::new(service.clone(), replay_limit)

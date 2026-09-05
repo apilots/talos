@@ -6,14 +6,18 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use talos_app_protocol::events::TimelineSubscriptionNotification;
+use talos_agent_api::{
+    InterruptTurnRequest, InterruptTurnResponse, RecoverTimelineResponse,
+    SessionActiveTurnResponse, SessionHistoryResponse, SubmitTurnInputRequest,
+    SubmitTurnInputResponse, TimelineEvent,
+};
+use talos_app_protocol::events::TimelineEventNotification;
 use talos_app_protocol::jsonrpc::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, RequestId};
 #[cfg(test)]
 use talos_app_protocol::requests::ActorCredential;
 use talos_app_protocol::requests::{
-    ActorCredentials, ClientCapabilities, ClientInfo, InitializeParams, InitializeResponse,
-    SkillsListRequest, SkillsListResponse, SkillsReadRequest, SkillsRefreshRequest,
-    SkillsResolveRequest, SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse,
+    ActorCredentials, ClientCapabilities, ClientInfo, ClientKind, InitializeParams,
+    InitializeResponse,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_auth::{
@@ -24,15 +28,14 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_types::{
     AuthLogoutRequest, AuthLogoutResponse, AuthSessionClearRequest, AuthSessionClearResponse,
     AuthSessionReadRequest, AuthSessionReadResponse, CloudLoginCancelResponse, ConfigDeleteRequest,
-    ConfigDeleteResponse, ConfigGetRequest, ConfigGetResponse, ConfigReloadRequest,
-    ConfigReloadResponse, ConfigUpdateRequest, ConfigUpdateResponse, EventUnsubscribeRequest,
-    EventUnsubscribeResponse, FsDirectoryCreateRequest, FsDirectoryCreateResponse,
-    FsDirectoryReadRequest, FsDirectoryReadResponse, InterruptTurnRequest, InterruptTurnResponse,
-    MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest, MemoryFileReadResponse,
-    MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest, MemoryGetResponse,
-    MemorySearchRequest, MemorySearchResponse, MessageQueue, MessageQueueAddRequest,
-    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
-    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
+    ConfigDeleteResponse, ConfigGetRequest, ConfigReloadRequest, ConfigReloadResponse,
+    ConfigResponse, ConfigUpdateRequest, EventUnsubscribeRequest, EventUnsubscribeResponse,
+    FsDirectoryCreateRequest, FsDirectoryCreateResponse, FsDirectoryReadRequest,
+    FsDirectoryReadResponse, MemoryFileListRequest, MemoryFileListResponse, MemoryFileReadRequest,
+    MemoryFileReadResponse, MemoryFileWriteRequest, MemoryFileWriteResponse, MemoryGetRequest,
+    MemoryGetResponse, MemorySearchRequest, MemorySearchResponse, MessageQueue,
+    MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
     ModelListRequest, ModelListResponse, PluginDisableRequest, PluginDisableResponse,
     PluginEnableRequest, PluginEnableResponse, PluginInstallRequest, PluginInstallResponse,
     PluginListRequest, PluginListResponse, PluginReadRequest, PluginReadResponse,
@@ -43,29 +46,28 @@ use talos_types::{
     ProfileReadRequest, ProfileReadResponse, ProjectCreateRequest, ProjectCreateResponse,
     ProjectDeleteRequest, ProjectDeleteResponse, ProjectListRequest, ProjectListResponse,
     ProjectPatchRequest, ProjectPatchResponse, ProjectReadRequest, ProjectReadResponse,
-    RecoverTimelineRequest, RetryTurnRequest, RetryTurnResponse, SessionActiveTurnRequest,
-    SessionActiveTurnResponse, SessionClearRequest, SessionClearResponse, SessionCloseRequest,
-    SessionCloseResponse, SessionCompactRequest, SessionCompactResponse, SessionDeleteRequest,
-    SessionDeleteResponse, SessionGetRequest, SessionGetResponse, SessionHistoryRequest,
-    SessionHistoryResponse, SessionListRequest, SessionListResponse, SessionPatchRequest,
-    SessionUpdateResponse, SkillsReadResponse, StartTurnRequest, StartTurnResponse,
-    SubmitDynamicToolResultRequest, SubmitDynamicToolResultResponse, SubmitUserActionRequest,
-    SubmitUserActionResponse, SubscribeTimelineRequest, SubscribeTimelineResponse,
-    TimelineRecoveryResponse, UserCurrentRequest, UserCurrentResponse, WorkspaceDocListRequest,
-    WorkspaceDocListResponse, WorkspaceDocReadRequest, WorkspaceDocReadResponse,
-    WorkspaceDocWriteRequest, WorkspaceDocWriteResponse,
+    RecoverTimelineRequest, RetryTurnRequest, SessionActiveTurnRequest, SessionClearRequest,
+    SessionClearResponse, SessionCloseRequest, SessionCloseResponse, SessionCompactRequest,
+    SessionCompactResponse, SessionDeleteRequest, SessionDeleteResponse, SessionGetRequest,
+    SessionGetResponse, SessionHistoryRequest, SessionListRequest, SessionListResponse,
+    SessionPatchRequest, SessionUpdateResponse, SkillsListRequest, SkillsListResponse,
+    SkillsReadRequest, SkillsReadResponse, SkillsRefreshRequest, SkillsResolveRequest,
+    SkillsResolveResponse, SkillsSuggestRequest, SkillsSuggestResponse, StartTurnRequest,
+    StartTurnResponse, SubscribeTimelineRequest, SubscribeTimelineResponse, UserCurrentRequest,
+    UserCurrentResponse, WorkspaceDocListRequest, WorkspaceDocListResponse,
+    WorkspaceDocReadRequest, WorkspaceDocReadResponse, WorkspaceDocWriteRequest,
+    WorkspaceDocWriteResponse,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
 mod events;
-use events::{dispatch_application_event, dispatch_message_queue_change};
+use events::{dispatch_message_queue_change, dispatch_timeline_event};
 use tokio::sync::{mpsc, oneshot, Mutex};
 
 use crate::{
     GatewayClient, MessageQueueChangeStream, TimelineEventStream, TimelineStreamSubscription,
 };
-use talos_types::talos::TimelineEventEnvelope;
 
 mod response;
 mod stdout;
@@ -121,16 +123,16 @@ pub struct AppServerClient {
     next_id: i32,
     pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    pending_subscription_events: Arc<Mutex<HashMap<String, Vec<TimelineEventEnvelope>>>>,
-    events: mpsc::Receiver<TimelineEventEnvelope>,
-    notifications: mpsc::Receiver<TimelineSubscriptionNotification>,
+    pending_subscription_events: Arc<Mutex<HashMap<String, Vec<TimelineEvent>>>>,
+    events: mpsc::Receiver<TimelineEvent>,
+    notifications: mpsc::Receiver<TimelineEventNotification>,
     actor_credentials: Option<ActorCredentials>,
     use_cloud_session_cache: bool,
 }
 
 struct SubscriptionStream {
     session_id: String,
-    sender: mpsc::Sender<TimelineEventEnvelope>,
+    sender: mpsc::Sender<TimelineEvent>,
     message_queue_sender: mpsc::Sender<talos_types::MessageQueueChangedNotification>,
 }
 
@@ -203,6 +205,7 @@ impl AppServerClient {
                     name: config.client_name.clone(),
                     title: None,
                     version: config.client_version.clone(),
+                    kind: ClientKind::Sdk,
                 },
                 capabilities: ClientCapabilities {
                     protocol_version: ProtocolVersion::CURRENT,
@@ -222,7 +225,7 @@ impl AppServerClient {
 
     pub(crate) async fn restore_cloud_session_candidate(&mut self) -> TalosResult<bool> {
         let response: AuthSessionReadResponse = self
-            .request_typed("auth.session.read", AuthSessionReadRequest {})
+            .request_typed("auth/session/read", AuthSessionReadRequest {})
             .await?;
         if let Some(session) = response.session {
             self.actor_credentials = Some(existing_session_credentials(session.access_token));
@@ -242,14 +245,14 @@ impl AppServerClient {
         Ok(())
     }
 
-    pub async fn next_event(&mut self) -> TalosResult<TimelineEventEnvelope> {
+    pub async fn next_event(&mut self) -> TalosResult<TimelineEvent> {
         self.events
             .recv()
             .await
             .ok_or_else(|| TalosError::internal("app-server event stream closed".to_string()))
     }
 
-    pub async fn next_notification(&mut self) -> TalosResult<TimelineSubscriptionNotification> {
+    pub async fn next_notification(&mut self) -> TalosResult<TimelineEventNotification> {
         self.notifications.recv().await.ok_or_else(|| {
             TalosError::internal("app-server notification stream closed".to_string())
         })
@@ -324,7 +327,7 @@ impl AppServerClient {
                 if error.is_code(ErrorCode::Unauthenticated)
                     && self.use_cloud_session_cache
                     && self.actor_credentials.is_some()
-                    && method != "auth.session.clear" =>
+                    && method != "auth/session/clear" =>
             {
                 let message = error.diagnostic_message().to_string();
                 self.actor_credentials = None;
@@ -375,20 +378,20 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: AuthSessionReadRequest,
     ) -> TalosResult<AuthSessionReadResponse> {
-        self.request_typed("auth.session.read", request).await
+        self.request_typed("auth/session/read", request).await
     }
 
     async fn clear_auth_session(
         &mut self,
         request: AuthSessionClearRequest,
     ) -> TalosResult<AuthSessionClearResponse> {
-        let response = self.request_typed("auth.session.clear", request).await?;
+        let response = self.request_typed("auth/session/clear", request).await?;
         self.actor_credentials = None;
         Ok(response)
     }
 
     async fn auth_logout(&mut self, request: AuthLogoutRequest) -> TalosResult<AuthLogoutResponse> {
-        let response = self.request_typed("auth.logout", request).await?;
+        let response = self.request_typed("auth/logout", request).await?;
         self.actor_credentials = None;
         Ok(response)
     }
@@ -397,14 +400,14 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: CloudLoginStartRequest,
     ) -> TalosResult<CloudLoginStartResponse> {
-        self.request_typed("auth.login.start", request).await
+        self.request_typed("auth/login/start", request).await
     }
 
     async fn cloud_login_status(
         &mut self,
         request: CloudLoginStatusRequest,
     ) -> TalosResult<CloudLoginStatusResponse> {
-        let response = self.request_typed("auth.login.status", request).await?;
+        let response = self.request_typed("auth/login/status", request).await?;
         self.apply_cloud_login_credentials(&response).await?;
         Ok(response)
     }
@@ -413,14 +416,14 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: CloudLoginCancelRequest,
     ) -> TalosResult<CloudLoginCancelResponse> {
-        self.request_typed("auth.login.cancel", request).await
+        self.request_typed("auth/login/cancel", request).await
     }
 
     async fn current_user(
         &mut self,
         request: UserCurrentRequest,
     ) -> TalosResult<UserCurrentResponse> {
-        self.request_typed("user.current", request).await
+        self.request_typed("user/current", request).await
     }
 
     async fn read_profile(
@@ -431,135 +434,132 @@ impl GatewayClient for AppServerClient {
     }
 
     async fn list_models(&mut self, request: ModelListRequest) -> TalosResult<ModelListResponse> {
-        self.request_typed("model.list", request).await
+        self.request_typed("model/list", request).await
     }
 
-    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigGetResponse> {
-        self.request_typed("config.get", request).await
+    async fn get_config(&mut self, request: ConfigGetRequest) -> TalosResult<ConfigResponse> {
+        self.request_typed("config/get", request).await
     }
 
-    async fn update_config(
-        &mut self,
-        request: ConfigUpdateRequest,
-    ) -> TalosResult<ConfigUpdateResponse> {
-        self.request_typed("config.update", request).await
+    async fn update_config(&mut self, request: ConfigUpdateRequest) -> TalosResult<ConfigResponse> {
+        self.request_typed("config/update", request).await
     }
 
     async fn delete_config(
         &mut self,
         request: ConfigDeleteRequest,
     ) -> TalosResult<ConfigDeleteResponse> {
-        self.request_typed("config.delete", request).await
+        self.request_typed("config/delete", request).await
     }
 
     async fn reload_config(
         &mut self,
         request: ConfigReloadRequest,
     ) -> TalosResult<ConfigReloadResponse> {
-        self.request_typed("config.reload", request).await
+        self.request_typed("config/reload", request).await
     }
 
     async fn list_skills(&mut self, request: SkillsListRequest) -> TalosResult<SkillsListResponse> {
-        self.request_typed("skills.list", request).await
+        self.request_typed("skills/list", request).await
     }
 
     async fn refresh_skills(
         &mut self,
         request: SkillsRefreshRequest,
     ) -> TalosResult<SkillsListResponse> {
-        self.request_typed("skills.refresh", request).await
+        self.request_typed("skills/refresh", request).await
     }
 
     async fn suggest_skills(
         &mut self,
         request: SkillsSuggestRequest,
     ) -> TalosResult<SkillsSuggestResponse> {
-        self.request_typed("skills.suggest", request).await
+        self.request_typed("skills/suggest", request).await
     }
 
     async fn read_skill(&mut self, request: SkillsReadRequest) -> TalosResult<SkillsReadResponse> {
-        self.request_typed("skills.read", request).await
+        self.request_typed("skills/read", request).await
     }
 
     async fn resolve_skills(
         &mut self,
         request: SkillsResolveRequest,
     ) -> TalosResult<SkillsResolveResponse> {
-        self.request_typed("skills.resolve", request).await
+        self.request_typed("skills/resolve", request).await
     }
 
     async fn list_sessions(
         &mut self,
         request: SessionListRequest,
     ) -> TalosResult<SessionListResponse> {
-        self.request_typed("session.list", request).await
+        self.request_typed("session/list", request).await
     }
 
     async fn get_session(&mut self, request: SessionGetRequest) -> TalosResult<SessionGetResponse> {
-        self.request_typed("session.get", request).await
+        self.request_typed("session/get", request).await
     }
 
     async fn get_session_history(
         &mut self,
         request: SessionHistoryRequest,
     ) -> TalosResult<SessionHistoryResponse> {
-        self.request_typed("session.history", request).await
+        self.request_typed("session/history", request).await
     }
 
     async fn get_active_turn(
         &mut self,
         request: SessionActiveTurnRequest,
     ) -> TalosResult<SessionActiveTurnResponse> {
-        self.request_typed("session.active_turn", request).await
+        self.request_typed("session/active_turn", request).await
     }
 
     async fn patch_session(
         &mut self,
         request: SessionPatchRequest,
     ) -> TalosResult<SessionUpdateResponse> {
-        self.request_typed("session.patch", request).await
+        self.request_typed("session/patch", request).await
     }
 
     async fn close_session(
         &mut self,
         request: SessionCloseRequest,
     ) -> TalosResult<SessionCloseResponse> {
-        self.request_typed("session.close", request).await
+        self.request_typed("session/close", request).await
     }
 
     async fn delete_session(
         &mut self,
         request: SessionDeleteRequest,
     ) -> TalosResult<SessionDeleteResponse> {
-        self.request_typed("session.delete", request).await
+        self.request_typed("session/delete", request).await
     }
 
     async fn compact_session(
         &mut self,
         request: SessionCompactRequest,
     ) -> TalosResult<SessionCompactResponse> {
-        self.request_typed("session.compact", request).await
+        self.request_typed("session/compact", request).await
     }
 
     async fn clear_session(
         &mut self,
         request: SessionClearRequest,
     ) -> TalosResult<SessionClearResponse> {
-        self.request_typed("session.clear", request).await
+        self.request_typed("session/clear", request).await
     }
 
     async fn recover_timeline(
         &mut self,
         request: RecoverTimelineRequest,
-    ) -> TalosResult<TimelineRecoveryResponse> {
-        self.request_typed("timeline.recover", request).await
+    ) -> TalosResult<RecoverTimelineResponse> {
+        self.request_typed("timeline/recover", request).await
     }
 
     async fn subscribe_timeline(
         &mut self,
         request: SubscribeTimelineRequest,
     ) -> TalosResult<SubscribeTimelineResponse> {
-        self.request_typed("event.subscribe", request).await
+        self.request_typed("event/subscribe", request).await
     }
 
     async fn open_timeline_stream(
@@ -580,7 +580,7 @@ impl GatewayClient for AppServerClient {
                 .remove(&subscription_id)
                 .unwrap_or_default();
             for event in buffered_events {
-                if event.session_id == session_id && tx.try_send(event).is_err() {
+                if event.event.identity.session_id == session_id && tx.try_send(event).is_err() {
                     break;
                 }
             }
@@ -612,22 +612,22 @@ impl GatewayClient for AppServerClient {
             .lock()
             .await
             .remove(&request.subscription_id);
-        self.request_typed("event.unsubscribe", request).await
+        self.request_typed("event/unsubscribe", request).await
     }
 
     async fn start_turn(&mut self, request: StartTurnRequest) -> TalosResult<StartTurnResponse> {
-        self.request_typed("turn.start", request).await
+        self.request_typed("turn/start", request).await
     }
 
-    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<RetryTurnResponse> {
-        self.request_typed("turn.retry", request).await
+    async fn retry_turn(&mut self, request: RetryTurnRequest) -> TalosResult<StartTurnResponse> {
+        self.request_typed("turn/retry", request).await
     }
 
     async fn interrupt_turn(
         &mut self,
         request: InterruptTurnRequest,
     ) -> TalosResult<InterruptTurnResponse> {
-        self.request_typed("turn.interrupt", request).await
+        self.request_typed("turn/interrupt", request).await
     }
 
     async fn add_queued_message(
@@ -672,156 +672,141 @@ impl GatewayClient for AppServerClient {
         self.request_typed("messageQueue/start", request).await
     }
 
-    async fn steer_queued_message(
+    async fn submit_turn_input(
         &mut self,
-        request: MessageQueueSteerRequest,
-    ) -> TalosResult<MessageQueue> {
-        self.request_typed("messageQueue/steer", request).await
-    }
-
-    async fn submit_dynamic_tool_result(
-        &mut self,
-        request: SubmitDynamicToolResultRequest,
-    ) -> TalosResult<SubmitDynamicToolResultResponse> {
-        self.request_typed("tool.dynamic_result.submit", request)
-            .await
-    }
-
-    async fn submit_user_action(
-        &mut self,
-        request: SubmitUserActionRequest,
-    ) -> TalosResult<SubmitUserActionResponse> {
-        self.request_typed("userAction/submit", request).await
+        request: SubmitTurnInputRequest,
+    ) -> TalosResult<SubmitTurnInputResponse> {
+        self.request_typed("turn/input", request).await
     }
 
     async fn list_projects(
         &mut self,
         request: ProjectListRequest,
     ) -> TalosResult<ProjectListResponse> {
-        self.request_typed("project.list", request).await
+        self.request_typed("project/list", request).await
     }
 
     async fn get_project(
         &mut self,
         request: ProjectReadRequest,
     ) -> TalosResult<ProjectReadResponse> {
-        self.request_typed("project.read", request).await
+        self.request_typed("project/read", request).await
     }
 
     async fn create_project(
         &mut self,
         request: ProjectCreateRequest,
     ) -> TalosResult<ProjectCreateResponse> {
-        self.request_typed("project.create", request).await
+        self.request_typed("project/create", request).await
     }
 
     async fn patch_project(
         &mut self,
         request: ProjectPatchRequest,
     ) -> TalosResult<ProjectPatchResponse> {
-        self.request_typed("project.patch", request).await
+        self.request_typed("project/patch", request).await
     }
 
     async fn delete_project(
         &mut self,
         request: ProjectDeleteRequest,
     ) -> TalosResult<ProjectDeleteResponse> {
-        self.request_typed("project.delete", request).await
+        self.request_typed("project/delete", request).await
     }
 
     async fn read_fs_directory(
         &mut self,
         request: FsDirectoryReadRequest,
     ) -> TalosResult<FsDirectoryReadResponse> {
-        self.request_typed("fs.directory.read", request).await
+        self.request_typed("fs/directory/read", request).await
     }
 
     async fn create_fs_directory(
         &mut self,
         request: FsDirectoryCreateRequest,
     ) -> TalosResult<FsDirectoryCreateResponse> {
-        self.request_typed("fs.directory.create", request).await
+        self.request_typed("fs/directory/create", request).await
     }
 
     async fn list_plugin_sources(
         &mut self,
         request: PluginSourceListRequest,
     ) -> TalosResult<PluginSourceListResponse> {
-        self.request_typed("plugin.source.list", request).await
+        self.request_typed("plugin/source/list", request).await
     }
 
     async fn add_plugin_source(
         &mut self,
         request: PluginSourceAddRequest,
     ) -> TalosResult<PluginSourceAddResponse> {
-        self.request_typed("plugin.source.add", request).await
+        self.request_typed("plugin/source/add", request).await
     }
 
     async fn refresh_plugin_source(
         &mut self,
         request: PluginSourceRefreshRequest,
     ) -> TalosResult<PluginSourceRefreshResponse> {
-        self.request_typed("plugin.source.refresh", request).await
+        self.request_typed("plugin/source/refresh", request).await
     }
 
     async fn remove_plugin_source(
         &mut self,
         request: PluginSourceRemoveRequest,
     ) -> TalosResult<PluginSourceRemoveResponse> {
-        self.request_typed("plugin.source.remove", request).await
+        self.request_typed("plugin/source/remove", request).await
     }
 
     async fn search_plugins(
         &mut self,
         request: PluginSearchRequest,
     ) -> TalosResult<PluginSearchResponse> {
-        self.request_typed("plugin.search", request).await
+        self.request_typed("plugin/search", request).await
     }
 
     async fn list_plugins(
         &mut self,
         request: PluginListRequest,
     ) -> TalosResult<PluginListResponse> {
-        self.request_typed("plugin.list", request).await
+        self.request_typed("plugin/list", request).await
     }
 
     async fn read_plugin(&mut self, request: PluginReadRequest) -> TalosResult<PluginReadResponse> {
-        self.request_typed("plugin.read", request).await
+        self.request_typed("plugin/read", request).await
     }
 
     async fn install_plugin(
         &mut self,
         request: PluginInstallRequest,
     ) -> TalosResult<PluginInstallResponse> {
-        self.request_typed("plugin.install", request).await
+        self.request_typed("plugin/install", request).await
     }
 
     async fn update_plugin(
         &mut self,
         request: PluginUpdateRequest,
     ) -> TalosResult<PluginUpdateResponse> {
-        self.request_typed("plugin.update", request).await
+        self.request_typed("plugin/update", request).await
     }
 
     async fn uninstall_plugin(
         &mut self,
         request: PluginUninstallRequest,
     ) -> TalosResult<PluginUninstallResponse> {
-        self.request_typed("plugin.uninstall", request).await
+        self.request_typed("plugin/uninstall", request).await
     }
 
     async fn enable_plugin(
         &mut self,
         request: PluginEnableRequest,
     ) -> TalosResult<PluginEnableResponse> {
-        self.request_typed("plugin.enable", request).await
+        self.request_typed("plugin/enable", request).await
     }
 
     async fn disable_plugin(
         &mut self,
         request: PluginDisableRequest,
     ) -> TalosResult<PluginDisableResponse> {
-        self.request_typed("plugin.disable", request).await
+        self.request_typed("plugin/disable", request).await
     }
 
     async fn upload_file(
@@ -865,21 +850,21 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: MemoryFileListRequest,
     ) -> TalosResult<MemoryFileListResponse> {
-        self.request_typed("memory.file.list", request).await
+        self.request_typed("memory/file/list", request).await
     }
 
     async fn read_memory_file(
         &mut self,
         request: MemoryFileReadRequest,
     ) -> TalosResult<MemoryFileReadResponse> {
-        self.request_typed("memory.file.read", request).await
+        self.request_typed("memory/file/read", request).await
     }
 
     async fn write_memory_file(
         &mut self,
         request: MemoryFileWriteRequest,
     ) -> TalosResult<MemoryFileWriteResponse> {
-        self.request_typed("memory.file.write", request).await
+        self.request_typed("memory/file/write", request).await
     }
 
     async fn search_memory(
@@ -897,21 +882,21 @@ impl GatewayClient for AppServerClient {
         &mut self,
         request: WorkspaceDocListRequest,
     ) -> TalosResult<WorkspaceDocListResponse> {
-        self.request_typed("workspace.doc.list", request).await
+        self.request_typed("workspace/doc/list", request).await
     }
 
     async fn read_workspace_doc(
         &mut self,
         request: WorkspaceDocReadRequest,
     ) -> TalosResult<WorkspaceDocReadResponse> {
-        self.request_typed("workspace.doc.read", request).await
+        self.request_typed("workspace/doc/read", request).await
     }
 
     async fn write_workspace_doc(
         &mut self,
         request: WorkspaceDocWriteRequest,
     ) -> TalosResult<WorkspaceDocWriteResponse> {
-        self.request_typed("workspace.doc.write", request).await
+        self.request_typed("workspace/doc/write", request).await
     }
 
     async fn shutdown(&mut self) -> TalosResult<()> {

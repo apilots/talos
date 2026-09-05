@@ -71,7 +71,7 @@ export function buildSessionBlocks({
       liveBlocks.some(
         (block) =>
           block.kind === "user" &&
-          block.id.startsWith(`user-${streamState.pendingInput?.serverMessageId}-`),
+          block.id.endsWith(`-${streamState.pendingInput?.serverMessageId}`),
       ),
   );
   const pendingInputBlock =

@@ -1,65 +1,240 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use crate::test_support::run_test_migrations;
+use crate::test_support::{
+    canonical_completed_message_events, canonical_user_admission, commit_test_running_turn,
+    run_test_migrations,
+};
 use crate::SessionMessageQueueService;
 use async_trait::async_trait;
-use chrono::Utc;
-use talos_coordinator::SessionRuntime;
+use talos_agent::{
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentInputParams, AgentInterruptParams,
+    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSessionContext,
+};
+use talos_agent_api::{
+    AgentAssistantText, AgentAssistantTextPhase, AgentEvent as CanonicalAgentEvent,
+    AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome, AgentMessage,
+    AgentMessageBlock, AgentMessageBlockContent, AgentMessageBlockStatus, AgentMessageRole,
+    AgentMessageStatus, AgentRunMetrics, AgentStopReason, AgentTurnCompleted,
+};
+use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{SqliteStorage, Storage};
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::MockProjectStore;
 use talos_store::session::{
-    ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
-    FileSessionArtifactStore, MessageIdempotencyStore, SessionArtifactStore, SessionQuery,
-    SessionStore, TalosTurn, TimelineEventStore,
+    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore, SessionQuery,
+    SessionRecord, SessionStore,
 };
-use talos_types::agent_dispatch::{
-    AgentDispatchInput, AgentDispatchInputParams, AgentDispatchParams, DispatchBinding,
-};
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, RunItem, StopReason, TalosContext,
-    TalosInputItem, TalosItemDeltaEvent, TalosItemStartedEvent, TalosProvider, TalosSourceType,
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase, TalosTurnCompletedEvent, TalosTurnErrorEvent,
-    TalosTurnStartedEvent, TokenUsage,
-};
+use talos_types::talos::{SessionSource, SessionSourceProvider, SessionSourceType};
 use talos_types::{
-    AgentCaller, AgentTarget, AgentTurnRef, DynamicToolResultParams, FollowUpSubagentRequest,
-    InterruptSubagentRequest, ListSubagentsRequest, ModelRef, ModelSelection, PendingUserAction,
-    SendSubagentMessageRequest, SessionConf, SpawnSubagentRequest, SubagentOutcome, SubagentRef,
-    TalosConfig, TimelineUserActionEvent, UserActionParams, UserActionState, WaitSubagentRequest,
+    AgentCaller, AgentTarget, AgentTurnRef, FollowUpSubagentRequest, InterruptSubagentRequest,
+    ListSubagentsRequest, ModelRef, ModelSelection, SendSubagentMessageRequest, SessionConf,
+    SpawnSubagentRequest, SubagentOutcome, SubagentRef, TalosConfig, WaitSubagentRequest,
 };
 use tokio::sync::mpsc;
 
 use super::SubagentService;
 use crate::session::{CreateSessionParams, SessionService};
-use crate::turn::{TurnExecutor, TurnService};
-use crate::{SessionHistoryService, TimelineEventRetentionConfig, TimelineEventService};
+use crate::turn::TurnService;
+use crate::TimelineEventService;
 
 #[path = "list_tests.rs"]
 mod list_tests;
 
 #[derive(Default)]
-struct RecordingTurnExecutor {
-    requests: Mutex<Vec<AgentDispatchParams>>,
-    inputs: Mutex<Vec<AgentDispatchInputParams>>,
+struct RecordingAgentExecution {
+    requests: Mutex<Vec<AgentRunParams>>,
+    inputs: Mutex<Vec<AgentInputParams>>,
     input_error: Mutex<Option<TalosError>>,
     fail_next: Mutex<bool>,
-    interactive_next: Mutex<bool>,
-    silent_next: Mutex<bool>,
-    held_turns: Mutex<Vec<(AgentDispatchParams, mpsc::Sender<AgentEvent>)>>,
-    hold_next: Mutex<usize>,
-    rejected_agent_id: Mutex<Option<String>>,
-    artifact_workspace: Mutex<Option<PathBuf>>,
-    artifact_sequences: Mutex<HashMap<String, u64>>,
+    hold_running_turn: Mutex<bool>,
+    active_progress: Mutex<Vec<mpsc::Sender<CanonicalAgentEvent>>>,
+    input_sequences: Mutex<HashMap<(String, String), u64>>,
+    active_settlements: Mutex<
+        Vec<
+            tokio::sync::oneshot::Sender<talos_agent::AgentResult<talos_agent::AgentRunSettlement>>,
+        >,
+    >,
+}
+
+#[path = "authorization_tests.rs"]
+mod authorization_tests;
+#[path = "follow_up_tests.rs"]
+mod follow_up_tests;
+#[path = "interrupt_tests.rs"]
+mod interrupt_tests;
+#[path = "message_tests.rs"]
+mod message_tests;
+#[path = "wait_tests.rs"]
+mod wait_tests;
+
+struct RecordingExecutionCoordinator {
+    execution: Arc<RecordingAgentExecution>,
+    delegate: Arc<dyn AgentCoordinator>,
 }
 
 #[async_trait]
-impl TurnExecutor for RecordingTurnExecutor {
-    async fn validate_agent_id(&self, agent_id: &str) -> TalosResult<()> {
+impl AgentCoordinator for RecordingExecutionCoordinator {
+    async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
+        self.delegate.resolve_agent(params).await
+    }
+
+    async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
+        self.delegate.ensure_agent(agent_id).await
+    }
+
+    async fn start(&self, request: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        self.execution
+            .requests
+            .lock()
+            .unwrap()
+            .push(request.clone());
+        if std::mem::take(&mut *self.execution.fail_next.lock().unwrap()) {
+            return Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                "start failed".to_string(),
+            ));
+        }
+        let identity = request.context.identity();
+        let admission = canonical_user_admission(identity.clone(), request.input, 1, true);
+        let assistant = AgentMessage {
+            message_id: format!("assistant-{}", identity.turn_id),
+            turn_id: identity.turn_id.clone(),
+            role: AgentMessageRole::Agent,
+            status: AgentMessageStatus::Completed,
+            blocks: vec![AgentMessageBlock {
+                block_id: format!("answer-{}", identity.turn_id),
+                status: AgentMessageBlockStatus::Completed,
+                content: AgentMessageBlockContent::AssistantText(AgentAssistantText {
+                    phase: AgentAssistantTextPhase::FinalAnswer,
+                    text: "AGENT_CHILD_OK".to_string(),
+                }),
+                started_at: 1,
+                completed_at: Some(1),
+            }],
+            created_at: 1,
+            completed_at: Some(1),
+        };
+        let progress = canonical_completed_message_events(
+            identity.clone(),
+            assistant.clone(),
+            admission.last().expect("test admission").sequence + 1,
+        );
+        let terminal = CanonicalAgentEvent {
+            identity,
+            sequence: progress.last().expect("test progress").sequence + 1,
+            occurred_at: 1,
+            payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: AgentStopReason::EndTurn,
+            }),
+        };
+        let (progress_tx, progress_rx) = mpsc::channel(progress.len().max(1));
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        let mut settlement_tx = Some(settlement_tx);
+        let hold_running_turn = *self.execution.hold_running_turn.lock().unwrap();
+        if hold_running_turn {
+            self.execution.input_sequences.lock().unwrap().insert(
+                (
+                    terminal.identity.session_id.clone(),
+                    terminal.identity.turn_id.clone(),
+                ),
+                terminal.sequence,
+            );
+            self.execution
+                .active_progress
+                .lock()
+                .unwrap()
+                .push(progress_tx.clone());
+            self.execution
+                .active_settlements
+                .lock()
+                .unwrap()
+                .push(settlement_tx.take().unwrap());
+        }
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: admission,
+                permit: AgentAdmissionPermit::new(async move {
+                    for event in progress {
+                        progress_tx.send(event).await.map_err(|_| {
+                            talos_agent::AgentError::provider_error("test progress receiver")
+                        })?;
+                    }
+                    if hold_running_turn {
+                        return Ok(());
+                    }
+                    drop(progress_tx);
+                    settlement_tx
+                        .expect("completed test Turn settlement sender")
+                        .send(Ok(AgentRunSettlement::Finished {
+                            event: terminal,
+                            messages: vec![assistant],
+                            metrics: AgentRunMetrics::default(),
+                        }))
+                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        self.execution.inputs.lock().unwrap().push(params.clone());
+        if let Some(error) = self.execution.input_error.lock().unwrap().take() {
+            return Err(error);
+        }
+        let identity = params.identity.clone();
+        let key = (identity.session_id.clone(), identity.turn_id.clone());
+        let mut input_sequences = self.execution.input_sequences.lock().unwrap();
+        let sequence = input_sequences.get(&key).copied().unwrap_or(6);
+        let events = canonical_user_admission(identity, params.input, sequence, false);
+        input_sequences.insert(key, events.last().unwrap().sequence + 1);
+        Ok(AgentAdmission {
+            events,
+            permit: AgentAdmissionPermit::new(async { Ok(()) }),
+        })
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.delegate.interrupt(params).await
+    }
+
+    async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
+        self.delegate.compact_session(params).await
+    }
+
+    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.clear_session(params).await
+    }
+
+    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.close_session(params).await
+    }
+
+    async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
+        self.delegate.shutdown(timeout).await
+    }
+}
+
+#[derive(Default)]
+struct RecordingAgentCoordinator {
+    cancellations: Mutex<Vec<(String, String, Option<String>)>>,
+    rejected_agent_id: Mutex<Option<String>>,
+    interrupt_outcome: Mutex<Option<AgentInterruptOutcome>>,
+}
+
+#[async_trait]
+impl AgentCoordinator for RecordingAgentCoordinator {
+    async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
+        Ok("default".to_string())
+    }
+
+    async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
         if self.rejected_agent_id.lock().unwrap().as_deref() == Some(agent_id) {
             return Err(TalosError::public(
                 talos_error::ErrorCode::ResourceNotFound,
@@ -69,183 +244,42 @@ impl TurnExecutor for RecordingTurnExecutor {
         Ok(())
     }
 
-    async fn start_turn_stream(
-        &self,
-        request: AgentDispatchParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
-        self.requests.lock().unwrap().push(request.clone());
-        if std::mem::take(&mut *self.fail_next.lock().unwrap()) {
-            return Err(TalosError::public(
-                talos_error::ErrorCode::Conflict,
-                "start failed".to_string(),
-            ));
-        }
-        let (tx, rx) = mpsc::channel(2);
-        if std::mem::take(&mut *self.silent_next.lock().unwrap()) {
-            self.held_turns.lock().unwrap().push((request, tx));
-            return Ok(rx);
-        }
-        let interactive = std::mem::take(&mut *self.interactive_next.lock().unwrap());
-        let hold = {
-            let mut remaining = self.hold_next.lock().unwrap();
-            if *remaining == 0 {
-                false
-            } else {
-                *remaining -= 1;
-                true
-            }
-        };
-        let first_payload = if interactive || hold {
-            AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-                request_id: "request-child".to_string(),
-                turn_id: request.turn_id.clone(),
-                started_at_ms: 1,
-            })
-        } else {
-            let artifact_workspace = self.artifact_workspace.lock().unwrap().clone();
-            if let Some(artifact_workspace) = artifact_workspace {
-                let sequence = {
-                    let mut sequences = self.artifact_sequences.lock().unwrap();
-                    let sequence = sequences
-                        .entry(request.session.context.session_id.clone())
-                        .or_default();
-                    *sequence += 1;
-                    *sequence
-                };
-                FileSessionArtifactStore::default()
-                    .append_turn(
-                        &artifact_workspace,
-                        &TalosTurn {
-                            turn_id: format!("artifact-{}", request.turn_id),
-                            message_id: "message-child".to_string(),
-                            session_id: request.session.context.session_id.clone(),
-                            seq: sequence,
-                            timestamp: Utc::now(),
-                            items: vec![RunItem::OutputText {
-                                text: "AGENT_CHILD_OK".to_string(),
-                            }],
-                            usage: TokenUsage::default(),
-                            stop_reason: StopReason::EndTurn,
-                        },
-                    )
-                    .await?;
-            }
-            AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                request_id: "request-child".to_string(),
-                turn_id: request.turn_id.clone(),
-                completed_at_ms: 1,
-                stop_reason: talos_types::talos::StopReason::EndTurn,
-                usage: TokenUsage::default(),
-                metrics: None,
-                artifact_seq: Some(1),
-            })
-        };
-        tx.send(AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: if interactive || hold {
-                AgentEventType::TurnStarted
-            } else {
-                AgentEventType::TurnCompleted
-            },
-            turn_id: request.turn_id.clone(),
-            message_id: "message-child".to_string(),
-            session_id: request.session.context.session_id.clone(),
-            sequence: 0,
-            payload: first_payload,
-        })
-        .await
-        .unwrap();
-        if hold {
-            self.held_turns.lock().unwrap().push((request, tx));
-            return Ok(rx);
-        }
-        if interactive {
-            tx.send(AgentEvent {
-                event_seq: None,
-                event_id: None,
-                created_at_ms: None,
-                event_type: AgentEventType::ItemDelta,
-                turn_id: request.turn_id.clone(),
-                message_id: "message-child".to_string(),
-                session_id: request.session.context.session_id,
-                sequence: 1,
-                payload: AgentEventPayload::ItemDelta(TalosItemDeltaEvent {
-                    request_id: "request-child".to_string(),
-                    turn_id: request.turn_id,
-                    item_id: "item-tool".to_string(),
-                    delta: TalosTimelineDelta::UserAction {
-                        event: TimelineUserActionEvent::Requested {
-                            action: PendingUserAction {
-                                action_id: "ua-child".to_string(),
-                                call_id: "call-1".to_string(),
-                                item_id: Some("item-tool".to_string()),
-                                state: UserActionState::Pending,
-                                params: UserActionParams::DynamicToolResult(
-                                    DynamicToolResultParams {
-                                        tool_name: "ask_user".to_string(),
-                                    },
-                                ),
-                            },
-                        },
-                    },
-                }),
-            })
-            .await
-            .unwrap();
-        }
-        Ok(rx)
+    async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        unreachable!("execution is delegated by the scenario Coordinator")
     }
 
-    async fn submit_input(&self, params: AgentDispatchInputParams) -> TalosResult<()> {
-        self.inputs.lock().unwrap().push(params);
-        if let Some(error) = self.input_error.lock().unwrap().take() {
-            return Err(error);
-        }
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        unreachable!("input is delegated by the scenario Coordinator")
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.cancellations.lock().unwrap().push((
+            params.identity.session_id,
+            params.identity.turn_id,
+            Some(params.agent_id),
+        ));
+        Ok(self
+            .interrupt_outcome
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(AgentInterruptOutcome::Cancelled))
+    }
+
+    async fn compact_session(&self, _params: AgentContext) -> TalosResult<AgentRunExecution> {
+        unreachable!("not used by spawn")
+    }
+
+    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
         Ok(())
     }
-}
 
-#[derive(Default)]
-struct RecordingSessionRuntime {
-    cancellations: Mutex<Vec<(String, String, Option<String>)>>,
-}
-
-#[async_trait]
-impl SessionRuntime for RecordingSessionRuntime {
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<TokenUsage> {
-        unreachable!("not used by spawn")
+    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+        Ok(())
     }
 
-    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used by spawn")
-    }
-
-    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used by spawn")
-    }
-
-    async fn prepare_delete_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used by spawn")
-    }
-
-    async fn cancel_active_turn(
-        &self,
-        params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
-        self.cancellations.lock().unwrap().push((
-            params.session.context.session_id,
-            params.turn_id,
-            match params.binding {
-                DispatchBinding::Routed => None,
-                DispatchBinding::Exact { agent_id } => Some(agent_id),
-            },
-        ));
-        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
+    async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
     }
 }
 
@@ -254,11 +288,19 @@ struct TestServices {
     sessions: Arc<SessionService>,
     store: Arc<DatabaseSessionStore>,
     storage: Arc<SqliteStorage>,
-    executor: Arc<RecordingTurnExecutor>,
-    runtime: Arc<RecordingSessionRuntime>,
+    executor: Arc<RecordingAgentExecution>,
+    coordinator: Arc<RecordingAgentCoordinator>,
     timeline: Arc<TimelineEventService>,
-    user_workspace: PathBuf,
     _workspace: tempfile::TempDir,
+}
+
+fn message_text(message: &talos_agent_api::AgentMessage) -> Option<&str> {
+    match message.blocks.first()?.content {
+        talos_agent_api::AgentMessageBlockContent::UserContent(
+            talos_agent_api::AgentUserContent::Text { ref text },
+        ) => Some(text),
+        _ => None,
+    }
 }
 
 async fn test_services() -> TestServices {
@@ -266,7 +308,11 @@ async fn test_services() -> TestServices {
 }
 
 async fn test_services_uninitialized() -> TestServices {
-    let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .unwrap(),
+    );
     run_test_migrations(storage.pool()).await;
     let store = Arc::new(DatabaseSessionStore::new(storage.clone()).await.unwrap());
     let workspace = tempfile::tempdir().unwrap();
@@ -279,42 +325,34 @@ async fn test_services_uninitialized() -> TestServices {
         Arc::new(MockProjectStore::new()),
         config.clone(),
     ));
-    let event_service = Arc::new(TimelineEventService::new(
-        store.clone() as Arc<dyn TimelineEventStore>,
-        store.clone() as Arc<dyn ActiveTurnStore>,
-        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
-        TimelineEventRetentionConfig::default(),
-    ));
-    let executor = Arc::new(RecordingTurnExecutor::default());
-    let user_workspace = config.resolve_workspace("default", "user-1").unwrap().root;
-    *executor.artifact_workspace.lock().unwrap() = Some(user_workspace.clone());
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
+    let executor = Arc::new(RecordingAgentExecution::default());
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
-    let runtime = Arc::new(RecordingSessionRuntime::default());
+    let recording_coordinator = Arc::new(RecordingAgentCoordinator::default());
+    let coordinator: Arc<dyn AgentCoordinator> = Arc::new(RecordingExecutionCoordinator {
+        execution: executor.clone(),
+        delegate: recording_coordinator.clone(),
+    });
     let turns = Arc::new(TurnService::new(
-        executor.clone(),
+        coordinator,
+        store.clone(),
         event_service.clone(),
-        store.clone() as Arc<dyn MessageIdempotencyStore>,
         profile_store,
         sessions.clone(),
-        runtime.clone(),
         SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
+        Arc::new(tokio::sync::RwLock::new(())),
     ));
-    let history = SessionHistoryService::new(
-        Arc::new(FileSessionArtifactStore::default()),
-        event_service.clone(),
-    );
-    let subagents = SubagentService::new(sessions.clone(), turns, event_service.clone(), history);
+    let subagents = SubagentService::new(sessions.clone(), turns, event_service.clone());
     TestServices {
         subagents,
         sessions,
         store,
         storage,
         executor,
-        runtime,
+        coordinator: recording_coordinator,
         timeline: event_service,
-        user_workspace,
         _workspace: workspace,
     }
 }
@@ -332,7 +370,6 @@ fn test_config() -> TalosConfig {
         input: Vec::new(),
         cost: Default::default(),
     }];
-    config.agent.kernel.timeline_events.first_event_timeout_ms = 25;
     config
 }
 
@@ -358,17 +395,14 @@ async fn create_parent_with_agent(
         .sessions
         .create_session(CreateSessionParams {
             session_id: Some(session_id.to_string()),
-            context: TalosContext {
-                source_type: TalosSourceType::System,
-                provider: TalosProvider::System,
-                user_id: "user-1".to_string(),
-                message_id: "message-parent".to_string(),
-                trace_id: "trace-parent".to_string(),
+            source: SessionSource {
+                source_type: SessionSourceType::System,
+                source_provider: SessionSourceProvider::System,
                 channel_id: None,
                 thread_id: None,
-                project_root: None,
                 environment: None,
             },
+            user_id: "user-1".to_string(),
             target_agent: agent_id.to_string(),
             model_selection: Some(ModelSelection::without_reasoning(ModelRef {
                 provider: "anthropic".to_string(),
@@ -382,23 +416,24 @@ async fn create_parent_with_agent(
         .await
         .unwrap();
     let parent_ref = AgentCaller {
-        session_id: parent.context.session_id,
+        session_id: parent.id,
         turn_id: turn_id.to_string(),
         agent_id: agent_id.to_string(),
     };
-    services
-        .store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: parent_ref.session_id.clone(),
-            turn_id: parent_ref.turn_id.clone(),
-            message_id: Some("message-parent".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .unwrap();
+    let identity = talos_agent_api::AgentTurnRef::new(&parent_ref.session_id, &parent_ref.turn_id);
+    let message = crate::turn::completed_agent_user_input(
+        &parent_ref.turn_id,
+        "message-parent",
+        crate::test_support::test_user_input("running parent"),
+        1,
+    )
+    .unwrap();
+    commit_test_running_turn(
+        services.store.as_ref() as &dyn AgentExecutionStore,
+        identity,
+        message,
+    )
+    .await;
     parent_ref
 }
 
@@ -414,22 +449,88 @@ async fn create_running_child_named(
     parent: AgentCaller,
     session_id: &str,
 ) -> (SubagentRef, String) {
-    let child = services
+    let child = create_child_session(services, &parent, session_id).await;
+    let turn_id = format!("turn-{session_id}");
+    let identity = talos_agent_api::AgentTurnRef::new(&child.id, &turn_id);
+    let message = crate::turn::completed_agent_user_input(
+        &turn_id,
+        "message-child",
+        crate::test_support::test_user_input("running child"),
+        1,
+    )
+    .unwrap();
+    commit_test_running_turn(
+        services.store.as_ref() as &dyn AgentExecutionStore,
+        identity,
+        message,
+    )
+    .await;
+    (
+        SubagentRef {
+            path: format!("/root/{}", session_id.replace('-', "_"))
+                .parse()
+                .unwrap(),
+            session_id: child.id,
+            parent: parent.turn_ref(),
+        },
+        turn_id,
+    )
+}
+
+async fn create_live_running_child(
+    services: &TestServices,
+    parent: AgentCaller,
+) -> (SubagentRef, String) {
+    let session_id = "child-live";
+    let child = create_child_session(services, &parent, session_id).await;
+    *services.executor.hold_running_turn.lock().unwrap() = true;
+    let started = services
+        .subagents
+        .turns
+        .submit_subagent_turn(
+            child.clone(),
+            talos_types::StartTurnRequest {
+                session_id: child.id.clone(),
+                input: crate::test_support::test_user_input("running child"),
+                model_selection: None,
+                user_permission_mode: None,
+                project_id: None,
+                current_directory: None,
+                client_request_id: None,
+            },
+            "reviewer".to_string(),
+        )
+        .await
+        .unwrap();
+    *services.executor.hold_running_turn.lock().unwrap() = false;
+    (
+        SubagentRef {
+            path: "/root/child_live".parse().unwrap(),
+            session_id: child.id,
+            parent: parent.turn_ref(),
+        },
+        started.turn_id,
+    )
+}
+
+async fn create_child_session(
+    services: &TestServices,
+    parent: &AgentCaller,
+    session_id: &str,
+) -> SessionRecord {
+    services
         .sessions
         .create_subagent_session(
             CreateSessionParams {
                 session_id: Some(session_id.to_string()),
-                context: TalosContext {
-                    source_type: TalosSourceType::System,
-                    provider: TalosProvider::System,
-                    user_id: "user-1".to_string(),
-                    message_id: "message-child".to_string(),
-                    trace_id: "trace-child".to_string(),
+                source: SessionSource {
+                    source_type: SessionSourceType::System,
+                    source_provider: SessionSourceProvider::System,
                     channel_id: None,
                     thread_id: None,
-                    project_root: None,
                     environment: None,
                 },
+                user_id: "user-1".to_string(),
                 target_agent: "reviewer".to_string(),
                 model_selection: Some(ModelSelection::without_reasoning(ModelRef {
                     provider: "anthropic".to_string(),
@@ -447,37 +548,94 @@ async fn create_running_child_named(
                 .unwrap(),
         )
         .await
-        .unwrap();
-    let turn_id = format!("turn-{session_id}");
-    services
-        .timeline
-        .record_talos_event(AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: AgentEventType::TurnStarted,
-            turn_id: turn_id.clone(),
-            message_id: "message-child".to_string(),
-            session_id: child.context.session_id.clone(),
-            sequence: 0,
-            payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-                request_id: "request-child".to_string(),
-                turn_id: turn_id.clone(),
-                started_at_ms: 2,
-            }),
+        .unwrap()
+}
+
+async fn settle_canonical_turn(
+    store: &DatabaseSessionStore,
+    timeline: &TimelineEventService,
+    session_id: &str,
+    turn_id: &str,
+    payload: CanonicalAgentEventPayload,
+) {
+    let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
+    let active = store
+        .get_agent_active_turn(session_id)
+        .await
+        .unwrap()
+        .expect("canonical active turn must exist");
+    let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
+    let completed_turn_metrics = matches!(payload, CanonicalAgentEventPayload::TurnCompleted(_))
+        .then(AgentRunMetrics::default);
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: CanonicalAgentEvent {
+                identity,
+                sequence: events
+                    .last()
+                    .expect("canonical turn must have admission events")
+                    .sequence
+                    .saturating_add(1),
+                occurred_at: 2,
+                payload,
+            },
+            expected_event_seq: active.last_event_seq,
+            completed_turn_metrics,
         })
         .await
         .unwrap();
-    (
-        SubagentRef {
-            path: format!("/root/{}", session_id.replace('-', "_"))
-                .parse()
-                .unwrap(),
-            session_id: child.context.session_id,
-            parent: parent.turn_ref(),
-        },
-        turn_id,
-    )
+    timeline.publish_committed([terminal]);
+}
+
+async fn commit_agent_text(
+    store: &DatabaseSessionStore,
+    timeline: &TimelineEventService,
+    session_id: &str,
+    turn_id: &str,
+    message_id: &str,
+    phase: AgentAssistantTextPhase,
+    text: String,
+) {
+    let identity = talos_agent_api::AgentTurnRef::new(session_id, turn_id);
+    let active = store
+        .get_agent_active_turn(session_id)
+        .await
+        .unwrap()
+        .expect("canonical active Turn must exist");
+    let events = store.list_agent_turn_events(&identity, 64).await.unwrap();
+    let message = AgentMessage {
+        message_id: message_id.to_string(),
+        turn_id: turn_id.to_string(),
+        role: AgentMessageRole::Agent,
+        status: AgentMessageStatus::Completed,
+        blocks: vec![AgentMessageBlock {
+            block_id: format!("{message_id}-block"),
+            status: AgentMessageBlockStatus::Completed,
+            content: AgentMessageBlockContent::AssistantText(AgentAssistantText { phase, text }),
+            started_at: 2,
+            completed_at: Some(2),
+        }],
+        created_at: 2,
+        completed_at: Some(2),
+    };
+    let message_events = canonical_completed_message_events(
+        identity,
+        message,
+        events
+            .last()
+            .expect("canonical Turn must have admission events")
+            .sequence
+            .saturating_add(1),
+    );
+    let mut expected_event_seq = active.last_event_seq;
+    for event in message_events {
+        let commit = store
+            .commit_progress_event(event, expected_event_seq)
+            .await
+            .unwrap();
+        expected_event_seq = commit.active_turn.last_event_seq;
+        timeline.publish_committed(commit.events);
+    }
 }
 
 fn target(subagent: &SubagentRef) -> AgentTarget {
@@ -524,8 +682,8 @@ async fn spawn_creates_bound_child_and_initial_turn() {
             child,
             record.agent_id,
             record.tree_identity,
-            request.binding,
-            request.input,
+            request.context.session.agent_id,
+            message_text(&request.input),
             spawned.turn,
         ),
         (
@@ -540,15 +698,12 @@ async fn spawn_creates_bound_child_and_initial_turn() {
                 tree_root_session_id: "parent-1".to_string(),
                 path: "/root/research".parse().unwrap(),
             },
-            DispatchBinding::Exact {
-                agent_id: "default".to_string(),
-            },
-            vec![TalosInputItem::Text {
-                text: "Review the patch".to_string(),
-            }],
+            "default".to_string(),
+            Some("Review the patch"),
             AgentTurnRef {
                 session_id: record.id.clone(),
                 turn_id: services.executor.requests.lock().unwrap()[0]
+                    .context
                     .turn_id
                     .clone(),
             },
@@ -592,11 +747,16 @@ async fn spawn_rejects_a_caller_agent_that_does_not_own_the_parent_session() {
 async fn spawn_rejects_inactive_or_child_parent() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
-    services
-        .store
-        .clear_active_turn(&parent.session_id)
-        .await
-        .unwrap();
+    settle_canonical_turn(
+        services.store.as_ref(),
+        services.timeline.as_ref(),
+        &parent.session_id,
+        &parent.turn_id,
+        CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+            stop_reason: AgentStopReason::EndTurn,
+        }),
+    )
+    .await;
     let error = services
         .subagents
         .spawn(SpawnSubagentRequest {
@@ -615,7 +775,7 @@ async fn spawn_rejects_inactive_or_child_parent() {
 async fn spawn_resolves_the_inherited_agent_before_creating_a_child_session() {
     let services = test_services().await;
     let parent = create_parent_with_agent(&services, "parent-1", "turn-parent", "missing").await;
-    *services.executor.rejected_agent_id.lock().unwrap() = Some("missing".to_string());
+    *services.coordinator.rejected_agent_id.lock().unwrap() = Some("missing".to_string());
 
     let error = services
         .subagents
@@ -658,7 +818,7 @@ async fn spawn_rejects_an_initial_prompt_over_the_hard_byte_cap() {
 async fn spawn_supports_recursive_child_parent() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
-    let child = services
+    let child_result = services
         .subagents
         .spawn(SpawnSubagentRequest {
             caller: parent,
@@ -666,28 +826,15 @@ async fn spawn_supports_recursive_child_parent() {
             prompt: "Review the patch".to_string(),
         })
         .await
-        .unwrap()
-        .subagent;
-    services
-        .store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: child.session_id.clone(),
-            turn_id: "turn-child".to_string(),
-            message_id: Some("message-child".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 2,
-        })
-        .await
         .unwrap();
+    let child = child_result.subagent;
 
     let nested = services
         .subagents
         .spawn(SpawnSubagentRequest {
             caller: AgentCaller {
                 session_id: child.session_id.clone(),
-                turn_id: "turn-child".to_string(),
+                turn_id: child_result.turn.turn_id,
                 agent_id: "default".to_string(),
             },
             task_name: "nested".to_string(),
@@ -728,530 +875,4 @@ async fn spawn_removes_child_when_turn_start_fails() {
         .unwrap();
     assert!(error.is_code(talos_error::ErrorCode::Conflict));
     assert!(rows.is_empty());
-}
-
-#[tokio::test]
-async fn wait_returns_an_already_completed_child() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let spawned = services
-        .subagents
-        .spawn(SpawnSubagentRequest {
-            caller: parent.clone(),
-            task_name: "research".to_string(),
-            prompt: "Review the patch".to_string(),
-        })
-        .await
-        .unwrap();
-
-    let result = services
-        .subagents
-        .wait(wait_request(parent, &spawned.subagent, 0))
-        .await
-        .unwrap();
-
-    assert!(matches!(
-        result.outcome,
-        SubagentOutcome::Completed {
-            output,
-            truncated: false,
-            ..
-        } if output == "AGENT_CHILD_OK"
-    ));
-}
-
-#[tokio::test]
-async fn send_message_dispatches_to_the_exact_running_child_turn() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
-
-    let result = services
-        .subagents
-        .send_message(SendSubagentMessageRequest {
-            caller: parent,
-            target: target(&child),
-            message: "Focus on tests".to_string(),
-        })
-        .await
-        .unwrap();
-    let inputs = services.executor.inputs.lock().unwrap();
-
-    assert!(result.accepted);
-    assert_eq!(result.subagent, child);
-    assert_eq!(result.agent_id, "reviewer");
-    assert_eq!(result.turn.turn_id, turn_id);
-    assert!(matches!(
-        &inputs[0],
-        AgentDispatchInputParams {
-            binding: DispatchBinding::Exact { agent_id },
-            turn_id: dispatched_turn_id,
-            input: AgentDispatchInput::Message { input },
-            ..
-        } if agent_id == "reviewer"
-            && dispatched_turn_id == &turn_id
-            && input == &vec![TalosInputItem::Text {
-                text: "Focus on tests".to_string(),
-            }]
-    ));
-}
-
-#[tokio::test]
-async fn send_message_rejects_a_non_running_child() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let spawned = services
-        .subagents
-        .spawn(SpawnSubagentRequest {
-            caller: parent.clone(),
-            task_name: "research".to_string(),
-            prompt: "Review".to_string(),
-        })
-        .await
-        .unwrap();
-
-    let error = services
-        .subagents
-        .send_message(SendSubagentMessageRequest {
-            caller: parent,
-            target: target(&spawned.subagent),
-            message: "Too late".to_string(),
-        })
-        .await
-        .unwrap_err();
-
-    assert!(error.is_code(talos_error::ErrorCode::Conflict));
-    assert!(services.executor.inputs.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn send_message_propagates_a_closed_runtime_input() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, _turn_id) = create_running_child(&services, parent.clone()).await;
-    *services.executor.input_error.lock().unwrap() = Some(TalosError::public(
-        talos_error::ErrorCode::ResourceNotFound,
-        "message input closed".to_string(),
-    ));
-
-    let error = services
-        .subagents
-        .send_message(SendSubagentMessageRequest {
-            caller: parent,
-            target: target(&child),
-            message: "Too late".to_string(),
-        })
-        .await
-        .unwrap_err();
-
-    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
-    assert_eq!(error.diagnostic_message(), "message input closed");
-}
-
-#[tokio::test]
-async fn wait_timeout_returns_the_running_child_as_pending() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, _turn_id) = create_running_child(&services, parent.clone()).await;
-
-    let result = services
-        .subagents
-        .wait(wait_request(parent, &child, 1))
-        .await
-        .unwrap();
-
-    assert_eq!(result.subagent, child);
-    assert_eq!(result.agent_id, "reviewer");
-    assert!(matches!(result.outcome, SubagentOutcome::Running { .. }));
-}
-
-#[tokio::test]
-async fn wait_resolves_a_relative_direct_child_target() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, _) = create_running_child(&services, parent.clone()).await;
-
-    let result = services
-        .subagents
-        .wait(WaitSubagentRequest {
-            caller: parent,
-            target: AgentTarget::DirectChild {
-                name: child.path.name().to_string(),
-            },
-            timeout_ms: 0,
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(result.subagent, child);
-    assert!(matches!(result.outcome, SubagentOutcome::Running { .. }));
-}
-
-#[tokio::test]
-async fn wait_pending_snapshot_exposes_bounded_latest_commentary() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
-    services
-        .timeline
-        .record_talos_event(AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: AgentEventType::ItemStarted,
-            turn_id: turn_id.clone(),
-            message_id: "message-child".to_string(),
-            session_id: child.session_id.clone(),
-            sequence: 1,
-            payload: AgentEventPayload::ItemStarted(TalosItemStartedEvent {
-                request_id: "request-child".to_string(),
-                turn_id: turn_id.clone(),
-                item: TalosTimelineItem {
-                    item_id: "commentary-1".to_string(),
-                    parent_item_id: None,
-                    kind: TalosTimelineItemKind::AssistantText,
-                    phase: TalosTimelinePhase::Commentary,
-                    status: TalosTimelineItemStatus::Running,
-                    title: None,
-                    started_at_ms: 2,
-                    completed_at_ms: None,
-                    content: TalosTimelineContent::Text {
-                        text: format!("reviewing\n{}", "x".repeat(3_000)),
-                    },
-                },
-            }),
-        })
-        .await
-        .unwrap();
-
-    let result = services
-        .subagents
-        .wait(wait_request(parent, &child, 0))
-        .await
-        .unwrap();
-    let update = result.latest_update.as_ref().unwrap();
-
-    assert_eq!(update.kind, talos_types::SubagentUpdateKind::Commentary);
-    assert!(update.text.starts_with("reviewing "));
-    assert_eq!(update.text.len(), 2 * 1024);
-    assert!(update.truncated);
-}
-
-#[tokio::test]
-async fn failed_outcome_exposes_a_bounded_preview_with_truncation_marker() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
-    services
-        .timeline
-        .record_talos_event(AgentEvent {
-            event_seq: None,
-            event_id: None,
-            created_at_ms: None,
-            event_type: AgentEventType::TurnError,
-            turn_id: turn_id.clone(),
-            message_id: "message-child".to_string(),
-            session_id: child.session_id.clone(),
-            sequence: 2,
-            payload: AgentEventPayload::TurnError(TalosTurnErrorEvent {
-                request_id: "request-child".to_string(),
-                turn_id: turn_id.clone(),
-                error: talos_error::ApiError {
-                    code: talos_error::ErrorCode::InternalError,
-                    message: "failed ".repeat(400),
-                },
-                failed_at_ms: 2,
-            }),
-        })
-        .await
-        .unwrap();
-
-    let result = services
-        .subagents
-        .wait(wait_request(parent, &child, 0))
-        .await
-        .unwrap();
-
-    assert!(matches!(
-        &result.outcome,
-        SubagentOutcome::Failed {
-            error,
-            truncated: true,
-            ..
-        } if error.len() == 2 * 1024
-    ));
-}
-
-#[tokio::test]
-async fn wait_rejects_a_child_owned_by_another_parent() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, _turn_id) = create_running_child(&services, parent.clone()).await;
-
-    let error = services
-        .subagents
-        .wait(wait_request(
-            AgentCaller {
-                session_id: "other-parent".to_string(),
-                turn_id: parent.turn_id,
-                agent_id: parent.agent_id,
-            },
-            &child,
-            0,
-        ))
-        .await
-        .unwrap_err();
-
-    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
-}
-
-#[tokio::test]
-async fn interrupt_delegates_without_fabricating_a_cancelling_state() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
-
-    let result = services
-        .subagents
-        .interrupt(InterruptSubagentRequest {
-            caller: parent,
-            target: target(&child),
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(
-        result.outcome,
-        SubagentOutcome::Running {
-            turn_id: turn_id.clone(),
-        }
-    );
-    assert_eq!(
-        services.runtime.cancellations.lock().unwrap().as_slice(),
-        &[(child.session_id, turn_id, Some("reviewer".to_string()))]
-    );
-}
-
-#[tokio::test]
-async fn concurrent_waiters_observe_live_completion() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, turn_id) = create_running_child(&services, parent.clone()).await;
-    let request = WaitSubagentRequest {
-        caller: parent,
-        target: target(&child),
-        timeout_ms: 1_000,
-    };
-    let timeline = services.timeline.clone();
-    let session_id = child.session_id;
-    let artifact_workspace = services.user_workspace.clone();
-    let complete = tokio::spawn(async move {
-        tokio::task::yield_now().await;
-        FileSessionArtifactStore::default()
-            .append_turn(
-                Path::new(&artifact_workspace),
-                &TalosTurn {
-                    turn_id: format!("artifact-{turn_id}"),
-                    message_id: "message-child".to_string(),
-                    session_id: session_id.clone(),
-                    seq: 1,
-                    timestamp: Utc::now(),
-                    items: vec![RunItem::OutputText {
-                        text: "AGENT_CHILD_OK".to_string(),
-                    }],
-                    usage: TokenUsage::default(),
-                    stop_reason: StopReason::EndTurn,
-                },
-            )
-            .await
-            .unwrap();
-        timeline
-            .record_talos_event(AgentEvent {
-                event_seq: None,
-                event_id: None,
-                created_at_ms: None,
-                event_type: AgentEventType::TurnCompleted,
-                turn_id: turn_id.clone(),
-                message_id: "message-child".to_string(),
-                session_id,
-                sequence: 2,
-                payload: AgentEventPayload::TurnCompleted(TalosTurnCompletedEvent {
-                    request_id: "request-child".to_string(),
-                    turn_id,
-                    completed_at_ms: 2,
-                    stop_reason: talos_types::talos::StopReason::EndTurn,
-                    usage: TokenUsage::default(),
-                    metrics: None,
-                    artifact_seq: None,
-                }),
-            })
-            .await
-            .unwrap();
-    });
-
-    let (first, second) = tokio::join!(
-        services.subagents.wait(request.clone()),
-        services.subagents.wait(request)
-    );
-    complete.await.unwrap();
-
-    assert!(matches!(
-        first.unwrap().outcome,
-        SubagentOutcome::Completed { .. }
-    ));
-    assert!(matches!(
-        second.unwrap().outcome,
-        SubagentOutcome::Completed { .. }
-    ));
-}
-
-#[tokio::test]
-async fn interrupt_is_idempotent_for_a_terminal_child() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let spawned = services
-        .subagents
-        .spawn(SpawnSubagentRequest {
-            caller: parent.clone(),
-            task_name: "research".to_string(),
-            prompt: "Review the patch".to_string(),
-        })
-        .await
-        .unwrap();
-    let child = spawned.subagent;
-
-    let result = services
-        .subagents
-        .interrupt(InterruptSubagentRequest {
-            caller: parent,
-            target: target(&child),
-        })
-        .await
-        .unwrap();
-
-    assert!(matches!(result.outcome, SubagentOutcome::Completed { .. }));
-    assert!(services.runtime.cancellations.lock().unwrap().is_empty());
-}
-
-#[tokio::test]
-async fn every_existing_child_operation_rejects_a_stale_caller_turn() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let spawned = services
-        .subagents
-        .spawn(SpawnSubagentRequest {
-            caller: parent.clone(),
-            task_name: "research".to_string(),
-            prompt: "Review".to_string(),
-        })
-        .await
-        .unwrap();
-    let child = spawned.subagent;
-    services
-        .store
-        .clear_active_turn(&parent.session_id)
-        .await
-        .unwrap();
-
-    let wait = services
-        .subagents
-        .wait(wait_request(parent.clone(), &child, 0))
-        .await;
-    let interrupt = services
-        .subagents
-        .interrupt(InterruptSubagentRequest {
-            caller: parent.clone(),
-            target: target(&child),
-        })
-        .await;
-    let follow_up = services
-        .subagents
-        .follow_up(FollowUpSubagentRequest {
-            caller: parent.clone(),
-            target: target(&child),
-            prompt: "continue".to_string(),
-        })
-        .await;
-    let list = services
-        .subagents
-        .list(ListSubagentsRequest { caller: parent })
-        .await;
-
-    assert!(wait
-        .as_ref()
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-    assert!(interrupt
-        .as_ref()
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-    assert!(follow_up
-        .as_ref()
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-    assert!(list
-        .as_ref()
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::InvalidRequest)));
-}
-
-#[tokio::test]
-async fn follow_up_reuses_the_child_agent_binding() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let child = services
-        .subagents
-        .spawn(SpawnSubagentRequest {
-            caller: parent.clone(),
-            task_name: "research".to_string(),
-            prompt: "Review the patch".to_string(),
-        })
-        .await
-        .unwrap()
-        .subagent;
-
-    let result = services
-        .subagents
-        .follow_up(FollowUpSubagentRequest {
-            caller: parent,
-            target: target(&child),
-            prompt: "Check the tests too".to_string(),
-        })
-        .await
-        .unwrap();
-
-    let requests = services.executor.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1].binding,
-        DispatchBinding::Exact {
-            agent_id: "default".to_string(),
-        }
-    );
-    assert_eq!(
-        requests[1].input,
-        vec![TalosInputItem::Text {
-            text: "Check the tests too".to_string(),
-        }]
-    );
-    assert!(matches!(
-        result.outcome,
-        SubagentOutcome::Completed { turn_id, .. } if turn_id == requests[1].turn_id
-    ));
-}
-
-#[tokio::test]
-async fn follow_up_rejects_a_running_child() {
-    let services = test_services().await;
-    let parent = create_parent(&services).await;
-    let (child, _) = create_running_child(&services, parent.clone()).await;
-
-    let error = services
-        .subagents
-        .follow_up(FollowUpSubagentRequest {
-            caller: parent,
-            target: target(&child),
-            prompt: "Continue".to_string(),
-        })
-        .await
-        .unwrap_err();
-
-    assert!(error.is_code(talos_error::ErrorCode::ActiveTurnRunning));
-    assert!(services.executor.requests.lock().unwrap().is_empty());
 }

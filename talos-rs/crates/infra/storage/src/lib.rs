@@ -16,7 +16,7 @@
 
 mod sqlite;
 
-pub use sqlite::SqliteStorage;
+pub use sqlite::{SqliteStorage, SqliteWriteTransaction};
 
 use async_trait::async_trait;
 use serde_json::Value;
@@ -64,6 +64,9 @@ impl Row {
 /// Storage trait - Database abstraction layer
 #[async_trait]
 pub trait Storage: Send + Sync {
+    /// Begin one database transaction pinned to a single connection.
+    async fn begin_transaction(&self) -> TalosResult<Box<dyn StorageTransaction>>;
+
     /// Execute a query and return rows
     async fn query(&self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>>;
 
@@ -87,6 +90,26 @@ pub trait Storage: Send + Sync {
 
     /// Check if a table exists
     async fn table_exists(&self, table: &str) -> TalosResult<bool>;
+}
+
+/// Minimal transactional database boundary used by Store-owned atomic writes.
+///
+/// Business Store modules own SQL and transaction ordering. This interface
+/// only guarantees that all calls use one transaction and that completion is
+/// explicit; it must not acquire domain-specific helpers.
+#[async_trait]
+pub trait StorageTransaction: Send {
+    /// Execute a query inside this transaction and return its rows.
+    async fn query(&mut self, sql: &str, params: &[&str]) -> TalosResult<Vec<Row>>;
+
+    /// Execute a statement inside this transaction.
+    async fn execute(&mut self, sql: &str, params: &[&str]) -> TalosResult<u64>;
+
+    /// Commit all writes atomically.
+    async fn commit(self: Box<Self>) -> TalosResult<()>;
+
+    /// Roll back all writes explicitly.
+    async fn rollback(self: Box<Self>) -> TalosResult<()>;
 }
 
 /// Storage configuration

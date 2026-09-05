@@ -1,4 +1,4 @@
-use talos_config::{AgentKernelConfig, PluginsRuntimeConfig, SkillsRuntimeConfig};
+use talos_config::{PluginsRuntimeConfig, SkillsRuntimeConfig};
 use talos_error::TalosResult;
 use talos_plugin::PluginManager;
 use talos_skills::SkillRoots;
@@ -97,12 +97,5 @@ impl PluginManagerService {
 
     pub fn mcp_servers(&self) -> TalosResult<Vec<McpServerRuntimeDescriptor>> {
         self.manager.mcp_servers()
-    }
-
-    pub fn skill_roots_for_kernel_config(
-        &self,
-        config: &AgentKernelConfig,
-    ) -> TalosResult<SkillRoots> {
-        self.manager.skill_roots(&config.skills)
     }
 }

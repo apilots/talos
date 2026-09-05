@@ -3,114 +3,137 @@ use opendal::{services::Memory, Operator};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
+use talos_agent::{
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentEventPipeline, AgentInputParams,
+    AgentInterruptParams, AgentProgressEventReceiver, AgentRunExecution, AgentRunParams,
+    AgentRunSettlement, AgentRunSettlementReceiver, AgentSessionContext,
+};
+use talos_agent_api::{
+    AgentEventPayload, AgentInterruptOutcome, AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
+};
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserRole, UserService};
 use talos_config::{ConfigStore, InMemoryLlmConfigStore, ProviderModelConfig};
-use talos_coordinator::SessionRuntime;
+use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::TalosResult;
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_service::{Actor, AgentDispatchTurnExecutor, FileService, MemoryService, TalosService};
-use talos_service::{TimelineEventRetentionConfig, TimelineEventService};
+use talos_service::TimelineEventService;
+use talos_service::{
+    Actor, ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger, FileService, MemoryService,
+    TalosService,
+};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
 use talos_store::memory::MemoryStore;
 use talos_store::migration::run_migrations;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
-use talos_store::session::{
-    ActiveTurnStore, DatabaseSessionStore, MessageIdempotencyStore, SessionStore,
-    TimelineEventStore,
-};
-use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, TalosContext, TalosInputItem, TalosProvider,
-    TalosSourceType, TalosTurnStartedEvent,
-};
+use talos_store::session::{AgentExecutionStore, DatabaseSessionStore, SessionStore};
+use talos_types::talos::SessionSource;
+use talos_types::{AgentUserContent, AgentUserInput};
 use talos_types::{
-    AgentDispatchRuntime, ConfigGetRequest, ConfigPath, ConfigUpdateRequest, ConfigValue,
-    SessionPatchRequest, StartTurnRequest, TalosConfig, TalosSession, TokenUsage,
-    TurnCommandStatus,
+    ConfigGetRequest, ConfigPath, ConfigUpdateRequest, ConfigValue, SessionPatchRequest,
+    StartTurnRequest, TalosConfig, TurnCommandStatus,
 };
-use tokio::sync::mpsc;
 
 struct RecordingHandler;
 struct TestAuthService;
 
-#[async_trait]
-impl AgentDispatchRuntime for RecordingHandler {
-    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn handle(
-        &self,
-        _request: AgentDispatchParams,
-    ) -> TalosResult<talos_types::agent_dispatch::AgentDispatchResult> {
-        unreachable!("gateway start_turn should use stream execution")
-    }
-
-    async fn handle_stream(
-        &self,
-        request: AgentDispatchParams,
-    ) -> TalosResult<mpsc::Receiver<AgentEvent>> {
-        let (tx, rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            let turn_id = request.turn_id.clone();
-            let _ = tx
-                .send(AgentEvent {
-                    event_seq: None,
-                    event_id: None,
-                    created_at_ms: None,
-                    event_type: AgentEventType::TurnStarted,
-                    turn_id: turn_id.clone(),
-                    message_id: request.session.context.message_id,
-                    session_id: request.session.context.session_id,
-                    sequence: 0,
-                    payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-                        request_id: "req_test".to_string(),
-                        turn_id,
-                        started_at_ms: 0,
-                    }),
-                })
-                .await;
-        });
-        Ok(rx)
-    }
-
-    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
-        Ok(())
-    }
+fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
+    let active = Arc::new(std::sync::RwLock::new(config));
+    Arc::new(move |trigger| {
+        let mut next = active
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let ConfigReloadTrigger::Updated(value) = trigger {
+            match value {
+                ConfigValue::Llm(llm) => next.llm = *llm,
+                ConfigValue::WebSearch(web_search) => {
+                    next.agent.kernel.tools.web_search = *web_search;
+                }
+            }
+        }
+        let active = active.clone();
+        Ok(ConfigReloadPlan::new(next.clone(), move || {
+            *active
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+        }))
+    })
 }
 
 #[async_trait]
-impl SessionRuntime for RecordingHandler {
-    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
+impl AgentCoordinator for RecordingHandler {
+    async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
         Ok("default".to_string())
     }
 
-    async fn compact_session(
-        &self,
-        _params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<TokenUsage> {
-        Ok(TokenUsage::default())
-    }
-
-    async fn clear_session(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn close_session(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        let identity = params.context.identity();
+        let (pipeline, _sink, progress_rx) = AgentEventPipeline::fresh(identity);
+        let mut admission_events = vec![pipeline
+            .record(AgentEventPayload::TurnStarted(AgentTurnStarted {}))
+            .await
+            .map_err(talos_agent::AgentError::into_talos_error)?];
+        admission_events.extend(
+            pipeline
+                .record_user_message(params.input)
+                .await
+                .map_err(talos_agent::AgentError::into_talos_error)?,
+        );
+        let terminal = pipeline
+            .record(AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+            }))
+            .await
+            .map_err(talos_agent::AgentError::into_talos_error)?;
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: admission_events,
+                permit: AgentAdmissionPermit::new(async move {
+                    settlement_tx
+                        .send(Ok(AgentRunSettlement::Finished {
+                            event: terminal,
+                            messages: Vec::new(),
+                            metrics: AgentRunMetrics::default(),
+                        }))
+                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        unreachable!("gateway test does not submit live input")
+    }
+
+    async fn interrupt(&self, _params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        Ok(AgentInterruptOutcome::Cancelled)
+    }
+
+    async fn compact_session(&self, _params: AgentContext) -> TalosResult<AgentRunExecution> {
+        unreachable!("gateway test does not compact Sessions")
+    }
+
+    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn prepare_delete_session(&self, _session: TalosSession) -> TalosResult<()> {
+    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn cancel_active_turn(
-        &self,
-        _params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
-        Ok(talos_types::CancelActiveTurnOutcome::Cancelled)
+    async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
+        Ok(())
     }
 }
 
@@ -154,10 +177,7 @@ async fn test_gateway() -> ServiceGateway {
     let config = test_config();
     let (storage, store) = test_session_storage().await;
     let handler = Arc::new(RecordingHandler);
-    let turn_executor = Arc::new(AgentDispatchTurnExecutor::new(
-        handler.clone() as Arc<dyn AgentDispatchRuntime>
-    ));
-    test_gateway_with_runtime(config, storage, store, turn_executor, handler).await
+    test_gateway_with_coordinator(config, storage, store, handler).await
 }
 
 async fn test_session_storage() -> (Arc<SqliteStorage>, Arc<DatabaseSessionStore>) {
@@ -171,12 +191,11 @@ async fn test_session_storage() -> (Arc<SqliteStorage>, Arc<DatabaseSessionStore
     (storage, store)
 }
 
-async fn test_gateway_with_runtime(
+async fn test_gateway_with_coordinator(
     config: TalosConfig,
     storage: Arc<SqliteStorage>,
     store: Arc<DatabaseSessionStore>,
-    turn_executor: Arc<dyn talos_service::TurnExecutor>,
-    session_runtime: Arc<dyn SessionRuntime>,
+    coordinator: Arc<dyn AgentCoordinator>,
 ) -> ServiceGateway {
     let profile_store: Arc<dyn ProfileStore> =
         Arc::new(DatabaseProfileStore::new(storage.pool().clone()));
@@ -196,15 +215,7 @@ async fn test_gateway_with_runtime(
         )
         .unwrap(),
     );
-    let event_store: Arc<dyn TimelineEventStore> = store.clone();
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
-    let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
-    let event_service = Arc::new(TimelineEventService::new(
-        event_store,
-        active_turn_store,
-        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
-        TimelineEventRetentionConfig::default(),
-    ));
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
@@ -215,22 +226,22 @@ async fn test_gateway_with_runtime(
         Arc::new(MemoryStore::in_memory().await.unwrap()),
     )
     .unwrap();
-    let service = Arc::new(TalosService::new_with_session_store(
-        turn_executor,
-        session_runtime,
+    let reload_hook = test_config_reload_hook(config.clone());
+    let service = Arc::new(TalosService::new(
+        coordinator,
         session_store,
-        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+        store.clone() as Arc<dyn AgentExecutionStore>,
         project_store,
         profile_store,
         files,
         event_service,
-        idempotency_store,
         config,
         memory,
         config_store,
         Vec::new(),
         auth_service,
         user_service,
+        reload_hook,
     ));
     ServiceGateway::new(service)
 }
@@ -255,18 +266,8 @@ fn test_config() -> TalosConfig {
     config
 }
 
-fn request_context() -> TalosContext {
-    TalosContext {
-        source_type: TalosSourceType::Http,
-        provider: TalosProvider::Http,
-        user_id: "user-1".to_string(),
-        message_id: "msg-1".to_string(),
-        trace_id: "trace-1".to_string(),
-        channel_id: None,
-        thread_id: None,
-        project_root: None,
-        environment: None,
-    }
+fn request_source() -> SessionSource {
+    SessionSource::http()
 }
 
 #[tokio::test]
@@ -275,12 +276,14 @@ async fn gateway_start_turn_delegates_to_service() {
     let response = gateway
         .start_turn(
             &Actor::regular("user-1"),
+            request_source(),
             StartTurnRequest {
                 session_id: "session-1".to_string(),
-                input: vec![TalosInputItem::Text {
-                    text: "hello".to_string(),
-                }],
-                context: Some(request_context()),
+                input: AgentUserInput {
+                    content: vec![AgentUserContent::Text {
+                        text: "hello".to_string(),
+                    }],
+                },
                 model_selection: None,
                 user_permission_mode: None,
                 project_id: None,
@@ -302,10 +305,12 @@ async fn gateway_start_turn_rejects_invalid_request() {
     let result = gateway
         .start_turn(
             &Actor::regular("user-1"),
+            request_source(),
             StartTurnRequest {
                 session_id: "session-1".to_string(),
-                input: Vec::new(),
-                context: Some(request_context()),
+                input: AgentUserInput {
+                    content: Vec::new(),
+                },
                 model_selection: None,
                 user_permission_mode: None,
                 project_id: None,

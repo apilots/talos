@@ -1,14 +1,15 @@
 use crate::tool_execution::ToolExecutionContext;
+#[cfg(test)]
+use crate::UserInput;
 use crate::{
-    warnings::derive_prompt_warnings, AssistantTextCompletedStreamData,
-    AssistantTextDeltaStreamData, AssistantTextPhase, AssistantTextStartedStreamData,
-    InvocationContext, KernelEvent, KernelEventData, KernelEventLabel, KernelEventType,
-    KernelModelCallMode, KernelStreamEvent, KernelStreamEventData, KernelStreamEventType,
+    warnings::derive_prompt_warnings, AgentKernelEvent, AgentKernelEventPayload,
+    AssistantTextCompletedStreamData, AssistantTextDeltaStreamData, AssistantTextPhase,
+    AssistantTextStartedStreamData, InvocationContext, KernelModelCallMode, KernelRunItem,
     KernelStreamItemKey, KernelThinkingSource, KernelThinkingStage, KernelWarning,
-    PromptWarningEventData, SessionPromptContextConfig, SessionPromptRecentWindow,
-    SessionToolExchangeOutcome, StopReason, TalosMessageRole, ThinkingDeltaStreamData,
+    PromptWarningEventData, SessionPromptContextConfig, SessionPromptMessageRole,
+    SessionPromptRecentWindow, SessionToolExchangeOutcome, StopReason, ThinkingDeltaStreamData,
     ToolCallStartStreamData, ToolExecutionInput, ToolExecutor, ToolResultStreamData,
-    UserActionRequestStreamData, UserInput,
+    UserActionRequestStreamData,
 };
 use chrono::Utc;
 use serde_json::Value;
@@ -28,12 +29,11 @@ use talos_prompt::{
     PromptDiagnostics, PromptLoadPolicy, PromptPhase, PromptWarningState, SessionContinuity,
     SessionHistoryCompaction, SessionHistoryCompactionOutcome, SessionHistoryCompactionTrigger,
 };
-use talos_store::session::{RecordHeader, SummaryRecord};
 use talos_tools::{
     ToolDefinitionProvider, ToolDispatchOutcome, ToolExecutorPort, ToolOutputPayload, ToolPending,
 };
 use talos_types::talos::{
-    DynamicToolArguments, RunItem, StopReason as TalosApiStopReason, TalosContentItem, TokenUsage,
+    DynamicToolArguments, StopReason as TalosApiStopReason, TalosContentItem, TokenUsage,
     TurnExecutionMetrics,
 };
 use talos_types::MemoryGetResponse;
@@ -70,7 +70,7 @@ mod working_context_tests;
 pub use attachments::build_active_turn_input;
 
 pub use dream_memory::form_dream_session_memory;
-pub(crate) use finalize::{build_turn_execution_metrics, to_api_stop_reason};
+pub(crate) use finalize::build_turn_execution_metrics;
 pub use finalize::{emit_general_turn_finalization_stream, finalize_general_turn_artifacts};
 pub(crate) use guard::{
     build_read_only_nudge_message, build_tool_failure_recovery_nudge_message,
@@ -78,23 +78,20 @@ pub(crate) use guard::{
     should_force_finalization_for_step, should_inject_read_only_nudge,
     stop_reason_for_forced_finalization,
 };
-pub use loop_run::{
-    execute_general_turn_loop, execute_general_turn_loop_with_policy,
-    execute_general_turn_loop_with_resume,
-};
+pub(crate) use loop_run::execute_general_turn_loop_with_resume;
+#[cfg(test)]
+pub(crate) use loop_run::{execute_general_turn_loop, execute_general_turn_loop_with_policy};
 pub use memory_summary::{
     compact_session_memory, MemoryCompactionPolicy, MemoryFormationParams, MemoryFormationReport,
 };
-pub use persist::persist_general_turn_artifacts;
+pub use persist::persist_general_turn_state;
 pub(crate) use persist::stage_session_state_update;
 pub(crate) use prepare::next_session_compaction_state;
 pub use prepare::prepare_general_turn;
-pub(crate) use prepare::{
-    LAST_PROMPT_DIAGNOSTICS_STATE_KEY, PROMPT_WARNING_STATE_KEY, SESSION_CONTINUITY_STATE_KEY,
-};
-pub use prepare_compaction::SESSION_COMPACTION_STATE_KEY;
 pub(crate) use prepare_continuity::build_session_continuity;
-pub use run::{run_general_turn, run_general_turn_with_resume};
+#[cfg(test)]
+pub(crate) use run::run_general_turn;
+pub use run::run_general_turn_with_resume;
 #[cfg(test)]
 pub(crate) use step_execute::stream_round;
 pub use step_execute::{apply_general_turn_step, execute_general_turn_step};
@@ -103,13 +100,14 @@ pub use step_request::build_general_turn_step_request;
 #[cfg(test)]
 pub(crate) use tool_batch::parse_retrieved_memory_items;
 pub use tool_batch::{apply_general_turn_tool_batch, execute_general_turn_tool_batch};
+#[cfg(test)]
+pub(crate) use types::GeneralTurnPolicyStop;
 pub use types::{
+    AgentKernelContinuation, AgentKernelContinuationToolCall, AgentKernelUserActionContinuation,
     BuiltInGeneralTurnPolicy, ExecutedTurnArtifacts, GeneralTurnLoopState, GeneralTurnOutcome,
-    GeneralTurnPolicy, GeneralTurnPolicyStop, GeneralTurnResult, GeneralTurnResume,
-    GeneralTurnSkillOptions, GeneralTurnStepDisposition, GeneralTurnStepRequest,
-    GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason, PendingGeneralTurnAction,
-    PreparedGeneralTurn, ResumeToolCall, SessionCompactionState, StreamingToolExecutionConfig,
-    UserActionResume,
+    GeneralTurnPolicy, GeneralTurnResult, GeneralTurnSkillOptions, GeneralTurnStepDisposition,
+    GeneralTurnStepRequest, GeneralTurnStepResult, GeneralTurnToolBatch, ModelFinishReason,
+    PreparedGeneralTurn, SessionCompactionState, StreamingToolExecutionConfig,
 };
 pub(crate) use types::{
     ForcedFinalizationCause, PendingUserActionRequest, ReadOnlyRoundFingerprint,

@@ -2,10 +2,10 @@ use std::time::{Duration, Instant};
 
 use talos_error::{ErrorCode, TalosError};
 use talos_sdk::{
-    MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
-    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueSteerRequest,
-    MessageQueueUpdateRequest, QueuedMessage, SkillSuggestion, TalosInputItem,
-    TimelineActiveTurnStatus,
+    AgentTurnRef, AgentUserContent, AgentUserInput, MessageQueue, MessageQueueAddRequest,
+    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
+    MessageQueueStartRequest, MessageQueueUpdateRequest, QueuedMessage, SkillSuggestion,
+    SubmitTurnInput, SubmitTurnInputRequest,
 };
 use tokio::sync::mpsc::error::TryRecvError;
 
@@ -171,23 +171,24 @@ impl TuiApp {
         else {
             return false;
         };
-        let mut input = Vec::new();
+        let mut content = Vec::new();
         if !text.trim().is_empty() {
-            input.push(TalosInputItem::Text {
+            content.push(AgentUserContent::Text {
                 text: text.trim().to_string(),
             });
         }
-        input.extend(
+        content.extend(
             existing
                 .input
+                .content
                 .into_iter()
-                .filter(|item| !matches!(item, TalosInputItem::Text { .. })),
+                .filter(|item| !matches!(item, AgentUserContent::Text { .. })),
         );
         match client
             .update_queued_message(MessageQueueUpdateRequest {
                 session_id,
                 message_id,
-                input,
+                input: AgentUserInput { content },
             })
             .await
         {
@@ -320,21 +321,24 @@ impl TuiApp {
                 return;
             }
         };
-        let Some(turn_id) = active_turn.turn_id else {
+        let Some(turn_id) = active_turn.map(|active| active.identity.turn_id) else {
             self.show_status_hint("No active turn for Steer.", Duration::from_secs(2));
             return;
         };
         match client
-            .steer_queued_message(MessageQueueSteerRequest {
-                session_id,
-                message_id,
-                turn_id,
+            .submit_turn_input(SubmitTurnInputRequest {
+                identity: AgentTurnRef::new(&session_id, turn_id),
+                input: SubmitTurnInput::QueuedMessage {
+                    message_id: message_id.clone(),
+                },
+                client_request_id: None,
             })
             .await
         {
-            Ok(queue) => {
-                self.apply_message_queue(queue);
+            Ok(_) => {
                 self.selected_queue_message = None;
+                self.refresh_message_queue(self.message_queue.revision.saturating_add(1))
+                    .await;
             }
             Err(error) => self.show_message_queue_error(&error),
         }
@@ -389,12 +393,7 @@ impl TuiApp {
             }
         };
         self.message_queue_turn_reconcile_pending = false;
-        if matches!(
-            active_turn.status,
-            TimelineActiveTurnStatus::Running
-                | TimelineActiveTurnStatus::WaitingUserAction
-                | TimelineActiveTurnStatus::Cancelling
-        ) {
+        if active_turn.is_some() {
             self.connect_queued_turn_stream(&session_id).await;
             return;
         }
@@ -419,10 +418,10 @@ impl TuiApp {
                 self.abort_pending_stream_task();
                 self.pending_stream_connect = None;
                 self.pending_stream = Some(receiver);
-                self.active_stream_message_id = None;
+                self.active_stream_turn_id = None;
                 self.last_stream_sequence = None;
                 self.last_stream_event_id = None;
-                self.timeline_items.clear();
+                self.context_compaction_stage = None;
                 self.in_flight = true;
                 self.stream_started_at = Some(Instant::now());
                 self.last_stream_event_at = Some(Instant::now());
@@ -490,13 +489,15 @@ impl TuiApp {
 pub(crate) fn queued_message_text(message: &QueuedMessage) -> String {
     message
         .input
+        .content
         .iter()
         .filter_map(|item| match item {
-            TalosInputItem::Text { text } => Some(text.as_str()),
-            TalosInputItem::SkillSelection { .. }
-            | TalosInputItem::Files { .. }
-            | TalosInputItem::Voice { .. }
-            | TalosInputItem::Video { .. } => None,
+            AgentUserContent::Text { text } => Some(text.as_str()),
+            AgentUserContent::SkillSelection { .. }
+            | AgentUserContent::File { .. }
+            | AgentUserContent::Audio { .. }
+            | AgentUserContent::Video { .. }
+            | AgentUserContent::UserActionResponse { .. } => None,
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -509,11 +510,15 @@ pub(crate) fn queued_message_summary(message: &QueuedMessage) -> String {
     }
     let attachment_count = message
         .input
+        .content
         .iter()
         .map(|item| match item {
-            TalosInputItem::Files { file_ids } => file_ids.len(),
-            TalosInputItem::Voice { .. } | TalosInputItem::Video { .. } => 1,
-            TalosInputItem::Text { .. } | TalosInputItem::SkillSelection { .. } => 0,
+            AgentUserContent::File { .. }
+            | AgentUserContent::Audio { .. }
+            | AgentUserContent::Video { .. } => 1,
+            AgentUserContent::Text { .. }
+            | AgentUserContent::SkillSelection { .. }
+            | AgentUserContent::UserActionResponse { .. } => 0,
         })
         .sum::<usize>();
     if attachment_count > 0 {
@@ -521,22 +526,24 @@ pub(crate) fn queued_message_summary(message: &QueuedMessage) -> String {
     }
     message
         .input
+        .content
         .iter()
         .find_map(|item| match item {
-            TalosInputItem::SkillSelection { name, .. } => Some(format!("${name}")),
-            TalosInputItem::Text { .. }
-            | TalosInputItem::Files { .. }
-            | TalosInputItem::Voice { .. }
-            | TalosInputItem::Video { .. } => None,
+            AgentUserContent::SkillSelection { name, .. } => Some(format!("${name}")),
+            AgentUserContent::Text { .. }
+            | AgentUserContent::File { .. }
+            | AgentUserContent::Audio { .. }
+            | AgentUserContent::Video { .. }
+            | AgentUserContent::UserActionResponse { .. } => None,
         })
         .unwrap_or_else(|| "Queued message".to_string())
 }
 
 pub(crate) fn queued_message_is_steerable(message: &QueuedMessage) -> bool {
-    message.input.iter().all(|item| {
+    message.input.content.iter().all(|item| {
         matches!(
             item,
-            TalosInputItem::Text { .. } | TalosInputItem::Files { .. }
+            AgentUserContent::Text { .. } | AgentUserContent::File { .. }
         )
     })
 }

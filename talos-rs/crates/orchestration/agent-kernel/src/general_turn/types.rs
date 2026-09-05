@@ -113,23 +113,61 @@ impl SessionCompactionState {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnResult {
-    pub output_text: String,
-    pub output_items: Vec<RunItem>,
-    pub stop_reason: StopReason,
-    pub usage: TokenUsage,
     pub last_model_usage: TokenUsage,
-    pub metrics: TurnExecutionMetrics,
     pub prompt_diagnostics: PromptDiagnostics,
-    pub warnings: Vec<KernelWarning>,
     pub outcome: GeneralTurnOutcome,
-    pub artifact_seq: u64,
+}
+
+#[cfg(test)]
+impl GeneralTurnResult {
+    pub(crate) fn output_items(&self) -> &[KernelRunItem] {
+        match &self.outcome {
+            GeneralTurnOutcome::Completed { output_items, .. }
+            | GeneralTurnOutcome::Waiting { output_items, .. } => output_items,
+        }
+    }
+
+    pub(crate) fn output_text(&self) -> &str {
+        self.output_items()
+            .iter()
+            .rev()
+            .find_map(|item| match item {
+                KernelRunItem::OutputText { text } => Some(text.as_str()),
+                KernelRunItem::UserInput { .. }
+                | KernelRunItem::Reasoning { .. }
+                | KernelRunItem::ExecutionSummary { .. }
+                | KernelRunItem::ToolCall { .. }
+                | KernelRunItem::ToolResult { .. } => None,
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn stop_reason(&self) -> StopReason {
+        match &self.outcome {
+            GeneralTurnOutcome::Completed { stop_reason, .. } => *stop_reason,
+            GeneralTurnOutcome::Waiting { .. } => StopReason::WaitingUserAction,
+        }
+    }
+
+    pub(crate) fn usage(&self) -> &TokenUsage {
+        match &self.outcome {
+            GeneralTurnOutcome::Completed { usage, .. }
+            | GeneralTurnOutcome::Waiting { usage, .. } => usage,
+        }
+    }
+
+    pub(crate) fn metrics(&self) -> &TurnExecutionMetrics {
+        match &self.outcome {
+            GeneralTurnOutcome::Completed { metrics, .. }
+            | GeneralTurnOutcome::Waiting { metrics, .. } => metrics,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct PreparedGeneralTurn {
     pub session_id: String,
     pub user_id: String,
-    pub message_id: String,
     pub invocation_id: String,
     pub agent_id: String,
     pub workspace_id: String,
@@ -139,15 +177,12 @@ pub struct PreparedGeneralTurn {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
     pub attachment_tokens: usize,
-    pub prompt_prefix_messages: Vec<ChatMessage>,
     pub messages: Vec<ChatMessage>,
     pub maintenance_usage: TokenUsage,
-    pub tool_definitions: Vec<ToolDefinition>,
     pub tool_selection_request: talos_tools::ToolSelectionRequest,
     pub prompt_diagnostics: PromptDiagnostics,
-    pub warnings: Vec<KernelWarning>,
     pub prompt_warning_state: Option<PromptWarningState>,
-    pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pub stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pub message_rx: Option<Arc<std::sync::Mutex<mpsc::Receiver<crate::ActiveTurnInputDelivery>>>>,
     /// Harness-owned Run capabilities propagated to Tool execution.
     pub run_tasks: talos_run_control::RunTaskGroup,
@@ -156,54 +191,45 @@ pub struct PreparedGeneralTurn {
 #[derive(Debug, Clone)]
 pub struct ExecutedTurnArtifacts {
     pub output_text: String,
-    pub output_items: Vec<RunItem>,
+    pub output_items: Vec<KernelRunItem>,
     pub stop_reason: StopReason,
     pub usage: TokenUsage,
     pub last_model_usage: TokenUsage,
     pub metrics: TurnExecutionMetrics,
-    pub reasoning_log: Vec<String>,
     pub tool_call_log: Vec<ToolCallRecord>,
     pub tool_result_log: Vec<ToolResultLog>,
     pub pending_user_action: Option<PendingUserActionRequest>,
     pub final_answer_streamed: bool,
-    pub execution_summary_streamed: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum GeneralTurnOutcome {
     Completed {
-        output_text: String,
-        output_items: Vec<RunItem>,
+        output_items: Vec<KernelRunItem>,
         stop_reason: StopReason,
         usage: TokenUsage,
         metrics: TurnExecutionMetrics,
     },
     Waiting {
-        output_items: Vec<RunItem>,
-        pending_action: PendingGeneralTurnAction,
-        stop_reason: StopReason,
+        output_items: Vec<KernelRunItem>,
+        pending_action: Box<PendingUserActionRequest>,
         usage: TokenUsage,
         metrics: TurnExecutionMetrics,
     },
 }
 
 #[derive(Debug, Clone)]
-pub enum PendingGeneralTurnAction {
-    UserAction(PendingUserActionRequest),
+pub enum AgentKernelContinuation {
+    UserAction(AgentKernelUserActionContinuation),
 }
 
 #[derive(Debug, Clone)]
-pub enum GeneralTurnResume {
-    UserAction(UserActionResume),
-}
-
-#[derive(Debug, Clone)]
-pub struct UserActionResume {
+pub struct AgentKernelUserActionContinuation {
     pub call_id: String,
     pub tool_name: String,
     pub response: UserActionResponse,
     pub sandbox_request_fingerprint: Option<String>,
-    pub original_call: Option<ResumeToolCall>,
+    pub original_call: Option<AgentKernelContinuationToolCall>,
     pub tool_calls: Vec<FunctionCall>,
     pub tool_messages: Vec<ChatMessage>,
     pub deferred_tool_calls: Vec<FunctionCall>,
@@ -213,7 +239,7 @@ pub struct UserActionResume {
 }
 
 #[derive(Debug, Clone)]
-pub struct ResumeToolCall {
+pub struct AgentKernelContinuationToolCall {
     pub item_id: Option<String>,
     pub call_id: String,
     pub tool_name: String,
@@ -225,12 +251,6 @@ pub struct ResumeToolCall {
 pub struct GeneralTurnPolicyStop {
     pub output_text: String,
     pub stop_reason: StopReason,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GeneralTurnPolicyFinalAcceptance {
-    Accept,
-    Reject,
 }
 
 pub trait GeneralTurnPolicy: Send + Sync {
@@ -245,11 +265,10 @@ pub trait GeneralTurnPolicy: Send + Sync {
         Ok(None)
     }
 
-    fn accepts_final_response(&self, _text: &str) -> GeneralTurnPolicyFinalAcceptance {
-        GeneralTurnPolicyFinalAcceptance::Accept
-    }
-
-    fn before_user_action_resume(&self, _resume: &mut UserActionResume) -> TalosResult<()> {
+    fn before_user_action_resume(
+        &self,
+        _resume: &mut AgentKernelUserActionContinuation,
+    ) -> TalosResult<()> {
         Ok(())
     }
 
@@ -299,7 +318,7 @@ pub struct GeneralTurnLoopState {
     pub started_at: Instant,
     pub messages: Vec<ChatMessage>,
     pub round: u32,
-    pub output_items: Vec<RunItem>,
+    pub output_items: Vec<KernelRunItem>,
     pub usage: TokenUsage,
     pub last_model_usage: TokenUsage,
     pub reasoning_log: Vec<String>,
@@ -386,7 +405,7 @@ pub struct GeneralTurnStepRequest {
     pub reasoning_effort: Option<ReasoningEffort>,
     pub speed: ModelSpeed,
     pub pre_final_execution_summary: Option<String>,
-    pub stream_tx: Option<mpsc::Sender<KernelStreamEvent>>,
+    pub stream_tx: Option<mpsc::Sender<AgentKernelEvent>>,
     pub streaming_tool_execution: Option<StreamingToolExecutionConfig>,
 }
 
@@ -428,7 +447,7 @@ pub struct GeneralTurnStepResult {
     pub tool_calls: Vec<FunctionCall>,
     pub streamed_tool_outputs: Vec<ToolExecutionOutput>,
     pub model_finish_reason: ModelFinishReason,
-    pub output_items: Vec<RunItem>,
+    pub output_items: Vec<KernelRunItem>,
     pub usage: TokenUsage,
     pub final_answer_streamed: bool,
     pub execution_summary_streamed: bool,
@@ -456,7 +475,7 @@ impl fmt::Debug for StreamingToolExecutionConfig {
 
 #[derive(Debug, Clone)]
 pub struct GeneralTurnToolBatch {
-    pub output_items: Vec<RunItem>,
+    pub output_items: Vec<KernelRunItem>,
     pub tool_messages: Vec<ChatMessage>,
     pub pending_user_action: Option<PendingUserActionRequest>,
     pub logs: Vec<ToolResultLog>,

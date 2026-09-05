@@ -223,7 +223,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .await
         .expect("app-server upload should succeed");
     let uploaded: FileUploadResponse =
-        serde_json::from_value(uploaded).expect("upload response should decode");
+        serde_json::from_value(uploaded.body).expect("upload response should decode");
 
     let listed = adapter
         .dispatch(
@@ -236,7 +236,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .await
         .expect("app-server list should succeed");
     let listed: FileListResponse =
-        serde_json::from_value(listed).expect("list response should decode");
+        serde_json::from_value(listed.body).expect("list response should decode");
     assert_eq!(listed.data, vec![uploaded.file.clone()]);
 
     adapter
@@ -278,7 +278,7 @@ async fn app_server_file_methods_use_the_same_file_service() {
         .await
         .expect("app-server delete should succeed");
     let deleted: FileDeleteResponse =
-        serde_json::from_value(deleted).expect("delete response should decode");
+        serde_json::from_value(deleted.body).expect("delete response should decode");
     assert_eq!(deleted.file_id, uploaded.file.file_id);
 }
 

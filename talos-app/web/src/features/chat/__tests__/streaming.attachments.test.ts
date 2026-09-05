@@ -28,7 +28,7 @@ describe("timeline attachment events", () => {
     const restored = buildSessionBlocks({
       sessionId: "sess-1",
       sessionHistory: sessionHistory([
-        historyUserInputItem("input-1", "", ["file-1"]),
+        ...historyUserInputItem("input-1", "", ["file-1"]),
       ]),
       waitingResponseDetail: "waiting detail",
       waitingResponseTitle: "waiting title",

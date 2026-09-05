@@ -14,14 +14,18 @@ const queue = {
   messages: [
     {
       id: "q1",
-      input: [
-        { type: "text" as const, text: "First waiting message" },
-        { type: "files" as const, fileIds: ["file-1"] },
-      ],
+      input: {
+        content: [
+          { type: "text" as const, text: "First waiting message" },
+          { type: "file" as const, fileId: "file-1" },
+        ],
+      },
     },
     {
       id: "q2",
-      input: [{ type: "skill_selection" as const, name: "review", path: "/skills/review" }],
+      input: {
+        content: [{ type: "skillSelection" as const, name: "review", path: "/skills/review" }],
+      },
     },
   ],
 };
@@ -32,7 +36,7 @@ const steerQueue = {
     queue.messages[0]!,
     {
       id: "q3",
-      input: [{ type: "text" as const, text: "Second steer message" }],
+      input: { content: [{ type: "text" as const, text: "Second steer message" }] },
     },
   ],
 };
@@ -69,10 +73,12 @@ describe("WaitingMessages", () => {
     fireEvent.change(input, { target: { value: "Updated message" } });
     fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
     await waitFor(() => {
-      expect(actions.update).toHaveBeenCalledWith("q1", [
-        { type: "text", text: "Updated message" },
-        { type: "files", fileIds: ["file-1"] },
-      ]);
+      expect(actions.update).toHaveBeenCalledWith("q1", {
+        content: [
+          { type: "text", text: "Updated message" },
+          { type: "file", fileId: "file-1" },
+        ],
+      });
     });
 
     fireEvent.click(screen.getAllByRole("button", { name: "More message actions" })[0]!);

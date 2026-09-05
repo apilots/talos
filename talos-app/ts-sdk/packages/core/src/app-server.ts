@@ -24,9 +24,9 @@ import type {
   FileUploadData,
   FileUploadRequest,
   FileUploadResponse,
-  ConfigGetResponse,
+  ConfigDeleteResponse,
+  ConfigResponse,
   ConfigReloadResponse,
-  ConfigUpdateResponse,
   ConfigPath,
   ConfigValue,
   LlmConfig,
@@ -45,7 +45,7 @@ import type {
   SessionCompactResponse,
   SessionClearResponse,
   SessionDeleteResponse,
-  TimelineRecoveryResponse,
+  RecoverTimelineResponse,
   UserCurrentResponse,
   AuthLogoutResponse,
   AuthSessionClearResponse,
@@ -59,11 +59,11 @@ import type {
 } from "./types";
 
 export type AppServerEventHandler = (
-  event: AppProtocol.TimelineEventEnvelope,
+  event: AppProtocol.TimelineEvent,
 ) => void;
 
 export type AppServerSubscriptionTerminatedHandler = (
-  envelope: AppProtocol.SubscriptionTerminatedEnvelope,
+  notification: AppProtocol.SubscriptionTerminatedNotification,
 ) => void;
 
 export type AppServerMessageQueueChangedHandler = (
@@ -146,55 +146,59 @@ export class AppServerClient {
   };
 
   listModels(): Promise<ModelListResponse> {
-    return this.transport.request("model.list", {} satisfies AppProtocol.ModelListRequest);
+    return this.transport.request("model/list", {} satisfies AppProtocol.ModelListRequest);
   }
 
-  configGet(path: ConfigPath = "llm"): Promise<ConfigGetResponse> {
-    return this.transport.request("config.get", { path });
+  configGet(path: ConfigPath = "llm"): Promise<ConfigResponse> {
+    return this.transport.request("config/get", { path });
   }
 
-  configUpdate(value: ConfigValue): Promise<ConfigUpdateResponse> {
-    return this.transport.request("config.update", { value });
+  configUpdate(value: ConfigValue): Promise<ConfigResponse> {
+    return this.transport.request("config/update", { value });
   }
 
-  getLlmConfig(): Promise<ConfigGetResponse> {
+  configDelete(path: ConfigPath): Promise<ConfigDeleteResponse> {
+    return this.transport.request("config/delete", { path });
+  }
+
+  getLlmConfig(): Promise<ConfigResponse> {
     return this.configGet("llm");
   }
 
-  updateLlmConfig(config: LlmConfig): Promise<ConfigUpdateResponse> {
+  updateLlmConfig(config: LlmConfig): Promise<ConfigResponse> {
     return this.configUpdate({ type: "llm", value: config });
   }
 
   configReload(): Promise<ConfigReloadResponse> {
-    return this.transport.request("config.reload", {});
+    return this.transport.request("config/reload", {});
   }
 
   authLogout(): Promise<AuthLogoutResponse> {
-    return this.transport.request("auth.logout", {});
+    return this.transport.request("auth/logout", {});
   }
 
   startCloudLogin(params: AppProtocol.CloudLoginStartRequest): Promise<AppProtocol.CloudLoginStartResponse> {
-    return this.transport.request("auth.login.start", params);
+    return this.transport.request("auth/login/start", params);
   }
 
   getCloudLoginStatus(params: AppProtocol.CloudLoginStatusRequest): Promise<AppProtocol.CloudLoginStatusResponse> {
-    return this.transport.request("auth.login.status", params);
+    return this.transport.request("auth/login/status", params);
   }
 
   cancelCloudLogin(params: AppProtocol.CloudLoginCancelRequest): Promise<CloudLoginCancelResponse> {
-    return this.transport.request("auth.login.cancel", params);
+    return this.transport.request("auth/login/cancel", params);
   }
 
   readAuthSession(): Promise<AuthSessionReadResponse> {
-    return this.transport.request("auth.session.read", {});
+    return this.transport.request("auth/session/read", {});
   }
 
   clearAuthSession(): Promise<AuthSessionClearResponse> {
-    return this.transport.request("auth.session.clear", {});
+    return this.transport.request("auth/session/clear", {});
   }
 
   getCurrentUser(): Promise<UserCurrentResponse> {
-    return this.transport.request("user.current", {});
+    return this.transport.request("user/current", {});
   }
 
   readProfile(
@@ -206,165 +210,163 @@ export class AppServerClient {
   listPluginSources(
     params: AppProtocol.PluginSourceListRequest = {},
   ): Promise<AppProtocol.PluginSourceListResponse> {
-    return this.transport.request("plugin.source.list", params);
+    return this.transport.request("plugin/source/list", params);
   }
 
   addPluginSource(params: AppProtocol.PluginSourceAddRequest): Promise<AppProtocol.PluginSourceAddResponse> {
-    return this.transport.request("plugin.source.add", params);
+    return this.transport.request("plugin/source/add", params);
   }
 
   refreshPluginSource(
     params: AppProtocol.PluginSourceRefreshRequest,
   ): Promise<AppProtocol.PluginSourceRefreshResponse> {
-    return this.transport.request("plugin.source.refresh", params);
+    return this.transport.request("plugin/source/refresh", params);
   }
 
   removePluginSource(
     params: AppProtocol.PluginSourceRemoveRequest,
   ): Promise<AppProtocol.PluginSourceRemoveResponse> {
-    return this.transport.request("plugin.source.remove", params);
+    return this.transport.request("plugin/source/remove", params);
   }
 
   searchPlugins(params: AppProtocol.PluginSearchRequest): Promise<AppProtocol.PluginSearchResponse> {
-    return this.transport.request("plugin.search", params);
+    return this.transport.request("plugin/search", params);
   }
 
   listPlugins(params: AppProtocol.PluginListRequest): Promise<AppProtocol.PluginListResponse> {
-    return this.transport.request("plugin.list", params);
+    return this.transport.request("plugin/list", params);
   }
 
   readPlugin(params: AppProtocol.PluginReadRequest): Promise<AppProtocol.PluginReadResponse> {
-    return this.transport.request("plugin.read", params);
+    return this.transport.request("plugin/read", params);
   }
 
   installPlugin(params: AppProtocol.PluginInstallRequest): Promise<AppProtocol.PluginInstallResponse> {
-    return this.transport.request("plugin.install", params);
+    return this.transport.request("plugin/install", params);
   }
 
   updatePlugin(params: AppProtocol.PluginUpdateRequest): Promise<AppProtocol.PluginUpdateResponse> {
-    return this.transport.request("plugin.update", params);
+    return this.transport.request("plugin/update", params);
   }
 
   uninstallPlugin(params: AppProtocol.PluginUninstallRequest): Promise<AppProtocol.PluginUninstallResponse> {
-    return this.transport.request("plugin.uninstall", params);
+    return this.transport.request("plugin/uninstall", params);
   }
 
   enablePlugin(params: AppProtocol.PluginEnableRequest): Promise<AppProtocol.PluginEnableResponse> {
-    return this.transport.request("plugin.enable", params);
+    return this.transport.request("plugin/enable", params);
   }
 
   disablePlugin(params: AppProtocol.PluginDisableRequest): Promise<AppProtocol.PluginDisableResponse> {
-    return this.transport.request("plugin.disable", params);
+    return this.transport.request("plugin/disable", params);
   }
 
   listSkills(params: AppProtocol.SkillsListRequest = { include_disabled: false }): Promise<AppProtocol.SkillsListResponse> {
-    return this.transport.request("skills.list", params);
+    return this.transport.request("skills/list", params);
   }
 
   refreshSkills(params: AppProtocol.SkillsRefreshRequest = {}): Promise<AppProtocol.SkillsListResponse> {
-    return this.transport.request("skills.refresh", params);
+    return this.transport.request("skills/refresh", params);
   }
 
   suggestSkills(params: AppProtocol.SkillsSuggestRequest): Promise<AppProtocol.SkillsSuggestResponse> {
-    return this.transport.request("skills.suggest", params);
+    return this.transport.request("skills/suggest", params);
   }
 
   readSkill(params: AppProtocol.SkillsReadRequest): Promise<AppProtocol.SkillsReadResponse> {
-    return this.transport.request("skills.read", params);
+    return this.transport.request("skills/read", params);
   }
 
   resolveSkills(params: AppProtocol.SkillsResolveRequest): Promise<AppProtocol.SkillsResolveResponse> {
-    return this.transport.request("skills.resolve", params);
+    return this.transport.request("skills/resolve", params);
   }
 
   listSessions(params: AppProtocol.SessionListRequest): Promise<SessionListResponse> {
-    return this.transport.request("session.list", params);
+    return this.transport.request("session/list", params);
   }
 
   getSession(params: AppProtocol.SessionGetRequest): Promise<AppProtocol.SessionGetResponse> {
-    return this.transport.request("session.get", params);
+    return this.transport.request("session/get", params);
   }
 
   getSessionById(sessionId: string): Promise<AppProtocol.SessionGetResponse> {
-    return this.getSession({ session_id: sessionId });
+    return this.getSession({ sessionId });
   }
 
   patchSession(params: AppProtocol.SessionPatchRequest): Promise<SessionUpdateResponse> {
-    return this.transport.request("session.patch", params);
+    return this.transport.request("session/patch", params);
   }
 
   deleteSession(params: AppProtocol.SessionDeleteRequest): Promise<SessionDeleteResponse> {
-    return this.transport.request("session.delete", params);
+    return this.transport.request("session/delete", params);
   }
 
   deleteSessionById(sessionId: string): Promise<SessionDeleteResponse> {
-    return this.deleteSession({ session_id: sessionId });
+    return this.deleteSession({ sessionId });
   }
 
   closeSession(params: AppProtocol.SessionCloseRequest): Promise<SessionCloseResponse> {
-    return this.transport.request("session.close", params);
+    return this.transport.request("session/close", params);
   }
 
   closeSessionById(sessionId: string): Promise<SessionCloseResponse> {
-    return this.closeSession({ session_id: sessionId });
+    return this.closeSession({ sessionId });
   }
 
   compactSession(params: AppProtocol.SessionCompactRequest): Promise<SessionCompactResponse> {
-    return this.transport.request("session.compact", params);
+    return this.transport.request("session/compact", params);
   }
 
   compactSessionById(sessionId: string): Promise<SessionCompactResponse> {
-    return this.compactSession({ session_id: sessionId });
+    return this.compactSession({ sessionId });
   }
 
   clearSession(params: AppProtocol.SessionClearRequest): Promise<SessionClearResponse> {
-    return this.transport.request("session.clear", params);
+    return this.transport.request("session/clear", params);
   }
 
   clearSessionById(sessionId: string): Promise<SessionClearResponse> {
-    return this.clearSession({ session_id: sessionId });
+    return this.clearSession({ sessionId });
   }
 
   getActiveTurn(params: AppProtocol.SessionActiveTurnRequest): Promise<SessionActiveTurnResponse> {
-    return this.transport.request("session.active_turn", params);
+    return this.transport.request("session/active_turn", params);
   }
 
   getActiveTurnById(sessionId: string): Promise<SessionActiveTurnResponse> {
-    return this.getActiveTurn({ session_id: sessionId });
+    return this.getActiveTurn({ sessionId });
   }
 
   getSessionHistory(params: AppProtocol.SessionHistoryRequest): Promise<SessionHistoryResponse> {
-    return this.transport.request<SessionHistoryResponse>("session.history", {
-      session_id: params.session_id,
-    });
+    return this.transport.request<SessionHistoryResponse>("session/history", params);
   }
 
   getSessionHistoryById(sessionId: string): Promise<SessionHistoryResponse> {
-    return this.getSessionHistory({ session_id: sessionId });
+    return this.getSessionHistory({ sessionId, cursor: null, limit: null });
   }
 
-  recoverTimeline(params: AppProtocol.RecoverTimelineRequest): Promise<TimelineRecoveryResponse> {
-    return this.transport.request<TimelineRecoveryResponse>("timeline.recover", params);
+  recoverTimeline(params: AppProtocol.RecoverTimelineRequest): Promise<RecoverTimelineResponse> {
+    return this.transport.request<RecoverTimelineResponse>("timeline/recover", params);
   }
 
   recoverTimelineById(
     sessionId: string,
     afterEventId: string | null = null,
     replayLimit: number | null = null,
-  ): Promise<TimelineRecoveryResponse> {
+  ): Promise<RecoverTimelineResponse> {
     return this.recoverTimeline({
-      session_id: sessionId,
-      after_event_id: afterEventId,
-      replay_limit: replayLimit,
+      sessionId,
+      afterEventId,
+      replayLimit,
     });
   }
 
   listProjects(params: AppProtocol.ProjectListRequest = {}): Promise<ProjectListResponse> {
-    return this.transport.request<ProjectListResponse>("project.list", params);
+    return this.transport.request<ProjectListResponse>("project/list", params);
   }
 
   getProject(params: AppProtocol.ProjectReadRequest): Promise<ProjectReadResponse> {
-    return this.transport.request<ProjectReadResponse>("project.read", params);
+    return this.transport.request<ProjectReadResponse>("project/read", params);
   }
 
   getProjectById(projectId: string): Promise<ProjectReadResponse> {
@@ -372,7 +374,7 @@ export class AppServerClient {
   }
 
   createProject(params: AppProtocol.ProjectCreateRequest): Promise<ProjectCreateResponse> {
-    return this.transport.request<ProjectCreateResponse>("project.create", params);
+    return this.transport.request<ProjectCreateResponse>("project/create", params);
   }
 
   createProjectFromFields(name: string, directory: string): Promise<ProjectCreateResponse> {
@@ -380,7 +382,7 @@ export class AppServerClient {
   }
 
   patchProject(params: AppProtocol.ProjectPatchRequest): Promise<ProjectPatchResponse> {
-    return this.transport.request<ProjectPatchResponse>("project.patch", params);
+    return this.transport.request<ProjectPatchResponse>("project/patch", params);
   }
 
   patchProjectById(projectId: string, patch: ProjectPatch): Promise<ProjectPatchResponse> {
@@ -388,7 +390,7 @@ export class AppServerClient {
   }
 
   deleteProject(params: AppProtocol.ProjectDeleteRequest): Promise<ProjectDeleteResponse> {
-    return this.transport.request("project.delete", params);
+    return this.transport.request("project/delete", params);
   }
 
   deleteProjectById(projectId: string): Promise<ProjectDeleteResponse> {
@@ -396,27 +398,35 @@ export class AppServerClient {
   }
 
   readFsDirectory(params: AppProtocol.FsDirectoryReadRequest = { path: null }): Promise<FsDirectoryReadResponse> {
-    return this.transport.request("fs.directory.read", params);
+    return this.transport.request("fs/directory/read", params);
   }
 
   createFsDirectory(params: AppProtocol.FsDirectoryCreateRequest): Promise<FsDirectoryCreateResponse> {
-    return this.transport.request("fs.directory.create", params);
+    return this.transport.request("fs/directory/create", params);
   }
 
   startTurn(params: AppProtocol.StartTurnRequest): Promise<AppProtocol.StartTurnResponse> {
-    return this.transport.request("turn.start", params);
+    return this.transport.request("turn/start", params);
   }
 
-  retryTurn(params: AppProtocol.RetryTurnRequest): Promise<AppProtocol.RetryTurnResponse> {
-    return this.transport.request("turn.retry", params);
+  retryTurn(params: AppProtocol.RetryTurnRequest): Promise<AppProtocol.StartTurnResponse> {
+    return this.transport.request("turn/retry", params);
   }
 
   interruptTurn(params: AppProtocol.InterruptTurnRequest): Promise<AppProtocol.InterruptTurnResponse> {
-    return this.transport.request("turn.interrupt", params);
+    return this.transport.request("turn/interrupt", params);
   }
 
   interruptTurnById(sessionId: string, turnId: string): Promise<AppProtocol.InterruptTurnResponse> {
-    return this.interruptTurn({ session_id: sessionId, turn_id: turnId });
+    return this.interruptTurn({
+      identity: { sessionId, turnId },
+    });
+  }
+
+  submitTurnInput(
+    params: AppProtocol.SubmitTurnInputRequest,
+  ): Promise<AppProtocol.SubmitTurnInputResponse> {
+    return this.transport.request("turn/input", params);
   }
 
   messageQueue = {
@@ -432,40 +442,26 @@ export class AppServerClient {
       this.transport.request("messageQueue/reorder", params),
     start: (params: AppProtocol.MessageQueueStartRequest): Promise<AppProtocol.StartTurnResponse> =>
       this.transport.request("messageQueue/start", params),
-    steer: (params: AppProtocol.MessageQueueSteerRequest): Promise<AppProtocol.MessageQueue> =>
-      this.transport.request("messageQueue/steer", params),
   };
 
   subscribeEvents(
     params: AppProtocol.SubscribeTimelineRequest,
   ): Promise<AppProtocol.SubscribeTimelineResponse> {
-    return this.transport.request("event.subscribe", params);
+    return this.transport.request("event/subscribe", params);
   }
 
   unsubscribeEvents(
     subscriptionId: string,
   ): Promise<AppProtocol.EventUnsubscribeResponse> {
-    return this.transport.request("event.unsubscribe", { subscription_id: subscriptionId });
-  }
-
-  submitDynamicToolResult(
-    params: AppProtocol.SubmitDynamicToolResultRequest,
-  ): Promise<AppProtocol.SubmitDynamicToolResultResponse> {
-    return this.transport.request("tool.dynamic_result.submit", params);
-  }
-
-  submitUserAction(
-    params: AppProtocol.SubmitUserActionRequest,
-  ): Promise<AppProtocol.SubmitUserActionResponse> {
-    return this.transport.request("userAction/submit", params);
+    return this.transport.request("event/unsubscribe", { subscriptionId });
   }
 
   listMemoryFiles(request: MemoryFileListRequest = {}): Promise<MemoryFileListResponse> {
-    return this.transport.request<MemoryFileListResponse>("memory.file.list", request);
+    return this.transport.request<MemoryFileListResponse>("memory/file/list", request);
   }
 
   readMemoryFile(request: MemoryFileReadRequest): Promise<MemoryFileReadResponse> {
-    return this.transport.request("memory.file.read", request);
+    return this.transport.request("memory/file/read", request);
   }
 
   searchMemory(request: MemorySearchRequest): Promise<MemorySearchResponse> {
@@ -477,15 +473,15 @@ export class AppServerClient {
   }
 
   writeMemoryFile(request: MemoryFileWriteRequest): Promise<MemoryFileWriteResponse> {
-    return this.transport.request("memory.file.write", request);
+    return this.transport.request("memory/file/write", request);
   }
 
   listWorkspaceDocs(): Promise<WorkspaceDocListResponse> {
-    return this.transport.request<WorkspaceDocListResponse>("workspace.doc.list", {});
+    return this.transport.request<WorkspaceDocListResponse>("workspace/doc/list", {});
   }
 
   readWorkspaceDoc(kind: WorkspaceDocKind): Promise<WorkspaceDocReadResponse> {
-    return this.transport.request("workspace.doc.read", { kind });
+    return this.transport.request("workspace/doc/read", { kind });
   }
 
   writeWorkspaceDoc(
@@ -493,7 +489,7 @@ export class AppServerClient {
     content: string,
     expectedVersion: string | null,
   ): Promise<WorkspaceDocWriteResponse> {
-    return this.transport.request("workspace.doc.write", {
+    return this.transport.request("workspace/doc/write", {
       kind,
       content,
       expected_version: expectedVersion,

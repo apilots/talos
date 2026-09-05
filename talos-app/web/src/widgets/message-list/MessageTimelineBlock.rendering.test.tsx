@@ -21,11 +21,10 @@ describe("MessageTimelineBlock rendering", () => {
             kind: "timeline",
             metrics: {
               state: "completed",
-              model_rounds: 2,
-              tool_calls: 1,
-              tool_successes: 1,
-              tool_errors: 0,
-              stop_reason: "end_turn",
+              modelRounds: 2,
+              toolCalls: 1,
+              toolSuccesses: 1,
+              toolErrors: 0,
               usage: {
                 input_tokens: 12,
                 output_tokens: 34,
@@ -33,7 +32,8 @@ describe("MessageTimelineBlock rendering", () => {
                 cache_creation_input_tokens: null,
                 cache_read_input_tokens: null,
               },
-              duration_ms: null,
+              context: null,
+              durationMs: null,
             },
             items: [
               {
@@ -118,11 +118,10 @@ describe("MessageTimelineBlock rendering", () => {
             kind: "timeline",
             metrics: {
               state: "completed",
-              model_rounds: 11,
-              tool_calls: 16,
-              tool_successes: 16,
-              tool_errors: 0,
-              stop_reason: "end_turn",
+              modelRounds: 11,
+              toolCalls: 16,
+              toolSuccesses: 16,
+              toolErrors: 0,
               usage: {
                 input_tokens: 900_000,
                 output_tokens: 78_200,
@@ -130,7 +129,8 @@ describe("MessageTimelineBlock rendering", () => {
                 cache_creation_input_tokens: null,
                 cache_read_input_tokens: null,
               },
-              duration_ms: 30_000,
+              context: null,
+              durationMs: 30_000,
             },
             items: [
               {

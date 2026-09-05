@@ -78,18 +78,16 @@ pub struct MemoryFormationParams<'a> {
     pub session_id: &'a str,
     /// Agent that produced new canonical Dream Memory content.
     pub producer_agent_id: &'a str,
-    /// Session-selected model used when no compaction override exists.
-    pub selected_model: &'a str,
-    /// Provider used for the single structured extraction request.
-    pub llm_provider: Arc<dyn LlmProvider>,
     /// Long-term memory write boundary.
     pub dream_memory_store: &'a dyn DreamMemoryFormationStore,
     /// User-scoped long-term memory destination.
     pub memory_scope: &'a MemoryScope,
-    /// Persisted transcript and summary boundary.
-    pub session_artifact_store: &'a dyn talos_store::session::SessionArtifactStore,
+    /// Provider-private Session summary boundary.
+    pub session_artifact_store: &'a dyn crate::KernelSessionArtifactStore,
+    /// Bounded canonical Session history projected for Kernel prompt use.
+    pub session_prompt_context_source: &'a dyn crate::SessionPromptContextSource,
     /// Persisted memory cursor boundary.
-    pub session_store: &'a dyn talos_store::session::SessionStore,
+    pub memory_progress_store: &'a dyn crate::KernelMemoryProgressStore,
     /// Resolved per-user Kernel configuration.
     pub kernel_config: &'a AgentKernelConfig,
 }
@@ -106,7 +104,7 @@ pub(super) struct CompactableTranscriptUnit {
     kind: CompactableTranscriptUnitKind,
     record_id: String,
     turn_id: Option<String>,
-    timestamp: chrono::DateTime<chrono::Utc>,
+    timestamp: i64,
     rendered: String,
 }
 
@@ -151,15 +149,15 @@ fn render_session_summary_content(summary: &CompactionMemoryOutput) -> String {
     out.trim().to_string()
 }
 
-fn render_transcript_line(message: &crate::TalosMessage) -> Option<String> {
+fn render_transcript_line(message: &crate::SessionPromptMessage) -> Option<String> {
     let text = message.text.trim();
     if text.is_empty() {
         return None;
     }
     Some(match message.role {
-        TalosMessageRole::User => format!("User: {}", text),
-        TalosMessageRole::Assistant => format!("Assistant: {}", text),
-        TalosMessageRole::System => format!("System: {}", text),
+        SessionPromptMessageRole::User => format!("User: {}", text),
+        SessionPromptMessageRole::Assistant => format!("Assistant: {}", text),
+        SessionPromptMessageRole::System => format!("System: {}", text),
     })
 }
 
@@ -231,7 +229,7 @@ pub(super) fn build_compactable_transcript_units(
 ) -> Vec<CompactableTranscriptUnit> {
     let mut units = Vec::new();
     for message in &context.recent_messages {
-        let turn_id = message.header.turn_id.clone();
+        let turn_id = Some(message.header.turn_id.clone());
         let rendered = match render_transcript_line(message) {
             Some(rendered) => rendered,
             None => continue,
@@ -253,7 +251,7 @@ pub(super) fn build_compactable_transcript_units(
                 kind: CompactableTranscriptUnitKind::HistoryTurn,
                 record_id: message.header.id.clone(),
                 turn_id,
-                timestamp: message.header.timestamp,
+                timestamp: message.header.completed_at,
                 rendered,
             });
         }
@@ -266,8 +264,8 @@ pub(super) fn build_compactable_transcript_units(
         units.push(CompactableTranscriptUnit {
             kind: CompactableTranscriptUnitKind::ToolResult,
             record_id: result.header.id.clone(),
-            turn_id: result.header.turn_id.clone(),
-            timestamp: result.header.timestamp,
+            turn_id: Some(result.header.turn_id.clone()),
+            timestamp: result.header.completed_at,
             rendered,
         });
     }
@@ -279,8 +277,8 @@ pub(super) fn build_compactable_transcript_units(
         units.push(CompactableTranscriptUnit {
             kind: CompactableTranscriptUnitKind::ToolExchange,
             record_id: exchange.header.id.clone(),
-            turn_id: exchange.header.turn_id.clone(),
-            timestamp: exchange.header.timestamp,
+            turn_id: Some(exchange.header.turn_id.clone()),
+            timestamp: exchange.header.completed_at,
             rendered,
         });
     }
@@ -394,20 +392,26 @@ pub(super) fn compact_summary_coverage(
         .filter_map(|turn_id| turn_seq_by_id.get(turn_id).copied())
         .filter(|seq| *seq > previous_covers_until_seq)
         .collect::<std::collections::BTreeSet<_>>();
+    let available_seqs = turn_seq_by_id
+        .values()
+        .copied()
+        .filter(|seq| *seq > previous_covers_until_seq)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut covers_from_seq = None;
     let mut covers_until_seq = previous_covers_until_seq;
     let mut source_turn_count = 0;
 
-    loop {
-        let next_seq = covers_until_seq.saturating_add(1);
-        if !source_seqs.contains(&next_seq) {
+    for sequence in available_seqs {
+        if !source_seqs.contains(&sequence) {
             break;
         }
-        covers_until_seq = next_seq;
+        covers_from_seq.get_or_insert(sequence);
+        covers_until_seq = sequence;
         source_turn_count += 1;
     }
 
-    (source_turn_count > 0).then_some(CompactSummaryCoverage {
-        covers_from_seq: previous_covers_until_seq.saturating_add(1),
+    covers_from_seq.map(|covers_from_seq| CompactSummaryCoverage {
+        covers_from_seq,
         covers_until_seq,
         source_turn_count,
     })
@@ -481,7 +485,7 @@ async fn request_compaction_output(
 }
 
 async fn latest_summary_compact_cursor(
-    session_artifact_store: &dyn talos_store::session::SessionArtifactStore,
+    session_artifact_store: &dyn crate::KernelSessionArtifactStore,
     workspace_root: &std::path::Path,
     session_id: &str,
 ) -> TalosResult<Option<talos_prompt::CompactPromptCursor>> {
@@ -497,17 +501,18 @@ async fn latest_summary_compact_cursor(
 
 pub async fn compact_session_memory(
     params: MemoryFormationParams<'_>,
+    selected_model: &str,
+    llm_provider: Arc<dyn LlmProvider>,
     policy: MemoryCompactionPolicy,
 ) -> TalosResult<MemoryFormationReport> {
     let MemoryFormationParams {
         session_id,
         producer_agent_id,
-        selected_model,
-        llm_provider,
         dream_memory_store,
         memory_scope,
         session_artifact_store,
-        session_store,
+        session_prompt_context_source,
+        memory_progress_store,
         kernel_config,
     } = params;
     let mut usage_report = MemoryFormationReport::default();
@@ -520,21 +525,11 @@ pub async fn compact_session_memory(
     let previous_covers_until_seq = compact_cursor
         .map(|cursor| cursor.covers_until_seq)
         .unwrap_or_default();
-    let memory_processed_until_seq = session_store
-        .get_session_record(session_id)
-        .await?
-        .ok_or_else(|| {
-            talos_error::TalosError::public(
-                talos_error::ErrorCode::ResourceNotFound,
-                session_id.to_string(),
-            )
-        })?
-        .memory_processed_until_seq;
-    let context = crate::build_session_prompt_context(
-        session_artifact_store,
-        std::path::Path::new(&kernel_config.workspace_dir),
-        session_id,
-        &SessionPromptContextConfig {
+    let memory_processed_until_event_seq = memory_progress_store
+        .processed_until_event_seq(session_id)
+        .await?;
+    let context = session_prompt_context_source
+        .load(SessionPromptContextConfig {
             compact_cursor,
             recent_window: SessionPromptRecentWindow::OldestUncovered,
             recent_messages_limit: kernel_config.compaction.source_recent_messages_limit,
@@ -547,9 +542,8 @@ pub async fn compact_session_memory(
             include_summary: false,
             summary_recent_count: 0,
             summary_max_chars: 0,
-        },
-    )
-    .await?;
+        })
+        .await?;
     if context.recent_messages.is_empty()
         && context.recent_tool_results.is_empty()
         && context.recent_tool_exchanges.is_empty()
@@ -599,13 +593,9 @@ pub async fn compact_session_memory(
                     .then_some(unit.record_id.clone())
             })
             .collect::<std::collections::HashSet<_>>();
-        compaction_context.recent_messages.retain(|message| {
-            message
-                .header
-                .turn_id
-                .as_ref()
-                .is_some_and(|turn_id| kept_history_turn_ids.contains(turn_id))
-        });
+        compaction_context
+            .recent_messages
+            .retain(|message| kept_history_turn_ids.contains(&message.header.turn_id));
         compaction_context
             .recent_tool_results
             .retain(|result| kept_tool_result_ids.contains(&result.header.id));
@@ -620,28 +610,22 @@ pub async fn compact_session_memory(
         return Ok(usage_report);
     }
 
-    let turns = session_artifact_store
-        .load_turn_window(
-            std::path::Path::new(&kernel_config.workspace_dir),
-            session_id,
-            talos_store::session::SessionTurnWindow::OldestAfter {
-                seq: previous_covers_until_seq,
-            },
-            kernel_config
-                .compaction
-                .source_recent_messages_limit
-                .max(kernel_config.compaction.source_recent_tool_results_limit)
-                .max(kernel_config.compaction.source_recent_tool_exchanges_limit),
-        )
-        .await?;
-    let turn_seq_by_id = turns
+    let turn_seq_by_id = context
+        .source_turns
         .iter()
-        .map(|turn| (turn.turn_id.clone(), turn.seq))
-        .collect::<std::collections::HashMap<_, _>>();
-    let occurred_at_by_seq = turns
-        .into_iter()
-        .map(|turn| (turn.seq, turn.timestamp.timestamp()))
-        .collect::<std::collections::HashMap<_, _>>();
+        .map(|turn| {
+            u64::try_from(turn.completed_event_seq).map(|sequence| (turn.turn_id.clone(), sequence))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(|_| TalosError::internal("canonical history event sequence is negative"))?;
+    let occurred_at_by_seq = context
+        .source_turns
+        .iter()
+        .map(|turn| {
+            u64::try_from(turn.completed_event_seq).map(|sequence| (sequence, turn.completed_at))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(|_| TalosError::internal("canonical history event sequence is negative"))?;
     let Some(coverage) =
         compact_summary_coverage(previous_covers_until_seq, &compacted_units, &turn_seq_by_id)
     else {
@@ -681,7 +665,7 @@ pub async fn compact_session_memory(
     .await?;
     usage_report.record_usage(&summary_usage);
     let session_summary_content = render_session_summary_content(&summary);
-    if memory_processed_until_seq == previous_covers_until_seq {
+    if memory_processed_until_event_seq == previous_covers_until_seq {
         dream_memory_store
             .write(
                 memory_scope,
@@ -700,10 +684,10 @@ pub async fn compact_session_memory(
                 ),
             )
             .await?;
-        session_store
-            .advance_memory_processed_until_seq(
+        memory_progress_store
+            .advance_processed_until_event_seq(
                 session_id,
-                memory_processed_until_seq,
+                memory_processed_until_event_seq,
                 coverage.covers_until_seq,
             )
             .await?;
@@ -723,9 +707,9 @@ pub async fn compact_session_memory(
     session_artifact_store
         .save_summary(
             std::path::Path::new(&kernel_config.workspace_dir),
-            &SummaryRecord {
+            &crate::KernelSessionSummary {
                 version: 2,
-                header: RecordHeader {
+                header: crate::KernelArtifactHeader {
                     id: Uuid::new_v4().to_string(),
                     session_id: session_id.to_string(),
                     turn_id: None,

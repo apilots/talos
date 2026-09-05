@@ -345,8 +345,7 @@ async fn emit_working_context_compaction(
 ) {
     emit_stream_event(
         prepared.stream_tx.as_ref(),
-        KernelStreamEventType::ContextCompaction,
-        KernelStreamEventData::ContextCompaction(crate::ContextCompactionStreamData {
+        AgentKernelEventPayload::ContextCompaction(crate::ContextCompactionStreamData {
             trigger: talos_types::talos::ContextCompactionTrigger::WorkingContextExceeded,
             stage,
             outcome,

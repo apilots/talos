@@ -1,146 +1,96 @@
 use crate::render_runtime::render::live::LiveTextKind;
 use crate::render_runtime::runtime::engine::RenderRuntimeEngine;
 use talos_sdk::{
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelineItemStatus, TalosTimelinePhase,
+    AgentAssistantText, AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlock,
+    AgentMessageBlockContent, AgentMessageBlockDelta, AgentMessageBlockDeltaContent,
+    AgentMessageBlockStarted, AgentMessageBlockStatus, AgentReasoning, AgentToolCall,
+    AgentToolCallArguments, AgentToolProgress, TalosToolProgressKind,
 };
 
 pub(crate) fn start_live_text(
     engine: &mut RenderRuntimeEngine,
-    item_id: &str,
+    block_id: &str,
     kind: LiveTextKind,
     text: &str,
 ) {
-    let (item_kind, phase) = match kind {
-        LiveTextKind::Commentary => (
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::Commentary,
-        ),
-        LiveTextKind::Thinking => (
-            TalosTimelineItemKind::Reasoning,
-            TalosTimelinePhase::Thinking,
-        ),
-        LiveTextKind::FinalAnswer => (
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::FinalAnswer,
-        ),
-    };
-    engine.apply_timeline_item_started(&TalosTimelineItem {
-        item_id: item_id.to_string(),
-        parent_item_id: None,
-        kind: item_kind,
-        phase,
-        status: TalosTimelineItemStatus::Running,
-        title: None,
-        started_at_ms: 1,
-        completed_at_ms: None,
-        content: TalosTimelineContent::Text {
-            text: text.to_string(),
+    engine.apply_agent_event_payload(AgentEventPayload::MessageBlockStarted(
+        AgentMessageBlockStarted {
+            message_id: "message-test".to_string(),
+            block: text_block(block_id, kind, text, AgentMessageBlockStatus::Running),
         },
-    });
-}
-
-pub(crate) fn append_live_text(
-    engine: &mut RenderRuntimeEngine,
-    item_id: &str,
-    kind: LiveTextKind,
-    text: &str,
-) {
-    let item = live_text_item(item_id, kind);
-    engine.apply_timeline_item_delta(
-        &item,
-        TalosTimelineDelta::Text {
-            text: text.to_string(),
-        },
-    );
-}
-
-pub(crate) fn finalize_live_text(
-    engine: &mut RenderRuntimeEngine,
-    item_id: &str,
-    kind: LiveTextKind,
-) {
-    let item = live_text_item(item_id, kind);
-    engine.apply_timeline_item_completed(&item, None);
+    ));
 }
 
 pub(crate) fn start_live_tool(
     engine: &mut RenderRuntimeEngine,
-    item_id: &str,
+    block_id: &str,
     call_id: &str,
     name: &str,
     arguments: &str,
 ) {
-    engine.apply_timeline_item_started(&TalosTimelineItem {
-        item_id: item_id.to_string(),
-        parent_item_id: None,
-        kind: TalosTimelineItemKind::ToolCall,
-        phase: TalosTimelinePhase::Acting,
-        status: TalosTimelineItemStatus::Running,
-        title: None,
-        started_at_ms: 1,
-        completed_at_ms: None,
-        content: TalosTimelineContent::ToolCall {
-            call_id: call_id.to_string(),
-            name: name.to_string(),
-            arguments: arguments.to_string(),
-            progress: Vec::new(),
-            result: None,
+    engine.apply_agent_event_payload(AgentEventPayload::MessageBlockStarted(
+        AgentMessageBlockStarted {
+            message_id: "message-test".to_string(),
+            block: AgentMessageBlock {
+                block_id: block_id.to_string(),
+                status: AgentMessageBlockStatus::Running,
+                content: AgentMessageBlockContent::ToolCall(AgentToolCall {
+                    call_id: call_id.to_string(),
+                    name: name.to_string(),
+                    arguments: AgentToolCallArguments::Streaming {
+                        json_fragment: arguments.to_string(),
+                    },
+                    progress: Vec::new(),
+                }),
+                started_at: 1,
+                completed_at: None,
+            },
         },
-    });
+    ));
 }
 
 pub(crate) fn append_live_tool_progress(
     engine: &mut RenderRuntimeEngine,
-    item_id: &str,
+    block_id: &str,
     text: &str,
 ) {
-    let item = TalosTimelineItem {
-        item_id: item_id.to_string(),
-        parent_item_id: None,
-        kind: TalosTimelineItemKind::ToolCall,
-        phase: TalosTimelinePhase::Acting,
-        status: TalosTimelineItemStatus::Running,
-        title: None,
-        started_at_ms: 1,
-        completed_at_ms: None,
-        content: TalosTimelineContent::Empty,
-    };
-    engine.apply_timeline_item_delta(
-        &item,
-        TalosTimelineDelta::ToolProgress {
-            progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
-            text_delta: text.to_string(),
+    engine.apply_agent_event_payload(AgentEventPayload::MessageBlockDelta(
+        AgentMessageBlockDelta {
+            message_id: "message-test".to_string(),
+            block_id: block_id.to_string(),
+            delta: AgentMessageBlockDeltaContent::ToolProgress(AgentToolProgress {
+                kind: TalosToolProgressKind::Stdout,
+                text: text.to_string(),
+                occurred_at: 1,
+            }),
         },
-    );
+    ));
 }
 
-fn live_text_item(item_id: &str, kind: LiveTextKind) -> TalosTimelineItem {
-    let (item_kind, phase) = match kind {
-        LiveTextKind::Commentary => (
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::Commentary,
-        ),
-        LiveTextKind::Thinking => (
-            TalosTimelineItemKind::Reasoning,
-            TalosTimelinePhase::Thinking,
-        ),
-        LiveTextKind::FinalAnswer => (
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::FinalAnswer,
-        ),
+fn text_block(
+    block_id: &str,
+    kind: LiveTextKind,
+    text: &str,
+    status: AgentMessageBlockStatus,
+) -> AgentMessageBlock {
+    let content = match kind {
+        LiveTextKind::Commentary => AgentMessageBlockContent::AssistantText(AgentAssistantText {
+            phase: AgentAssistantTextPhase::Commentary,
+            text: text.to_string(),
+        }),
+        LiveTextKind::Thinking => AgentMessageBlockContent::Reasoning(AgentReasoning {
+            text: text.to_string(),
+        }),
+        LiveTextKind::FinalAnswer => AgentMessageBlockContent::AssistantText(AgentAssistantText {
+            phase: AgentAssistantTextPhase::FinalAnswer,
+            text: text.to_string(),
+        }),
     };
-    TalosTimelineItem {
-        item_id: item_id.to_string(),
-        parent_item_id: None,
-        kind: item_kind,
-        phase,
-        status: TalosTimelineItemStatus::Running,
-        title: None,
-        started_at_ms: 1,
-        completed_at_ms: None,
-        content: TalosTimelineContent::Text {
-            text: String::new(),
-        },
+    AgentMessageBlock {
+        block_id: block_id.to_string(),
+        status,
+        content,
+        started_at: 1,
+        completed_at: (status == AgentMessageBlockStatus::Completed).then_some(2),
     }
 }

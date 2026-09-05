@@ -21,11 +21,11 @@ fn is_public_method(method: &str) -> bool {
     matches!(
         method,
         "initialize"
-            | "auth.login.start"
-            | "auth.login.status"
-            | "auth.login.cancel"
-            | "auth.session.read"
-            | "auth.session.clear"
+            | "auth/login/start"
+            | "auth/login/status"
+            | "auth/login/cancel"
+            | "auth/session/read"
+            | "auth/session/clear"
     )
 }
 

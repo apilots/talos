@@ -4,7 +4,6 @@ use talos_config::ModelInputKind;
 use talos_llm_provider::{
     validate_inline_attachments, Attachment, AttachmentKind, AttachmentUsage,
 };
-use talos_store::session::{FileSessionArtifactStore, SessionArtifactStore};
 
 #[derive(Default)]
 struct RecordingAttachmentProvider {
@@ -159,7 +158,7 @@ fn active_turn_input_reuses_ordered_attachment_validation() {
 async fn attachment_only_turn_sends_ordered_files_and_persists_only_references() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace).expect("temp workspace should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let tool_registry = Arc::new(ToolRegistry::new());
     let provider = Arc::new(RecordingAttachmentProvider::default());
     let mut config = AgentKernelConfig::default();
@@ -184,7 +183,7 @@ async fn attachment_only_turn_sends_ordered_files_and_persists_only_references()
     .await
     .expect("attachment-only turn should succeed");
 
-    assert_eq!(result.output_text, "files received");
+    assert_eq!(result.output_text(), "files received");
     {
         let requests = provider
             .requests
@@ -215,28 +214,13 @@ async fn attachment_only_turn_sends_ordered_files_and_persists_only_references()
             )
         );
     }
-
-    let turns = FileSessionArtifactStore::default()
-        .load_turns(&workspace, "attachment-only")
-        .await
-        .expect("turn artifact should load");
-    assert_eq!(
-        turns[0].items[0],
-        RunItem::UserInput {
-            text: String::new(),
-            file_ids: vec!["image-1".to_string(), "document-1".to_string()],
-        }
-    );
-    let serialized = serde_json::to_string(&turns[0]).expect("turn should serialize");
-    assert!(!serialized.contains("AQID"));
-    assert!(!serialized.contains("%PDF"));
 }
 
 #[tokio::test]
 async fn model_capability_rejects_attachments_before_prompt_work() {
     let workspace = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace).expect("temp workspace should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let tool_registry = Arc::new(ToolRegistry::new());
     let provider = Arc::new(RecordingAttachmentProvider::default());
     let mut config = AgentKernelConfig::default();

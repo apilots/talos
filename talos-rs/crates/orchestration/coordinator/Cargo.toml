@@ -8,10 +8,8 @@ license.workspace = true
 [dependencies]
 talos-error = { path = "../../infra/error" }
 talos-types = { path = "../../common/types" }
-talos-agent = { path = "../agent" }
+talos-agent-api = { workspace = true }
+talos-agent = { workspace = true }
 talos-router = { path = "../router" }
-serde = { version = "1.0", features = ["derive"] }
 tokio = { workspace = true }
-tracing = "0.1"
 async-trait = "0.1"
-uuid = { version = "1.0", features = ["v4", "fast-rng"] }

@@ -1,7 +1,7 @@
 import type {
+  AgentUserInput,
   FileInfo,
   MessageQueue,
-  TalosInputItem,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 
@@ -28,7 +28,7 @@ export interface MessageQueueController {
   reorder: (messageIds: string[]) => Promise<unknown>;
   start: (messageId?: string) => Promise<unknown>;
   steer: (messageId: string, turnId: string) => Promise<unknown>;
-  update: (messageId: string, input: TalosInputItem[]) => Promise<unknown>;
+  update: (messageId: string, input: AgentUserInput) => Promise<unknown>;
 }
 
 export interface ChatComposerProps {

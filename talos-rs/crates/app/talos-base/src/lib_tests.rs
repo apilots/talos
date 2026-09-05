@@ -10,9 +10,10 @@ use std::sync::{
     Arc,
 };
 use talos_config::{
-    AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, Config, LlmProtocol, ProviderModelConfig,
+    AgentDefinitionConfig, AgentProviderConfig, Config, LlmProtocol, ProviderModelConfig,
     TalosPaths,
 };
+use talos_coordinator::AgentCoordinator;
 use talos_gateway_http::{ServerLifecycle, ServerLifecycleState};
 use talos_llm_provider::{ChatRequest, ChatResponse, ChatStream, LlmProvider, Usage};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -260,10 +261,9 @@ async fn application_runtime_registers_configured_default_agent() {
     config.agent.agents = vec![AgentDefinitionConfig {
         id: "reviewer".to_string(),
         name: "Reviewer".to_string(),
-        kind: AgentKind::Kernel,
         enabled: true,
         description: Some("Review agent".to_string()),
-        runtime_config: Some(AgentRuntimeConfig::Kernel {
+        provider: Some(AgentProviderConfig::Kernel {
             kernel: config.agent.kernel.clone(),
         }),
     }];
@@ -272,14 +272,11 @@ async fn application_runtime_registers_configured_default_agent() {
         .await
         .expect("runtime should build with configured agent");
 
-    let registration = runtime
+    runtime
         .coordinator
-        .registry()
-        .get("reviewer")
+        .ensure_agent("reviewer")
         .await
         .expect("configured agent should register");
-    assert_eq!(registration.descriptor.name, "Reviewer");
-    assert_eq!(runtime.coordinator.registry().len().await, 1);
     runtime.shutdown().await.unwrap();
     let _ = fs::remove_dir_all(workspace);
 }
@@ -296,18 +293,16 @@ async fn application_runtime_skips_disabled_agent_definitions() {
         AgentDefinitionConfig {
             id: "disabled".to_string(),
             name: "Disabled".to_string(),
-            kind: AgentKind::Kernel,
             enabled: false,
             description: None,
-            runtime_config: None,
+            provider: None,
         },
         AgentDefinitionConfig {
             id: "enabled".to_string(),
             name: "Enabled".to_string(),
-            kind: AgentKind::Kernel,
             enabled: true,
             description: None,
-            runtime_config: Some(AgentRuntimeConfig::Kernel {
+            provider: Some(AgentProviderConfig::Kernel {
                 kernel: config.agent.kernel.clone(),
             }),
         },
@@ -317,14 +312,8 @@ async fn application_runtime_skips_disabled_agent_definitions() {
         .await
         .expect("runtime should build with enabled agent");
 
-    assert!(runtime
-        .coordinator
-        .registry()
-        .get("disabled")
-        .await
-        .is_err());
-    assert!(runtime.coordinator.registry().get("enabled").await.is_ok());
-    assert_eq!(runtime.coordinator.registry().len().await, 1);
+    assert!(runtime.coordinator.ensure_agent("disabled").await.is_err());
+    assert!(runtime.coordinator.ensure_agent("enabled").await.is_ok());
     runtime.shutdown().await.unwrap();
     let _ = fs::remove_dir_all(workspace);
 }

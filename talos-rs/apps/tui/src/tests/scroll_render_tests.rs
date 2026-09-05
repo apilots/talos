@@ -84,18 +84,21 @@ async fn test_turn_completed_updates_session_usage_without_inferring_context_usa
         state.session_context_usage = talos_sdk::ContextUsage::new(1_020, 32_768, 30_000, 2);
     }
 
-    app.handle_stream_event(completed_event(
-        "msg-usage",
+    app.handle_stream_event(metrics_updated_event(
         "sess-test",
         1,
-        TokenUsage {
-            input_tokens: 964,
-            output_tokens: 16,
-            total_tokens: 980,
-            cache_creation_input_tokens: Some(7),
-            cache_read_input_tokens: Some(13),
+        AgentRunMetrics {
+            usage: TokenUsage {
+                input_tokens: 964,
+                output_tokens: 16,
+                total_tokens: 980,
+                cache_creation_input_tokens: Some(7),
+                cache_read_input_tokens: Some(13),
+            },
+            ..AgentRunMetrics::default()
         },
     ));
+    app.handle_stream_event(turn_completed_event("sess-test", 2));
 
     assert_eq!(app.session_usage.total_tokens, 980);
     assert_eq!(app.session_usage.cache_creation_input_tokens, Some(7));
@@ -146,28 +149,23 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
         cache_creation_input_tokens: Some(2),
         cache_read_input_tokens: Some(4),
     };
-    let live_metrics = TurnExecutionMetrics {
+    let live_metrics = AgentRunMetrics {
         model_rounds: 2,
         tool_calls: 3,
         tool_successes: 2,
         tool_errors: 1,
-        stop_reason: StopReason::EndTurn,
         usage: turn_usage.clone(),
+        context: None,
         duration_ms: Some(1_250),
     };
-    let final_metrics = TurnExecutionMetrics {
+    let final_metrics = AgentRunMetrics {
         duration_ms: Some(1_500),
         ..live_metrics.clone()
     };
 
     app.in_flight = true;
     app.active_message = Some("Inspect live metrics".to_string());
-    app.handle_stream_event(turn_metrics_event_with_metrics(
-        "msg-usage",
-        "sess-test",
-        1,
-        live_metrics.clone(),
-    ));
+    app.handle_stream_event(metrics_updated_event("sess-test", 1, live_metrics.clone()));
 
     assert_eq!(app.session_usage.total_tokens, 100);
     assert_eq!(app.turn_metrics, Some(live_metrics));
@@ -188,13 +186,8 @@ async fn test_live_metrics_do_not_overwrite_session_usage_before_turn_completed(
     assert!(!input_status.contains('%'));
     assert!(!input_status.contains("Brewing"));
 
-    app.handle_stream_event(completed_event_with_metrics(
-        "msg-usage",
-        "sess-test",
-        2,
-        turn_usage,
-        final_metrics.clone(),
-    ));
+    app.handle_stream_event(metrics_updated_event("sess-test", 2, final_metrics.clone()));
+    app.handle_stream_event(turn_completed_event("sess-test", 3));
 
     assert_eq!(app.session_usage.total_tokens, 140);
     assert_eq!(app.session_usage.cache_creation_input_tokens, Some(5));
@@ -226,23 +219,18 @@ async fn test_completed_without_final_metrics_preserves_last_live_metrics() {
         total_tokens: 40,
         ..TokenUsage::default()
     };
-    let live_metrics = TurnExecutionMetrics {
+    let live_metrics = AgentRunMetrics {
         model_rounds: 2,
         tool_calls: 3,
         tool_successes: 2,
         tool_errors: 1,
-        stop_reason: StopReason::EndTurn,
         usage: turn_usage.clone(),
+        context: None,
         duration_ms: Some(1_250),
     };
 
-    app.handle_stream_event(turn_metrics_event_with_metrics(
-        "msg-usage",
-        "sess-test",
-        1,
-        live_metrics.clone(),
-    ));
-    app.handle_stream_event(completed_event("msg-usage", "sess-test", 2, turn_usage));
+    app.handle_stream_event(metrics_updated_event("sess-test", 1, live_metrics.clone()));
+    app.handle_stream_event(turn_completed_event("sess-test", 2));
 
     assert_eq!(app.turn_metrics, Some(live_metrics));
     assert!(!app.turn_metrics_live);
@@ -258,16 +246,16 @@ fn test_metrics_line_renders_above_input_without_border() {
     let mut app = create_embedded_app();
     set_test_model_info(&mut app, "kimi-k2.5", 128_000);
     app.current_model = "kimi-k2.5".to_string();
-    app.turn_metrics = Some(TurnExecutionMetrics {
+    app.turn_metrics = Some(AgentRunMetrics {
         model_rounds: 2,
         tool_calls: 3,
         tool_successes: 2,
         tool_errors: 1,
-        stop_reason: StopReason::EndTurn,
         usage: TokenUsage {
             total_tokens: 4_200,
             ..TokenUsage::default()
         },
+        context: None,
         duration_ms: Some(12_300),
     });
     app.turn_metrics_live = true;
@@ -497,14 +485,14 @@ fn test_session_header_enters_terminal_projection() {
 fn test_exit_snapshot_renders_transcript_without_interaction_controls() {
     let mut app = create_embedded_app();
     app.current_model = "qwen-test".to_string();
-    app.turn_metrics = Some(TurnExecutionMetrics {
+    app.turn_metrics = Some(AgentRunMetrics {
         model_rounds: 1,
         tool_calls: 1,
         tool_successes: 1,
         tool_errors: 0,
-        stop_reason: StopReason::EndTurn,
         duration_ms: Some(1000),
         usage: TokenUsage::default(),
+        context: None,
     });
     app.input_buffer = "draft should not render".to_string();
     app.should_exit = true;
@@ -574,13 +562,13 @@ fn test_rebuild_chat_render_state_hides_round_footer_while_turn_is_in_flight() {
 fn test_rebuild_chat_render_state_uses_completed_turn_duration_in_footer() {
     let mut app = create_embedded_app();
     append_transcript_answer(&mut app, "Timed", "Done");
-    app.turn_metrics = Some(TurnExecutionMetrics {
+    app.turn_metrics = Some(AgentRunMetrics {
         model_rounds: 1,
         tool_calls: 0,
         tool_successes: 0,
         tool_errors: 0,
-        stop_reason: StopReason::EndTurn,
         usage: TokenUsage::default(),
+        context: None,
         duration_ms: Some(12_300),
     });
 

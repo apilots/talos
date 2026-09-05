@@ -114,10 +114,9 @@ async fn migrates_only_the_single_legacy_workspace_derived_from_agent_name() {
     config.agent.agents = vec![talos_config::AgentDefinitionConfig {
         id: "reviewer".to_string(),
         name: "Reviewer".to_string(),
-        kind: talos_config::AgentKind::Kernel,
         enabled: true,
         description: None,
-        runtime_config: None,
+        provider: None,
     }];
     let writer = paths.legacy_workspace_dir_for_agent("writer");
     let reviewer = paths.legacy_workspace_dir_for_agent("reviewer");

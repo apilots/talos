@@ -150,7 +150,7 @@ async fn search_then_get_injects_only_the_complete_memory() {
     tool_registry.set_memory_reader(Arc::new(TestMemoryReader));
     let workspace_dir = std::env::temp_dir().join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&workspace_dir).expect("workspace directory should exist");
-    let memory_store = Arc::new(TestMemoryStore::new(workspace_dir.clone()));
+    let memory_store = Arc::new(TestMemoryStore::new());
     let mut config = AgentKernelConfig::default();
     config.prompt.bootstrap.enabled = false;
     config.workspace_dir = workspace_dir.to_string_lossy().to_string();
@@ -172,7 +172,7 @@ async fn search_then_get_injects_only_the_complete_memory() {
     .await
     .expect("memory tool loop should succeed");
 
-    assert_eq!(result.output_text, "Memory used once.");
+    assert_eq!(result.output_text(), "Memory used once.");
     assert_eq!(provider.round.load(Ordering::SeqCst), 3);
 }
 

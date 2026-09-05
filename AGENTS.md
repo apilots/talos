@@ -265,7 +265,7 @@
 ## 25. App Server / JSON-RPC API 规则
 
 - 活跃 API 开发只能发生在当前主版本协议；不要给旧版本协议增加新 API surface。
-- talos-rs API 类型命名必须按边界区分：Service / Gateway / SDK 等对外公共方法 DTO 使用 `*Request` / `*Response`；JSON-RPC method params 使用 `*Params`，response 使用 `*Response`；Coordinator / AgentHarness / AgentRuntime SPI 等内部执行 API 使用 `*Params` / `*Result`。
+- talos-rs API 类型命名必须按边界区分：Service / Gateway / SDK 等对外公共方法 DTO 使用 `*Request` / `*Response`；JSON-RPC method params 使用 `*Params`，response 使用 `*Response`；Coordinator / AgentHarness / AgentProvider / AgentSession SPI 等内部执行 API 使用 `*Params` / `*Result`。
 - 同一语义不能同时存在 `XxxRequest` 和 `XxxParams`、`XxxResponse` 和 `XxxResult` 两套对象；如果边界变化需要改名，应重命名已有对象并删除旧名，不要用 alias 长期保留双名。
 - JSON-RPC request payload 命名使用 `*Params`，response 使用 `*Response`，notification 使用 `*Notification`。
 - RPC 方法名使用 `<resource>/<method>`，resource 保持单数，例如 `thread/read`、`app/list`。

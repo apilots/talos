@@ -20,12 +20,10 @@ fn build_executed_turn_artifacts(
         usage: TokenUsage::default(),
         last_model_usage: TokenUsage::default(),
         metrics: TurnExecutionMetrics::default(),
-        reasoning_log: Vec::new(),
         tool_call_log,
         tool_result_log,
         pending_user_action: None,
         final_answer_streamed: false,
-        execution_summary_streamed: false,
     }
 }
 

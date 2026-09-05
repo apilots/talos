@@ -2,10 +2,10 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use talos_sdk::{
-    ErrorCode, GatewayClient, InterruptTurnRequest, MessageQueue, MessageQueueAddRequest,
-    MessageQueueDeleteRequest, MessageQueueListRequest, MessageQueueReorderRequest,
-    MessageQueueStartRequest, MessageQueueSteerRequest, MessageQueueUpdateRequest,
-    SubscribeTimelineRequest, TalosInputItem, TimelineStreamSubscription,
+    AgentTurnRef, AgentUserContent, AgentUserInput, ErrorCode, GatewayClient, InterruptTurnRequest,
+    MessageQueue, MessageQueueAddRequest, MessageQueueDeleteRequest, MessageQueueListRequest,
+    MessageQueueReorderRequest, MessageQueueStartRequest, MessageQueueUpdateRequest,
+    SubmitTurnInput, SubmitTurnInputRequest, SubscribeTimelineRequest, TimelineStreamSubscription,
 };
 
 use super::request::start_turn_request;
@@ -42,12 +42,21 @@ pub(super) async fn message_queue_e2e(client: &mut talos_sdk::AppServerClient) -
 
     let queued = add_text(client, &session_id, "Use this instruction instead").await?;
     assert_change(&mut subscription, &session_id, queued.revision).await?;
-    let steered = GatewayClient::steer_queued_message(
+    GatewayClient::submit_turn_input(
         client,
-        MessageQueueSteerRequest {
+        SubmitTurnInputRequest {
+            identity: AgentTurnRef::new(&session_id, &active.turn_id),
+            input: SubmitTurnInput::QueuedMessage {
+                message_id: queued.messages[0].id.clone(),
+            },
+            client_request_id: None,
+        },
+    )
+    .await?;
+    let steered = GatewayClient::list_message_queue(
+        client,
+        MessageQueueListRequest {
             session_id: session_id.clone(),
-            message_id: queued.messages[0].id.clone(),
-            turn_id: active.turn_id.clone(),
         },
     )
     .await?;
@@ -59,8 +68,7 @@ pub(super) async fn message_queue_e2e(client: &mut talos_sdk::AppServerClient) -
     GatewayClient::interrupt_turn(
         client,
         InterruptTurnRequest {
-            session_id: session_id.clone(),
-            turn_id: active.turn_id,
+            identity: AgentTurnRef::new(&session_id, active.turn_id),
         },
     )
     .await?;
@@ -190,8 +198,7 @@ pub(super) async fn message_queue_e2e(client: &mut talos_sdk::AppServerClient) -
     GatewayClient::interrupt_turn(
         client,
         InterruptTurnRequest {
-            session_id,
-            turn_id: started.turn_id,
+            identity: AgentTurnRef::new(session_id, started.turn_id),
         },
     )
     .await?;
@@ -214,10 +221,12 @@ async fn add_text(
     .await
 }
 
-fn text_input(text: &str) -> Vec<TalosInputItem> {
-    vec![TalosInputItem::Text {
-        text: text.to_string(),
-    }]
+fn text_input(text: &str) -> AgentUserInput {
+    AgentUserInput {
+        content: vec![AgentUserContent::Text {
+            text: text.to_string(),
+        }],
+    }
 }
 
 fn queue_ids(queue: &MessageQueue) -> Vec<String> {

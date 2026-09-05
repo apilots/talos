@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     EventAuthor, ExecutionBranch, InvocationSession, KernelTranscriptEvent,
-    KernelTranscriptEventKind, KernelTranscriptPayload, KernelTranscriptService,
+    KernelTranscriptPayload, KernelTranscriptService,
 };
 
 pub(crate) async fn stage_session_state_update(
@@ -9,84 +9,27 @@ pub(crate) async fn stage_session_state_update(
     session_id: &str,
     invocation_id: &str,
     branch: ExecutionBranch,
-    key: &str,
-    value: serde_json::Value,
+    update: crate::SessionStateUpdate,
 ) -> TalosResult<()> {
-    let mut event = KernelTranscriptEvent::new(
+    let event = KernelTranscriptEvent::new(
         session_id.to_string(),
         invocation_id.to_string(),
         branch,
         EventAuthor::System,
-        KernelTranscriptEventKind::Planning,
-        KernelTranscriptPayload::StateOnly,
+        KernelTranscriptPayload::SessionState { update },
     );
-    event.actions.state_delta.push(crate::StateDelta {
-        namespace: crate::StateNamespace::Session,
-        key: key.to_string(),
-        value,
-    });
-    if let Some(transcript_service) = ctx.transcript_service.clone() {
-        transcript_service
-            .append_event(&mut ctx.session, event)
-            .await?;
-    } else {
-        stage_kernel_transcript_event(ctx, event);
-    }
+    ctx.transcript_service
+        .clone()
+        .append_event(&mut ctx.session, event)
+        .await?;
     Ok(())
 }
 
-fn stage_kernel_transcript_event(ctx: &mut InvocationContext, event: KernelTranscriptEvent) {
-    for delta in &event.actions.state_delta {
-        ctx.session.state.apply_delta(delta);
-    }
-    ctx.session.events.push(event);
-}
-
-pub async fn persist_general_turn_artifacts(
+pub async fn persist_general_turn_state(
     prepared: &PreparedGeneralTurn,
-    input: &UserInput,
     executed: &ExecutedTurnArtifacts,
-    session_artifact_store: Arc<dyn talos_store::session::SessionArtifactStore>,
-    transcript_service: Option<Arc<dyn KernelTranscriptService>>,
-    kernel_config: &AgentKernelConfig,
-) -> TalosResult<u64> {
-    let workspace_root = std::path::Path::new(&kernel_config.workspace_dir);
-    let seq = session_artifact_store
-        .next_turn_seq(workspace_root, &prepared.session_id)
-        .await?;
-    let turn_id = Uuid::new_v4().to_string();
-    let now = Utc::now();
-    let mut items = Vec::with_capacity(executed.output_items.len().saturating_add(1));
-    if !input.text.trim().is_empty() || !input.file_ids.is_empty() {
-        items.push(RunItem::UserInput {
-            text: input.text.clone(),
-            file_ids: input.file_ids.clone(),
-        });
-    }
-    items.extend(executed.output_items.clone());
-    let talos_turn = talos_store::session::TalosTurn {
-        turn_id: turn_id.clone(),
-        message_id: prepared.message_id.clone(),
-        session_id: prepared.session_id.to_string(),
-        seq,
-        timestamp: now,
-        items,
-        usage: executed.usage.clone(),
-        stop_reason: to_api_stop_reason(executed.stop_reason),
-    };
-    session_artifact_store
-        .append_turn(workspace_root, &talos_turn)
-        .await?;
-
-    let Some(transcript_service) = transcript_service else {
-        if executed.pending_user_action.is_some() {
-            warn!(
-                session_id = %prepared.session_id,
-                "pending user action transcript was not persisted because no session port is configured"
-            );
-        }
-        return Ok(seq);
-    };
+    transcript_service: Arc<dyn KernelTranscriptService>,
+) -> TalosResult<()> {
     let mut session = InvocationSession {
         session_id: prepared.session_id.clone(),
         ..InvocationSession::default()
@@ -97,7 +40,6 @@ pub async fn persist_general_turn_artifacts(
             prepared.invocation_id.clone(),
             ExecutionBranch::ReactiveLoop,
             EventAuthor::System,
-            KernelTranscriptEventKind::SystemMessage,
             KernelTranscriptPayload::UserActionRequest {
                 payload: crate::session::KernelTranscriptUserActionRequestPayload {
                     action_id: pending.action_id.clone(),
@@ -122,5 +64,5 @@ pub async fn persist_general_turn_artifacts(
             );
         }
     }
-    Ok(seq)
+    Ok(())
 }

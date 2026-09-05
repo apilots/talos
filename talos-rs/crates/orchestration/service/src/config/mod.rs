@@ -2,4 +2,4 @@ mod service;
 mod types;
 
 pub use service::ConfigService;
-pub use types::{RuntimeConfigReloadHook, RuntimeConfigReloadTrigger};
+pub use types::{ConfigReloadHook, ConfigReloadPlan, ConfigReloadTrigger};

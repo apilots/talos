@@ -3,13 +3,10 @@ import type {
   ContextCompactionOutcome,
   ContextCompactionStage,
   ContextCompactionTrigger,
+  AgentRunMetrics,
+  PendingUserAction,
   TalosContentItem,
-  TalosPendingUserAction,
-  TalosTimelineItemKind,
-  TalosTimelineItemStatus,
-  TalosTimelinePhase,
   TalosToolProgressKind,
-  TalosTurnExecutionMetrics,
 } from "./protocol";
 
 export type RuntimeMode = "cloud" | "local";
@@ -108,17 +105,43 @@ export type ChatRenderBlock =
       live?: boolean;
     };
 
-export type ChatTurnMetrics = TalosTurnExecutionMetrics & {
+export type ChatTurnMetrics = AgentRunMetrics & {
   state: "running" | "completed" | "failed";
 };
+
+export type ChatTimelinePhase =
+  | "input"
+  | "thinking"
+  | "pending"
+  | "commentary"
+  | "final_answer"
+  | "acting"
+  | "system";
+
+export type ChatTimelineStatus =
+  | "queued"
+  | "running"
+  | "waitingForInput"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type ChatTimelineKind =
+  | "user_input"
+  | "reasoning"
+  | "assistant_text"
+  | "execution_summary"
+  | "system_notice"
+  | "context_compaction"
+  | "tool_call";
 
 export type ChatTimelineItem =
   | {
       itemId: string;
       sourceItemId?: string;
-      kind: Exclude<TalosTimelineItemKind, "tool_call" | "context_compaction">;
-      phase: TalosTimelinePhase;
-      status: TalosTimelineItemStatus;
+      kind: Exclude<ChatTimelineKind, "tool_call" | "context_compaction">;
+      phase: ChatTimelinePhase;
+      status: ChatTimelineStatus;
       title?: string | null;
       text: string;
       replayFinalAnswer?: boolean;
@@ -129,15 +152,15 @@ export type ChatTimelineItem =
       itemId: string;
       sourceItemId?: string;
       kind: "context_compaction";
-      phase: TalosTimelinePhase;
-      status: TalosTimelineItemStatus;
+      phase: ChatTimelinePhase;
+      status: ChatTimelineStatus;
       title?: string | null;
       text: string;
       replayFinalAnswer?: boolean;
       trigger: ContextCompactionTrigger;
       stage: ContextCompactionStage;
-      outcome?: ContextCompactionOutcome;
-      metrics?: ContextCompactionMetrics;
+      outcome?: ContextCompactionOutcome | null;
+      metrics?: ContextCompactionMetrics | null;
       startedAtMs: number;
       completedAtMs?: number | null;
     }
@@ -145,8 +168,8 @@ export type ChatTimelineItem =
       itemId: string;
       sourceItemId?: string;
       kind: "tool_call";
-      phase: TalosTimelinePhase;
-      status: TalosTimelineItemStatus;
+      phase: ChatTimelinePhase;
+      status: ChatTimelineStatus;
       title?: string | null;
       callId: string;
       toolName: string;
@@ -194,7 +217,7 @@ export interface StreamSessionState {
   activeClientMessageId?: string;
   blocks: ChatRenderBlock[];
   pendingInput?: PendingInput;
-  pendingUserAction?: TalosPendingUserAction;
+  pendingUserAction?: PendingUserAction;
   turnMetrics?: ChatTurnMetrics;
   error?: string;
 }

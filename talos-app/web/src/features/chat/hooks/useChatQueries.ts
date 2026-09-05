@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   ModelSelection,
   SessionInfo,
-  SubmitUserActionRequest,
+  UserActionResponse,
   UserPermissionMode,
 } from "@talos/sdk-browser";
 
@@ -15,8 +15,7 @@ import {
   deleteSession,
   getActiveTurn,
   getSessionHistory,
-  recoverTimelineLiveTail,
-  submitUserAction,
+  submitTurnInput,
   getSession,
   listModels,
   listProjects,
@@ -40,8 +39,6 @@ export const chatKeys = {
     [...chatKeys.all, connectionKey, "active-turn", sessionId] as const,
   sessionHistory: (connectionKey: string, sessionId: string) =>
     [...chatKeys.all, connectionKey, "session-history", sessionId] as const,
-  liveRecovery: (connectionKey: string, sessionId: string, afterEventId?: string) =>
-    [...chatKeys.all, connectionKey, "live-recovery", sessionId, afterEventId ?? "tail"] as const,
 };
 
 export function useConnectionKey() {
@@ -67,7 +64,7 @@ export function useSessionsQuery() {
   });
 
   const data = [...(query.data ?? [])].sort(
-    (left, right) => right.last_activity - left.last_activity,
+    (left, right) => right.lastActivity - left.lastActivity,
   );
 
   return {
@@ -114,23 +111,10 @@ export function useActiveTurnQuery(sessionId: string, enabled = true) {
     queryFn: () => getActiveTurn(sessionId),
     enabled: Boolean(sessionId) && enabled,
     refetchInterval: (query) =>
-      query.state.data?.status === "running" ||
-      query.state.data?.status === "waiting_user_action"
+      query.state.data?.state === "running" ||
+      query.state.data?.state === "waitingForInput"
         ? 4_000
         : false,
-  });
-}
-
-export function useLiveRecoveryQuery(
-  sessionId: string,
-  afterEventId?: string,
-  enabled = true,
-) {
-  const connectionKey = useConnectionKey();
-  return useQuery({
-    queryKey: chatKeys.liveRecovery(connectionKey, sessionId, afterEventId),
-    queryFn: () => recoverTimelineLiveTail(sessionId, afterEventId),
-    enabled: Boolean(sessionId) && enabled,
   });
 }
 
@@ -245,15 +229,23 @@ export function useSubmitUserActionMutation(sessionId: string) {
   const connectionKey = useConnectionKey();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (request: Omit<SubmitUserActionRequest, "sessionId">) =>
-      submitUserAction({ ...request, sessionId }),
-    onSuccess: async (response) => {
+    mutationFn: (request: { turnId: string; actionId: string; response: UserActionResponse }) =>
+      submitTurnInput({
+        identity: { sessionId, turnId: request.turnId },
+        input: {
+          type: "userActionResponse",
+          actionId: request.actionId,
+          response: request.response,
+        },
+        clientRequestId: null,
+      }),
+    onSuccess: async (_, request) => {
       const state = useAppStore.getState();
       const pending = state.streams[sessionId]?.pendingUserAction;
-      if (pending?.actionId === response.actionId) {
+      if (pending?.actionId === request.actionId) {
         state.setPendingUserAction(sessionId, {
           ...pending,
-          state: response.state,
+          state: "resuming",
         });
       }
       await queryClient.invalidateQueries({
@@ -272,7 +264,6 @@ export function useDeleteSessionMutation() {
       await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
       queryClient.removeQueries({ queryKey: chatKeys.session(connectionKey, sessionId) });
       queryClient.removeQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
-      queryClient.removeQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
     },
   });
 }
@@ -287,7 +278,6 @@ export function useSessionActions(sessionId: string) {
     );
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessions(connectionKey) });
     await queryClient.invalidateQueries({ queryKey: chatKeys.sessionHistory(connectionKey, sessionId) });
-    await queryClient.invalidateQueries({ queryKey: chatKeys.liveRecovery(connectionKey, sessionId) });
   };
   return {
     cancelTurn: useMutation({

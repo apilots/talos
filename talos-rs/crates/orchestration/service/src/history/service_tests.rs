@@ -1,352 +1,360 @@
-use super::*;
-use crate::history::timeline_items_from_events;
-use chrono::Utc;
-use talos_agent_kernel::TimelineBuilder;
-use talos_store::session::TalosTurn;
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, RunItem, SessionHistoryMessage, StopReason, TalosContentItem,
-    TalosTimelineContent, TalosTimelineItem, TalosTimelineItemKind, TalosTimelineItemStatus,
-    TalosTimelinePhase, TokenUsage, ToolArguments,
+use std::sync::Arc;
+
+use talos_agent::{SessionHistoryReadParams, SessionHistoryWindow};
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentMessage, AgentMessageBlock, AgentMessageBlockContent,
+    AgentMessageBlockStatus, AgentMessageRole, AgentMessageStatus, AgentStopReason,
+    AgentTurnCompleted, AgentTurnRef,
+};
+use talos_storage::SqliteStorage;
+use talos_store::session::{
+    AgentExecutionStore, CommitTerminalSettlementParams, DatabaseSessionStore,
 };
 
-#[test]
-fn history_messages_reuse_timeline_items() {
-    let turn = TalosTurn {
-        turn_id: "turn-1".to_string(),
-        message_id: "message-1".to_string(),
-        session_id: "session-1".to_string(),
-        seq: 1,
-        timestamp: Utc::now(),
-        items: vec![
-            RunItem::UserInput {
-                text: "question".to_string(),
-                file_ids: vec!["file-1".to_string()],
-            },
-            RunItem::Reasoning {
-                text: "thinking".to_string(),
-            },
-            RunItem::ToolCall {
-                call_id: "call-1".to_string(),
-                name: "Read".to_string(),
-                arguments: ToolArguments::from(serde_json::json!({"path": "a"})),
-            },
-            RunItem::ToolResult {
-                call_id: "call-1".to_string(),
-                tool_name: "Read".to_string(),
-                content: vec![TalosContentItem::Text {
-                    text: "content".to_string(),
-                }],
-                is_error: false,
-            },
-            RunItem::OutputText {
-                text: "answer".to_string(),
-            },
-        ],
-        usage: TokenUsage::default(),
-        stop_reason: StopReason::EndTurn,
-    };
+use super::SessionHistoryService;
+use crate::test_support::{
+    canonical_completed_message_events, commit_test_running_turn, run_test_migrations,
+};
+use crate::TimelineEventService;
 
-    let messages = map_turns_to_history_messages(vec![turn]);
-
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].items.len(), 4);
-    assert_eq!(messages[0].items[0].phase, TalosTimelinePhase::Input);
-    assert_eq!(
-        messages[0].items[0].content,
-        TalosTimelineContent::UserInput {
-            text: "question".to_string(),
-            file_ids: vec!["file-1".to_string()],
-        }
+async fn fixture() -> (Arc<DatabaseSessionStore>, SessionHistoryService) {
+    let storage = Arc::new(
+        SqliteStorage::new_with_max_connections(":memory:", 1)
+            .await
+            .expect("test storage should open"),
     );
-    assert_eq!(messages[0].items[1].phase, TalosTimelinePhase::Thinking);
-    assert_eq!(messages[0].items[2].phase, TalosTimelinePhase::Acting);
-    assert_eq!(messages[0].items[3].phase, TalosTimelinePhase::FinalAnswer);
-    match &messages[0].items[2].content {
-        TalosTimelineContent::ToolCall { result, .. } => assert!(result.is_some()),
-        _ => panic!("expected tool call content"),
-    }
+    run_test_migrations(storage.pool()).await;
+    let store = Arc::new(
+        DatabaseSessionStore::new(storage)
+            .await
+            .expect("Session Store should initialize"),
+    );
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
+    (store, SessionHistoryService::new(event_service))
 }
 
-#[test]
-fn timeline_message_replaces_memory_message_for_item_timing() {
-    let mut messages = vec![SessionHistoryMessage {
-        message_id: "message-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        items: vec![
-            test_text_item(
-                "memory-input",
-                TalosTimelinePhase::Input,
-                TalosTimelineItemKind::UserInput,
-                100,
-                100,
-            ),
-            test_text_item(
-                "memory-thinking",
-                TalosTimelinePhase::Thinking,
-                TalosTimelineItemKind::Reasoning,
-                100,
-                100,
-            ),
-        ],
-        usage: TokenUsage::default(),
-        metrics: None,
-        stop_reason: StopReason::EndTurn,
-    }];
-    let timeline_message = SessionHistoryMessage {
-        message_id: "message-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        items: vec![
-            test_text_item(
-                "event-input",
-                TalosTimelinePhase::Input,
-                TalosTimelineItemKind::UserInput,
-                100,
-                100,
-            ),
-            test_text_item(
-                "event-thinking",
-                TalosTimelinePhase::Thinking,
-                TalosTimelineItemKind::Reasoning,
-                120,
-                240,
-            ),
-        ],
-        usage: TokenUsage::default(),
-        metrics: None,
-        stop_reason: StopReason::EndTurn,
-    };
-
-    merge_completed_timeline_message(&mut messages, timeline_message);
-
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].items[1].item_id, "event-thinking");
-    assert_eq!(messages[0].items[1].started_at_ms, 120);
-    assert_eq!(messages[0].items[1].completed_at_ms, Some(240));
-}
-
-#[test]
-fn timeline_message_replaces_all_artifact_messages_with_the_same_message_id() {
-    let unrelated_before = test_history_message("message-before", "turn-before");
-    let artifact_request = test_history_message("message-1", "artifact-request");
-    let artifact_resume = test_history_message("message-1", "artifact-resume");
-    let unrelated_after = test_history_message("message-after", "turn-after");
-    let timeline_message = test_history_message("message-1", "timeline-turn");
-    let mut messages = vec![
-        unrelated_before.clone(),
-        artifact_request,
-        artifact_resume,
-        unrelated_after.clone(),
-    ];
-
-    merge_completed_timeline_message(&mut messages, timeline_message.clone());
-
-    assert_eq!(
-        messages,
-        vec![unrelated_before, timeline_message, unrelated_after]
-    );
-}
-
-#[test]
-fn timeline_replay_applies_reused_item_ids_to_the_latest_lifecycle() {
-    let mut initial = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
-    let initial_started = initial.start_reasoning();
-    initial
-        .append_delta(
-            "reasoning-1",
-            talos_types::talos::TalosTimelineDelta::Text {
-                text: "initial".to_string(),
-            },
-        )
-        .expect("initial delta should apply");
-    let initial_completed = initial
-        .complete_item("reasoning-1", TalosTimelineItemStatus::Completed, None)
-        .expect("initial item should complete");
-
-    let mut resumed = TimelineBuilder::new("request-2", "turn-1", "message-1", "session-1");
-    let resumed_started = resumed.start_reasoning();
-    let resumed_delta = resumed
-        .append_delta(
-            "reasoning-1",
-            talos_types::talos::TalosTimelineDelta::Text {
-                text: "resumed".to_string(),
-            },
-        )
-        .expect("resumed delta should apply");
-    let resumed_completed = resumed
-        .complete_item("reasoning-1", TalosTimelineItemStatus::Completed, None)
-        .expect("resumed item should complete");
-
-    let items = timeline_items_from_events(&[
-        initial_started,
-        initial_completed,
-        resumed_started,
-        resumed_delta,
-        resumed_completed,
-    ]);
-
-    assert_eq!(items.len(), 2);
-    assert_eq!(items[0].status, TalosTimelineItemStatus::Completed);
-    assert_eq!(items[1].status, TalosTimelineItemStatus::Completed);
-    assert_eq!(
-        items[1].content,
-        TalosTimelineContent::Text {
-            text: "resumed".to_string(),
-        }
-    );
-}
-
-#[test]
-fn stable_message_keys_ignore_active_memory_only_turns() {
-    let completed_timeline_messages = vec![test_history_message("message-1", "turn-1")];
-    let keys = stable_message_keys(&completed_timeline_messages);
-
-    assert!(keys.contains_event(&test_timeline_event("message-1", "turn-1", 1)));
-    assert!(!keys.contains_event(&test_timeline_event("message-active", "turn-active", 2)));
-}
-
-#[test]
-fn waiting_turn_is_not_stable_until_resumed_tools_reach_terminal_state() {
-    let mut waiting = TimelineBuilder::new("request-1", "turn-1", "message-1", "session-1");
-    let mut events = vec![waiting.start_turn()];
-    let input = waiting.start_user_input("question", Vec::new());
-    let input_id = timeline_item_id(&input);
-    events.push(input);
-    events.push(
-        waiting
-            .complete_item(&input_id, TalosTimelineItemStatus::Completed, None)
-            .expect("input should complete"),
-    );
-    let tool = waiting.start_tool_call("call-1", "Bash", "{}");
-    let tool_id = timeline_item_id(&tool);
-    events.push(tool);
-    events.push(
-        waiting
-            .append_delta(
-                &tool_id,
-                talos_types::talos::TalosTimelineDelta::Status {
-                    status: TalosTimelineItemStatus::WaitingUserAction,
-                },
-            )
-            .expect("tool should wait"),
-    );
-    events.push(waiting.complete_turn(
-        StopReason::WaitingUserAction,
-        TokenUsage::default(),
-        None,
-        None,
-    ));
-
-    assert!(history_messages_from_completed_events(events.clone()).is_empty());
-
-    let mut resumed = TimelineBuilder::new("request-2", "turn-1", "message-1", "session-1");
-    resumed.track_existing_tool_call(&tool_id, "call-1", "Bash", "{}");
-    events.push(resumed.start_turn());
-    events.push(
-        resumed
-            .append_delta(
-                &tool_id,
-                talos_types::talos::TalosTimelineDelta::ToolResult {
-                    content: vec![TalosContentItem::Text {
-                        text: "done".to_string(),
-                    }],
-                    is_error: false,
-                },
-            )
-            .expect("tool result should apply"),
-    );
-    events.push(
-        resumed
-            .complete_item(&tool_id, TalosTimelineItemStatus::Completed, None)
-            .expect("tool should complete"),
-    );
-    let answer = resumed.start_item(
-        TalosTimelineItemKind::AssistantText,
-        TalosTimelinePhase::FinalAnswer,
-        None,
-        TalosTimelineContent::Text {
-            text: "answer".to_string(),
-        },
-    );
-    let answer_id = timeline_item_id(&answer);
-    events.push(answer);
-    events.push(
-        resumed
-            .complete_item(&answer_id, TalosTimelineItemStatus::Completed, None)
-            .expect("answer should complete"),
-    );
-    events.push(resumed.complete_turn(StopReason::EndTurn, TokenUsage::default(), None, None));
-
-    let messages = history_messages_from_completed_events(events);
-    assert_eq!(messages.len(), 1);
-    assert_eq!(messages[0].stop_reason, StopReason::EndTurn);
-    assert!(messages[0].items.iter().all(|item| matches!(
-        item.status,
-        TalosTimelineItemStatus::Completed
-            | TalosTimelineItemStatus::Failed
-            | TalosTimelineItemStatus::Cancelled
-    )));
-}
-
-fn test_history_message(message_id: &str, turn_id: &str) -> SessionHistoryMessage {
-    SessionHistoryMessage {
-        message_id: message_id.to_string(),
-        turn_id: turn_id.to_string(),
-        items: vec![test_text_item(
-            "input-1",
-            TalosTimelinePhase::Input,
-            TalosTimelineItemKind::UserInput,
-            100,
-            100,
-        )],
-        usage: TokenUsage::default(),
-        metrics: None,
-        stop_reason: StopReason::EndTurn,
-    }
-}
-
-fn test_timeline_event(message_id: &str, turn_id: &str, sequence: u64) -> AgentEvent {
-    AgentEvent {
-        event_seq: Some(sequence as i64),
-        event_id: Some(format!("ev_{sequence}")),
-        created_at_ms: Some(sequence as i64),
-        event_type: talos_types::talos::AgentEventType::TurnStarted,
-        turn_id: turn_id.to_string(),
-        message_id: message_id.to_string(),
-        session_id: "session-1".to_string(),
-        sequence,
-        payload: AgentEventPayload::TurnStarted(talos_types::talos::TalosTurnStartedEvent {
-            request_id: "request-1".to_string(),
-            turn_id: turn_id.to_string(),
-            started_at_ms: sequence,
+#[tokio::test]
+async fn recent_prompt_history_reads_the_terminal_metrics_beyond_the_first_event_page() {
+    let (store, history) = fixture().await;
+    let identity = AgentTurnRef::new("session-long", "turn-long");
+    let user = completed_message(
+        &identity,
+        "user-long",
+        AgentMessageRole::User,
+        AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text {
+            text: "complete a long analysis".to_string(),
         }),
+    );
+    let admission = commit_test_running_turn(store.as_ref(), identity.clone(), user).await;
+    let mut tail = admission.active_turn.last_event_seq;
+    let mut sequence = admission.events.last().unwrap().sequence;
+    let mut metrics = talos_agent_api::AgentRunMetrics::default();
+    for duration in 1..=10_001 {
+        metrics.duration_ms = Some(duration);
+        sequence += 1;
+        tail = store
+            .commit_progress_event(
+                AgentEvent {
+                    identity: identity.clone(),
+                    sequence,
+                    occurred_at: 12,
+                    payload: AgentEventPayload::MetricsUpdated(metrics.clone()),
+                },
+                tail,
+            )
+            .await
+            .unwrap()
+            .active_turn
+            .last_event_seq;
     }
-}
-
-fn timeline_item_id(event: &AgentEvent) -> String {
-    match &event.payload {
-        AgentEventPayload::ItemStarted(started) => started.item.item_id.clone(),
-        _ => panic!("expected item started event"),
-    }
-}
-
-fn test_text_item(
-    item_id: &str,
-    phase: TalosTimelinePhase,
-    kind: TalosTimelineItemKind,
-    started_at_ms: u64,
-    completed_at_ms: u64,
-) -> TalosTimelineItem {
-    TalosTimelineItem {
-        item_id: item_id.to_string(),
-        parent_item_id: None,
-        kind,
-        phase,
-        status: TalosTimelineItemStatus::Completed,
-        title: None,
-        started_at_ms,
-        completed_at_ms: Some(completed_at_ms),
-        content: TalosTimelineContent::Text {
-            text: item_id.to_string(),
+    let terminal = store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity: identity.clone(),
+                sequence: sequence + 1,
+                occurred_at: 13,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq: tail,
+            completed_turn_metrics: None,
+        })
+        .await
+        .unwrap();
+    let turns = talos_agent::SessionHistoryReader::read(
+        &history,
+        SessionHistoryReadParams {
+            session_id: identity.session_id.clone(),
+            window: SessionHistoryWindow::Latest,
+            limit: 1,
         },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            turns[0].identity.clone(),
+            turns[0].completed_event_seq,
+            match &turns[0].result {
+                talos_agent_api::AgentRunResult::Completed(output) => Some(output.metrics.clone()),
+                talos_agent_api::AgentRunResult::Failed(_) => None,
+            }
+        ),
+        (identity, terminal.event_seq, Some(metrics)),
+    );
+}
+
+fn completed_message(
+    identity: &AgentTurnRef,
+    message_id: &str,
+    role: AgentMessageRole,
+    content: AgentMessageBlockContent,
+) -> AgentMessage {
+    AgentMessage {
+        message_id: message_id.to_string(),
+        turn_id: identity.turn_id.clone(),
+        role,
+        status: AgentMessageStatus::Completed,
+        blocks: vec![AgentMessageBlock {
+            block_id: format!("{message_id}-block"),
+            status: AgentMessageBlockStatus::Completed,
+            content,
+            started_at: 10,
+            completed_at: Some(11),
+        }],
+        created_at: 10,
+        completed_at: Some(11),
     }
+}
+
+async fn commit_completed_turn(
+    store: &dyn AgentExecutionStore,
+    identity: AgentTurnRef,
+    suffix: &str,
+) {
+    let user = completed_message(
+        &identity,
+        &format!("user-{suffix}"),
+        AgentMessageRole::User,
+        AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text {
+            text: format!("question-{suffix}"),
+        }),
+    );
+    let admission = commit_test_running_turn(store, identity.clone(), user).await;
+    let assistant = completed_message(
+        &identity,
+        &format!("assistant-{suffix}"),
+        AgentMessageRole::Agent,
+        AgentMessageBlockContent::AssistantText(talos_agent_api::AgentAssistantText {
+            phase: talos_agent_api::AgentAssistantTextPhase::FinalAnswer,
+            text: format!("answer-{suffix}"),
+        }),
+    );
+    let assistant_events = canonical_completed_message_events(
+        identity.clone(),
+        assistant,
+        admission
+            .events
+            .last()
+            .expect("admission should persist events")
+            .sequence
+            + 1,
+    );
+    let terminal_sequence = assistant_events
+        .last()
+        .expect("assistant lifecycle should contain events")
+        .sequence
+        + 1;
+    let mut expected_event_seq = admission.active_turn.last_event_seq;
+    for event in assistant_events {
+        expected_event_seq = store
+            .commit_progress_event(event, expected_event_seq)
+            .await
+            .expect("assistant message lifecycle should commit")
+            .active_turn
+            .last_event_seq;
+    }
+    store
+        .commit_terminal_settlement(CommitTerminalSettlementParams {
+            event: AgentEvent {
+                identity,
+                sequence: terminal_sequence,
+                occurred_at: 13,
+                payload: AgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: AgentStopReason::EndTurn,
+                }),
+            },
+            expected_event_seq,
+            completed_turn_metrics: None,
+        })
+        .await
+        .expect("terminal event should commit");
+}
+
+#[tokio::test]
+async fn history_reduces_only_canonical_events_into_complete_turns() {
+    let (store, history) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    commit_completed_turn(store.as_ref(), identity.clone(), "1").await;
+
+    let response = history
+        .read("session-1", None, Some(10))
+        .await
+        .expect("canonical history should load");
+
+    assert_eq!(response.data.len(), 1);
+    assert_eq!(response.data[0].identity, identity);
+    let messages = match &response.data[0].result {
+        talos_agent_api::AgentRunResult::Completed(output) => &output.messages,
+        other => panic!("expected completed history Turn, got {other:?}"),
+    };
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0].message_id, "user-1");
+    assert_eq!(messages[1].message_id, "assistant-1");
+    assert_eq!(response.next_cursor, None);
+}
+
+#[tokio::test]
+async fn history_cursor_keeps_a_fixed_high_water_mark() {
+    let (store, history) = fixture().await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-1"),
+        "1",
+    )
+    .await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-2"),
+        "2",
+    )
+    .await;
+
+    let first = history
+        .read("session-1", None, Some(1))
+        .await
+        .expect("first history page should load");
+    let cursor = first
+        .next_cursor
+        .as_deref()
+        .expect("another completed Turn should produce a cursor");
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-3"),
+        "3",
+    )
+    .await;
+
+    let second = history
+        .read("session-1", Some(cursor), Some(10))
+        .await
+        .expect("second history page should load");
+
+    assert_eq!(first.data[0].identity.turn_id, "turn-1");
+    assert_eq!(second.data.len(), 1);
+    assert_eq!(second.data[0].identity.turn_id, "turn-2");
+    assert_eq!(second.next_cursor, None);
+}
+
+#[tokio::test]
+async fn history_cursor_rejects_a_nonterminal_page_boundary() {
+    let (store, history) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let admission = commit_test_running_turn(
+        store.as_ref(),
+        identity.clone(),
+        completed_message(
+            &identity,
+            "user-1",
+            AgentMessageRole::User,
+            AgentMessageBlockContent::UserContent(talos_agent_api::AgentUserContent::Text {
+                text: "question".to_string(),
+            }),
+        ),
+    )
+    .await;
+    let high_water = admission
+        .events
+        .last()
+        .expect("admission has a tail")
+        .event_seq;
+    let nonterminal_boundary = admission.events[0].event_seq;
+    let cursor = super::format_history_cursor(high_water, nonterminal_boundary);
+
+    let error = history
+        .read("session-1", Some(&cursor), Some(10))
+        .await
+        .expect_err("forged nonterminal history boundary must fail");
+
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+}
+
+#[tokio::test]
+async fn bounded_history_windows_preserve_order_across_global_event_sequence_gaps() {
+    let (store, history) = fixture().await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-1"),
+        "1",
+    )
+    .await;
+    let first_terminal = history
+        .read("session-1", None, Some(10))
+        .await
+        .expect("first history should load")
+        .data[0]
+        .completed_event_seq;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-2", "foreign-turn"),
+        "foreign",
+    )
+    .await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-2"),
+        "2",
+    )
+    .await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-3"),
+        "3",
+    )
+    .await;
+
+    let latest = history
+        .read_window(SessionHistoryReadParams {
+            session_id: "session-1".to_string(),
+            window: SessionHistoryWindow::Latest,
+            limit: 2,
+        })
+        .await
+        .expect("latest bounded history should load");
+    let after_first = history
+        .read_window(SessionHistoryReadParams {
+            session_id: "session-1".to_string(),
+            window: SessionHistoryWindow::OldestAfter {
+                completed_event_seq: first_terminal,
+            },
+            limit: 10,
+        })
+        .await
+        .expect("oldest bounded history should load");
+
+    assert_eq!(
+        latest
+            .iter()
+            .map(|turn| turn.identity.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["turn-2", "turn-3"]
+    );
+    assert_eq!(
+        after_first
+            .iter()
+            .map(|turn| turn.identity.turn_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["turn-2", "turn-3"]
+    );
 }

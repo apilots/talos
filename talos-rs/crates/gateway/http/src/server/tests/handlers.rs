@@ -36,11 +36,11 @@ async fn test_state_with_config_and_plugin_manager(
     auth_disabled: bool,
 ) -> Arc<HttpApiState> {
     let (auth_service, user_service) = test_auth_services();
-    let event_store = Arc::new(RecordingEventStore::default());
-    let event_service = event_service_from_store(event_store.clone());
+    let agent_execution_store = test_agent_execution_store().await;
+    let event_service = event_service_from_store(agent_execution_store.clone());
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
-    let session_service: Arc<dyn SessionService> = Arc::new(MockSessionService::default());
+    let session_store = test_session_store().await;
     let memory = talos_service::MemoryService::new(
         config.clone(),
         Arc::new(talos_store::memory::MemoryStore::in_memory().await.unwrap()),
@@ -48,22 +48,22 @@ async fn test_state_with_config_and_plugin_manager(
     .unwrap();
     let project_store = Arc::new(talos_store::project::MockProjectStore::new());
     let files = test_file_service(project_store.clone(), config.storage.files.clone()).await;
-    let app = TalosService::new_with_session_store(
-        Arc::new(MockGateway),
-        Arc::new(SessionServiceRuntimeAdapter::new(session_service.clone())),
-        Arc::new(SessionStoreAdapter::new(session_service)),
-        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+    let reload_hook = test_config_reload_hook(config.clone());
+    let app = TalosService::new(
+        Arc::new(TestAgentCoordinator),
+        session_store,
+        agent_execution_store,
         project_store,
         Arc::new(EmptyProfileStore),
         files,
         event_service.clone(),
-        event_store,
         config.clone(),
         memory,
         config_store,
         vec![test_model_info()],
         auth_service.clone(),
         user_service,
+        reload_hook,
     );
     let mut app = app;
     app.plugins = plugin_manager.clone();
@@ -241,8 +241,8 @@ async fn test_profile_handler_returns_shared_profile_response() {
         .expect("profile read should succeed");
 
     let data = expect_success(response.0);
-    assert_eq!(data.session_count, 0);
-    assert_eq!(data.message_count, 0);
+    assert_eq!(data.session_count, 1);
+    assert_eq!(data.message_count, 1);
     assert_eq!(data.project_count, 0);
     assert!(!data.usage_available);
 }
@@ -260,7 +260,8 @@ async fn test_list_sessions_handler_returns_data_array() {
     .expect("list sessions should succeed");
 
     let data = expect_success(response.0);
-    assert!(data.sessions.is_empty());
+    assert_eq!(data.sessions.len(), 1);
+    assert_eq!(data.sessions[0].id, "mock-session");
 }
 
 #[tokio::test]
@@ -383,20 +384,14 @@ async fn test_compact_session_handler_returns_session_payload() {
 
 #[tokio::test]
 async fn test_compact_session_handler_maps_active_turn_to_conflict() {
-    let event_store = Arc::new(RecordingEventStore::default());
-    event_store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "mock-session".to_string(),
-            turn_id: "turn-running".to_string(),
-            message_id: Some("msg-running".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .expect("active turn should be inserted");
-    let state = test_state_with_event_store(false, event_store).await;
+    let execution_store = test_agent_execution_store().await;
+    seed_running_agent_execution(execution_store.as_ref(), "mock-session", "turn-running").await;
+    let state = test_state_with_event_store_and_agent_execution_store(
+        false,
+        execution_store.clone(),
+        execution_store,
+    )
+    .await;
 
     let error = compact_session_handler(
         State(state),
@@ -536,7 +531,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         )
         .await
         .expect("app-server memory read should use shared service");
-    assert!(app_server_memory["file"]["content"]
+    assert!(app_server_memory.body["file"]["content"]
         .as_str()
         .unwrap()
         .contains("shared service fact"));
@@ -554,7 +549,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         .await
         .expect("app-server workspace read should use shared service");
     assert_eq!(
-        app_server_workspace["doc"]["exists"],
+        app_server_workspace.body["doc"]["exists"],
         serde_json::Value::Bool(false)
     );
 
@@ -568,7 +563,7 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         )
         .await
         .expect("app-server model list should use shared config service");
-    assert_eq!(models["models"][0]["id"], "qwen-plus");
+    assert_eq!(models.body["models"][0]["id"], "qwen-plus");
 
     let config = adapter
         .dispatch(
@@ -580,10 +575,10 @@ async fn test_http_and_app_server_adapters_share_service_contract() {
         )
         .await
         .expect("app-server config get should use shared config service");
-    assert!(config["config"]["provider"].is_string());
+    assert!(config.body["config"]["provider"].is_string());
 
     let invalid_workspace_kind = ClientRequest::decode(
-        "workspace.doc.read",
+        "workspace/doc/read",
         Some(serde_json::json!({ "kind": "unknown" })),
     )
     .expect_err("invalid workspace kind should fail at protocol decode");
@@ -668,11 +663,11 @@ Use this skill for protocol contract verification.
         .expect("app-server plugin search should use shared service");
 
     assert_eq!(
-        app_server_search["plugins"][0]["metadata"]["name"],
+        app_server_search.body["plugins"][0]["metadata"]["name"],
         "contract-skill"
     );
     assert_eq!(
-        app_server_search["warnings"].as_array().map(Vec::len),
+        app_server_search.body["warnings"].as_array().map(Vec::len),
         Some(0)
     );
 

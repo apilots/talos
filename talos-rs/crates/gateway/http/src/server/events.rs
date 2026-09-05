@@ -10,17 +10,14 @@ use serde::Deserialize;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
-use talos_app_protocol::events::canonical_method;
+use talos_agent_api::{RecoverTimelineResponse, SessionActiveTurnResponse, TimelineEvent};
+use talos_app_protocol::events::timeline_event_method;
 use talos_app_protocol::events::{SubscriptionTerminatedEvent, SubscriptionTerminatedReason};
-use talos_app_protocol::requests::TimelineRecoveryResponse;
 use talos_auth::RequestIdentity;
 use talos_service::{
     TimelineSubscriptionCloseReason, TimelineSubscriptionClosed, TimelineSubscriptionMessage,
 };
-use talos_types::{
-    RecoverTimelineRequest, SessionActiveTurnRequest, SessionActiveTurnResponse,
-    SubscribeTimelineRequest,
-};
+use talos_types::{RecoverTimelineRequest, SessionActiveTurnRequest, SubscribeTimelineRequest};
 
 use super::access::shared_actor;
 use super::errors::{api_success, ApiError, JsonResponse};
@@ -52,19 +49,12 @@ pub(super) async fn subscribe_timeline_events_handler(
     let close_when_idle = query.close_when_idle.unwrap_or(true);
     let limit = query
         .limit
-        .unwrap_or(
-            state
-                .base_config
-                .agent
-                .kernel
-                .timeline_events
-                .replay_batch_size,
-        )
+        .unwrap_or(state.base_config.agent.timeline_replay_batch_size)
         .max(1);
 
     let subscription = state
         .app
-        .timeline_subscription_source(
+        .open_timeline_subscription(
             &shared_actor(&actor.0),
             SubscribeTimelineRequest {
                 session_id: session_id.clone(),
@@ -78,9 +68,9 @@ pub(super) async fn subscribe_timeline_events_handler(
         .await
         .map_err(map_event_replay_error)?;
 
-    let stream = ReceiverStream::new(subscription.subscription.events).map(|message| {
+    let stream = ReceiverStream::new(subscription.events).map(|message| {
         match message {
-            TimelineSubscriptionMessage::Event(record) => timeline_sse_event(record),
+            TimelineSubscriptionMessage::Event(record) => timeline_sse_event(*record),
             TimelineSubscriptionMessage::MessageQueueChanged(change) => {
                 message_queue_changed_sse_event(change)
             }
@@ -113,22 +103,11 @@ fn timeline_sse_response(mut response: Response) -> Response {
     response
 }
 
-fn timeline_sse_event(
-    record: talos_types::talos::TimelineEventEnvelope,
-) -> Result<Event, serde_json::Error> {
-    let event_name = canonical_method(&record.event.event_type);
+fn timeline_sse_event(record: TimelineEvent) -> Result<Event, serde_json::Error> {
+    let event_name = timeline_event_method(&record.event.payload);
     let event_id = record.event_id.clone();
-    let is_live_metrics = matches!(
-        record.event.payload,
-        talos_types::talos::AgentEventPayload::TurnMetrics(_)
-    );
     let data = serde_json::to_string(&record)?;
-    let event = Event::default().event(event_name).data(data);
-    if is_live_metrics {
-        Ok(event)
-    } else {
-        Ok(event.id(event_id))
-    }
+    Ok(Event::default().event(event_name).id(event_id).data(data))
 }
 
 pub(super) async fn recover_timeline_handler(
@@ -137,18 +116,11 @@ pub(super) async fn recover_timeline_handler(
     Path(session_id): Path<String>,
     headers: HeaderMap,
     Query(query): Query<TimelineRecoveryQuery>,
-) -> Result<JsonResponse<TimelineRecoveryResponse>, ApiError> {
+) -> Result<JsonResponse<RecoverTimelineResponse>, ApiError> {
     let after_event_id = parse_cursor(query.after_event_id, &headers)?;
     let limit = query
         .limit
-        .unwrap_or(
-            state
-                .base_config
-                .agent
-                .kernel
-                .timeline_events
-                .replay_batch_size,
-        )
+        .unwrap_or(state.base_config.agent.timeline_replay_batch_size)
         .max(1);
     let response = state
         .gateway
@@ -173,7 +145,7 @@ fn timeline_subscription_closed_sse_event(
         reason: map_subscription_close_reason(closed.reason),
         message: closed.message,
     })?;
-    Ok(Event::default().event("subscription.terminated").data(data))
+    Ok(Event::default().event("subscription/terminated").data(data))
 }
 
 fn map_subscription_close_reason(

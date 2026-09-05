@@ -30,6 +30,7 @@ export interface JsonRpcStdioTransportOptions {
 export interface AppServerClientOptions extends JsonRpcStdioTransportOptions {
   clientName?: string;
   clientVersion?: string;
+  clientKind?: AppProtocol.ClientKind;
   getActorCredentials?: () => AppProtocol.ActorCredentials | null | undefined;
 }
 
@@ -271,10 +272,10 @@ export class JsonRpcStdioTransport implements AppServerTransport {
 
     if ("method" in message && !("id" in message)) {
       this.events.emit("notification", message);
-      if (isTimelineSubscriptionNotification(message.params)) {
+      if (isTimelineEventNotification(message.params)) {
         this.events.emit("event", message.params.event);
       }
-      if (isSubscriptionTerminatedEnvelope(message.params)) {
+      if (isSubscriptionTerminatedNotification(message.params)) {
         this.events.emit("subscriptionTerminated", message.params);
       }
       if (
@@ -375,6 +376,7 @@ export class StdioAppServerClient extends AppServerClient {
         name: this.options.clientName ?? "talos-ts-app-server-sdk",
         title: null,
         version: this.options.clientVersion ?? "0.1.5",
+        kind: this.options.clientKind ?? "sdk",
       },
       capabilities: {
         protocol_version: { major: 0, minor: 2 },
@@ -420,33 +422,38 @@ function buildAppServerEnvironment(
   };
 }
 
-function isTimelineSubscriptionNotification(
+function isTimelineEventNotification(
   value: unknown,
-): value is AppProtocol.TimelineSubscriptionNotification {
+): value is AppProtocol.TimelineEventNotification {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<AppProtocol.TimelineSubscriptionNotification>;
-  const event = candidate.event as Partial<AppProtocol.TimelineEventEnvelope> | undefined;
+  const candidate = value as Partial<AppProtocol.TimelineEventNotification>;
+  const event = candidate.event as Partial<AppProtocol.TimelineEvent> | undefined;
+  const agentEvent = event?.event as Partial<AppProtocol.AgentEvent> | undefined;
   return (
-    typeof candidate.subscription_id === "string" &&
+    typeof candidate.subscriptionId === "string" &&
     !!event &&
-    typeof event.session_id === "string" &&
-    typeof event.message_id === "string" &&
-    typeof event.event_id === "string" &&
-    typeof event.event === "object" &&
-    event.event !== null
+    typeof event.eventId === "string" &&
+    typeof event.eventSeq === "number" &&
+    typeof event.persistedAt === "number" &&
+    !!agentEvent &&
+    typeof agentEvent.identity?.sessionId === "string" &&
+    typeof agentEvent.identity?.turnId === "string" &&
+    typeof agentEvent.sequence === "number" &&
+    typeof agentEvent.payload === "object" &&
+    agentEvent.payload !== null
   );
 }
 
-function isSubscriptionTerminatedEnvelope(value: unknown): value is AppProtocol.SubscriptionTerminatedEnvelope {
+function isSubscriptionTerminatedNotification(value: unknown): value is AppProtocol.SubscriptionTerminatedNotification {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as Partial<AppProtocol.SubscriptionTerminatedEnvelope>;
+  const candidate = value as Partial<AppProtocol.SubscriptionTerminatedNotification>;
   return (
-    typeof candidate.subscription_id === "string" &&
-    typeof candidate.session_id === "string" &&
+    typeof candidate.subscriptionId === "string" &&
+    typeof candidate.sessionId === "string" &&
     typeof candidate.reason === "string" &&
     typeof candidate.message === "string"
   );

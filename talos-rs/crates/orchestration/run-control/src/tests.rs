@@ -5,12 +5,13 @@ use tokio::sync::oneshot;
 
 use crate::{
     ActiveRunControl, CancellationMode, CancellationPolicy, CleanupFailure, CleanupReport,
-    RunIdentity, RunTaskCompletion, RunTaskError, RunTermination, Settlement, SettlementKind,
+    RunControlScope, RunTaskCompletion, RunTaskError, RunTermination, Settlement, SettlementKind,
 };
+use talos_types::AgentTurnRef;
 
 #[tokio::test]
 async fn completed_settlement_waits_for_registered_task() {
-    let control = Arc::new(ActiveRunControl::new(RunIdentity::new(
+    let control = Arc::new(ActiveRunControl::new(AgentTurnRef::new(
         "session-1",
         "turn-1",
     )));
@@ -49,7 +50,7 @@ async fn completed_settlement_waits_for_registered_task() {
 
 #[tokio::test]
 async fn cancelled_settlement_notifies_registered_task() {
-    let control = Arc::new(ActiveRunControl::new(RunIdentity::new(
+    let control = Arc::new(ActiveRunControl::new(AgentTurnRef::new(
         "session-1",
         "turn-1",
     )));
@@ -81,7 +82,7 @@ async fn cancelled_settlement_notifies_registered_task() {
 
 #[tokio::test]
 async fn cancelled_settlement_force_aborts_unfinished_task() {
-    let control = Arc::new(ActiveRunControl::new(RunIdentity::new(
+    let control = Arc::new(ActiveRunControl::new(AgentTurnRef::new(
         "session-1",
         "turn-1",
     )));
@@ -116,7 +117,7 @@ async fn cancelled_settlement_force_aborts_unfinished_task() {
 
 #[tokio::test]
 async fn repeated_settlement_returns_the_first_result() {
-    let control = Arc::new(ActiveRunControl::new(RunIdentity::new(
+    let control = Arc::new(ActiveRunControl::new(AgentTurnRef::new(
         "session-1",
         "turn-1",
     )));
@@ -135,4 +136,36 @@ async fn repeated_settlement_returns_the_first_result() {
         .await;
 
     assert_eq!(repeated, expected);
+}
+
+#[tokio::test]
+async fn session_operation_uses_the_same_control_without_a_fake_turn() {
+    let control = Arc::new(ActiveRunControl::new(RunControlScope::SessionOperation {
+        session_id: "session-1".to_owned(),
+        operation_id: "clear-1".to_owned(),
+    }));
+    let task = control
+        .tasks()
+        .spawn(|cancellation| async move {
+            cancellation.requested().await;
+            RunTaskCompletion::Confirmed(())
+        })
+        .unwrap();
+
+    let settlement = control
+        .settle(RunTermination::Cancelled {
+            policy: CancellationPolicy {
+                grace: Duration::from_secs(1),
+            },
+        })
+        .await;
+
+    assert_eq!(task.await, Ok(()));
+    assert_eq!(
+        settlement,
+        Settlement {
+            kind: SettlementKind::Cancelled(CancellationMode::Cooperative),
+            cleanup: CleanupReport::Confirmed,
+        }
+    );
 }

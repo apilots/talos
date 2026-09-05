@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+use talos_types::AgentTurnRef;
 use tokio::sync::Notify;
 
 use crate::task_group::{CleanupOutcome, RunTaskGroup};
@@ -14,22 +15,64 @@ enum RunPhase {
     Settled,
 }
 
-/// Exact identity of one active Run.
+/// Typed ownership scope for one controlled operation.
+///
+/// This type distinguishes product Turn execution from Session-scoped
+/// maintenance and process-scoped shutdown without inventing fake Turn IDs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunIdentity {
-    /// Product Session that owns the Run.
-    pub session_id: String,
-    /// Product Turn that identifies the Run.
-    pub turn_id: String,
+pub enum RunControlScope {
+    /// One exact product Turn.
+    Turn(AgentTurnRef),
+    /// One transient operation against Provider-owned Session resources.
+    SessionOperation {
+        /// Product Session that owns the resources.
+        session_id: String,
+        /// Process-local operation identity allocated by the lifecycle owner.
+        operation_id: String,
+    },
+    /// One transient process-wide operation such as Provider shutdown.
+    ProcessOperation {
+        /// Process-local operation identity allocated by the lifecycle owner.
+        operation_id: String,
+    },
 }
 
-impl RunIdentity {
-    /// Create an exact Run identity.
-    pub fn new(session_id: impl Into<String>, turn_id: impl Into<String>) -> Self {
-        Self {
-            session_id: session_id.into(),
-            turn_id: turn_id.into(),
+impl RunControlScope {
+    pub(crate) fn kind(&self) -> &'static str {
+        match self {
+            Self::Turn(_) => "turn",
+            Self::SessionOperation { .. } => "sessionOperation",
+            Self::ProcessOperation { .. } => "processOperation",
         }
+    }
+
+    pub(crate) fn session_id(&self) -> Option<&str> {
+        match self {
+            Self::Turn(identity) => Some(&identity.session_id),
+            Self::SessionOperation { session_id, .. } => Some(session_id),
+            Self::ProcessOperation { .. } => None,
+        }
+    }
+
+    pub(crate) fn turn_id(&self) -> Option<&str> {
+        match self {
+            Self::Turn(identity) => Some(&identity.turn_id),
+            Self::SessionOperation { .. } | Self::ProcessOperation { .. } => None,
+        }
+    }
+
+    pub(crate) fn operation_id(&self) -> Option<&str> {
+        match self {
+            Self::Turn(_) => None,
+            Self::SessionOperation { operation_id, .. }
+            | Self::ProcessOperation { operation_id } => Some(operation_id),
+        }
+    }
+}
+
+impl From<AgentTurnRef> for RunControlScope {
+    fn from(identity: AgentTurnRef) -> Self {
+        Self::Turn(identity)
     }
 }
 
@@ -84,7 +127,7 @@ pub struct Settlement {
 
 /// Owns the single settlement transition for one active Run.
 pub struct ActiveRunControl {
-    identity: RunIdentity,
+    scope: RunControlScope,
     phase: AtomicU8,
     tasks: RunTaskGroup,
     settlement: OnceLock<Settlement>,
@@ -94,11 +137,12 @@ pub struct ActiveRunControl {
 
 impl ActiveRunControl {
     /// Create a running control that accepts task registration.
-    pub fn new(identity: RunIdentity) -> Self {
+    pub fn new(scope: impl Into<RunControlScope>) -> Self {
+        let scope = scope.into();
         let cancellation = Cancellation::new();
         Self {
-            tasks: RunTaskGroup::new(identity.clone(), cancellation),
-            identity,
+            tasks: RunTaskGroup::new(scope.clone(), cancellation.clone()),
+            scope,
             phase: AtomicU8::new(RunPhase::Running as u8),
             settlement: OnceLock::new(),
             settled: Notify::new(),
@@ -109,6 +153,11 @@ impl ActiveRunControl {
     /// Return the restricted task registration capability for this Run.
     pub fn tasks(&self) -> RunTaskGroup {
         self.tasks.clone()
+    }
+
+    /// Return the restricted cooperative cancellation signal for this operation.
+    pub fn cancellation(&self) -> Cancellation {
+        self.tasks.cancellation()
     }
 
     /// Execute or await the one immutable settlement transition for this Run.
@@ -138,8 +187,10 @@ impl ActiveRunControl {
         self.phase.store(RunPhase::Settled as u8, Ordering::SeqCst);
         let (cleanup_outcome, unconfirmed_tasks) = cleanup_observation(&settlement.cleanup);
         tracing::info!(
-            session_id = self.identity.session_id,
-            turn_id = self.identity.turn_id,
+            scope_kind = self.scope.kind(),
+            session_id = self.scope.session_id(),
+            turn_id = self.scope.turn_id(),
+            operation_id = self.scope.operation_id(),
             settlement_kind = ?settlement.kind,
             cleanup_outcome = ?cleanup_outcome,
             unconfirmed_tasks,

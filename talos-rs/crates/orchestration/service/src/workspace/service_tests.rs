@@ -1,9 +1,5 @@
 use super::*;
 use std::path::PathBuf;
-use talos_types::{
-    talos::{TalosProvider, TalosSourceType},
-    SessionContext, SessionState, TalosSession,
-};
 
 fn test_config() -> TalosConfig {
     TalosConfig::default().with_workspace_definition(talos_config::WorkspaceDefinition::new(
@@ -61,10 +57,9 @@ fn agent_definitions_do_not_change_user_workspace_resolution() {
     config.agent.agents = vec![talos_config::AgentDefinitionConfig {
         id: "alternate-agent".to_string(),
         name: "Alternate".to_string(),
-        kind: talos_config::AgentKind::Kernel,
         enabled: true,
         description: None,
-        runtime_config: Some(talos_config::AgentRuntimeConfig::Kernel {
+        provider: Some(talos_config::AgentProviderConfig::Kernel {
             kernel: agent_kernel,
         }),
     }];
@@ -91,17 +86,6 @@ fn rejects_unsafe_user_id() {
         .expect_err("unsafe user id should fail");
 
     assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
-}
-
-#[test]
-fn rejects_inconsistent_session_user() {
-    let mut session = test_session("user_1");
-    session.context.user_id = "user_2".to_string();
-
-    let error =
-        ensure_session_user_consistency(&session).expect_err("session user mismatch should fail");
-
-    assert!(error.is_internal());
 }
 
 #[tokio::test]
@@ -174,33 +158,4 @@ async fn profile_snapshot_updates_when_username_changes() {
     assert_eq!(profile["username"], "alice-renamed");
     assert_ne!(profile["updated_at_ms"], 1);
     let _ = talos_fs::remove_directory(&temp_dir).await;
-}
-
-fn test_session(user_id: &str) -> TalosSession {
-    TalosSession {
-        agent_id: "default".to_string(),
-        title: "Test".to_string(),
-        user_id: user_id.to_string(),
-        context: SessionContext {
-            session_id: "session-1".to_string(),
-            workspace_id: "default".to_string(),
-            source_type: TalosSourceType::Http,
-            provider: TalosProvider::Http,
-            user_id: user_id.to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: None,
-            thread_id: None,
-            project_id: None,
-            current_directory: None,
-            project_root: None,
-            environment: None,
-        },
-        conf: Default::default(),
-        project_id: None,
-        current_directory: None,
-        config: test_config(),
-        effective_user_permission_mode: talos_types::UserPermissionMode::FullAccess,
-        state: SessionState::default(),
-    }
 }

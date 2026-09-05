@@ -1,8 +1,8 @@
 use super::*;
 use bytes::Bytes;
 use std::collections::BTreeMap;
-use talos_types::talos::{
-    AgentEvent, AgentEventPayload, AgentEventType, TalosTurnStartedEvent, TimelineEventEnvelope,
+use talos_agent_api::{
+    AgentEvent, AgentEventPayload, AgentTurnRef, AgentTurnStarted, TimelineEvent,
 };
 
 #[test]
@@ -18,27 +18,27 @@ fn skips_cached_actor_credentials_for_local_session_methods() {
         None
     );
     assert_eq!(
-        actor_credentials_for_method("auth.session.read", &credentials),
+        actor_credentials_for_method("auth/session/read", &credentials),
         None
     );
     assert_eq!(
-        actor_credentials_for_method("auth.session.clear", &credentials),
+        actor_credentials_for_method("auth/session/clear", &credentials),
         None
     );
     assert_eq!(
-        actor_credentials_for_method("auth.login.start", &credentials),
+        actor_credentials_for_method("auth/login/start", &credentials),
         None
     );
     assert_eq!(
-        actor_credentials_for_method("auth.login.status", &credentials),
+        actor_credentials_for_method("auth/login/status", &credentials),
         None
     );
     assert_eq!(
-        actor_credentials_for_method("auth.login.cancel", &credentials),
+        actor_credentials_for_method("auth/login/cancel", &credentials),
         None
     );
     assert_eq!(
-        actor_credentials_for_method("session.list", &credentials),
+        actor_credentials_for_method("session/list", &credentials),
         credentials
     );
 }
@@ -46,14 +46,14 @@ fn skips_cached_actor_credentials_for_local_session_methods() {
 #[test]
 fn touches_cached_session_only_for_business_methods() {
     assert!(!is_business_method("initialize"));
-    assert!(!is_business_method("auth.session.read"));
-    assert!(!is_business_method("auth.session.clear"));
-    assert!(!is_business_method("auth.login.start"));
-    assert!(!is_business_method("auth.login.status"));
-    assert!(!is_business_method("auth.login.cancel"));
-    assert!(is_business_method("user.current"));
+    assert!(!is_business_method("auth/session/read"));
+    assert!(!is_business_method("auth/session/clear"));
+    assert!(!is_business_method("auth/login/start"));
+    assert!(!is_business_method("auth/login/status"));
+    assert!(!is_business_method("auth/login/cancel"));
+    assert!(is_business_method("user/current"));
     assert!(is_business_method("profile/read"));
-    assert!(is_business_method("session.list"));
+    assert!(is_business_method("session/list"));
 }
 
 #[test]
@@ -73,7 +73,7 @@ fn file_upload_params_use_canonical_padded_base64() {
 }
 
 #[test]
-fn decodes_message_queue_change_notification_without_timeline_envelope() {
+fn decodes_message_queue_change_notification_without_timeline_event() {
     let notification = JsonRpcNotification::new(
         "messageQueue/changed",
         Some(serde_json::json!({ "sessionId": "session-1", "revision": 6 })),
@@ -86,6 +86,26 @@ fn decodes_message_queue_change_notification_without_timeline_envelope() {
             revision: 6,
         })
     );
+}
+
+#[test]
+fn decodes_slash_timeline_notification() {
+    let expected = talos_app_protocol::events::TimelineEventNotification {
+        subscription_id: "sub-1".to_string(),
+        event: timeline_event("ev_1", 1),
+    };
+    let notification = JsonRpcNotification::new(
+        "timeline/turn/started",
+        Some(serde_json::to_value(&expected).expect("notification should serialize")),
+    );
+
+    let decoded = response::decode_event_notification(notification)
+        .expect("notification should decode")
+        .expect("timeline method should be recognized");
+
+    assert_eq!(decoded.subscription_id, expected.subscription_id);
+    assert_eq!(decoded.event.event_id, expected.event.event_id);
+    assert_eq!(decoded.event.event, expected.event.event);
 }
 
 #[tokio::test]
@@ -121,7 +141,7 @@ async fn cloud_login_status_uses_returned_token_with_session_cache_enabled() {
 }
 
 #[tokio::test]
-async fn dispatch_application_event_routes_only_matching_subscription() {
+async fn dispatch_timeline_event_routes_only_matching_subscription() {
     let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
     let pending_subscription_events = Arc::new(Mutex::new(HashMap::new()));
     let (first_tx, mut first_rx) = mpsc::channel(4);
@@ -148,11 +168,11 @@ async fn dispatch_application_event_routes_only_matching_subscription() {
         );
     }
 
-    dispatch_application_event(
+    dispatch_timeline_event(
         &subscription_senders,
         &pending_subscription_events,
         "sub-1",
-        timeline_envelope("ev_1", 1),
+        timeline_event("ev_1", 1),
     )
     .await;
 
@@ -161,15 +181,15 @@ async fn dispatch_application_event_routes_only_matching_subscription() {
 }
 
 #[tokio::test]
-async fn dispatch_application_event_buffers_until_stream_registration() {
+async fn dispatch_timeline_event_buffers_until_stream_registration() {
     let subscription_senders = Arc::new(Mutex::new(HashMap::new()));
     let pending_subscription_events = Arc::new(Mutex::new(HashMap::new()));
 
-    dispatch_application_event(
+    dispatch_timeline_event(
         &subscription_senders,
         &pending_subscription_events,
         "sub-1",
-        timeline_envelope("ev_1", 1),
+        timeline_event("ev_1", 1),
     )
     .await;
 
@@ -215,30 +235,17 @@ async fn message_queue_change_closes_a_lagged_sdk_subscription() {
     assert!(timeline_rx.recv().await.is_none());
 }
 
-fn timeline_envelope(event_id: &str, event_seq: i64) -> TimelineEventEnvelope {
-    let event = AgentEvent {
-        event_seq: Some(event_seq),
-        event_id: Some(event_id.to_string()),
-        created_at_ms: Some(event_seq),
-        event_type: AgentEventType::TurnStarted,
-        turn_id: "turn-1".to_string(),
-        message_id: "msg-1".to_string(),
-        session_id: "session-1".to_string(),
-        sequence: event_seq as u64,
-        payload: AgentEventPayload::TurnStarted(TalosTurnStartedEvent {
-            request_id: "req-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            started_at_ms: event_seq as u64,
-        }),
-    };
-    TimelineEventEnvelope {
+fn timeline_event(event_id: &str, event_seq: i64) -> TimelineEvent {
+    TimelineEvent {
         event_id: event_id.to_string(),
         event_seq,
-        created_at_ms: event_seq,
-        session_id: event.session_id.clone(),
-        turn_id: event.turn_id.clone(),
-        message_id: event.message_id.clone(),
-        event,
+        persisted_at: event_seq,
+        event: AgentEvent {
+            identity: AgentTurnRef::new("session-1", "turn-1"),
+            sequence: event_seq as u64,
+            occurred_at: event_seq,
+            payload: AgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        },
     }
 }
 

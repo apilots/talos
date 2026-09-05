@@ -2,10 +2,9 @@
 //!
 //! Defines common types and ID structures.
 
-pub use async_trait::async_trait;
 pub use talos_error::{TalosError, TalosResult};
 
-pub mod agent_dispatch;
+pub mod agent_input;
 pub mod auth_api;
 pub mod config_api;
 pub mod event_api;
@@ -25,12 +24,11 @@ pub mod skills;
 pub mod subagent;
 pub mod talos;
 mod talos_content_display;
-mod talos_event;
 pub mod turn_api;
 pub mod usage;
 pub mod user_action;
 
-pub use agent_dispatch::*;
+pub use agent_input::*;
 pub use auth_api::*;
 pub use config_api::*;
 pub use event_api::*;

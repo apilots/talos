@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::TalosInputItem;
+use crate::AgentUserInput;
 
 /// A user message waiting in a session-scoped in-memory queue.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
@@ -10,7 +10,7 @@ use crate::TalosInputItem;
 #[ts(rename_all = "camelCase")]
 pub struct QueuedMessage {
     pub id: String,
-    pub input: Vec<TalosInputItem>,
+    pub input: AgentUserInput,
 }
 
 /// The complete bounded message queue visible to clients for one session.
@@ -40,7 +40,7 @@ pub struct MessageQueueChangedNotification {
 #[ts(rename_all = "camelCase")]
 pub struct MessageQueueAddRequest {
     pub session_id: String,
-    pub input: Vec<TalosInputItem>,
+    pub input: AgentUserInput,
 }
 
 /// Parameters for reading one complete Session queue.
@@ -58,7 +58,7 @@ pub struct MessageQueueListRequest {
 pub struct MessageQueueUpdateRequest {
     pub session_id: String,
     pub message_id: String,
-    pub input: Vec<TalosInputItem>,
+    pub input: AgentUserInput,
 }
 
 /// Parameters for deleting one waiting message.
@@ -87,14 +87,4 @@ pub struct MessageQueueStartRequest {
     pub session_id: String,
     #[ts(optional, type = "string | null")]
     pub message_id: Option<String>,
-}
-
-/// Parameters for steering one waiting message into an exact active Turn.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(rename_all = "camelCase")]
-pub struct MessageQueueSteerRequest {
-    pub session_id: String,
-    pub message_id: String,
-    pub turn_id: String,
 }

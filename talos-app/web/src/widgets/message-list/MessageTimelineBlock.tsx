@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { TalosPendingUserAction } from "@talos/sdk-browser";
+import type { PendingUserAction } from "@talos/sdk-browser";
 import {
   Activity,
   Brain,
@@ -32,8 +32,8 @@ interface MessageTimelineBlockProps {
   copyLabel: string;
   helpfulLabel: string;
   notHelpfulLabel: string;
-  pendingUserAction?: TalosPendingUserAction;
-  renderUserAction?: (action: TalosPendingUserAction) => ReactNode;
+  pendingUserAction?: PendingUserAction;
+  renderUserAction?: (action: PendingUserAction) => ReactNode;
 }
 
 const FINAL_ANSWER_REPLAY_CHUNK_SIZE = 24;
@@ -60,14 +60,14 @@ export function MessageTimelineBlock({
   );
   const processItems = visibleItems.filter((item) => !isTimelineResponseItem(item));
   const hasRunningItem = processItems.some(
-    (item) => item.status === "running" || item.status === "waiting_user_action",
+    (item) => item.status === "running" || item.status === "waitingForInput",
   );
   const hasActiveTimeline = hasRunningItem || (live && processItems.length > 0 && responseItems.length === 0);
   const isAwaitingTimelineDelta = (live || hasRunningItem) && responseItems.length === 0;
   const [nowMs, setNowMs] = useState(() => Date.now());
   const totalDuration = timelineDuration(processItems, nowMs);
-  const displayDuration = metrics?.duration_ms ?? totalDuration;
-  const requiresAttention = processItems.some((item) => item.status === "waiting_user_action");
+  const displayDuration = metrics?.durationMs ?? totalDuration;
+  const requiresAttention = processItems.some((item) => item.status === "waitingForInput");
   const [open, setOpen] = useState(hasActiveTimeline);
   const wasActiveRef = useRef(hasActiveTimeline);
   const userCollapsedRef = useRef(false);
@@ -253,7 +253,7 @@ function timelineItemRole(item: TimelineItem) {
   if (item.kind === "reasoning") {
     return "thinking";
   }
-  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "unknown")) {
+  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "pending")) {
     return "commentary";
   }
   return "system";
@@ -291,7 +291,7 @@ function timelineProcessLabel({
     ? "processWorking"
     : metrics?.state === "failed" || hasFailedItem
       ? "processFailed"
-      : metrics?.stop_reason === "cancelled" || hasCancelledItem
+      : hasCancelledItem
         ? "processStopped"
         : "processWorked";
   return displayDuration === null
@@ -318,7 +318,7 @@ function TimelineItemIcon({ item }: { item: TimelineItem }) {
     }
     return <Check className="shrink-0" size={13} />;
   }
-  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "unknown")) {
+  if (item.kind === "assistant_text" && (item.phase === "commentary" || item.phase === "pending")) {
     return <MessageCircle className="shrink-0" size={13} />;
   }
   return <Activity className="shrink-0" size={13} />;
@@ -390,7 +390,7 @@ function timelineItemTitle(item: TimelineItem) {
     return "Context status";
   }
   if (item.kind === "assistant_text") {
-    if (item.phase === "commentary" || item.phase === "unknown") {
+    if (item.phase === "commentary" || item.phase === "pending") {
       return "Commentary";
     }
     if (item.phase === "final_answer") {
@@ -460,7 +460,7 @@ function timelineToolStatus(item: TimelineItem) {
   if (item.status === "cancelled") {
     return "cancelled";
   }
-  if (item.status === "waiting_user_action") {
+  if (item.status === "waitingForInput") {
     return "waiting_dynamic_input";
   }
   return "running";

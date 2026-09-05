@@ -7,52 +7,36 @@ use super::memory_summary::{
     validate_memory_candidates,
 };
 use super::*;
+use talos_llm_provider::ChatResponse;
 
 const DREAM_MEMORY_TRANSCRIPT_MAX_CHARS: usize = 4_000;
 
 /// Forms one bounded, contiguous Dream Memory batch for a session tail.
-pub async fn form_dream_session_memory(
+pub async fn form_dream_session_memory<F, Fut>(
     params: MemoryFormationParams<'_>,
-) -> TalosResult<MemoryFormationReport> {
+    model_call: F,
+) -> TalosResult<MemoryFormationReport>
+where
+    F: FnOnce(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<Output = TalosResult<ChatResponse>>,
+{
     let MemoryFormationParams {
         session_id,
         producer_agent_id,
-        selected_model,
-        llm_provider,
         dream_memory_store,
         memory_scope,
-        session_artifact_store,
-        session_store,
+        session_artifact_store: _,
+        session_prompt_context_source,
+        memory_progress_store,
         kernel_config,
     } = params;
-    let memory_processed_until_seq = session_store
-        .get_session_record(session_id)
-        .await?
-        .ok_or_else(|| {
-            talos_error::TalosError::public(
-                talos_error::ErrorCode::ResourceNotFound,
-                session_id.to_string(),
-            )
-        })?
-        .memory_processed_until_seq;
-    let turn_limit = kernel_config
-        .compaction
-        .source_recent_messages_limit
-        .max(kernel_config.compaction.source_recent_tool_exchanges_limit);
-    let turns = session_artifact_store
-        .load_turn_window(
-            std::path::Path::new(&kernel_config.workspace_dir),
-            session_id,
-            talos_store::session::SessionTurnWindow::OldestAfter {
-                seq: memory_processed_until_seq,
-            },
-            turn_limit,
-        )
+    let memory_processed_until_event_seq = memory_progress_store
+        .processed_until_event_seq(session_id)
         .await?;
     let context_config = SessionPromptContextConfig {
-        compact_cursor: (memory_processed_until_seq > 0).then_some(
+        compact_cursor: (memory_processed_until_event_seq > 0).then_some(
             talos_prompt::CompactPromptCursor {
-                covers_until_seq: memory_processed_until_seq,
+                covers_until_seq: memory_processed_until_event_seq,
             },
         ),
         recent_window: SessionPromptRecentWindow::OldestUncovered,
@@ -65,7 +49,7 @@ pub async fn form_dream_session_memory(
         summary_recent_count: 0,
         summary_max_chars: 0,
     };
-    let mut context = crate::session_context::build_recent_session_context(&turns, &context_config);
+    let mut context = session_prompt_context_source.load(context_config).await?;
     let transcript_max_chars = kernel_config
         .compaction
         .recent_messages_max_chars
@@ -83,16 +67,24 @@ pub async fn form_dream_session_memory(
         return Ok(MemoryFormationReport::default());
     }
 
-    let turn_seq_by_id = turns
+    let turn_seq_by_id = context
+        .source_turns
         .iter()
-        .map(|turn| (turn.turn_id.clone(), turn.seq))
-        .collect::<std::collections::HashMap<_, _>>();
-    let occurred_at_by_seq = turns
+        .map(|turn| {
+            u64::try_from(turn.completed_event_seq).map(|sequence| (turn.turn_id.clone(), sequence))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(|_| TalosError::internal("canonical history event sequence is negative"))?;
+    let occurred_at_by_seq = context
+        .source_turns
         .iter()
-        .map(|turn| (turn.seq, turn.timestamp.timestamp()))
-        .collect::<std::collections::HashMap<_, _>>();
+        .map(|turn| {
+            u64::try_from(turn.completed_event_seq).map(|sequence| (sequence, turn.completed_at))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()
+        .map_err(|_| TalosError::internal("canonical history event sequence is negative"))?;
     let Some(coverage) =
-        compact_summary_coverage(memory_processed_until_seq, &units, &turn_seq_by_id)
+        compact_summary_coverage(memory_processed_until_event_seq, &units, &turn_seq_by_id)
     else {
         return Ok(MemoryFormationReport::default());
     };
@@ -110,26 +102,15 @@ pub async fn form_dream_session_memory(
         })?;
     let date = date_for_timestamp(occurred_at, &kernel_config.timezone)?;
     let snapshot = dream_memory_store.read_day(memory_scope, date).await?;
-    let model = kernel_config
-        .compaction
-        .model
-        .as_deref()
-        .unwrap_or(selected_model);
-    let response = llm_provider
-        .chat(
-            ChatRequest::builder()
-                .model(model.to_string())
-                .messages(vec![
-                    ChatMessage::system(DREAM_MEMORY_FORMATION_PROMPT),
-                    ChatMessage::user(formation_user_prompt(
-                        DreamMemoryFormationMode::Maintenance,
-                        &transcript,
-                        &snapshot,
-                    )?),
-                ])
-                .build(),
-        )
-        .await?;
+    let response = model_call(vec![
+        ChatMessage::system(DREAM_MEMORY_FORMATION_PROMPT),
+        ChatMessage::user(formation_user_prompt(
+            DreamMemoryFormationMode::Maintenance,
+            &transcript,
+            &snapshot,
+        )?),
+    ])
+    .await?;
     let output = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
         |error| {
             talos_error::TalosError::memory_error(
@@ -163,10 +144,10 @@ pub async fn form_dream_session_memory(
             ),
         )
         .await?;
-    session_store
-        .advance_memory_processed_until_seq(
+    memory_progress_store
+        .advance_processed_until_event_seq(
             session_id,
-            memory_processed_until_seq,
+            memory_processed_until_event_seq,
             coverage.covers_until_seq,
         )
         .await?;

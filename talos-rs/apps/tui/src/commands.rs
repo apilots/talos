@@ -12,7 +12,7 @@ use crate::permission_picker::PermissionPickerState;
 use crate::session_picker::SessionPickerState;
 use crate::types::{CommandUpdate, SessionCloseUpdate, SessionHistoryLoad, StatusLoad};
 use crate::{TuiApp, SESSION_CLOSE_FORCE_TIMEOUT};
-use talos_sdk::{SessionInfo, SkillSuggestion, TimelineActiveTurnStatus};
+use talos_sdk::{SessionInfo, SkillSuggestion};
 
 mod permission;
 
@@ -399,10 +399,10 @@ impl TuiApp {
         self.stream_started_at = Some(Instant::now());
         self.last_stream_event_at = Some(Instant::now());
         self.pending_stream = None;
-        self.active_stream_message_id = None;
+        self.active_stream_turn_id = None;
         self.last_stream_sequence = None;
         self.last_stream_event_id = None;
-        self.timeline_items.clear();
+        self.context_compaction_stage = None;
 
         let (stream_tx, stream_rx) = mpsc::channel(1);
         self.pending_stream_connect = Some(stream_rx);
@@ -413,7 +413,7 @@ impl TuiApp {
         let handle = tokio::spawn(async move {
             let stream = async {
                 let recovery = client.recover_timeline(&session_id, None).await?;
-                let since_event_id = recovery.snapshot.replay.high_water_mark_event_id;
+                let since_event_id = recovery.replay.high_water_mark_event_id;
                 client
                     .subscribe_session_timeline(&session_id, since_event_id)
                     .await
@@ -563,24 +563,8 @@ impl TuiApp {
             let result = match client.get_session_history(&session_id).await {
                 Ok(history) => {
                     let live_recovery = match client.get_active_turn(&session_id).await {
-                        Ok(active_turn)
-                            if matches!(
-                                active_turn.status,
-                                TimelineActiveTurnStatus::Running
-                                    | TimelineActiveTurnStatus::WaitingUserAction
-                                    | TimelineActiveTurnStatus::Cancelling
-                            ) =>
-                        {
-                            Some(
-                                client
-                                    .recover_timeline(
-                                        &session_id,
-                                        history.last_stable_event_id.clone(),
-                                    )
-                                    .await,
-                            )
-                        }
-                        Ok(_) => None,
+                        Ok(Some(_)) => Some(client.recover_timeline(&session_id, None).await),
+                        Ok(None) => None,
                         Err(err) => Some(Err(err)),
                     };
                     Ok(SessionHistoryLoad {

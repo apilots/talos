@@ -77,31 +77,6 @@ pub struct AgentKernelCompactionConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
-pub struct AgentKernelTimelineEventsConfig {
-    #[serde(default = "default_timeline_events_retention_hours")]
-    pub retention_hours: u32,
-
-    #[serde(default = "default_timeline_events_max_events_per_session")]
-    pub max_events_per_session: usize,
-
-    #[serde(default = "default_timeline_events_gc_interval_minutes")]
-    pub gc_interval_minutes: u32,
-
-    #[serde(default = "default_timeline_events_gc_batch_size")]
-    pub gc_batch_size: usize,
-
-    #[serde(default = "default_timeline_events_replay_batch_size")]
-    pub replay_batch_size: usize,
-
-    #[serde(default = "default_timeline_events_first_event_timeout_ms")]
-    pub first_event_timeout_ms: u64,
-
-    #[serde(default = "default_timeline_events_idempotency_key_ttl_hours")]
-    pub idempotency_key_ttl_hours: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
 pub struct AgentKernelOutputConfig {
     #[serde(default = "default_kernel_output_max_tokens")]
     pub max_tokens: u32,
@@ -129,48 +104,6 @@ impl Default for AgentKernelOutputConfig {
         Self {
             max_tokens: default_kernel_output_max_tokens(),
             upper_limit: default_kernel_output_upper_limit(),
-        }
-    }
-}
-
-fn default_timeline_events_retention_hours() -> u32 {
-    24
-}
-
-fn default_timeline_events_max_events_per_session() -> usize {
-    10_000
-}
-
-fn default_timeline_events_gc_interval_minutes() -> u32 {
-    30
-}
-
-fn default_timeline_events_gc_batch_size() -> usize {
-    1_000
-}
-
-fn default_timeline_events_replay_batch_size() -> usize {
-    1_024
-}
-
-fn default_timeline_events_first_event_timeout_ms() -> u64 {
-    5_000
-}
-
-fn default_timeline_events_idempotency_key_ttl_hours() -> u32 {
-    24
-}
-
-impl Default for AgentKernelTimelineEventsConfig {
-    fn default() -> Self {
-        Self {
-            retention_hours: default_timeline_events_retention_hours(),
-            max_events_per_session: default_timeline_events_max_events_per_session(),
-            gc_interval_minutes: default_timeline_events_gc_interval_minutes(),
-            gc_batch_size: default_timeline_events_gc_batch_size(),
-            replay_batch_size: default_timeline_events_replay_batch_size(),
-            first_event_timeout_ms: default_timeline_events_first_event_timeout_ms(),
-            idempotency_key_ttl_hours: default_timeline_events_idempotency_key_ttl_hours(),
         }
     }
 }
@@ -295,7 +228,7 @@ impl Default for AgentKernelCompactionConfig {
     }
 }
 
-/// Agent kernel runtime configuration
+/// Kernel Provider configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentKernelConfig {
@@ -338,10 +271,6 @@ pub struct AgentKernelConfig {
     /// Context compaction policy and model override.
     #[serde(default)]
     pub compaction: AgentKernelCompactionConfig,
-
-    /// Timeline event replay and retention defaults.
-    #[serde(default)]
-    pub timeline_events: AgentKernelTimelineEventsConfig,
 
     /// Tools runtime defaults
     #[serde(default)]
@@ -389,7 +318,6 @@ impl Default for AgentKernelConfig {
             prompt: AgentKernelPromptConfig::default(),
             output: AgentKernelOutputConfig::default(),
             compaction: AgentKernelCompactionConfig::default(),
-            timeline_events: AgentKernelTimelineEventsConfig::default(),
             tools: ToolsRuntimeConfig::default(),
             skills: SkillsRuntimeConfig::default(),
             plugins: PluginsRuntimeConfig::default(),

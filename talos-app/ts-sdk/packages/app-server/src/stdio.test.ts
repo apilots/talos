@@ -21,14 +21,14 @@ describe("JsonRpcStdioTransport server requests", () => {
   it("responds to server requests with registered handler output", async () => {
     const transport = createTransportHarness();
     transport.instance.onServerRequest((request) => {
-      expect(request.method).toBe("client.user_input.request");
+      expect(request.method).toBe("client/user_input/request");
       return { text: "confirmed" };
     });
 
     transport.handleLine(JSON.stringify({
       jsonrpc: "2.0",
       id: 7,
-      method: "client.user_input.request",
+      method: "client/user_input/request",
       params: { prompt: "Continue?" },
     }));
     await Promise.resolve();
@@ -48,7 +48,7 @@ describe("JsonRpcStdioTransport server requests", () => {
     transport.handleLine(JSON.stringify({
       jsonrpc: "2.0",
       id: 9,
-      method: "client.unknown",
+      method: "client/unknown",
       params: null,
     }));
     await Promise.resolve();
@@ -59,7 +59,7 @@ describe("JsonRpcStdioTransport server requests", () => {
         id: 9,
         error: {
           code: AppProtocol.AppServerErrorCode.MethodNotFound,
-          message: "unsupported server request: client.unknown",
+          message: "unsupported server request: client/unknown",
         },
       },
     ]);
@@ -74,7 +74,7 @@ describe("JsonRpcStdioTransport server requests", () => {
     transport.handleLine(JSON.stringify({
       jsonrpc: "2.0",
       id: 10,
-      method: "client.user_input.request",
+      method: "client/user_input/request",
       params: { prompt: "Continue?" },
     }));
     await Promise.resolve();
@@ -95,8 +95,8 @@ describe("JsonRpcStdioTransport server requests", () => {
 describe("JsonRpcStdioTransport responses", () => {
   it("unwraps successful API result data", async () => {
     const transport = createTransportHarness();
-    const request = transport.instance.request<{ ok: boolean }>("session.get", {
-      session_id: "session-1",
+    const request = transport.instance.request<{ ok: boolean }>("session/get", {
+      sessionId: "session-1",
     });
 
     transport.handleLine(JSON.stringify({
@@ -113,8 +113,8 @@ describe("JsonRpcStdioTransport responses", () => {
 
   it("rejects application API errors separately from protocol errors", async () => {
     const transport = createTransportHarness();
-    const request = transport.instance.request("session.get", {
-      session_id: "missing",
+    const request = transport.instance.request("session/get", {
+      sessionId: "missing",
     });
 
     transport.handleLine(JSON.stringify({
@@ -138,8 +138,8 @@ describe("JsonRpcStdioTransport responses", () => {
 
   it("rejects unregistered protocol error codes", async () => {
     const transport = createTransportHarness();
-    const request = transport.instance.request("session.get", {
-      session_id: "session-1",
+    const request = transport.instance.request("session/get", {
+      sessionId: "session-1",
     });
 
     transport.handleLine(JSON.stringify({
@@ -173,14 +173,14 @@ describe("JsonRpcStdioTransport notifications", () => {
   it("emits typed subscription termination notifications", () => {
     const transport = createTransportHarness();
     const terminated: unknown[] = [];
-    transport.instance.onSubscriptionTerminated((envelope) => terminated.push(envelope));
+    transport.instance.onSubscriptionTerminated((notification) => terminated.push(notification));
 
     transport.handleLine(JSON.stringify({
       jsonrpc: "2.0",
-      method: "subscription.terminated",
+      method: "subscription/terminated",
       params: {
-        subscription_id: "sub-1",
-        session_id: "session-1",
+        subscriptionId: "sub-1",
+        sessionId: "session-1",
         reason: "slow_consumer",
         message: "subscription lagged behind retained live events",
       },
@@ -188,8 +188,8 @@ describe("JsonRpcStdioTransport notifications", () => {
 
     expect(terminated).toEqual([
       {
-        subscription_id: "sub-1",
-        session_id: "session-1",
+        subscriptionId: "sub-1",
+        sessionId: "session-1",
         reason: "slow_consumer",
         message: "subscription lagged behind retained live events",
       },

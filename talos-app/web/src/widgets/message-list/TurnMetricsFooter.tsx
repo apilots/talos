@@ -12,8 +12,8 @@ import {
 export function TurnMetricsFooter({ metrics }: { metrics: ChatTurnMetrics }) {
   const { t } = useTranslation("chat");
   const tokensPerSecond = calculateTurnTokensPerSecond(
-    metrics.usage.total_tokens,
-    metrics.duration_ms,
+    metrics.usage.output_tokens,
+    metrics.durationMs,
   );
   const items = [
     tokensPerSecond === null
@@ -31,17 +31,17 @@ export function TurnMetricsFooter({ metrics }: { metrics: ChatTurnMetrics }) {
     {
       icon: Repeat2,
       key: "rounds",
-      label: t(metrics.model_rounds === 1 ? "round" : "rounds", { value: metrics.model_rounds }),
+      label: t(metrics.modelRounds === 1 ? "round" : "rounds", { value: metrics.modelRounds }),
     },
     {
       icon: Wrench,
       key: "tools",
-      label: t(metrics.tool_calls === 1 ? "tool" : "tools", { value: metrics.tool_calls }),
+      label: t(metrics.toolCalls === 1 ? "tool" : "tools", { value: metrics.toolCalls }),
     },
     {
       icon: CircleAlert,
       key: "errors",
-      label: t(metrics.tool_errors === 1 ? "error" : "errors", { value: metrics.tool_errors }),
+      label: t(metrics.toolErrors === 1 ? "error" : "errors", { value: metrics.toolErrors }),
     },
   ].filter((item): item is NonNullable<typeof item> => item !== null);
 
@@ -57,9 +57,10 @@ export function TurnMetricsFooter({ metrics }: { metrics: ChatTurnMetrics }) {
           <span
             className={cn(
               "inline-flex items-center gap-1 whitespace-nowrap",
-              key === "errors" && metrics.tool_errors > 0 && "text-danger",
+              key === "errors" && metrics.toolErrors > 0 && "text-danger",
             )}
             data-metric={key}
+            title={key === "tokensPerSecond" ? t("turnOutputThroughputHelp") : undefined}
           >
             <Icon aria-hidden="true" size={12} strokeWidth={1.6} />
             {label}

@@ -25,21 +25,9 @@ if [[ -z "${primary_model}" || -z "${primary_provider}" || -z "${secondary_provi
 fi
 echo "CASE select_models PASS primary=${primary_provider}:${primary_model} secondary=${secondary_provider}:${secondary_model}"
 
-create_payload='{
-  "context": {
-    "source_type": "http",
-    "provider": "http",
-    "channel_id": "session",
-    "user_id": "session-user",
-    "thread_id": null,
-    "message_id": "msg-session-lifecycle",
-    "trace_id": "trace-session-lifecycle"
-  }
-}'
 create_id="$(new_session_id)"
-remember_session_context "${create_id}" "${create_payload}"
 create_json="{\"id\":\"${create_id}\"}"
-log_case_json "session_id" "${create_payload}" "${create_json}"
+log_case_json "session_id" "{}" "${create_json}"
 session_id="$(session_id_from_json "${create_json}")"
 if [[ -z "${session_id}" ]]; then
   echo "CASE session_id FAIL response=${create_json}"
@@ -48,7 +36,7 @@ fi
 echo "CASE session_id PASS session_id=${session_id}"
 
 first_message_payload='{
-  "input": [{"type":"text","text":"Reply with exactly SESSION_READY."}]
+  "input": {"content":[{"type":"text","text":"Reply with exactly SESSION_READY."}]}
 }'
 first_message_json="$(send_message_response "${session_id}" "${first_message_payload}" "session_lifecycle_first_message")"
 log_case_json "first_message" "${first_message_payload}" "${first_message_json}"
@@ -84,12 +72,12 @@ if [[ "${patch_session_id}" != "${session_id}" ]] || ! json_equal "${patch_selec
 fi
 echo "CASE patch_session_model PASS session_id=${patch_session_id}"
 
-list_json="$(curl -sS "${GATEWAY_URL}/v1/sessions?user_id=session-user&channel_id=session&provider=http")"
-log_case_json "list_sessions_with_filter" "{\"user_id\":\"session-user\",\"channel_id\":\"session\",\"provider\":\"http\"}" "${list_json}"
+list_json="$(curl -sS "${GATEWAY_URL}/v1/sessions")"
+log_case_json "list_sessions" "{}" "${list_json}"
 list_data_json="$(api_data_json "${list_json}")"
-list_count="$(python3 -c 'import json,sys; payload=json.load(sys.stdin); print(len(payload.get("sessions", [])))' <<< "${list_data_json}")"
-if [[ "${list_count}" -lt 1 ]]; then
-  echo "CASE list_sessions_with_filter FAIL expected=>=1 actual=${list_count}"
+listed_source_provider="$(SESSION_ID="${session_id}" python3 -c 'import json,os,sys; payload=json.load(sys.stdin); item=next((item for item in payload.get("sessions", []) if item.get("id") == os.environ["SESSION_ID"]), {}); print(item.get("sourceProvider", ""))' <<< "${list_data_json}")"
+if [[ "${listed_source_provider}" != "http" ]]; then
+  echo "CASE list_sessions FAIL session_id=${session_id} source_provider=${listed_source_provider}"
   exit 1
 fi
-echo "CASE list_sessions_with_filter PASS count=${list_count}"
+echo "CASE list_sessions PASS session_id=${session_id} source_provider=${listed_source_provider}"

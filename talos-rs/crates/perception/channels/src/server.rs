@@ -2,14 +2,15 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use talos_agent_api::{
+    AgentAssistantTextPhase, AgentEvent, AgentEventPayload, AgentMessageBlockContent,
+    AgentMessageRole,
+};
 use talos_config::Config;
 use talos_error::{TalosError, TalosResult};
-use talos_gateway::Gateway;
-use talos_service::{Actor, TalosService, TimelineSubscriptionMessage, TimelineSubscriptionSource};
-use talos_types::talos::{
-    AgentEventPayload, TalosContext, TalosInputItem, TalosProvider, TalosTimelineContent,
-    TalosTimelineDelta, TalosTimelineItemKind,
-};
+use talos_service::{Actor, TalosService, TimelineSubscription, TimelineSubscriptionMessage};
+use talos_types::talos::{SessionSource, SessionSourceProvider};
+use talos_types::{AgentUserContent, AgentUserInput};
 use talos_types::{StartTurnRequest, SubscribeTimelineRequest};
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -18,47 +19,62 @@ use crate::traits::{
     Channel, ChannelEvent, ChannelRuntimeContext, MessageContent, MessageTarget, OutboundContext,
 };
 
-#[async_trait::async_trait]
-pub trait ChannelTimelineSubscriptionService: Send + Sync {
-    async fn timeline_subscription_source(
+/// Exposes the product operations required to process one inbound Channel message.
+///
+/// Implementations own Turn admission and timeline subscription. Channel runtimes
+/// must not depend on transport gateways or the Agent execution framework.
+pub trait ChannelApplicationService: Send + Sync {
+    fn start_turn(
+        &self,
+        actor: &Actor,
+        source: SessionSource,
+        request: StartTurnRequest,
+    ) -> impl std::future::Future<Output = TalosResult<talos_types::StartTurnResponse>> + Send;
+
+    fn open_timeline_subscription(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> TalosResult<TimelineSubscriptionSource>;
+    ) -> impl std::future::Future<Output = TalosResult<TimelineSubscription>> + Send;
 }
 
-#[async_trait::async_trait]
-impl ChannelTimelineSubscriptionService for TalosService {
-    async fn timeline_subscription_source(
+impl ChannelApplicationService for TalosService {
+    async fn start_turn(
+        &self,
+        actor: &Actor,
+        source: SessionSource,
+        request: StartTurnRequest,
+    ) -> TalosResult<talos_types::StartTurnResponse> {
+        TalosService::start_turn(self, actor, source, request, None).await
+    }
+
+    async fn open_timeline_subscription(
         &self,
         actor: &Actor,
         request: SubscribeTimelineRequest,
-    ) -> TalosResult<TimelineSubscriptionSource> {
-        TalosService::timeline_subscription_source(self, actor, request).await
+    ) -> TalosResult<TimelineSubscription> {
+        TalosService::open_timeline_subscription(self, actor, request).await
     }
 }
 
-pub struct ChannelServer {
+pub struct ChannelServer<S = TalosService> {
     config: Arc<Config>,
-    gateway: Arc<dyn Gateway>,
-    timeline_subscriptions: Arc<dyn ChannelTimelineSubscriptionService>,
+    application: Arc<S>,
     channels: HashMap<String, Box<dyn Channel>>,
     started_accounts: HashMap<String, Vec<String>>,
     event_tx: mpsc::Sender<ChannelEvent>,
     event_rx: mpsc::Receiver<ChannelEvent>,
 }
 
-impl ChannelServer {
-    pub fn new(
-        config: Arc<Config>,
-        gateway: Arc<dyn Gateway>,
-        timeline_subscriptions: Arc<dyn ChannelTimelineSubscriptionService>,
-    ) -> Self {
+impl<S> ChannelServer<S>
+where
+    S: ChannelApplicationService,
+{
+    pub fn new(config: Arc<Config>, application: Arc<S>) -> Self {
         let (event_tx, event_rx) = mpsc::channel(256);
         Self {
             config,
-            gateway,
-            timeline_subscriptions,
+            application,
             channels: HashMap::new(),
             started_accounts: HashMap::new(),
             event_tx,
@@ -124,7 +140,7 @@ impl ChannelServer {
                     content,
                     reply_to_id,
                 } => {
-                    let request = build_start_turn_request(
+                    let (source, request) = build_start_turn_request(
                         &channel_id,
                         &account_id,
                         &user_id,
@@ -135,13 +151,8 @@ impl ChannelServer {
                     );
 
                     let actor = Actor::regular(user_id);
-                    match submit_channel_turn(
-                        self.gateway.as_ref(),
-                        self.timeline_subscriptions.as_ref(),
-                        &actor,
-                        request,
-                    )
-                    .await
+                    match submit_channel_turn(self.application.as_ref(), &actor, source, request)
+                        .await
                     {
                         Ok(content) => {
                             let Some(text) = normalize_channel_response(&content) else {
@@ -174,7 +185,7 @@ impl ChannelServer {
                             }
                         }
                         Err(err) => {
-                            error!("Failed to process channel event via gateway: {}", err);
+                            error!("Failed to process channel event: {}", err);
                         }
                     }
                 }
@@ -208,14 +219,14 @@ impl ChannelServer {
 }
 
 async fn submit_channel_turn(
-    gateway: &dyn Gateway,
-    timeline_subscriptions: &dyn ChannelTimelineSubscriptionService,
+    application: &impl ChannelApplicationService,
     actor: &Actor,
+    source: SessionSource,
     request: StartTurnRequest,
 ) -> TalosResult<String> {
-    let response = gateway.start_turn(actor, request, None).await?;
-    let mut subscription = timeline_subscriptions
-        .timeline_subscription_source(
+    let response = application.start_turn(actor, source, request).await?;
+    let mut subscription = application
+        .open_timeline_subscription(
             actor,
             SubscribeTimelineRequest {
                 session_id: response.session_id.clone(),
@@ -240,16 +251,16 @@ async fn submit_channel_turn(
                     response.turn_id
                 )));
             }
-            message = subscription.subscription.events.recv() => {
+            message = subscription.events.recv() => {
                 let Some(message) = message else {
                     return Ok(collector.finish());
                 };
                 match message {
                     TimelineSubscriptionMessage::Event(record) => {
-                        if record.turn_id != response.turn_id {
+                        if record.event.identity.turn_id != response.turn_id {
                             continue;
                         }
-                        if collector.apply(record.event.payload) {
+                        if collector.apply(record.event) {
                             return Ok(collector.finish());
                         }
                     }
@@ -265,95 +276,86 @@ async fn submit_channel_turn(
 
 #[derive(Default)]
 struct ChannelTurnReplyCollector {
-    assistant_text_items: HashMap<String, String>,
+    text: Vec<String>,
 }
 
 impl ChannelTurnReplyCollector {
-    fn apply(&mut self, payload: AgentEventPayload) -> bool {
-        match payload {
-            AgentEventPayload::ItemStarted(started) => {
-                if started.item.kind == TalosTimelineItemKind::AssistantText {
-                    let text = match started.item.content {
-                        TalosTimelineContent::Text { text } => text,
-                        _ => String::new(),
-                    };
-                    self.assistant_text_items.insert(started.item.item_id, text);
-                }
-            }
-            AgentEventPayload::ItemDelta(delta) => {
-                if let TalosTimelineDelta::Text { text } = delta.delta {
-                    if let Some(existing) = self.assistant_text_items.get_mut(&delta.item_id) {
-                        existing.push_str(&text);
-                    }
-                }
-            }
-            AgentEventPayload::ItemCompleted(completed) => {
-                if let Some(existing) = self.assistant_text_items.get_mut(&completed.item_id) {
-                    if let Some(TalosTimelineContent::Text { text }) = completed.final_content {
-                        *existing = text;
-                    }
-                }
-            }
-            AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnError(_) => {
-                return true;
-            }
-            AgentEventPayload::TurnStarted(_)
-            | AgentEventPayload::AssistantTextCommitted(_)
-            | AgentEventPayload::TurnMetrics(_) => {}
+    fn apply(&mut self, event: AgentEvent) -> bool {
+        let terminal = matches!(
+            &event.payload,
+            AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+        );
+        if let AgentEventPayload::MessageCompleted(message) = event.payload {
+            self.collect_message(message);
         }
-        false
+        terminal
     }
 
     fn finish(self) -> String {
-        self.assistant_text_items
-            .into_values()
-            .filter(|text| !text.trim().is_empty())
-            .collect::<Vec<_>>()
-            .join("\n")
+        self.text.join("\n")
+    }
+
+    fn collect_message(&mut self, message: talos_agent_api::AgentMessage) {
+        if message.role != AgentMessageRole::Agent {
+            return;
+        }
+        for block in message.blocks {
+            let AgentMessageBlockContent::AssistantText(assistant) = block.content else {
+                continue;
+            };
+            if assistant.phase != AgentAssistantTextPhase::Pending
+                && !assistant.text.trim().is_empty()
+            {
+                self.text.push(assistant.text);
+            }
+        }
     }
 }
 
 fn build_start_turn_request(
     channel_id: &str,
     _account_id: &str,
-    user_id: &str,
+    _user_id: &str,
     chat_id: &str,
     thread_id: Option<String>,
     session_id: String,
     content: MessageContent,
-) -> StartTurnRequest {
-    let input = match content {
-        MessageContent::Text(text) => vec![TalosInputItem::Text { text }],
-        MessageContent::Media { kind, file_id } => vec![TalosInputItem::Text {
-            text: format!("[media:{kind:?}] {file_id}"),
+) -> (SessionSource, StartTurnRequest) {
+    let input = AgentUserInput {
+        content: vec![match content {
+            MessageContent::Text(text) => AgentUserContent::Text { text },
+            MessageContent::Media { kind, file_id } => AgentUserContent::Text {
+                text: format!("[media:{kind:?}] {file_id}"),
+            },
         }],
     };
 
     let provider = match channel_id {
-        "telegram" => TalosProvider::Telegram,
-        _ => TalosProvider::System,
+        "telegram" => SessionSourceProvider::Telegram,
+        _ => SessionSourceProvider::System,
     };
 
-    let context = {
-        let context =
-            TalosContext::im(provider, user_id.to_string()).with_channel_id(chat_id.to_string());
+    let source = {
+        let source = SessionSource::im(provider).with_channel_id(chat_id.to_string());
         if let Some(thread_id) = thread_id {
-            context.with_thread_id(thread_id)
+            source.with_thread_id(thread_id)
         } else {
-            context
+            source
         }
     };
 
-    StartTurnRequest {
-        session_id,
-        input,
-        context: Some(context),
-        model_selection: None,
-        user_permission_mode: None,
-        project_id: None,
-        current_directory: None,
-        client_request_id: None,
-    }
+    (
+        source,
+        StartTurnRequest {
+            session_id,
+            input,
+            model_selection: None,
+            user_permission_mode: None,
+            project_id: None,
+            current_directory: None,
+            client_request_id: None,
+        },
+    )
 }
 
 fn normalize_channel_response(content: &str) -> Option<String> {

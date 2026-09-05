@@ -40,8 +40,7 @@ pub mod workspace;
 
 pub type TalosTimezone = chrono_tz::Tz;
 pub use domains::agent::{
-    AgentConfig, AgentDefinitionConfig, AgentKind, AgentRuntimeConfig, MessageQueueConfig,
-    PlannerMode,
+    AgentConfig, AgentDefinitionConfig, AgentProviderConfig, MessageQueueConfig, PlannerMode,
 };
 pub use domains::automation::{
     AutomationConfig, DreamMemoryMaintenanceConfig, ProfileUsageRetentionConfig,
@@ -50,7 +49,6 @@ pub use domains::cloud::{CloudAuthConfig, CloudConfig};
 pub use domains::fs::{DirectoryPickerConfig, DirectoryPickerRoot, FsConfig};
 pub use domains::kernel::{
     AgentKernelCompactionConfig, AgentKernelConfig, AgentKernelOutputConfig,
-    AgentKernelTimelineEventsConfig,
 };
 pub use domains::memory::MemoryConfig;
 pub use domains::network::{
@@ -87,7 +85,8 @@ pub use paths::{
     resolve_runtime_path, resolve_talos_home, sanitize_agent_name, set_talos_home, TalosPaths,
 };
 pub use store::{
-    ConfigStore, InMemoryLlmConfigStore, LlmConfigStore, YamlConfigStore, YamlLlmConfigStore,
+    resolve_llm_update_for_runtime, resolve_web_search_update_for_runtime, ConfigStore,
+    InMemoryLlmConfigStore, LlmConfigStore, YamlConfigStore, YamlLlmConfigStore,
 };
 pub use upgrade::{
     refresh_default_config_template, upgrade_default_config, ConfigTemplateRefreshReport,

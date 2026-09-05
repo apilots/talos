@@ -1,7 +1,5 @@
-pub mod scope;
-
 mod service;
 mod types;
 
-pub use service::SessionService;
-pub use types::CreateSessionParams;
+pub(crate) use service::SessionService;
+pub(crate) use types::CreateSessionParams;

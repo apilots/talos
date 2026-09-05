@@ -3,14 +3,15 @@ use base64::Engine;
 use bytes::Bytes;
 use serde::Serialize;
 use serde_json::Value;
+use talos_agent_api::AgentTurnRef;
 use talos_app_protocol::errors::AppServerErrorBody;
 use talos_app_protocol::requests::{ClientRequest, ClientRequestParams, FileUploadParams};
 use talos_auth::CloudSessionCache;
 use talos_gateway::{Gateway, ServiceGateway};
-use talos_service::{Actor, TalosService, TimelineSubscriptionSource};
+use talos_service::{Actor, TalosService, TimelineSubscription};
 use talos_types::{
     RecoverTimelineRequest, RetryTurnRequest as SharedRetryTurnRequest, StartTurnRequest,
-    StartTurnResponse, SubscribeTimelineRequest,
+    SubscribeTimelineRequest,
 };
 
 use std::sync::Arc;
@@ -38,15 +39,36 @@ where
 pub type ApplicationResult<T> = Result<T, ApiError>;
 pub type ProtocolResult<T> = Result<T, AppServerErrorBody>;
 
+/// Internal result of one typed application dispatch.
+///
+/// The body is already serialized for the JSON-RPC transport. `started_turn`
+/// carries the canonical identity needed by connection-owned lifecycle control;
+/// transports must not recover that identity by inspecting JSON fields.
+pub struct ApplicationResponse {
+    pub body: Value,
+    pub started_turn: Option<AgentTurnRef>,
+}
+
 #[async_trait]
 pub trait AppServerApplication: Send + Sync {
-    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ApplicationResult<Value>;
+    async fn dispatch(
+        &self,
+        actor: &Actor,
+        request: ClientRequest,
+    ) -> ApplicationResult<ApplicationResponse>;
+
+    async fn start_turn(
+        &self,
+        actor: &Actor,
+        source: talos_types::talos::SessionSource,
+        request: StartTurnRequest,
+    ) -> ApplicationResult<ApplicationResponse>;
 
     async fn subscribe_timeline_events(
         &self,
         actor: &Actor,
         params: SubscribeTimelineRequest,
-    ) -> ApplicationResult<SubscriptionSource>;
+    ) -> ApplicationResult<TimelineSubscription>;
 
     async fn cancel_active_turn(
         &self,
@@ -57,8 +79,6 @@ pub trait AppServerApplication: Send + Sync {
 
     async fn drain_background_tasks(&self, timeout: Duration) -> TalosResult<()>;
 }
-
-pub type SubscriptionSource = TimelineSubscriptionSource;
 
 #[derive(Clone)]
 pub struct TalosApplicationAdapter {
@@ -103,7 +123,11 @@ impl TalosApplicationAdapter {
 
 #[async_trait]
 impl AppServerApplication for TalosApplicationAdapter {
-    async fn dispatch(&self, actor: &Actor, request: ClientRequest) -> ApplicationResult<Value> {
+    async fn dispatch(
+        &self,
+        actor: &Actor,
+        request: ClientRequest,
+    ) -> ApplicationResult<ApplicationResponse> {
         match request.params {
             ClientRequestParams::Initialize(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::ProfileRead(params) => to_value(
@@ -229,12 +253,16 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
-            ClientRequestParams::TurnStart(params) => {
-                to_value(self.start_turn(actor, params).await?)
-            }
+            ClientRequestParams::TurnStart(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::TurnInterrupt(params) => to_value(
                 self.gateway
                     .interrupt_turn(actor, params)
+                    .await
+                    .map_err(talos_error_to_api_error)?,
+            ),
+            ClientRequestParams::TurnInput(params) => to_value(
+                self.gateway
+                    .submit_turn_input(actor, params)
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
@@ -283,28 +311,10 @@ impl AppServerApplication for TalosApplicationAdapter {
                     .await
                     .map_err(talos_error_to_api_error)?,
             ),
-            ClientRequestParams::MessageQueueSteer(params) => to_value(
-                self.gateway
-                    .steer_queued_message(actor, params)
-                    .await
-                    .map_err(talos_error_to_api_error)?,
-            ),
             ClientRequestParams::EventSubscribe(_) => Err(ApiError::new(ErrorCode::InvalidRequest)),
             ClientRequestParams::EventUnsubscribe(_) => {
                 Err(ApiError::new(ErrorCode::InvalidRequest))
             }
-            ClientRequestParams::ToolDynamicResultSubmit(params) => to_value(
-                self.gateway
-                    .submit_dynamic_tool_result(actor, params)
-                    .await
-                    .map_err(talos_error_to_api_error)?,
-            ),
-            ClientRequestParams::UserActionSubmit(params) => to_value(
-                self.gateway
-                    .submit_user_action(actor, params)
-                    .await
-                    .map_err(talos_error_to_api_error)?,
-            ),
             ClientRequestParams::ModelList(_) => {
                 let models = self
                     .gateway
@@ -583,10 +593,10 @@ impl AppServerApplication for TalosApplicationAdapter {
         &self,
         actor: &Actor,
         mut request: SubscribeTimelineRequest,
-    ) -> ApplicationResult<SubscriptionSource> {
+    ) -> ApplicationResult<TimelineSubscription> {
         request.replay_limit = Some(request.replay_limit.unwrap_or(self.replay_limit).max(1));
         self.app
-            .timeline_subscription_source(actor, request)
+            .open_timeline_subscription(actor, request)
             .await
             .map_err(talos_error_to_api_error)
     }
@@ -600,9 +610,8 @@ impl AppServerApplication for TalosApplicationAdapter {
         self.gateway
             .interrupt_turn(
                 actor,
-                talos_types::InterruptTurnRequest {
-                    session_id: session_id.to_string(),
-                    turn_id: turn_id.to_string(),
+                talos_agent_api::InterruptTurnRequest {
+                    identity: talos_types::AgentTurnRef::new(session_id, turn_id),
                 },
             )
             .await
@@ -616,6 +625,25 @@ impl AppServerApplication for TalosApplicationAdapter {
         } else {
             Ok(())
         }
+    }
+
+    async fn start_turn(
+        &self,
+        actor: &Actor,
+        source: talos_types::talos::SessionSource,
+        request: StartTurnRequest,
+    ) -> ApplicationResult<ApplicationResponse> {
+        let client_request_id = request.client_request_id.clone();
+        let response = self
+            .gateway
+            .start_turn(actor, source, request, client_request_id)
+            .await
+            .map_err(talos_error_to_api_error)?;
+        let started_turn = AgentTurnRef::new(&response.session_id, &response.turn_id);
+        to_value(response).map(|body| ApplicationResponse {
+            body: body.body,
+            started_turn: Some(started_turn),
+        })
     }
 }
 
@@ -641,25 +669,18 @@ impl TalosApplicationAdapter {
             .await
             .map_err(talos_error_to_api_error)
     }
-
-    async fn start_turn(
-        &self,
-        actor: &Actor,
-        request: StartTurnRequest,
-    ) -> ApplicationResult<StartTurnResponse> {
-        let client_request_id = request.client_request_id.clone();
-        self.gateway
-            .start_turn(actor, request, client_request_id)
-            .await
-            .map_err(talos_error_to_api_error)
-    }
 }
 
-fn to_value<T: Serialize>(value: T) -> ApplicationResult<Value> {
-    serde_json::to_value(value).map_err(|error| {
-        tracing::error!(error = %error, "failed to serialize app-server application response");
-        ApiError::new(ErrorCode::InternalError)
-    })
+fn to_value<T: Serialize>(value: T) -> ApplicationResult<ApplicationResponse> {
+    serde_json::to_value(value)
+        .map(|body| ApplicationResponse {
+            body,
+            started_turn: None,
+        })
+        .map_err(|error| {
+            tracing::error!(error = %error, "failed to serialize app-server application response");
+            ApiError::new(ErrorCode::InternalError)
+        })
 }
 
 fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> ApplicationResult<Bytes> {

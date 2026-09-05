@@ -1,8 +1,8 @@
-//! Timeline event adapter for the render runtime live reducer.
+//! Canonical Agent message adapter for the render runtime live reducer.
 
 use talos_sdk::{
-    TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem, TalosTimelineItemKind,
-    TalosTimelinePhase,
+    AgentAssistantTextPhase, AgentMessageBlock, AgentMessageBlockContent,
+    AgentMessageBlockDeltaContent, AgentToolCallArguments, AgentUserContent,
 };
 
 use crate::render_runtime::common::style::StyledLine;
@@ -10,170 +10,145 @@ use crate::render_runtime::render::live::{LiveReducer, LiveTextKind};
 use crate::render_runtime::render::user_input_display;
 use crate::render_runtime::transcript::block::{FinalizedTranscriptBlock, TranscriptBlockKind};
 
-/// Applies an item-started event to render runtime live state.
-pub(crate) fn apply_item_started(
+/// Applies one canonical block-started event to render runtime live state.
+pub(crate) fn apply_block_started(
     live: &mut LiveReducer,
-    item: &TalosTimelineItem,
+    block: &AgentMessageBlock,
 ) -> Vec<FinalizedTranscriptBlock> {
-    match (&item.kind, &item.phase, &item.content) {
-        (
-            TalosTimelineItemKind::UserInput,
-            TalosTimelinePhase::Input,
-            TalosTimelineContent::Text { text },
-        ) => text_finalized_block(TranscriptBlockKind::UserInput, text),
-        (
-            TalosTimelineItemKind::UserInput,
-            TalosTimelinePhase::Input,
-            TalosTimelineContent::UserInput { text, file_ids },
-        ) => text_finalized_block(
+    match &block.content {
+        AgentMessageBlockContent::UserContent(content) => text_finalized_block(
             TranscriptBlockKind::UserInput,
-            &user_input_display(text, file_ids),
+            &user_content_display(content),
         ),
-        (_, _, TalosTimelineContent::Text { text }) => {
-            if let Some((kind, phase_resolved)) = live_text_state(item) {
-                if phase_resolved {
-                    live.start_text(&item.item_id, kind, text);
-                } else {
-                    live.start_unresolved_text(&item.item_id, kind, text);
-                }
+        AgentMessageBlockContent::Reasoning(reasoning) => {
+            live.start_text(&block.block_id, LiveTextKind::Thinking, &reasoning.text);
+            Vec::new()
+        }
+        AgentMessageBlockContent::AssistantText(assistant) => {
+            let (kind, resolved) = assistant_text_state(assistant.phase);
+            if resolved {
+                live.start_text(&block.block_id, kind, &assistant.text);
+            } else {
+                live.start_unresolved_text(&block.block_id, kind, &assistant.text);
             }
             Vec::new()
         }
-        (
-            TalosTimelineItemKind::ToolCall,
-            TalosTimelinePhase::Acting,
-            TalosTimelineContent::ToolCall {
-                call_id,
-                name,
-                arguments,
-                ..
-            },
-        ) => {
-            live.start_tool_with_arguments(&item.item_id, call_id, name, arguments);
+        AgentMessageBlockContent::ToolCall(tool) => {
+            live.start_tool_with_arguments(
+                &block.block_id,
+                &tool.call_id,
+                &tool.name,
+                tool_arguments_text(&tool.arguments),
+            );
+            for progress in &tool.progress {
+                live.append_tool_progress_delta(&block.block_id, progress.kind, &progress.text);
+            }
             Vec::new()
         }
-        (
-            TalosTimelineItemKind::SystemNotice,
-            TalosTimelinePhase::System,
-            TalosTimelineContent::SystemNotice { message, .. },
-        ) => text_finalized_block(TranscriptBlockKind::SystemNotice, message),
-        _ => Vec::new(),
+        AgentMessageBlockContent::SystemNotice(notice) => {
+            text_finalized_block(TranscriptBlockKind::SystemNotice, &notice.message)
+        }
+        AgentMessageBlockContent::ToolResult(_)
+        | AgentMessageBlockContent::ExecutionSummary(_)
+        | AgentMessageBlockContent::ContextCompaction(_) => Vec::new(),
     }
 }
 
-/// Applies a timeline delta to render runtime live state.
-pub(crate) fn apply_item_delta(
+/// Applies one typed canonical block delta.
+pub(crate) fn apply_block_delta(
     live: &mut LiveReducer,
-    item: &TalosTimelineItem,
-    delta: TalosTimelineDelta,
+    block: &AgentMessageBlock,
+    delta: AgentMessageBlockDeltaContent,
 ) -> Vec<FinalizedTranscriptBlock> {
     match delta {
-        TalosTimelineDelta::Text { text } => {
-            if let Some((kind, phase_resolved)) = live_text_state(item) {
-                if phase_resolved {
-                    live.start_text(&item.item_id, kind, "");
-                } else {
-                    live.start_unresolved_text(&item.item_id, kind, "");
-                }
-                live.append_text(&item.item_id, &text);
-            }
+        AgentMessageBlockDeltaContent::Text(text) => {
+            live.append_text(&block.block_id, &text);
             Vec::new()
         }
-        TalosTimelineDelta::ToolProgress {
-            progress_kind,
-            text_delta,
-        } => {
-            live.append_tool_progress_delta(&item.item_id, progress_kind, &text_delta);
+        AgentMessageBlockDeltaContent::AssistantTextPhase(phase) => {
+            let (kind, _) = assistant_text_state(phase);
+            live.commit_text(&block.block_id, kind)
+                .into_iter()
+                .collect()
+        }
+        AgentMessageBlockDeltaContent::ToolCallArguments(arguments) => {
+            live.append_tool_arguments(&block.block_id, &arguments.json_fragment);
             Vec::new()
         }
-        TalosTimelineDelta::ToolResult { content, is_error } => live
-            .complete_tool(&item.item_id, is_error, content)
+        AgentMessageBlockDeltaContent::ToolProgress(progress) => {
+            live.append_tool_progress_delta(&block.block_id, progress.kind, &progress.text);
+            Vec::new()
+        }
+        AgentMessageBlockDeltaContent::ContextCompaction(_) => Vec::new(),
+    }
+}
+
+/// Applies one completed canonical block snapshot.
+pub(crate) fn apply_block_completed(
+    live: &mut LiveReducer,
+    block: &AgentMessageBlock,
+    tool_call_block_id: Option<&str>,
+) -> Vec<FinalizedTranscriptBlock> {
+    match &block.content {
+        AgentMessageBlockContent::Reasoning(reasoning) => {
+            live.replace_text(&block.block_id, reasoning.text.clone());
+            live.complete_text(&block.block_id).into_iter().collect()
+        }
+        AgentMessageBlockContent::AssistantText(assistant) => {
+            let (kind, _) = assistant_text_state(assistant.phase);
+            live.commit_text(&block.block_id, kind);
+            live.replace_text(&block.block_id, assistant.text.clone());
+            live.complete_text(&block.block_id).into_iter().collect()
+        }
+        AgentMessageBlockContent::ToolResult(result) => tool_call_block_id
+            .and_then(|block_id| {
+                live.complete_tool(block_id, result.is_error, result.content.clone())
+            })
             .into_iter()
             .collect(),
-        TalosTimelineDelta::ToolArguments { arguments_delta } => {
-            live.append_tool_arguments(&item.item_id, &arguments_delta);
+        AgentMessageBlockContent::ExecutionSummary(_) => Vec::new(),
+        AgentMessageBlockContent::ContextCompaction(compaction) => text_finalized_block(
+            TranscriptBlockKind::SystemNotice,
+            compaction
+                .message
+                .as_deref()
+                .unwrap_or("Context compaction completed"),
+        ),
+        AgentMessageBlockContent::SystemNotice(notice) => {
+            text_finalized_block(TranscriptBlockKind::SystemNotice, &notice.message)
+        }
+        AgentMessageBlockContent::UserContent(_) | AgentMessageBlockContent::ToolCall(_) => {
             Vec::new()
         }
-        TalosTimelineDelta::UserAction { .. }
-        | TalosTimelineDelta::ContextCompaction { .. }
-        | TalosTimelineDelta::Status { .. } => Vec::new(),
     }
 }
 
-/// Applies an item-completed event to render runtime live state.
-pub(crate) fn apply_item_completed(
-    live: &mut LiveReducer,
-    item: &TalosTimelineItem,
-    final_content: Option<&TalosTimelineContent>,
-) -> Vec<FinalizedTranscriptBlock> {
-    if let Some(content) = final_content {
-        match content {
-            TalosTimelineContent::Text { text } => {
-                if let Some((kind, phase_resolved)) = live_text_state(item) {
-                    if phase_resolved {
-                        live.start_text(&item.item_id, kind, "");
-                    } else {
-                        live.start_unresolved_text(&item.item_id, kind, "");
-                    }
-                    live.replace_text(&item.item_id, text.clone());
-                }
-            }
-            TalosTimelineContent::ToolCall { result, .. } => {
-                if let Some(result) = result {
-                    return live
-                        .complete_tool(&item.item_id, result.is_error, result.content.clone())
-                        .into_iter()
-                        .collect();
-                }
-            }
-            TalosTimelineContent::SystemNotice { message, .. } => {
-                return text_finalized_block(TranscriptBlockKind::SystemNotice, message);
-            }
-            TalosTimelineContent::ExecutionSummary { .. }
-            | TalosTimelineContent::UserInput { .. }
-            | TalosTimelineContent::ContextCompaction { .. }
-            | TalosTimelineContent::Empty => {}
-        }
-    }
-
-    if live_text_state(item).is_some() {
-        return live.complete_text(&item.item_id).into_iter().collect();
-    }
-    Vec::new()
-}
-
-/// Applies an assistant text committed event to render runtime live state.
-pub(crate) fn apply_assistant_text_committed(
-    live: &mut LiveReducer,
-    item_id: &str,
-    phase: TalosTimelinePhase,
-) -> Option<FinalizedTranscriptBlock> {
+fn assistant_text_state(phase: AgentAssistantTextPhase) -> (LiveTextKind, bool) {
     match phase {
-        TalosTimelinePhase::FinalAnswer => live.commit_text(item_id, LiveTextKind::FinalAnswer),
-        TalosTimelinePhase::Commentary => live.commit_text(item_id, LiveTextKind::Commentary),
-        TalosTimelinePhase::Unknown
-        | TalosTimelinePhase::Input
-        | TalosTimelinePhase::Thinking
-        | TalosTimelinePhase::Acting
-        | TalosTimelinePhase::System => None,
+        AgentAssistantTextPhase::Pending => (LiveTextKind::Commentary, false),
+        AgentAssistantTextPhase::Commentary => (LiveTextKind::Commentary, true),
+        AgentAssistantTextPhase::FinalAnswer => (LiveTextKind::FinalAnswer, true),
     }
 }
 
-fn live_text_state(item: &TalosTimelineItem) -> Option<(LiveTextKind, bool)> {
-    match (&item.kind, item.phase) {
-        (TalosTimelineItemKind::Reasoning, TalosTimelinePhase::Thinking) => {
-            Some((LiveTextKind::Thinking, true))
+fn tool_arguments_text(arguments: &AgentToolCallArguments) -> String {
+    match arguments {
+        AgentToolCallArguments::Streaming { json_fragment } => json_fragment.clone(),
+        AgentToolCallArguments::Complete { value } => serde_json::to_string(value)
+            .unwrap_or_else(|error| format!("<invalid tool arguments: {error}>")),
+    }
+}
+
+fn user_content_display(content: &AgentUserContent) -> String {
+    match content {
+        AgentUserContent::Text { text } => text.clone(),
+        AgentUserContent::SkillSelection { name, .. } => format!("[skill:{name}]"),
+        AgentUserContent::File { file_id } => user_input_display("", std::slice::from_ref(file_id)),
+        AgentUserContent::Audio { .. } => "[audio]".to_string(),
+        AgentUserContent::Video { .. } => "[video]".to_string(),
+        AgentUserContent::UserActionResponse { action_id, .. } => {
+            format!("[user action response:{action_id}]")
         }
-        (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::FinalAnswer) => {
-            Some((LiveTextKind::FinalAnswer, true))
-        }
-        (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::Commentary) => {
-            Some((LiveTextKind::Commentary, true))
-        }
-        (TalosTimelineItemKind::AssistantText, TalosTimelinePhase::Unknown) => {
-            Some((LiveTextKind::Commentary, false))
-        }
-        _ => None,
     }
 }
 
@@ -189,220 +164,5 @@ fn text_finalized_block(kind: TranscriptBlockKind, text: &str) -> Vec<FinalizedT
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        apply_assistant_text_committed, apply_item_completed, apply_item_delta, apply_item_started,
-    };
-    use crate::render_runtime::render::live::LiveReducer;
-    use crate::render_runtime::transcript::block::TranscriptBlockKind;
-    use talos_sdk::{
-        TalosContentItem, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItem,
-        TalosTimelineItemKind, TalosTimelineItemStatus, TalosTimelinePhase,
-    };
-
-    fn text_item(
-        kind: TalosTimelineItemKind,
-        phase: TalosTimelinePhase,
-        text: &str,
-    ) -> TalosTimelineItem {
-        TalosTimelineItem {
-            item_id: "item-1".to_string(),
-            parent_item_id: None,
-            kind,
-            phase,
-            status: TalosTimelineItemStatus::Running,
-            title: None,
-            started_at_ms: 1,
-            completed_at_ms: None,
-            content: TalosTimelineContent::Text {
-                text: text.to_string(),
-            },
-        }
-    }
-
-    fn tool_item() -> TalosTimelineItem {
-        TalosTimelineItem {
-            item_id: "tool-1".to_string(),
-            parent_item_id: None,
-            kind: TalosTimelineItemKind::ToolCall,
-            phase: TalosTimelinePhase::Acting,
-            status: TalosTimelineItemStatus::Running,
-            title: None,
-            started_at_ms: 1,
-            completed_at_ms: None,
-            content: TalosTimelineContent::ToolCall {
-                call_id: "call-1".to_string(),
-                name: "Read".to_string(),
-                arguments: r#"{"file_path":"/tmp/demo.py"}"#.to_string(),
-                progress: Vec::new(),
-                result: None,
-            },
-        }
-    }
-
-    #[test]
-    fn text_deltas_stay_mutable_until_item_completed() {
-        let mut live = LiveReducer::default();
-        let item = text_item(
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::Unknown,
-            "",
-        );
-
-        assert!(apply_item_started(&mut live, &item).is_empty());
-        assert!(apply_item_delta(
-            &mut live,
-            &item,
-            TalosTimelineDelta::Text {
-                text: "hello".to_string(),
-            },
-        )
-        .is_empty());
-        assert!(apply_assistant_text_committed(
-            &mut live,
-            &item.item_id,
-            TalosTimelinePhase::FinalAnswer
-        )
-        .is_none());
-
-        let finalized = apply_item_completed(&mut live, &item, None);
-
-        assert_eq!(finalized.len(), 1);
-        assert_eq!(finalized[0].kind, TranscriptBlockKind::FinalAnswer);
-        assert_eq!(finalized[0].lines[0].plain_text(), "hello");
-    }
-
-    #[test]
-    fn final_content_replaces_mutable_text_before_finalizing() {
-        let mut live = LiveReducer::default();
-        let item = text_item(
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::FinalAnswer,
-            "partial",
-        );
-        apply_item_started(&mut live, &item);
-
-        let finalized = apply_item_completed(
-            &mut live,
-            &item,
-            Some(&TalosTimelineContent::Text {
-                text: "complete".to_string(),
-            }),
-        );
-
-        assert_eq!(finalized[0].lines[0].plain_text(), "complete");
-    }
-
-    #[test]
-    fn completed_unknown_assistant_text_waits_for_phase_commit() {
-        let mut live = LiveReducer::default();
-        let item = text_item(
-            TalosTimelineItemKind::AssistantText,
-            TalosTimelinePhase::Unknown,
-            "partial",
-        );
-        apply_item_started(&mut live, &item);
-
-        let finalized = apply_item_completed(
-            &mut live,
-            &item,
-            Some(&TalosTimelineContent::Text {
-                text: "final\nanswer".to_string(),
-            }),
-        );
-
-        assert!(finalized.is_empty());
-        let finalized = apply_assistant_text_committed(
-            &mut live,
-            &item.item_id,
-            TalosTimelinePhase::FinalAnswer,
-        )
-        .unwrap();
-        assert_eq!(finalized.kind, TranscriptBlockKind::FinalAnswer);
-        assert_eq!(finalized.lines[0].plain_text(), "final");
-        assert_eq!(finalized.lines[1].plain_text(), "answer");
-    }
-
-    #[test]
-    fn tool_progress_and_result_are_append_only_blocks() {
-        let mut live = LiveReducer::default();
-        let item = tool_item();
-
-        let header = apply_item_started(&mut live, &item);
-        let progress = apply_item_delta(
-            &mut live,
-            &item,
-            TalosTimelineDelta::ToolProgress {
-                progress_kind: talos_sdk::TalosToolProgressKind::Stdout,
-                text_delta: "Read 1 line".to_string(),
-            },
-        );
-        let result = apply_item_delta(
-            &mut live,
-            &item,
-            TalosTimelineDelta::ToolResult {
-                content: vec![TalosContentItem::Text {
-                    text: "ok".to_string(),
-                }],
-                is_error: false,
-            },
-        );
-
-        assert!(header.is_empty());
-        assert!(progress.is_empty());
-        assert_eq!(
-            result[0].lines[0].plain_text(),
-            "● Read(/tmp/demo.py) completed"
-        );
-        assert_eq!(result[0].lines[1].plain_text(), "  ⎿ ok (ctrl+o to expand)");
-        let markdown = result[0].copy_markdown.as_deref().unwrap_or_default();
-        assert!(markdown.contains("### Tool `Read`"));
-        assert!(markdown.contains("\"file_path\": \"/tmp/demo.py\""));
-        assert!(markdown.contains("Output:\n```text\nok\n```"));
-    }
-
-    #[test]
-    fn tool_argument_delta_updates_completed_title() {
-        let mut live = LiveReducer::default();
-        let mut item = tool_item();
-        if let TalosTimelineContent::ToolCall { arguments, .. } = &mut item.content {
-            arguments.clear();
-        }
-
-        let header = apply_item_started(&mut live, &item);
-        assert!(header.is_empty());
-
-        assert!(apply_item_delta(
-            &mut live,
-            &item,
-            TalosTimelineDelta::ToolArguments {
-                arguments_delta: r#"{"file_path":"/tmp/delta.rs"}"#.to_string(),
-            },
-        )
-        .is_empty());
-        let result = apply_item_delta(
-            &mut live,
-            &item,
-            TalosTimelineDelta::ToolResult {
-                content: vec![TalosContentItem::FileRead {
-                    path: "/tmp/delta.rs".to_string(),
-                    offset: 0,
-                    limit: 1,
-                    total_lines: 1,
-                    content: "ok".to_string(),
-                    truncated: false,
-                }],
-                is_error: false,
-            },
-        );
-
-        assert_eq!(
-            result[0].lines[0].plain_text(),
-            "● Read(/tmp/delta.rs) completed"
-        );
-        assert_eq!(
-            result[0].lines[1].plain_text(),
-            "  ⎿ Read 1 lines (ctrl+o to expand)"
-        );
-    }
-}
+#[path = "timeline_tests.rs"]
+mod tests;

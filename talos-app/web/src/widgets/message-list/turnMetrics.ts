@@ -8,11 +8,12 @@ export function formatMetricNumber(value: number) {
   return String(value);
 }
 
-export function calculateTurnTokensPerSecond(totalTokens: number, durationMs: number | null) {
+/** Average output throughput over the whole Turn, not model decode speed. */
+export function calculateTurnTokensPerSecond(outputTokens: number, durationMs: number | null) {
   if (durationMs === null || durationMs <= 0) {
     return null;
   }
-  return totalTokens / (durationMs / 1000);
+  return outputTokens / (durationMs / 1000);
 }
 
 export function formatTokensPerSecond(value: number) {

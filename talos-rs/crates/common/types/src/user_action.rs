@@ -66,24 +66,6 @@ pub enum UserActionState {
     Cancelled,
 }
 
-/// Request accepted by the application service to answer one pending user action.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct SubmitUserActionRequest {
-    pub session_id: String,
-    pub turn_id: String,
-    pub action_id: String,
-    pub response: UserActionResponse,
-}
-
-/// Current durable state returned after a user-action response is submitted.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitUserActionResponse {
-    pub action_id: String,
-    pub state: UserActionState,
-}
-
 /// Durable Timeline projection for a requested or finished user action.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(

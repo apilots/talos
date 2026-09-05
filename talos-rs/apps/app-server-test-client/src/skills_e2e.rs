@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Context, Result};
 use talos_sdk::{
-    AppServerClient, GatewayClient, MarketplaceSourceInput, ModelSelection,
-    PluginDocumentMediaType, PluginDocumentRole, PluginInstallConflictPolicy, PluginInstallRequest,
-    PluginInstallTarget, PluginKind, PluginReadRequest, PluginSearchRefreshPolicy,
-    PluginSearchRequest, PluginSearchStatusFilter, PluginSourceAddRequest,
-    PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary, SkillsListRequest,
-    SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest, StartTurnRequest,
-    TalosInputItem,
+    AgentUserContent, AgentUserInput, AppServerClient, GatewayClient, MarketplaceSourceInput,
+    ModelSelection, PluginDocumentMediaType, PluginDocumentRole, PluginInstallConflictPolicy,
+    PluginInstallRequest, PluginInstallTarget, PluginKind, PluginReadRequest,
+    PluginSearchRefreshPolicy, PluginSearchRequest, PluginSearchStatusFilter,
+    PluginSourceAddRequest, PluginSourceRefreshRequest, SkillScope, SkillSelector, SkillSummary,
+    SkillsListRequest, SkillsReadRequest, SkillsResolveRequest, SkillsSuggestRequest,
+    StartTurnRequest,
 };
 
 pub(super) async fn skills_e2e(client: &mut AppServerClient) -> Result<()> {
@@ -258,16 +258,17 @@ async fn run_selected_skill_turn(
     client
         .start_turn(StartTurnRequest {
             session_id: session_id.clone(),
-            input: vec![
-                TalosInputItem::Text {
-                    text: prompt.to_string(),
-                },
-                TalosInputItem::SkillSelection {
-                    name: skill.name.clone(),
-                    path: skill.path.to_string_lossy().to_string(),
-                },
-            ],
-            context: Some(super::test_talos_context()),
+            input: AgentUserInput {
+                content: vec![
+                    AgentUserContent::Text {
+                        text: prompt.to_string(),
+                    },
+                    AgentUserContent::SkillSelection {
+                        name: skill.name.clone(),
+                        path: skill.path.to_string_lossy().to_string(),
+                    },
+                ],
+            },
             model_selection: super::test_model_ref().map(ModelSelection::without_reasoning),
             user_permission_mode: None,
             project_id: None,
@@ -284,7 +285,7 @@ async fn run_selected_skill_turn(
     eprintln!("skills-e2e collect events {}", skill.name);
     let events = super::collect_until_terminal(client, &subscription.subscription_id).await?;
     super::ensure_turn_event_flow(&events)?;
-    Ok(super::assistant_text_from_events(&events))
+    super::assistant_text_from_events(&events)
 }
 
 fn assert_skill_localizer_output(output: &str, skill_name: &str, check: &str) -> Result<()> {

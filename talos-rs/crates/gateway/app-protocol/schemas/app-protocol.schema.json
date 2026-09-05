@@ -1,6 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
+    "ActiveTurnState": {
+      "description": "Durable nonterminal state of one logical Agent Turn.\n\nTerminal truth belongs exclusively to the terminal Agent event, so this enum intentionally has no completed or failed variants.",
+      "enum": [
+        "running",
+        "waitingForInput",
+        "cancelling"
+      ],
+      "type": "string"
+    },
     "ActorCredential": {
       "oneOf": [
         {
@@ -34,37 +43,149 @@
       ],
       "type": "object"
     },
-    "AgentEvent": {
-      "description": "Agent execution event.",
+    "AgentAssistantText": {
+      "additionalProperties": false,
+      "description": "Agent-authored user-visible text with an explicit presentation phase.",
       "properties": {
-        "created_at_ms": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
+        "phase": {
+          "$ref": "#/definitions/AgentAssistantTextPhase"
         },
-        "event_id": {
-          "default": null,
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "phase",
+        "text"
+      ],
+      "type": "object"
+    },
+    "AgentAssistantTextPhase": {
+      "description": "User-visible phase of Agent-authored text.",
+      "enum": [
+        "pending",
+        "commentary",
+        "finalAnswer"
+      ],
+      "type": "string"
+    },
+    "AgentContextCompaction": {
+      "additionalProperties": false,
+      "description": "Typed context-compaction progress or final outcome.",
+      "properties": {
+        "message": {
           "type": [
             "string",
             "null"
           ]
         },
-        "event_seq": {
-          "default": null,
-          "format": "int64",
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextCompactionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextCompactionOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stage": {
+          "$ref": "#/definitions/ContextCompactionStage"
+        },
+        "trigger": {
+          "$ref": "#/definitions/ContextCompactionTrigger"
+        }
+      },
+      "required": [
+        "stage",
+        "trigger"
+      ],
+      "type": "object"
+    },
+    "AgentContextCompactionDelta": {
+      "additionalProperties": false,
+      "description": "Incremental typed update for a context-compaction block.",
+      "properties": {
+        "message": {
           "type": [
-            "integer",
+            "string",
             "null"
           ]
         },
-        "event_type": {
-          "$ref": "#/definitions/AgentEventType"
+        "metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextCompactionMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
-        "message_id": {
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextCompactionOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextCompactionStage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AgentErrorInfo": {
+      "additionalProperties": false,
+      "description": "Stable, serializable Agent error projection safe for events and history.",
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "message": {
           "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable"
+      ],
+      "type": "object"
+    },
+    "AgentEvent": {
+      "additionalProperties": false,
+      "description": "Canonical append-only fact emitted during one logical Agent Turn.",
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "occurredAt": {
+          "format": "int64",
+          "type": "integer"
         },
         "payload": {
           "$ref": "#/definitions/AgentEventPayload"
@@ -73,311 +194,1091 @@
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "type": "string"
         }
       },
       "required": [
-        "event_type",
-        "message_id",
+        "identity",
+        "occurredAt",
         "payload",
-        "sequence",
-        "session_id",
-        "turn_id"
+        "sequence"
       ],
       "type": "object"
     },
     "AgentEventPayload": {
+      "description": "Closed union of canonical Agent Turn lifecycle events.",
       "oneOf": [
         {
           "properties": {
-            "request_id": {
-              "type": "string"
-            },
-            "started_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentTurnStarted"
             },
             "type": {
               "enum": [
-                "turn_started"
+                "turnStarted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "request_id",
-            "started_at_ms",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "item": {
-              "$ref": "#/definitions/TalosTimelineItem"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentMessageStarted"
             },
             "type": {
               "enum": [
-                "item_started"
+                "messageStarted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "item",
-            "request_id",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "delta": {
-              "$ref": "#/definitions/TalosTimelineDelta"
-            },
-            "item_id": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentMessageBlockStarted"
             },
             "type": {
               "enum": [
-                "item_delta"
+                "messageBlockStarted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "delta",
-            "item_id",
-            "request_id",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "completed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "final_content": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TalosTimelineContent"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "item_id": {
-              "type": "string"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "status": {
-              "$ref": "#/definitions/TalosTimelineItemStatus"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentMessageBlockDelta"
             },
             "type": {
               "enum": [
-                "item_completed"
+                "messageBlockDelta"
               ],
               "type": "string"
             }
           },
           "required": [
-            "completed_at_ms",
-            "item_id",
-            "request_id",
-            "status",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "item_id": {
-              "type": "string"
-            },
-            "phase": {
-              "$ref": "#/definitions/TalosTimelinePhase"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentMessageBlockCompleted"
             },
             "type": {
               "enum": [
-                "assistant_text_committed"
+                "messageBlockCompleted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "item_id",
-            "phase",
-            "request_id",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "metrics": {
-              "$ref": "#/definitions/TurnExecutionMetrics"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentMessage"
             },
             "type": {
               "enum": [
-                "turn_metrics"
+                "messageCompleted"
               ],
               "type": "string"
             }
           },
           "required": [
-            "metrics",
-            "request_id",
-            "turn_id",
+            "data",
             "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "completed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "metrics": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TurnExecutionMetrics"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "stop_reason": {
-              "$ref": "#/definitions/StopReason"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentPendingInput"
             },
             "type": {
               "enum": [
-                "turn_completed"
+                "waitingForInput"
               ],
               "type": "string"
-            },
-            "usage": {
-              "$ref": "#/definitions/TokenUsage"
             }
           },
           "required": [
-            "completed_at_ms",
-            "request_id",
-            "stop_reason",
-            "turn_id",
-            "type",
-            "usage"
+            "data",
+            "type"
           ],
           "type": "object"
         },
         {
           "properties": {
-            "error": {
-              "$ref": "#/definitions/ApiError"
-            },
-            "failed_at_ms": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "request_id": {
-              "type": "string"
-            },
-            "turn_id": {
-              "type": "string"
+            "data": {
+              "$ref": "#/definitions/AgentRunMetrics"
             },
             "type": {
               "enum": [
-                "turn_error"
+                "metricsUpdated"
               ],
               "type": "string"
             }
           },
           "required": [
-            "error",
-            "failed_at_ms",
-            "request_id",
-            "turn_id",
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentTurnCompleted"
+            },
+            "type": {
+              "enum": [
+                "turnCompleted"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentTurnFailed"
+            },
+            "type": {
+              "enum": [
+                "turnFailed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
             "type"
           ],
           "type": "object"
         }
       ]
     },
-    "AgentEventType": {
-      "description": "Agent execution event lifecycle type.",
+    "AgentExecutionSummary": {
+      "additionalProperties": false,
+      "description": "Bounded execution summary produced during one Agent Turn.",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "AgentInterruptOutcome": {
+      "description": "Observable result of exact Turn cancellation and cleanup settlement.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "cancelled"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "task_count": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "cleanupUnconfirmed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "task_count",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentMediaSource": {
+      "description": "Exact source of one submitted media content item.",
+      "oneOf": [
+        {
+          "properties": {
+            "type": {
+              "enum": [
+                "url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "inlineBase64"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentMessage": {
+      "additionalProperties": false,
+      "description": "Canonical message shared by Agent execution, history, protocol, and SDK.",
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/AgentMessageBlock"
+          },
+          "type": "array"
+        },
+        "completedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "$ref": "#/definitions/AgentMessageRole"
+        },
+        "status": {
+          "$ref": "#/definitions/AgentMessageStatus"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blocks",
+        "createdAt",
+        "messageId",
+        "role",
+        "status",
+        "turnId"
+      ],
+      "type": "object"
+    },
+    "AgentMessageBlock": {
+      "additionalProperties": false,
+      "description": "One typed lifecycle block inside an Agent message.",
+      "properties": {
+        "blockId": {
+          "type": "string"
+        },
+        "completedAt": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "content": {
+          "$ref": "#/definitions/AgentMessageBlockContent"
+        },
+        "startedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/definitions/AgentMessageBlockStatus"
+        }
+      },
+      "required": [
+        "blockId",
+        "content",
+        "startedAt",
+        "status"
+      ],
+      "type": "object"
+    },
+    "AgentMessageBlockCompleted": {
+      "additionalProperties": false,
+      "description": "Completed snapshot of one block inside an existing message.",
+      "properties": {
+        "block": {
+          "$ref": "#/definitions/AgentMessageBlock"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "block",
+        "messageId"
+      ],
+      "type": "object"
+    },
+    "AgentMessageBlockContent": {
+      "description": "Closed union of content that can appear in canonical Agent history.",
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentUserContent"
+            },
+            "type": {
+              "enum": [
+                "userContent"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentReasoning"
+            },
+            "type": {
+              "enum": [
+                "reasoning"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentAssistantText"
+            },
+            "type": {
+              "enum": [
+                "assistantText"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentToolCall"
+            },
+            "type": {
+              "enum": [
+                "toolCall"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentToolResult"
+            },
+            "type": {
+              "enum": [
+                "toolResult"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentExecutionSummary"
+            },
+            "type": {
+              "enum": [
+                "executionSummary"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentContextCompaction"
+            },
+            "type": {
+              "enum": [
+                "contextCompaction"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentSystemNotice"
+            },
+            "type": {
+              "enum": [
+                "systemNotice"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentMessageBlockDelta": {
+      "additionalProperties": false,
+      "description": "Incremental typed update for one running message block.",
+      "properties": {
+        "blockId": {
+          "type": "string"
+        },
+        "delta": {
+          "$ref": "#/definitions/AgentMessageBlockDeltaContent"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "blockId",
+        "delta",
+        "messageId"
+      ],
+      "type": "object"
+    },
+    "AgentMessageBlockDeltaContent": {
+      "description": "Closed union of incremental block updates accepted by the reducer.",
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentAssistantTextPhase"
+            },
+            "type": {
+              "enum": [
+                "assistantTextPhase"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentToolCallArgumentsDelta"
+            },
+            "type": {
+              "enum": [
+                "toolCallArguments"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentToolProgress"
+            },
+            "type": {
+              "enum": [
+                "toolProgress"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentContextCompactionDelta"
+            },
+            "type": {
+              "enum": [
+                "contextCompaction"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentMessageBlockStarted": {
+      "additionalProperties": false,
+      "description": "Started snapshot of one block inside an existing message.",
+      "properties": {
+        "block": {
+          "$ref": "#/definitions/AgentMessageBlock"
+        },
+        "messageId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "block",
+        "messageId"
+      ],
+      "type": "object"
+    },
+    "AgentMessageBlockStatus": {
+      "description": "Lifecycle status of one Agent message block.",
       "enum": [
-        "turn_started",
-        "item_started",
-        "item_delta",
-        "item_completed",
-        "assistant_text_committed",
-        "turn_metrics",
-        "turn_completed",
-        "turn_error"
+        "queued",
+        "running",
+        "waitingForInput",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    },
+    "AgentMessageRole": {
+      "description": "Author of one canonical Agent message.",
+      "enum": [
+        "user",
+        "agent",
+        "tool",
+        "system"
+      ],
+      "type": "string"
+    },
+    "AgentMessageStarted": {
+      "additionalProperties": false,
+      "description": "Started snapshot of one canonical Agent message.",
+      "properties": {
+        "message": {
+          "$ref": "#/definitions/AgentMessage"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    },
+    "AgentMessageStatus": {
+      "description": "Lifecycle status of one canonical Agent message.",
+      "enum": [
+        "inProgress",
+        "completed",
+        "failed",
+        "cancelled"
       ],
       "type": "string"
     },
     "AgentPath": {
       "description": "Canonical logical address of one node inside a Primary Session Agent tree.\n\nThis type owns path parsing and ancestry rules. Session IDs remain the durable execution identity and must not be inferred from this path.",
       "type": "string"
+    },
+    "AgentPendingInput": {
+      "description": "Typed input required before the logical Turn can continue.",
+      "oneOf": [
+        {
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "prompt": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "message"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action_id",
+            "prompt",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action": {
+              "$ref": "#/definitions/PendingUserAction"
+            },
+            "type": {
+              "enum": [
+                "userAction"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentReasoning": {
+      "additionalProperties": false,
+      "description": "Model reasoning content safe to expose through the Agent API.",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "AgentRunFailure": {
+      "description": "Canonical failed Turn result preserving visible partial output.",
+      "properties": {
+        "failure": {
+          "$ref": "#/definitions/AgentTurnFailed"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/AgentMessage"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "$ref": "#/definitions/AgentRunMetrics"
+        }
+      },
+      "required": [
+        "failure",
+        "messages",
+        "metrics"
+      ],
+      "type": "object"
+    },
+    "AgentRunMetrics": {
+      "additionalProperties": false,
+      "description": "Aggregated execution metrics that do not duplicate terminal outcome.",
+      "properties": {
+        "context": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ContextUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Last measured model context window after this invocation."
+        },
+        "durationMs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "modelRounds": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "toolCalls": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "toolErrors": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "toolSuccesses": {
+          "format": "uint32",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "usage": {
+          "$ref": "#/definitions/TokenUsage"
+        }
+      },
+      "required": [
+        "modelRounds",
+        "toolCalls",
+        "toolErrors",
+        "toolSuccesses",
+        "usage"
+      ],
+      "type": "object"
+    },
+    "AgentRunOutput": {
+      "description": "Canonical successful Turn result derived by Harness from one reducer.",
+      "properties": {
+        "completion": {
+          "$ref": "#/definitions/AgentTurnCompleted"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/definitions/AgentMessage"
+          },
+          "type": "array"
+        },
+        "metrics": {
+          "$ref": "#/definitions/AgentRunMetrics"
+        }
+      },
+      "required": [
+        "completion",
+        "messages",
+        "metrics"
+      ],
+      "type": "object"
+    },
+    "AgentRunResult": {
+      "description": "Unique completed or failed result of one logical Agent Turn.",
+      "oneOf": [
+        {
+          "properties": {
+            "result": {
+              "$ref": "#/definitions/AgentRunOutput"
+            },
+            "status": {
+              "enum": [
+                "completed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "result",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "result": {
+              "$ref": "#/definitions/AgentRunFailure"
+            },
+            "status": {
+              "enum": [
+                "failed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "result",
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentStopReason": {
+      "description": "Provider-neutral successful stop reason.",
+      "enum": [
+        "endTurn",
+        "outputLimit",
+        "transferUnresolved"
+      ],
+      "type": "string"
+    },
+    "AgentSystemNotice": {
+      "additionalProperties": false,
+      "description": "Typed system notice emitted as part of Agent execution history.",
+      "properties": {
+        "level": {
+          "$ref": "#/definitions/TalosTimelineNoticeLevel"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "message"
+      ],
+      "type": "object"
+    },
+    "AgentToolCall": {
+      "additionalProperties": false,
+      "description": "Typed Tool invocation emitted by an Agent Provider.",
+      "properties": {
+        "arguments": {
+          "$ref": "#/definitions/AgentToolCallArguments"
+        },
+        "callId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "progress": {
+          "items": {
+            "$ref": "#/definitions/AgentToolProgress"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "arguments",
+        "callId",
+        "name",
+        "progress"
+      ],
+      "type": "object"
+    },
+    "AgentToolCallArguments": {
+      "description": "Structured lifecycle of streamed Tool arguments.",
+      "oneOf": [
+        {
+          "properties": {
+            "json_fragment": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "streaming"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "json_fragment",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "state": {
+              "enum": [
+                "complete"
+              ],
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/definitions/ToolArguments"
+            }
+          },
+          "required": [
+            "state",
+            "value"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentToolCallArgumentsDelta": {
+      "additionalProperties": false,
+      "description": "Incremental JSON fragment for one Tool call argument object.",
+      "properties": {
+        "jsonFragment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "jsonFragment"
+      ],
+      "type": "object"
+    },
+    "AgentToolProgress": {
+      "additionalProperties": false,
+      "description": "One typed progress observation for a running Tool call.",
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/TalosToolProgressKind"
+        },
+        "occurredAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "occurredAt",
+        "text"
+      ],
+      "type": "object"
+    },
+    "AgentToolResult": {
+      "additionalProperties": false,
+      "description": "Typed Tool result linked to one Tool invocation by `call_id`.",
+      "properties": {
+        "callId": {
+          "type": "string"
+        },
+        "content": {
+          "items": {
+            "$ref": "#/definitions/TalosContentItem"
+          },
+          "type": "array"
+        },
+        "isError": {
+          "type": "boolean"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "callId",
+        "content",
+        "isError",
+        "toolName"
+      ],
+      "type": "object"
     },
     "AgentTreeNode": {
       "description": "One Agent tree node and its direct child nodes.",
@@ -413,8 +1314,34 @@
       ],
       "type": "object"
     },
+    "AgentTurnCompleted": {
+      "additionalProperties": false,
+      "description": "Successful terminal metadata for one logical Turn.",
+      "properties": {
+        "stopReason": {
+          "$ref": "#/definitions/AgentStopReason"
+        }
+      },
+      "required": [
+        "stopReason"
+      ],
+      "type": "object"
+    },
+    "AgentTurnFailed": {
+      "additionalProperties": false,
+      "description": "Failed terminal metadata for one logical Turn.",
+      "properties": {
+        "error": {
+          "$ref": "#/definitions/AgentErrorInfo"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
     "AgentTurnRef": {
-      "description": "Exact Session Turn identity constructed by a trusted application adapter.",
+      "description": "Canonical exact reference to one logical Session Turn.\n\nService, Agent execution, events, persistence, protocols, and collaboration reuse this value instead of defining boundary-specific identity objects.",
       "properties": {
         "sessionId": {
           "type": "string"
@@ -429,19 +1356,156 @@
       ],
       "type": "object"
     },
-    "ApiError": {
-      "description": "Public application error object shared by server and SDKs.\n\n`message` is an English fallback derived from `code`. Clients must branch on `code` and apply localization outside the backend.",
-      "properties": {
-        "code": {
-          "$ref": "#/definitions/ErrorCode"
+    "AgentTurnStarted": {
+      "description": "Marker payload for the unique start of one logical Turn.",
+      "type": "object"
+    },
+    "AgentUserContent": {
+      "description": "Ordered User-authored content accepted by every Turn input API.",
+      "oneOf": [
+        {
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
         },
-        "message": {
-          "type": "string"
+        {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "skillSelection"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "path",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "file_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "file"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "file_id",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/definitions/AgentMediaSource"
+            },
+            "type": {
+              "enum": [
+                "audio"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "source": {
+              "$ref": "#/definitions/AgentMediaSource"
+            },
+            "type": {
+              "enum": [
+                "video"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/definitions/UserActionResponse"
+            },
+            "type": {
+              "enum": [
+                "userActionResponse"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action_id",
+            "response",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AgentUserInput": {
+      "additionalProperties": false,
+      "description": "Untrusted typed content submitted by an Agent API caller.",
+      "properties": {
+        "content": {
+          "items": {
+            "$ref": "#/definitions/AgentUserContent"
+          },
+          "type": "array"
         }
       },
       "required": [
-        "code",
-        "message"
+        "content"
       ],
       "type": "object"
     },
@@ -610,6 +1674,9 @@
     },
     "ClientInfo": {
       "properties": {
+        "kind": {
+          "$ref": "#/definitions/ClientKind"
+        },
         "name": {
           "type": "string"
         },
@@ -625,105 +1692,19 @@
         }
       },
       "required": [
+        "kind",
         "name",
         "version"
       ],
       "type": "object"
     },
-    "ClientMethod": {
+    "ClientKind": {
       "enum": [
-        "initialize",
-        "profile/read",
-        "session.list",
-        "session.get",
-        "session.patch",
-        "session.delete",
-        "session.close",
-        "session.compact",
-        "session.clear",
-        "session.active_turn",
-        "session.history",
-        "timeline.recover",
-        "project.create",
-        "project.list",
-        "project.read",
-        "project.patch",
-        "project.delete",
-        "fs.directory.read",
-        "fs.directory.create",
-        "turn.start",
-        "turn.interrupt",
-        "turn.retry",
-        "messageQueue/add",
-        "messageQueue/list",
-        "messageQueue/update",
-        "messageQueue/delete",
-        "messageQueue/reorder",
-        "messageQueue/start",
-        "messageQueue/steer",
-        "event.subscribe",
-        "event.unsubscribe",
-        "tool.dynamic_result.submit",
-        "userAction/submit",
-        "model.list",
-        "config.get",
-        "config.update",
-        "config.delete",
-        "config.reload",
-        "file/upload",
-        "file/list",
-        "file/read",
-        "file/update",
-        "file/delete",
-        "memory.file.list",
-        "memory.file.read",
-        "memory.file.write",
-        "workspace.doc.list",
-        "workspace.doc.read",
-        "workspace.doc.write",
-        "skills.list",
-        "skills.refresh",
-        "skills.suggest",
-        "skills.read",
-        "skills.resolve",
-        "plugin.source.list",
-        "plugin.source.add",
-        "plugin.source.refresh",
-        "plugin.source.remove",
-        "plugin.search",
-        "plugin.list",
-        "plugin.read",
-        "plugin.install",
-        "plugin.update",
-        "plugin.uninstall",
-        "plugin.enable",
-        "plugin.disable",
-        "auth.logout",
-        "auth.login.start",
-        "auth.login.status",
-        "auth.login.cancel",
-        "auth.session.read",
-        "auth.session.clear",
-        "user.current",
-        "memory/search",
-        "memory/get"
+        "desktop",
+        "cli",
+        "sdk"
       ],
       "type": "string"
-    },
-    "ClientRequest": {
-      "properties": {
-        "method": {
-          "$ref": "#/definitions/ClientMethod"
-        },
-        "params": {
-          "$ref": "#/definitions/ClientRequestParams"
-        }
-      },
-      "required": [
-        "method",
-        "params"
-      ],
-      "type": "object"
     },
     "ClientRequestParams": {
       "oneOf": [
@@ -767,7 +1748,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.list"
+                "session/list"
               ],
               "type": "string"
             },
@@ -785,7 +1766,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.get"
+                "session/get"
               ],
               "type": "string"
             },
@@ -803,7 +1784,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.patch"
+                "session/patch"
               ],
               "type": "string"
             },
@@ -821,7 +1802,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.delete"
+                "session/delete"
               ],
               "type": "string"
             },
@@ -839,7 +1820,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.close"
+                "session/close"
               ],
               "type": "string"
             },
@@ -857,7 +1838,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.compact"
+                "session/compact"
               ],
               "type": "string"
             },
@@ -875,7 +1856,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.clear"
+                "session/clear"
               ],
               "type": "string"
             },
@@ -893,7 +1874,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.active_turn"
+                "session/active_turn"
               ],
               "type": "string"
             },
@@ -911,7 +1892,7 @@
           "properties": {
             "method": {
               "enum": [
-                "session.history"
+                "session/history"
               ],
               "type": "string"
             },
@@ -929,7 +1910,7 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.recover"
+                "timeline/recover"
               ],
               "type": "string"
             },
@@ -947,7 +1928,7 @@
           "properties": {
             "method": {
               "enum": [
-                "project.create"
+                "project/create"
               ],
               "type": "string"
             },
@@ -965,7 +1946,7 @@
           "properties": {
             "method": {
               "enum": [
-                "project.list"
+                "project/list"
               ],
               "type": "string"
             },
@@ -983,7 +1964,7 @@
           "properties": {
             "method": {
               "enum": [
-                "project.read"
+                "project/read"
               ],
               "type": "string"
             },
@@ -1001,7 +1982,7 @@
           "properties": {
             "method": {
               "enum": [
-                "project.patch"
+                "project/patch"
               ],
               "type": "string"
             },
@@ -1019,7 +2000,7 @@
           "properties": {
             "method": {
               "enum": [
-                "project.delete"
+                "project/delete"
               ],
               "type": "string"
             },
@@ -1037,7 +2018,7 @@
           "properties": {
             "method": {
               "enum": [
-                "fs.directory.read"
+                "fs/directory/read"
               ],
               "type": "string"
             },
@@ -1055,7 +2036,7 @@
           "properties": {
             "method": {
               "enum": [
-                "fs.directory.create"
+                "fs/directory/create"
               ],
               "type": "string"
             },
@@ -1073,7 +2054,7 @@
           "properties": {
             "method": {
               "enum": [
-                "turn.start"
+                "turn/start"
               ],
               "type": "string"
             },
@@ -1091,7 +2072,7 @@
           "properties": {
             "method": {
               "enum": [
-                "turn.interrupt"
+                "turn/interrupt"
               ],
               "type": "string"
             },
@@ -1109,7 +2090,25 @@
           "properties": {
             "method": {
               "enum": [
-                "turn.retry"
+                "turn/input"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SubmitTurnInputRequest"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "turn/retry"
               ],
               "type": "string"
             },
@@ -1235,25 +2234,7 @@
           "properties": {
             "method": {
               "enum": [
-                "messageQueue/steer"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/MessageQueueSteerRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "event.subscribe"
+                "event/subscribe"
               ],
               "type": "string"
             },
@@ -1271,7 +2252,7 @@
           "properties": {
             "method": {
               "enum": [
-                "event.unsubscribe"
+                "event/unsubscribe"
               ],
               "type": "string"
             },
@@ -1289,43 +2270,7 @@
           "properties": {
             "method": {
               "enum": [
-                "tool.dynamic_result.submit"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/SubmitDynamicToolResultRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "userAction/submit"
-              ],
-              "type": "string"
-            },
-            "params": {
-              "$ref": "#/definitions/SubmitUserActionRequest"
-            }
-          },
-          "required": [
-            "method",
-            "params"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "method": {
-              "enum": [
-                "model.list"
+                "model/list"
               ],
               "type": "string"
             },
@@ -1343,7 +2288,7 @@
           "properties": {
             "method": {
               "enum": [
-                "config.get"
+                "config/get"
               ],
               "type": "string"
             },
@@ -1361,7 +2306,7 @@
           "properties": {
             "method": {
               "enum": [
-                "config.update"
+                "config/update"
               ],
               "type": "string"
             },
@@ -1379,7 +2324,7 @@
           "properties": {
             "method": {
               "enum": [
-                "config.delete"
+                "config/delete"
               ],
               "type": "string"
             },
@@ -1397,7 +2342,7 @@
           "properties": {
             "method": {
               "enum": [
-                "config.reload"
+                "config/reload"
               ],
               "type": "string"
             },
@@ -1505,7 +2450,7 @@
           "properties": {
             "method": {
               "enum": [
-                "memory.file.list"
+                "memory/file/list"
               ],
               "type": "string"
             },
@@ -1523,7 +2468,7 @@
           "properties": {
             "method": {
               "enum": [
-                "memory.file.read"
+                "memory/file/read"
               ],
               "type": "string"
             },
@@ -1541,7 +2486,7 @@
           "properties": {
             "method": {
               "enum": [
-                "memory.file.write"
+                "memory/file/write"
               ],
               "type": "string"
             },
@@ -1559,7 +2504,7 @@
           "properties": {
             "method": {
               "enum": [
-                "workspace.doc.list"
+                "workspace/doc/list"
               ],
               "type": "string"
             },
@@ -1577,7 +2522,7 @@
           "properties": {
             "method": {
               "enum": [
-                "workspace.doc.read"
+                "workspace/doc/read"
               ],
               "type": "string"
             },
@@ -1595,7 +2540,7 @@
           "properties": {
             "method": {
               "enum": [
-                "workspace.doc.write"
+                "workspace/doc/write"
               ],
               "type": "string"
             },
@@ -1613,7 +2558,7 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.list"
+                "skills/list"
               ],
               "type": "string"
             },
@@ -1631,7 +2576,7 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.refresh"
+                "skills/refresh"
               ],
               "type": "string"
             },
@@ -1649,7 +2594,7 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.suggest"
+                "skills/suggest"
               ],
               "type": "string"
             },
@@ -1667,7 +2612,7 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.read"
+                "skills/read"
               ],
               "type": "string"
             },
@@ -1685,7 +2630,7 @@
           "properties": {
             "method": {
               "enum": [
-                "skills.resolve"
+                "skills/resolve"
               ],
               "type": "string"
             },
@@ -1703,7 +2648,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.source.list"
+                "plugin/source/list"
               ],
               "type": "string"
             },
@@ -1721,7 +2666,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.source.add"
+                "plugin/source/add"
               ],
               "type": "string"
             },
@@ -1739,7 +2684,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.source.refresh"
+                "plugin/source/refresh"
               ],
               "type": "string"
             },
@@ -1757,7 +2702,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.source.remove"
+                "plugin/source/remove"
               ],
               "type": "string"
             },
@@ -1775,7 +2720,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.search"
+                "plugin/search"
               ],
               "type": "string"
             },
@@ -1793,7 +2738,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.list"
+                "plugin/list"
               ],
               "type": "string"
             },
@@ -1811,7 +2756,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.read"
+                "plugin/read"
               ],
               "type": "string"
             },
@@ -1829,7 +2774,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.install"
+                "plugin/install"
               ],
               "type": "string"
             },
@@ -1847,7 +2792,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.update"
+                "plugin/update"
               ],
               "type": "string"
             },
@@ -1865,7 +2810,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.uninstall"
+                "plugin/uninstall"
               ],
               "type": "string"
             },
@@ -1883,7 +2828,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.enable"
+                "plugin/enable"
               ],
               "type": "string"
             },
@@ -1901,7 +2846,7 @@
           "properties": {
             "method": {
               "enum": [
-                "plugin.disable"
+                "plugin/disable"
               ],
               "type": "string"
             },
@@ -1919,7 +2864,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.logout"
+                "auth/logout"
               ],
               "type": "string"
             },
@@ -1937,7 +2882,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.login.start"
+                "auth/login/start"
               ],
               "type": "string"
             },
@@ -1955,7 +2900,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.login.status"
+                "auth/login/status"
               ],
               "type": "string"
             },
@@ -1973,7 +2918,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.login.cancel"
+                "auth/login/cancel"
               ],
               "type": "string"
             },
@@ -1991,7 +2936,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.session.read"
+                "auth/session/read"
               ],
               "type": "string"
             },
@@ -2009,7 +2954,7 @@
           "properties": {
             "method": {
               "enum": [
-                "auth.session.clear"
+                "auth/session/clear"
               ],
               "type": "string"
             },
@@ -2027,7 +2972,7 @@
           "properties": {
             "method": {
               "enum": [
-                "user.current"
+                "user/current"
               ],
               "type": "string"
             },
@@ -2687,19 +3632,21 @@
       "type": "string"
     },
     "EventUnsubscribeRequest": {
+      "additionalProperties": false,
       "properties": {
-        "subscription_id": {
+        "subscriptionId": {
           "type": "string"
         }
       },
       "required": [
-        "subscription_id"
+        "subscriptionId"
       ],
       "type": "object"
     },
     "EventUnsubscribeResponse": {
+      "additionalProperties": false,
       "properties": {
-        "subscription_id": {
+        "subscriptionId": {
           "type": "string"
         },
         "unsubscribed": {
@@ -2707,7 +3654,7 @@
         }
       },
       "required": [
-        "subscription_id",
+        "subscriptionId",
         "unsubscribed"
       ],
       "type": "object"
@@ -3097,40 +4044,36 @@
       "type": "object"
     },
     "InterruptTurnRequest": {
+      "additionalProperties": false,
+      "description": "Public request for interrupting one exact Turn.",
       "properties": {
-        "session_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "type": "string"
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
         }
       },
       "required": [
-        "session_id",
-        "turn_id"
+        "identity"
       ],
       "type": "object"
     },
     "InterruptTurnResponse": {
+      "additionalProperties": false,
+      "description": "Public response for one exact Turn interruption request.",
       "properties": {
-        "success": {
-          "type": "boolean"
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "outcome": {
+          "$ref": "#/definitions/AgentInterruptOutcome"
         }
       },
       "required": [
-        "success"
+        "identity",
+        "outcome"
       ],
       "type": "object"
     },
     "JsonContentValue": {
-      "properties": {
-        "value": {
-          "type": "object"
-        }
-      },
-      "required": [
-        "value"
-      ],
       "type": "object"
     },
     "JsonRpcErrorResponse": {
@@ -3577,10 +4520,7 @@
       "description": "Parameters for adding one message to a Session queue.",
       "properties": {
         "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
+          "$ref": "#/definitions/AgentUserInput"
         },
         "sessionId": {
           "type": "string"
@@ -3675,34 +4615,11 @@
       ],
       "type": "object"
     },
-    "MessageQueueSteerRequest": {
-      "description": "Parameters for steering one waiting message into an exact active Turn.",
-      "properties": {
-        "messageId": {
-          "type": "string"
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "messageId",
-        "sessionId",
-        "turnId"
-      ],
-      "type": "object"
-    },
     "MessageQueueUpdateRequest": {
       "description": "Parameters for replacing one waiting message.",
       "properties": {
         "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
+          "$ref": "#/definitions/AgentUserInput"
         },
         "messageId": {
           "type": "string"
@@ -4563,10 +5480,7 @@
           "type": "string"
         },
         "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
+          "$ref": "#/definitions/AgentUserInput"
         }
       },
       "required": [
@@ -4585,15 +5499,16 @@
       "type": "string"
     },
     "RecoverTimelineRequest": {
+      "additionalProperties": false,
       "properties": {
-        "after_event_id": {
+        "afterEventId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "replay_limit": {
+        "replayLimit": {
           "default": null,
           "format": "uint",
           "minimum": 0.0,
@@ -4602,12 +5517,35 @@
             "null"
           ]
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "RecoverTimelineResponse": {
+      "additionalProperties": false,
+      "description": "Canonical Timeline recovery result shared by every transport.",
+      "properties": {
+        "activeTurn": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TimelineActiveTurn"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replay": {
+          "$ref": "#/definitions/TimelineReplay"
+        }
+      },
+      "required": [
+        "replay"
       ],
       "type": "object"
     },
@@ -4636,57 +5574,24 @@
     "RetryTurnRequest": {
       "additionalProperties": false,
       "properties": {
-        "client_message_id": {
+        "clientMessageId": {
           "type": "string"
         },
         "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
+          "$ref": "#/definitions/AgentUserInput"
         },
-        "retry_of_message_id": {
+        "retryOfMessageId": {
           "type": "string"
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "client_message_id",
+        "clientMessageId",
         "input",
-        "retry_of_message_id",
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "RetryTurnResponse": {
-      "properties": {
-        "message_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "request_id": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "status": {
-          "$ref": "#/definitions/TurnCommandStatus"
-        },
-        "turn_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "request_id",
-        "session_id",
-        "status",
-        "turn_id"
+        "retryOfMessageId",
+        "sessionId"
       ],
       "type": "object"
     },
@@ -4894,12 +5799,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.turn.started"
+                "timeline/turn/started"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -4912,12 +5817,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.item.started"
+                "timeline/message/started"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -4930,12 +5835,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.item.delta"
+                "timeline/message/block/started"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -4948,12 +5853,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.item.completed"
+                "timeline/message/block/delta"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -4966,12 +5871,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.assistant_text.committed"
+                "timeline/message/block/completed"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -4984,12 +5889,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.turn.metrics"
+                "timeline/message/completed"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -5002,12 +5907,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.turn.completed"
+                "timeline/waiting_for_input"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -5020,12 +5925,12 @@
           "properties": {
             "method": {
               "enum": [
-                "timeline.turn.error"
+                "timeline/metrics/updated"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/TimelineSubscriptionNotification"
+              "$ref": "#/definitions/TimelineEventNotification"
             }
           },
           "required": [
@@ -5038,12 +5943,48 @@
           "properties": {
             "method": {
               "enum": [
-                "subscription.terminated"
+                "timeline/turn/completed"
               ],
               "type": "string"
             },
             "params": {
-              "$ref": "#/definitions/SubscriptionTerminatedEnvelope"
+              "$ref": "#/definitions/TimelineEventNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "timeline/turn/failed"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TimelineEventNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "subscription/terminated"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/SubscriptionTerminatedNotification"
             }
           },
           "required": [
@@ -5078,7 +6019,7 @@
           "properties": {
             "method": {
               "enum": [
-                "client.user_input.request"
+                "client/user_input/request"
               ],
               "type": "string"
             },
@@ -5095,46 +6036,50 @@
       ]
     },
     "SessionActiveTurnRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SessionClearRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SessionCloseRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SessionCompactRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
@@ -5168,28 +6113,31 @@
       "type": "object"
     },
     "SessionDeleteRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SessionGetRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SessionGetResponse": {
+      "additionalProperties": false,
       "properties": {
         "session": {
           "$ref": "#/definitions/SessionInfo"
@@ -5200,112 +6148,93 @@
       ],
       "type": "object"
     },
-    "SessionHistoryMessage": {
-      "description": "Stable message view for session history.",
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/definitions/TalosTimelineItem"
-          },
-          "type": "array"
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "metrics": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TurnExecutionMetrics"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "stop_reason": {
-          "$ref": "#/definitions/StopReason"
-        },
-        "turn_id": {
-          "type": "string"
-        },
-        "usage": {
-          "$ref": "#/definitions/TokenUsage"
-        }
-      },
-      "required": [
-        "items",
-        "message_id",
-        "stop_reason",
-        "turn_id",
-        "usage"
-      ],
-      "type": "object"
-    },
     "SessionHistoryRequest": {
+      "additionalProperties": false,
       "properties": {
-        "session_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "session_id"
-      ],
-      "type": "object"
-    },
-    "SessionHistoryResponse": {
-      "properties": {
-        "history": {
-          "$ref": "#/definitions/SessionHistorySnapshot"
-        }
-      },
-      "required": [
-        "history"
-      ],
-      "type": "object"
-    },
-    "SessionHistorySnapshot": {
-      "description": "Stable session history snapshot. This is not a replay cursor envelope.",
-      "properties": {
-        "generated_at_ms": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "last_stable_event_id": {
-          "default": null,
+        "cursor": {
           "type": [
             "string",
             "null"
           ]
         },
-        "messages": {
-          "items": {
-            "$ref": "#/definitions/SessionHistoryMessage"
-          },
-          "type": "array"
+        "limit": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         }
       },
       "required": [
-        "generated_at_ms",
-        "messages",
-        "session_id"
+        "sessionId"
+      ],
+      "type": "object"
+    },
+    "SessionHistoryResponse": {
+      "additionalProperties": false,
+      "description": "Bounded canonical Session history shared by every transport and SDK.",
+      "properties": {
+        "data": {
+          "items": {
+            "$ref": "#/definitions/SessionHistoryTurn"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "data"
+      ],
+      "type": "object"
+    },
+    "SessionHistoryTurn": {
+      "additionalProperties": false,
+      "description": "One terminal Turn in canonical Session history.",
+      "properties": {
+        "completedAt": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "completedEventSeq": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "result": {
+          "$ref": "#/definitions/AgentRunResult"
+        }
+      },
+      "required": [
+        "completedAt",
+        "completedEventSeq",
+        "identity",
+        "result"
       ],
       "type": "object"
     },
     "SessionInfo": {
+      "additionalProperties": false,
       "properties": {
         "configuredDefaultMode": {
           "$ref": "#/definitions/UserPermissionMode"
         },
-        "created_at": {
+        "createdAt": {
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
-        "current_directory": {
+        "currentDirectory": {
           "default": null,
           "type": [
             "string",
@@ -5318,12 +6247,12 @@
         "id": {
           "type": "string"
         },
-        "last_activity": {
+        "lastActivity": {
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
         },
-        "message_count": {
+        "messageCount": {
           "format": "uint64",
           "minimum": 0.0,
           "type": "integer"
@@ -5331,18 +6260,18 @@
         "modelSelection": {
           "$ref": "#/definitions/ModelSelection"
         },
-        "project_id": {
+        "projectId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "provider": {
-          "$ref": "#/definitions/TalosProvider"
+        "sourceProvider": {
+          "$ref": "#/definitions/SessionSourceProvider"
         },
-        "source_type": {
-          "$ref": "#/definitions/TalosSourceType"
+        "sourceType": {
+          "$ref": "#/definitions/SessionSourceType"
         },
         "title": {
           "type": "string"
@@ -5364,26 +6293,27 @@
             }
           }
         },
-        "user_id": {
+        "userId": {
           "type": "string"
         }
       },
       "required": [
         "configuredDefaultMode",
-        "created_at",
+        "createdAt",
         "effectiveMode",
         "id",
-        "last_activity",
-        "message_count",
+        "lastActivity",
+        "messageCount",
         "modelSelection",
-        "provider",
-        "source_type",
+        "sourceProvider",
+        "sourceType",
         "title",
-        "user_id"
+        "userId"
       ],
       "type": "object"
     },
     "SessionListRequest": {
+      "additionalProperties": false,
       "properties": {
         "limit": {
           "default": null,
@@ -5403,7 +6333,7 @@
             "null"
           ]
         },
-        "project_id": {
+        "projectId": {
           "default": null,
           "type": [
             "string",
@@ -5427,7 +6357,7 @@
           ],
           "default": null
         },
-        "current_directory": {
+        "currentDirectory": {
           "anyOf": [
             {
               "$ref": "#/definitions/OptionalCurrentDirectoryPatch"
@@ -5438,12 +6368,36 @@
           ],
           "default": null
         },
-        "session_id": {
+        "sessionId": {
           "default": "",
           "type": "string"
         }
       },
       "type": "object"
+    },
+    "SessionSourceProvider": {
+      "description": "Concrete source provider.",
+      "enum": [
+        "http",
+        "sdk",
+        "cli",
+        "telegram",
+        "web_socket",
+        "system"
+      ],
+      "type": "string"
+    },
+    "SessionSourceType": {
+      "description": "High-level source category.",
+      "enum": [
+        "http",
+        "desktop",
+        "im",
+        "cli",
+        "ws",
+        "system"
+      ],
+      "type": "string"
     },
     "SessionUsage": {
       "description": "Session-owned usage combining cumulative token accounting with the latest context snapshot.",
@@ -5548,25 +6502,14 @@
       "additionalProperties": false,
       "description": "Request payload used by clients to start a turn in a session.",
       "properties": {
-        "client_request_id": {
+        "clientRequestId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "context": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TalosContext"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "current_directory": {
+        "currentDirectory": {
           "default": null,
           "type": [
             "string",
@@ -5574,10 +6517,7 @@
           ]
         },
         "input": {
-          "items": {
-            "$ref": "#/definitions/TalosInputItem"
-          },
-          "type": "array"
+          "$ref": "#/definitions/AgentUserInput"
         },
         "modelSelection": {
           "anyOf": [
@@ -5591,14 +6531,14 @@
           "default": null,
           "description": "Explicit model selection for this turn; absent means use the session or configured default."
         },
-        "project_id": {
+        "projectId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
         "userPermissionMode": {
@@ -5616,49 +6556,40 @@
       },
       "required": [
         "input",
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "StartTurnResponse": {
+      "additionalProperties": false,
       "properties": {
-        "message_id": {
+        "messageId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "request_id": {
+        "requestId": {
           "type": "string"
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
         "status": {
           "$ref": "#/definitions/TurnCommandStatus"
         },
-        "turn_id": {
+        "turnId": {
           "type": "string"
         }
       },
       "required": [
-        "request_id",
-        "session_id",
+        "requestId",
+        "sessionId",
         "status",
-        "turn_id"
+        "turnId"
       ],
       "type": "object"
-    },
-    "StopReason": {
-      "enum": [
-        "end_turn",
-        "model_output_limit",
-        "waiting_user_action",
-        "transfer_unresolved",
-        "cancelled"
-      ],
-      "type": "string"
     },
     "SubagentOutcome": {
       "description": "Current state projected from the child Session's existing Turn facts.",
@@ -5887,102 +6818,134 @@
       ],
       "type": "string"
     },
-    "SubmitDynamicToolResultRequest": {
-      "properties": {
-        "call_id": {
-          "type": "string"
+    "SubmitTurnInput": {
+      "description": "Typed input accepted by one exact nonterminal Turn.",
+      "oneOf": [
+        {
+          "description": "Submit new User-authored content directly to a running Turn.",
+          "properties": {
+            "input": {
+              "$ref": "#/definitions/AgentUserInput"
+            },
+            "type": {
+              "enum": [
+                "message"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "type"
+          ],
+          "type": "object"
         },
-        "output": {
-          "type": "string"
+        {
+          "description": "Atomically consume one queued message and deliver it to a running Turn.",
+          "properties": {
+            "message_id": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "queuedMessage"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "message_id",
+            "type"
+          ],
+          "type": "object"
         },
-        "session_id": {
-          "type": "string"
-        },
-        "success": {
-          "type": "boolean"
-        },
-        "tool_name": {
-          "type": "string"
+        {
+          "description": "Answer the exact pending UserAction of a waiting Turn.",
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "response": {
+              "$ref": "#/definitions/UserActionResponse"
+            },
+            "type": {
+              "enum": [
+                "userActionResponse"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "action_id",
+            "response",
+            "type"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "call_id",
-        "output",
-        "session_id",
-        "success",
-        "tool_name"
-      ],
-      "type": "object"
+      ]
     },
-    "SubmitDynamicToolResultResponse": {
-      "properties": {
-        "success": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "success"
-      ],
-      "type": "object"
-    },
-    "SubmitUserActionRequest": {
+    "SubmitTurnInputRequest": {
       "additionalProperties": false,
-      "description": "Request accepted by the application service to answer one pending user action.",
+      "description": "Public request for delivering input to one exact nonterminal Turn.",
       "properties": {
-        "actionId": {
-          "type": "string"
+        "clientRequestId": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "response": {
-          "$ref": "#/definitions/UserActionResponse"
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
         },
-        "sessionId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
+        "input": {
+          "$ref": "#/definitions/SubmitTurnInput"
         }
       },
       "required": [
-        "actionId",
-        "response",
-        "sessionId",
-        "turnId"
+        "identity",
+        "input"
       ],
       "type": "object"
     },
-    "SubmitUserActionResponse": {
-      "description": "Current durable state returned after a user-action response is submitted.",
+    "SubmitTurnInputResponse": {
+      "additionalProperties": false,
+      "description": "Durable acknowledgement returned after Turn input is accepted.",
       "properties": {
-        "actionId": {
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "messageId": {
           "type": "string"
         },
-        "state": {
-          "$ref": "#/definitions/UserActionState"
+        "requestId": {
+          "type": "string"
         }
       },
       "required": [
-        "actionId",
-        "state"
+        "identity",
+        "messageId",
+        "requestId"
       ],
       "type": "object"
     },
     "SubscribeTimelineRequest": {
+      "additionalProperties": false,
       "properties": {
-        "close_on_terminal": {
+        "closeOnTerminal": {
           "default": null,
           "type": [
             "boolean",
             "null"
           ]
         },
-        "close_when_idle": {
+        "closeWhenIdle": {
           "default": null,
           "type": [
             "boolean",
             "null"
           ]
         },
-        "replay_limit": {
+        "replayLimit": {
           "default": null,
           "format": "uint",
           "minimum": 0.0,
@@ -5991,17 +6954,17 @@
             "null"
           ]
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
-        "since_event_id": {
+        "sinceEventId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "turn_id": {
+        "turnId": {
           "default": null,
           "type": [
             "string",
@@ -6010,33 +6973,34 @@
         }
       },
       "required": [
-        "session_id"
+        "sessionId"
       ],
       "type": "object"
     },
     "SubscribeTimelineResponse": {
+      "additionalProperties": false,
       "properties": {
-        "high_water_mark_event_id": {
+        "highWaterMarkEventId": {
           "default": null,
           "type": [
             "string",
             "null"
           ]
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
-        "subscription_id": {
+        "subscriptionId": {
           "type": "string"
         }
       },
       "required": [
-        "session_id",
-        "subscription_id"
+        "sessionId",
+        "subscriptionId"
       ],
       "type": "object"
     },
-    "SubscriptionTerminatedEnvelope": {
+    "SubscriptionTerminatedNotification": {
       "properties": {
         "message": {
           "type": "string"
@@ -6044,18 +7008,18 @@
         "reason": {
           "$ref": "#/definitions/SubscriptionTerminatedReason"
         },
-        "session_id": {
+        "sessionId": {
           "type": "string"
         },
-        "subscription_id": {
+        "subscriptionId": {
           "type": "string"
         }
       },
       "required": [
         "message",
         "reason",
-        "session_id",
-        "subscription_id"
+        "sessionId",
+        "subscriptionId"
       ],
       "type": "object"
     },
@@ -6067,14 +7031,6 @@
         "session_deleted",
         "lagged",
         "slow_consumer"
-      ],
-      "type": "string"
-    },
-    "TalosConnectionMode": {
-      "description": "Talos gateway protocol types shared by server and client components.",
-      "enum": [
-        "embedded",
-        "remote"
       ],
       "type": "string"
     },
@@ -6464,711 +7420,11 @@
         }
       ]
     },
-    "TalosContext": {
-      "description": "Cross-channel request context.",
-      "properties": {
-        "channel_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "environment": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/TalosSessionEnvironment"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "message_id": {
-          "type": "string"
-        },
-        "project_root": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "provider": {
-          "$ref": "#/definitions/TalosProvider"
-        },
-        "source_type": {
-          "$ref": "#/definitions/TalosSourceType"
-        },
-        "thread_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "trace_id": {
-          "type": "string"
-        },
-        "user_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "message_id",
-        "provider",
-        "source_type",
-        "trace_id",
-        "user_id"
-      ],
-      "type": "object"
-    },
-    "TalosInputItem": {
-      "description": "Talos message input item.",
-      "oneOf": [
-        {
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "text"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "text",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "name": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "skill_selection"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "name",
-            "path",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "fileIds": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "type": {
-              "enum": [
-                "files"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "fileIds",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "data_base64": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "mime_type": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "voice"
-              ],
-              "type": "string"
-            },
-            "url": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "mime_type": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "type": {
-              "enum": [
-                "video"
-              ],
-              "type": "string"
-            },
-            "url": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TalosProvider": {
-      "description": "Concrete source provider.",
-      "enum": [
-        "http",
-        "sdk",
-        "cli",
-        "telegram",
-        "web_socket",
-        "system"
-      ],
-      "type": "string"
-    },
-    "TalosSessionEnvironment": {
-      "properties": {
-        "connection_mode": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/TalosConnectionMode"
-            }
-          ],
-          "default": "remote"
-        },
-        "directory": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "directory"
-      ],
-      "type": "object"
-    },
-    "TalosSourceType": {
-      "description": "High-level source category.",
-      "enum": [
-        "http",
-        "desktop",
-        "im",
-        "cli",
-        "ws",
-        "system"
-      ],
-      "type": "string"
-    },
-    "TalosTimelineContent": {
-      "description": "Current full content for a timeline item.",
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "empty"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "text"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "text",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "fileIds": {
-              "default": [],
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "user_input"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "text",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments": {
-              "type": "string"
-            },
-            "call_id": {
-              "type": "string"
-            },
-            "name": {
-              "type": "string"
-            },
-            "progress": {
-              "default": [],
-              "items": {
-                "$ref": "#/definitions/TalosToolProgressEntry"
-              },
-              "type": "array"
-            },
-            "result": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/TalosToolResult"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "type": {
-              "enum": [
-                "tool_call"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments",
-            "call_id",
-            "name",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "summary": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "execution_summary"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "summary",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "message": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "metrics": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ContextCompactionMetrics"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "outcome": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ContextCompactionOutcome"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "stage": {
-              "$ref": "#/definitions/ContextCompactionStage"
-            },
-            "trigger": {
-              "$ref": "#/definitions/ContextCompactionTrigger"
-            },
-            "type": {
-              "enum": [
-                "context_compaction"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "stage",
-            "trigger",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "level": {
-              "$ref": "#/definitions/TalosTimelineNoticeLevel"
-            },
-            "message": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "system_notice"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "level",
-            "message",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TalosTimelineDelta": {
-      "description": "Incremental update for an existing timeline item.",
-      "oneOf": [
-        {
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "text"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "text",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "arguments_delta": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "tool_arguments"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "arguments_delta",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "progress_kind": {
-              "$ref": "#/definitions/TalosToolProgressKind"
-            },
-            "text_delta": {
-              "type": "string"
-            },
-            "type": {
-              "enum": [
-                "tool_progress"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "progress_kind",
-            "text_delta",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "content": {
-              "items": {
-                "$ref": "#/definitions/TalosContentItem"
-              },
-              "type": "array"
-            },
-            "is_error": {
-              "type": "boolean"
-            },
-            "type": {
-              "enum": [
-                "tool_result"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "content",
-            "is_error",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "event": {
-              "$ref": "#/definitions/TimelineUserActionEvent"
-            },
-            "type": {
-              "enum": [
-                "user_action"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "event",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "message": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "metrics": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ContextCompactionMetrics"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "outcome": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ContextCompactionOutcome"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "stage": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/ContextCompactionStage"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "type": {
-              "enum": [
-                "context_compaction"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "status": {
-              "$ref": "#/definitions/TalosTimelineItemStatus"
-            },
-            "type": {
-              "enum": [
-                "status"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "status",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "TalosTimelineItem": {
-      "properties": {
-        "completed_at_ms": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "content": {
-          "$ref": "#/definitions/TalosTimelineContent"
-        },
-        "item_id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/definitions/TalosTimelineItemKind"
-        },
-        "parent_item_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "phase": {
-          "$ref": "#/definitions/TalosTimelinePhase"
-        },
-        "started_at_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "status": {
-          "$ref": "#/definitions/TalosTimelineItemStatus"
-        },
-        "title": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "content",
-        "item_id",
-        "kind",
-        "phase",
-        "started_at_ms",
-        "status"
-      ],
-      "type": "object"
-    },
-    "TalosTimelineItemKind": {
-      "description": "Timeline item kind rendered by clients.",
-      "enum": [
-        "user_input",
-        "reasoning",
-        "assistant_text",
-        "tool_call",
-        "execution_summary",
-        "context_compaction",
-        "system_notice"
-      ],
-      "type": "string"
-    },
-    "TalosTimelineItemStatus": {
-      "enum": [
-        "queued",
-        "running",
-        "waiting_user_action",
-        "completed",
-        "failed",
-        "cancelled"
-      ],
-      "type": "string"
-    },
     "TalosTimelineNoticeLevel": {
       "enum": [
         "info",
         "warning",
         "error"
-      ],
-      "type": "string"
-    },
-    "TalosTimelinePhase": {
-      "description": "Server-normalized display-layer union of model, assistant, and kernel execution phases.",
-      "enum": [
-        "input",
-        "thinking",
-        "acting",
-        "unknown",
-        "commentary",
-        "final_answer",
-        "system"
       ],
       "type": "string"
     },
@@ -7309,27 +7565,6 @@
       ],
       "type": "object"
     },
-    "TalosToolProgressEntry": {
-      "properties": {
-        "progress_kind": {
-          "$ref": "#/definitions/TalosToolProgressKind"
-        },
-        "text": {
-          "type": "string"
-        },
-        "timestamp_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "progress_kind",
-        "text",
-        "timestamp_ms"
-      ],
-      "type": "object"
-    },
     "TalosToolProgressKind": {
       "enum": [
         "status",
@@ -7337,24 +7572,6 @@
         "stderr"
       ],
       "type": "string"
-    },
-    "TalosToolResult": {
-      "properties": {
-        "content": {
-          "items": {
-            "$ref": "#/definitions/TalosContentItem"
-          },
-          "type": "array"
-        },
-        "is_error": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "content",
-        "is_error"
-      ],
-      "type": "object"
     },
     "TalosToolSearchMatch": {
       "properties": {
@@ -7411,239 +7628,124 @@
       ],
       "type": "string"
     },
-    "TimelineActiveTurnSnapshot": {
+    "TimelineActiveTurn": {
+      "additionalProperties": false,
+      "description": "Current nonterminal Turn projection for one Session.",
       "properties": {
-        "last_event_id": {
-          "default": null,
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "initialMessageId": {
           "type": [
             "string",
             "null"
           ]
         },
-        "message_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_user_action": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/PendingUserAction"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "session_id": {
+        "lastEventId": {
           "type": "string"
         },
-        "status": {
-          "$ref": "#/definitions/TimelineActiveTurnStatus"
+        "state": {
+          "$ref": "#/definitions/ActiveTurnState"
         },
-        "turn_id": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "updated_at": {
+        "updatedAt": {
           "format": "int64",
           "type": "integer"
         }
       },
       "required": [
-        "session_id",
-        "status",
-        "updated_at"
+        "identity",
+        "lastEventId",
+        "state",
+        "updatedAt"
       ],
       "type": "object"
     },
-    "TimelineActiveTurnStatus": {
-      "enum": [
-        "running",
-        "waiting_user_action",
-        "cancelling",
-        "completed",
-        "failed"
-      ],
-      "type": "string"
-    },
     "TimelineCursorStatus": {
+      "description": "Interpretation of the cursor used for one Timeline replay.",
       "enum": [
         "current",
-        "from_beginning"
+        "fromBeginning"
       ],
       "type": "string"
     },
-    "TimelineEventEnvelope": {
-      "description": "Public recoverable timeline stream event.",
+    "TimelineEvent": {
+      "additionalProperties": false,
+      "description": "Persisted product event exposed by Timeline, history, protocols, and SDKs.\n\nService is the only layer allowed to combine Store persistence metadata with the canonical `AgentEvent`. Transport layers may frame this value but must not duplicate its Agent identity, sequence, or timestamp fields.",
       "properties": {
-        "created_at_ms": {
-          "format": "int64",
-          "type": "integer"
-        },
         "event": {
           "$ref": "#/definitions/AgentEvent"
         },
-        "event_id": {
+        "eventId": {
           "type": "string"
         },
-        "event_seq": {
+        "eventSeq": {
           "format": "int64",
           "type": "integer"
         },
-        "message_id": {
-          "type": "string"
-        },
-        "session_id": {
-          "type": "string"
-        },
-        "turn_id": {
-          "type": "string"
+        "persistedAt": {
+          "format": "int64",
+          "type": "integer"
         }
       },
       "required": [
-        "created_at_ms",
         "event",
-        "event_id",
-        "event_seq",
-        "message_id",
-        "session_id",
-        "turn_id"
+        "eventId",
+        "eventSeq",
+        "persistedAt"
       ],
       "type": "object"
     },
-    "TimelineRecoveryResponse": {
+    "TimelineEventNotification": {
       "properties": {
-        "snapshot": {
-          "$ref": "#/definitions/TimelineRecoverySnapshot"
-        }
-      },
-      "required": [
-        "snapshot"
-      ],
-      "type": "object"
-    },
-    "TimelineRecoverySnapshot": {
-      "properties": {
-        "active_turn": {
-          "$ref": "#/definitions/TimelineActiveTurnSnapshot"
+        "event": {
+          "$ref": "#/definitions/TimelineEvent"
         },
-        "replay": {
-          "$ref": "#/definitions/TimelineReplay"
+        "subscriptionId": {
+          "type": "string"
         }
       },
       "required": [
-        "active_turn",
-        "replay"
+        "event",
+        "subscriptionId"
       ],
       "type": "object"
     },
     "TimelineReplay": {
+      "additionalProperties": false,
+      "description": "Stable bounded replay of committed Agent events.",
       "properties": {
-        "cursor_status": {
+        "cursorStatus": {
           "$ref": "#/definitions/TimelineCursorStatus"
         },
         "events": {
           "items": {
-            "$ref": "#/definitions/TimelineEventEnvelope"
+            "$ref": "#/definitions/TimelineEvent"
           },
           "type": "array"
         },
-        "high_water_mark_event_id": {
-          "default": null,
+        "highWaterMarkEventId": {
           "type": [
             "string",
             "null"
           ]
         },
-        "last_replay_seq": {
+        "lastEventSeq": {
           "format": "int64",
           "type": "integer"
+        },
+        "nextCursor": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
-        "cursor_status",
+        "cursorStatus",
         "events",
-        "last_replay_seq"
+        "lastEventSeq"
       ],
       "type": "object"
-    },
-    "TimelineSubscriptionNotification": {
-      "properties": {
-        "event": {
-          "$ref": "#/definitions/TimelineEventEnvelope"
-        },
-        "subscription_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "event",
-        "subscription_id"
-      ],
-      "type": "object"
-    },
-    "TimelineUserActionEvent": {
-      "description": "Durable Timeline projection for a requested or finished user action.",
-      "oneOf": [
-        {
-          "properties": {
-            "action": {
-              "$ref": "#/definitions/PendingUserAction"
-            },
-            "type": {
-              "enum": [
-                "requested"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "action",
-            "type"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "action_id": {
-              "type": "string"
-            },
-            "response": {
-              "anyOf": [
-                {
-                  "$ref": "#/definitions/UserActionResponse"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null
-            },
-            "state": {
-              "$ref": "#/definitions/UserActionState"
-            },
-            "type": {
-              "enum": [
-                "finished"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "action_id",
-            "state",
-            "type"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "TokenUsage": {
       "description": "Token usage values shared by runs, sessions, history, and metrics.",
@@ -7694,63 +7796,17 @@
       ],
       "type": "object"
     },
+    "ToolArguments": {
+      "type": "object"
+    },
     "TurnCommandStatus": {
       "enum": [
         "pending",
         "accepted",
         "failed",
-        "failed_no_first_event"
+        "failedNoFirstEvent"
       ],
       "type": "string"
-    },
-    "TurnExecutionMetrics": {
-      "description": "Kernel-owned execution metrics for a turn.",
-      "properties": {
-        "duration_ms": {
-          "default": null,
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "model_rounds": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "stop_reason": {
-          "$ref": "#/definitions/StopReason"
-        },
-        "tool_calls": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "tool_errors": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "tool_successes": {
-          "format": "uint32",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "usage": {
-          "$ref": "#/definitions/TokenUsage"
-        }
-      },
-      "required": [
-        "model_rounds",
-        "stop_reason",
-        "tool_calls",
-        "tool_errors",
-        "tool_successes",
-        "usage"
-      ],
-      "type": "object"
     },
     "UserActionParams": {
       "description": "Typed parameters needed to render and resume a user action.",
@@ -8098,9 +8154,6 @@
     "auth_session_read_response": {
       "$ref": "#/definitions/AuthSessionReadResponse"
     },
-    "client_request": {
-      "$ref": "#/definitions/ClientRequest"
-    },
     "client_request_params": {
       "$ref": "#/definitions/ClientRequestParams"
     },
@@ -8170,9 +8223,6 @@
     "message_queue_start_request": {
       "$ref": "#/definitions/MessageQueueStartRequest"
     },
-    "message_queue_steer_request": {
-      "$ref": "#/definitions/MessageQueueSteerRequest"
-    },
     "message_queue_update_request": {
       "$ref": "#/definitions/MessageQueueUpdateRequest"
     },
@@ -8187,9 +8237,6 @@
     },
     "retry_turn_request": {
       "$ref": "#/definitions/RetryTurnRequest"
-    },
-    "retry_turn_response": {
-      "$ref": "#/definitions/RetryTurnResponse"
     },
     "server_notification": {
       "$ref": "#/definitions/ServerNotification"
@@ -8209,17 +8256,11 @@
     "start_turn_response": {
       "$ref": "#/definitions/StartTurnResponse"
     },
-    "submit_dynamic_tool_result_request": {
-      "$ref": "#/definitions/SubmitDynamicToolResultRequest"
+    "submit_turn_input_request": {
+      "$ref": "#/definitions/SubmitTurnInputRequest"
     },
-    "submit_dynamic_tool_result_response": {
-      "$ref": "#/definitions/SubmitDynamicToolResultResponse"
-    },
-    "submit_user_action_request": {
-      "$ref": "#/definitions/SubmitUserActionRequest"
-    },
-    "submit_user_action_response": {
-      "$ref": "#/definitions/SubmitUserActionResponse"
+    "submit_turn_input_response": {
+      "$ref": "#/definitions/SubmitTurnInputResponse"
     },
     "subscribe_timeline_request": {
       "$ref": "#/definitions/SubscribeTimelineRequest"
@@ -8228,16 +8269,10 @@
       "$ref": "#/definitions/SubscribeTimelineResponse"
     },
     "timeline_event": {
-      "$ref": "#/definitions/AgentEvent"
-    },
-    "timeline_event_envelope": {
-      "$ref": "#/definitions/TimelineEventEnvelope"
+      "$ref": "#/definitions/TimelineEvent"
     },
     "timeline_recovery_response": {
-      "$ref": "#/definitions/TimelineRecoveryResponse"
-    },
-    "turn_start_response": {
-      "$ref": "#/definitions/StartTurnResponse"
+      "$ref": "#/definitions/RecoverTimelineResponse"
     },
     "user_current_response": {
       "$ref": "#/definitions/UserCurrentResponse"
@@ -8247,7 +8282,6 @@
     "auth_logout_response",
     "auth_session_clear_response",
     "auth_session_read_response",
-    "client_request",
     "client_request_params",
     "cloud_login_cancel_response",
     "cloud_login_start_response",
@@ -8271,29 +8305,23 @@
     "message_queue_list_request",
     "message_queue_reorder_request",
     "message_queue_start_request",
-    "message_queue_steer_request",
     "message_queue_update_request",
     "pending_user_action",
     "profile_read_response",
     "recover_timeline_request",
     "retry_turn_request",
-    "retry_turn_response",
     "server_notification",
     "server_request",
     "session_get_response",
     "session_history_response",
     "start_turn_request",
     "start_turn_response",
-    "submit_dynamic_tool_result_request",
-    "submit_dynamic_tool_result_response",
-    "submit_user_action_request",
-    "submit_user_action_response",
+    "submit_turn_input_request",
+    "submit_turn_input_response",
     "subscribe_timeline_request",
     "subscribe_timeline_response",
     "timeline_event",
-    "timeline_event_envelope",
     "timeline_recovery_response",
-    "turn_start_response",
     "user_current_response"
   ],
   "title": "AppProtocolSchemaRoot",

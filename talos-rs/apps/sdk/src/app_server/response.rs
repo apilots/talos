@@ -2,9 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::Value;
-use talos_app_protocol::events::{
-    SubscriptionTerminatedEnvelope, TimelineSubscriptionNotification,
-};
+use talos_app_protocol::events::{SubscriptionTerminatedNotification, TimelineEventNotification};
 use talos_app_protocol::jsonrpc::JsonRpcNotification;
 use talos_error::{ApiError, TalosError, TalosResult};
 use talos_types::ApiResponse;
@@ -14,8 +12,8 @@ type PendingResponses = Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value
 
 pub(super) fn decode_subscription_terminated(
     notification: &JsonRpcNotification,
-) -> TalosResult<Option<SubscriptionTerminatedEnvelope>> {
-    if notification.method != "subscription.terminated" {
+) -> TalosResult<Option<SubscriptionTerminatedNotification>> {
+    if notification.method != "subscription/terminated" {
         return Ok(None);
     }
     let Some(params) = notification.params.clone() else {
@@ -28,11 +26,11 @@ pub(super) fn decode_subscription_terminated(
 
 pub(super) fn decode_event_notification(
     notification: JsonRpcNotification,
-) -> TalosResult<Option<TimelineSubscriptionNotification>> {
+) -> TalosResult<Option<TimelineEventNotification>> {
     let Some(params) = notification.params else {
         return Ok(None);
     };
-    if !notification.method.starts_with("timeline.") {
+    if !notification.method.starts_with("timeline/") {
         return Ok(None);
     }
     serde_json::from_value(params)

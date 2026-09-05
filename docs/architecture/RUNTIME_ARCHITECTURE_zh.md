@@ -1,4 +1,4 @@
-# 运行时架构
+# Agent Provider 架构
 
 [English](RUNTIME_ARCHITECTURE.md)
 
@@ -22,42 +22,44 @@ AgentRegistry
     v
 AgentHarness
     |
-    +-- applies the common runtime lifecycle and event contract
+    +-- owns common live lifecycle, admission, cancellation, and event consistency
     |
     v
-AgentRuntime SPI
+AgentProvider SPI
     |
-    +-- KernelAgent [current local default] -> Agent Kernel subsystem
-    +-- CloudAgent [planned cloud default] -> remote cloud runtime
-    +-- CodexAgent [extension] -> runtime-private backend
-    `-- ClaudeAgent [extension] -> runtime-private backend
+    +-- creates one in-memory AgentSession per Talos Session
+    |
+    +-- KernelAgentProvider [current] -> KernelAgentSession -> Agent Kernel
+    +-- CodexAgentProvider [planned]
+    +-- ClaudeCodeAgentProvider [planned]
+    `-- PiAgentProvider [planned]
     |
     v
 Standard AgentEvent / AgentRunResult -> Timeline
 ```
 
-`TalosService` 是面向产品的 facade。协议适配器调用它，而不是直接组装 Store、Runtime
-或 Registry。Agent Kernel 子系统（`talos-agent-kernel`）是内置 `KernelAgent` engine，
-不是未来所有 Agent Runtime 背后的通用实现。
+`TalosService` 是面向产品的 facade。协议适配器调用它，而不是直接组装 Store、Provider
+或 Registry。Agent Kernel 子系统（`talos-agent-kernel`）是 `KernelAgentProvider` 使用的
+私有执行 engine，不是未来所有 Agent Provider 背后的通用实现。
 
-## 多 Agent 与 Runtime SPI
+## 多 Agent 与 Agent Provider SPI
 
-多 Agent 注册与 Runtime 实现是两个独立维度：
+多 Agent 注册与 Provider 实现是两个独立维度：
 
 ```text
 Agent configuration
     |
-    +-- AgentDefinition: default  -> kind=kernel -> KernelAgent
-    +-- AgentDefinition: reviewer -> kind=kernel -> KernelAgent
-    +-- AgentDefinition: cloud    -> kind=cloud  -> CloudAgent [planned]
-    +-- AgentDefinition: coder    -> kind=codex  -> CodexAgent [extension]
-    `-- AgentDefinition: analyst  -> kind=claude -> ClaudeAgent [extension]
+    +-- AgentDefinition: default  -> kind=kernel -> KernelAgentProvider
+    +-- AgentDefinition: reviewer -> kind=kernel -> KernelAgentProvider
+    +-- AgentDefinition: coder    -> kind=codex  -> CodexAgentProvider [planned]
+    +-- AgentDefinition: analyst  -> kind=claude -> ClaudeCodeAgentProvider [planned]
+    `-- AgentDefinition: pi       -> kind=pi     -> PiAgentProvider [planned]
     |
     v
 AgentDefinitionLoader
     |
     v
-AgentHarnessFactory selects the runtime family from typed config
+Composition Root selects a ready AgentProvider from typed config
     |
     v
 AgentRegistry stores multiple AgentHarness registrations by Agent id
@@ -66,24 +68,20 @@ AgentRegistry stores multiple AgentHarness registrations by Agent id
 Router / Coordinator selects one registration for a Session or Turn
 ```
 
-多个 Agent Definition 可以使用同一个 Runtime family，同时具有不同 identity、Model、
-Workspace 或 typed runtime config。新的 Runtime family 以内部 `AgentRuntime` SPI 为目标
-扩展边界，并封装在公共 Harness 生命周期之后；Coordinator 不能向下转换到具体 Runtime。
+多个 Agent Definition 可以使用同一个 Provider 实现，同时具有不同 identity、Model、
+Workspace 或 typed Provider config。新增实现面向 `AgentProvider + AgentSession` SPI，
+并封装在公共 Harness 生命周期之后；Coordinator 不能向下转换或按 Provider kind 分支。
 
-这是目标扩展边界，目前还不是完全通用的即插即用接口。现有 Harness 直接存储
-`KernelAgent`，参数包含 Kernel 专用配置，SPI 的 input-delivery 类型也来自
-`talos-agent-kernel`。因此 CloudAgent 和其他 Runtime family 落地前，需要先泛化该容器
-和输入桥，再添加具体实现。
-
-当前实现状态如下：本地 composition 默认使用已实现的 `KernelAgent`。云端
-composition 未来默认使用 `CloudAgent`，还需要新增 typed kind、config、Runtime 实现和
-factory 分支。`AgentKind` 已识别 `Codex` 和 `Claude`，但对应 typed runtime config 和
-Runtime 实现尚未完成，因此 Harness factory 会显式失败，不会 fallback 到 Kernel。
+这套扩展边界已经实现并且与具体 Provider 无关。Harness 只保存 SPI；Kernel 专用的
+request、event、continuation 和 transcript 均留在 `KernelAgentProvider` 之后。当前
+composition 只注册 typed Kernel Provider。Codex、Claude Code 和 Pi 必须等对应 Provider
+实现、typed config、capability 和 composition-root 分支完整后才可选择；不存在到
+Kernel 的 fallback。
 
 ## Kernel-backed Turn 执行
 
-以下是内置 `KernelAgent` 链路。其他 Runtime family 可以使用不同私有 backend，但必须
-返回相同的标准 Agent event、result、capability、interrupt 和 resume 行为。
+以下是内置 `KernelAgentProvider` 链路。其他 Provider 可以使用不同私有 backend，但必须
+返回相同的标准 Agent event、result、capability、cancellation 和 continuation 行为。
 
 ```text
 Turn request
@@ -117,11 +115,11 @@ Persist final response and terminal Turn state
 ```
 
 Timeline 保持模型输出、工具活动、用户交互、错误和最终响应的顺序。客户端渲染或
-投影这一有序模型，而不是从 transport 细节重新推断 Runtime 状态。
+投影这一有序模型，而不是从 transport 细节重新推断执行状态。
 
 ## Subagent 执行
 
-Subagent 协作与 Agent Runtime 注册是两套正交机制。
+Subagent 协作与 Agent Provider 注册是两套正交机制。
 
 ```text
 Parent Session / Turn / Agent binding
@@ -136,7 +134,7 @@ Create Child Session and Child Turn
 Inherit the parent's exact Agent binding
                  |
                  v
-Re-enter Coordinator -> same AgentHarness -> same AgentRuntime implementation
+Re-enter Coordinator -> same AgentHarness -> same AgentProvider implementation
                  |
                  v
 Child Timeline and result projection
@@ -170,7 +168,7 @@ Typed result -> bounded Timeline event -> next model input
 ```
 
 Policy、Sandbox、MCP 初始化和 schema 错误必须保持可见。没有显式策略决策时，
-Runtime 不得通过权限更弱的执行路径重试。
+Provider 不得通过权限更弱的执行路径重试。
 
 ## Context 规则
 

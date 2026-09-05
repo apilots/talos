@@ -4,12 +4,12 @@ use super::*;
 fn turn_requests_reject_workspace_override() {
     let start = serde_json::json!({
         "session_id": "session-1",
-        "input": [{"type": "text", "text": "hello"}],
+        "input": {"content": [{"type": "text", "text": "hello"}]},
         "workspace_id": "workspace-other"
     });
     let retry = serde_json::json!({
         "session_id": "session-1",
-        "input": [{"type": "text", "text": "hello"}],
+        "input": {"content": [{"type": "text", "text": "hello"}]},
         "workspace_id": "workspace-other",
         "client_message_id": "message-1",
         "retry_of_message_id": "message-0"
@@ -118,38 +118,6 @@ fn user_action_response_preserves_variant_specific_data() {
                 "response": "deny"
             }
         ])
-    );
-}
-
-#[test]
-fn submit_user_action_uses_one_canonical_request_and_response_shape() {
-    let request = SubmitUserActionRequest {
-        session_id: "session-1".to_string(),
-        turn_id: "turn-1".to_string(),
-        action_id: "action-1".to_string(),
-        response: UserActionResponse::Question(QuestionAnswer::FreeForm {
-            text: "Continue tomorrow".to_string(),
-        }),
-    };
-    let response = SubmitUserActionResponse {
-        action_id: "action-1".to_string(),
-        state: UserActionState::ResponseAccepted,
-    };
-
-    assert_eq!(
-        serde_json::to_value((request, response)).unwrap(),
-        serde_json::json!([{
-            "sessionId": "session-1",
-            "turnId": "turn-1",
-            "actionId": "action-1",
-            "response": {
-                "type": "question",
-                "response": { "type": "freeForm", "text": "Continue tomorrow" }
-            }
-        }, {
-            "actionId": "action-1",
-            "state": "responseAccepted"
-        }])
     );
 }
 
@@ -319,133 +287,6 @@ fn test_agent_id() {
 fn test_session_id() {
     let id = SessionId::new();
     assert!(!id.0.is_empty());
-}
-
-#[test]
-fn test_talos_timeline_tool_progress_updates_same_item() {
-    let event = talos::AgentEvent {
-        event_seq: None,
-        event_id: None,
-        created_at_ms: None,
-        event_type: talos::AgentEventType::ItemDelta,
-        turn_id: "turn-1".to_string(),
-        message_id: "message-1".to_string(),
-        session_id: "session-1".to_string(),
-        sequence: 2,
-        payload: talos::AgentEventPayload::ItemDelta(talos::TalosItemDeltaEvent {
-            request_id: "request-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            item_id: "tool-1".to_string(),
-            delta: talos::TalosTimelineDelta::ToolProgress {
-                progress_kind: talos::TalosToolProgressKind::Stdout,
-                text_delta: "running".to_string(),
-            },
-        }),
-    };
-
-    let encoded = serde_json::to_string(&event).expect("timeline event should encode");
-    assert!(encoded.contains("\"event_type\":\"item_delta\""));
-    assert!(encoded.contains("\"item_id\":\"tool-1\""));
-    assert!(!encoded.contains("tool_progress_item"));
-
-    let decoded: talos::AgentEvent =
-        serde_json::from_str(&encoded).expect("timeline event should decode");
-    match decoded.payload {
-        talos::AgentEventPayload::ItemDelta(payload) => {
-            assert_eq!(payload.item_id, "tool-1");
-            assert!(matches!(
-                payload.delta,
-                talos::TalosTimelineDelta::ToolProgress { .. }
-            ));
-        }
-        _ => panic!("expected item delta payload"),
-    }
-}
-
-#[test]
-fn test_desktop_source_type_roundtrip() {
-    assert_eq!(talos::TalosSourceType::Desktop.as_str(), "desktop");
-    assert!(matches!(
-        talos::TalosSourceType::parse("desktop"),
-        talos::TalosSourceType::Desktop
-    ));
-
-    let context = talos::TalosContext::desktop("user-1");
-    assert_eq!(context.source_type, talos::TalosSourceType::Desktop);
-    assert_eq!(context.provider, talos::TalosProvider::Sdk);
-
-    let encoded = serde_json::to_string(&context).expect("context should encode");
-    assert!(encoded.contains("\"source_type\":\"desktop\""));
-    let decoded: talos::TalosContext =
-        serde_json::from_str(&encoded).expect("context should decode");
-    assert_eq!(decoded.source_type, talos::TalosSourceType::Desktop);
-}
-
-#[test]
-fn test_talos_session_apply_turn_progress_updates_state_and_model() {
-    let mut session = TalosSession {
-        agent_id: "default".to_string(),
-        title: "Untitled Session".to_string(),
-        user_id: "user-1".to_string(),
-        context: SessionContext {
-            session_id: "session-progress".to_string(),
-            workspace_id: "default".to_string(),
-            source_type: talos::TalosSourceType::Im,
-            provider: talos::TalosProvider::Telegram,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("channel-1".to_string()),
-            thread_id: Some("thread-1".to_string()),
-            project_id: Some("project-1".to_string()),
-            current_directory: Some(std::path::PathBuf::from("/repo")),
-            project_root: Some(std::path::PathBuf::from("/repo")),
-            environment: None,
-        },
-        conf: SessionConf::default(),
-        project_id: Some("project-1".to_string()),
-        current_directory: Some(std::path::PathBuf::from("/repo")),
-        config: TalosConfig::default(),
-        effective_user_permission_mode: UserPermissionMode::FullAccess,
-        state: SessionState {
-            created_at: 100,
-            last_activity: 200,
-            message_count: 3,
-            usage: SessionUsage {
-                tokens: talos::TokenUsage {
-                    input_tokens: 1,
-                    output_tokens: 2,
-                    total_tokens: 3,
-                    cache_creation_input_tokens: None,
-                    cache_read_input_tokens: None,
-                },
-                context: None,
-            },
-        },
-    };
-
-    session.apply_turn_progress(
-        "qwen-plus",
-        2,
-        &talos::TokenUsage {
-            input_tokens: 4,
-            output_tokens: 5,
-            total_tokens: 9,
-            cache_creation_input_tokens: Some(7),
-            cache_read_input_tokens: None,
-        },
-    );
-
-    assert_eq!(session.state.message_count, 5);
-    assert!(session.state.last_activity >= 200);
-    assert_eq!(session.state.usage.tokens.input_tokens, 5);
-    assert_eq!(session.state.usage.tokens.output_tokens, 7);
-    assert_eq!(session.state.usage.tokens.total_tokens, 12);
-    assert_eq!(
-        session.state.usage.tokens.cache_creation_input_tokens,
-        Some(7)
-    );
-    assert_eq!(session.config.llm.model, "qwen-plus");
 }
 
 #[test]
@@ -658,138 +499,6 @@ fn test_session_patch_roundtrip_with_current_directory() {
             path: std::path::PathBuf::from("/repo"),
         })
     );
-}
-
-#[test]
-fn test_resolve_effective_project_root_prefers_project_directory() {
-    let session = TalosSession {
-        agent_id: "default".to_string(),
-        title: DEFAULT_SESSION_TITLE.to_string(),
-        user_id: "user-1".to_string(),
-        context: SessionContext {
-            session_id: "session-root".to_string(),
-            workspace_id: "default".to_string(),
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_id: Some("project-1".to_string()),
-            current_directory: Some(std::path::PathBuf::from("/current")),
-            project_root: None,
-            environment: None,
-        },
-        conf: SessionConf::default(),
-        project_id: Some("project-1".to_string()),
-        current_directory: Some(std::path::PathBuf::from("/current")),
-        config: TalosConfig::default(),
-        effective_user_permission_mode: UserPermissionMode::FullAccess,
-        state: SessionState {
-            created_at: 100,
-            last_activity: 200,
-            message_count: 0,
-            usage: SessionUsage::default(),
-        },
-    };
-
-    let root = resolve_effective_project_root(
-        &session,
-        Some(std::path::PathBuf::from("/project")),
-        Some(std::path::PathBuf::from("/workspace")),
-    );
-
-    assert_eq!(root.as_deref(), Some(std::path::Path::new("/project")));
-}
-
-#[test]
-fn test_resolve_effective_project_root_uses_embedded_current_directory() {
-    let session = TalosSession {
-        agent_id: "default".to_string(),
-        title: DEFAULT_SESSION_TITLE.to_string(),
-        user_id: "user-1".to_string(),
-        context: SessionContext {
-            session_id: "session-root".to_string(),
-            workspace_id: "default".to_string(),
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_id: None,
-            current_directory: Some(std::path::PathBuf::from("/current")),
-            project_root: None,
-            environment: Some(talos::TalosSessionEnvironment {
-                directory: std::path::PathBuf::from("/current"),
-                connection_mode: talos::TalosConnectionMode::Embedded,
-            }),
-        },
-        conf: SessionConf::default(),
-        project_id: None,
-        current_directory: Some(std::path::PathBuf::from("/current")),
-        config: TalosConfig::default(),
-        effective_user_permission_mode: UserPermissionMode::FullAccess,
-        state: SessionState {
-            created_at: 100,
-            last_activity: 200,
-            message_count: 0,
-            usage: SessionUsage::default(),
-        },
-    };
-
-    let root = resolve_effective_project_root(
-        &session,
-        None,
-        Some(std::path::PathBuf::from("/workspace")),
-    );
-
-    assert_eq!(root.as_deref(), Some(std::path::Path::new("/current")));
-}
-
-#[test]
-fn test_resolve_effective_project_root_uses_workspace_root() {
-    let session = TalosSession {
-        agent_id: "default".to_string(),
-        title: DEFAULT_SESSION_TITLE.to_string(),
-        user_id: "user-1".to_string(),
-        context: SessionContext {
-            session_id: "session-root".to_string(),
-            workspace_id: "workspace-alpha".to_string(),
-            source_type: talos::TalosSourceType::Http,
-            provider: talos::TalosProvider::Http,
-            user_id: "user-1".to_string(),
-            message_id: "message-1".to_string(),
-            trace_id: "trace-1".to_string(),
-            channel_id: Some("default".to_string()),
-            thread_id: None,
-            project_id: None,
-            current_directory: None,
-            project_root: None,
-            environment: None,
-        },
-        conf: SessionConf::default(),
-        project_id: None,
-        current_directory: None,
-        config: TalosConfig::default(),
-        effective_user_permission_mode: UserPermissionMode::FullAccess,
-        state: SessionState {
-            created_at: 100,
-            last_activity: 200,
-            message_count: 0,
-            usage: SessionUsage::default(),
-        },
-    };
-
-    let root = resolve_effective_project_root(
-        &session,
-        None,
-        Some(std::path::PathBuf::from("/workspace")),
-    );
-
-    assert_eq!(root.as_deref(), Some(std::path::Path::new("/workspace")));
 }
 
 #[test]

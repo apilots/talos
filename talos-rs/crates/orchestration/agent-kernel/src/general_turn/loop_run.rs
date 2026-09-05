@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub async fn execute_general_turn_loop(
     prepared: PreparedGeneralTurn,
     llm_provider: Arc<dyn LlmProvider>,
@@ -21,7 +22,7 @@ pub async fn execute_general_turn_loop_with_resume(
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
     kernel_config: &AgentKernelConfig,
-    resume: Option<GeneralTurnResume>,
+    resume: Option<AgentKernelContinuation>,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     execute_general_turn_loop_with_policy(
         prepared,
@@ -46,7 +47,7 @@ pub async fn execute_general_turn_loop_with_policy(
     llm_provider: Arc<dyn LlmProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
     kernel_config: &AgentKernelConfig,
-    resume: Option<GeneralTurnResume>,
+    resume: Option<AgentKernelContinuation>,
     policy: Arc<dyn GeneralTurnPolicy>,
 ) -> TalosResult<ExecutedTurnArtifacts> {
     let mut state = GeneralTurnLoopState::new(&prepared);
@@ -274,8 +275,7 @@ async fn apply_running_messages(
     for delivery in messages {
         emit_stream_event(
             prepared.stream_tx.as_ref(),
-            KernelStreamEventType::UserInput,
-            KernelStreamEventData::UserInput(delivery.input().input.clone()),
+            AgentKernelEventPayload::UserInput(delivery.input().input.clone()),
         )
         .await;
         let message = delivery.acknowledge();
@@ -283,7 +283,7 @@ async fn apply_running_messages(
             .active_turn_attachment_tokens
             .saturating_add(message.attachment_tokens);
         state.messages.push(message.message);
-        state.output_items.push(RunItem::UserInput {
+        state.output_items.push(KernelRunItem::UserInput {
             text: message.input.text,
             file_ids: message.input.file_ids,
         });
@@ -297,9 +297,10 @@ async fn emit_turn_metrics_stream_event(
 ) {
     emit_stream_event(
         prepared.stream_tx.as_ref(),
-        KernelStreamEventType::TurnMetrics,
-        KernelStreamEventData::TurnMetrics(crate::TurnMetricsStreamData {
+        AgentKernelEventPayload::TurnMetrics(crate::TurnMetricsStreamData {
             metrics: build_turn_execution_metrics(state, stop_reason),
+            usage: state.usage.clone(),
+            context: None,
         }),
     )
     .await;
@@ -314,8 +315,11 @@ async fn emit_turn_metrics_after_tool_batch(
     metrics.model_rounds = state.round;
     emit_stream_event(
         prepared.stream_tx.as_ref(),
-        KernelStreamEventType::TurnMetrics,
-        KernelStreamEventData::TurnMetrics(crate::TurnMetricsStreamData { metrics }),
+        AgentKernelEventPayload::TurnMetrics(crate::TurnMetricsStreamData {
+            metrics,
+            usage: state.usage.clone(),
+            context: None,
+        }),
     )
     .await;
 }
@@ -327,20 +331,22 @@ async fn apply_general_turn_resume(
     tool_executor_port: Arc<dyn ToolExecutorPort>,
     kernel_config: Arc<AgentKernelConfig>,
     state: &mut GeneralTurnLoopState,
-    resume: GeneralTurnResume,
+    resume: AgentKernelContinuation,
     policy: Arc<dyn GeneralTurnPolicy>,
     command_risk_assessor: Arc<dyn talos_tools::CommandRiskAssessor>,
 ) -> TalosResult<()> {
-    let GeneralTurnResume::UserAction(mut resume) = resume;
+    let AgentKernelContinuation::UserAction(mut resume) = resume;
     state.restore_execution_metrics(&resume.execution_metrics);
     policy.before_user_action_resume(&mut resume)?;
-    let original_call = resume.original_call.unwrap_or_else(|| ResumeToolCall {
-        item_id: None,
-        call_id: resume.call_id.clone(),
-        tool_name: resume.tool_name.clone(),
-        arguments: Value::Null.into(),
-        reasoning_continuation: None,
-    });
+    let original_call = resume
+        .original_call
+        .unwrap_or_else(|| AgentKernelContinuationToolCall {
+            item_id: None,
+            call_id: resume.call_id.clone(),
+            tool_name: resume.tool_name.clone(),
+            arguments: Value::Null.into(),
+            reasoning_continuation: None,
+        });
     let mut replay_dynamic_tool_results = resume.replay_dynamic_tool_results;
     let mut user_action_responses = std::collections::HashMap::new();
     match &resume.response {
@@ -412,9 +418,8 @@ async fn emit_pending_user_action_stream_events(
     };
     if let Some(action) = &tool_batch.pending_user_action {
         let _ = tx
-            .send(KernelStreamEvent::new(
-                KernelStreamEventType::UserActionRequest,
-                KernelStreamEventData::UserActionRequest(UserActionRequestStreamData {
+            .send(AgentKernelEvent::new(
+                AgentKernelEventPayload::UserActionRequest(UserActionRequestStreamData {
                     action_id: action.action_id.clone(),
                     call_id: action.call_id.clone(),
                     tool_name: action.tool_name.clone(),

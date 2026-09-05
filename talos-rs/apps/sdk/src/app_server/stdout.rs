@@ -4,9 +4,9 @@ pub(super) fn spawn_stdout_reader(
     stdout: ChildStdout,
     pending_responses: Arc<Mutex<HashMap<i32, oneshot::Sender<TalosResult<Value>>>>>,
     subscription_senders: Arc<Mutex<HashMap<String, SubscriptionStream>>>,
-    pending_subscription_events: Arc<Mutex<HashMap<String, Vec<TimelineEventEnvelope>>>>,
-    events_tx: mpsc::Sender<TimelineEventEnvelope>,
-    notifications_tx: mpsc::Sender<TimelineSubscriptionNotification>,
+    pending_subscription_events: Arc<Mutex<HashMap<String, Vec<TimelineEvent>>>>,
+    events_tx: mpsc::Sender<TimelineEvent>,
+    notifications_tx: mpsc::Sender<TimelineEventNotification>,
 ) {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
@@ -77,7 +77,7 @@ pub(super) fn spawn_stdout_reader(
                     };
                     let subscription_id = notification.subscription_id.clone();
                     let event = notification.event.clone();
-                    dispatch_application_event(
+                    dispatch_timeline_event(
                         &subscription_senders,
                         &pending_subscription_events,
                         &subscription_id,

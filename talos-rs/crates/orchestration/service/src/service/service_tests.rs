@@ -1,17 +1,29 @@
 use super::*;
 use crate::access::CreateSessionRequest;
 use crate::test_support::run_test_migrations;
-use crate::TimelineEventRetentionConfig;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::stream;
 use opendal::{services::Memory, Operator};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use talos_agent::{
+    AgentAdmission, AgentAdmissionPermit, AgentContext, AgentInputParams, AgentInterruptParams,
+    AgentProgressEventReceiver, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSessionContext,
+};
+use talos_agent_api::{
+    AgentContextCompaction, AgentContextCompactionDelta, AgentEvent as CanonicalAgentEvent,
+    AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome, AgentMessage,
+    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
+    AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
+    AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted, AgentMessageStatus,
+    AgentRunMetrics, AgentTurnCompleted, AgentTurnStarted,
+};
 use talos_auth::{AuthService, RequestIdentity, UserDto, UserService};
-use talos_config::{ConfigStore, InMemoryLlmConfigStore, WorkspaceDefinition};
+use talos_config::{ConfigStore, InMemoryLlmConfigStore};
+use talos_coordinator::{AgentCoordinator, AgentSelectionParams};
 use talos_error::{TalosError, TalosResult};
 use talos_storage::SqliteStorage;
 use talos_store::file::DatabaseFileStore;
@@ -19,34 +31,53 @@ use talos_store::memory::MemoryStore;
 use talos_store::profile::{DatabaseProfileStore, ProfileStore};
 use talos_store::project::StorageProjectStore;
 use talos_store::session::{
-    ActiveTurnStatus, ActiveTurnStore, ActiveTurnUpdate, DatabaseSessionStore,
-    FileSessionArtifactStore, IdempotencyReservation, MessageIdempotencyStore,
-    SessionArtifactStore, SessionStore, TalosTurn, TimelineEventId, TimelineEventStore,
+    AccumulateSessionUsageParams, AgentExecutionStore, CommandReservation, DatabaseSessionStore,
+    IdempotencyReservation, IdempotentCommand, SessionStore,
 };
-use talos_types::agent_dispatch::{AgentDispatchInputParams, AgentDispatchParams};
 use talos_types::talos::{
-    AgentEvent, AgentEventPayload, ContextCompactionOutcome, ContextCompactionStage,
-    ContextCompactionTrigger, RunItem, StopReason, TalosContext, TalosInputItem, TalosProvider,
-    TalosSourceType, TalosTimelineContent, TalosTimelineDelta, TalosTimelineItemStatus,
-    TalosTurnCompletedEvent, TokenUsage,
+    ContextCompactionOutcome, ContextCompactionStage, ContextCompactionTrigger, SessionSource,
+    TokenUsage,
 };
 
-enum TestTurnExecutorMode {
+#[derive(Clone)]
+enum TestAgentExecutionMode {
     Accepted,
-    Timeout,
-    Closed,
+    AdmissionBlocked {
+        reached: Arc<tokio::sync::Notify>,
+        release: Arc<tokio::sync::Notify>,
+    },
+    StartTimeout,
+    StartFailed,
 }
 
+#[path = "first_turn_rollback_tests.rs"]
+mod first_turn_rollback_tests;
+#[path = "project_lifecycle_tests.rs"]
+mod project_lifecycle_tests;
+#[path = "session_patch_tests.rs"]
+mod session_patch_tests;
+#[path = "turn_interrupt_tests.rs"]
+mod turn_interrupt_tests;
+
+#[path = "admission_recovery_tests.rs"]
+mod admission_recovery_tests;
 #[path = "compaction_tests.rs"]
 mod compaction_tests;
 #[path = "interrupt_queue_tests.rs"]
 mod interrupt_queue_tests;
+#[path = "maintenance_tests.rs"]
+mod maintenance_tests;
 
-struct TestTurnExecutor {
-    mode: TestTurnExecutorMode,
+struct TestAgentExecution {
+    mode: TestAgentExecutionMode,
 }
 
-struct TestSessionRuntime {
+struct TestExecutionCoordinator {
+    execution: Arc<TestAgentExecution>,
+    delegate: Arc<dyn AgentCoordinator>,
+}
+
+struct TestAgentCoordinator {
     cancel_mode: TestCancelMode,
     cancelled_turn_ids: Arc<Mutex<Vec<String>>>,
     compaction_usage: TokenUsage,
@@ -56,80 +87,25 @@ struct TestSessionRuntime {
 enum TestCancelMode {
     Cancelled,
     CleanupUnconfirmed,
-    MissingRuntimeTurn,
+    MissingLiveTurn,
     Rejected,
 }
 
-struct TestAuthService;
-
-struct FailOnceTimelineEventStore {
-    inner: Arc<dyn TimelineEventStore>,
-    fail_on_call: usize,
-    calls: AtomicUsize,
-}
-
-#[async_trait]
-impl TimelineEventStore for FailOnceTimelineEventStore {
-    async fn append_event(&self, event: AgentEvent) -> TalosResult<AgentEvent> {
-        let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
-        if call == self.fail_on_call {
-            return Err(TalosError::internal(
-                "injected compaction event persistence failure".to_string(),
-            ));
+impl TalosService {
+    async fn create_session(
+        &self,
+        actor: &Actor,
+        params: CreateSessionRequest,
+    ) -> ServiceResult<SessionInfo> {
+        if let Some(selection) = params.model_selection.as_ref() {
+            self.config.validate_model_selection_supported(selection)?;
         }
-        self.inner.append_event(event).await
-    }
-
-    async fn list_events_after(
-        &self,
-        session_id: &str,
-        after_event_id: Option<&TimelineEventId>,
-        limit: usize,
-    ) -> TalosResult<Vec<AgentEvent>> {
-        self.inner
-            .list_events_after(session_id, after_event_id, limit)
-            .await
-    }
-
-    async fn list_turn_events(
-        &self,
-        session_id: &str,
-        turn_id: &str,
-        limit: usize,
-    ) -> TalosResult<Vec<AgentEvent>> {
-        self.inner
-            .list_turn_events(session_id, turn_id, limit)
-            .await
-    }
-
-    async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
-        self.inner.latest_event_id(session_id).await
-    }
-
-    async fn oldest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
-        self.inner.oldest_event_id(session_id).await
-    }
-
-    async fn delete_completed_events_before(
-        &self,
-        before_timestamp_ms: i64,
-        limit: usize,
-    ) -> TalosResult<u64> {
-        self.inner
-            .delete_completed_events_before(before_timestamp_ms, limit)
-            .await
-    }
-
-    async fn delete_overflow_events_per_session(
-        &self,
-        max_events_per_session: usize,
-        limit: usize,
-    ) -> TalosResult<u64> {
-        self.inner
-            .delete_overflow_events_per_session(max_events_per_session, limit)
-            .await
+        let record = self.access.create_session(actor, params).await?;
+        self.sessions.session_info(&record)
     }
 }
+
+struct TestAuthService;
 
 fn configured_test_config() -> TalosConfig {
     let mut config = TalosConfig::default();
@@ -146,151 +122,338 @@ fn configured_test_config() -> TalosConfig {
     config
 }
 
+fn configured_test_config_with_turn_model() -> TalosConfig {
+    let mut config = configured_test_config();
+    config
+        .llm
+        .anthropic
+        .models
+        .push(talos_config::ProviderModelConfig {
+            id: "turn-model".to_string(),
+            name: "Turn Model".to_string(),
+            context_window: 128_000,
+            reasoning: true,
+            reasoning_effort: talos_config::ReasoningEffort::Medium,
+            speed: talos_config::ModelSpeed::Standard,
+            input: vec![talos_config::ModelInputKind::Text],
+            cost: talos_config::ModelCostConfig::default(),
+        });
+    config
+}
+
+fn test_config_reload_hook(config: TalosConfig) -> ConfigReloadHook {
+    let active = Arc::new(std::sync::RwLock::new(config));
+    Arc::new(move |trigger| {
+        let mut next = active
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let ConfigReloadTrigger::Updated(value) = trigger {
+            match value {
+                talos_types::ConfigValue::Llm(llm) => next.llm = *llm,
+                talos_types::ConfigValue::WebSearch(web_search) => {
+                    next.agent.kernel.tools.web_search = *web_search;
+                }
+            }
+        }
+        let active = active.clone();
+        Ok(ConfigReloadPlan::new(next.clone(), move || {
+            *active
+                .write()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next;
+        }))
+    })
+}
+
 #[async_trait]
-impl TurnExecutor for TestTurnExecutor {
-    async fn validate_agent_id(&self, _agent_id: &str) -> TalosResult<()> {
+impl AgentCoordinator for TestAgentCoordinator {
+    async fn resolve_agent(&self, _params: AgentSelectionParams) -> TalosResult<String> {
+        Ok("default".to_string())
+    }
+
+    async fn ensure_agent(&self, _agent_id: &str) -> TalosResult<()> {
         Ok(())
     }
 
-    async fn start_turn_stream(
-        &self,
-        request: AgentDispatchParams,
-    ) -> TalosResult<tokio::sync::mpsc::Receiver<AgentEvent>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        match self.mode {
-            TestTurnExecutorMode::Accepted => {
-                tokio::spawn(async move {
-                    tx.send(AgentEvent {
-                        event_seq: None,
-                        event_id: None,
-                        created_at_ms: None,
-                        event_type: talos_types::talos::AgentEventType::TurnStarted,
-                        turn_id: request.turn_id.clone(),
-                        message_id: request.session.context.message_id.clone(),
-                        session_id: request.session.context.session_id.clone(),
-                        sequence: 0,
-                        payload: AgentEventPayload::TurnStarted(
-                            talos_types::talos::TalosTurnStartedEvent {
-                                request_id: "request-test".to_string(),
-                                turn_id: request.turn_id,
-                                started_at_ms: 1,
-                            },
-                        ),
-                    })
-                    .await
-                    .expect("started event receiver should remain open");
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                });
-            }
-            TestTurnExecutorMode::Timeout => {
-                tokio::spawn(async move {
-                    tokio::time::sleep(Duration::from_secs(60)).await;
-                    drop(tx);
-                });
-            }
-            TestTurnExecutorMode::Closed => drop(tx),
-        }
-        Ok(rx)
+    async fn start(&self, _params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        unreachable!("execution is delegated by the scenario Coordinator")
     }
 
-    async fn submit_input(&self, _params: AgentDispatchInputParams) -> TalosResult<()> {
+    async fn submit_input(&self, _params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        unreachable!("input is delegated by the scenario Coordinator")
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.cancelled_turn_ids
+            .lock()
+            .unwrap()
+            .push(params.identity.turn_id);
+        match self.cancel_mode {
+            TestCancelMode::Cancelled => Ok(AgentInterruptOutcome::Cancelled),
+            TestCancelMode::CleanupUnconfirmed => {
+                Ok(AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 })
+            }
+            TestCancelMode::MissingLiveTurn => Err(TalosError::public(
+                talos_error::ErrorCode::ResourceNotFound,
+                "active turn for session session-interrupt-live-missing".to_string(),
+            )),
+            TestCancelMode::Rejected => Err(TalosError::internal("Harness rejected interruption")),
+        }
+    }
+
+    async fn compact_session(&self, context: AgentContext) -> TalosResult<AgentRunExecution> {
+        let identity = context.identity();
+        let message_id = "message-compaction".to_string();
+        let block_id = "item-compaction".to_string();
+        let started_message = AgentMessage {
+            message_id: message_id.clone(),
+            turn_id: identity.turn_id.clone(),
+            role: AgentMessageRole::System,
+            status: AgentMessageStatus::InProgress,
+            blocks: Vec::new(),
+            created_at: 2,
+            completed_at: None,
+        };
+        let started_block = AgentMessageBlock {
+            block_id: block_id.clone(),
+            status: AgentMessageBlockStatus::Running,
+            content: AgentMessageBlockContent::ContextCompaction(AgentContextCompaction {
+                trigger: ContextCompactionTrigger::UserRequested,
+                stage: ContextCompactionStage::Preparing,
+                outcome: None,
+                metrics: None,
+                message: None,
+            }),
+            started_at: 3,
+            completed_at: None,
+        };
+        let completed_block = AgentMessageBlock {
+            block_id,
+            status: AgentMessageBlockStatus::Completed,
+            content: AgentMessageBlockContent::ContextCompaction(AgentContextCompaction {
+                trigger: ContextCompactionTrigger::UserRequested,
+                stage: ContextCompactionStage::Completed,
+                outcome: Some(ContextCompactionOutcome::Applied),
+                metrics: Some(Default::default()),
+                message: Some("Context compacted".to_string()),
+            }),
+            started_at: 3,
+            completed_at: Some(5),
+        };
+        let completed_message = AgentMessage {
+            status: AgentMessageStatus::Completed,
+            blocks: vec![completed_block.clone()],
+            completed_at: Some(6),
+            ..started_message.clone()
+        };
+        let started = CanonicalAgentEvent {
+            identity: identity.clone(),
+            sequence: 1,
+            occurred_at: 1,
+            payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
+        };
+        let progress = vec![
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 2,
+                occurred_at: 2,
+                payload: CanonicalAgentEventPayload::MessageStarted(AgentMessageStarted {
+                    message: started_message,
+                }),
+            },
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 3,
+                occurred_at: 3,
+                payload: CanonicalAgentEventPayload::MessageBlockStarted(
+                    AgentMessageBlockStarted {
+                        message_id: message_id.clone(),
+                        block: started_block,
+                    },
+                ),
+            },
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 4,
+                occurred_at: 4,
+                payload: CanonicalAgentEventPayload::MessageBlockDelta(AgentMessageBlockDelta {
+                    message_id: message_id.clone(),
+                    block_id: completed_block.block_id.clone(),
+                    delta: AgentMessageBlockDeltaContent::ContextCompaction(
+                        AgentContextCompactionDelta {
+                            stage: Some(ContextCompactionStage::Summarizing),
+                            outcome: None,
+                            metrics: None,
+                            message: Some("Summarizing context".to_string()),
+                        },
+                    ),
+                }),
+            },
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 5,
+                occurred_at: 5,
+                payload: CanonicalAgentEventPayload::MessageBlockCompleted(
+                    AgentMessageBlockCompleted {
+                        message_id,
+                        block: completed_block,
+                    },
+                ),
+            },
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 6,
+                occurred_at: 6,
+                payload: CanonicalAgentEventPayload::MessageCompleted(completed_message.clone()),
+            },
+        ];
+        let terminal = CanonicalAgentEvent {
+            identity,
+            sequence: 7,
+            occurred_at: 7,
+            payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+            }),
+        };
+        let metrics = AgentRunMetrics {
+            usage: self.compaction_usage.clone(),
+            ..AgentRunMetrics::default()
+        };
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(progress.len());
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: vec![started],
+                permit: AgentAdmissionPermit::new(async move {
+                    for event in progress {
+                        progress_tx.send(event).await.map_err(|_| {
+                            talos_agent::AgentError::provider_error("test progress receiver")
+                        })?;
+                    }
+                    drop(progress_tx);
+                    settlement_tx
+                        .send(Ok(AgentRunSettlement::Finished {
+                            event: terminal,
+                            messages: vec![completed_message],
+                            metrics,
+                        }))
+                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn clear_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn close_session(&self, _params: AgentSessionContext) -> TalosResult<()> {
+        Ok(())
+    }
+
+    async fn shutdown(&self, _timeout: Duration) -> TalosResult<()> {
         Ok(())
     }
 }
 
 #[async_trait]
-impl SessionRuntime for TestSessionRuntime {
-    async fn resolve_target_agent(&self, _context: &TalosContext) -> TalosResult<String> {
-        Ok("default".to_string())
+impl AgentCoordinator for TestExecutionCoordinator {
+    async fn resolve_agent(&self, params: AgentSelectionParams) -> TalosResult<String> {
+        self.delegate.resolve_agent(params).await
     }
 
-    async fn compact_session(
-        &self,
-        params: talos_coordinator::AgentSessionCompactionParams,
-    ) -> TalosResult<talos_types::TokenUsage> {
-        let usage = self.compaction_usage.clone();
-        let mut timeline = talos_agent_kernel::TimelineBuilder::new(
-            params.identity.request_id,
-            params.identity.turn_id,
-            params.identity.message_id,
-            params.session.context.session_id,
-        );
-        params.event_tx.send(timeline.start_turn()).await.unwrap();
-        let started = timeline.start_context_compaction(
-            ContextCompactionTrigger::UserRequested,
-            ContextCompactionStage::Preparing,
-            None,
-        );
-        let item_id = match &started.payload {
-            AgentEventPayload::ItemStarted(payload) => payload.item.item_id.clone(),
-            _ => unreachable!("timeline builder should start an item"),
-        };
-        params.event_tx.send(started).await.unwrap();
-        let final_content = TalosTimelineContent::ContextCompaction {
-            trigger: ContextCompactionTrigger::UserRequested,
-            stage: ContextCompactionStage::Completed,
-            outcome: Some(ContextCompactionOutcome::NoChanges),
-            metrics: None,
-            message: None,
-        };
-        params
-            .event_tx
-            .send(timeline.append_delta(
-                &item_id,
-                TalosTimelineDelta::ContextCompaction {
-                    stage: Some(ContextCompactionStage::Completed),
-                    outcome: Some(ContextCompactionOutcome::NoChanges),
-                    metrics: None,
-                    message: None,
-                },
-            )?)
-            .await
-            .unwrap();
-        params
-            .event_tx
-            .send(timeline.complete_item(
-                &item_id,
-                TalosTimelineItemStatus::Completed,
-                Some(final_content),
-            )?)
-            .await
-            .unwrap();
-        params
-            .event_tx
-            .send(timeline.complete_turn(StopReason::EndTurn, usage.clone(), None, None))
-            .await
-            .unwrap();
-        Ok(usage)
+    async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
+        self.delegate.ensure_agent(agent_id).await
     }
 
-    async fn clear_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn close_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        unreachable!("not used in this test")
-    }
-
-    async fn prepare_delete_session(&self, _session: talos_types::TalosSession) -> TalosResult<()> {
-        Ok(())
-    }
-
-    async fn cancel_active_turn(
-        &self,
-        params: talos_types::CancelActiveTurnParams,
-    ) -> TalosResult<talos_types::CancelActiveTurnOutcome> {
-        self.cancelled_turn_ids.lock().unwrap().push(params.turn_id);
-        match self.cancel_mode {
-            TestCancelMode::Cancelled => Ok(talos_types::CancelActiveTurnOutcome::Cancelled),
-            TestCancelMode::CleanupUnconfirmed => {
-                Ok(talos_types::CancelActiveTurnOutcome::CleanupUnconfirmed { task_count: 1 })
+    async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
+        let admission_gate = match &self.execution.mode {
+            TestAgentExecutionMode::StartTimeout => {
+                return Err(TalosError::public(
+                    talos_error::ErrorCode::Timeout,
+                    "injected Agent start timeout",
+                ));
             }
-            TestCancelMode::MissingRuntimeTurn => Err(TalosError::public(
-                talos_error::ErrorCode::ResourceNotFound,
-                "active turn for session session-interrupt-runtime-missing".to_string(),
-            )),
-            TestCancelMode::Rejected => Err(TalosError::internal("runtime rejected cancellation")),
-        }
+            TestAgentExecutionMode::StartFailed => {
+                return Err(TalosError::internal("injected Agent start failure"));
+            }
+            TestAgentExecutionMode::Accepted => None,
+            TestAgentExecutionMode::AdmissionBlocked { reached, release } => {
+                Some((reached.clone(), release.clone()))
+            }
+        };
+        let identity = params.context.identity();
+        let admission = vec![
+            CanonicalAgentEvent {
+                identity: identity.clone(),
+                sequence: 1,
+                occurred_at: 1,
+                payload: CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}),
+            },
+            CanonicalAgentEvent {
+                identity,
+                sequence: 2,
+                occurred_at: params.input.completed_at.unwrap_or(params.input.created_at),
+                payload: CanonicalAgentEventPayload::MessageCompleted(params.input),
+            },
+        ];
+        let (progress_tx, progress_rx) = tokio::sync::mpsc::channel(1);
+        let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
+        Ok(AgentRunExecution {
+            admission: AgentAdmission {
+                events: admission,
+                permit: AgentAdmissionPermit::new(async move {
+                    if let Some((reached, release)) = admission_gate {
+                        reached.notify_one();
+                        release.notified().await;
+                    }
+                    let hold = tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_secs(60)).await;
+                        drop(progress_tx);
+                        drop(settlement_tx);
+                    });
+                    drop(hold);
+                    Ok(())
+                }),
+            },
+            events: AgentProgressEventReceiver::new(progress_rx),
+            settlement: AgentRunSettlementReceiver::new(settlement_rx),
+        })
+    }
+
+    async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
+        Ok(AgentAdmission {
+            events: vec![CanonicalAgentEvent {
+                identity: params.identity,
+                sequence: 3,
+                occurred_at: params.input.completed_at.unwrap_or(params.input.created_at),
+                payload: CanonicalAgentEventPayload::MessageCompleted(params.input),
+            }],
+            permit: AgentAdmissionPermit::new(async { Ok(()) }),
+        })
+    }
+
+    async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
+        self.delegate.interrupt(params).await
+    }
+
+    async fn compact_session(&self, params: AgentContext) -> TalosResult<AgentRunExecution> {
+        self.delegate.compact_session(params).await
+    }
+
+    async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.clear_session(params).await
+    }
+
+    async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
+        self.delegate.close_session(params).await
+    }
+
+    async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
+        self.delegate.shutdown(timeout).await
     }
 }
 
@@ -331,12 +494,12 @@ impl UserService for TestAuthService {
 }
 
 async fn test_application(
-    turn_executor: Arc<dyn TurnExecutor>,
+    agent_execution: Arc<TestAgentExecution>,
     config: TalosConfig,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
-    test_application_with_runtime(
-        turn_executor,
-        Arc::new(TestSessionRuntime {
+    test_application_with_coordinator(
+        agent_execution,
+        Arc::new(TestAgentCoordinator {
             cancel_mode: TestCancelMode::Cancelled,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
@@ -346,20 +509,10 @@ async fn test_application(
     .await
 }
 
-async fn test_application_with_runtime(
-    turn_executor: Arc<dyn TurnExecutor>,
-    session_runtime: Arc<dyn SessionRuntime>,
+async fn test_application_with_coordinator(
+    agent_execution: Arc<TestAgentExecution>,
+    coordinator: Arc<dyn AgentCoordinator>,
     config: TalosConfig,
-) -> (TalosService, Arc<DatabaseSessionStore>) {
-    test_application_with_runtime_and_event_failure(turn_executor, session_runtime, config, None)
-        .await
-}
-
-async fn test_application_with_runtime_and_event_failure(
-    turn_executor: Arc<dyn TurnExecutor>,
-    session_runtime: Arc<dyn SessionRuntime>,
-    config: TalosConfig,
-    fail_on_event_call: Option<usize>,
 ) -> (TalosService, Arc<DatabaseSessionStore>) {
     let storage = Arc::new(SqliteStorage::new(":memory:").await.unwrap());
     run_test_migrations(storage.pool()).await;
@@ -378,22 +531,7 @@ async fn test_application_with_runtime_and_event_failure(
         )
         .unwrap(),
     );
-    let event_store: Arc<dyn TimelineEventStore> = match fail_on_event_call {
-        Some(fail_on_call) => Arc::new(FailOnceTimelineEventStore {
-            inner: store.clone(),
-            fail_on_call,
-            calls: AtomicUsize::new(0),
-        }),
-        None => store.clone(),
-    };
-    let active_turn_store: Arc<dyn ActiveTurnStore> = store.clone();
-    let event_service = Arc::new(TimelineEventService::new(
-        event_store,
-        active_turn_store,
-        store.clone() as Arc<dyn talos_store::session::UserActionStore>,
-        TimelineEventRetentionConfig::default(),
-    ));
-    let idempotency_store: Arc<dyn MessageIdempotencyStore> = store.clone();
+    let event_service = Arc::new(TimelineEventService::new(store.clone()));
     let config_store: Arc<dyn ConfigStore> =
         Arc::new(InMemoryLlmConfigStore::new(config.llm.clone()));
     let auth = Arc::new(TestAuthService);
@@ -404,47 +542,38 @@ async fn test_application_with_runtime_and_event_failure(
         Arc::new(MemoryStore::in_memory().await.unwrap()),
     )
     .unwrap();
-    let service = TalosService::new_with_session_store(
-        turn_executor,
-        session_runtime,
+    let coordinator: Arc<dyn AgentCoordinator> = Arc::new(TestExecutionCoordinator {
+        execution: agent_execution,
+        delegate: coordinator,
+    });
+    let reload_hook = test_config_reload_hook(config.clone());
+    let service = TalosService::new(
+        coordinator,
         store.clone(),
-        Arc::new(talos_store::session::FileSessionArtifactStore::default()),
+        store.clone(),
         project_store,
         profile_store,
         files,
         event_service,
-        idempotency_store,
         config,
         memory,
         config_store,
         Vec::new(),
         auth_service,
         user_service,
+        reload_hook,
     );
     (service, store)
 }
 
-fn request_context() -> TalosContext {
-    TalosContext {
-        source_type: TalosSourceType::Http,
-        provider: TalosProvider::Http,
-        user_id: "client-user".to_string(),
-        message_id: "client-message".to_string(),
-        trace_id: "trace-1".to_string(),
-        channel_id: None,
-        thread_id: None,
-        project_root: None,
-        environment: None,
-    }
+fn request_source() -> SessionSource {
+    SessionSource::http()
 }
 
 fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
     StartTurnRequest {
         session_id: session_id.to_string(),
-        input: vec![TalosInputItem::Text {
-            text: text.to_string(),
-        }],
-        context: Some(request_context()),
+        input: crate::test_support::test_user_input(text),
         model_selection: None,
         user_permission_mode: None,
         project_id: None,
@@ -456,8 +585,8 @@ fn start_turn_request(session_id: &str, text: &str) -> StartTurnRequest {
 #[tokio::test]
 async fn first_turn_persists_selected_permission_mode() {
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Accepted,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::Accepted,
         }),
         configured_test_config(),
     )
@@ -467,7 +596,7 @@ async fn first_turn_persists_selected_permission_mode() {
     request.user_permission_mode = Some(talos_types::UserPermissionMode::AskForApproval);
 
     service
-        .start_turn(&actor, request, None)
+        .start_turn(&actor, request_source(), request, None)
         .await
         .expect("first turn should create the session");
 
@@ -476,25 +605,19 @@ async fn first_turn_persists_selected_permission_mode() {
         .await
         .expect("created session should be readable");
     assert_eq!(
-        (
-            session.conf.user_permission_mode,
-            session.effective_user_permission_mode,
-        ),
-        (
-            Some(talos_types::UserPermissionMode::AskForApproval),
-            talos_types::UserPermissionMode::AskForApproval,
-        )
+        session.effective_mode,
+        talos_types::UserPermissionMode::AskForApproval
     );
 }
 
 fn create_session_params(
     session_id: &str,
-    context: TalosContext,
+    source: SessionSource,
     current_directory: Option<std::path::PathBuf>,
 ) -> CreateSessionRequest {
     CreateSessionRequest {
         session_id: session_id.to_string(),
-        context,
+        source,
         model_selection: None,
         user_permission_mode: None,
         project_id: None,
@@ -505,8 +628,8 @@ fn create_session_params(
 #[tokio::test]
 async fn delete_session_clears_its_message_queue() {
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
         configured_test_config(),
     )
@@ -515,7 +638,7 @@ async fn delete_session_clears_its_message_queue() {
     service
         .create_session(
             &actor,
-            create_session_params("session-delete-queue", request_context(), None),
+            create_session_params("session-delete-queue", request_source(), None),
         )
         .await
         .expect("session should be created");
@@ -523,9 +646,7 @@ async fn delete_session_clears_its_message_queue() {
         .message_queue
         .add(
             "session-delete-queue",
-            vec![TalosInputItem::Text {
-                text: "waiting".to_string(),
-            }],
+            crate::test_support::test_user_input("waiting"),
         )
         .expect("queued message should be added");
 
@@ -534,7 +655,7 @@ async fn delete_session_clears_its_message_queue() {
         .await
         .expect("session should be deleted");
 
-    assert!(ack.success);
+    assert!(ack);
     assert_eq!(
         service
             .message_queue
@@ -546,90 +667,19 @@ async fn delete_session_clears_its_message_queue() {
 }
 
 #[tokio::test]
-async fn session_history_reads_artifacts_from_the_session_user_workspace() {
-    let workspace = tempfile::tempdir().expect("temp workspace");
-    let config = configured_test_config().with_workspace_definition(WorkspaceDefinition::new(
-        talos_config::DEFAULT_WORKSPACE_ID,
-        workspace.path().to_path_buf(),
-    ));
-    let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        config.clone(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    let session_id = "session-user-history";
-    service
-        .create_session(
-            &actor,
-            create_session_params(session_id, request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-    let user_workspace = config
-        .resolve_workspace("default", "member-user")
-        .expect("user workspace")
-        .root;
-    FileSessionArtifactStore::default()
-        .append_turn(
-            &user_workspace,
-            &TalosTurn {
-                turn_id: "turn-history".to_string(),
-                message_id: "message-history".to_string(),
-                session_id: session_id.to_string(),
-                seq: 1,
-                timestamp: chrono::Utc::now(),
-                items: vec![RunItem::UserInput {
-                    text: "remember this".to_string(),
-                    file_ids: Vec::new(),
-                }],
-                usage: TokenUsage::default(),
-                stop_reason: StopReason::EndTurn,
-            },
-        )
-        .await
-        .expect("turn artifact should be written");
-
-    let history = service
-        .get_session_history(&actor, session_id)
-        .await
-        .expect("session history should be readable");
-
-    assert_eq!(history.messages.len(), 1);
-    assert_eq!(history.messages[0].message_id, "message-history");
-}
-
-#[tokio::test]
 async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
-    let mut config = configured_test_config();
-    config
-        .llm
-        .anthropic
-        .models
-        .push(talos_config::ProviderModelConfig {
-            id: "turn-model".to_string(),
-            name: "Turn Model".to_string(),
-            context_window: 128_000,
-            reasoning: true,
-            reasoning_effort: talos_config::ReasoningEffort::Medium,
-            speed: talos_config::ModelSpeed::Standard,
-            input: vec![talos_config::ModelInputKind::Text],
-            cost: talos_config::ModelCostConfig::default(),
-        });
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
-        config,
+        configured_test_config_with_turn_model(),
     )
     .await;
     let actor = Actor::regular("member-user");
     service
         .create_session(
             &actor,
-            create_session_params("session-model-ref", request_context(), None),
+            create_session_params("session-model-ref", request_source(), None),
         )
         .await
         .expect("session should be created");
@@ -641,21 +691,118 @@ async fn existing_session_start_turn_applies_model_selection_before_dispatch() {
             id: "turn-model".to_string(),
         },
     ));
-    let _ = service.start_turn(&actor, request, None).await;
+    let _ = service
+        .start_turn(&actor, request_source(), request, None)
+        .await;
 
     let session = service
         .get_session(&actor, "session-model-ref")
         .await
         .expect("session should still be readable");
-    assert_eq!(session.config.llm.provider, "anthropic");
-    assert_eq!(session.config.llm.model, "turn-model");
+    assert_eq!(session.model_selection.model_ref.provider, "anthropic");
+    assert_eq!(session.model_selection.model_ref.id, "turn-model");
+}
+
+#[tokio::test]
+async fn start_replay_returns_before_reapplying_session_metadata() {
+    let (service, _store) = test_application(
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::Accepted,
+        }),
+        configured_test_config_with_turn_model(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-start-replay", request_source(), None),
+        )
+        .await
+        .unwrap();
+    let mut request = start_turn_request("session-start-replay", "hello");
+    request.model_selection = Some(talos_types::ModelSelection::without_reasoning(
+        talos_types::ModelRef {
+            provider: "anthropic".to_string(),
+            id: "turn-model".to_string(),
+        },
+    ));
+
+    let first = service
+        .start_turn(
+            &actor,
+            request_source(),
+            request.clone(),
+            Some("start-replay-key".to_string()),
+        )
+        .await
+        .unwrap();
+    let replay = service
+        .start_turn(
+            &actor,
+            request_source(),
+            request,
+            Some("start-replay-key".to_string()),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(replay, first);
+}
+
+#[tokio::test]
+async fn start_key_rejects_different_metadata_before_session_patch() {
+    let (service, _store) = test_application(
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::Accepted,
+        }),
+        configured_test_config_with_turn_model(),
+    )
+    .await;
+    let actor = Actor::regular("member-user");
+    service
+        .create_session(
+            &actor,
+            create_session_params("session-start-conflict", request_source(), None),
+        )
+        .await
+        .unwrap();
+    let request = start_turn_request("session-start-conflict", "hello");
+    service
+        .start_turn(
+            &actor,
+            request_source(),
+            request.clone(),
+            Some("start-conflict-key".to_string()),
+        )
+        .await
+        .unwrap();
+    let mut conflicting = request;
+    conflicting.model_selection = Some(talos_types::ModelSelection::without_reasoning(
+        talos_types::ModelRef {
+            provider: "anthropic".to_string(),
+            id: "turn-model".to_string(),
+        },
+    ));
+
+    let error = service
+        .start_turn(
+            &actor,
+            request_source(),
+            conflicting,
+            Some("start-conflict-key".to_string()),
+        )
+        .await
+        .expect_err("same key with different metadata must conflict");
+
+    assert!(error.is_code(talos_error::ErrorCode::IdempotencyConflict));
 }
 
 #[tokio::test]
 async fn existing_session_start_turn_does_not_change_permission_mode() {
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
         configured_test_config(),
     )
@@ -664,33 +811,32 @@ async fn existing_session_start_turn_does_not_change_permission_mode() {
     service
         .create_session(
             &actor,
-            create_session_params("session-existing-permission", request_context(), None),
+            create_session_params("session-existing-permission", request_source(), None),
         )
         .await
         .expect("session should be created");
 
     let mut request = start_turn_request("session-existing-permission", "hello");
     request.user_permission_mode = Some(talos_types::UserPermissionMode::AskForApproval);
-    let _ = service.start_turn(&actor, request, None).await;
+    let _ = service
+        .start_turn(&actor, request_source(), request, None)
+        .await;
 
     let session = service
         .get_session(&actor, "session-existing-permission")
         .await
         .expect("session should remain readable");
     assert_eq!(
-        (
-            session.conf.user_permission_mode,
-            session.effective_user_permission_mode,
-        ),
-        (None, talos_types::UserPermissionMode::FullAccess)
+        session.effective_mode,
+        talos_types::UserPermissionMode::FullAccess
     );
 }
 
 #[tokio::test]
 async fn existing_session_start_turn_rejects_a_project_override() {
     let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
+        Arc::new(TestAgentExecution {
+            mode: TestAgentExecutionMode::StartFailed,
         }),
         configured_test_config(),
     )
@@ -714,7 +860,7 @@ async fn existing_session_start_turn_rejects_a_project_override() {
         )
         .await
         .unwrap();
-    let mut params = create_session_params("session-project-binding", request_context(), None);
+    let mut params = create_session_params("session-project-binding", request_source(), None);
     params.project_id = Some(first_project.project_id.clone());
     service
         .create_session(&actor, params)
@@ -723,7 +869,10 @@ async fn existing_session_start_turn_rejects_a_project_override() {
 
     let mut request = start_turn_request("session-project-binding", "hello");
     request.project_id = Some(second_project.project_id);
-    let error = service.start_turn(&actor, request, None).await.unwrap_err();
+    let error = service
+        .start_turn(&actor, request_source(), request, None)
+        .await
+        .unwrap_err();
 
     assert!(error.is_code(talos_error::ErrorCode::InvalidRequest));
     assert_eq!(
@@ -744,6 +893,27 @@ async fn assert_session_absent(store: &DatabaseSessionStore, session_id: &str) {
         .is_none());
 }
 
+fn turn_submission_reservation(
+    session_id: &str,
+    idempotency_key: &str,
+    request_hash: &str,
+) -> CommandReservation {
+    let now = chrono::Utc::now().timestamp_millis();
+    CommandReservation {
+        session_id: session_id.to_string(),
+        command: IdempotentCommand::TurnSubmission,
+        idempotency_key: idempotency_key.to_string(),
+        request_hash: request_hash.to_string(),
+        request_id: "request-test".to_string(),
+        turn_id: "turn-test".to_string(),
+        message_id: "message-test".to_string(),
+        lease_id: "lease-test".to_string(),
+        now,
+        lease_expires_at: now.saturating_add(30_000),
+        record_expires_at: None,
+    }
+}
+
 async fn assert_session_creation_rolled_back(
     service: &TalosService,
     store: &DatabaseSessionStore,
@@ -757,10 +927,7 @@ async fn assert_session_creation_rolled_back(
         .await
         .expect("recovery should succeed");
     assert!(recovery.replay.events.is_empty());
-    assert_eq!(
-        recovery.active_turn.status,
-        talos_types::TimelineActiveTurnStatus::Completed
-    );
+    assert_eq!(recovery.active_turn, None);
     assert!(service
         .events
         .get_active_turn(session_id)
@@ -768,427 +935,14 @@ async fn assert_session_creation_rolled_back(
         .expect("active turn lookup should succeed")
         .is_none());
     if let Some(key) = idempotency_key {
-        assert!(store
-            .get(session_id, key)
-            .await
-            .expect("idempotency lookup should succeed")
-            .is_none());
         let reservation = store
-            .reserve(
+            .reserve_command(turn_submission_reservation(
                 session_id,
                 key,
                 "new-request-hash",
-                "turn-new",
-                chrono::Utc::now().timestamp_millis(),
-                None,
-            )
+            ))
             .await
             .expect("idempotency key should be reusable after rollback");
         assert!(matches!(reservation, IdempotencyReservation::Reserved(_)));
     }
-}
-
-#[tokio::test]
-async fn first_turn_timeout_does_not_leave_session_record() {
-    let mut config = configured_test_config();
-    config.agent.kernel.timeline_events.first_event_timeout_ms = 1;
-    let (service, store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Timeout,
-        }),
-        config,
-    )
-    .await;
-
-    let result = service
-        .start_turn(
-            &Actor::regular("member-user"),
-            start_turn_request("session-timeout", "hello"),
-            Some("timeout-key".to_string()),
-        )
-        .await;
-
-    assert!(result.is_err());
-    assert_session_creation_rolled_back(&service, &store, "session-timeout", Some("timeout-key"))
-        .await;
-}
-
-#[tokio::test]
-async fn first_turn_closed_stream_does_not_leave_session_record() {
-    let (service, store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-
-    let result = service
-        .start_turn(
-            &Actor::regular("member-user"),
-            start_turn_request("session-closed", "hello"),
-            Some("closed-key".to_string()),
-        )
-        .await;
-
-    assert!(result.is_err());
-    assert_session_creation_rolled_back(&service, &store, "session-closed", Some("closed-key"))
-        .await;
-}
-
-#[tokio::test]
-async fn first_turn_idempotency_conflict_does_not_leave_session_record() {
-    let (service, store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let reservation = store
-        .reserve(
-            "session-idempotency-conflict",
-            "conflict-key",
-            "different-request-hash",
-            "turn-existing",
-            1,
-            None,
-        )
-        .await
-        .expect("idempotency reserve should succeed");
-    assert!(matches!(reservation, IdempotencyReservation::Reserved(_)));
-
-    let result = service
-        .start_turn(
-            &Actor::regular("member-user"),
-            start_turn_request("session-idempotency-conflict", "hello"),
-            Some("conflict-key".to_string()),
-        )
-        .await;
-
-    assert!(result
-        .as_ref()
-        .is_err_and(|error| error.is_code(talos_error::ErrorCode::IdempotencyConflict)));
-    assert_session_creation_rolled_back(
-        &service,
-        &store,
-        "session-idempotency-conflict",
-        Some("conflict-key"),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn first_turn_active_turn_conflict_does_not_leave_session_record() {
-    let (service, store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "session-active-conflict".to_string(),
-            turn_id: "turn-existing".to_string(),
-            message_id: None,
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .expect("active turn insert should succeed");
-
-    let result = service
-        .start_turn(
-            &Actor::regular("member-user"),
-            start_turn_request("session-active-conflict", "hello"),
-            None,
-        )
-        .await;
-
-    assert!(result.is_err());
-    assert_session_creation_rolled_back(&service, &store, "session-active-conflict", None).await;
-}
-
-#[tokio::test]
-async fn patch_session_updates_permission_mode_when_idle() {
-    let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    service
-        .create_session(
-            &actor,
-            create_session_params("session-patch-permission", request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-
-    let ack = service
-        .patch_session(
-            &actor,
-            "session-patch-permission",
-            SessionPatch {
-                conf: Some(talos_types::SessionConf {
-                    user_permission_mode: Some(talos_types::UserPermissionMode::AskForApproval),
-                    ..Default::default()
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect("idle session patch should succeed");
-
-    assert!(ack.success);
-    let session = service
-        .get_session(&actor, "session-patch-permission")
-        .await
-        .expect("patched session should be readable");
-    assert_eq!(
-        session.conf.user_permission_mode,
-        Some(talos_types::UserPermissionMode::AskForApproval)
-    );
-    assert_eq!(
-        session.effective_user_permission_mode,
-        talos_types::UserPermissionMode::AskForApproval
-    );
-}
-
-#[tokio::test]
-async fn patch_session_rejects_running_active_turn() {
-    let (service, store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    service
-        .create_session(
-            &actor,
-            create_session_params("session-patch-active", request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "session-patch-active".to_string(),
-            turn_id: "turn-existing".to_string(),
-            message_id: None,
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .expect("active turn insert should succeed");
-
-    let error = service
-        .patch_session(&actor, "session-patch-active", SessionPatch::default())
-        .await
-        .expect_err("active session patch should be rejected");
-
-    assert!(error.is_code(talos_error::ErrorCode::ActiveTurnRunning));
-}
-
-#[tokio::test]
-async fn interrupt_turn_without_matching_active_turn_returns_not_found() {
-    let (service, _store) = test_application_with_runtime(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        Arc::new(TestSessionRuntime {
-            cancel_mode: TestCancelMode::MissingRuntimeTurn,
-            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
-            compaction_usage: TokenUsage::default(),
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    service
-        .create_session(
-            &actor,
-            create_session_params("session-interrupt-idempotent", request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-
-    let error = service
-        .interrupt_turn(
-            &actor,
-            talos_types::InterruptTurnRequest {
-                session_id: "session-interrupt-idempotent".to_string(),
-                turn_id: "turn-missing".to_string(),
-            },
-        )
-        .await
-        .expect_err("interrupt without matching active turn should fail");
-
-    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
-}
-
-#[tokio::test]
-async fn interrupt_turn_unknown_session_returns_not_found() {
-    let (service, _store) = test_application_with_runtime(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        Arc::new(TestSessionRuntime {
-            cancel_mode: TestCancelMode::MissingRuntimeTurn,
-            cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
-            compaction_usage: TokenUsage::default(),
-        }),
-        configured_test_config(),
-    )
-    .await;
-
-    let error = service
-        .interrupt_turn(
-            &Actor::regular("member-user"),
-            talos_types::InterruptTurnRequest {
-                session_id: "missing-session".to_string(),
-                turn_id: "turn-missing".to_string(),
-            },
-        )
-        .await
-        .expect_err("unknown session should be rejected");
-
-    assert!(error.is_code(talos_error::ErrorCode::ResourceNotFound));
-}
-
-#[tokio::test]
-async fn interrupt_turn_finalizes_orphaned_active_turn() {
-    let cancelled_turn_ids = Arc::new(Mutex::new(Vec::new()));
-    let (service, store) = test_application_with_runtime(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        Arc::new(TestSessionRuntime {
-            cancel_mode: TestCancelMode::MissingRuntimeTurn,
-            cancelled_turn_ids: cancelled_turn_ids.clone(),
-            compaction_usage: TokenUsage::default(),
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    service
-        .create_session(
-            &actor,
-            create_session_params("session-interrupt-runtime-missing", request_context(), None),
-        )
-        .await
-        .expect("session should be created");
-    store
-        .upsert_active_turn(ActiveTurnUpdate {
-            session_id: "session-interrupt-runtime-missing".to_string(),
-            turn_id: "turn-existing".to_string(),
-            message_id: Some("msg-existing".to_string()),
-            status: ActiveTurnStatus::Running,
-            last_event_id: None,
-            current_action_id: None,
-            updated_at: 1,
-        })
-        .await
-        .expect("active turn should be inserted");
-
-    let response = service
-        .interrupt_turn(
-            &actor,
-            talos_types::InterruptTurnRequest {
-                session_id: "session-interrupt-runtime-missing".to_string(),
-                turn_id: "turn-existing".to_string(),
-            },
-        )
-        .await
-        .expect("orphaned active turn should be finalized");
-
-    assert!(response.success);
-    assert_eq!(
-        *cancelled_turn_ids.lock().unwrap(),
-        vec!["turn-existing".to_string()]
-    );
-    let active_turn = store
-        .get_active_turn("session-interrupt-runtime-missing")
-        .await
-        .expect("active turn should load")
-        .expect("active turn should remain as terminal recovery state");
-    assert_eq!(active_turn.status, ActiveTurnStatus::Failed);
-    let events = store
-        .list_turn_events("session-interrupt-runtime-missing", "turn-existing", 10)
-        .await
-        .expect("turn events should load");
-    assert!(matches!(
-        events.last().map(|event| &event.payload),
-        Some(AgentEventPayload::TurnError(error))
-            if error.error.code == talos_error::ErrorCode::InternalError
-    ));
-}
-
-#[tokio::test]
-async fn project_delete_is_blocked_until_owned_files_are_removed() {
-    let (service, _store) = test_application(
-        Arc::new(TestTurnExecutor {
-            mode: TestTurnExecutorMode::Closed,
-        }),
-        configured_test_config(),
-    )
-    .await;
-    let actor = Actor::regular("member-user");
-    let directory = tempfile::tempdir().unwrap();
-    let project = service
-        .create_project(
-            &actor,
-            "Project with file".to_string(),
-            directory.path().to_path_buf(),
-        )
-        .await
-        .unwrap();
-    let uploaded = service
-        .files
-        .upload(
-            &actor,
-            talos_types::FileUploadRequest {
-                filename: "image.png".to_string(),
-                scope: talos_types::FileScope::Project {
-                    project_id: project.project_id.clone(),
-                },
-                tags: Vec::new(),
-                metadata: BTreeMap::new(),
-            },
-            Box::pin(stream::iter([Ok(Bytes::from_static(
-                b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR",
-            ))])),
-        )
-        .await
-        .unwrap();
-
-    let conflict = service
-        .delete_project(&actor, &project.project_id)
-        .await
-        .unwrap_err();
-    assert!(conflict.is_code(talos_error::ErrorCode::Conflict));
-
-    service
-        .files
-        .delete(
-            &actor,
-            talos_types::FileDeleteRequest {
-                file_id: uploaded.file.file_id,
-            },
-        )
-        .await
-        .unwrap();
-    service
-        .delete_project(&actor, &project.project_id)
-        .await
-        .unwrap();
 }

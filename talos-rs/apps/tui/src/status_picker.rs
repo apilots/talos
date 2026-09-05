@@ -1,9 +1,11 @@
 use std::path::PathBuf;
 
 use talos_error::{TalosError, TalosResult};
-use talos_sdk::UserPermissionMode;
-use talos_sdk::{AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo};
-use talos_types::talos::{TokenUsage, TurnExecutionMetrics};
+use talos_sdk::{
+    AgentRunMetrics, AuthSessionReadResponse, ContextUsage, ReasoningEffort, SessionInfo,
+    UserPermissionMode,
+};
+use talos_types::talos::TokenUsage;
 
 use crate::utils::{text_display_width, APP_VERSION};
 use crate::TuiApp;
@@ -41,7 +43,7 @@ struct StatusModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct StatusTurn {
     state: &'static str,
-    metrics: Option<TurnExecutionMetrics>,
+    metrics: Option<AgentRunMetrics>,
 }
 
 impl TuiStatusSnapshot {

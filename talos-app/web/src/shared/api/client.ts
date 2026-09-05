@@ -4,7 +4,51 @@ import { createDesktopTalosClient, getDesktopBridge } from "./desktop-client";
 import { resolveServerBaseUrl } from "./server-base-url";
 import { getConnectionSettings } from "@/shared/store/app-store";
 
-export type TalosWebClient = ReturnType<typeof createBrowserTalosClient>;
+type BrowserTalosClient = ReturnType<typeof createBrowserTalosClient>;
+type Methods<T, K extends keyof T> = Pick<T, K>;
+
+/** Transport-neutral API surface consumed by the Web application. */
+export type TalosWebClient = {
+  auth: Methods<BrowserTalosClient["auth"], "logout">;
+  user: Methods<BrowserTalosClient["user"], "current">;
+  profile: Methods<BrowserTalosClient["profile"], "read">;
+  llm: Methods<BrowserTalosClient["llm"], "get" | "update">;
+  config: Methods<BrowserTalosClient["config"], "get" | "update">;
+  models: Methods<BrowserTalosClient["models"], "list">;
+  sessions: Methods<
+    BrowserTalosClient["sessions"],
+    | "list"
+    | "get"
+    | "patch"
+    | "close"
+    | "delete"
+    | "cancel"
+    | "compact"
+    | "clear"
+    | "activeTurn"
+    | "history"
+    | "recoverTimeline"
+  >;
+  messageQueue: Methods<
+    BrowserTalosClient["messageQueue"],
+    "list" | "add" | "update" | "delete" | "reorder" | "start"
+  >;
+  projects: Methods<BrowserTalosClient["projects"], "list" | "create" | "patch" | "delete">;
+  files: Methods<BrowserTalosClient["files"], "upload" | "list" | "read" | "update" | "delete">;
+  fs: {
+    directory: Methods<BrowserTalosClient["fs"]["directory"], "read" | "create">;
+  };
+  memory: Methods<BrowserTalosClient["memory"], "list" | "get" | "put" | "search" | "getEntry">;
+  workspaceDocs: Methods<BrowserTalosClient["workspaceDocs"], "get" | "put">;
+  skills: Methods<BrowserTalosClient["skills"], "list" | "suggest" | "read">;
+  plugin: Methods<
+    BrowserTalosClient["plugin"],
+    "search" | "list" | "read" | "install" | "update" | "uninstall" | "enable" | "disable"
+  > & {
+    sources: Methods<BrowserTalosClient["plugin"]["sources"], "add">;
+  };
+  turns: Methods<BrowserTalosClient["turns"], "start" | "retry" | "input" | "events">;
+};
 export type TalosClientFactory = () => TalosWebClient;
 
 let clientFactory: TalosClientFactory | undefined;

@@ -1,23 +1,40 @@
 use super::*;
-use talos_store::session::{SessionArtifactStore, SessionStore, TalosTurn};
+use crate::{
+    ExecutionBranch, InvocationSession, KernelMemoryProgressStore, KernelSessionArtifactStore,
+    KernelSessionSummary, KernelTranscriptEvent, KernelTranscriptPayload, KernelTranscriptService,
+    SessionPromptContext, SessionPromptContextFuture, SessionPromptContextSource,
+    SessionPromptEntryHeader, SessionPromptMessage, SessionPromptSourceTurn, SessionPromptSummary,
+    SessionState,
+};
 
 struct TestMemoryStore {
-    workspace_dir: PathBuf,
+    session_id: Mutex<String>,
     writes: Mutex<Vec<MemoryWriteBatch>>,
     day_entries: Mutex<Vec<talos_memory::DreamMemoryEntry>>,
+    prompt_context: Mutex<SessionPromptContext>,
+    summaries: Mutex<Vec<KernelSessionSummary>>,
+    transcript: Mutex<Vec<KernelTranscriptEvent>>,
+    memory_cursor: std::sync::atomic::AtomicU64,
 }
 
 impl TestMemoryStore {
-    fn new(workspace_dir: PathBuf) -> Self {
+    fn new() -> Self {
         Self {
-            workspace_dir,
+            session_id: Mutex::new("s1".to_string()),
             writes: Mutex::new(Vec::new()),
             day_entries: Mutex::new(Vec::new()),
+            prompt_context: Mutex::new(SessionPromptContext::default()),
+            summaries: Mutex::new(Vec::new()),
+            transcript: Mutex::new(Vec::new()),
+            memory_cursor: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
-    fn workspace_dir(&self) -> &Path {
-        &self.workspace_dir
+    fn set_session_id(&self, session_id: impl Into<String>) {
+        *self
+            .session_id
+            .lock()
+            .expect("test Session id mutex should lock") = session_id.into();
     }
 
     fn writes(&self) -> Vec<MemoryWriteBatch> {
@@ -32,6 +49,160 @@ impl TestMemoryStore {
             .day_entries
             .lock()
             .expect("test day entries mutex should lock") = entries;
+    }
+
+    fn append_prompt_turn(
+        &self,
+        turn_id: impl Into<String>,
+        completed_event_seq: i64,
+        messages: Vec<(SessionPromptMessageRole, String)>,
+    ) {
+        let turn_id = turn_id.into();
+        let mut context = self
+            .prompt_context
+            .lock()
+            .expect("test prompt context mutex should lock");
+        context.source_turns.push(SessionPromptSourceTurn {
+            turn_id: turn_id.clone(),
+            completed_event_seq,
+            completed_at: completed_event_seq,
+        });
+        context
+            .recent_messages
+            .extend(
+                messages
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (role, text))| SessionPromptMessage {
+                        header: SessionPromptEntryHeader {
+                            id: format!("{turn_id}:message:{index}"),
+                            turn_id: turn_id.clone(),
+                            completed_at: completed_event_seq,
+                        },
+                        role,
+                        text,
+                    }),
+            );
+    }
+}
+
+#[async_trait]
+impl KernelTranscriptService for TestMemoryStore {
+    async fn append_event(
+        &self,
+        session: &mut InvocationSession,
+        event: KernelTranscriptEvent,
+    ) -> TalosResult<KernelTranscriptEvent> {
+        if let KernelTranscriptPayload::SessionState { update } = &event.payload {
+            session.state.apply(update);
+        }
+        self.transcript
+            .lock()
+            .expect("test transcript mutex should lock")
+            .push(event.clone());
+        session.events.push(event.clone());
+        Ok(event)
+    }
+
+    async fn load_session(
+        &self,
+        session_id: &str,
+        invocation_id: Option<&str>,
+        branch: Option<ExecutionBranch>,
+    ) -> TalosResult<InvocationSession> {
+        let events = self
+            .transcript
+            .lock()
+            .expect("test transcript mutex should lock")
+            .iter()
+            .filter(|event| {
+                event.session_id == session_id
+                    && invocation_id.is_none_or(|id| event.invocation_id == id)
+                    && branch.is_none_or(|value| event.branch == value)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut state = SessionState::default();
+        for event in &events {
+            if let KernelTranscriptPayload::SessionState { update } = &event.payload {
+                state.apply(update);
+            }
+        }
+        Ok(InvocationSession {
+            session_id: session_id.to_string(),
+            events,
+            state,
+        })
+    }
+}
+
+impl SessionPromptContextSource for TestMemoryStore {
+    fn load(&self, config: SessionPromptContextConfig) -> SessionPromptContextFuture<'_> {
+        Box::pin(async move {
+            let mut context = self
+                .prompt_context
+                .lock()
+                .expect("test prompt context mutex should lock")
+                .clone();
+            if let Some(cursor) = config.compact_cursor {
+                let uncovered_turns = context
+                    .source_turns
+                    .iter()
+                    .filter(|turn| {
+                        u64::try_from(turn.completed_event_seq)
+                            .is_ok_and(|sequence| sequence > cursor.covers_until_seq)
+                    })
+                    .map(|turn| turn.turn_id.clone())
+                    .collect::<std::collections::HashSet<_>>();
+                context
+                    .source_turns
+                    .retain(|turn| uncovered_turns.contains(&turn.turn_id));
+                context
+                    .recent_messages
+                    .retain(|message| uncovered_turns.contains(&message.header.turn_id));
+            }
+            if context.recent_messages.len() > config.recent_messages_limit {
+                match config.recent_window {
+                    SessionPromptRecentWindow::Latest => {
+                        context.recent_messages = context.recent_messages.split_off(
+                            context.recent_messages.len() - config.recent_messages_limit,
+                        );
+                    }
+                    SessionPromptRecentWindow::OldestUncovered => {
+                        context
+                            .recent_messages
+                            .truncate(config.recent_messages_limit);
+                    }
+                }
+            }
+            context.summaries = if config.include_summary {
+                let session_id = self
+                    .session_id
+                    .lock()
+                    .expect("test Session id mutex should lock")
+                    .clone();
+                self.load_test_summaries(&session_id, config.summary_recent_count)
+                    .into_iter()
+                    .map(|summary| SessionPromptSummary {
+                        id: summary.header.id,
+                        covers_until_seq: summary.covers_until_seq,
+                        source_turn_count: summary.source_turn_count,
+                        content: if config.summary_max_chars == 0 {
+                            summary.content
+                        } else {
+                            summary
+                                .content
+                                .chars()
+                                .take(config.summary_max_chars)
+                                .collect()
+                        },
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            Ok(context)
+        })
     }
 }
 
@@ -106,45 +277,129 @@ impl DreamMemoryFormationStore for FailingMemoryWriter {
     }
 }
 
+impl TestMemoryStore {
+    fn load_test_summaries(&self, session_id: &str, limit: usize) -> Vec<KernelSessionSummary> {
+        let summaries = self
+            .summaries
+            .lock()
+            .expect("test summaries mutex should lock");
+        let mut matching = summaries
+            .iter()
+            .filter(|summary| summary.header.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        if matching.len() > limit {
+            matching = matching.split_off(matching.len() - limit);
+        }
+        matching
+    }
+}
+
 #[async_trait]
-trait TestSessionArtifacts {
-    async fn next_turn_seq(&self, session_id: &str) -> TalosResult<u64>;
-    async fn append_turn(&self, turn: &TalosTurn) -> TalosResult<()>;
+impl KernelSessionArtifactStore for TestMemoryStore {
+    async fn append_transcript_event(
+        &self,
+        _workspace_root: &Path,
+        event: &KernelTranscriptEvent,
+    ) -> TalosResult<()> {
+        self.transcript
+            .lock()
+            .expect("test transcript mutex should lock")
+            .push(event.clone());
+        Ok(())
+    }
+
+    async fn load_transcript_events(
+        &self,
+        _workspace_root: &Path,
+        session_id: &str,
+        invocation_id: Option<&str>,
+        branch: Option<ExecutionBranch>,
+    ) -> TalosResult<Vec<KernelTranscriptEvent>> {
+        Ok(self
+            .transcript
+            .lock()
+            .expect("test transcript mutex should lock")
+            .iter()
+            .filter(|event| {
+                event.session_id == session_id
+                    && invocation_id.is_none_or(|value| event.invocation_id == value)
+                    && branch.is_none_or(|value| event.branch == value)
+            })
+            .cloned()
+            .collect())
+    }
+
+    async fn save_summary(
+        &self,
+        _workspace_root: &Path,
+        summary: &KernelSessionSummary,
+    ) -> TalosResult<()> {
+        self.summaries
+            .lock()
+            .expect("test summaries mutex should lock")
+            .push(summary.clone());
+        Ok(())
+    }
+
     async fn load_summaries(
         &self,
+        _workspace_root: &Path,
         session_id: &str,
         limit: usize,
-    ) -> TalosResult<Vec<SummaryRecord>>;
+    ) -> TalosResult<Vec<KernelSessionSummary>> {
+        Ok(self.load_test_summaries(session_id, limit))
+    }
+
+    async fn session_size_bytes(
+        &self,
+        _workspace_root: &Path,
+        _session_id: &str,
+    ) -> TalosResult<u64> {
+        Ok(0)
+    }
+
+    async fn reset_session(&self, _workspace_root: &Path, session_id: &str) -> TalosResult<()> {
+        self.summaries
+            .lock()
+            .expect("test summaries mutex should lock")
+            .retain(|summary| summary.header.session_id != session_id);
+        self.transcript
+            .lock()
+            .expect("test transcript mutex should lock")
+            .retain(|event| event.session_id != session_id);
+        Ok(())
+    }
 }
 
 #[async_trait]
-impl TestSessionArtifacts for TestMemoryStore {
-    async fn next_turn_seq(&self, session_id: &str) -> TalosResult<u64> {
-        talos_store::session::FileSessionArtifactStore::default()
-            .next_turn_seq(self.workspace_dir(), session_id)
-            .await
+impl KernelMemoryProgressStore for TestMemoryStore {
+    async fn processed_until_event_seq(&self, _session_id: &str) -> TalosResult<u64> {
+        Ok(self.memory_cursor.load(Ordering::SeqCst))
     }
 
-    async fn append_turn(&self, turn: &TalosTurn) -> TalosResult<()> {
-        talos_store::session::FileSessionArtifactStore::default()
-            .append_turn(self.workspace_dir(), turn)
-            .await
-    }
-
-    async fn load_summaries(
+    async fn advance_processed_until_event_seq(
         &self,
-        session_id: &str,
-        limit: usize,
-    ) -> TalosResult<Vec<SummaryRecord>> {
-        talos_store::session::FileSessionArtifactStore::default()
-            .load_summaries(self.workspace_dir(), session_id, limit)
-            .await
+        _session_id: &str,
+        expected_until_seq: u64,
+        next_until_seq: u64,
+    ) -> TalosResult<()> {
+        match self.memory_cursor.compare_exchange(
+            expected_until_seq,
+            next_until_seq,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            Ok(_) => Ok(()),
+            Err(current) if current >= next_until_seq => Ok(()),
+            Err(current) => Err(TalosError::public(
+                talos_error::ErrorCode::Conflict,
+                format!("memory cursor conflict: expected {expected_until_seq}, current {current}"),
+            )),
+        }
     }
 }
-use crate::{
-    ContextStateBags, InvocationExecutionState, InvocationLimits, KernelEventData,
-    KernelStreamEventData, KernelStreamEventType, ToolExecutionMode, ToolProgressKind, TurnPhase,
-};
+use crate::{AgentKernelEventPayload, ToolExecutionMode, ToolProgressKind, TurnPhase};
 use async_trait::async_trait;
 use chrono::Utc;
 use serde_json::json;
@@ -180,10 +435,14 @@ async fn run_general_turn(
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
     tool_executor_port: Arc<dyn ToolExecutorPort>,
-    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
+    dream_memory_store: Arc<TestMemoryStore>,
     kernel_config: &AgentKernelConfig,
     skill_options: GeneralTurnSkillOptions,
 ) -> TalosResult<GeneralTurnResult> {
+    dream_memory_store.set_session_id(ctx.session_id.clone());
+    ctx.session_prompt_context_source = dream_memory_store.clone();
+    ctx.session_artifact_store = dream_memory_store.clone();
+    ctx.memory_progress_store = dream_memory_store.clone();
     super::run_general_turn(
         ctx,
         agent_name,
@@ -209,10 +468,14 @@ async fn prepare_general_turn(
     input: &str,
     llm_provider: Arc<dyn LlmProvider>,
     tool_definition_provider: Arc<dyn ToolDefinitionProvider>,
-    dream_memory_store: Arc<dyn DreamMemoryFormationStore>,
+    dream_memory_store: Arc<TestMemoryStore>,
     kernel_config: &AgentKernelConfig,
     skill_options: Option<GeneralTurnSkillOptions>,
 ) -> TalosResult<PreparedGeneralTurn> {
+    dream_memory_store.set_session_id(ctx.session_id.clone());
+    ctx.session_prompt_context_source = dream_memory_store.clone();
+    ctx.session_artifact_store = dream_memory_store.clone();
+    ctx.memory_progress_store = dream_memory_store.clone();
     super::prepare_general_turn(
         ctx,
         agent_name,
@@ -839,20 +1102,20 @@ impl LlmProvider for SummaryProvider {
 }
 
 fn build_ctx_with_stream(
-    stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    stream_tx: Option<mpsc::Sender<crate::AgentKernelEvent>>,
 ) -> InvocationContext {
     build_ctx_with_stream_for_session("s1", stream_tx)
 }
 
 fn build_ctx_with_stream_for_session(
     session_id: impl Into<String>,
-    stream_tx: Option<mpsc::Sender<crate::KernelStreamEvent>>,
+    stream_tx: Option<mpsc::Sender<crate::AgentKernelEvent>>,
 ) -> InvocationContext {
     let session_id = session_id.into();
+    let kernel_state = Arc::new(TestMemoryStore::new());
     InvocationContext {
         session_id: session_id.clone(),
         user_id: "u1".to_string(),
-        message_id: "msg-1".to_string(),
         invocation_id: "i1".to_string(),
         agent_id: "a1".to_string(),
         workspace_id: "w1".to_string(),
@@ -881,45 +1144,26 @@ fn build_ctx_with_stream_for_session(
         ),
         phase: TurnPhase::Execution,
         planning_instruction: None,
-        transfer_to: None,
-        execution_state: InvocationExecutionState::default(),
         session: crate::InvocationSession {
             session_id: session_id.clone(),
             ..crate::InvocationSession::default()
         },
         session_environment: None,
-        state: HashMap::new(),
-        state_bags: ContextStateBags::default(),
-        limits: InvocationLimits::default(),
-        events: Vec::new(),
-        transcript_service: None,
-        session_artifact_store: Some(Arc::new(
-            talos_store::session::FileSessionArtifactStore::default(),
-        )),
-        session_store: Some(Arc::new(talos_store::session::MockSessionStore::new())),
+        transcript_service: kernel_state.clone(),
+        session_artifact_store: kernel_state.clone(),
+        session_prompt_context_source: kernel_state.clone(),
+        memory_progress_store: kernel_state,
         stream_tx,
     }
 }
 
 async fn seed_recent_user_message(memory_store: &TestMemoryStore) {
-    let timestamp = Utc::now();
-    memory_store
-        .append_turn(&TalosTurn {
-            turn_id: "turn-1".to_string(),
-            message_id: "msg-1".to_string(),
-            session_id: "s1".to_string(),
-            seq: memory_store
-                .next_turn_seq("s1")
-                .await
-                .expect("seq should load"),
-            timestamp,
-            items: vec![RunItem::UserInput {
-                text: "history that should be dropped".to_string(),
-                file_ids: Vec::new(),
-            }],
-            usage: TokenUsage::default(),
-            stop_reason: TalosApiStopReason::EndTurn,
-        })
-        .await
-        .expect("append should succeed");
+    memory_store.append_prompt_turn(
+        "turn-1",
+        1,
+        vec![(
+            SessionPromptMessageRole::User,
+            "history that should be dropped".to_string(),
+        )],
+    );
 }

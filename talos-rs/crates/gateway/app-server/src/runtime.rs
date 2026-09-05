@@ -3,16 +3,16 @@ use std::sync::Arc;
 
 use talos_app_protocol::errors::{AppServerErrorBody, ALREADY_INITIALIZED};
 use talos_app_protocol::events::{
-    canonical_method, SubscriptionTerminatedEnvelope, SubscriptionTerminatedReason,
-    TimelineSubscriptionNotification,
+    timeline_event_method, SubscriptionTerminatedNotification, SubscriptionTerminatedReason,
+    TimelineEventNotification,
 };
 use talos_app_protocol::jsonrpc::{
     parse_message_line, JsonRpcErrorResponse, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, RequestId,
 };
 use talos_app_protocol::requests::{
-    ActorCredentials, ClientMethod, ClientRequest, ClientRequestParams, InitializeResponse,
-    ServerInfo,
+    ActorCredentials, ClientKind, ClientMethod, ClientRequest, ClientRequestParams,
+    InitializeResponse, ServerInfo,
 };
 use talos_app_protocol::version::ProtocolVersion;
 use talos_error::{ApiError, ErrorCode};
@@ -269,6 +269,7 @@ where
 #[derive(Default)]
 struct RuntimeState {
     actor: Option<Actor>,
+    session_source: Option<talos_types::talos::SessionSource>,
     initialized_notification_seen: bool,
     owned_turn_sessions: HashMap<String, OwnedTurn>,
     subscription_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
@@ -335,7 +336,7 @@ async fn handle_request(
     }
 
     match decoded.params {
-        ClientRequestParams::Initialize(_params) => {
+        ClientRequestParams::Initialize(params) => {
             if state.actor.is_some() {
                 return send_error(
                     outgoing_tx,
@@ -348,6 +349,11 @@ async fn handle_request(
                 .await;
             }
             state.actor = Some(Actor::regular("anonymous"));
+            state.session_source = Some(match params.client_info.kind {
+                ClientKind::Desktop => talos_types::talos::SessionSource::desktop(),
+                ClientKind::Cli => talos_types::talos::SessionSource::cli(),
+                ClientKind::Sdk => talos_types::talos::SessionSource::sdk(),
+            });
             let result = serde_json::to_value(InitializeResponse {
                 protocol_version: ProtocolVersion::CURRENT,
                 server_info: ServerInfo {
@@ -377,19 +383,20 @@ async fn handle_request(
                 Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
             match app.subscribe_timeline_events(&actor, params).await {
-                Ok(source) => {
-                    let subscription_id = source.response.subscription_id.clone();
+                Ok(subscription) => {
+                    let response = subscription.response();
+                    let subscription_id = response.subscription_id.clone();
                     send_result(
                         outgoing_tx.clone(),
                         id,
-                        serde_json::to_value(&source.response).map_err(|error| {
+                        serde_json::to_value(&response).map_err(|error| {
                             AppServerErrorBody::invalid_request(error.to_string())
                         }),
                     )
                     .await?;
                     let task = spawn_subscription(
                         subscription_id.clone(),
-                        source.subscription,
+                        subscription,
                         outgoing_tx,
                         config.subscription_capacity,
                     );
@@ -446,27 +453,37 @@ async fn handle_request(
                 Ok(actor) => actor,
                 Err(error) => return send_application_error(outgoing_tx, id, error).await,
             };
-            let request = ClientRequest {
-                method: decoded.method,
-                params,
+            let result = match params {
+                ClientRequestParams::TurnStart(request) => {
+                    let source = state
+                        .session_source
+                        .clone()
+                        .expect("initialized app-server must have a Session source");
+                    app.start_turn(&actor, source, request).await
+                }
+                params => {
+                    app.dispatch(
+                        &actor,
+                        ClientRequest {
+                            method: decoded.method,
+                            params,
+                        },
+                    )
+                    .await
+                }
             };
-            match app.dispatch(&actor, request).await {
+            match result {
                 Ok(result) => {
-                    if decoded.method == ClientMethod::TurnStart {
-                        if let (Some(session_id), Some(turn_id)) = (
-                            result.get("session_id").and_then(serde_json::Value::as_str),
-                            result.get("turn_id").and_then(serde_json::Value::as_str),
-                        ) {
-                            state.owned_turn_sessions.insert(
-                                session_id.to_string(),
-                                OwnedTurn {
-                                    actor: actor.clone(),
-                                    turn_id: turn_id.to_string(),
-                                },
-                            );
-                        }
+                    if let Some(identity) = result.started_turn {
+                        state.owned_turn_sessions.insert(
+                            identity.session_id,
+                            OwnedTurn {
+                                actor: actor.clone(),
+                                turn_id: identity.turn_id,
+                            },
+                        );
                     }
-                    send_result(outgoing_tx, id, Ok(result)).await
+                    send_result(outgoing_tx, id, Ok(result.body)).await
                 }
                 Err(error) => send_application_error(outgoing_tx, id, error).await,
             }
@@ -516,7 +533,7 @@ fn spawn_subscription(
         while let Some(message) = source.events.recv().await {
             match message {
                 TimelineSubscriptionMessage::Event(record) => {
-                    if send_event(&subscription_id, record, &outgoing_tx)
+                    if send_event(&subscription_id, *record, &outgoing_tx)
                         .await
                         .is_err()
                     {
@@ -585,11 +602,11 @@ fn map_subscription_close_reason(
 
 async fn send_event(
     subscription_id: &str,
-    record: talos_types::talos::TimelineEventEnvelope,
+    record: talos_agent_api::TimelineEvent,
     outgoing_tx: &mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
-    let method = canonical_method(&record.event.event_type);
-    let params = serde_json::to_value(TimelineSubscriptionNotification {
+    let method = timeline_event_method(&record.event.payload);
+    let params = serde_json::to_value(TimelineEventNotification {
         subscription_id: subscription_id.to_string(),
         event: record,
     })
@@ -612,7 +629,7 @@ async fn send_subscription_terminated(
     message: &str,
     outgoing_tx: &mpsc::Sender<OutgoingMessage>,
 ) -> Result<(), ()> {
-    let params = serde_json::to_value(SubscriptionTerminatedEnvelope {
+    let params = serde_json::to_value(SubscriptionTerminatedNotification {
         subscription_id: subscription_id.to_string(),
         session_id: session_id.to_string(),
         reason,
@@ -623,7 +640,7 @@ async fn send_subscription_terminated(
     })?;
     outgoing_tx
         .send(OutgoingMessage::Notification(JsonRpcNotification::new(
-            "subscription.terminated",
+            "subscription/terminated",
             Some(params),
         )))
         .await

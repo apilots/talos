@@ -2,15 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TalosClient } from "../client";
 import type { HttpAdapter, StreamAdapter } from "../adapters";
-import type { AgentEvent, TimelineEventEnvelope } from "../types";
+import type { AgentEvent, StartTurnRequest, TimelineEvent } from "../types";
 
 describe("TalosClient", () => {
   it("uses absolute urls for http requests", async () => {
     const request = vi.fn().mockResolvedValue({ results: [] });
     const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
+    const streamAdapter = noopStreamAdapter();
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080/");
 
     await client.models.list();
@@ -21,9 +19,7 @@ describe("TalosClient", () => {
   it("reads and writes llm config through the user config route", async () => {
     const request = vi.fn().mockResolvedValue({ provider: "anthropic", model: "claude-sonnet-4" });
     const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
+    const streamAdapter = noopStreamAdapter();
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080/");
     const config = { provider: "anthropic", model: "claude-sonnet-4" } as never;
 
@@ -40,42 +36,38 @@ describe("TalosClient", () => {
   it("uses ack plus events for streaming messages", async () => {
     const http: HttpAdapter = {
       request: vi.fn().mockResolvedValue({
-        request_id: "req-1",
-        message_id: "msg-1",
-        session_id: "session-1",
-        turn_id: "turn-1",
+        requestId: "req-1",
+        messageId: "msg-1",
+        sessionId: "session-1",
+        turnId: "turn-1",
         status: "accepted",
       }),
     };
     const stream = vi.fn().mockImplementation(async (_url, _options, onMessage) => {
-      onMessage(JSON.stringify(timelineEnvelope({
-        event_seq: 1,
-        event_id: "ev_00000000000000000001",
-        session_id: "session-1",
-        turn_id: "turn-1",
-        message_id: "msg-1",
+      onMessage(JSON.stringify(timelineEvent({
+        identity: { sessionId: "session-1", turnId: "turn-1" },
         sequence: 1,
-        event_type: "turn_completed",
         payload: {
-          type: "turn_completed",
-          request_id: "req-1",
-          turn_id: "turn-1",
-          completed_at_ms: 1 as never,
-          stop_reason: "end_turn",
-          usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null },
-          metrics: null,
+          type: "turnCompleted",
+          data: { stopReason: "endTurn" },
         },
-        created_at_ms: 1,
+        occurredAt: 1,
       })));
     });
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
+    const startRequest: StartTurnRequest = {
+      sessionId: "session-1",
+      input: { content: [{ type: "text", text: "hello" }] },
+      modelSelection: null,
+      userPermissionMode: null,
+      projectId: null,
+      currentDirectory: null,
+      clientRequestId: null,
+    };
 
     await client.turns.startEvents(
-      {
-        session_id: "session-1",
-        input: [{ type: "text", text: "hello" }],
-      },
+      startRequest,
       () => undefined,
     );
 
@@ -87,9 +79,8 @@ describe("TalosClient", () => {
     );
     const [, startOptions] = vi.mocked(http.request).mock.calls[0];
     expect(JSON.parse(String(startOptions?.body))).toEqual({
-      session_id: "session-1",
-      input: [{ type: "text", text: "hello" }],
-      client_request_id: expect.any(String),
+      ...startRequest,
+      clientRequestId: expect.any(String),
     });
     expect(stream).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/events",
@@ -100,62 +91,43 @@ describe("TalosClient", () => {
     );
   });
 
-  it("filters timeline events by message id in the SDK helper", async () => {
+  it("filters timeline events by turn id in the SDK helper", async () => {
     const http: HttpAdapter = {
       request: vi.fn(),
     };
     const onEvent = vi.fn();
     const stream = vi.fn().mockImplementation(async (_url, options, onMessage) => {
-      onMessage(JSON.stringify(timelineEnvelope({
-        event_seq: 1,
-        event_id: "ev_00000000000000000001",
-        session_id: "session-1",
-        turn_id: "turn-1",
-        message_id: "other-message",
+      onMessage(JSON.stringify(timelineEvent({
+        identity: { sessionId: "session-1", turnId: "turn-other" },
         sequence: 1,
-        event_type: "item_delta",
         payload: {
-          type: "item_delta",
-          request_id: "req-1",
-          turn_id: "turn-1",
-          item_id: "assistant-1",
-          delta: { type: "text", text: "skip" },
+          type: "turnStarted",
+          data: {},
         },
-        created_at_ms: 1,
+        occurredAt: 1,
       })));
-      onMessage(JSON.stringify(timelineEnvelope({
-        event_seq: 2,
-        event_id: "ev_00000000000000000002",
-        session_id: "session-1",
-        turn_id: "turn-1",
-        message_id: "msg-1",
+      onMessage(JSON.stringify(timelineEvent({
+        identity: { sessionId: "session-1", turnId: "turn-1" },
         sequence: 2,
-        event_type: "turn_completed",
         payload: {
-          type: "turn_completed",
-          request_id: "req-1",
-          turn_id: "turn-1",
-          completed_at_ms: 2 as never,
-          stop_reason: "end_turn",
-          usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0, cache_creation_input_tokens: null, cache_read_input_tokens: null },
-          metrics: null,
+          type: "turnCompleted",
+          data: { stopReason: "endTurn" },
         },
-        created_at_ms: 2,
+        occurredAt: 2,
       })));
       expect(options.signal.aborted).toBe(true);
     });
     const streamAdapter: StreamAdapter = { stream };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.turns.eventsForMessage("session-1", "msg-1", onEvent);
+    await client.turns.eventsForTurn("session-1", "turn-1", onEvent);
 
     expect(onEvent).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
-      event_id: "ev_00000000000000000002",
-      message_id: "msg-1",
+      eventId: "ev_00000000000000000002",
       event: expect.objectContaining({
-        event_type: "turn_completed",
-        message_id: "msg-1",
+        identity: { sessionId: "session-1", turnId: "turn-1" },
+        payload: { type: "turnCompleted", data: { stopReason: "endTurn" } },
       }),
     }));
   });
@@ -174,23 +146,21 @@ describe("TalosClient", () => {
 
   it("uses shared turn retry request for business retry execution", async () => {
     const request = vi.fn().mockResolvedValue({
-      request_id: "req-1",
-      message_id: "msg-2",
-      session_id: "session-1",
-      turn_id: "turn-2",
+      requestId: "req-1",
+      messageId: "msg-2",
+      sessionId: "session-1",
+      turnId: "turn-2",
       status: "accepted",
     });
     const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
+    const streamAdapter = noopStreamAdapter();
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
     await client.turns.retry({
-      session_id: "session-1",
-      client_message_id: "client-1",
-      retry_of_message_id: "msg-1",
-      input: [{ type: "text", text: "retry" }],
+      sessionId: "session-1",
+      clientMessageId: "client-1",
+      retryOfMessageId: "msg-1",
+      input: { content: [{ type: "text", text: "retry" }] },
     });
 
     expect(request).toHaveBeenCalledWith(
@@ -198,10 +168,10 @@ describe("TalosClient", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          session_id: "session-1",
-          client_message_id: "client-1",
-          retry_of_message_id: "msg-1",
-          input: [{ type: "text", text: "retry" }],
+          sessionId: "session-1",
+          clientMessageId: "client-1",
+          retryOfMessageId: "msg-1",
+          input: { content: [{ type: "text", text: "retry" }] },
         }),
       }),
     );
@@ -210,12 +180,10 @@ describe("TalosClient", () => {
   it("uses the dedicated close route for session shutdown", async () => {
     const request = vi.fn().mockResolvedValue({ success: true });
     const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
+    const streamAdapter = noopStreamAdapter();
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.sessions.close({ session_id: "session-1" });
+    await client.sessions.close({ sessionId: "session-1" });
 
     expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions/session-1/close", {
       method: "POST",
@@ -224,56 +192,39 @@ describe("TalosClient", () => {
 
   it("reads the active turn recovery snapshot", async () => {
     const request = vi.fn().mockResolvedValue({
-      active_turn: {
-        session_id: "session-1",
-        turn_id: "turn-1",
-        message_id: "msg-1",
-        status: "waiting_user_action",
-        last_event_id: "ev_00000000000000000007",
-        pending_user_action: {
-          type: "dynamic_tool_result",
-          call_id: "call-1",
-          tool_name: "ExternalTool",
-        },
-        updated_at: 123,
+      activeTurn: {
+        identity: { sessionId: "session-1", turnId: "turn-1" },
+        initialMessageId: "msg-1",
+        state: "waitingForInput",
+        lastEventId: "ev_00000000000000000007",
+        updatedAt: 123,
       },
     });
     const http: HttpAdapter = { request };
-    const streamAdapter: StreamAdapter = {
-      stream: vi.fn().mockResolvedValue(undefined),
-    };
+    const streamAdapter = noopStreamAdapter();
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    const activeTurn = await client.sessions.activeTurn({ session_id: "session-1" });
+    const activeTurn = await client.sessions.activeTurn({ sessionId: "session-1" });
 
     expect(request).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/active-turn",
     );
-    expect(activeTurn.active_turn.pending_user_action).toMatchObject({
-      type: "dynamic_tool_result",
-      call_id: "call-1",
+    expect(activeTurn.activeTurn).toMatchObject({
+      identity: { sessionId: "session-1", turnId: "turn-1" },
+      state: "waitingForInput",
     });
   });
 
   it("reads timeline recovery snapshots through the sessions SDK", async () => {
     const request = vi.fn().mockResolvedValue({
-      snapshot: {
-        replay: {
-          events: [],
-          high_water_mark_event_id: null,
-          last_replay_seq: 0,
-          cursor_status: "from_beginning",
-        },
-        active_turn: {
-          session_id: "session-1",
-          turn_id: null,
-          message_id: null,
-          status: "completed",
-          last_event_id: null,
-          pending_user_action: null,
-          updated_at: 0,
-        },
+      replay: {
+        events: [],
+        highWaterMarkEventId: null,
+        nextCursor: null,
+        lastEventSeq: 0,
+        cursorStatus: "fromBeginning",
       },
+      activeTurn: null,
     });
     const http: HttpAdapter = { request };
     const streamAdapter: StreamAdapter = {
@@ -282,15 +233,15 @@ describe("TalosClient", () => {
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
     const response = await client.sessions.recoverTimeline({
-      session_id: "session-1",
-      after_event_id: "ev_00000000000000000001",
-      replay_limit: 100,
+      sessionId: "session-1",
+      afterEventId: "ev_00000000000000000001",
+      replayLimit: 100,
     });
 
     expect(request).toHaveBeenCalledWith(
       "http://localhost:8080/v1/sessions/session-1/timeline/recovery?after_event_id=ev_00000000000000000001&limit=100",
     );
-    expect(response.snapshot.replay.events).toEqual([]);
+    expect(response.replay.events).toEqual([]);
   });
 
   it("posts project creation to the project collection route", async () => {
@@ -341,9 +292,9 @@ describe("TalosClient", () => {
     };
     const client = new TalosClient(http, streamAdapter, "http://localhost:8080");
 
-    await client.sessions.list({ project_id: "project-1", limit: null, offset: null });
+    await client.sessions.list({ projectId: "project-1", limit: null, offset: null });
 
-    expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?project_id=project-1");
+    expect(request).toHaveBeenCalledWith("http://localhost:8080/v1/sessions?projectId=project-1");
   });
 
   it("reads and writes memory files through request objects", async () => {
@@ -409,14 +360,15 @@ describe("TalosClient", () => {
   });
 });
 
-function timelineEnvelope(event: AgentEvent): TimelineEventEnvelope {
+function timelineEvent(event: AgentEvent): TimelineEvent {
   return {
-    event_id: event.event_id ?? "ev_00000000000000000000",
-    event_seq: event.event_seq ?? 0,
-    created_at_ms: event.created_at_ms ?? 0,
-    session_id: event.session_id,
-    turn_id: event.turn_id,
-    message_id: event.message_id,
+    eventId: `ev_${String(event.sequence).padStart(20, "0")}`,
+    eventSeq: event.sequence,
+    persistedAt: event.occurredAt,
     event,
   };
+}
+
+function noopStreamAdapter(): StreamAdapter {
+  return { stream: vi.fn().mockResolvedValue(undefined) };
 }

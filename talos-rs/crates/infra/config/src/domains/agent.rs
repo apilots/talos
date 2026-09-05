@@ -15,6 +15,14 @@ fn default_max_messages_per_session() -> u32 {
     10
 }
 
+fn default_timeline_replay_batch_size() -> usize {
+    1_024
+}
+
+fn default_command_idempotency_ttl_hours() -> u32 {
+    24
+}
+
 /// Bounded in-memory message queue settings for each session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -31,33 +39,21 @@ impl Default for MessageQueueConfig {
     }
 }
 
-/// Runtime family selected by an Agent definition.
+/// Typed Provider configuration for an Agent definition.
 ///
-/// A new kind must have a matching AgentRuntimeConfig variant and Harness
-/// factory support. Unsupported kinds must not silently fall back to Kernel.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentKind {
-    #[default]
-    Kernel,
-    Codex,
-    Claude,
-}
-
-/// Typed runtime configuration for an Agent definition.
-///
-/// This is configuration schema only. Runtime-private clients, handles, or
+/// Add a variant only with a working AgentProvider implementation and
+/// composition-root branch. Provider-private clients, handles, or
 /// continuation references must not be stored here.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-pub enum AgentRuntimeConfig {
+pub enum AgentProviderConfig {
     Kernel {
         #[serde(default)]
         kernel: AgentKernelConfig,
     },
 }
 
-impl Default for AgentRuntimeConfig {
+impl Default for AgentProviderConfig {
     fn default() -> Self {
         Self::Kernel {
             kernel: AgentKernelConfig::default(),
@@ -68,7 +64,7 @@ impl Default for AgentRuntimeConfig {
 /// Config-file representation of an Agent definition.
 ///
 /// The config layer owns parsing and schema shape. The Harness layer converts
-/// this into an AgentDefinition domain object before building a runtime.
+/// this into an AgentDefinition domain object before building a Provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AgentDefinitionConfig {
@@ -80,10 +76,6 @@ pub struct AgentDefinitionConfig {
     #[serde(default = "default_agent_name")]
     pub name: String,
 
-    /// Runtime family for this Agent.
-    #[serde(default)]
-    pub kind: AgentKind,
-
     /// Whether this definition should be instantiated.
     #[serde(default = "default_agent_enabled")]
     pub enabled: bool,
@@ -92,9 +84,9 @@ pub struct AgentDefinitionConfig {
     #[serde(default)]
     pub description: Option<String>,
 
-    /// Optional runtime-specific configuration matched with kind.
+    /// Optional typed Provider configuration; omitted uses the default Kernel Provider.
     #[serde(default)]
-    pub runtime_config: Option<AgentRuntimeConfig>,
+    pub provider: Option<AgentProviderConfig>,
 }
 
 /// Agent configuration
@@ -117,7 +109,15 @@ pub struct AgentConfig {
     #[serde(default)]
     pub message_queue: MessageQueueConfig,
 
-    /// Agent kernel runtime settings
+    /// Maximum canonical events fetched for one replay page.
+    #[serde(default = "default_timeline_replay_batch_size")]
+    pub timeline_replay_batch_size: usize,
+
+    /// Retention period for completed command idempotency facts.
+    #[serde(default = "default_command_idempotency_ttl_hours")]
+    pub command_idempotency_ttl_hours: u32,
+
+    /// Default Kernel Provider settings.
     #[serde(default)]
     pub kernel: AgentKernelConfig,
 
@@ -137,6 +137,8 @@ impl Default for AgentConfig {
             identity: None,
             inner_model: None,
             message_queue: MessageQueueConfig::default(),
+            timeline_replay_batch_size: default_timeline_replay_batch_size(),
+            command_idempotency_ttl_hours: default_command_idempotency_ttl_hours(),
             kernel: AgentKernelConfig::default(),
             agents: Vec::new(),
         }
