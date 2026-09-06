@@ -63,16 +63,10 @@ impl AgentExecutionStore for DatabaseSessionStore {
 
     async fn list_turn_notices(
         &self,
-        identity: &AgentTurnRef,
+        identities: &[AgentTurnRef],
         through_event_seq: i64,
     ) -> TalosResult<Vec<super::TimelineEventRecord>> {
-        let rows = self.storage.query("SELECT * FROM agent_events WHERE session_id = ? AND turn_id = ? AND sequence IS NULL AND event_seq <= ? ORDER BY event_seq ASC LIMIT 1025", &[&identity.session_id, &identity.turn_id, &through_event_seq.to_string()]).await?;
-        if rows.len() > 1024 {
-            return Err(talos_error::TalosError::internal(
-                "The Turn notice history exceeds the supported limit.",
-            ));
-        }
-        rows.iter().map(super::notice::parse).collect()
+        super::notice::list(self, identities, through_event_seq).await
     }
 
     async fn reserve_command(

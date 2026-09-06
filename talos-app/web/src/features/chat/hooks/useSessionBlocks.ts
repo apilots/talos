@@ -63,10 +63,12 @@ export function buildSessionBlocks({
     recoveredInputItems,
     streamState?.pendingInput,
   );
-  const liveBlocks =
-    historyHasActiveMessage && !streamState?.isStreaming
-      ? (streamState?.blocks ?? []).filter((block) => block.kind === "notice")
-      : streamState?.blocks ?? [];
+  const historyNoticeIds = new Set(historyBlocks.filter((block) => block.kind === "notice").map((block) => block.id));
+  const liveBlocks = (streamState?.blocks ?? []).filter((block) =>
+    block.kind === "notice"
+      ? !historyNoticeIds.has(block.id)
+      : !historyHasActiveMessage || Boolean(streamState?.isStreaming),
+  );
   const liveBlockIds = new Set(liveBlocks.map((block) => block.id));
   const liveHasPendingInput = Boolean(
     streamState?.pendingInput?.serverMessageId &&

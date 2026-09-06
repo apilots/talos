@@ -1,11 +1,60 @@
 //! Product notices share the append-only log, not Agent lifecycle ownership.
 
-use talos_agent_api::{AgentEvent, TimelineEventPayload, TimelineSystemNotice};
+use talos_agent_api::{AgentEvent, AgentTurnRef, TimelineEventPayload, TimelineSystemNotice};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_storage::Row;
 
 use super::{record::parse_event_record, TimelineEventRecord};
 use crate::session::DatabaseSessionStore;
+
+/// Load one bounded batch without per-Turn round trips or unbounded SQL parameters.
+pub(super) async fn list(
+    store: &DatabaseSessionStore,
+    identities: &[AgentTurnRef],
+    through_event_seq: i64,
+) -> TalosResult<Vec<TimelineEventRecord>> {
+    const MAX_TURNS: usize = 1_000;
+    const MAX_NOTICES_PER_TURN: usize = 1_024;
+    if identities.is_empty() {
+        return Ok(Vec::new());
+    }
+    if identities.len() > MAX_TURNS {
+        return Err(TalosError::new(
+            ErrorCode::InvalidRequest,
+            "A notice batch cannot exceed 1,000 Turns.",
+        ));
+    }
+    let requested = serde_json::to_string(identities).map_err(|error| {
+        TalosError::internal_with_source("Could not encode notice query identities.", error)
+    })?;
+    let limit = (MAX_NOTICES_PER_TURN + 1).to_string();
+    let rows = store
+        .storage
+        .query(
+            r#"SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY session_id, turn_id ORDER BY event_seq
+                ) AS notice_position
+                FROM agent_events
+                WHERE (session_id, turn_id) IN (
+                    SELECT json_extract(value, '$.sessionId'), json_extract(value, '$.turnId')
+                    FROM json_each(?)
+                ) AND sequence IS NULL AND event_seq <= ?
+            ) WHERE notice_position <= ? ORDER BY event_seq ASC"#,
+            &[&requested, &through_event_seq.to_string(), &limit],
+        )
+        .await?;
+    // SQL returns at most one overflow marker per Turn, even for corrupt oversized history.
+    if rows.iter().any(|row| {
+        row.get_i64("notice_position")
+            .is_some_and(|position| position > MAX_NOTICES_PER_TURN as i64)
+    }) {
+        return Err(TalosError::internal(
+            "The Turn notice history exceeds the supported limit.",
+        ));
+    }
+    rows.iter().map(parse).collect()
+}
 
 pub(super) async fn append(
     store: &DatabaseSessionStore,

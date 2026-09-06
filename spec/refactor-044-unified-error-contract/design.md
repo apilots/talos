@@ -453,6 +453,11 @@ Web/Desktop/TUI keep Session subscriptions after a Turn terminates; explicitly
 Turn-limited CLI/SDK consumers end at the terminal fact and must use a Session
 subscription or history to observe later product effects. No extra event bus,
 notification manager, warning database or duplicate error object is introduced.
+History fetches notices in one bounded Store batch for the returned page, not for
+the lookahead Turn. Exact Session/Turn identities and one captured high water
+preserve ownership and replay boundaries. The batch accepts at most 1000 Turns
+and fails explicitly above 1024 notices per Turn. Web prefers historical notice
+positions for matching event IDs while retaining notices not yet present in history.
 Public subscribers drain the durable log when independent writers publish out of
 order. Failed durable publication produces a separate diagnostic, never a made-up
 cursor or a promise that database/process outages always reach disconnected UI.

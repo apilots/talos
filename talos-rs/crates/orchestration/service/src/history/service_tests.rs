@@ -17,25 +17,33 @@ use crate::test_support::{
 };
 use crate::TimelineEventService;
 
-async fn fixture() -> (Arc<DatabaseSessionStore>, SessionHistoryService) {
-    let storage = Arc::new(
+#[path = "test_support.rs"]
+mod test_support;
+use test_support::CountingStorage;
+
+async fn fixture() -> (
+    Arc<DatabaseSessionStore>,
+    SessionHistoryService,
+    Arc<CountingStorage>,
+) {
+    let storage = Arc::new(CountingStorage::new(
         SqliteStorage::new_with_max_connections(":memory:", 1)
             .await
             .expect("test storage should open"),
-    );
-    run_test_migrations(storage.pool()).await;
+    ));
+    run_test_migrations(storage.inner.pool()).await;
     let store = Arc::new(
-        DatabaseSessionStore::new(storage)
+        DatabaseSessionStore::new(storage.clone())
             .await
             .expect("Session Store should initialize"),
     );
     let event_service = Arc::new(TimelineEventService::new(store.clone()));
-    (store, SessionHistoryService::new(event_service))
+    (store, SessionHistoryService::new(event_service), storage)
 }
 
 #[tokio::test]
 async fn recent_prompt_history_reads_the_terminal_metrics_beyond_the_first_event_page() {
-    let (store, history) = fixture().await;
+    let (store, history, _) = fixture().await;
     let identity = AgentTurnRef::new("session-long", "turn-long");
     let user = completed_message(
         &identity,
@@ -194,7 +202,7 @@ async fn commit_completed_turn(
 
 #[tokio::test]
 async fn history_reduces_only_canonical_events_into_complete_turns() {
-    let (store, history) = fixture().await;
+    let (store, history, _) = fixture().await;
     let identity = AgentTurnRef::new("session-1", "turn-1");
     commit_completed_turn(store.as_ref(), identity.clone(), "1").await;
 
@@ -216,8 +224,162 @@ async fn history_reduces_only_canonical_events_into_complete_turns() {
 }
 
 #[tokio::test]
+async fn history_notice_reads_do_not_grow_per_turn() {
+    let (store, history, storage) = fixture().await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("session-1", "turn-1"),
+        "1",
+    )
+    .await;
+    storage.take_reads();
+    history.read("session-1", None, Some(100)).await.unwrap();
+    let single_turn_reads = storage.take_reads();
+
+    for suffix in ["2", "3"] {
+        commit_completed_turn(
+            store.as_ref(),
+            AgentTurnRef::new("session-1", format!("turn-{suffix}")),
+            suffix,
+        )
+        .await;
+    }
+    let warning = publish_warning(&history, AgentTurnRef::new("session-1", "turn-2")).await;
+    commit_completed_turn(
+        store.as_ref(),
+        AgentTurnRef::new("foreign", "turn-2"),
+        "foreign",
+    )
+    .await;
+    publish_warning(&history, AgentTurnRef::new("foreign", "turn-2")).await;
+    storage.take_reads();
+    let page = history.read("session-1", None, Some(100)).await.unwrap();
+    let page_reads = storage.take_reads();
+    for window in [
+        SessionHistoryWindow::Latest,
+        SessionHistoryWindow::OldestAfter {
+            completed_event_seq: 0,
+        },
+    ] {
+        let turns = history
+            .read_window(SessionHistoryReadParams {
+                session_id: "session-1".to_string(),
+                window,
+                limit: 100,
+            })
+            .await
+            .unwrap();
+        assert_eq!(turns, page.data);
+    }
+    assert_eq!(
+        page.data
+            .into_iter()
+            .map(|turn| (turn.identity.turn_id, turn.notices))
+            .collect::<Vec<_>>(),
+        vec![
+            ("turn-1".to_string(), vec![]),
+            ("turn-2".to_string(), vec![warning]),
+            ("turn-3".to_string(), vec![])
+        ],
+    );
+    assert_eq!(page_reads, single_turn_reads);
+}
+
+#[tokio::test]
+async fn history_notice_limits_apply_per_turn_without_poisoning_the_previous_page() {
+    let (store, history, _) = fixture().await;
+    for suffix in ["1", "2"] {
+        commit_completed_turn(
+            store.as_ref(),
+            AgentTurnRef::new("session-1", format!("turn-{suffix}")),
+            suffix,
+        )
+        .await;
+    }
+    let first = publish_warning(&history, AgentTurnRef::new("session-1", "turn-1")).await;
+    let mut second = Vec::new();
+    for _ in 0..1024 {
+        second.push(publish_warning(&history, AgentTurnRef::new("session-1", "turn-2")).await);
+    }
+    let full = history.read("session-1", None, Some(10)).await.unwrap();
+    assert_eq!(
+        full.data
+            .into_iter()
+            .map(|turn| turn.notices)
+            .collect::<Vec<_>>(),
+        vec![vec![first.clone()], second]
+    );
+    publish_warning(&history, AgentTurnRef::new("session-1", "turn-2")).await;
+    let page = history.read("session-1", None, Some(1)).await.unwrap();
+    assert_eq!(page.data[0].notices, vec![first]);
+    let error = history
+        .read("session-1", page.next_cursor.as_deref(), Some(1))
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InternalError);
+}
+
+#[tokio::test]
+async fn notice_batches_support_a_full_page_and_reject_oversized_requests() {
+    let (store, history, storage) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    commit_completed_turn(store.as_ref(), identity.clone(), "1").await;
+    let warning = publish_warning(&history, identity.clone()).await;
+    let mut identities: Vec<_> = (0..999)
+        .map(|index| AgentTurnRef::new("session-1", format!("missing-{index}")))
+        .collect();
+    identities.push(identity.clone());
+    storage.take_reads();
+    assert!(store
+        .list_turn_notices(&[], warning.event_seq)
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(storage.take_reads(), 0);
+    let records = store
+        .list_turn_notices(&identities, warning.event_seq)
+        .await
+        .unwrap();
+    assert_eq!(
+        records,
+        vec![talos_store::session::TimelineEventRecord {
+            event_seq: warning.event_seq,
+            persisted_at: warning.persisted_at,
+            event: warning.event,
+        }]
+    );
+    assert_eq!(storage.take_reads(), 1);
+    identities.push(identity);
+    let error = store
+        .list_turn_notices(&identities, warning.event_seq)
+        .await
+        .unwrap_err();
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
+}
+
+async fn publish_warning(
+    history: &SessionHistoryService,
+    identity: AgentTurnRef,
+) -> talos_agent_api::TimelineEvent {
+    history
+        .event_service
+        .publish_notice(talos_agent_api::TimelineSystemNotice {
+            identity,
+            occurred_at: 14,
+            notice: talos_agent_api::AgentSystemNotice {
+                level: talos_types::TalosTimelineNoticeLevel::Warning,
+                content: talos_agent_api::SystemNoticeContent::Error(talos_error::ApiError::new(
+                    talos_error::ErrorCode::InternalError,
+                )),
+            },
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
 async fn history_cursor_keeps_a_fixed_high_water_mark() {
-    let (store, history) = fixture().await;
+    let (store, history, _) = fixture().await;
     commit_completed_turn(
         store.as_ref(),
         AgentTurnRef::new("session-1", "turn-1"),
@@ -239,6 +401,7 @@ async fn history_cursor_keeps_a_fixed_high_water_mark() {
         .next_cursor
         .as_deref()
         .expect("another completed Turn should produce a cursor");
+    let late_warning = publish_warning(&history, AgentTurnRef::new("session-1", "turn-2")).await;
     commit_completed_turn(
         store.as_ref(),
         AgentTurnRef::new("session-1", "turn-3"),
@@ -255,11 +418,14 @@ async fn history_cursor_keeps_a_fixed_high_water_mark() {
     assert_eq!(second.data.len(), 1);
     assert_eq!(second.data[0].identity.turn_id, "turn-2");
     assert_eq!(second.next_cursor, None);
+    assert!(second.data[0].notices.is_empty());
+    let fresh = history.read("session-1", None, Some(10)).await.unwrap();
+    assert_eq!(fresh.data[1].notices, vec![late_warning]);
 }
 
 #[tokio::test]
 async fn history_cursor_rejects_a_nonterminal_page_boundary() {
-    let (store, history) = fixture().await;
+    let (store, history, _) = fixture().await;
     let identity = AgentTurnRef::new("session-1", "turn-1");
     let admission = commit_test_running_turn(
         store.as_ref(),
@@ -292,7 +458,7 @@ async fn history_cursor_rejects_a_nonterminal_page_boundary() {
 
 #[tokio::test]
 async fn bounded_history_windows_preserve_order_across_global_event_sequence_gaps() {
-    let (store, history) = fixture().await;
+    let (store, history, _) = fixture().await;
     commit_completed_turn(
         store.as_ref(),
         AgentTurnRef::new("session-1", "turn-1"),

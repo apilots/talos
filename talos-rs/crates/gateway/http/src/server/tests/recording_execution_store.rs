@@ -77,7 +77,7 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
 
     async fn list_turn_notices(
         &self,
-        _identity: &AgentTurnRef,
+        _identities: &[AgentTurnRef],
         _through_event_seq: i64,
     ) -> TalosResult<Vec<TimelineEventRecord>> {
         Ok(Vec::new())

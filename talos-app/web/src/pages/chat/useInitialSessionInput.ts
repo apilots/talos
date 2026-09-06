@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { ModelInfo } from "@talos/sdk-browser";
 
 import { modelSelectionForRef, type SendTextOptions } from "@/features/chat";
@@ -12,7 +12,7 @@ type Navigate = (
 ) => void;
 
 interface InitialSessionInputParams {
-  onPendingSessionChange: (sessionId: string | undefined) => void;
+  onPendingSessionChange: Dispatch<SetStateAction<string | undefined>>;
   locationPathname: string;
   locationState: SessionLocationState | null;
   models?: ModelInfo[];
@@ -86,8 +86,8 @@ export function useInitialSessionInput({
         }
       })
       .finally(() => {
-        if (mountedRef.current && activeSessionIdRef.current === sessionId) {
-          onPendingSessionChange(undefined);
+        if (mountedRef.current) {
+          onPendingSessionChange((pending) => pending === sessionId ? undefined : pending);
         }
       });
   }, [

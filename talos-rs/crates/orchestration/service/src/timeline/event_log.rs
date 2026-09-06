@@ -125,11 +125,11 @@ impl TimelineEventService {
 
     pub(crate) async fn turn_notices(
         &self,
-        identity: &AgentTurnRef,
+        identities: &[AgentTurnRef],
         through_event_seq: i64,
     ) -> TalosResult<Vec<TimelineEvent>> {
         self.execution_store
-            .list_turn_notices(identity, through_event_seq)
+            .list_turn_notices(identities, through_event_seq)
             .await
             .map(|records| records.into_iter().map(map_timeline_record).collect())
     }

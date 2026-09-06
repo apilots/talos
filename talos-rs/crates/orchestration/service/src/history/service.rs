@@ -88,10 +88,9 @@ impl SessionHistoryService {
             .then(|| completed.last().map(|(event_seq, _)| *event_seq))
             .flatten()
             .map(|event_seq| format_history_cursor(high_water_event_seq, event_seq));
-        Ok(SessionHistoryResponse {
-            data: completed.into_iter().map(|(_, turn)| turn).collect(),
-            next_cursor,
-        })
+        let mut data: Vec<_> = completed.into_iter().map(|(_, turn)| turn).collect();
+        self.attach_notices(&mut data, high_water_event_seq).await?;
+        Ok(SessionHistoryResponse { data, next_cursor })
     }
 
     async fn validate_cursor_event(
@@ -125,7 +124,7 @@ impl SessionHistoryService {
             return Ok(Vec::new());
         }
         let limit = params.limit.clamp(1, MAX_HISTORY_PAGE_SIZE);
-        match params.window {
+        let mut turns = match params.window {
             SessionHistoryWindow::Latest => {
                 let terminals = self
                     .event_service
@@ -135,17 +134,26 @@ impl SessionHistoryService {
                 for terminal in terminals {
                     turns.push(self.reduce_terminal(terminal).await?);
                 }
-                Ok(turns)
+                turns
             }
             SessionHistoryWindow::OldestAfter {
                 completed_event_seq,
-            } => Ok(self
+            } => self
                 .read_completed_after(&params.session_id, completed_event_seq, None, limit)
                 .await?
                 .into_iter()
                 .map(|(_, turn)| turn)
-                .collect()),
-        }
+                .collect(),
+        };
+        let high_water = self
+            .event_service
+            .latest_event_id(&params.session_id)
+            .await?
+            .map(|id| id.event_seq())
+            .transpose()?
+            .unwrap_or_default();
+        self.attach_notices(&mut turns, high_water).await?;
+        Ok(turns)
     }
 
     async fn read_completed_after(
@@ -155,16 +163,6 @@ impl SessionHistoryService {
         through_event_seq: Option<i64>,
         limit: usize,
     ) -> TalosResult<Vec<(i64, SessionHistoryTurn)>> {
-        let notice_high_water = match through_event_seq {
-            Some(through) => through,
-            None => self
-                .event_service
-                .latest_event_id(session_id)
-                .await?
-                .map(|id| id.event_seq())
-                .transpose()?
-                .unwrap_or_default(),
-        };
         let mut timeline_cursor =
             (after_event_seq > 0).then(|| TimelineEventId::from_seq(after_event_seq));
         let mut reducers = HashMap::new();
@@ -206,11 +204,7 @@ impl SessionHistoryService {
                 let reducer = reducers
                     .remove(&timeline_event.event.identity().turn_id)
                     .expect("terminal Turn reducer exists");
-                let mut turn = self.reduce_checkpoint(timeline_event, reducer.checkpoint())?;
-                turn.notices = self
-                    .event_service
-                    .turn_notices(&turn.identity, notice_high_water)
-                    .await?;
+                let turn = self.reduce_checkpoint(timeline_event, reducer.checkpoint())?;
                 completed.push((timeline_event.event_seq, turn));
                 if completed.len() == limit {
                     return Ok(completed);
@@ -240,19 +234,40 @@ impl SessionHistoryService {
             .event_service
             .turn_checkpoint(terminal.event.identity(), terminal.event_seq)
             .await?;
-        let mut turn = self.reduce_checkpoint(&terminal, checkpoint)?;
-        let high_water = self
+        self.reduce_checkpoint(&terminal, checkpoint)
+    }
+
+    /// Enrich only returned Turns, never the pagination lookahead, at one shared high water.
+    async fn attach_notices(
+        &self,
+        turns: &mut [SessionHistoryTurn],
+        high_water: i64,
+    ) -> TalosResult<()> {
+        if turns.is_empty() {
+            return Ok(());
+        }
+        let identities: Vec<_> = turns.iter().map(|turn| turn.identity.clone()).collect();
+        let mut notices = HashMap::<_, Vec<_>>::new();
+        for event in self
             .event_service
-            .latest_event_id(&turn.identity.session_id)
+            .turn_notices(&identities, high_water)
             .await?
-            .map(|id| id.event_seq())
-            .transpose()?
-            .unwrap_or_default();
-        turn.notices = self
-            .event_service
-            .turn_notices(&turn.identity, high_water)
-            .await?;
-        Ok(turn)
+        {
+            let identity = event.event.identity();
+            notices
+                .entry((identity.session_id.clone(), identity.turn_id.clone()))
+                .or_default()
+                .push(event);
+        }
+        for turn in turns {
+            turn.notices = notices
+                .remove(&(
+                    turn.identity.session_id.clone(),
+                    turn.identity.turn_id.clone(),
+                ))
+                .unwrap_or_default();
+        }
+        Ok(())
     }
 
     fn reduce_checkpoint(

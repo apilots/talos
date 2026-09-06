@@ -309,17 +309,22 @@ describe("ChatSessionPage", () => {
     await waitFor(() => expect(mocks.sessionQueryEnabled).toBe(true));
   });
 
-  it("does not block another session query while initial admission is pending", async () => {
+  it.each(["success", "failure"])("clears pending admission after navigating away and returning (%s)", async (outcome) => {
     render(
       <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
         <Link to="/sessions/sess-2">Other session</Link>
+        <Link to="/sessions/sess-1">Original session</Link>
         <Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes>
       </MemoryRouter>,
     );
     await waitFor(() => expect(mocks.sendText).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("link", { name: "Other session" }));
     expect(mocks.sessionQueryEnabled).toBe(true);
-    await act(async () => { resolveSend(); });
+    await act(async () => {
+      if (outcome === "success") resolveSend();
+      else rejectSend(new Error("Admission failed."));
+    });
+    fireEvent.click(screen.getByRole("link", { name: "Original session" }));
     expect(mocks.sessionQueryEnabled).toBe(true);
   });
 

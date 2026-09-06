@@ -82,10 +82,15 @@ fabricated replay cursor.
 The durable log resolves publication order between independent writers before
 advancing subscription cursors. Web notices have stable event IDs and remain
 outside collapsed activity; locale changes render their retained ApiError again.
+When history contains a notice ID, Web keeps that historical position instead of
+appending its live duplicate after newer Turns. Unpersisted live notices remain visible.
 TUI reuses the Session subscription that already carries queue changes. Its
 transcript blocks own replay identity, so there is no separate notice registry.
 Notices are not injected into Provider continuation state. A history read rejects
 more than 1024 notices for one Turn explicitly instead of silently truncating them.
+History batches notices for the returned Turn identities (up to 1000) at one
+captured high water, excluding pagination lookahead. Store queries enforce exact
+Session/Turn ownership and bounded results; no per-Turn notice query or cache is used.
 
 Use `talos_logging::report_error` once at the handling boundary:
 

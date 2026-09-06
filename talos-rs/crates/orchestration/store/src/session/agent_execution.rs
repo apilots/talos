@@ -199,10 +199,11 @@ pub trait AgentExecutionStore: Send + Sync {
     /// Capture the global Timeline high water, including product notices.
     async fn get_latest_timeline_event_seq(&self, session_id: &str) -> TalosResult<Option<i64>>;
 
-    /// Read bounded notices for a history Turn at its captured Timeline high water.
+    /// Read notices for at most 1,000 exact Turn identities at one Timeline high water.
+    /// Results are event-ordered, with an explicit failure above 1,024 notices per Turn.
     async fn list_turn_notices(
         &self,
-        identity: &AgentTurnRef,
+        identities: &[AgentTurnRef],
         through_event_seq: i64,
     ) -> TalosResult<Vec<TimelineEventRecord>>;
 

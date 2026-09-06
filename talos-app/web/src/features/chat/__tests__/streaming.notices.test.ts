@@ -1,13 +1,18 @@
-import { beforeEach, expect, it } from "vitest";
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { createElement } from "react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { AppProtocol } from "@talos/sdk-core";
 import { applyStreamEvent } from "../stream-events";
 import { buildSessionBlocks } from "../hooks/useSessionBlocks";
 import { useAppStore } from "@/shared/store/app-store";
+import { MessageList } from "@/widgets/message-list/MessageList";
 import { historyTextItem, sessionHistory, turnCompleted } from "./streaming-fixtures";
 
 beforeEach(() => useAppStore.setState({ streams: {} }));
+afterEach(cleanup);
 
-it("preserves success and deduplicates a late warning against restored history", () => {
+it("preserves success and a warning's historical position across later Turns", () => {
   const record = {
     eventId: "ev_10", eventSeq: 10, persistedAt: 10,
     event: { type: "systemNotice", data: {
@@ -28,10 +33,28 @@ it("preserves success and deduplicates a late warning against restored history",
     .toEqual({ running: completed.isStreaming, error: completed.error, turn: completed.activeTurnId });
   const history = sessionHistory([historyTextItem("answer", "assistant_text", "final_answer", "Saved answer")]);
   history.data[0].notices = [record];
-  const blocks = buildSessionBlocks({ sessionId: "sess-1", streamState: stream, sessionHistory: history,
+  const later = sessionHistory([historyTextItem("later-answer", "assistant_text", "final_answer", "Later answer")]).data[0];
+  later.identity.turnId = "turn-2";
+  later.completedEventSeq = 20;
+  for (const message of later.result.result.messages) {
+    message.turnId = "turn-2";
+    message.messageId = `later-${message.messageId}`;
+  }
+  history.data.push(later);
+  applyStreamEvent("sess-1", { ...record, eventId: "ev_21", eventSeq: 21, persistedAt: 21 });
+  const blocks = buildSessionBlocks({ sessionId: "sess-1", streamState: useAppStore.getState().streams["sess-1"], sessionHistory: history,
     waitingResponseTitle: "Waiting", waitingResponseDetail: "", stoppingResponseTitle: "Stopping", stoppingResponseDetail: "" });
-  expect(blocks.filter((block) => block.kind === "notice")).toEqual([expectedNotice]);
-  expect(JSON.stringify(blocks)).toContain("Saved answer");
+  expect(blocks.filter((block) => block.kind === "notice")).toEqual([expectedNotice, { ...expectedNotice, id: "notice-ev_21" }]);
+  render(createElement(MessageList, { blocks, emptyTitle: "Empty", emptyDetail: "" }));
+  expect(screen.getAllByText(/^(Saved answer|Later answer|Usage could not be saved\.)$/)
+    .map((element) => element.textContent)).toMatchInlineSnapshot(`
+      [
+        "Saved answer",
+        "Usage could not be saved.",
+        "Later answer",
+        "Usage could not be saved.",
+      ]
+    `);
   useAppStore.getState().resetLiveResponse("sess-1");
   expect(useAppStore.getState().streams["sess-1"].blocks).toEqual(blocks.filter((block) => block.kind === "notice"));
 });

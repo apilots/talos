@@ -1,8 +1,39 @@
 # Unified Error Contract: Review Handoff
 
-No remaining implementation tasks as of 2026-09-06. Completed execution stages
-have been removed. The error taxonomy is frozen; do not open a new framework or
-add compatibility guessing during review.
+PR #16 review follow-up is implemented and verified. The error taxonomy is frozen; reuse existing state,
+Timeline, and Store boundaries without adding a cache or framework.
+
+## Stage 1: Initial-input ownership
+**Goal**: Clear settled requests' pending state across session navigation.
+**Success criteria**: Returning to the original session enables its query after
+either success or failure; another pending owner is never cleared accidentally.
+**Tests**: Extend the existing route-navigation regression, then lint/typecheck.
+**Status**: Completed. Both navigation outcomes failed before the fix; 13 page
+tests, scoped ESLint and Web typecheck passed. Ownership cleanup remains local.
+
+## Stage 2: Notice merge ordering
+**Goal**: Preserve the historical position of already persisted notices.
+**Success criteria**: Multiple completed Turns retain order without duplicate
+notices, while new notices and active response blocks remain visible.
+**Tests**: Extend the existing notice ingestion/history regression and stream tests.
+**Status**: Completed. Historical ordering failed before the fix; 84 chat/stream
+tests, scoped ESLint and Web typecheck passed. Unpersisted notices remain visible;
+active response merging is unchanged and no persistent deduplication state was added.
+
+## Stage 3: Bounded batch history notices
+**Goal**: Replace per-Turn notice reads with bounded page-level Store queries.
+**Success criteria**: No per-Turn notice query growth; session ownership, per-Turn
+limits, event ordering, and a shared high-water snapshot are preserved.
+**Tests**: Real SQLite history/query-count regressions, scoped Rust tests and lint,
+frontend CI and submission hooks. Update the English PR after final self-review.
+**Status**: Completed. The real SQLite query-count regression failed before the fix
+(3 reads for one Turn versus 5 for three) and passes with a single batch.
+Service/Store: 300 tests passed; the final SQL-bound refinement passed all 8 history
+tests. HTTP: 55 tests passed. Strict Clippy passed for the affected packages.
+Frontend CI: 483 tests passed, with the two existing opt-in integrations skipped;
+the strengthened MessageList ordering snapshot, ESLint and typecheck also passed.
+Self-review confirmed all Store implementations were updated, no public wire/schema
+or migration changes are needed, and no cache, duplicate DTO or new framework was added.
 
 ## Verified closure
 

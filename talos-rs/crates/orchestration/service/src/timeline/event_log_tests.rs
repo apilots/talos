@@ -103,7 +103,7 @@ async fn product_notices_share_replay_without_advancing_agent_state() {
     );
     assert_eq!(
         service
-            .turn_notices(&identity, committed.active_turn.last_event_seq)
+            .turn_notices(&[identity], committed.active_turn.last_event_seq)
             .await
             .unwrap(),
         vec![notice]
