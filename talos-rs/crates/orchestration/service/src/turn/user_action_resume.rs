@@ -223,7 +223,7 @@ impl TurnService {
             .recover_terminal_turn(
                 session,
                 &active.identity,
-                talos_agent::AgentError::from(TalosError::new(code, message)),
+                talos_agent::AgentRunFailure::from(TalosError::new(code, message)),
             )
             .await?;
         match outcome {

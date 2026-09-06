@@ -80,14 +80,12 @@ impl TimelineEventService {
             through_event_seq,
             |record| {
                 found_tail = record.event_seq == through_event_seq;
-                reducer
-                    .apply(talos_agent_api::AgentEvent {
-                        identity: record.identity,
-                        sequence: record.sequence,
-                        occurred_at: record.occurred_at,
-                        payload: record.payload,
-                    })
-                    .map_err(talos_agent::AgentError::into_talos_error)
+                reducer.apply(talos_agent_api::AgentEvent {
+                    identity: record.identity,
+                    sequence: record.sequence,
+                    occurred_at: record.occurred_at,
+                    payload: record.payload,
+                })
             },
         )
         .await?;

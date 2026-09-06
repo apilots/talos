@@ -15,8 +15,16 @@ class ErrorContractTests(unittest.TestCase):
                 self.assertTrue(violations("sdk/adapters.ts", source))
 
     def test_rejects_duplicate_contract_and_public_diagnostic(self):
-        for source in ["struct AgentErrorInfo {}", "TalosError::public(code, text)",
-                       "content: error.to_string()"]:
+        for source in [
+            "struct AgentError {}",
+            "struct AgentErrorInfo {}",
+            "enum TalosMemoryErrorKind {}",
+            "struct TalosToolFailureDiagnostic {}",
+            "pub enum ErrorKind { Business, Internal }",
+            "TalosError::public(code, text)",
+            "TalosError::tool_failure(kind, text, source)",
+            "content: error.to_string()",
+        ]:
             self.assertTrue(violations("gateway/response.rs", source))
 
     def test_accepts_projection_and_internal_diagnostic(self):

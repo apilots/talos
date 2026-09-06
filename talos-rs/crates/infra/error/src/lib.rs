@@ -109,85 +109,10 @@ impl ErrorCode {
     }
 }
 
-/// Stable internal kind for tool execution failures.
-///
-/// This kind is the single source of truth for tool-domain failure semantics.
-/// Tool registries, kernels, and transport layers may carry it across their
-/// boundaries, but they must not encode the kind in a human-readable message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosToolErrorKind {
-    ValidationFailure,
-    PermissionRejection,
-    GovernanceRejection,
-    StaleWriteFailure,
-    DeferredToolUnavailable,
-    RuntimeFailure,
-}
-
-/// Stable internal kind for memory and session-summary failures.
-///
-/// Memory-domain code is defined once here because these failures can cross
-/// kernel, service, gateway, and client boundaries.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosMemoryErrorKind {
-    SummaryParseFailed,
-}
-
-/// Product failure classification, independent of transport status and visibility.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorKind {
-    Business,
-    Internal,
-}
-
 impl ErrorCode {
-    /// Classify every code explicitly when the shared taxonomy is extended.
-    pub const fn kind(self) -> ErrorKind {
-        match self {
-            Self::InternalError => ErrorKind::Internal,
-            Self::InvalidRequest
-            | Self::InvalidRetryRequest
-            | Self::Unauthenticated
-            | Self::PermissionDenied
-            | Self::ResourceNotFound
-            | Self::SessionNotFound
-            | Self::ResourceExpired
-            | Self::Conflict
-            | Self::ActiveTurnRunning
-            | Self::MessageQueueFull
-            | Self::MessageQueueBusy
-            | Self::RetrySourceCompleted
-            | Self::RetrySourceMismatch
-            | Self::IdempotencyConflict
-            | Self::InvalidCursor
-            | Self::EventCursorExpired
-            | Self::FsDisabled
-            | Self::InvalidPath
-            | Self::PathOutsideRoot
-            | Self::SymlinkNotSupported
-            | Self::PathNotFound
-            | Self::NotDirectory
-            | Self::InvalidName
-            | Self::AlreadyExists
-            | Self::UploadTooLarge
-            | Self::UnsupportedMediaType
-            | Self::AttachmentLimitExceeded
-            | Self::UnsupportedAttachment
-            | Self::FileInputRejected
-            | Self::ContextWindowExceeded
-            | Self::SessionBudgetExceeded
-            | Self::UsageLimitExceeded
-            | Self::ContextCompactionFailed
-            | Self::ProviderUnavailable
-            | Self::ToolExecutionFailed
-            | Self::Timeout
-            | Self::Cancelled
-            | Self::ServiceUnavailable
-            | Self::RunForcedAbort
-            | Self::RunCleanupUnconfirmed => ErrorKind::Business,
-        }
+    /// Internal is the single unknown-failure code; all other codes are explainable.
+    pub const fn is_internal(self) -> bool {
+        matches!(self, Self::InternalError)
     }
 }
 
@@ -206,20 +131,12 @@ struct ErrorState {
     diagnostic: String,
     source: Option<Arc<dyn std::error::Error + Send + Sync>>,
     capture: Arc<ErrorCapture>,
-    tool_failure: Option<TalosToolFailureDiagnostic>,
-    memory_kind: Option<TalosMemoryErrorKind>,
 }
 
 #[derive(Debug)]
 struct ErrorCapture {
     location: &'static Location<'static>,
     backtrace: Backtrace,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TalosToolFailureDiagnostic {
-    pub kind: TalosToolErrorKind,
-    pub gate_source: Option<String>,
 }
 
 pub type TalosResult<T> = Result<T, TalosError>;
@@ -239,8 +156,6 @@ impl TalosError {
                     location: Location::caller(),
                     backtrace: Backtrace::force_capture(),
                 }),
-                tool_failure: None,
-                memory_kind: None,
             }),
         }
     }
@@ -303,10 +218,6 @@ impl TalosError {
         self.state.error.code
     }
 
-    pub fn kind(&self) -> ErrorKind {
-        self.state.error.code.kind()
-    }
-
     pub fn diagnostic_message(&self) -> &str {
         &self.state.diagnostic
     }
@@ -321,59 +232,26 @@ impl TalosError {
     }
 
     pub fn is_internal(&self) -> bool {
-        self.kind() == ErrorKind::Internal
+        self.state.error.code.is_internal()
     }
 
     pub fn is_code(&self, code: ErrorCode) -> bool {
         self.error_code() == code
     }
 
-    pub fn tool_failure_diagnostic(&self) -> Option<&TalosToolFailureDiagnostic> {
-        self.state.tool_failure.as_ref()
-    }
-
-    pub fn memory_error_kind(&self) -> Option<TalosMemoryErrorKind> {
-        self.state.memory_kind
-    }
-
     #[track_caller]
     pub fn authorization_denied() -> Self {
         Self::new(ErrorCode::PermissionDenied, "authorization denied")
-    }
-
-    #[track_caller]
-    pub fn memory_error(kind: TalosMemoryErrorKind, message: impl Into<String>) -> Self {
-        let mut error =
-            Self::internal("Failed to parse the memory summary; technical details were withheld.")
-                .context(message.into());
-        error.state.memory_kind = Some(kind);
-        error
-    }
-
-    #[track_caller]
-    pub fn tool_failure(
-        kind: TalosToolErrorKind,
-        message: impl Into<String>,
-        gate_source: Option<String>,
-    ) -> Self {
-        let mut error = Self::new(ErrorCode::ToolExecutionFailed, message);
-        error.state.tool_failure = Some(TalosToolFailureDiagnostic { kind, gate_source });
-        error
     }
 }
 
 impl fmt::Display for TalosError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind() {
-            ErrorKind::Business => {
-                write!(f, "{:?}: {}", self.state.error.code, self.state.diagnostic)
-            }
-            ErrorKind::Internal => write!(f, "Internal error: {}", self.state.diagnostic),
-        }?;
-        if let Some(source) = &self.state.source {
-            write!(f, ": {source}")?;
+        if self.is_internal() {
+            write!(f, "Internal error: {}", self.state.diagnostic)
+        } else {
+            write!(f, "{:?}: {}", self.state.error.code, self.state.diagnostic)
         }
-        Ok(())
     }
 }
 

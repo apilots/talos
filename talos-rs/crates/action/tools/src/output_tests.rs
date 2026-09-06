@@ -1,5 +1,5 @@
+use super::TalosToolErrorKind;
 use super::*;
-use talos_error::TalosToolErrorKind;
 
 #[test]
 fn tool_result_envelope_preserves_structured_success_payload() {

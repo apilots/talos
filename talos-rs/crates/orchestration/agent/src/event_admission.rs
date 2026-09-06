@@ -3,8 +3,9 @@ use talos_agent_api::{
     AgentMessageBlockStarted, AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted,
     AgentMessageStatus,
 };
+use talos_error::TalosError;
 
-use crate::{AgentError, AgentEventReducer, AgentResult};
+use crate::{AgentEventReducer, AgentResult};
 
 /// Apply one completed User message as canonical lifecycle facts.
 pub(crate) fn apply_user_message(
@@ -76,7 +77,8 @@ fn validate_completed_user_message(message: &AgentMessage) -> AgentResult<()> {
                 || !matches!(block.content, AgentMessageBlockContent::UserContent(_))
         })
     {
-        return Err(AgentError::invalid_execution_context(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
             "Agent admission requires one fully completed User message",
         ));
     }

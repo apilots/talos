@@ -176,7 +176,8 @@ async fn provider_failure_closes_compaction_and_message_lifecycles() {
         .unwrap();
 
     mapper
-        .finish_failed(&talos_agent::AgentError::provider_error(
+        .finish_failed(&talos_error::TalosError::new(
+            talos_error::ErrorCode::InternalError,
             "compaction failed",
         ))
         .await

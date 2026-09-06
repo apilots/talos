@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use talos_config::{ToolSandboxModeConfig, ToolSandboxNetworkConfig};
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::{
     FileSystemPermissionLevel, GovernanceDecisionReason, GovernanceEventSink, GovernanceOutcome,
     NetworkSandboxPolicy, RequestedFileSystemAccess, RequestedToolPermissions, ToolExecutionPlan,
@@ -459,11 +459,7 @@ fn invocation_scope_digest(invocation: &ToolInvocation) -> TalosResult<String> {
 }
 
 fn sandbox_permission_failure(message: impl Into<String>) -> TalosError {
-    TalosError::tool_failure(
-        TalosToolErrorKind::PermissionRejection,
-        message,
-        Some("sandbox_policy".to_string()),
-    )
+    TalosError::new(talos_error::ErrorCode::PermissionDenied, message)
 }
 
 fn map_sandbox_mode(mode: &ToolSandboxModeConfig) -> ToolSandboxMode {

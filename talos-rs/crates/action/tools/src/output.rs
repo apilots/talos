@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_types::talos::{JsonContentValue, TalosContentItem};
 use talos_types::{QuestionParams, SandboxApprovalParams};
 
@@ -21,6 +21,91 @@ pub enum ToolResultStatus {
     Failure,
     Pending,
     Rejected,
+}
+
+/// Tool-domain failure semantics used by model continuation and UI rendering.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TalosToolErrorKind {
+    ValidationFailure,
+    PermissionRejection,
+    GovernanceRejection,
+    StaleWriteFailure,
+    DeferredToolUnavailable,
+    RuntimeFailure,
+}
+
+/// Tool-boundary failure that preserves the application error and optional
+/// model-facing recovery semantics without leaking tool state into TalosError.
+#[derive(Debug)]
+pub enum ToolDispatchFailure {
+    Application(TalosError),
+    Classified {
+        error: TalosError,
+        kind: TalosToolErrorKind,
+        gate_source: Option<&'static str>,
+    },
+}
+
+pub type ToolDispatchResult<T> = Result<T, ToolDispatchFailure>;
+
+impl ToolDispatchFailure {
+    pub fn classified(
+        error: TalosError,
+        kind: TalosToolErrorKind,
+        gate_source: Option<&'static str>,
+    ) -> Self {
+        Self::Classified {
+            error,
+            kind,
+            gate_source,
+        }
+    }
+
+    pub fn error(&self) -> &TalosError {
+        match self {
+            Self::Application(error) | Self::Classified { error, .. } => error,
+        }
+    }
+
+    pub fn into_error(self) -> TalosError {
+        match self {
+            Self::Application(error) | Self::Classified { error, .. } => error,
+        }
+    }
+
+    pub fn into_outcome(self) -> ToolDispatchOutcome {
+        match self {
+            Self::Application(error) => ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
+                content: error.to_api_error().message,
+                is_error: true,
+            }),
+            Self::Classified {
+                error,
+                kind,
+                gate_source,
+            } => {
+                let message = error.to_api_error().message;
+                let mut details = json!({
+                    "error": &message,
+                    "error_kind": kind,
+                });
+                if let Some(gate_source) = gate_source {
+                    details["gate_source"] = Value::String(gate_source.to_string());
+                }
+                ToolDispatchOutcome::executed(ToolOutputPayload::failure_structured(
+                    message,
+                    Some(details),
+                ))
+            }
+        }
+    }
+}
+
+impl From<TalosError> for ToolDispatchFailure {
+    fn from(error: TalosError) -> Self {
+        Self::Application(error)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

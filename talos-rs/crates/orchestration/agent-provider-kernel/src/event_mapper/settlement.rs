@@ -1,8 +1,9 @@
-use talos_agent::{AgentError, AgentResult};
+use talos_agent::AgentResult;
 use talos_agent_api::{
     AgentAssistantTextPhase, AgentContextCompactionDelta, AgentMessageBlockDeltaContent,
     AgentMessageBlockStatus, AgentMessageStatus,
 };
+use talos_error::TalosError;
 use talos_types::{ContextCompactionOutcome, ContextCompactionStage};
 
 use super::KernelAgentEventMapper;
@@ -36,7 +37,10 @@ impl KernelAgentEventMapper {
         }
         for call_id in self.tools_by_call.keys().cloned().collect::<Vec<_>>() {
             let tool = self.tools_by_call.get(&call_id).cloned().ok_or_else(|| {
-                AgentError::run_conflict("Kernel Tool block disappeared during settlement")
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Kernel Tool block disappeared during settlement",
+                )
             })?;
             self.sink
                 .complete_block(&tool.handle, AgentMessageBlockStatus::Failed)
@@ -54,7 +58,7 @@ impl KernelAgentEventMapper {
         Ok(())
     }
 
-    pub(crate) async fn finish_failed(&mut self, error: &AgentError) -> AgentResult<()> {
+    pub(crate) async fn finish_failed(&mut self, error: &TalosError) -> AgentResult<()> {
         let (block_status, message_status) = if is_interrupted(error) {
             (
                 AgentMessageBlockStatus::Cancelled,
@@ -80,7 +84,7 @@ impl KernelAgentEventMapper {
                         outcome: (!is_interrupted(error))
                             .then_some(ContextCompactionOutcome::FailedInternalError),
                         metrics: None,
-                        message: Some(error.error().to_api_error().message),
+                        message: Some(error.to_api_error().message),
                     }),
                 )
                 .await?;
@@ -89,7 +93,10 @@ impl KernelAgentEventMapper {
         }
         for call_id in self.tools_by_call.keys().cloned().collect::<Vec<_>>() {
             let tool = self.tools_by_call.get(&call_id).cloned().ok_or_else(|| {
-                AgentError::run_conflict("Kernel Tool block disappeared during settlement")
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Kernel Tool block disappeared during settlement",
+                )
             })?;
             self.sink.complete_block(&tool.handle, block_status).await?;
             self.tools_by_call.remove(&call_id);
@@ -103,17 +110,17 @@ impl KernelAgentEventMapper {
         Ok(())
     }
 
-    pub(crate) async fn settle_failure(&mut self, error: AgentError) -> AgentError {
+    pub(crate) async fn settle_failure(&mut self, error: TalosError) -> TalosError {
         match self.finish_failed(&error).await {
             Ok(()) => error,
             Err(settlement_error) => {
-                talos_logging::report_error(error.error());
+                talos_logging::report_error(&error);
                 settlement_error.context("close failed Provider lifecycle")
             }
         }
     }
 }
 
-fn is_interrupted(error: &AgentError) -> bool {
-    error.error().is_code(talos_error::ErrorCode::Cancelled)
+fn is_interrupted(error: &TalosError) -> bool {
+    error.is_code(talos_error::ErrorCode::Cancelled)
 }

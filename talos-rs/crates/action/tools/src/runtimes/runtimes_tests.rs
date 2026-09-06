@@ -6,21 +6,19 @@ use talos_config::AgentKernelConfig;
 fn sandbox_failures_retain_sources_and_exclude_private_details() {
     use std::error::Error;
 
-    for (source, expected_code, expected_kind) in [
+    for (source, expected_code) in [
         (
             TalosSandboxError::FileSystemOperationFailed {
                 reason: "private-sandbox-sentinel".to_string(),
             },
             talos_error::ErrorCode::InternalError,
-            None,
         ),
         (
             TalosSandboxError::FileSystemAccessDenied {
                 operation: "read",
                 path: PathBuf::from("/private-sandbox-sentinel"),
             },
-            talos_error::ErrorCode::ToolExecutionFailed,
-            Some(talos_error::TalosToolErrorKind::PermissionRejection),
+            talos_error::ErrorCode::PermissionDenied,
         ),
     ] {
         let error = map_sandbox_error(source.clone());
@@ -35,12 +33,6 @@ fn sandbox_failures_retain_sources_and_exclude_private_details() {
             .message
             .contains("private-sandbox-sentinel"));
         assert_eq!(error.error_code(), expected_code);
-        assert_eq!(
-            error
-                .tool_failure_diagnostic()
-                .map(|diagnostic| diagnostic.kind),
-            expected_kind
-        );
     }
 }
 

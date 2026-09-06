@@ -313,11 +313,7 @@ impl SessionHistoryReader for SessionHistoryService {
         &self,
         params: SessionHistoryReadParams,
     ) -> AgentFuture<'_, AgentResult<Vec<SessionHistoryTurn>>> {
-        Box::pin(async move {
-            self.read_window(params)
-                .await
-                .map_err(talos_agent::AgentError::from)
-        })
+        Box::pin(async move { self.read_window(params).await })
     }
 }
 

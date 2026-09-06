@@ -113,17 +113,21 @@ where
     .await?;
     let output = serde_json::from_str::<DreamMemoryModelOutput>(response.content.trim()).map_err(
         |error| {
-            talos_error::TalosError::memory_error(
-                talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-                format!("parse Dream Memory json for session '{session_id}': {error}"),
+            TalosError::internal_with_source(
+                "The generated Dream Memory summary was invalid.",
+                error,
             )
+            .context(format!(
+                "parse Dream Memory json for session '{session_id}'"
+            ))
         },
     )?;
     let DreamMemoryModelOutput::Maintenance { memory_candidates } = output else {
-        return Err(talos_error::TalosError::memory_error(
-            talos_error::TalosMemoryErrorKind::SummaryParseFailed,
-            format!("Dream Memory mode mismatch for session '{session_id}'"),
-        ));
+        return Err(
+            TalosError::internal("The generated Dream Memory summary was invalid.").context(
+                format!("Dream Memory mode mismatch for session '{session_id}'"),
+            ),
+        );
     };
     validate_memory_candidates(&memory_candidates)?;
     dream_memory_store

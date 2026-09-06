@@ -283,25 +283,18 @@ pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<
         .unwrap_or_default();
     let (pipeline, sink, progress, mut admission_events) = match params.checkpoint {
         Some(checkpoint) => {
-            let (pipeline, sink, progress) = AgentEventPipeline::resumed(identity, checkpoint)
-                .map_err(talos_agent::AgentError::into_talos_error)?;
+            let (pipeline, sink, progress) = AgentEventPipeline::resumed(identity, checkpoint)?;
             (pipeline, sink, progress, Vec::new())
         }
         None => {
             let (pipeline, sink, progress) = AgentEventPipeline::fresh(identity);
             let started = pipeline
                 .record(CanonicalAgentEventPayload::TurnStarted(AgentTurnStarted {}))
-                .await
-                .map_err(talos_agent::AgentError::into_talos_error)?;
+                .await?;
             (pipeline, sink, progress, vec![started])
         }
     };
-    admission_events.extend(
-        pipeline
-            .record_user_message(params.input)
-            .await
-            .map_err(talos_agent::AgentError::into_talos_error)?,
-    );
+    admission_events.extend(pipeline.record_user_message(params.input).await?);
     let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
     let settlement_pipeline = pipeline.clone();
     let permit = AgentAdmissionPermit::new(async move {
@@ -381,7 +374,12 @@ pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<
                 messages: checkpoint.messages,
                 metrics: checkpoint.metrics,
             }))
-            .map_err(|_| talos_agent::AgentError::provider_error("test settlement receiver"))?;
+            .map_err(|_| {
+                talos_error::TalosError::new(
+                    talos_error::ErrorCode::InternalError,
+                    "test settlement receiver",
+                )
+            })?;
         Ok(())
     });
     Ok(AgentRunExecution {

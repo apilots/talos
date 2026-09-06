@@ -114,10 +114,16 @@ impl SessionTurnInputSender {
             .send(SessionTurnInputDelivery { input, accepted_tx })
             .await
             .map_err(|_| {
-                crate::AgentError::provider_error("provider input receiver closed before delivery")
+                talos_error::TalosError::new(
+                    talos_error::ErrorCode::InternalError,
+                    "provider input receiver closed before delivery",
+                )
             })?;
         accepted_rx.await.map_err(|_| {
-            crate::AgentError::provider_error("Provider dropped input without acknowledgement")
+            talos_error::TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "Provider dropped input without acknowledgement",
+            )
         })?
     }
 }
@@ -140,7 +146,7 @@ impl SessionTurnInputDelivery {
     }
 
     /// Consume the delivery and report a typed rejection.
-    pub fn reject(self, error: crate::AgentError) {
+    pub fn reject(self, error: talos_error::TalosError) {
         let _ = self.accepted_tx.send(Err(error));
     }
 }

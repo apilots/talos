@@ -7,8 +7,9 @@ use talos_agent_api::{
     AgentContinuationRef, AgentEvent, AgentMessage, AgentMessageRole, AgentMessageStatus,
     AgentRunMetrics, AgentTurnRef,
 };
+use talos_error::TalosError;
 
-use crate::{AgentContext, AgentError, AgentResult, AgentRunCheckpoint};
+use crate::{AgentContext, AgentResult, AgentRunCheckpoint};
 
 type AgentPermitFuture = Pin<Box<dyn Future<Output = AgentResult<()>> + Send + 'static>>;
 
@@ -28,19 +29,22 @@ impl AgentRunParams {
     /// Validate boundary invariants before Harness admission.
     pub fn validate(&self) -> AgentResult<()> {
         if self.input.turn_id != self.context.turn_id {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent input turn_id does not match AgentContext identity",
             ));
         }
         if self.input.role != AgentMessageRole::User
             || self.input.status != AgentMessageStatus::Completed
         {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent run input must be one completed User message",
             ));
         }
         if self.checkpoint.is_some() != self.continuation.is_some() {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent continuation requires both checkpoint and Provider reference",
             ));
         }
@@ -161,7 +165,10 @@ impl AgentRunSettlementReceiver {
     /// Await the unique invocation settlement.
     pub async fn recv(self) -> AgentResult<AgentRunSettlement> {
         self.receiver.await.map_err(|_| {
-            AgentError::provider_error("Agent Harness stopped before delivering settlement")
+            TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "Agent Harness stopped before delivering settlement",
+            )
         })?
     }
 }

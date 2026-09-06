@@ -79,10 +79,7 @@ async fn provider_sink_cannot_create_user_lifecycle() {
         .await
         .expect_err("Provider must not create trusted User messages");
 
-    assert!(error
-        .error()
-        .diagnostic_message()
-        .contains("cannot create User"));
+    assert!(error.diagnostic_message().contains("cannot create User"));
 }
 
 #[tokio::test]
@@ -110,10 +107,7 @@ async fn handles_cannot_cross_event_sinks() {
         .await
         .expect_err("message handle must remain scoped to its sink");
 
-    assert!(error
-        .error()
-        .diagnostic_message()
-        .contains("another event sink"));
+    assert!(error.diagnostic_message().contains("another event sink"));
 }
 
 #[tokio::test]

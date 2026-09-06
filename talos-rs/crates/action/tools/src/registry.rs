@@ -2,7 +2,10 @@ use crate::handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, Tool
 use crate::invocation::{ToolDispatchContext, ToolInvocation};
 use crate::mcp::McpConnectionManager;
 use crate::orchestrator::{RegistryOrchestrator, ToolPreparation};
-use crate::output::{ToolDispatchOutcome, ToolOutputPayload};
+use crate::output::{
+    TalosToolErrorKind, ToolDispatchFailure, ToolDispatchOutcome, ToolDispatchResult,
+    ToolOutputPayload,
+};
 use crate::r#trait::Tool;
 use crate::router::ToolRouter;
 use crate::spec::{
@@ -18,7 +21,7 @@ use serde_json::Value;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use talos_config::AgentKernelConfig;
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_llm_provider::ToolDefinition;
 use talos_memory::{MemoryReader, UserWorkspaceMemoryWriter};
 use talos_tools_policy::{ToolPolicy, ToolPolicyChecker};
@@ -104,7 +107,7 @@ pub trait ToolExecutorPort: ToolDefinitionProvider + Send + Sync {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolDispatchOutcome>;
+    ) -> ToolDispatchResult<ToolDispatchOutcome>;
 
     fn tool_supports_parallel(&self, name: &str) -> bool;
 
@@ -143,31 +146,66 @@ impl ToolRegistry {
         }
     }
 
-    fn annotate_policy_error(error: TalosError) -> TalosError {
+    fn policy_failure(error: TalosError) -> ToolDispatchFailure {
         if error.is_code(talos_error::ErrorCode::PermissionDenied) {
-            TalosError::tool_failure(
+            ToolDispatchFailure::classified(
+                TalosError::new(
+                    talos_error::ErrorCode::PermissionDenied,
+                    "authorization denied",
+                )
+                .with_source(error),
                 TalosToolErrorKind::PermissionRejection,
-                "authorization denied",
-                Some(GATE_SOURCE_ALLOW_LIST.to_string()),
+                Some(GATE_SOURCE_ALLOW_LIST),
             )
         } else {
-            error
+            error.into()
         }
     }
 
-    fn annotate_pre_execute_error(error: TalosError) -> TalosError {
+    fn pre_execute_failure(error: TalosError) -> ToolDispatchFailure {
         match error.error_code() {
-            talos_error::ErrorCode::InvalidRequest => TalosError::tool_failure(
+            talos_error::ErrorCode::InvalidRequest => ToolDispatchFailure::classified(
+                error,
                 TalosToolErrorKind::ValidationFailure,
-                error.diagnostic_message(),
-                Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+                Some(GATE_SOURCE_TOOL_SEMANTIC),
             ),
-            talos_error::ErrorCode::PermissionDenied => TalosError::tool_failure(
+            talos_error::ErrorCode::PermissionDenied => ToolDispatchFailure::classified(
+                TalosError::new(
+                    talos_error::ErrorCode::PermissionDenied,
+                    "authorization denied",
+                )
+                .with_source(error),
                 TalosToolErrorKind::PermissionRejection,
-                "authorization denied",
-                Some(GATE_SOURCE_TOOL_SEMANTIC.to_string()),
+                Some(GATE_SOURCE_TOOL_SEMANTIC),
             ),
-            _ => error,
+            _ => error.into(),
+        }
+    }
+
+    fn sandbox_failure(error: TalosError) -> ToolDispatchFailure {
+        if error.is_code(talos_error::ErrorCode::PermissionDenied) {
+            ToolDispatchFailure::classified(
+                error,
+                TalosToolErrorKind::PermissionRejection,
+                Some("sandbox_policy"),
+            )
+        } else {
+            error.into()
+        }
+    }
+
+    fn execution_failure(error: TalosError) -> ToolDispatchFailure {
+        match error.error_code() {
+            talos_error::ErrorCode::InvalidRequest => ToolDispatchFailure::classified(
+                error,
+                TalosToolErrorKind::ValidationFailure,
+                Some(GATE_SOURCE_TOOL_SEMANTIC),
+            ),
+            talos_error::ErrorCode::PermissionDenied => Self::sandbox_failure(error),
+            talos_error::ErrorCode::ToolExecutionFailed => {
+                ToolDispatchFailure::classified(error, TalosToolErrorKind::RuntimeFailure, None)
+            }
+            _ => error.into(),
         }
     }
 
@@ -465,17 +503,23 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolDispatchOutcome> {
+    ) -> ToolDispatchResult<ToolDispatchOutcome> {
         if let Some(spec) = self.tool_catalog().find(invocation.tool_name.as_str()) {
             if !Self::is_static_policy_exempt(spec) {
-                self.policy_checker
+                if let Err(error) = self
+                    .policy_checker
                     .check_tool_access(spec.definition.name.as_str())
-                    .map_err(Self::annotate_policy_error)?;
+                {
+                    return Err(Self::policy_failure(error));
+                }
             }
         } else {
-            self.policy_checker
+            if let Err(error) = self
+                .policy_checker
                 .check_tool_access(invocation.tool_name.as_str())
-                .map_err(Self::annotate_policy_error)?;
+            {
+                return Err(Self::policy_failure(error));
+            }
         }
         self.execute_invocation_unchecked_with_context(invocation, context)
             .await
@@ -485,7 +529,7 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolDispatchOutcome> {
+    ) -> ToolDispatchResult<ToolDispatchOutcome> {
         let max_output_bytes = output_limits::resolve_max_output_bytes(&context);
         let tool_name = invocation.tool_name.clone();
         let result = self
@@ -502,7 +546,7 @@ impl ToolRegistry {
         &self,
         invocation: ToolInvocation,
         mut context: ToolDispatchContext,
-    ) -> TalosResult<ToolDispatchOutcome> {
+    ) -> ToolDispatchResult<ToolDispatchOutcome> {
         let catalog = self.tool_catalog();
         let invocation = self.router.normalize(invocation, &catalog)?;
         context
@@ -517,7 +561,8 @@ impl ToolRegistry {
             return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("Tool '{}' not found", invocation.tool_name),
-            ));
+            )
+            .into());
         };
         if !handler.matches(&invocation) {
             return Err(TalosError::new(
@@ -526,17 +571,18 @@ impl ToolRegistry {
                     "Tool '{}' invoked with incompatible payload",
                     invocation.tool_name
                 ),
-            ));
+            )
+            .into());
         }
-        handler
-            .pre_execute(&invocation, &context)
-            .await
-            .map_err(Self::annotate_pre_execute_error)?;
-        let file_system_access = handler
-            .requested_file_system_access(&invocation, &context)
-            .map_err(Self::annotate_pre_execute_error)?;
+        if let Err(error) = handler.pre_execute(&invocation, &context).await {
+            return Err(Self::pre_execute_failure(error));
+        }
+        let file_system_access = match handler.requested_file_system_access(&invocation, &context) {
+            Ok(access) => access,
+            Err(error) => return Err(Self::pre_execute_failure(error)),
+        };
         let orchestrator = RegistryOrchestrator::from_context(context.tool_context());
-        match orchestrator
+        let preparation = match orchestrator
             .prepare_execution(
                 &invocation,
                 &mut context,
@@ -544,8 +590,12 @@ impl ToolRegistry {
                 file_system_access,
                 &self.sandbox,
             )
-            .await?
+            .await
         {
+            Ok(preparation) => preparation,
+            Err(error) => return Err(Self::sandbox_failure(error)),
+        };
+        match preparation {
             ToolPreparation::Ready => {}
             ToolPreparation::RequiresApproval {
                 params,
@@ -570,7 +620,10 @@ impl ToolRegistry {
                 ));
             }
         }
-        handler.handle(invocation, context).await
+        match handler.handle(invocation, context).await {
+            Ok(outcome) => Ok(outcome),
+            Err(error) => Err(Self::execution_failure(error)),
+        }
     }
 
     /// Get a list of available tool names.
@@ -766,7 +819,7 @@ impl ToolExecutorPort for ToolRegistry {
         &self,
         invocation: ToolInvocation,
         context: ToolContext,
-    ) -> TalosResult<ToolDispatchOutcome> {
+    ) -> ToolDispatchResult<ToolDispatchOutcome> {
         ToolRegistry::execute_invocation_with_context(self, invocation, context).await
     }
 

@@ -15,7 +15,7 @@ use rmcp::transport::child_process::TokioChildProcess;
 use rmcp::transport::StreamableHttpClientTransport;
 use rmcp::{ClientHandler, RoleClient};
 use serde_json::Value;
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_tools_sandbox::filter_inherited_tool_environment;
 use talos_types::{
     McpCallToolRequest, McpCallToolResponse, McpContent, McpReadResourceRequest,
@@ -598,7 +598,7 @@ fn map_service_error(mut error: ServiceError) -> TalosError {
             )
         }
     };
-    TalosError::tool_failure(TalosToolErrorKind::RuntimeFailure, message, None).with_source(error)
+    TalosError::new(talos_error::ErrorCode::ToolExecutionFailed, message).with_source(error)
 }
 
 pub fn mcp_tool_name(server: &str, tool: &str) -> String {

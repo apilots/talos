@@ -52,7 +52,7 @@ fn reducer_rejects_sequence_gaps() {
         ))
         .expect_err("sequence gap must fail");
 
-    assert!(error.error().diagnostic_message().contains("expected 1"));
+    assert!(error.diagnostic_message().contains("expected 1"));
 }
 
 #[test]
@@ -97,10 +97,7 @@ fn reducer_rejects_delta_for_the_wrong_block_kind() {
         ))
         .expect_err("Tool argument delta must not target assistant text");
 
-    assert!(error
-        .error()
-        .diagnostic_message()
-        .contains("does not match"));
+    assert!(error.diagnostic_message().contains("does not match"));
 }
 
 #[test]

@@ -20,7 +20,12 @@ def violations(path, text):
         rf"{receiver}(?:\.\w+\(\))*\.(?:includes|contains|startsWith|starts_with|endsWith|ends_with|match|split|split_once)\(",
     ]):
         errors.append("Use error codes and typed parameters for decisions; messages are display-only.")
-    if re.search(r"\bAgentErrorInfo\b|TalosError::public\s*\(", text):
+    if re.search(
+        r"\b(?:AgentError|AgentErrorInfo|TalosMemoryErrorKind|TalosToolFailureDiagnostic)\b"
+        r"|TalosError::(?:public|tool_failure)\s*\("
+        r"|pub\s+enum\s+ErrorKind\b",
+        text,
+    ):
         errors.append("Do not reintroduce duplicate or visibility-based product errors.")
     if any(owner in path for owner in ["gateway/", "agent-kernel/", "agent-provider-kernel/", "action/mcp/"]):
         if re.search(r"(?:message|content)\s*:\s*(?:error|err)\.to_string\(\)", text):

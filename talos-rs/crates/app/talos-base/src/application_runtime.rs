@@ -172,8 +172,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
                         AgentUserContentKind::SkillSelection,
                         AgentUserContentKind::File,
                     ],
-                })
-                .map_err(talos_agent::AgentError::into_talos_error)?
+                })?
             }
         };
         kernel_providers.insert(definition.id.clone(), provider.clone());

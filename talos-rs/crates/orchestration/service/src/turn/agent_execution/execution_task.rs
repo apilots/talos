@@ -50,7 +50,6 @@ impl AgentExecutionDriver {
                         .await
                 }
                 Err(error) => {
-                    let error = error.into_talos_error();
                     driver
                         .recover_failed_execution(&task_active, durable_tail, &error)
                         .await

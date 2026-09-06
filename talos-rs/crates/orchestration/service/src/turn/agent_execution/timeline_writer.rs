@@ -1,4 +1,6 @@
-use talos_agent::{AgentProgressEventReceiver, AgentRunSettlement, AgentRunSettlementReceiver};
+use talos_agent::{
+    AgentProgressEventReceiver, AgentRunFailure, AgentRunSettlement, AgentRunSettlementReceiver,
+};
 use talos_agent_api::{AgentEventPayload, AgentInterruptOutcome};
 use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::session::{CommitRunningInputAdmissionParams, CommitTerminalSettlementParams};
@@ -135,7 +137,6 @@ impl AgentExecutionDriver {
         let settlement = match settlement.recv().await {
             Ok(settlement) => settlement,
             Err(settlement_error) => {
-                let settlement_error = settlement_error.into_talos_error();
                 return self
                     .recover_failed_execution(&active, last_event_seq, &settlement_error)
                     .await;
@@ -260,12 +261,12 @@ impl AgentExecutionDriver {
                 return Err(interrupt_error);
             }
         };
-        let failure = talos_agent::AgentError::from(
+        let failure = AgentRunFailure::from(
             commit_error
                 .clone()
                 .context("Agent Turn stopped before canonical settlement"),
         )
-        .retryable(true);
+        .retryable();
         let settlement = self
             .settle_recovered_turn(
                 active.identity.clone(),
@@ -286,7 +287,7 @@ fn delivery_error(
 ) -> Option<TalosError> {
     let error = match delivery {
         Some(Ok(Ok(()))) | None => return None,
-        Some(Ok(Err(error))) => error.into_talos_error(),
+        Some(Ok(Err(error))) => error,
         Some(Err(error)) => {
             TalosError::internal_with_source("Agent input delivery task failed", error)
         }

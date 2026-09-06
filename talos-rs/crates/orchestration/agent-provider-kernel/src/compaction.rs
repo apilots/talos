@@ -1,12 +1,12 @@
 use talos_agent::{
-    AgentError, AgentOperationControl, AgentResult, SessionCompactionParams,
-    SessionCompactionResult,
+    AgentOperationControl, AgentResult, SessionCompactionParams, SessionCompactionResult,
 };
 use talos_agent_kernel::{
     compact_session_memory, AgentKernelEvent, AgentKernelEventPayload, ContextCompactionStreamData,
     EventAuthor, ExecutionBranch, KernelTranscriptEvent, KernelTranscriptPayload,
     MemoryCompactionPolicy, MemoryFormationParams, SessionCompactionState, SessionStateUpdate,
 };
+use talos_error::TalosError;
 use talos_memory::MemoryScope;
 use talos_types::{
     ContextCompactionMetrics, ContextCompactionOutcome, ContextCompactionStage,
@@ -44,8 +44,7 @@ async fn compact_mapped(
     let config = provider.effective_kernel_config(context);
     let llm_provider = provider
         .llm_provider_router
-        .provider_for(&context.model_selection.model_ref)
-        .map_err(AgentError::from)?;
+        .provider_for(&context.model_selection.model_ref)?;
     let memory_scope = MemoryScope {
         workspace_id: context.session.workspace.workspace_id.clone(),
         user_id: context.session.workspace.user_id.clone(),
@@ -78,9 +77,9 @@ async fn compact_mapped(
             &context.model.model.id,
             llm_provider,
             MemoryCompactionPolicy::for_compaction(),
-        ) => result.map_err(AgentError::from)?,
+        ) => result?,
         () = control.cancellation().requested() => {
-            return Err(AgentError::new(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Cancelled,
                 "Kernel context compaction was cancelled",
             ));
@@ -142,5 +141,4 @@ async fn persist_recovery_state(
         .session_artifact_store
         .append_transcript_event(std::path::Path::new(&config.workspace_dir), &event)
         .await
-        .map_err(AgentError::from)
 }

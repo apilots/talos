@@ -6,7 +6,7 @@ fn internal_tool_failure_projects_only_reviewed_text_to_model_and_ui() {
         "The tool output could not be decoded.",
         std::io::Error::other("SECRET_SQL /private/service.db"),
     );
-    let outcome = tool_error_outcome(error);
+    let outcome = ToolDispatchFailure::from(error).into_outcome();
     let rendered = format!("{outcome:?}");
     assert!(rendered.contains("The tool output could not be decoded."));
     assert!(!rendered.contains("SECRET_SQL"));
@@ -16,7 +16,9 @@ fn internal_tool_failure_projects_only_reviewed_text_to_model_and_ui() {
 fn tool_failure_envelopes_preserve_policy_and_default_runtime_semantics() {
     for (error, expected) in [
         (
-            TalosError::internal("The tool output could not be decoded."),
+            ToolDispatchFailure::from(TalosError::internal(
+                "The tool output could not be decoded.",
+            )),
             ToolOutputPayload::Mcp {
                 content: "The tool output could not be decoded.".into(),
                 is_error: true,
@@ -24,10 +26,13 @@ fn tool_failure_envelopes_preserve_policy_and_default_runtime_semantics() {
             .envelope(),
         ),
         (
-            TalosError::tool_failure(
-                TalosToolErrorKind::PermissionRejection,
-                "The sandbox denied this tool operation.",
-                Some("sandbox_policy".into()),
+            ToolDispatchFailure::classified(
+                TalosError::new(
+                    talos_error::ErrorCode::PermissionDenied,
+                    "The sandbox denied this tool operation.",
+                ),
+                talos_tools::TalosToolErrorKind::PermissionRejection,
+                Some("sandbox_policy"),
             ),
             ToolOutputPayload::failure_structured(
                 "The sandbox denied this tool operation.",
@@ -40,7 +45,7 @@ fn tool_failure_envelopes_preserve_policy_and_default_runtime_semantics() {
             .envelope(),
         ),
     ] {
-        let actual = tool_error_outcome(error).envelope();
+        let actual = error.into_outcome().envelope();
         assert_eq!(actual, expected);
     }
 }

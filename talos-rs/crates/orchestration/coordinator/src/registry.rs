@@ -1,7 +1,8 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
-use talos_agent::{AgentError, AgentHarness, AgentResult};
+use talos_agent::{AgentHarness, AgentResult};
+use talos_error::TalosError;
 use tokio::sync::RwLock;
 
 /// Coordinator-owned registry of available AgentHarness instances.
@@ -30,15 +31,17 @@ impl AgentRegistry {
         harness: Arc<dyn AgentHarness>,
     ) -> AgentResult<()> {
         if agent_id.trim().is_empty() {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "agent_id cannot be empty",
             ));
         }
         let mut registrations = self.registrations.write().await;
         match registrations.entry(agent_id.clone()) {
-            Entry::Occupied(_) => Err(AgentError::run_conflict(format!(
-                "agent `{agent_id}` is already registered"
-            ))),
+            Entry::Occupied(_) => Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                format!("agent `{agent_id}` is already registered"),
+            )),
             Entry::Vacant(entry) => {
                 entry.insert(harness);
                 Ok(())
@@ -50,7 +53,7 @@ impl AgentRegistry {
     pub(crate) async fn get(&self, agent_id: &str) -> AgentResult<Arc<dyn AgentHarness>> {
         let registrations = self.registrations.read().await;
         registrations.get(agent_id).cloned().ok_or_else(|| {
-            AgentError::new(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 agent_id.to_string(),
             )

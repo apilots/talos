@@ -1,25 +1,27 @@
 # Error contract
 
-Owner: `talos-error`. See [refactor-044](../../spec/refactor-044-unified-error-contract/design.md) for rationale and the [root plan](../../IMPLEMENTATION_PLAN.md) for verification and review handoff.
+Owner: `talos-error`. See [refactor-044](../../spec/refactor-044-unified-error-contract/design.md) for rationale.
 
 ## One model, two categories
 
 One internal `TalosError` carries one public `ApiError`, private context, the original typed source, capture location and a shared native backtrace. `TalosResult<T>` is Rust's ordinary Result.
 
 - Business: known product meaning (validation, permissions, missing data, conflicts, limits, recognized provider rejection).
-- Internal: unclassified technical failure, malformed response, broken invariant or unexpected task failure. InternalError derives this kind; all other codes derive Business.
+- Internal: unclassified technical failure, malformed response, broken invariant or unexpected task failure. `InternalError` identifies this category; every other code is Business.
 
-Both categories are visible and reported. Kind does not determine retryability or protocol status. Rust does not automatically convert arbitrary errors or panics into responses.
+Both categories are visible and reported. Category does not determine retryability or protocol status. Rust does not automatically convert arbitrary errors or panics into responses. There is no separate category enum because it would only duplicate `ErrorCode`.
 
 ## Construction and propagation
 
 `TalosError::new(code, message)` takes a reviewed English explanation. `internal` requires static text; `from_source` / `internal_with_source` retain a new dependency cause. `with_source` attaches the original cause during construction. `context` and clone preserve public text, code, source and original capture. Never stringify/re-wrap an existing TalosError.
 
-AgentError composes TalosError with execution policy, not a second public taxonomy. Finished settlements retain the original in-process Result alongside the public event, avoiding reconstruction from JSON.
+Ordinary Agent APIs return `TalosResult` directly. `AgentRunFailure` temporarily composes the original `TalosError` with operation-owned retry policy only while publishing or recovering a terminal Turn. Finished settlements retain the original in-process Result alongside the public event, avoiding reconstruction from JSON.
 
-Agent, filesystem, and file-upload callers use ErrorCode directly; do not add
-parallel kind enums that merely map to the same codes. Operation-owned retry
-safety and actual tool-policy metadata remain separate because they are not codes.
+Agent, filesystem, and file-upload callers use `ErrorCode` directly; do not add
+parallel kind enums that merely map to the same codes. Memory recovery branches
+on its owned code. Structured tool classification belongs to `ToolDispatchFailure`
+and is consumed when building the tool outcome; neither concern adds optional
+metadata to `TalosError`.
 
 ## Public contract
 

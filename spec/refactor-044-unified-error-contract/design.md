@@ -1,10 +1,10 @@
 # Unified Error Contract
 
-Status: approved design; see the implementation plan for verification status.
+Status: implemented and verified.
 The current error model is authoritative for implemented APIs and ownership.
 Owner: Talos error, logging, gateway, SDK, and presentation boundaries.
 Baseline: repository inspected on 2026-09-06.
-Related: [current error model](../../docs/architecture/ERROR_MODEL.md), [review handoff](../../IMPLEMENTATION_PLAN.md).
+Related: [current error model](../../docs/architecture/ERROR_MODEL.md).
 
 ## 1. Decision and scope
 
@@ -103,19 +103,18 @@ and both gateway adapters under `talos-rs`; Desktop IPC, SDK adapters, and
 - The complete public `ApiError` described below.
 - Internal operation/context, the original typed source, first-capture location,
   and first-capture backtrace.
-- Existing domain-specific diagnostic metadata only where a real consumer needs it.
+- No optional domain metadata bags; owning domains carry non-product execution metadata.
 
 Store diagnostics once in shared immutable ownership so cloning an error across
 Agent tasks retains the same source and backtrace. Context additions preserve
 the original failure; they must not manufacture a new root error from `Display`.
 Backtrace/source values are not part of business equality or wire serialization.
 
-Expose `ErrorKind::{Business, Internal}` through the error API. For the existing
-taxonomy, `InternalError` determines Internal and the other recognized codes
-determine Business, using an exhaustive mapping. Do not store an independently
-writable kind alongside the code. This avoids contradictory combinations and
-does not require a second public code enum. Future codes must explicitly declare
-their classification.
+Derive the two categories directly: `InternalError` is Internal and every other
+recognized code is Business. Do not expose or store a second category enum; it
+would duplicate `ErrorCode` and permit contradictory state. New unknown technical
+failures enter through `InternalError`, while new business meanings add a stable
+code.
 
 Constructors have explicit purposes:
 
@@ -138,18 +137,19 @@ factory traits, or separate BusinessError/InternalError class hierarchies.
 | --- | --- | --- |
 | `talos-error` | Error model, stable codes, controlled public construction, pure projection | Logging sinks, transport codes, UI components |
 | Existing domain/provider adapters | Recognize failure meaning; choose disclosable cause; preserve source | Localized copy, response envelopes |
-| Agent framework | Operation-owned retry safety; carry original failure by composition | Duplicate or reinterpret already established product codes |
+| Agent framework | Return `TalosResult`; compose retry safety only at terminal settlement | Duplicate or reinterpret already established product codes |
 | `talos-logging` | Common diagnostic reporting through existing tracing infrastructure | Business classification, protocol serialization |
 | Gateway/terminal owner | Report the handled failure and serialize its public projection | Rebuild messages or discard fields |
 | SDK/IPC adapters | Validate and preserve public errors; identify local transport/protocol failures | Translate messages or expose backend diagnostic objects |
 | Presentation | Render the full public failure and optional localization | Derive semantics by parsing English messages |
 
-`AgentError` composes the original `TalosError` with operation-owned retry safety.
-Lifecycle consumers inspect the existing product code; a parallel Agent kind enum
+Ordinary Agent APIs propagate `TalosError` directly. `AgentRunFailure` adds only
+operation-owned retry safety at terminal settlement and recovery boundaries.
+Lifecycle consumers inspect the product code; a parallel Agent error or kind enum
 would duplicate classification and permit inconsistent state. Known product codes,
-sources, and capture identity survive a Talos -> Agent -> Talos round trip unchanged.
-Tool policy metadata remains with its existing owner: Function and MCP output
-envelopes have different structured-content semantics and are not interchangeable.
+sources, and capture identity survive Agent task propagation unchanged. Tool
+classification remains in the tool execution domain and is consumed into the
+existing Function/MCP output envelope rather than stored on `TalosError`.
 
 ### 3.3 Unclassified failures and no silent error exits
 

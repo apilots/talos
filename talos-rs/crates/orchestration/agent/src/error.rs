@@ -1,101 +1,42 @@
-use talos_error::{ErrorCode, TalosError};
-use thiserror::Error;
+use talos_error::{TalosError, TalosResult};
 
-/// Agent-domain result used inside Provider, Harness, and Coordinator adapters.
-pub type AgentResult<T> = Result<T, AgentError>;
+/// Agent-domain result shared by Provider, Harness, and Coordinator adapters.
+pub type AgentResult<T> = TalosResult<T>;
 
-/// Agent lifecycle metadata composed with the original product failure.
+/// Operation-owned delivery policy for a terminal Agent failure.
 ///
-/// Only operation-owned retry safety belongs here. Product classification,
-/// projection, diagnostic sources, and capture identity belong to TalosError.
-#[derive(Debug, Clone, Error)]
-#[error("{error}")]
-pub struct AgentError {
-    pub retryable: bool,
-    #[source]
+/// Product classification, diagnostics, and public projection remain owned by
+/// `TalosError`; this wrapper exists only while publishing a terminal event.
+#[derive(Debug, Clone)]
+pub struct AgentRunFailure {
+    retryable: bool,
     error: TalosError,
 }
 
-impl AgentError {
-    /// Build a framework failure with its product meaning established once.
-    #[track_caller]
-    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
-        TalosError::new(code, message).into()
-    }
-
-    /// Retain a dependency source when constructing a framework failure.
-    #[track_caller]
-    pub fn from_source(
-        code: ErrorCode,
-        message: impl Into<String>,
-        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
-    ) -> Self {
-        TalosError::from_source(code, message, source).into()
-    }
-
-    /// Mark operation-owned retry safety without changing the product error.
-    pub fn retryable(mut self, retryable: bool) -> Self {
-        self.retryable = retryable;
+impl AgentRunFailure {
+    /// Mark whether the failed operation can be retried safely.
+    pub fn retryable(mut self) -> Self {
+        self.retryable = true;
         self
     }
 
-    /// Add diagnostic context without discarding sources or capturing again.
-    pub fn context(mut self, context: impl std::fmt::Display) -> Self {
-        self.error = self.error.context(context);
-        self
+    /// Return whether retrying the failed operation is safe.
+    pub const fn is_retryable(&self) -> bool {
+        self.retryable
     }
 
-    /// Borrow the original failure for projection or boundary reporting.
+    /// Borrow the product failure for logging and projection.
     pub fn error(&self) -> &TalosError {
         &self.error
     }
 
-    /// Return the original product failure without remapping its code.
-    pub fn into_talos_error(self) -> TalosError {
+    /// Return the product failure after terminal metadata is projected.
+    pub fn into_error(self) -> TalosError {
         self.error
-    }
-
-    /// Error for unsupported standard Agent capabilities.
-    #[track_caller]
-    pub fn capability_unsupported(agent_id: &str, capability: &str) -> Self {
-        Self::new(
-            talos_error::ErrorCode::InvalidRequest,
-            format!("agent `{agent_id}` does not support capability `{capability}`"),
-        )
-    }
-
-    /// Error for invalid cross-layer Agent execution context.
-    #[track_caller]
-    pub fn invalid_execution_context(message: impl Into<String>) -> Self {
-        Self::new(talos_error::ErrorCode::InvalidRequest, message)
-    }
-
-    /// Error for an Agent run that cannot be found or controlled.
-    #[track_caller]
-    pub fn run_not_found(message: impl Into<String>) -> Self {
-        Self::new(talos_error::ErrorCode::ResourceNotFound, message)
-    }
-
-    /// Error for conflicting Agent run lifecycle state.
-    #[track_caller]
-    pub fn run_conflict(message: impl Into<String>) -> Self {
-        Self::new(talos_error::ErrorCode::Conflict, message)
-    }
-
-    /// Error for rejected structured input to an Agent run.
-    #[track_caller]
-    pub fn input_rejected(message: impl Into<String>) -> Self {
-        Self::new(talos_error::ErrorCode::InvalidRequest, message)
-    }
-
-    /// Error for unexpected Provider or backend failures.
-    #[track_caller]
-    pub fn provider_error(message: impl Into<String>) -> Self {
-        Self::new(talos_error::ErrorCode::InternalError, message)
     }
 }
 
-impl From<TalosError> for AgentError {
+impl From<TalosError> for AgentRunFailure {
     fn from(error: TalosError) -> Self {
         Self {
             retryable: false,
@@ -103,7 +44,3 @@ impl From<TalosError> for AgentError {
         }
     }
 }
-
-#[cfg(test)]
-#[path = "error_tests.rs"]
-mod tests;

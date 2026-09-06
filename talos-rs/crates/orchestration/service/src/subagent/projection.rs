@@ -83,9 +83,7 @@ impl SubagentService {
                 let Some(event) = record.event.agent_event().cloned() else {
                     return Ok(());
                 };
-                reducer
-                    .apply(event.clone())
-                    .map_err(talos_agent::AgentError::into_talos_error)?;
+                reducer.apply(event.clone())?;
                 last_event = Some(event);
                 Ok(())
             })

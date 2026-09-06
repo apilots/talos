@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
 
-use talos_error::{ErrorKind, TalosError};
+use talos_error::TalosError;
 
 /// Report a handled product failure once at its request, terminal, or task owner.
 ///
@@ -15,7 +15,7 @@ pub fn report_error(error: &TalosError) {
             tracing::event!(
                 target: "talos::diagnostic",
                 $level,
-                kind = ?error.kind(),
+                kind = if error.is_internal() { "Internal" } else { "Business" },
                 code = ?error.error_code(),
                 public_message = %error.to_api_error().message,
                 context = error.diagnostic_message(),
@@ -27,9 +27,10 @@ pub fn report_error(error: &TalosError) {
             )
         };
     }
-    match error.kind() {
-        ErrorKind::Business => report!(tracing::Level::WARN),
-        ErrorKind::Internal => report!(tracing::Level::ERROR),
+    if error.is_internal() {
+        report!(tracing::Level::ERROR)
+    } else {
+        report!(tracing::Level::WARN)
     }
 }
 

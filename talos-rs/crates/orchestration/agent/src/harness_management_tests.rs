@@ -64,7 +64,7 @@ async fn rejected_input_keeps_its_cause_after_provider_cleanup() {
         .await
         .expect_err("Provider rejection should be reported to the delivery owner");
     assert_eq!(
-        delivery_error.error().error_code(),
+        delivery_error.error_code(),
         talos_error::ErrorCode::InvalidRequest
     );
 
@@ -192,7 +192,6 @@ async fn session_maintenance_conflicts_with_a_live_turn() {
             .clear_session(session_params())
             .await
             .expect_err("clear must conflict with live Turn")
-            .error()
             .error_code(),
         talos_error::ErrorCode::ActiveTurnRunning
     );
@@ -240,13 +239,7 @@ async fn failed_session_acquisition_retains_unconfirmed_resources() {
         .unwrap();
     execution.admission.permit.consume().await.unwrap();
     assert_eq!(
-        execution
-            .settlement
-            .recv()
-            .await
-            .unwrap_err()
-            .error()
-            .error_code(),
+        execution.settlement.recv().await.unwrap_err().error_code(),
         talos_error::ErrorCode::RunCleanupUnconfirmed
     );
 

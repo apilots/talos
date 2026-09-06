@@ -1,6 +1,7 @@
-use talos_agent::{AgentError, AgentResult};
+use talos_agent::AgentResult;
 use talos_agent_api::{AgentMessage, AgentMessageBlockContent, AgentUserContent};
 use talos_agent_kernel::UserInput;
+use talos_error::TalosError;
 use talos_skills::SkillSelector;
 use talos_types::UserActionResponse;
 
@@ -18,7 +19,8 @@ pub(crate) fn project_input(message: &AgentMessage) -> AgentResult<KernelInputPr
 
     for block in &message.blocks {
         let AgentMessageBlockContent::UserContent(content) = &block.content else {
-            return Err(AgentError::input_rejected(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent Provider input contains non-User content",
             ));
         };
@@ -43,13 +45,15 @@ pub(crate) fn project_input(message: &AgentMessage) -> AgentResult<KernelInputPr
                     .replace((action_id.clone(), response.clone()))
                     .is_some()
                 {
-                    return Err(AgentError::input_rejected(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::InvalidRequest,
                         "Agent input contains multiple UserAction responses",
                     ));
                 }
             }
             AgentUserContent::Audio { .. } | AgentUserContent::Video { .. } => {
-                return Err(AgentError::input_rejected(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::InvalidRequest,
                     "Kernel Agent Provider does not support audio or video input",
                 ));
             }

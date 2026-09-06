@@ -19,8 +19,8 @@ use talos_types::{
 
 use crate::{
     register_core_local_tools, AbsolutePathBuf, CommandRiskAssessmentError,
-    CommandRiskAssessmentInput, CommandRiskAssessor, ToolContext, ToolDispatchOutcome, ToolPending,
-    ToolRegistry, ToolSandboxEnvironment,
+    CommandRiskAssessmentInput, CommandRiskAssessor, ToolContext, ToolDispatchFailure,
+    ToolDispatchOutcome, ToolPending, ToolRegistry, ToolSandboxEnvironment,
 };
 
 #[derive(Clone)]
@@ -118,6 +118,7 @@ async fn dispatch(
     registry
         .execute_invocation_with_context(invocation, context)
         .await
+        .map_err(ToolDispatchFailure::into_error)
 }
 
 async fn dispatch_allow_once(
@@ -130,7 +131,8 @@ async fn dispatch_allow_once(
     let invocation = registry.build_function_invocation(call_id, tool_name, arguments)?;
     let outcome = registry
         .execute_invocation_with_context(invocation.clone(), context.clone())
-        .await?;
+        .await
+        .map_err(ToolDispatchFailure::into_error)?;
     let ToolDispatchOutcome::Pending {
         pending:
             ToolPending::SandboxApproval {
@@ -151,6 +153,7 @@ async fn dispatch_allow_once(
     registry
         .execute_invocation_with_context(invocation, context)
         .await
+        .map_err(ToolDispatchFailure::into_error)
 }
 
 async fn dispatch_file_allow_once(
@@ -165,7 +168,8 @@ async fn dispatch_file_allow_once(
     let invocation = registry.build_function_invocation(call_id, tool_name, arguments)?;
     let pending = registry
         .execute_invocation_with_context(invocation.clone(), context.clone())
-        .await?;
+        .await
+        .map_err(ToolDispatchFailure::into_error)?;
     let ToolDispatchOutcome::Pending {
         pending:
             ToolPending::SandboxApproval {
@@ -193,6 +197,7 @@ async fn dispatch_file_allow_once(
     registry
         .execute_invocation_with_context(invocation, context)
         .await
+        .map_err(ToolDispatchFailure::into_error)
 }
 
 fn assert_local_os_event(sink: &RecordingSink) {

@@ -94,7 +94,7 @@ impl TurnService {
         }
         self.complete_recovered_turn(
             &identity,
-            talos_agent::AgentError::from(TalosError::new(
+            talos_agent::AgentRunFailure::from(TalosError::new(
                 talos_error::ErrorCode::Cancelled,
                 "Agent Turn was interrupted",
             )),
@@ -111,7 +111,7 @@ impl TurnService {
         &self,
         session: &talos_store::session::SessionRecord,
         identity: &AgentTurnRef,
-        failure: talos_agent::AgentError,
+        failure: talos_agent::AgentRunFailure,
     ) -> TalosResult<AgentInterruptOutcome> {
         let ownership = self
             .execution
@@ -138,7 +138,7 @@ impl TurnService {
     async fn complete_recovered_turn(
         &self,
         identity: &AgentTurnRef,
-        failure: talos_agent::AgentError,
+        failure: talos_agent::AgentRunFailure,
         cleanup: AgentInterruptOutcome,
         ownership: crate::turn::agent_execution::SessionMaintenanceGuard,
     ) -> TalosResult<AgentInterruptOutcome> {

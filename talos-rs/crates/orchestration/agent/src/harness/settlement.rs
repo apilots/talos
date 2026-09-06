@@ -5,7 +5,8 @@ use talos_agent_api::{
 use talos_run_control::{CleanupReport, Settlement, SettlementKind, SpawnError};
 
 use crate::{
-    event_sink::AgentEventPipeline, AgentError, AgentResult, AgentRunSettlement, SessionTurnResult,
+    event_sink::AgentEventPipeline, AgentResult, AgentRunFailure, AgentRunSettlement,
+    SessionTurnResult,
 };
 
 pub(super) async fn settle_provider_completion(
@@ -46,8 +47,9 @@ pub(super) async fn settle_completed(
 
 pub(super) async fn settle_failure(
     pipeline: &AgentEventPipeline,
-    error: AgentError,
+    error: impl Into<AgentRunFailure>,
 ) -> AgentResult<AgentRunSettlement> {
+    let error = error.into();
     let cancelled = error.error().is_code(talos_error::ErrorCode::Cancelled);
     pipeline
         .close_open_lifecycle(
@@ -64,11 +66,11 @@ pub(super) async fn settle_failure(
         )
         .await
         .inspect_err(|_| talos_logging::report_error(error.error()))?;
-    let product_error = error.clone().into_talos_error();
+    let product_error = error.clone().into_error();
     let event = pipeline
         .record(AgentEventPayload::TurnFailed(AgentTurnFailed {
             error: product_error.to_api_error(),
-            retryable: error.retryable,
+            retryable: error.is_retryable(),
         }))
         .await
         .inspect_err(|_| talos_logging::report_error(error.error()))?;
@@ -100,12 +102,12 @@ pub(super) fn cleanup_task_count(settlement: &Settlement) -> u32 {
     }
 }
 
-pub(super) fn cleanup_error(settlement: &Settlement) -> AgentError {
+pub(super) fn cleanup_error(settlement: &Settlement) -> talos_error::TalosError {
     let count = match &settlement.cleanup {
         CleanupReport::Confirmed => 0,
         CleanupReport::Unconfirmed { count, .. } => *count,
     };
-    AgentError::new(
+    talos_error::TalosError::new(
         talos_error::ErrorCode::RunCleanupUnconfirmed,
         format!("Agent Provider cleanup is unconfirmed for {count} task(s)"),
     )
@@ -123,10 +125,10 @@ pub(super) fn interrupt_outcome(settlement: &Settlement) -> AgentInterruptOutcom
     }
 }
 
-pub(super) fn spawn_error(error: SpawnError) -> AgentError {
+pub(super) fn spawn_error(error: SpawnError) -> talos_error::TalosError {
     let message = match error {
         SpawnError::Closed => "Agent run control stopped accepting Provider tasks",
         SpawnError::CapacityExceeded => "Agent run control reached its Provider task capacity",
     };
-    AgentError::provider_error(message)
+    talos_error::TalosError::new(talos_error::ErrorCode::InternalError, message)
 }

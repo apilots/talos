@@ -2,18 +2,19 @@ use crate::execution::ReplayDynamicToolResult;
 use crate::ToolExecutionMode;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use talos_config::{AgentKernelConfig, TalosPaths};
-use talos_error::{TalosError, TalosResult, TalosToolErrorKind};
+use talos_error::{TalosError, TalosResult};
 use talos_memory::MemoryScope;
 use talos_run_control::{RunTaskCompletion, RunTaskGroup, SpawnError};
 use talos_tools::{
-    AbsolutePathBuf, ToolDispatchOutcome, ToolExecutorPort, ToolInvocation, ToolOutputPayload,
-    ToolProgressEmitter, ToolProgressEvent, ToolSandboxEnvironment,
+    AbsolutePathBuf, ToolDispatchFailure, ToolDispatchOutcome, ToolDispatchResult,
+    ToolExecutorPort, ToolInvocation, ToolProgressEmitter, ToolProgressEvent,
+    ToolSandboxEnvironment,
 };
 use talos_types::UserActionResponse;
 use tokio::sync::mpsc;
@@ -237,9 +238,9 @@ async fn execute_single_tool_call(
                 )
                 .await
             }
-            Err(error) => Err(error),
+            Err(error) => Err(error.into()),
         },
-        Err(error) => Err(error),
+        Err(error) => Err(error.into()),
     };
     match result {
         Ok(payload) => ToolExecutionOutput {
@@ -253,12 +254,12 @@ async fn execute_single_tool_call(
             outcome: payload,
         },
         Err(error) => {
-            talos_logging::report_error(&error);
+            talos_logging::report_error(error.error());
             ToolExecutionOutput {
                 call_id: call.call_id,
                 tool_name: call.tool_name,
                 arguments: call.arguments,
-                outcome: tool_error_outcome(error),
+                outcome: error.into_outcome(),
                 is_error: true,
             }
         }
@@ -270,7 +271,7 @@ async fn execute_tool_invocation(
     run_tasks: &RunTaskGroup,
     invocation: ToolInvocation,
     tool_context: talos_tools::ToolContext,
-) -> TalosResult<ToolDispatchOutcome> {
+) -> ToolDispatchResult<ToolDispatchOutcome> {
     let run_task = run_tasks.spawn(move |cancellation| async move {
         let tool_context = tool_context.with_cancellation(
             talos_tools::InvocationCancellation::new(cancellation.requested()),
@@ -278,63 +279,31 @@ async fn execute_tool_invocation(
         let result = registry
             .execute_invocation_with_context(invocation, tool_context)
             .await;
-        if result
-            .as_ref()
-            .is_err_and(|error| error.is_code(talos_error::ErrorCode::RunCleanupUnconfirmed))
-        {
+        if result.as_ref().is_err_and(|failure| {
+            failure
+                .error()
+                .is_code(talos_error::ErrorCode::RunCleanupUnconfirmed)
+        }) {
             RunTaskCompletion::CleanupUnconfirmed(result)
         } else {
             RunTaskCompletion::Confirmed(result)
         }
     });
     let run_task = run_task.map_err(|error| match error {
-        SpawnError::Closed => TalosError::new(
+        SpawnError::Closed => ToolDispatchFailure::from(TalosError::new(
             talos_error::ErrorCode::Cancelled,
             "Run stopped accepting Tool tasks",
-        ),
-        SpawnError::CapacityExceeded => TalosError::internal("Run Tool task capacity exceeded"),
+        )),
+        SpawnError::CapacityExceeded => {
+            ToolDispatchFailure::from(TalosError::internal("Run Tool task capacity exceeded"))
+        }
     })?;
     run_task.await.map_err(|_| {
-        TalosError::new(
+        ToolDispatchFailure::from(TalosError::new(
             talos_error::ErrorCode::Cancelled,
             "Tool task ended without a result",
-        )
+        ))
     })?
-}
-
-fn tool_error_outcome(error: TalosError) -> ToolDispatchOutcome {
-    if let Some(diagnostic) = error.tool_failure_diagnostic() {
-        structured_tool_failure(
-            diagnostic.kind,
-            error.to_api_error().message,
-            diagnostic.gate_source.clone(),
-        )
-    } else {
-        ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-            content: error.to_api_error().message,
-            is_error: true,
-        })
-    }
-}
-
-fn structured_tool_failure(
-    kind: TalosToolErrorKind,
-    message: String,
-    gate_source: Option<String>,
-) -> ToolDispatchOutcome {
-    let mut payload = json!({
-        "error": message.clone(),
-        "error_kind": kind,
-    });
-    if let Some(gate_source) = gate_source {
-        if let Some(object) = payload.as_object_mut() {
-            object.insert("gate_source".to_string(), Value::String(gate_source));
-        }
-    }
-    ToolDispatchOutcome::executed(ToolOutputPayload::failure_structured(
-        message,
-        Some(payload),
-    ))
 }
 
 #[async_trait]

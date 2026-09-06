@@ -127,10 +127,7 @@ async fn fresh_rich_input_is_rejected_before_provider_admission() {
         Err(error) => error,
     };
 
-    assert_eq!(
-        error.error().error_code(),
-        talos_error::ErrorCode::InvalidRequest
-    );
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
     assert!(!provider.started.load(Ordering::Acquire));
 }
 
@@ -178,10 +175,7 @@ async fn running_input_requires_dynamic_input_before_delivery() {
         .await
         .expect("interrupted invocation should settle");
 
-    assert_eq!(
-        error.error().error_code(),
-        talos_error::ErrorCode::InvalidRequest
-    );
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
     assert!(!provider.input_received.load(Ordering::Acquire));
 }
 

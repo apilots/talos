@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use talos_agent::{
-    AgentAdmissionPermit, AgentContext, AgentError, AgentEventReducer, AgentInputParams,
-    AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentAdmissionPermit, AgentContext, AgentEventReducer, AgentInputParams, AgentRunExecution,
+    AgentRunFailure, AgentRunParams, AgentRunSettlement,
 };
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentInterruptOutcome, AgentMessage, AgentMessageBlockContent,
@@ -272,7 +272,7 @@ impl AgentExecutionDriver {
         &self,
         identity: AgentTurnRef,
         expected_event_seq: i64,
-        failure: AgentError,
+        failure: AgentRunFailure,
         cleanup: AgentInterruptOutcome,
     ) -> TalosResult<AgentRunSettlement> {
         if let AgentInterruptOutcome::CleanupUnconfirmed { task_count } = cleanup {
@@ -285,37 +285,32 @@ impl AgentExecutionDriver {
             .event_service
             .turn_checkpoint(&identity, expected_event_seq)
             .await?;
-        let mut reducer = AgentEventReducer::from_checkpoint(identity.clone(), checkpoint)
-            .map_err(AgentError::into_talos_error)?;
+        let mut reducer = AgentEventReducer::from_checkpoint(identity.clone(), checkpoint)?;
         let cancelled = failure.error().is_code(ErrorCode::Cancelled);
         let occurred_at = chrono::Utc::now().timestamp();
-        let recovery_events = reducer
-            .close_open_lifecycle(
-                if cancelled {
-                    AgentMessageStatus::Cancelled
-                } else {
-                    AgentMessageStatus::Failed
-                },
-                if cancelled {
-                    AgentMessageBlockStatus::Cancelled
-                } else {
-                    AgentMessageBlockStatus::Failed
-                },
-                occurred_at,
-            )
-            .map_err(AgentError::into_talos_error)?;
+        let recovery_events = reducer.close_open_lifecycle(
+            if cancelled {
+                AgentMessageStatus::Cancelled
+            } else {
+                AgentMessageStatus::Failed
+            },
+            if cancelled {
+                AgentMessageBlockStatus::Cancelled
+            } else {
+                AgentMessageBlockStatus::Failed
+            },
+            occurred_at,
+        )?;
         let event = AgentEvent {
             identity,
             sequence: reducer.next_sequence(),
             occurred_at,
             payload: AgentEventPayload::TurnFailed(AgentTurnFailed {
                 error: failure.error().to_api_error(),
-                retryable: failure.retryable,
+                retryable: failure.is_retryable(),
             }),
         };
-        reducer
-            .apply(event.clone())
-            .map_err(AgentError::into_talos_error)?;
+        reducer.apply(event.clone())?;
         let mut current_event_seq = expected_event_seq;
         for recovery_event in recovery_events {
             let commit = self
@@ -339,7 +334,7 @@ impl AgentExecutionDriver {
             event,
             messages: checkpoint.messages,
             metrics: checkpoint.metrics,
-            result: Err(failure.into_talos_error()),
+            result: Err(failure.into_error()),
         })
     }
 

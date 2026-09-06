@@ -5,8 +5,9 @@ use talos_agent_api::{
     AgentMessageBlockStatus, AgentMessageStatus, AgentRunMetrics, AgentToolCallArguments,
     AgentTurnRef,
 };
+use talos_error::TalosError;
 
-use crate::{AgentError, AgentResult};
+use crate::AgentResult;
 
 /// Durable reducer state reconstructed from canonical Agent events.
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +51,8 @@ impl AgentEventReducer {
         checkpoint: AgentRunCheckpoint,
     ) -> AgentResult<Self> {
         if checkpoint.last_sequence == 0 {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "continued Agent checkpoint must follow TurnStarted",
             ));
         }
@@ -59,7 +61,8 @@ impl AgentEventReducer {
             .iter()
             .any(|message| message.turn_id != identity.turn_id)
         {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent checkpoint contains a message from another Turn",
             ));
         }
@@ -83,25 +86,31 @@ impl AgentEventReducer {
     /// Apply one canonical event after validating identity, order, and lifecycle.
     pub fn apply(&mut self, event: AgentEvent) -> AgentResult<()> {
         if event.identity != self.identity {
-            return Err(AgentError::invalid_execution_context(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
                 "Agent event identity does not match reducer identity",
             ));
         }
         if event.sequence != self.next_sequence() {
-            return Err(AgentError::invalid_execution_context(format!(
-                "Agent event sequence {} does not match expected {}",
-                event.sequence,
-                self.next_sequence()
-            )));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                format!(
+                    "Agent event sequence {} does not match expected {}",
+                    event.sequence,
+                    self.next_sequence()
+                ),
+            ));
         }
         if self.terminal {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "closed Agent Turn rejects late events",
             ));
         }
         let is_turn_started = matches!(&event.payload, AgentEventPayload::TurnStarted(_));
         if !self.turn_started && !is_turn_started {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Agent Turn must start before other events",
             ));
         }
@@ -128,7 +137,8 @@ impl AgentEventReducer {
         occurred_at: i64,
     ) -> AgentResult<Vec<AgentEvent>> {
         if !is_terminal_message_status(message_status) || !is_terminal_block_status(block_status) {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Agent lifecycle closure requires terminal statuses",
             ));
         }
@@ -204,12 +214,22 @@ impl AgentEventReducer {
             .messages
             .iter()
             .find(|message| message.message_id == message_id)
-            .ok_or_else(|| AgentError::run_conflict("Agent message does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Agent message does not exist",
+                )
+            })?;
         let block = message
             .blocks
             .iter()
             .find(|block| block.block_id == block_id)
-            .ok_or_else(|| AgentError::run_conflict("Agent message block does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Agent message block does not exist",
+                )
+            })?;
         let mut completed = block.clone();
         completed.content = finalized_content(&block.content, status)?;
         completed.status = status;
@@ -229,7 +249,12 @@ impl AgentEventReducer {
             .iter()
             .find(|message| message.message_id == message_id)
             .cloned()
-            .ok_or_else(|| AgentError::run_conflict("Agent message does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Agent message does not exist",
+                )
+            })?;
         completed.status = status;
         completed.completed_at = Some(completed_at);
         Ok(completed)
@@ -239,7 +264,8 @@ impl AgentEventReducer {
         match payload {
             AgentEventPayload::TurnStarted(_) => {
                 if self.turn_started {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "Agent TurnStarted may occur only once",
                     ));
                 }
@@ -253,7 +279,10 @@ impl AgentEventReducer {
                     .iter()
                     .any(|message| message.message_id == started.message.message_id)
                 {
-                    return Err(AgentError::run_conflict("Agent message already exists"));
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
+                        "Agent message already exists",
+                    ));
                 }
                 self.checkpoint.messages.push(started.message);
             }
@@ -277,7 +306,8 @@ impl AgentEventReducer {
                     || completed.block.completed_at.is_none()
                     || completed.block != expected
                 {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "completed Agent block snapshot does not match reducer state",
                     ));
                 }
@@ -296,7 +326,8 @@ impl AgentEventReducer {
                     })
                     || completed != expected
                 {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "completed Agent message snapshot does not match reducer state",
                     ));
                 }
@@ -312,7 +343,8 @@ impl AgentEventReducer {
                 if let Some(block_id) = waiting_block_id {
                     let block = find_block_by_id_mut(&mut self.checkpoint.messages, block_id)?;
                     if block.status != AgentMessageBlockStatus::Running {
-                        return Err(AgentError::run_conflict(
+                        return Err(TalosError::new(
+                            talos_error::ErrorCode::Conflict,
                             "Agent pending input requires a running message block",
                         ));
                     }
@@ -331,7 +363,8 @@ impl AgentEventReducer {
                             !is_terminal_block_status(block.status) || block.completed_at.is_none()
                         })
                 }) {
-                    return Err(AgentError::run_conflict(
+                    return Err(TalosError::new(
+                        talos_error::ErrorCode::Conflict,
                         "Agent Turn cannot finish with open message lifecycle",
                     ));
                 }
@@ -348,7 +381,8 @@ fn validate_started_message(identity: &AgentTurnRef, message: &AgentMessage) -> 
         || message.completed_at.is_some()
         || !message.blocks.is_empty()
     {
-        return Err(AgentError::run_conflict(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "started Agent message has invalid identity or lifecycle state",
         ));
     }
@@ -364,7 +398,8 @@ fn validate_started_block(message: &AgentMessage, block: &AgentMessageBlock) -> 
             .iter()
             .any(|existing| existing.block_id == block.block_id)
     {
-        return Err(AgentError::run_conflict(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "started Agent block has invalid lifecycle state",
         ));
     }
@@ -378,7 +413,8 @@ fn apply_block_delta(
     let message = find_message_mut(messages, &delta.message_id)?;
     let block = find_block_mut(message, &delta.block_id)?;
     if block.status != AgentMessageBlockStatus::Running {
-        return Err(AgentError::run_conflict(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent block delta requires a running block",
         ));
     }
@@ -398,7 +434,8 @@ fn apply_block_delta(
             if content.phase != AgentAssistantTextPhase::Pending
                 || phase == AgentAssistantTextPhase::Pending
             {
-                return Err(AgentError::run_conflict(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Conflict,
                     "Agent assistant text phase can be committed only once",
                 ));
             }
@@ -416,7 +453,8 @@ fn apply_block_delta(
                 json_fragment.push_str(&delta.json_fragment);
             }
             AgentToolCallArguments::Complete { .. } => {
-                return Err(AgentError::run_conflict(
+                return Err(TalosError::new(
+                    talos_error::ErrorCode::Conflict,
                     "completed Tool arguments reject deltas",
                 ));
             }
@@ -430,7 +468,8 @@ fn apply_block_delta(
             AgentMessageBlockDeltaContent::ContextCompaction(delta),
         ) => apply_compaction_delta(compaction, delta),
         _ => {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Agent block delta kind does not match block content",
             ));
         }
@@ -471,9 +510,10 @@ fn finalized_content(
         return Ok(content);
     };
     let value: serde_json::Value = serde_json::from_str(json_fragment).map_err(|error| {
-        AgentError::invalid_execution_context(format!(
-            "completed Tool arguments are invalid JSON: {error}"
-        ))
+        TalosError::new(
+            talos_error::ErrorCode::InvalidRequest,
+            format!("completed Tool arguments are invalid JSON: {error}"),
+        )
     })?;
     tool_call.arguments = AgentToolCallArguments::Complete {
         value: talos_types::ToolArguments::from(value),
@@ -503,7 +543,8 @@ fn validate_monotonic_metrics(
             next_usage.cache_read_input_tokens,
         )
     {
-        return Err(AgentError::run_conflict(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent metrics update must be cumulative",
         ));
     }
@@ -525,7 +566,12 @@ fn find_message_mut<'a>(
     messages
         .iter_mut()
         .find(|message| message.message_id == message_id)
-        .ok_or_else(|| AgentError::run_conflict("Agent message does not exist"))
+        .ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Agent message does not exist",
+            )
+        })
 }
 
 fn find_block_mut<'a>(
@@ -536,7 +582,12 @@ fn find_block_mut<'a>(
         .blocks
         .iter_mut()
         .find(|block| block.block_id == block_id)
-        .ok_or_else(|| AgentError::run_conflict("Agent message block does not exist"))
+        .ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Agent message block does not exist",
+            )
+        })
 }
 
 fn find_block_by_id_mut<'a>(
@@ -547,7 +598,12 @@ fn find_block_by_id_mut<'a>(
         .iter_mut()
         .flat_map(|message| message.blocks.iter_mut())
         .find(|block| block.block_id == block_id)
-        .ok_or_else(|| AgentError::run_conflict("Agent pending input block does not exist"))
+        .ok_or_else(|| {
+            TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "Agent pending input block does not exist",
+            )
+        })
 }
 
 fn is_terminal_message_status(status: AgentMessageStatus) -> bool {

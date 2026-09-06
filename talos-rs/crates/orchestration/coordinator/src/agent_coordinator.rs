@@ -3,8 +3,8 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use talos_agent::{
-    AgentAdmission, AgentContext, AgentError, AgentHarness, AgentInputParams, AgentInterruptParams,
-    AgentResult, AgentRunExecution, AgentRunParams, AgentSessionContext,
+    AgentAdmission, AgentContext, AgentHarness, AgentInputParams, AgentInterruptParams,
+    AgentRunExecution, AgentRunParams, AgentSessionContext,
 };
 use talos_agent_api::AgentInterruptOutcome;
 use talos_error::{TalosError, TalosResult};
@@ -35,18 +35,14 @@ impl CoordinatorImpl {
         agent_id: String,
         harness: Arc<dyn AgentHarness>,
     ) -> TalosResult<()> {
-        Self::map_agent_result(self.registry.register(agent_id, harness).await)
-    }
-
-    fn map_agent_result<T>(result: AgentResult<T>) -> TalosResult<T> {
-        result.map_err(AgentError::into_talos_error)
+        self.registry.register(agent_id, harness).await
     }
 
     async fn harness(&self, agent_id: &str) -> TalosResult<Arc<dyn AgentHarness>> {
         if agent_id.trim().is_empty() {
             return Err(TalosError::internal("Agent binding cannot be empty"));
         }
-        Self::map_agent_result(self.registry.get(agent_id).await)
+        self.registry.get(agent_id).await
     }
 
     async fn context_harness(&self, context: &AgentContext) -> TalosResult<Arc<dyn AgentHarness>> {
@@ -66,32 +62,32 @@ impl AgentCoordinator for CoordinatorImpl {
 
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         let harness = self.context_harness(&params.context).await?;
-        Self::map_agent_result(harness.start(params).await)
+        harness.start(params).await
     }
 
     async fn submit_input(&self, params: AgentInputParams) -> TalosResult<AgentAdmission> {
         let harness = self.harness(&params.agent_id).await?;
-        Self::map_agent_result(harness.submit_input(params).await)
+        harness.submit_input(params).await
     }
 
     async fn interrupt(&self, params: AgentInterruptParams) -> TalosResult<AgentInterruptOutcome> {
         let harness = self.harness(&params.agent_id).await?;
-        Self::map_agent_result(harness.interrupt(params).await)
+        harness.interrupt(params).await
     }
 
     async fn compact_session(&self, context: AgentContext) -> TalosResult<AgentRunExecution> {
         let harness = self.context_harness(&context).await?;
-        Self::map_agent_result(harness.compact_session(context).await)
+        harness.compact_session(context).await
     }
 
     async fn clear_session(&self, params: AgentSessionContext) -> TalosResult<()> {
         let harness = self.harness(&params.agent_id).await?;
-        Self::map_agent_result(harness.clear_session(params).await)
+        harness.clear_session(params).await
     }
 
     async fn close_session(&self, params: AgentSessionContext) -> TalosResult<()> {
         let harness = self.harness(&params.agent_id).await?;
-        Self::map_agent_result(harness.close_session(params).await)
+        harness.close_session(params).await
     }
 
     async fn shutdown(&self, timeout: Duration) -> TalosResult<()> {
@@ -105,7 +101,7 @@ impl AgentCoordinator for CoordinatorImpl {
                         "Agent Coordinator shutdown timed out",
                     )
                 })?;
-            Self::map_agent_result(harness.shutdown(remaining).await)?;
+            harness.shutdown(remaining).await?;
         }
         Ok(())
     }

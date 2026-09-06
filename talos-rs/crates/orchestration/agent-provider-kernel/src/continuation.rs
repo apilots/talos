@@ -2,13 +2,14 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
-use talos_agent::{AgentError, AgentResult};
+use talos_agent::AgentResult;
 use talos_agent_api::AgentContinuationRef;
 use talos_agent_kernel::{
     AgentKernelContinuation, AgentKernelContinuationToolCall, AgentKernelUserActionContinuation,
     EventAuthor, ExecutionBranch, KernelSessionArtifactStore, KernelTranscriptEvent,
     KernelTranscriptPayload, KernelTranscriptUserActionResponsePayload,
 };
+use talos_error::TalosError;
 use talos_types::{TurnExecutionMetrics, UserActionResponse};
 
 const CONTINUATION_VERSION: u8 = 1;
@@ -49,7 +50,7 @@ impl KernelProviderContinuation {
         serde_json::to_string(self)
             .map(|opaque_id| AgentContinuationRef { opaque_id })
             .map_err(|error| {
-                AgentError::from_source(
+                TalosError::from_source(
                     talos_error::ErrorCode::InternalError,
                     "serialize Kernel continuation reference",
                     error,
@@ -59,14 +60,14 @@ impl KernelProviderContinuation {
 
     pub(crate) fn decode(reference: &AgentContinuationRef) -> AgentResult<Self> {
         let decoded: Self = serde_json::from_str(&reference.opaque_id).map_err(|error| {
-            AgentError::from_source(
+            TalosError::from_source(
                 talos_error::ErrorCode::InvalidRequest,
                 "Kernel continuation reference is invalid",
                 error,
             )
         })?;
         if decoded.version != CONTINUATION_VERSION {
-            return Err(AgentError::new(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "Kernel continuation reference version is unsupported",
             ));
@@ -85,7 +86,7 @@ pub(crate) async fn build_kernel_continuation(
     response: UserActionResponse,
 ) -> AgentResult<AgentKernelContinuation> {
     if reference.action_id != action_id {
-        return Err(AgentError::new(
+        return Err(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "UserAction response does not match Kernel continuation",
         ));
@@ -97,8 +98,7 @@ pub(crate) async fn build_kernel_continuation(
             None,
             Some(ExecutionBranch::ReactiveLoop),
         )
-        .await
-        .map_err(AgentError::from)?;
+        .await?;
     let request = records
         .into_iter()
         .filter_map(|record| match record.payload {
@@ -114,7 +114,7 @@ pub(crate) async fn build_kernel_continuation(
         .max_by_key(|(timestamp, _)| *timestamp)
         .map(|(_, payload)| payload)
         .ok_or_else(|| {
-            AgentError::new(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "Kernel continuation request was not found",
             )
@@ -137,8 +137,7 @@ pub(crate) async fn build_kernel_continuation(
                 },
             ),
         )
-        .await
-        .map_err(AgentError::from)?;
+        .await?;
 
     Ok(AgentKernelContinuation::UserAction(
         AgentKernelUserActionContinuation {

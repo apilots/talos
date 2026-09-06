@@ -84,10 +84,9 @@ pub(crate) fn map_sandbox_error(error: TalosSandboxError) -> TalosError {
     let public = match &error {
         TalosSandboxError::FileSystemAccessDenied { .. }
         | TalosSandboxError::SandboxBypassDenied
-        | TalosSandboxError::Permission(_) => TalosError::tool_failure(
-            talos_error::TalosToolErrorKind::PermissionRejection,
+        | TalosSandboxError::Permission(_) => TalosError::new(
+            talos_error::ErrorCode::PermissionDenied,
             "The sandbox denied this tool operation. Check the granted permissions.",
-            Some("sandbox_policy".to_string()),
         ),
         TalosSandboxError::UnsupportedPlatform
         | TalosSandboxError::ProviderUnavailable { .. }

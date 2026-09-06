@@ -31,9 +31,9 @@ pub use handlers::{DynamicToolHandler, LocalToolHandler, McpToolHandler, ToolHan
 pub use invocation::{ToolCallPayload, ToolDispatchContext, ToolInvocation};
 pub use mcp::{mcp_tool_name, split_mcp_tool_name, McpConnectionManager};
 pub use output::{
-    NextTurnFailurePayload, ToolDispatchOutcome, ToolOutputPayload, ToolPending,
-    ToolResultEnvelope, ToolResultError, ToolResultPendingMeta, ToolResultPolicyMeta,
-    ToolResultStatus,
+    NextTurnFailurePayload, TalosToolErrorKind, ToolDispatchFailure, ToolDispatchOutcome,
+    ToolDispatchResult, ToolOutputPayload, ToolPending, ToolResultEnvelope, ToolResultError,
+    ToolResultPendingMeta, ToolResultPolicyMeta, ToolResultStatus,
 };
 pub use r#trait::{decode_tool_input, Tool};
 pub use registry::{ToolDefinitionProvider, ToolExecutorPort, ToolRegistry, ToolRuntime};

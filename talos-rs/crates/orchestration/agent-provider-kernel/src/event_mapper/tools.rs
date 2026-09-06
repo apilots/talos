@@ -109,7 +109,10 @@ impl KernelAgentEventMapper {
             .get(&data.call_id)
             .cloned()
             .ok_or_else(|| {
-                talos_agent::AgentError::run_conflict("Kernel Tool result has no Tool call")
+                talos_error::TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "Kernel Tool result has no Tool call",
+                )
             })?;
         self.sink
             .complete_block(

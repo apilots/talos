@@ -1,4 +1,5 @@
 use sqlx::Row;
+use std::error::Error;
 use std::sync::Arc;
 use talos_storage::SqliteStorage;
 
@@ -366,7 +367,19 @@ async fn migration_rejects_unsettled_legacy_active_turns() {
         .await
         .expect_err("unsettled legacy Turn must block migration");
 
-    assert!(error.to_string().contains("active_turns_must_be_settled"));
+    let migration_error = error
+        .source()
+        .and_then(|source| source.downcast_ref::<sqlx::migrate::MigrateError>())
+        .expect("migration failure must retain the typed SQLx source");
+    let sqlx::migrate::MigrateError::Execute(sqlx::Error::Database(database_error)) =
+        migration_error
+    else {
+        panic!("migration must fail with a database constraint");
+    };
+    assert_eq!(
+        database_error.kind(),
+        sqlx::error::ErrorKind::CheckViolation
+    );
 }
 
 #[tokio::test]

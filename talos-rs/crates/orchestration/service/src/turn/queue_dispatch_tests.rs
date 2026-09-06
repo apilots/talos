@@ -157,9 +157,10 @@ async fn committed_failure_recovery_releases_execution_and_dispatches_the_queue(
         if rejected_stage == "panic" {
             execution.panic_start_permit.store(true, Ordering::SeqCst);
         } else if rejected_stage == "permit" {
-            *execution.start_permit_error.lock().unwrap() = Some(
-                talos_agent::AgentError::provider_error("injected start permit rejection"),
-            );
+            *execution.start_permit_error.lock().unwrap() = Some(talos_error::TalosError::new(
+                talos_error::ErrorCode::InternalError,
+                "injected start permit rejection",
+            ));
         } else {
             sqlx::query(&format!(
                 r#"

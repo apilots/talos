@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use talos_agent::AgentError;
 use talos_error::TalosResult;
 use talos_router::Router;
 use talos_types::talos::SessionSource;
@@ -64,10 +63,7 @@ impl AgentRouter {
                     "no Agent routing binding matched the Session source",
                 )
             })?;
-        self.registry
-            .get(&agent_id)
-            .await
-            .map_err(AgentError::into_talos_error)?;
+        self.registry.get(&agent_id).await?;
         Ok(agent_id)
     }
 }

@@ -10,10 +10,10 @@ use talos_agent_api::{
     AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted, AgentMessageStatus,
     AgentRunMetrics, AgentTurnRef,
 };
+use talos_error::TalosError;
 
 use crate::{
-    AgentError, AgentEventReducer, AgentMessageBlockHandle, AgentMessageHandle, AgentResult,
-    AgentRunCheckpoint,
+    AgentEventReducer, AgentMessageBlockHandle, AgentMessageHandle, AgentResult, AgentRunCheckpoint,
 };
 
 const AGENT_PROGRESS_EVENT_CAPACITY: usize = 256;
@@ -100,7 +100,10 @@ impl AgentEventPipeline {
             let events = next_reducer.close_open_lifecycle(message_status, block_status, now())?;
             for event in &events {
                 state.event_tx.send(event.clone()).await.map_err(|_| {
-                    AgentError::provider_error("Agent progress event receiver was closed")
+                    TalosError::new(
+                        talos_error::ErrorCode::InternalError,
+                        "Agent progress event receiver was closed",
+                    )
                 })?;
             }
             state.reducer = next_reducer;
@@ -112,7 +115,8 @@ impl AgentEventPipeline {
     pub async fn record_user_message(&self, message: AgentMessage) -> AgentResult<Vec<AgentEvent>> {
         let mut state = self.inner.state.lock().await;
         if state.reservation.is_some() {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Agent event pipeline already has a pending admission",
             ));
         }
@@ -129,7 +133,8 @@ impl AgentEventPipeline {
     ) -> AgentResult<(Vec<AgentEvent>, AgentEventReservation)> {
         let mut state = self.inner.state.lock().await;
         if state.reservation.is_some() {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Agent event pipeline already has a pending admission",
             ));
         }
@@ -232,7 +237,8 @@ impl AgentEventSink {
     /// Start an Agent, Tool, or System message and return its scoped handle.
     pub async fn start_message(&self, role: AgentMessageRole) -> AgentResult<AgentMessageHandle> {
         if role == AgentMessageRole::User {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "Provider event sink cannot create User messages",
             ));
         }
@@ -264,11 +270,17 @@ impl AgentEventSink {
             .messages
             .iter()
             .find(|message| message.message_id == message_id)
-            .ok_or_else(|| AgentError::run_conflict("resumed Agent message does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "resumed Agent message does not exist",
+                )
+            })?;
         if message.role == AgentMessageRole::User
             || message.status != AgentMessageStatus::InProgress
         {
-            return Err(AgentError::run_conflict(
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
                 "resumed Agent message is not Provider-owned and open",
             ));
         }
@@ -319,17 +331,30 @@ impl AgentEventSink {
             .messages
             .iter()
             .find(|message| message.message_id == message_id)
-            .ok_or_else(|| AgentError::run_conflict("resumed Agent message does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "resumed Agent message does not exist",
+                )
+            })?;
         let block = message
             .blocks
             .iter()
             .find(|block| block.block_id == block_id)
-            .ok_or_else(|| AgentError::run_conflict("resumed Agent block does not exist"))?;
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::Conflict,
+                    "resumed Agent block does not exist",
+                )
+            })?;
         if !matches!(
             block.status,
             AgentMessageBlockStatus::Running | AgentMessageBlockStatus::WaitingForInput
         ) {
-            return Err(AgentError::run_conflict("resumed Agent block is not open"));
+            return Err(TalosError::new(
+                talos_error::ErrorCode::Conflict,
+                "resumed Agent block is not open",
+            ));
         }
         Ok(AgentMessageBlockHandle {
             sink_id: self.inner.sink_id.clone(),
@@ -420,7 +445,8 @@ impl AgentEventSink {
         if handle.sink_id == self.inner.sink_id {
             return Ok(());
         }
-        Err(AgentError::run_conflict(
+        Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent message handle belongs to another event sink",
         ))
     }
@@ -429,7 +455,8 @@ impl AgentEventSink {
         if handle.sink_id == self.inner.sink_id {
             return Ok(());
         }
-        Err(AgentError::run_conflict(
+        Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent block handle belongs to another event sink",
         ))
     }
@@ -470,7 +497,10 @@ async fn record_event(
         next_reducer.apply(event.clone())?;
         if matches!(delivery, EventDelivery::Progress) {
             state.event_tx.send(event.clone()).await.map_err(|_| {
-                AgentError::provider_error("Agent progress event receiver was closed")
+                TalosError::new(
+                    talos_error::ErrorCode::InternalError,
+                    "Agent progress event receiver was closed",
+                )
             })?;
         }
         state.reducer = next_reducer;
@@ -484,13 +514,16 @@ async fn finish_reservation(
     disposition: ReservationDisposition,
 ) -> AgentResult<()> {
     let mut state = inner.state.lock().await;
-    let reservation = state
-        .reservation
-        .take()
-        .ok_or_else(|| AgentError::run_conflict("Agent event reservation is no longer active"))?;
+    let reservation = state.reservation.take().ok_or_else(|| {
+        TalosError::new(
+            talos_error::ErrorCode::Conflict,
+            "Agent event reservation is no longer active",
+        )
+    })?;
     if reservation.reservation_id != reservation_id {
         state.reservation = Some(reservation);
-        return Err(AgentError::run_conflict(
+        return Err(TalosError::new(
+            talos_error::ErrorCode::Conflict,
             "Agent event reservation identity does not match",
         ));
     }

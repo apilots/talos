@@ -74,8 +74,7 @@ impl SessionPromptContextSource for KernelSessionPromptContextSource {
                         window,
                         limit: turn_limit,
                     })
-                    .await
-                    .map_err(|error| error.into_talos_error())?
+                    .await?
             };
             let mut context = build_context(&turns, &config);
             context.summaries = if config.include_summary {

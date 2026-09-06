@@ -160,7 +160,10 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 permit: AgentAdmissionPermit::new(async move {
                     for event in progress {
                         progress_tx.send(event).await.map_err(|_| {
-                            talos_agent::AgentError::provider_error("test progress receiver")
+                            talos_error::TalosError::new(
+                                talos_error::ErrorCode::InternalError,
+                                "test progress receiver",
+                            )
                         })?;
                     }
                     if hold_running_turn {
@@ -175,7 +178,12 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                             messages: vec![assistant],
                             metrics: AgentRunMetrics::default(),
                         }))
-                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                        .map_err(|_| {
+                            talos_error::TalosError::new(
+                                talos_error::ErrorCode::InternalError,
+                                "test receiver",
+                            )
+                        })?;
                     Ok(())
                 }),
             },

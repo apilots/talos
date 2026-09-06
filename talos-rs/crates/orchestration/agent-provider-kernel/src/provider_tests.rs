@@ -384,10 +384,7 @@ fn kernel_provider_rejects_capabilities_the_adapter_cannot_execute() {
         panic!("unsupported capability must be rejected");
     };
 
-    assert_eq!(
-        error.error().error_code(),
-        talos_error::ErrorCode::InvalidRequest
-    );
+    assert_eq!(error.error_code(), talos_error::ErrorCode::InvalidRequest);
 }
 
 #[test]

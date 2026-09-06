@@ -106,8 +106,8 @@ struct RecordingAgentExecution {
     stream_request_received: Notify,
     stream_error: Mutex<Option<TalosError>>,
     input_error: Mutex<Option<TalosError>>,
-    input_permit_error: Mutex<Option<talos_agent::AgentError>>,
-    start_permit_error: Mutex<Option<talos_agent::AgentError>>,
+    input_permit_error: Mutex<Option<talos_error::TalosError>>,
+    start_permit_error: Mutex<Option<talos_error::TalosError>>,
     panic_start_permit: AtomicBool,
     progress_event: Mutex<Option<CanonicalAgentEventPayload>>,
     hold_input_permit: Mutex<bool>,
@@ -496,7 +496,10 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                     }
                     for event in progress {
                         progress_tx.send(event).await.map_err(|_| {
-                            talos_agent::AgentError::provider_error("test progress receiver")
+                            talos_error::TalosError::new(
+                                talos_error::ErrorCode::InternalError,
+                                "test progress receiver",
+                            )
                         })?;
                     }
                     if hold_running_turn {
@@ -511,7 +514,12 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                             messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),
                         }))
-                        .map_err(|_| talos_agent::AgentError::provider_error("test receiver"))?;
+                        .map_err(|_| {
+                            talos_error::TalosError::new(
+                                talos_error::ErrorCode::InternalError,
+                                "test receiver",
+                            )
+                        })?;
                     Ok(())
                 }),
             },
