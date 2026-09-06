@@ -57,13 +57,10 @@ impl SessionService {
                     .find(|model| model.id == selection.model_ref.id)
             })
             .ok_or_else(|| {
-                TalosError::public(
-                    talos_error::ErrorCode::ProviderUnavailable,
-                    format!(
-                        "{}:{}",
-                        selection.model_ref.provider, selection.model_ref.id
-                    ),
-                )
+                TalosError::localized(talos_error::ErrorLocalization::ModelNotConfigured {
+                    provider: selection.model_ref.provider.clone(),
+                    model: selection.model_ref.id.clone(),
+                })
             })?;
         let model =
             ModelInfo::from_provider_model(selection.model_ref.provider.clone(), model.clone());
@@ -73,7 +70,7 @@ impl SessionService {
 
     fn validate_persisted_model_selection(&self, record: &SessionRecord) -> TalosResult<()> {
         record.conf.model_selection.as_ref().ok_or_else(|| {
-            TalosError::internal(format!(
+            TalosError::internal("Session uses an incompatible persisted session format: missing modelSelection.").context(format!(
                 "session '{}' uses an incompatible persisted session format: missing modelSelection",
                 record.id
             ))
@@ -109,7 +106,7 @@ impl SessionService {
     pub(crate) fn session_info(&self, record: &SessionRecord) -> TalosResult<SessionInfo> {
         let base_config = self.base_config_snapshot();
         let model_selection = record.conf.model_selection.clone().ok_or_else(|| {
-            TalosError::internal(format!(
+            TalosError::internal("Session is missing its model selection.").context(format!(
                 "session '{}' is missing its model selection",
                 record.id
             ))
@@ -148,9 +145,9 @@ impl SessionService {
                     .get_project(project_id)
                     .await?
                     .ok_or_else(|| {
-                        TalosError::public(
+                        TalosError::new(
                             talos_error::ErrorCode::ResourceNotFound,
-                            format!("project {}", project_id),
+                            format!("Project {} was not found.", project_id),
                         )
                     })?
                     .directory,
@@ -181,14 +178,14 @@ impl SessionService {
             .await?
             .filter(|project| project.user_id == user_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
-                    format!("project {project_id}"),
+                    format!("Project {project_id} was not found."),
                 )
             })?;
         if project.project_id.trim().is_empty() {
             return Err(TalosError::internal(
-                "project store returned an empty project_id".to_string(),
+                "project store returned an empty project_id",
             ));
         }
         Ok(())
@@ -268,14 +265,16 @@ impl SessionService {
             ));
         }
         if record.agent_id.trim().is_empty() {
-            return Err(TalosError::internal(format!(
-                "session '{}' is missing its Agent binding",
-                record.id
-            )));
+            return Err(
+                TalosError::internal("Session is missing its Agent binding.").context(format!(
+                    "session '{}' is missing its Agent binding",
+                    record.id
+                )),
+            );
         }
         let model_selection = SessionConfigOverridePolicy::extract_model_selection(&record.conf)?
             .ok_or_else(|| {
-            TalosError::internal(format!(
+            TalosError::internal("Session is missing its model selection.").context(format!(
                 "session '{}' is missing its model selection",
                 record.id
             ))
@@ -303,10 +302,12 @@ impl SessionService {
         record: &SessionRecord,
     ) -> TalosResult<AgentSessionContext> {
         if record.agent_id.trim().is_empty() {
-            return Err(TalosError::internal(format!(
-                "session '{}' is missing its Agent binding",
-                record.id
-            )));
+            return Err(
+                TalosError::internal("Session is missing its Agent binding.").context(format!(
+                    "session '{}' is missing its Agent binding",
+                    record.id
+                )),
+            );
         }
         Ok(AgentSessionContext {
             agent_id: record.agent_id.clone(),
@@ -379,9 +380,9 @@ impl SessionService {
             .clear_session_history(&record.id, cleared_at)
             .await?
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
-                format!("session {}", record.id),
+                format!("Session {} was not found.", record.id),
             ));
         }
         record.title = DEFAULT_SESSION_TITLE.to_string();
@@ -412,9 +413,9 @@ impl SessionService {
             })
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
-                    format!("session {session_id}"),
+                    format!("Session {session_id} was not found."),
                 )
             })
     }
@@ -422,7 +423,7 @@ impl SessionService {
     pub(crate) async fn delete_session(&self, record: SessionRecord) -> TalosResult<bool> {
         let session_id = &record.id;
         if matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("session '{session_id}' is controlled by its parent agent"),
             ));
@@ -433,7 +434,7 @@ impl SessionService {
     pub(crate) async fn delete_subagent_session(&self, record: SessionRecord) -> TalosResult<bool> {
         let session_id = &record.id;
         if !matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("session '{session_id}' is not a subagent session"),
             ));

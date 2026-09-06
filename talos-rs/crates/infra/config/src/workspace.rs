@@ -40,7 +40,7 @@ impl WorkspaceConfig {
 
     pub fn default_definition(&self) -> TalosResult<&WorkspaceDefinition> {
         self.definition(&self.default_workspace_id).ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 ErrorCode::InvalidRequest,
                 format!(
                     "workspaces.default_workspace_id '{}' is not defined",
@@ -57,7 +57,7 @@ impl WorkspaceConfig {
         user_id: &str,
     ) -> TalosResult<EffectiveWorkspace> {
         let definition = self.definition(workspace_id).ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 ErrorCode::InvalidRequest,
                 format!("unsupported workspace_id: {workspace_id}"),
             )
@@ -73,7 +73,7 @@ impl WorkspaceConfig {
         self.definition(workspace_id)
             .map(|definition| definition.resolved_root_prefix(paths))
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     ErrorCode::InvalidRequest,
                     format!("unsupported workspace_id: {workspace_id}"),
                 )
@@ -82,7 +82,7 @@ impl WorkspaceConfig {
 
     pub fn validate(&self, paths: &crate::TalosPaths) -> TalosResult<()> {
         if self.definitions.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "workspaces.definitions must contain at least one workspace".to_string(),
             ));
@@ -94,7 +94,7 @@ impl WorkspaceConfig {
         for definition in &self.definitions {
             validate_workspace_id(&definition.workspace_id)?;
             if !ids.insert(definition.workspace_id.as_str()) {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
                     format!(
                         "duplicate workspaces.definitions workspace_id: {}",
@@ -108,7 +108,7 @@ impl WorkspaceConfig {
                 .iter()
                 .find(|(_, other)| root.starts_with(other) || other.starts_with(&root))
             {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     ErrorCode::InvalidRequest,
                     format!(
                         "workspace root_prefix overlaps between '{}' and '{}'",
@@ -179,7 +179,7 @@ fn validate_workspace_id(workspace_id: &str) -> TalosResult<()> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!("invalid workspace_id: {workspace_id}"),
         ));
@@ -193,7 +193,7 @@ fn validate_root_prefix(root_prefix: &Path) -> TalosResult<()> {
             .components()
             .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!("workspace root_prefix is unsafe: {}", root_prefix.display()),
         ));
@@ -204,13 +204,13 @@ fn validate_root_prefix(root_prefix: &Path) -> TalosResult<()> {
 pub fn validate_user_workspace_segment(user_id: &str) -> TalosResult<&str> {
     let trimmed = user_id.trim();
     if trimmed.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "user_id cannot be empty for workspace resolution".to_string(),
         ));
     }
     if trimmed != user_id {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "user_id must not contain leading or trailing whitespace".to_string(),
         ));
@@ -219,7 +219,7 @@ pub fn validate_user_workspace_segment(user_id: &str) -> TalosResult<&str> {
         .chars()
         .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!("user_id is not path-safe: {user_id}"),
         ));
@@ -233,7 +233,7 @@ pub fn validate_session_workspace_user<'a>(
 ) -> TalosResult<&'a str> {
     if session_user_id != context_user_id {
         return Err(TalosError::internal(
-            "session user_id does not match session context user_id".to_string(),
+            "session user_id does not match session context user_id",
         ));
     }
     validate_user_workspace_segment(session_user_id)

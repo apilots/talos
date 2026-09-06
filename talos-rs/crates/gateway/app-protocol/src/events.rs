@@ -1,6 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use talos_agent_api::{AgentEventPayload, TimelineEvent};
+use talos_agent_api::{AgentEventPayload, TimelineEvent, TimelineEventPayload};
 use ts_rs::TS;
 
 pub type EventSubscriptionId = String;
@@ -14,8 +14,12 @@ pub struct TimelineEventNotification {
 }
 
 /// Return the single wire method used by JSON-RPC and SSE for one Agent event.
-pub fn timeline_event_method(payload: &AgentEventPayload) -> &'static str {
-    match payload {
+pub fn timeline_event_method(payload: &TimelineEventPayload) -> &'static str {
+    let event = match payload {
+        TimelineEventPayload::Agent(event) => event,
+        TimelineEventPayload::SystemNotice(_) => return "timeline/systemNotice",
+    };
+    match &event.payload {
         AgentEventPayload::TurnStarted(_) => "timeline/turn/started",
         AgentEventPayload::MessageStarted(_) => "timeline/message/started",
         AgentEventPayload::MessageBlockStarted(_) => "timeline/message/block/started",

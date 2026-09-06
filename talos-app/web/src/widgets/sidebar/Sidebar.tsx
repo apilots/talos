@@ -1,5 +1,5 @@
 import type { ProjectView } from "@/shared/types/ui";
-import type { AccountType } from "@/shared/types/account";
+import type { AccountType, AuthStatus } from "@/shared/types/account";
 import { SidebarAccountMenu } from "./SidebarAccountMenu";
 import { SidebarChatsSection } from "./SidebarChatsSection";
 import { SidebarCollapseButton } from "./SidebarCollapseButton";
@@ -10,13 +10,7 @@ import type { SidebarSessionItem } from "./SidebarSessionRow";
 import { SidebarSessionDeleteDialog } from "./SidebarSessionDeleteDialog";
 
 type AuthConnectionState = {
-  authStatus:
-    | "unknown"
-    | "loading"
-    | "authenticated"
-    | "unauthenticated"
-    | "logged_out"
-    | "open";
+  authStatus: AuthStatus;
   authRole: "user" | "admin";
   accountType: AccountType;
   authUsername: string;

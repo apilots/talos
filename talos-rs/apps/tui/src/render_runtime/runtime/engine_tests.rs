@@ -1,10 +1,10 @@
 use super::RenderRuntimeEngine;
 use crate::render_runtime::transcript::block::TranscriptBlockKind;
 use talos_sdk::{
-    AgentAssistantText, AgentAssistantTextPhase, AgentErrorInfo, AgentEventPayload,
-    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
-    AgentMessageBlockDelta, AgentMessageBlockDeltaContent, AgentMessageBlockStarted,
-    AgentMessageBlockStatus, AgentTurnFailed, AgentUserContent, ErrorCode,
+    AgentAssistantText, AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlock,
+    AgentMessageBlockCompleted, AgentMessageBlockContent, AgentMessageBlockDelta,
+    AgentMessageBlockDeltaContent, AgentMessageBlockStarted, AgentMessageBlockStatus,
+    AgentTurnFailed, AgentUserContent, ErrorCode,
 };
 
 fn pending_plain_text(engine: &RenderRuntimeEngine) -> Vec<String> {
@@ -92,11 +92,12 @@ fn canonical_assistant_block_lifecycle_finalizes_one_answer() {
 fn canonical_turn_failure_adds_one_system_notice() {
     let mut engine = RenderRuntimeEngine::default();
     engine.apply_agent_event_payload(AgentEventPayload::TurnFailed(AgentTurnFailed {
-        error: AgentErrorInfo {
+        error: talos_error::ApiError {
             code: ErrorCode::InternalError,
             message: "boom".to_string(),
-            retryable: false,
+            localization: None,
         },
+        retryable: false,
     }));
 
     assert_eq!(pending_plain_text(&engine), vec!["Stream error: boom"]);

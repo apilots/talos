@@ -32,6 +32,7 @@ describe("useInitialSessionInput", () => {
 
     renderHook(() =>
       useInitialSessionInput({
+        onPendingSessionChange: vi.fn(),
         locationPathname: "/sessions/sess-1",
         locationState,
         navigate,

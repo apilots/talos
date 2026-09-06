@@ -4,7 +4,7 @@ use talos_sdk::{
     AgentAssistantTextPhase, AgentEventPayload, AgentMessageBlockContent,
     AgentMessageBlockDeltaContent, AgentMessageRole, AgentPendingInput, AgentRunResult,
     AgentUserContent, ContextCompactionOutcome, ContextCompactionStage, RecoverTimelineResponse,
-    SessionHistoryResponse, TimelineEvent,
+    SessionHistoryResponse, TimelineEvent, TimelineEventPayload, TimelineSystemNotice,
 };
 use tokio::sync::mpsc;
 use tracing::error;
@@ -16,7 +16,7 @@ use crate::TuiApp;
 impl TuiApp {
     pub(crate) fn handle_stream_event(&mut self, envelope: TimelineEvent) {
         self.trace_event_count = self.trace_event_count.saturating_add(1);
-        let identity = &envelope.event.identity;
+        let identity = envelope.event.identity();
 
         if let Some(session_id) = self.session_id.as_deref() {
             if identity.session_id != session_id {
@@ -28,6 +28,14 @@ impl TuiApp {
             }
         }
 
+        let event = match envelope.event {
+            TimelineEventPayload::SystemNotice(notice) => {
+                self.apply_system_notice(envelope.event_seq, notice);
+                return;
+            }
+            TimelineEventPayload::Agent(event) => event,
+        };
+        let identity = &event.identity;
         match self.active_stream_turn_id.as_deref() {
             Some(active_id) if identity.turn_id != active_id => {
                 self.push_right_event(format!(
@@ -42,7 +50,6 @@ impl TuiApp {
             _ => {}
         }
 
-        let event = envelope.event;
         if let Some(last_seq) = self.last_stream_sequence {
             if event.sequence <= last_seq {
                 self.push_right_event(format!(
@@ -118,16 +125,18 @@ impl TuiApp {
     pub(crate) fn replay_recovery_snapshot(&mut self, response: RecoverTimelineResponse) -> usize {
         let active_turn = response.active_turn.clone();
         let mut events = response.replay.events;
-        if let Some(active) = &active_turn {
-            events.retain(|event| event.event.identity.turn_id == active.identity.turn_id);
-        } else {
-            events.clear();
-        }
+        events.retain(|event| match &event.event {
+            TimelineEventPayload::SystemNotice(_) => true,
+            TimelineEventPayload::Agent(event) => active_turn
+                .as_ref()
+                .is_some_and(|active| event.identity.turn_id == active.identity.turn_id),
+        });
         events.sort_by_key(|a| a.event_seq);
         let count = events.len();
         for envelope in events {
-            if self.active_stream_turn_id.as_deref()
-                != Some(envelope.event.identity.turn_id.as_str())
+            if matches!(envelope.event, TimelineEventPayload::Agent(_))
+                && self.active_stream_turn_id.as_deref()
+                    != Some(envelope.event.identity().turn_id.as_str())
             {
                 self.active_stream_turn_id = None;
                 self.last_stream_sequence = None;
@@ -174,6 +183,10 @@ impl TuiApp {
         self.context_compaction_stage = None;
 
         for turn in response.data {
+            let failure = match &turn.result {
+                AgentRunResult::Completed(_) => None,
+                AgentRunResult::Failed(failure) => Some(failure.failure.error.message.clone()),
+            };
             let (messages, round_duration_ms) = match turn.result {
                 AgentRunResult::Completed(output) => (output.messages, output.metrics.duration_ms),
                 AgentRunResult::Failed(failure) => (failure.messages, failure.metrics.duration_ms),
@@ -203,10 +216,48 @@ impl TuiApp {
                     .collect::<Vec<_>>();
                 item_count += self.render_runtime.append_history(blocks);
             }
+            if let Some(message) = failure {
+                self.push_system_notice(format!("Error: {message}"));
+                item_count += 1;
+            }
+            for envelope in turn.notices {
+                if let TimelineEventPayload::SystemNotice(notice) = envelope.event {
+                    self.apply_system_notice(envelope.event_seq, notice);
+                }
+            }
         }
 
         self.context_compaction_stage = None;
         item_count
+    }
+
+    pub(crate) fn apply_system_notice(&mut self, event_seq: i64, notice: TimelineSystemNotice) {
+        if self.session_id.as_deref() != Some(notice.identity.session_id.as_str())
+            || self
+                .render_runtime
+                .store()
+                .blocks()
+                .iter()
+                .any(|block| block.timeline_event_seq == Some(event_seq))
+        {
+            return;
+        }
+        let level = match notice.notice.level {
+            talos_sdk::TalosTimelineNoticeLevel::Info => "Info",
+            talos_sdk::TalosTimelineNoticeLevel::Warning => "Warning",
+            talos_sdk::TalosTimelineNoticeLevel::Error => "Error",
+        };
+        // Replay identity belongs to the rendered block, not a separate eviction-prone cache.
+        let text = format!("{level}: {}", notice.notice.message());
+        let mut block = crate::render_runtime::transcript::block::FinalizedTranscriptBlock::new(
+            TranscriptBlockKind::SystemNotice,
+            text.lines()
+                .map(crate::render_runtime::common::style::StyledLine::plain)
+                .collect(),
+        );
+        block.timeline_event_seq = Some(event_seq);
+        self.render_runtime.append_history([block]);
+        self.request_chat_activity();
     }
 
     fn observe_started_block(&mut self, content: &AgentMessageBlockContent, block_id: &str) {
@@ -233,8 +284,10 @@ impl TuiApp {
                     compaction.message.as_deref(),
                 ));
             }
-            AgentMessageBlockContent::SystemNotice(notice) if !notice.message.trim().is_empty() => {
-                self.push_right_event(notice.message.trim().to_string());
+            AgentMessageBlockContent::SystemNotice(notice)
+                if !notice.message().trim().is_empty() =>
+            {
+                self.push_right_event(notice.message().trim().to_string());
             }
             _ => {}
         }

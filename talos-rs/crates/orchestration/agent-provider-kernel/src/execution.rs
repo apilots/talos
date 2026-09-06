@@ -1,6 +1,6 @@
 use talos_agent::{
-    AgentContext, AgentError, AgentErrorKind, AgentResult, SessionTurnInputDelivery,
-    SessionTurnParams, SessionTurnResult, TurnFileScope,
+    AgentContext, AgentError, AgentResult, SessionTurnInputDelivery, SessionTurnParams,
+    SessionTurnResult, TurnFileScope,
 };
 use talos_agent_api::{AgentPendingInput, AgentStopReason};
 use talos_agent_kernel::{
@@ -193,7 +193,7 @@ async fn prepare_continuation(
     let Some(reference) = reference else {
         if projection.user_action.is_some() {
             return Err(AgentError::new(
-                AgentErrorKind::ContinuationInvalid,
+                talos_error::ErrorCode::InvalidRequest,
                 "UserAction response requires a Kernel continuation",
             ));
         }
@@ -201,7 +201,7 @@ async fn prepare_continuation(
     };
     let (action_id, response) = projection.user_action.clone().ok_or_else(|| {
         AgentError::new(
-            AgentErrorKind::ContinuationInvalid,
+            talos_error::ErrorCode::InvalidRequest,
             "Kernel continuation requires one UserAction response",
         )
     })?;
@@ -291,8 +291,11 @@ async fn load_user_workspace_memory(
             UserWorkspaceMemoryPromptFileState::Missing,
             None,
             template.prompt_view().map_err(|error| {
-                AgentError::provider_error("render missing User Workspace Memory")
-                    .with_source(error.to_string())
+                AgentError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "render missing User Workspace Memory",
+                    error,
+                )
             })?,
         ),
         UserWorkspaceMemorySnapshot::Valid {
@@ -303,8 +306,11 @@ async fn load_user_workspace_memory(
             UserWorkspaceMemoryPromptFileState::Valid,
             Some(version_token),
             document.prompt_view().map_err(|error| {
-                AgentError::provider_error("render User Workspace Memory")
-                    .with_source(error.to_string())
+                AgentError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "render User Workspace Memory",
+                    error,
+                )
             })?,
         ),
         UserWorkspaceMemorySnapshot::Invalid {
@@ -328,7 +334,13 @@ async fn await_kernel_result(execution: AgentKernelExecution) -> AgentResult<Age
     execution
         .result
         .await
-        .map_err(|_| AgentError::new(AgentErrorKind::BackendTaskLost, "Kernel task stopped"))?
+        .map_err(|error| {
+            AgentError::from_source(
+                talos_error::ErrorCode::InternalError,
+                "Kernel task stopped",
+                error,
+            )
+        })?
         .map_err(AgentError::from)
 }
 

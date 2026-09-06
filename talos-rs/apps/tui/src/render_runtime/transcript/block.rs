@@ -23,6 +23,7 @@ pub(crate) enum TranscriptBlockKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TranscriptBlock {
     pub(crate) id: TranscriptBlockId,
+    pub(crate) timeline_event_seq: Option<i64>,
     pub(crate) kind: TranscriptBlockKind,
     pub(crate) lines: Vec<TranscriptLine>,
     pub(crate) round_duration_ms: Option<u64>,
@@ -33,6 +34,7 @@ pub(crate) struct TranscriptBlock {
 /// Finalized transcript content ready to enter the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FinalizedTranscriptBlock {
+    pub(crate) timeline_event_seq: Option<i64>,
     pub(crate) kind: TranscriptBlockKind,
     pub(crate) lines: Vec<crate::render_runtime::common::style::StyledLine>,
     pub(crate) round_duration_ms: Option<u64>,
@@ -45,6 +47,7 @@ impl FinalizedTranscriptBlock {
         lines: Vec<crate::render_runtime::common::style::StyledLine>,
     ) -> Self {
         Self {
+            timeline_event_seq: None,
             kind,
             lines,
             round_duration_ms: None,
@@ -74,6 +77,7 @@ impl TranscriptBlock {
     ) -> Self {
         Self {
             id,
+            timeline_event_seq: None,
             kind,
             lines,
             round_duration_ms: None,

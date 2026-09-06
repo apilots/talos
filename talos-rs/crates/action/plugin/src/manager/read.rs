@@ -36,7 +36,7 @@ impl PluginManager {
         {
             return Ok(self.plugin_for_install(install, install.enabled));
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
             format!("plugin `{}` not found", plugin_id.0),
         ))
@@ -71,16 +71,21 @@ impl PluginManager {
             let path = root.join(installed_document_name(plugin)?);
             let path = ensure_contained_regular_file(&root, &path)?;
             let root = fs::canonicalize(&root).map_err(|err| {
-                TalosError::internal(format!(
+                let diagnostic = format!(
                     "failed to canonicalize plugin document root `{}`: {err}",
                     root.display()
-                ))
+                );
+                TalosError::internal_with_source(
+                    "Failed to canonicalize plugin document root; technical details were withheld.",
+                    err,
+                )
+                .context(diagnostic)
             })?;
             return Ok((root, path));
         }
 
         let source_id = plugin.source_id.as_ref().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("plugin `{}` has no source id", plugin.id.0),
             )
@@ -91,7 +96,7 @@ impl PluginManager {
             .into_iter()
             .find(|source| &source.id == source_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("plugin source `{}` not found", source_id.0),
                 )
@@ -105,7 +110,7 @@ impl PluginManager {
         let path = root.join(source_document_path(plugin)?);
         let path = ensure_contained_regular_file(&root, &path)?;
         let document_root = path.parent().ok_or_else(|| {
-            TalosError::internal(format!(
+            TalosError::internal("Plugin document has no parent directory.").context(format!(
                 "plugin document `{}` has no parent directory",
                 path.display()
             ))
@@ -133,10 +138,15 @@ fn document_paths(plugin: &Plugin, root: &Path, primary_path: &Path) -> TalosRes
 
 fn relative_document_path(root: &Path, path: &Path) -> TalosResult<String> {
     let relative = path.strip_prefix(root).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to build plugin document path for `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to build plugin document path; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     Ok(relative.to_string_lossy().replace('\\', "/"))
 }
@@ -146,7 +156,7 @@ fn installed_content_root(plugin: &Plugin, installed_path: &Path) -> TalosResult
         talos_types::PluginKind::Skill | talos_types::PluginKind::McpServer => {
             Ok(installed_path.to_path_buf())
         }
-        other => Err(TalosError::public(
+        other => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("plugin kind `{other:?}` has no readable document"),
         )),
@@ -157,7 +167,7 @@ fn installed_document_name(plugin: &Plugin) -> TalosResult<&'static str> {
     match plugin.kind {
         talos_types::PluginKind::Skill => Ok("SKILL.md"),
         talos_types::PluginKind::McpServer => Ok("talos-mcp.json"),
-        other => Err(TalosError::public(
+        other => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("plugin kind `{other:?}` has no readable document"),
         )),
@@ -168,7 +178,7 @@ fn source_document_path(plugin: &Plugin) -> TalosResult<&str> {
     match &plugin.definition {
         talos_types::PluginDefinition::Skill(skill) => Ok(skill.skill_md_path.as_str()),
         talos_types::PluginDefinition::McpServer(mcp) => Ok(mcp.manifest_path.as_str()),
-        other => Err(TalosError::public(
+        other => Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("plugin definition `{other:?}` has no readable document"),
         )),
@@ -186,33 +196,48 @@ fn installed_path(plugin: &Plugin) -> Option<&Path> {
 
 fn ensure_contained_regular_file(root: &Path, path: &Path) -> TalosResult<PathBuf> {
     let metadata = fs::symlink_metadata(path).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to inspect plugin document `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to inspect plugin document; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     if !metadata.file_type().is_file() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("plugin document `{}` is not a regular file", path.display()),
         ));
     }
     let root = fs::canonicalize(root).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to canonicalize plugin root `{}`: {err}",
             root.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to canonicalize plugin root; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     let path = fs::canonicalize(path).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to canonicalize plugin document `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to canonicalize plugin document; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     if path.starts_with(&root) {
         return Ok(path);
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::InvalidRequest,
         format!(
             "plugin document `{}` escaped root `{}`",
@@ -231,13 +256,18 @@ fn optional_contained_regular_file(root: &Path, path: &Path) -> TalosResult<Opti
 
 fn read_to_string_limited(path: &Path, max_bytes: usize) -> TalosResult<String> {
     let metadata = fs::metadata(path).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to inspect plugin document `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to inspect plugin document; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     if metadata.len() > max_bytes as u64 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!(
                 "plugin document `{}` exceeds max size of {} bytes",
@@ -247,23 +277,27 @@ fn read_to_string_limited(path: &Path, max_bytes: usize) -> TalosResult<String> 
         ));
     }
     let mut file = File::open(path).map_err(|err| {
-        TalosError::internal(format!(
-            "failed to read plugin document `{}`: {err}",
-            path.display()
-        ))
+        let diagnostic = format!("failed to read plugin document `{}`: {err}", path.display());
+        TalosError::internal_with_source(
+            "Failed to read plugin document; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     let mut contents = String::new();
     file.by_ref()
         .take(max_bytes.saturating_add(1) as u64)
         .read_to_string(&mut contents)
         .map_err(|err| {
-            TalosError::internal(format!(
-                "failed to read plugin document `{}`: {err}",
-                path.display()
-            ))
+            let diagnostic = format!("failed to read plugin document `{}`: {err}", path.display());
+            TalosError::internal_with_source(
+                "Failed to read plugin document; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
     if contents.len() > max_bytes {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!(
                 "plugin document `{}` exceeds max size of {} bytes",

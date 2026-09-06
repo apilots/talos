@@ -150,8 +150,10 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_exceeds_
         );
     }
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
@@ -307,8 +309,10 @@ async fn test_prepare_general_turn_compacts_session_history_when_prompt_reaches_
         );
     }
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
@@ -381,8 +385,10 @@ async fn test_run_general_turn_updates_compaction_state_to_recovery_after_succes
         );
     }
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 32;
@@ -455,8 +461,10 @@ async fn test_prepare_general_turn_drops_sections_only_after_compaction_exhauste
         );
     }
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
@@ -534,8 +542,10 @@ async fn test_prepare_general_turn_records_rejected_compaction_when_summary_is_m
         );
     }
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.enabled = false;
     config.prompt.window.compaction_buffer_tokens = 64;
@@ -636,8 +646,10 @@ async fn test_run_general_turn_blocks_session_when_budget_remains_exhausted() {
     let memory_store = Arc::new(TestMemoryStore::new());
     seed_recent_user_message(memory_store.as_ref()).await;
 
-    let mut config = AgentKernelConfig::default();
-    config.workspace_dir = workspace_dir.to_string_lossy().to_string();
+    let mut config = AgentKernelConfig {
+        workspace_dir: workspace_dir.to_string_lossy().to_string(),
+        ..Default::default()
+    };
     configure_test_skill_root(&mut config, &workspace_dir);
     config.prompt.bootstrap.auto_create_missing_files = false;
     config.prompt.window.compaction_buffer_tokens = 8;

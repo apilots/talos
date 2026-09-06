@@ -2,7 +2,8 @@
 
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { MessageQueue } from "@talos/sdk-browser";
+import { TalosApiError, type MessageQueue } from "@talos/sdk-browser";
+import { i18n } from "@/shared/i18n/setup";
 
 import { useSessionMessageQueue } from "./useSessionMessageQueue";
 import {
@@ -11,9 +12,22 @@ import {
   type TalosWebClient,
 } from "@/shared/api/client";
 
-afterEach(resetTalosClientFactory);
+afterEach(async () => { resetTalosClientFactory(); await i18n.changeLanguage("en"); });
 
 describe("useSessionMessageQueue", () => {
+  it("retranslates a queued operation failure without retrying the operation", async () => {
+    const add = vi.fn().mockRejectedValue(new TalosApiError({
+      code: "attachmentLimitExceeded", message: "Too many attachments: 6 supplied, 4 allowed.",
+      localization: { type: "attachmentCountExceeded", limit: 4, actual: 6 },
+    }));
+    setTalosClientFactory(() => ({ messageQueue: { add } }) as unknown as TalosWebClient);
+    const { result } = renderHook(() => useSessionMessageQueue("sess-1"));
+    await act(async () => { await result.current.add({ content: [] }).catch(() => undefined); });
+    expect(result.current.error).toBe("This request contains 6 attachments; the limit is 4.");
+    await act(() => i18n.changeLanguage("zh-CN"));
+    expect(result.current.error).toMatchInlineSnapshot('"本次请求包含 6 个附件，上限为 4 个。"');
+    expect(add).toHaveBeenCalledTimes(1);
+  });
   it("applies a successful mutation before the connection opens", async () => {
     const added: MessageQueue = {
       revision: 1,

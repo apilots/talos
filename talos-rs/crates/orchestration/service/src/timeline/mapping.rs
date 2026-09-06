@@ -1,4 +1,4 @@
-use talos_agent_api::{AgentEvent, TimelineActiveTurn, TimelineEvent};
+use talos_agent_api::{AgentEvent, TimelineActiveTurn, TimelineEvent, TimelineEventPayload};
 use talos_store::session::{AgentActiveTurnRecord, AgentEventRecord};
 
 use super::TimelineEventId;
@@ -8,12 +8,23 @@ pub(crate) fn map_timeline_event(record: AgentEventRecord) -> TimelineEvent {
         event_id: TimelineEventId::from_seq(record.event_seq).to_string(),
         event_seq: record.event_seq,
         persisted_at: record.persisted_at,
-        event: AgentEvent {
+        event: TimelineEventPayload::Agent(AgentEvent {
             identity: record.identity,
             sequence: record.sequence,
             occurred_at: record.occurred_at,
             payload: record.payload,
-        },
+        }),
+    }
+}
+
+pub(crate) fn map_timeline_record(
+    record: talos_store::session::TimelineEventRecord,
+) -> TimelineEvent {
+    TimelineEvent {
+        event_id: TimelineEventId::from_seq(record.event_seq).to_string(),
+        event_seq: record.event_seq,
+        persisted_at: record.persisted_at,
+        event: record.event,
     }
 }
 

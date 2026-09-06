@@ -376,6 +376,7 @@ pub(crate) async fn mock_agent_execution(params: AgentRunParams) -> TalosResult<
         let checkpoint = settlement_pipeline.checkpoint().await;
         settlement_tx
             .send(Ok(AgentRunSettlement::Finished {
+                result: Ok(()),
                 event: terminal,
                 messages: checkpoint.messages,
                 metrics: checkpoint.metrics,

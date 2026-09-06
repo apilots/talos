@@ -2,6 +2,7 @@ import type { AppProtocol } from "@talos/sdk-core";
 
 import {
   AppServerClient,
+  unwrapTalosApiResponse,
   type AppServerEventHandler,
   type AppServerMessageQueueChangedHandler,
   type AppServerRequestOptions,
@@ -16,7 +17,7 @@ export interface DesktopTalosInvoke {
     method: DesktopTalosMethod,
     params: unknown,
     options?: AppServerRequestOptions,
-  ): Promise<T>;
+  ): Promise<AppProtocol.ApiResponse<T>>;
 }
 
 export interface DesktopTimelineEventSource {
@@ -26,7 +27,7 @@ export interface DesktopTimelineEventSource {
 }
 
 export interface DesktopRendererBridge extends DesktopTimelineEventSource {
-  connect?(): Promise<AppProtocol.InitializeResponse>;
+  connect?(): Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>;
   invoke: DesktopTalosInvoke;
   openExternal?(url: string): Promise<void>;
 }
@@ -37,7 +38,7 @@ export async function getDesktopServerInfo(
   if (!bridge.connect) {
     throw new Error("Desktop runtime connect bridge is not available.");
   }
-  const response = await bridge.connect();
+  const response = unwrapTalosApiResponse<AppProtocol.InitializeResponse>(await bridge.connect());
   return response.server_info;
 }
 
@@ -47,14 +48,14 @@ class DesktopRendererTransport implements AppServerTransport {
     private readonly options: ElectronAppServerClientOptions,
   ) {}
 
-  request<T>(
+  async request<T>(
     method: AppProtocol.ClientMethod,
     params: unknown,
     options?: AppServerRequestOptions,
   ): Promise<T> {
-    return this.bridge.invoke<T>(method, params, {
+    return unwrapTalosApiResponse<T>(await this.bridge.invoke<T>(method, params, {
       actorCredentials: options?.actorCredentials ?? this.options.getActorCredentials?.() ?? null,
-    });
+    }));
   }
 
   onEvent(handler: AppServerEventHandler): () => void {

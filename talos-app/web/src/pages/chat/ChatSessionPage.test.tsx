@@ -2,7 +2,7 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 
 import "@/shared/i18n/setup";
 import { ChatSessionPage } from "./ChatSessionPage";
@@ -26,6 +26,16 @@ function NavigateAwayButton() {
       Settings
     </button>
   );
+}
+
+function renderSessionPage() {
+  return render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
+        <Routes>
+          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
+        </Routes>
+      </MemoryRouter>,
+    );
 }
 
 describe("ChatSessionPage", () => {
@@ -68,13 +78,7 @@ describe("ChatSessionPage", () => {
   it("keeps model and project changes local before the session exists", () => {
     mocks.session = undefined;
 
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     expect(screen.getByTestId("chat-composer").getAttribute("data-disabled")).toBe("false");
     fireEvent.click(screen.getByRole("button", { name: "Model" }));
@@ -84,13 +88,7 @@ describe("ChatSessionPage", () => {
   });
 
   it("hides runtime mode selector on the session detail composer", () => {
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     expect((mocks.composerProps as { showRuntimeModeSelector?: boolean }).showRuntimeModeSelector).toBe(false);
   });
@@ -140,13 +138,7 @@ describe("ChatSessionPage", () => {
       effectiveMode: "askForApproval",
     };
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     (mocks.composerProps as {
       onPermissionModeChange: (mode: "fullAccess") => void;
@@ -209,13 +201,7 @@ describe("ChatSessionPage", () => {
   });
 
   it("submits an explicit reasoning effort through model selection", () => {
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     fireEvent.click(screen.getByRole("button", { name: "Reasoning" }));
 
@@ -310,17 +296,38 @@ describe("ChatSessionPage", () => {
     expect(screen.getByText("Settings page")).toBeTruthy();
   });
 
+  it("waits for initial admission before querying the newly created session", async () => {
+    mocks.session = undefined;
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
+        <Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mocks.sendText).toHaveBeenCalled());
+    expect(mocks.sessionQueryEnabled).toBe(false);
+    await act(async () => { resolveSend(); });
+    await waitFor(() => expect(mocks.sessionQueryEnabled).toBe(true));
+  });
+
+  it("does not block another session query while initial admission is pending", async () => {
+    render(
+      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1", state: { initialPrompt: "hello" } }]}>
+        <Link to="/sessions/sess-2">Other session</Link>
+        <Routes><Route element={<ChatSessionPage />} path="/sessions/:sessionId" /></Routes>
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mocks.sendText).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("link", { name: "Other session" }));
+    expect(mocks.sessionQueryEnabled).toBe(true);
+    await act(async () => { resolveSend(); });
+    expect(mocks.sessionQueryEnabled).toBe(true);
+  });
+
   it("shows history errors instead of the empty ready state", () => {
     mocks.sessionHistoryError = new Error("history parse failed");
     mocks.sessionHistoryIsSuccess = false;
 
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     expect(screen.getByText("Session history failed to load.")).toBeTruthy();
     expect(screen.getByText("history parse failed")).toBeTruthy();
@@ -328,13 +335,7 @@ describe("ChatSessionPage", () => {
   });
 
   it("shows the empty ready state after history loads successfully with no blocks", () => {
-    render(
-      <MemoryRouter initialEntries={[{ pathname: "/sessions/sess-1" }]}>
-        <Routes>
-          <Route element={<ChatSessionPage />} path="/sessions/:sessionId" />
-        </Routes>
-      </MemoryRouter>,
-    );
+    renderSessionPage();
 
     expect(screen.getByText("This chat is ready.")).toBeTruthy();
     expect(screen.queryByText("Session history failed to load.")).toBeNull();

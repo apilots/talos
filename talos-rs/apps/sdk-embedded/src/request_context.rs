@@ -53,7 +53,7 @@ pub(super) fn prepare_embedded_start_turn(
     let directory = match request.current_directory.clone() {
         Some(directory) => directory,
         None => env::current_dir().map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("failed to resolve embedded current directory: {err}"),
             )

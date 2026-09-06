@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { AppProtocol, TalosApiError } from "@talos/sdk-browser";
 
 import { useSessionBlocks } from "./useSessionBlocks";
@@ -36,6 +38,7 @@ export function useChatSession(
   sessionId: string,
   serverMessageCount?: number,
 ) {
+  useTranslation("errors");
   const [draft, setDraft] = useState("");
   const sessionAvailable = serverMessageCount !== undefined;
   const streamState = useAppStore((state) => state.streams[sessionId]);
@@ -237,7 +240,7 @@ export function useChatSession(
     pendingUserAction: streamState?.pendingUserAction,
     streamConnectionState: streamState?.connectionState ?? "idle",
     showReconnectControls: streamState?.showReconnectControls ?? false,
-    streamError: streamState?.error,
+    streamError: streamState?.error ? apiErrorMessage(streamState.error) : undefined,
     sessionHistoryQuery,
   };
 }

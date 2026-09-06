@@ -11,7 +11,7 @@ use talos_llm_provider::ChatMessage;
 use talos_memory::{MemoryScope, UserWorkspaceMemorySnapshot, UserWorkspaceMemoryUpdate};
 use talos_store::session::SessionTreeIdentity;
 use talos_types::ModelUsageKind;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use super::UserWorkspaceMemoryService;
 use crate::session::SessionService;
@@ -64,91 +64,55 @@ impl UserWorkspaceMemoryReflection {
     }
 
     /// Performs one bounded reflection before Service publishes the terminal fact.
-    pub(crate) async fn reflect(&self, event: &AgentEvent, messages: &[AgentMessage]) {
+    pub(crate) async fn reflect(
+        &self,
+        event: &AgentEvent,
+        messages: &[AgentMessage],
+    ) -> talos_error::TalosResult<()> {
         if !reflection_is_eligible(event) || has_successful_memory_tool_result(messages) {
-            return;
+            return Ok(());
         }
         let session_id = &event.identity.session_id;
-        let session = match self.sessions.load_record(session_id).await {
-            Ok(Some(session)) => session,
-            Ok(None) => {
-                debug!(
-                    session_id,
-                    "skip memory reflection for an unpersisted Session"
-                );
-                return;
-            }
-            Err(error) => {
-                warn!(
-                    ?error,
-                    session_id, "failed to resolve Session identity for memory reflection"
-                );
-                return;
-            }
+        let Some(session) = self.sessions.load_record(session_id).await? else {
+            debug!(
+                session_id,
+                "skip memory reflection for an unpersisted Session"
+            );
+            return Ok(());
         };
         if !matches!(session.tree_identity, SessionTreeIdentity::Primary) {
-            return;
+            return Ok(());
         }
-        let workspace = match self.sessions.build_agent_session_context(&session) {
-            Ok(context) => context.workspace,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    session_id, "failed to resolve Workspace for memory reflection"
-                );
-                return;
-            }
-        };
+        let workspace = self
+            .sessions
+            .build_agent_session_context(&session)?
+            .workspace;
         let scope = MemoryScope {
             workspace_id: session.workspace_id.clone(),
             user_id: session.user_id.clone(),
             workspace_root: workspace.root,
         };
-        let snapshot = match self.memory.read(&scope).await {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    session_id, "failed to read User Workspace Memory for reflection"
-                );
-                return;
-            }
-        };
+        let snapshot = self.memory.read(&scope).await?;
         if matches!(snapshot, UserWorkspaceMemorySnapshot::Invalid { .. }) {
-            warn!(
-                session_id,
-                "skip memory reflection because MEMORY.md is invalid"
-            );
-            return;
+            return Err(talos_error::TalosError::new(
+                talos_error::ErrorCode::InvalidRequest,
+                "Memory reflection could not update an invalid MEMORY.md document.",
+            ));
         }
-        let current_memory = match prompt_content(&snapshot) {
-            Ok(content) => content,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    session_id, "failed to render User Workspace Memory for reflection"
-                );
-                return;
-            }
-        };
         let input = MemoryReflectionInput {
-            current_memory,
+            current_memory: prompt_content(&snapshot)?,
             user_message: truncate_chars(&user_text(messages), REFLECTION_TEXT_MAX_CHARS),
             assistant_response: truncate_chars(
                 &assistant_response(messages),
                 REFLECTION_TEXT_MAX_CHARS,
             ),
         };
-        let input = match serde_json::to_string(&input) {
-            Ok(input) => input,
-            Err(error) => {
-                warn!(
-                    ?error,
-                    session_id, "failed to serialize memory reflection input"
-                );
-                return;
-            }
-        };
+        let input = serde_json::to_string(&input).map_err(|error| {
+            talos_error::TalosError::internal_with_source(
+                "Could not encode the memory reflection input.",
+                error,
+            )
+        })?;
         let call = self.inner_model.chat(InnerModelChatParams {
             user_id: session.user_id,
             session_id: Some(session_id.clone()),
@@ -158,50 +122,35 @@ impl UserWorkspaceMemoryReflection {
                 ChatMessage::user(input),
             ],
         });
-        let response = match tokio::time::timeout(REFLECTION_TIMEOUT, call).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(error)) => {
-                warn!(
-                    ?error,
-                    session_id, "User Workspace Memory reflection model call failed"
-                );
-                return;
-            }
-            Err(_) => {
-                warn!(
-                    session_id,
-                    "User Workspace Memory reflection model call timed out"
-                );
-                return;
-            }
-        };
-        let Some(update) = parse_reflection_update(&response.content) else {
-            return;
+        let response = tokio::time::timeout(REFLECTION_TIMEOUT, call)
+            .await
+            .map_err(|error| {
+                talos_error::TalosError::from_source(
+                    talos_error::ErrorCode::Timeout,
+                    "Memory reflection timed out; the response is still available.",
+                    error,
+                )
+            })??;
+        let Some(update) = parse_reflection_update(&response.content)? else {
+            return Ok(());
         };
         if update_is_noop(&snapshot, &update) {
-            return;
+            return Ok(());
         }
-        let write = match update {
+        match update {
             UserWorkspaceMemoryUpdate::UpsertEntry { entry } => {
-                self.memory.upsert_entry(&scope, entry).await
+                self.memory.upsert_entry(&scope, entry).await?
             }
             UserWorkspaceMemoryUpdate::RemoveEntry { key } => {
-                self.memory.remove_entry(&scope, &key).await
+                self.memory.remove_entry(&scope, &key).await?
             }
             _ => {
-                warn!(
-                    session_id,
-                    "memory reflection returned a disallowed update operation"
-                );
-                return;
+                return Err(talos_error::TalosError::internal(
+                    "Memory reflection selected an unsupported update.",
+                ))
             }
         };
-        if let Err(error) = write {
-            warn!(
-                ?error,
-                session_id, "failed to persist reflected User Workspace Memory"
-            );
-        }
+        Ok(())
     }
 }
 
@@ -267,9 +216,10 @@ fn prompt_content(snapshot: &UserWorkspaceMemorySnapshot) -> talos_error::TalosR
         })?
         .prompt_view()
         .map_err(|error| {
-            talos_error::TalosError::internal(format!(
-                "render User Workspace Memory reflection input: {error}"
-            ))
+            talos_error::TalosError::internal_with_source(
+                "render User Workspace Memory reflection input; technical details were withheld.",
+                error,
+            )
         })
 }
 
@@ -293,15 +243,17 @@ enum MemoryReflectionDecision {
     },
 }
 
-fn parse_reflection_update(content: &str) -> Option<UserWorkspaceMemoryUpdate> {
-    let decision = match serde_json::from_str::<MemoryReflectionDecision>(content.trim()) {
-        Ok(value) => value,
-        Err(error) => {
-            warn!(?error, "memory reflection returned an invalid decision");
-            return None;
-        }
-    };
-    match decision {
+fn parse_reflection_update(
+    content: &str,
+) -> talos_error::TalosResult<Option<UserWorkspaceMemoryUpdate>> {
+    let decision =
+        serde_json::from_str::<MemoryReflectionDecision>(content.trim()).map_err(|error| {
+            talos_error::TalosError::internal_with_source(
+                "Memory reflection returned an invalid decision.",
+                error,
+            )
+        })?;
+    Ok(match decision {
         MemoryReflectionDecision::Noop => None,
         MemoryReflectionDecision::UpsertEntry { entry } => {
             Some(UserWorkspaceMemoryUpdate::UpsertEntry { entry })
@@ -309,7 +261,7 @@ fn parse_reflection_update(content: &str) -> Option<UserWorkspaceMemoryUpdate> {
         MemoryReflectionDecision::RemoveEntry { key } => {
             Some(UserWorkspaceMemoryUpdate::RemoveEntry { key })
         }
-    }
+    })
 }
 
 fn update_is_noop(

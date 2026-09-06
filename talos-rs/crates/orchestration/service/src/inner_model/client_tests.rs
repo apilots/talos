@@ -29,7 +29,7 @@ impl LlmProvider for TestProvider {
 
     async fn chat(&self, request: ChatRequest) -> TalosResult<ChatResponse> {
         if self.fail_chat.load(Ordering::Relaxed) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::ProviderUnavailable,
                 "injected provider failure",
             ));

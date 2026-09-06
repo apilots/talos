@@ -170,7 +170,26 @@ pub struct AgentContextCompaction {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentSystemNotice {
     pub level: TalosTimelineNoticeLevel,
-    pub message: String,
+    pub content: SystemNoticeContent,
+}
+
+/// Notice presentation retains either informational text or the shared error contract.
+/// Add variants only for distinct presentation semantics, never domain error categories.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(tag = "type", content = "data", rename_all = "camelCase")]
+pub enum SystemNoticeContent {
+    Text(String),
+    Error(talos_error::ApiError),
+}
+
+impl AgentSystemNotice {
+    /// Safe English presentation for clients without localization support.
+    pub fn message(&self) -> &str {
+        match &self.content {
+            SystemNoticeContent::Text(message) => message,
+            SystemNoticeContent::Error(error) => &error.message,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -36,7 +36,7 @@ pub(crate) fn resolve_base_dir(context: &ToolContext) -> TalosResult<PathBuf> {
         }
     }
 
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::ToolExecutionFailed,
         "no project root is configured for this tool invocation".to_string(),
     ))
@@ -55,7 +55,7 @@ pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
     let path = PathBuf::from(program);
     if path.components().count() > 1 {
         return std::fs::canonicalize(&path).map_err(|error| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("resolve executable {}: {error}", path.display()),
             )
@@ -67,7 +67,7 @@ pub(crate) fn resolve_executable(program: &str) -> TalosResult<PathBuf> {
         .find(|candidate| candidate.is_file())
         .and_then(|candidate| std::fs::canonicalize(candidate).ok())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("executable not found on PATH: {program}"),
             )
@@ -78,36 +78,37 @@ pub(crate) fn process_environment() -> BTreeMap<String, String> {
     filter_inherited_tool_environment(env::vars())
 }
 
-pub(crate) fn map_sandbox_file_error(error: TalosSandboxError) -> TalosError {
-    match error {
+/// Project sandbox failures once for filesystem and process tools. Preserve
+/// policy metadata, but keep provider reasons and resolved paths in the source.
+pub(crate) fn map_sandbox_error(error: TalosSandboxError) -> TalosError {
+    let public = match &error {
         TalosSandboxError::FileSystemAccessDenied { .. }
-        | TalosSandboxError::SandboxBypassDenied => TalosError::tool_failure(
+        | TalosSandboxError::SandboxBypassDenied
+        | TalosSandboxError::Permission(_) => TalosError::tool_failure(
             talos_error::TalosToolErrorKind::PermissionRejection,
-            error.to_string(),
+            "The sandbox denied this tool operation. Check the granted permissions.",
             Some("sandbox_policy".to_string()),
         ),
-        other => TalosError::public(
-            talos_error::ErrorCode::ToolExecutionFailed,
-            other.to_string(),
+        TalosSandboxError::UnsupportedPlatform
+        | TalosSandboxError::ProviderUnavailable { .. }
+        | TalosSandboxError::UnsupportedCapability { .. } => TalosError::new(
+            talos_error::ErrorCode::ServiceUnavailable,
+            "The configured sandbox cannot support this tool operation.",
         ),
-    }
-}
-
-pub(crate) fn map_sandbox_process_error(error: TalosSandboxError) -> TalosError {
-    match error {
-        error @ (TalosSandboxError::SandboxBypassDenied | TalosSandboxError::Permission(_)) => {
-            TalosError::tool_failure(
-                talos_error::TalosToolErrorKind::PermissionRejection,
-                error.to_string(),
-                Some("sandbox_policy".to_string()),
-            )
-        }
-        other => TalosError::tool_failure(
-            talos_error::TalosToolErrorKind::RuntimeFailure,
-            other.to_string(),
-            Some("sandbox_runtime".to_string()),
+        TalosSandboxError::SandboxSetupFailed { .. } => TalosError::internal(
+            "The sandbox could not be initialized; technical details were withheld.",
         ),
-    }
+        TalosSandboxError::SandboxExecutionFailed { .. } => TalosError::internal(
+            "The sandbox could not execute this tool; technical details were withheld.",
+        ),
+        TalosSandboxError::FileSystemOperationFailed { .. } => TalosError::internal(
+            "The sandbox filesystem operation failed; technical details were withheld.",
+        ),
+        TalosSandboxError::InvalidLocalExecutionContext => TalosError::internal(
+            "The tool execution context is invalid; technical details were withheld.",
+        ),
+    };
+    public.with_source(error)
 }
 
 pub(crate) fn truncate_prefix(text: &str, max_bytes: usize) -> (String, usize, bool) {

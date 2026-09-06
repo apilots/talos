@@ -59,7 +59,12 @@ async fn applied_versions(pool: &SqlitePool) -> TalosResult<Vec<i64>> {
     )
     .fetch_one(pool)
     .await
-    .map_err(|error| TalosError::internal(format!("inspect SQLx migration ledger: {error}")))?;
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "inspect SQLx migration ledger; technical details were withheld.",
+            error,
+        )
+    })?;
     if ledger_exists == 0 {
         return Ok(Vec::new());
     }
@@ -68,7 +73,12 @@ async fn applied_versions(pool: &SqlitePool) -> TalosResult<Vec<i64>> {
     )
     .fetch_all(pool)
     .await
-    .map_err(|error| TalosError::internal(format!("read SQLx migration ledger: {error}")))
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "read SQLx migration ledger; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 #[cfg(test)]

@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
+use std::backtrace::Backtrace;
 use std::fmt;
 use std::panic::Location;
+use std::sync::Arc;
 
 use ts_rs::TS;
+
+mod api_error;
+pub use api_error::{ApiError, ErrorLocalization};
 
 /// Public application error code shared by server and SDKs.
 ///
@@ -104,64 +109,6 @@ impl ErrorCode {
     }
 }
 
-/// Public application error object shared by server and SDKs.
-///
-/// `message` is an English fallback derived from `code`. Clients must branch
-/// on `code` and apply localization outside the backend.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema, TS, PartialEq, Eq)]
-pub struct ApiError {
-    pub code: ErrorCode,
-    pub message: String,
-}
-
-impl ApiError {
-    pub fn new(code: ErrorCode) -> Self {
-        Self {
-            code,
-            message: code.default_message().to_string(),
-        }
-    }
-}
-
-impl From<ErrorCode> for ApiError {
-    fn from(code: ErrorCode) -> Self {
-        Self::new(code)
-    }
-}
-
-/// Stable internal kind for filesystem domain errors.
-///
-/// This kind is owned by `talos-error` because filesystem failures cross
-/// service, gateway, SDK, and UI boundaries. Transport layers may map it to
-/// their own public error codes, but they must not derive filesystem semantics
-/// from the display message.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosFsErrorKind {
-    InvalidPath,
-    FsDisabled,
-    PathOutsideRoot,
-    SymlinkNotSupported,
-    PathNotFound,
-    NotDirectory,
-    InvalidName,
-    AlreadyExists,
-}
-
-/// Stable internal kind for uploaded file and model attachment failures.
-///
-/// File services, providers, and transports branch on this kind. Generic
-/// not-found, validation, conflict, configuration, and storage failures keep
-/// using the existing `TalosError` variants instead of being duplicated here.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TalosFileErrorKind {
-    UploadTooLarge,
-    UnsupportedMediaType,
-    AttachmentLimitExceeded,
-    UnsupportedAttachment,
-}
-
 /// Stable internal kind for tool execution failures.
 ///
 /// This kind is the single source of truth for tool-domain failure semantics.
@@ -188,25 +135,85 @@ pub enum TalosMemoryErrorKind {
     SummaryParseFailed,
 }
 
-#[derive(Debug)]
+/// Product failure classification, independent of transport status and visibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    Business,
+    Internal,
+}
+
+impl ErrorCode {
+    /// Classify every code explicitly when the shared taxonomy is extended.
+    pub const fn kind(self) -> ErrorKind {
+        match self {
+            Self::InternalError => ErrorKind::Internal,
+            Self::InvalidRequest
+            | Self::InvalidRetryRequest
+            | Self::Unauthenticated
+            | Self::PermissionDenied
+            | Self::ResourceNotFound
+            | Self::SessionNotFound
+            | Self::ResourceExpired
+            | Self::Conflict
+            | Self::ActiveTurnRunning
+            | Self::MessageQueueFull
+            | Self::MessageQueueBusy
+            | Self::RetrySourceCompleted
+            | Self::RetrySourceMismatch
+            | Self::IdempotencyConflict
+            | Self::InvalidCursor
+            | Self::EventCursorExpired
+            | Self::FsDisabled
+            | Self::InvalidPath
+            | Self::PathOutsideRoot
+            | Self::SymlinkNotSupported
+            | Self::PathNotFound
+            | Self::NotDirectory
+            | Self::InvalidName
+            | Self::AlreadyExists
+            | Self::UploadTooLarge
+            | Self::UnsupportedMediaType
+            | Self::AttachmentLimitExceeded
+            | Self::UnsupportedAttachment
+            | Self::FileInputRejected
+            | Self::ContextWindowExceeded
+            | Self::SessionBudgetExceeded
+            | Self::UsageLimitExceeded
+            | Self::ContextCompactionFailed
+            | Self::ProviderUnavailable
+            | Self::ToolExecutionFailed
+            | Self::Timeout
+            | Self::Cancelled
+            | Self::ServiceUnavailable
+            | Self::RunForcedAbort
+            | Self::RunCleanupUnconfirmed => ErrorKind::Business,
+        }
+    }
+}
+
+/// Non-serializable product failure carried across internal application layers.
+///
+/// Sources and first-capture diagnostics are shared across clones. Only
+/// to_api_error may project this value for clients; Display is diagnostic-only.
+#[derive(Debug, Clone)]
 pub struct TalosError {
-    repr: TalosErrorRepr,
+    state: Box<ErrorState>,
+}
+
+#[derive(Debug, Clone)]
+struct ErrorState {
+    error: ApiError,
+    diagnostic: String,
+    source: Option<Arc<dyn std::error::Error + Send + Sync>>,
+    capture: Arc<ErrorCapture>,
+    tool_failure: Option<TalosToolFailureDiagnostic>,
+    memory_kind: Option<TalosMemoryErrorKind>,
 }
 
 #[derive(Debug)]
-enum TalosErrorRepr {
-    Public {
-        error: ApiError,
-        diagnostic: String,
-        tool_failure: Option<TalosToolFailureDiagnostic>,
-        location: &'static Location<'static>,
-    },
-    Internal {
-        context: String,
-        source: Option<Box<dyn std::error::Error + Send + Sync>>,
-        memory_kind: Option<TalosMemoryErrorKind>,
-        location: &'static Location<'static>,
-    },
+struct ErrorCapture {
+    location: &'static Location<'static>,
+    backtrace: Backtrace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,147 +225,129 @@ pub struct TalosToolFailureDiagnostic {
 pub type TalosResult<T> = Result<T, TalosError>;
 
 impl TalosError {
-    /// Build a public application error while keeping internal diagnostics.
+    /// Construct a failure with a reviewed public English explanation.
+    /// Keep dependency details in a typed source or diagnostic context instead.
     #[track_caller]
-    pub fn public(code: ErrorCode, diagnostic: impl Into<String>) -> Self {
+    pub fn new(code: ErrorCode, message: impl Into<String>) -> Self {
+        let message = message.into();
         Self {
-            repr: TalosErrorRepr::Public {
-                error: ApiError::new(code),
-                diagnostic: diagnostic.into(),
-                tool_failure: None,
-                location: Location::caller(),
-            },
-        }
-    }
-
-    /// Build an internal program error with caller location for server logs.
-    #[track_caller]
-    pub fn internal(context: impl Into<String>) -> Self {
-        Self {
-            repr: TalosErrorRepr::Internal {
-                context: context.into(),
+            state: Box::new(ErrorState {
+                error: ApiError::with_message(code, message.clone()),
+                diagnostic: message,
                 source: None,
+                capture: Arc::new(ErrorCapture {
+                    location: Location::caller(),
+                    backtrace: Backtrace::force_capture(),
+                }),
+                tool_failure: None,
                 memory_kind: None,
-                location: Location::caller(),
-            },
+            }),
         }
     }
 
-    /// Build an internal program error with a source error for diagnostics.
+    /// Construct one exact localizable business explanation without recoding it.
+    #[track_caller]
+    pub fn localized(localization: ErrorLocalization) -> Self {
+        let mut error = Self::new(localization.code(), localization.english_message());
+        error.state.error = ApiError::localized(localization);
+        error
+    }
+
+    /// Wrap a dependency error without stringifying its source chain.
+    #[track_caller]
+    pub fn from_source(
+        code: ErrorCode,
+        message: impl Into<String>,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        Self::new(code, message).with_source(source)
+    }
+
+    /// Attach the original dependency cause without replacing classification or capture.
+    pub fn with_source(
+        mut self,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+    ) -> Self {
+        self.state.source = Some(Arc::from(source.into()));
+        self
+    }
+
+    /// Construct an unclassified failure with a static disclosable explanation.
+    /// Dynamic dependency diagnostics belong in from_source/context, not this text.
+    #[track_caller]
+    pub fn internal(message: &'static str) -> Self {
+        Self::new(ErrorCode::InternalError, message)
+    }
+
+    /// Wrap an unclassified technical source, retaining its error chain.
     #[track_caller]
     pub fn internal_with_source(
-        context: impl Into<String>,
-        source: impl std::error::Error + Send + Sync + 'static,
+        message: impl Into<String>,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync>>,
     ) -> Self {
-        Self {
-            repr: TalosErrorRepr::Internal {
-                context: context.into(),
-                source: Some(Box::new(source)),
-                memory_kind: None,
-                location: Location::caller(),
-            },
-        }
+        Self::from_source(ErrorCode::InternalError, message, source)
     }
 
-    /// Convert the current internal error model to a public application error.
-    ///
-    /// This helper is deterministic and does not log. Public boundary owners
-    /// are responsible for logging internal failures before exposing the
-    /// returned error.
+    /// Add internal operation context without reclassification or recapture.
+    pub fn context(mut self, context: impl fmt::Display) -> Self {
+        self.state.diagnostic = format!("{context}: {}", self.state.diagnostic);
+        self
+    }
+
+    /// Pure public projection. The handling boundary owns diagnostic reporting.
     pub fn to_api_error(&self) -> ApiError {
-        match self {
-            Self {
-                repr: TalosErrorRepr::Public { error, .. },
-            } => error.clone(),
-            Self {
-                repr: TalosErrorRepr::Internal { .. },
-            } => ApiError::new(ErrorCode::InternalError),
-        }
+        self.state.error.clone()
     }
 
     pub fn error_code(&self) -> ErrorCode {
-        self.to_api_error().code
+        self.state.error.code
+    }
+
+    pub fn kind(&self) -> ErrorKind {
+        self.state.error.code.kind()
     }
 
     pub fn diagnostic_message(&self) -> &str {
-        match self {
-            Self {
-                repr: TalosErrorRepr::Public { diagnostic, .. },
-            } => diagnostic,
-            Self {
-                repr: TalosErrorRepr::Internal { context, .. },
-            } => context,
-        }
+        &self.state.diagnostic
     }
 
     pub fn location(&self) -> &'static Location<'static> {
-        match self {
-            Self {
-                repr: TalosErrorRepr::Public { location, .. },
-            }
-            | Self {
-                repr: TalosErrorRepr::Internal { location, .. },
-            } => location,
-        }
+        self.state.capture.location
+    }
+
+    /// First-wrapper native stack, not a reconstructed logical async stack.
+    pub fn backtrace(&self) -> &Backtrace {
+        &self.state.capture.backtrace
     }
 
     pub fn is_internal(&self) -> bool {
-        matches!(self.repr, TalosErrorRepr::Internal { .. })
+        self.kind() == ErrorKind::Internal
     }
 
     pub fn is_code(&self, code: ErrorCode) -> bool {
         self.error_code() == code
     }
 
-    pub fn is_file_error_kind(&self, kind: TalosFileErrorKind) -> bool {
-        self.is_code(error_code_for_file_kind(kind))
-    }
-
-    pub fn is_fs_error_kind(&self, kind: TalosFsErrorKind) -> bool {
-        self.is_code(error_code_for_fs_kind(kind))
-    }
-
     pub fn tool_failure_diagnostic(&self) -> Option<&TalosToolFailureDiagnostic> {
-        match &self.repr {
-            TalosErrorRepr::Public { tool_failure, .. } => tool_failure.as_ref(),
-            TalosErrorRepr::Internal { .. } => None,
-        }
+        self.state.tool_failure.as_ref()
     }
 
     pub fn memory_error_kind(&self) -> Option<TalosMemoryErrorKind> {
-        match &self.repr {
-            TalosErrorRepr::Internal { memory_kind, .. } => *memory_kind,
-            TalosErrorRepr::Public { .. } => None,
-        }
+        self.state.memory_kind
     }
-}
 
-impl TalosError {
     #[track_caller]
     pub fn authorization_denied() -> Self {
-        Self::public(ErrorCode::PermissionDenied, "authorization denied")
-    }
-
-    #[track_caller]
-    pub fn fs_error(kind: TalosFsErrorKind, message: impl Into<String>) -> Self {
-        Self::public(error_code_for_fs_kind(kind), message)
-    }
-
-    #[track_caller]
-    pub fn file_error(kind: TalosFileErrorKind, message: impl Into<String>) -> Self {
-        Self::public(error_code_for_file_kind(kind), message)
+        Self::new(ErrorCode::PermissionDenied, "authorization denied")
     }
 
     #[track_caller]
     pub fn memory_error(kind: TalosMemoryErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            repr: TalosErrorRepr::Internal {
-                context: message.into(),
-                source: None,
-                memory_kind: Some(kind),
-                location: Location::caller(),
-            },
-        }
+        let mut error =
+            Self::internal("Failed to parse the memory summary; technical details were withheld.")
+                .context(message.into());
+        error.state.memory_kind = Some(kind);
+        error
     }
 
     #[track_caller]
@@ -367,151 +356,45 @@ impl TalosError {
         message: impl Into<String>,
         gate_source: Option<String>,
     ) -> Self {
-        Self {
-            repr: TalosErrorRepr::Public {
-                error: ApiError::new(error_code_for_tool_kind(kind)),
-                diagnostic: message.into(),
-                tool_failure: Some(TalosToolFailureDiagnostic { kind, gate_source }),
-                location: Location::caller(),
-            },
-        }
+        let mut error = Self::new(ErrorCode::ToolExecutionFailed, message);
+        error.state.tool_failure = Some(TalosToolFailureDiagnostic { kind, gate_source });
+        error
     }
-}
-
-fn error_code_for_fs_kind(kind: TalosFsErrorKind) -> ErrorCode {
-    match kind {
-        TalosFsErrorKind::InvalidPath => ErrorCode::InvalidPath,
-        TalosFsErrorKind::FsDisabled => ErrorCode::FsDisabled,
-        TalosFsErrorKind::PathOutsideRoot => ErrorCode::PathOutsideRoot,
-        TalosFsErrorKind::SymlinkNotSupported => ErrorCode::SymlinkNotSupported,
-        TalosFsErrorKind::PathNotFound => ErrorCode::PathNotFound,
-        TalosFsErrorKind::NotDirectory => ErrorCode::NotDirectory,
-        TalosFsErrorKind::InvalidName => ErrorCode::InvalidName,
-        TalosFsErrorKind::AlreadyExists => ErrorCode::AlreadyExists,
-    }
-}
-
-fn error_code_for_file_kind(kind: TalosFileErrorKind) -> ErrorCode {
-    match kind {
-        TalosFileErrorKind::UploadTooLarge => ErrorCode::UploadTooLarge,
-        TalosFileErrorKind::UnsupportedMediaType => ErrorCode::UnsupportedMediaType,
-        TalosFileErrorKind::AttachmentLimitExceeded => ErrorCode::AttachmentLimitExceeded,
-        TalosFileErrorKind::UnsupportedAttachment => ErrorCode::UnsupportedAttachment,
-    }
-}
-
-fn error_code_for_tool_kind(_kind: TalosToolErrorKind) -> ErrorCode {
-    ErrorCode::ToolExecutionFailed
 }
 
 impl fmt::Display for TalosError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self {
-                repr:
-                    TalosErrorRepr::Public {
-                        error, diagnostic, ..
-                    },
-            } => {
-                write!(f, "{:?}: {diagnostic}", error.code)
+        match self.kind() {
+            ErrorKind::Business => {
+                write!(f, "{:?}: {}", self.state.error.code, self.state.diagnostic)
             }
-            Self {
-                repr: TalosErrorRepr::Internal { context, .. },
-            } => write!(f, "Internal error: {context}"),
+            ErrorKind::Internal => write!(f, "Internal error: {}", self.state.diagnostic),
+        }?;
+        if let Some(source) = &self.state.source {
+            write!(f, ": {source}")?;
         }
+        Ok(())
     }
 }
 
 impl std::error::Error for TalosError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.repr {
-            TalosErrorRepr::Internal {
-                source: Some(source),
-                ..
-            } => Some(source.as_ref()),
-            TalosErrorRepr::Public { .. } | TalosErrorRepr::Internal { source: None, .. } => None,
-        }
+        self.state.source.as_deref().map(|source| source as _)
+    }
+}
+
+/// SDK boundary conversion for a remote public failure. The captured stack is
+/// the local receiving boundary, never the remote backend's diagnostic stack.
+impl From<ApiError> for TalosError {
+    #[track_caller]
+    fn from(error: ApiError) -> Self {
+        let mut received =
+            Self::new(error.code, error.message.clone()).context("remote application failure");
+        received.state.error = error;
+        received
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ApiError, ErrorCode, TalosError};
-
-    #[test]
-    fn api_error_uses_code_default_message() {
-        assert_eq!(
-            ApiError::new(ErrorCode::ResourceNotFound),
-            ApiError {
-                code: ErrorCode::ResourceNotFound,
-                message: "Resource not found".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn error_code_serializes_as_camel_case() {
-        let value = serde_json::to_string(&ErrorCode::ActiveTurnRunning).unwrap();
-        assert_eq!(value, "\"activeTurnRunning\"");
-        let decoded: ErrorCode = serde_json::from_str(&value).unwrap();
-        assert_eq!(decoded, ErrorCode::ActiveTurnRunning);
-    }
-
-    #[test]
-    fn message_queue_full_has_stable_wire_value_and_message() {
-        let value = serde_json::to_string(&ErrorCode::MessageQueueFull).unwrap();
-
-        assert_eq!(value, "\"messageQueueFull\"");
-        assert_eq!(
-            ApiError::new(ErrorCode::MessageQueueFull),
-            ApiError {
-                code: ErrorCode::MessageQueueFull,
-                message: "Message queue is full".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn message_queue_busy_has_stable_wire_value_and_message() {
-        let value = serde_json::to_string(&ErrorCode::MessageQueueBusy).unwrap();
-
-        assert_eq!(value, "\"messageQueueBusy\"");
-        assert_eq!(
-            ApiError::new(ErrorCode::MessageQueueBusy),
-            ApiError {
-                code: ErrorCode::MessageQueueBusy,
-                message: "Message queue message is busy".to_string(),
-            }
-        );
-    }
-
-    #[test]
-    fn unregistered_error_code_fails_to_decode() {
-        let error = serde_json::from_str::<ErrorCode>("\"futureCode\"").unwrap_err();
-        assert!(error.is_data());
-    }
-
-    #[test]
-    fn talos_error_maps_to_public_api_error_without_source_message() {
-        assert_eq!(
-            TalosError::public(ErrorCode::InvalidRequest, "bad request detail").to_api_error(),
-            ApiError::new(ErrorCode::InvalidRequest)
-        );
-        assert_eq!(
-            TalosError::internal("database path leaked").to_api_error(),
-            ApiError::new(ErrorCode::InternalError)
-        );
-    }
-
-    #[test]
-    fn talos_error_keeps_internal_diagnostics_out_of_public_error() {
-        let error = TalosError::internal("secret path leaked");
-
-        assert!(error.is_internal());
-        assert_eq!(error.diagnostic_message(), "secret path leaked");
-        assert_eq!(
-            error.to_api_error(),
-            ApiError::new(ErrorCode::InternalError)
-        );
-    }
-}
+#[path = "error_tests.rs"]
+mod tests;

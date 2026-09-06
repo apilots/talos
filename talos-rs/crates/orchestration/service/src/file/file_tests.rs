@@ -9,7 +9,7 @@ use futures_util::stream;
 use opendal::{services::Fs, Operator};
 use talos_agent::{AttachmentReader, TurnFileScope};
 use talos_config::{FileStorageConfig, FileStorageLimits};
-use talos_error::TalosFileErrorKind;
+use talos_error::ErrorCode;
 use talos_storage::SqliteStorage;
 use talos_store::file::{DatabaseFileStore, FileStatus, FileStore};
 use talos_store::project::{ProjectStore, StorageProjectStore};
@@ -251,7 +251,7 @@ async fn csv_validation_reads_the_complete_upload() {
         .await
         .unwrap_err();
 
-    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
+    assert!(error.is_code(ErrorCode::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -342,7 +342,7 @@ async fn malformed_excel_content_is_rejected() {
         .await
         .unwrap_err();
 
-    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
+    assert!(error.is_code(ErrorCode::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -366,7 +366,7 @@ async fn binary_content_is_not_misclassified_as_csv() {
         .await
         .unwrap_err();
 
-    assert!(error.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
+    assert!(error.is_code(ErrorCode::UnsupportedMediaType));
 }
 
 #[tokio::test]
@@ -421,7 +421,7 @@ async fn file_scope_and_owner_are_enforced_as_not_found() {
     let other = Actor::regular("user-2");
     let project = files
         .project_store
-        .create_project_for_owner("Project", &files.root.path().to_path_buf(), &owner.user_id)
+        .create_project_for_owner("Project", files.root.path(), &owner.user_id)
         .await
         .unwrap();
     let uploaded = files
@@ -452,7 +452,7 @@ async fn project_file_relation_is_preserved_by_store_writes() {
     let owner = Actor::regular("user-1");
     let project = files
         .project_store
-        .create_project_for_owner("Project", &files.root.path().to_path_buf(), &owner.user_id)
+        .create_project_for_owner("Project", files.root.path(), &owner.user_id)
         .await
         .unwrap();
     let uploaded = files
@@ -517,7 +517,7 @@ async fn attachment_reader_preserves_order_and_allows_personal_plus_session_proj
     let owner = Actor::regular("user-1");
     let project = files
         .project_store
-        .create_project_for_owner("Project", &files.root.path().to_path_buf(), &owner.user_id)
+        .create_project_for_owner("Project", files.root.path(), &owner.user_id)
         .await
         .unwrap();
     let personal = files.upload(&owner, FileScope::Personal).await;
@@ -557,7 +557,7 @@ async fn attachment_reader_rejects_project_mismatch_and_count_limit() {
     let owner = Actor::regular("user-1");
     let project = files
         .project_store
-        .create_project_for_owner("Project", &files.root.path().to_path_buf(), &owner.user_id)
+        .create_project_for_owner("Project", files.root.path(), &owner.user_id)
         .await
         .unwrap();
     let project_file = files
@@ -591,7 +591,7 @@ async fn attachment_reader_rejects_project_mismatch_and_count_limit() {
     )
     .await
     .unwrap_err();
-    assert!(count.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded));
+    assert!(count.is_code(ErrorCode::AttachmentLimitExceeded));
 }
 
 #[tokio::test]
@@ -628,7 +628,7 @@ async fn attachment_reader_rejects_an_oversized_object_before_loading_it() {
     .await
     .unwrap_err();
 
-    assert!(error.is_file_error_kind(TalosFileErrorKind::AttachmentLimitExceeded));
+    assert!(error.is_code(ErrorCode::AttachmentLimitExceeded));
 }
 
 #[tokio::test]
@@ -675,7 +675,7 @@ async fn upload_rejects_invalid_metadata_and_stream_limits_before_visibility() {
         .await
         .unwrap();
 
-    assert!(too_large.is_file_error_kind(TalosFileErrorKind::UploadTooLarge));
+    assert!(too_large.is_code(ErrorCode::UploadTooLarge));
     assert!(invalid_name.is_code(talos_error::ErrorCode::InvalidRequest));
     assert!(visible.data.is_empty());
 }
@@ -756,7 +756,7 @@ async fn unsupported_media_and_ready_transition_failure_leave_no_visible_file() 
         .await
         .unwrap_err();
 
-    assert!(unsupported.is_file_error_kind(TalosFileErrorKind::UnsupportedMediaType));
+    assert!(unsupported.is_code(ErrorCode::UnsupportedMediaType));
     assert!(ready_failure.is_internal());
     assert!(files
         .store

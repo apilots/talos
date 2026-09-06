@@ -5,11 +5,13 @@ on:
   pull_request:
     paths:
       - "talos-rs/**"
+      - "scripts/check_error_contract*.py"
       - "justfile"
       - ".github/workflows/talos-rust.yml"
   push:
     paths:
       - "talos-rs/**"
+      - "scripts/check_error_contract*.py"
       - "justfile"
       - ".github/workflows/talos-rust.yml"
 
@@ -44,6 +46,11 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: just
+
+      - name: Check error contract guardrails
+        run: |
+          python3 scripts/check_error_contract_tests.py
+          python3 scripts/check_error_contract.py
 
       - name: Check Rust formatting
         run: just fmt-check

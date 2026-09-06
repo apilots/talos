@@ -67,7 +67,7 @@ impl Tool for MemorySearchTool {
             .unwrap_or_default()
             .trim();
         if query.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "query is required".to_string(),
             ));
@@ -81,19 +81,19 @@ impl Tool for MemorySearchTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let reader = context.memory_reader().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "memory_search requires memory access".to_string(),
             )
         })?;
         let scope = context.memory_scope().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "memory_search requires a memory scope".to_string(),
             )
         })?;
         let request = serde_json::from_value::<MemorySearchRequest>(input).map_err(|err| {
-            TalosError::public(talos_error::ErrorCode::InvalidRequest, err.to_string())
+            TalosError::new(talos_error::ErrorCode::InvalidRequest, err.to_string())
         })?;
         let response = reader.search(scope, request).await?;
         ToolOutputPayload::success_json(&response, "serialize memory_search result")

@@ -10,9 +10,18 @@ mod admission;
 mod cancellation;
 mod continuation;
 mod idempotency;
+mod notice;
 mod record;
 mod settlement;
 mod sqlite;
+
+/// Store metadata for either execution or product facts; Service owns wire IDs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineEventRecord {
+    pub event_seq: i64,
+    pub persisted_at: i64,
+    pub event: talos_agent_api::TimelineEventPayload,
+}
 
 /// Private normalized persistence record for one canonical Agent event.
 #[derive(Debug, Clone, PartialEq)]
@@ -170,6 +179,33 @@ pub struct CommitTerminalSettlementParams {
 /// Narrow atomic Store commands for canonical Agent execution facts.
 #[async_trait]
 pub trait AgentExecutionStore: Send + Sync {
+    /// Append a product notice for an existing Turn without mutating its lifecycle.
+    async fn append_timeline_notice(
+        &self,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<TimelineEventRecord>;
+
+    /// Read both kinds of Timeline facts using the shared bounded replay cursor.
+    async fn list_timeline_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        limit: usize,
+    ) -> TalosResult<Vec<TimelineEventRecord>>;
+
+    /// Resolve either kind of fact for cursor ownership checks.
+    async fn get_timeline_event(&self, event_seq: i64) -> TalosResult<Option<TimelineEventRecord>>;
+
+    /// Capture the global Timeline high water, including product notices.
+    async fn get_latest_timeline_event_seq(&self, session_id: &str) -> TalosResult<Option<i64>>;
+
+    /// Read bounded notices for a history Turn at its captured Timeline high water.
+    async fn list_turn_notices(
+        &self,
+        identity: &AgentTurnRef,
+        through_event_seq: i64,
+    ) -> TalosResult<Vec<TimelineEventRecord>>;
+
     /// Reserve, replay, repair, or reclaim one idempotent product command.
     async fn reserve_command(
         &self,
@@ -414,7 +450,7 @@ fn validate_progress_event(event: &AgentEvent) -> TalosResult<()> {
 }
 
 fn execution_conflict(message: impl Into<String>) -> TalosError {
-    TalosError::public(talos_error::ErrorCode::Conflict, message.into())
+    TalosError::new(talos_error::ErrorCode::Conflict, message.into())
 }
 
 #[cfg(test)]

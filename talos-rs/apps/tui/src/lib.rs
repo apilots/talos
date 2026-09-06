@@ -31,7 +31,7 @@ mod types;
 mod user_action;
 mod utils;
 
-pub use client::{GatewayClient, MessageQueueSubscription};
+pub use client::{GatewayClient, SessionSubscription};
 pub use run::run_tui_app_with_gateway_client;
 pub use turn_request::TerminalTurnRequest;
 use types::*;
@@ -96,8 +96,8 @@ pub struct TuiApp {
     pub(crate) chat_content_rect: Option<Rect>,
     pub(crate) chat_viewport_height: usize,
     pub(crate) message_queue: MessageQueue,
-    pub(crate) message_queue_subscription: Option<client::MessageQueueSubscription>,
-    pub(crate) message_queue_subscription_session_id: Option<String>,
+    pub(crate) session_subscription: Option<client::SessionSubscription>,
+    pub(crate) session_subscription_session_id: Option<String>,
     pub(crate) message_queue_retry_at: Option<Instant>,
     pub(crate) message_queue_turn_reconcile_pending: bool,
     pub(crate) selected_queue_message: Option<usize>,

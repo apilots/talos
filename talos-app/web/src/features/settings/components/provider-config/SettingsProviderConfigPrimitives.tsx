@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -85,7 +87,6 @@ type SettingsConfigSaveFooterProps = {
   savingLabel: string;
   saveLabel: string;
   onSave: () => void;
-  parseError: (error: unknown) => string;
   children?: ReactNode;
 };
 
@@ -97,12 +98,12 @@ export function SettingsConfigSaveFooter({
   savingLabel,
   saveLabel,
   onSave,
-  parseError,
   children,
 }: SettingsConfigSaveFooterProps) {
+  useTranslation("errors");
   return (
     <div className="mt-6 flex items-center justify-between border-t border-border/60 pt-4">
-      {error ? <span className="text-sm text-danger">{parseError(error)}</span> : null}
+      {error ? <span className="text-sm text-danger">{userVisibleErrorMessage(error, "Request failed.")}</span> : null}
       {!error && dirty ? <span className="text-sm text-muted">{unsavedLabel}</span> : null}
       {!error && !dirty ? <span>{children}</span> : null}
       <Button disabled={pending || !dirty} onClick={onSave} type="button">

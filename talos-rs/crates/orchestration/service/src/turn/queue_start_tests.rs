@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn failed_queue_start_keeps_the_message_in_place() {
     let agent_execution = Arc::new(RecordingAgentExecution {
-        stream_error: Mutex::new(Some(TalosError::public(
+        stream_error: Mutex::new(Some(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "agent busy",
         ))),

@@ -69,7 +69,7 @@ impl Tool for WriteTool {
         context: &ToolContext,
     ) -> TalosResult<Vec<RequestedFileSystemAccess>> {
         let request: WriteFileRequest = serde_json::from_value(input.clone()).map_err(|error| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("invalid write arguments: {error}"),
             )
@@ -91,14 +91,14 @@ impl Tool for WriteTool {
         context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
         let request: WriteFileRequest = serde_json::from_value(input).map_err(|err| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("invalid write arguments: {}", err),
             )
         })?;
         let result = run(&request, &context).await?;
         let structured = serde_json::to_value(&result).map_err(|err| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("serialize write response: {}", err),
             )

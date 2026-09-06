@@ -22,3 +22,6 @@ talos-auth = { workspace = true }
 talos-error = { path = "../../crates/infra/error" }
 
 [dev-dependencies]
+
+[lints]
+workspace = true

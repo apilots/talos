@@ -131,7 +131,7 @@ impl std::fmt::Debug for AgentProgressEventReceiver {
 /// Harness produces live results; Service recovery reuses the same shape from
 /// a durable checkpoint without invoking a Provider or fabricating snapshots.
 /// Metrics are cumulative for the logical Turn, including earlier invocations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum AgentRunSettlement {
     WaitingForInput {
         event: AgentEvent,
@@ -142,6 +142,8 @@ pub enum AgentRunSettlement {
         event: AgentEvent,
         messages: Vec<AgentMessage>,
         metrics: AgentRunMetrics,
+        /// Original live outcome; never reconstruct diagnostics from the event.
+        result: talos_error::TalosResult<()>,
     },
 }
 

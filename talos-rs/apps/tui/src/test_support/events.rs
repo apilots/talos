@@ -50,6 +50,7 @@ pub(crate) fn completed_history_response(
 ) -> SessionHistoryResponse {
     SessionHistoryResponse {
         data: vec![SessionHistoryTurn {
+            notices: vec![],
             identity: AgentTurnRef::new("sess-test", "turn-history"),
             result: AgentRunResult::Completed(AgentRunOutput {
                 messages,
@@ -486,11 +487,11 @@ pub(crate) fn timeline_event(
         event_id,
         event_seq: sequence as i64,
         persisted_at: sequence as i64,
-        event: AgentEvent {
+        event: talos_sdk::TimelineEventPayload::Agent(AgentEvent {
             identity: AgentTurnRef::new(session_id, "turn-test"),
             sequence,
             occurred_at: sequence as i64,
             payload,
-        },
+        }),
     }
 }

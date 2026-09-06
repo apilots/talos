@@ -358,27 +358,31 @@ fn memory_entries_containing(
 }
 
 fn contains_memory_tool_call(events: &[TimelineEvent]) -> bool {
-    events.iter().any(|event| match &event.event.payload {
-        AgentEventPayload::MessageBlockStarted(started) => matches!(
-            &started.block.content,
-            AgentMessageBlockContent::ToolCall(call)
-                if call.name == "UserWorkspaceMemoryUpdate"
-                    || call.name == "user_workspace_memory_update"
-        ),
-        AgentEventPayload::MessageBlockCompleted(completed) => matches!(
-            &completed.block.content,
-            AgentMessageBlockContent::ToolCall(call)
-                if call.name == "UserWorkspaceMemoryUpdate"
-                    || call.name == "user_workspace_memory_update"
-        ),
-        _ => false,
-    })
+    events
+        .iter()
+        .filter_map(|event| event.event.agent_event())
+        .any(|event| match &event.payload {
+            AgentEventPayload::MessageBlockStarted(started) => matches!(
+                &started.block.content,
+                AgentMessageBlockContent::ToolCall(call)
+                    if call.name == "UserWorkspaceMemoryUpdate"
+                        || call.name == "user_workspace_memory_update"
+            ),
+            AgentEventPayload::MessageBlockCompleted(completed) => matches!(
+                &completed.block.content,
+                AgentMessageBlockContent::ToolCall(call)
+                    if call.name == "UserWorkspaceMemoryUpdate"
+                        || call.name == "user_workspace_memory_update"
+            ),
+            _ => false,
+        })
 }
 
 fn ensure_successful_memory_tool_call(events: &[TimelineEvent]) -> Result<()> {
     let memory_items: std::collections::HashSet<_> = events
         .iter()
-        .filter_map(|event| match &event.event.payload {
+        .filter_map(|event| event.event.agent_event())
+        .filter_map(|event| match &event.payload {
             AgentEventPayload::MessageBlockStarted(started)
                 if matches!(
                     &started.block.content,
@@ -400,14 +404,17 @@ fn ensure_successful_memory_tool_call(events: &[TimelineEvent]) -> Result<()> {
             "expected the primary model to call UserWorkspaceMemoryUpdate"
         ));
     }
-    let succeeded = events.iter().any(|event| match &event.event.payload {
-        AgentEventPayload::MessageBlockCompleted(completed) => matches!(
-            &completed.block.content,
-            AgentMessageBlockContent::ToolResult(result)
-                if memory_items.contains(&result.call_id) && !result.is_error
-        ),
-        _ => false,
-    });
+    let succeeded = events
+        .iter()
+        .filter_map(|event| event.event.agent_event())
+        .any(|event| match &event.payload {
+            AgentEventPayload::MessageBlockCompleted(completed) => matches!(
+                &completed.block.content,
+                AgentMessageBlockContent::ToolResult(result)
+                    if memory_items.contains(&result.call_id) && !result.is_error
+            ),
+            _ => false,
+        });
     if !succeeded {
         return Err(anyhow!(
             "UserWorkspaceMemoryUpdate was called but no successful Tool result was emitted"

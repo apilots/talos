@@ -8,6 +8,7 @@ import {
   type HttpAdapter,
   type HttpRequestOptions,
   parseTalosApiErrorBody,
+  parseTalosJson,
   TalosHttpError,
   type StreamAdapter,
   type StreamRequestOptions,
@@ -52,7 +53,7 @@ class BrowserHttpAdapter implements HttpAdapter {
       });
     }
 
-    return unwrapTalosApiResponse<T>(await response.json());
+    return unwrapTalosApiResponse<T>(parseTalosJson(await response.text()));
   }
 }
 
@@ -97,7 +98,7 @@ function xhrRequest<T>(
           return;
         }
         try {
-          resolve(unwrapTalosApiResponse<T>(JSON.parse(xhr.responseText) as unknown));
+          resolve(unwrapTalosApiResponse<T>(parseTalosJson(xhr.responseText)));
         } catch (error) {
           reject(error);
         }

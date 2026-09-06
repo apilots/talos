@@ -9,6 +9,7 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
         event_store.clone(),
     )
     .await;
+    let mut events = state.event_service.subscribe_live_events();
     let app = Router::new()
         .route("/v1/turns/start", post(start_turn_handler))
         .layer(axum::Extension(test_auth()))
@@ -42,12 +43,27 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
     let first_payload: Value =
         serde_json::from_slice(&first_body).expect("first payload should be json");
 
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let event = events
+                .recv()
+                .await
+                .expect("turn events should remain available");
+            if matches!(
+                event.event.agent_event().expect("Agent fixture").payload,
+                talos_agent_api::AgentEventPayload::TurnCompleted(_)
+                    | talos_agent_api::AgentEventPayload::TurnFailed(_)
+            ) {
+                break;
+            }
+        }
+    })
+    .await
+    .expect("the first turn must settle before checking idempotency");
     let recorded_before = event_store
         .list_agent_events_after("mock-session", None, 100)
         .await
-        .unwrap()
-        .len();
+        .unwrap();
 
     let second = app
         .oneshot(
@@ -78,13 +94,11 @@ async fn test_start_turn_handler_reuses_idempotent_response() {
         first_payload["data"]["messageId"],
         second_payload["data"]["messageId"]
     );
-    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     assert_eq!(
         event_store
             .list_agent_events_after("mock-session", None, 100)
             .await
-            .unwrap()
-            .len(),
+            .unwrap(),
         recorded_before
     );
 }

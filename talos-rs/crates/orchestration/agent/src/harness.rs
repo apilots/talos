@@ -19,7 +19,7 @@ use settlement::cleanup_task_count;
 
 use crate::{
     event_sink::AgentEventPipeline, provider::SessionTurnInputSender, AgentCapabilities,
-    AgentError, AgentErrorKind, AgentProvider, AgentResult, AgentSessionContext,
+    AgentError, AgentProvider, AgentResult, AgentSessionContext,
 };
 
 const RUN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
@@ -139,7 +139,7 @@ where
         }
         match self.inner.active.entry(identity.session_id.clone()) {
             Entry::Occupied(_) => Err(AgentError::new(
-                AgentErrorKind::ActiveTurnRunning,
+                talos_error::ErrorCode::ActiveTurnRunning,
                 format!(
                     "session `{}` already has an active Agent operation",
                     identity.session_id

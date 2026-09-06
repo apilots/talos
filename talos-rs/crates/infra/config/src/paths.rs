@@ -71,11 +71,12 @@ impl TalosPaths {
             &self.data_dir,
         ] {
             std::fs::create_dir_all(dir).map_err(|err| {
-                TalosError::internal(format!(
-                    "create talos runtime dir {}: {}",
-                    dir.display(),
-                    err
-                ))
+                let diagnostic = format!("create talos runtime dir {}: {}", dir.display(), err);
+                TalosError::internal_with_source(
+                    "Create talos runtime dir; technical details were withheld.",
+                    err,
+                )
+                .context(diagnostic)
             })?;
         }
         Ok(())
@@ -86,7 +87,7 @@ pub fn set_talos_home(path: impl Into<PathBuf>) -> TalosResult<()> {
     use talos_error::TalosError;
 
     TALOS_HOME_OVERRIDE.set(path.into()).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "talos_home is already initialized".to_string(),
         )

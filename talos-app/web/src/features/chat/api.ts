@@ -18,7 +18,7 @@ import type {
 } from "@talos/sdk-browser";
 
 import { getTalosClient } from "@/shared/api/client";
-import { isUnboundProject } from "@/shared/types/domain";
+import { deriveProjectName, isUnboundProject } from "@/shared/types/domain";
 import type { ProjectView } from "@/shared/types/ui";
 
 const ACTIVE_TURN_RUNNING_CODE = AppProtocol.ErrorCode.ActiveTurnRunning;
@@ -39,11 +39,6 @@ function mapProjectView(project: ApiProjectInfo): ProjectView {
     origin: "server",
     sessionCount: project.session_count,
   };
-}
-
-function deriveProjectName(directory: string) {
-  const normalized = directory.trim().replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).at(-1) || "project";
 }
 
 interface CreateProjectInput {

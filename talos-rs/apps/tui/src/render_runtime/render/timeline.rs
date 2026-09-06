@@ -46,7 +46,7 @@ pub(crate) fn apply_block_started(
             Vec::new()
         }
         AgentMessageBlockContent::SystemNotice(notice) => {
-            text_finalized_block(TranscriptBlockKind::SystemNotice, &notice.message)
+            text_finalized_block(TranscriptBlockKind::SystemNotice, notice.message())
         }
         AgentMessageBlockContent::ToolResult(_)
         | AgentMessageBlockContent::ExecutionSummary(_)
@@ -115,7 +115,7 @@ pub(crate) fn apply_block_completed(
                 .unwrap_or("Context compaction completed"),
         ),
         AgentMessageBlockContent::SystemNotice(notice) => {
-            text_finalized_block(TranscriptBlockKind::SystemNotice, &notice.message)
+            text_finalized_block(TranscriptBlockKind::SystemNotice, notice.message())
         }
         AgentMessageBlockContent::UserContent(_) | AgentMessageBlockContent::ToolCall(_) => {
             Vec::new()

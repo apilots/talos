@@ -31,15 +31,23 @@ fn no_op<'a>(_context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
 
 fn write_first<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
     Box::pin(async move {
-        fs::write(context.paths.talos_home.join("first-ran"), "done")
-            .map_err(|error| TalosError::internal(format!("write first proof: {error}")))
+        fs::write(context.paths.talos_home.join("first-ran"), "done").map_err(|error| {
+            TalosError::internal_with_source(
+                "write first proof; technical details were withheld.",
+                error,
+            )
+        })
     })
 }
 
 fn write_second<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFuture<'a> {
     Box::pin(async move {
-        fs::write(context.paths.talos_home.join("second-ran"), "done")
-            .map_err(|error| TalosError::internal(format!("write second proof: {error}")))
+        fs::write(context.paths.talos_home.join("second-ran"), "done").map_err(|error| {
+            TalosError::internal_with_source(
+                "write second proof; technical details were withheld.",
+                error,
+            )
+        })
     })
 }
 
@@ -47,13 +55,17 @@ fn fail_while_marker_exists<'a>(context: &'a UpgradeContext<'_>) -> UpgradeFutur
     Box::pin(async move {
         let marker = context.paths.talos_home.join("fail-upgrade");
         if marker.exists() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::Conflict,
                 "forced upgrade failure".to_string(),
             ));
         }
-        fs::write(context.paths.talos_home.join("upgrade-ran"), "done")
-            .map_err(|error| TalosError::internal(format!("write upgrade proof: {error}")))
+        fs::write(context.paths.talos_home.join("upgrade-ran"), "done").map_err(|error| {
+            TalosError::internal_with_source(
+                "write upgrade proof; technical details were withheld.",
+                error,
+            )
+        })
     })
 }
 

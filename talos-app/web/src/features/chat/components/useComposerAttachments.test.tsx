@@ -196,7 +196,9 @@ describe("useComposerAttachments", () => {
     );
 
     expect(result.current.items).toEqual([
-      expect.objectContaining({ status: "failed", error: "network lost" }),
+      expect.objectContaining({ status: "failed", error: {
+        code: "internalError", message: "network lost", localization: null,
+      } }),
     ]);
     expect(result.current.hasFailedUploads).toBe(true);
     expect(result.current.fileIds).toEqual([]);

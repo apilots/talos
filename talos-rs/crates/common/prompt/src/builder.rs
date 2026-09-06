@@ -213,11 +213,14 @@ impl<'a> PromptBuilder<'a> {
             Ok(content) => Some(content),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
             Err(err) => {
-                return Err(talos_error::TalosError::internal(format!(
-                    "read bootstrap file {}: {}",
-                    path.display(),
-                    err
-                )));
+                return Err({
+                    let diagnostic = format!("read bootstrap file {}: {}", path.display(), err);
+                    talos_error::TalosError::internal_with_source(
+                        "Failed to read the bootstrap file; technical details were withheld.",
+                        err,
+                    )
+                    .context(diagnostic)
+                });
             }
         };
         Ok(WorkspaceBootstrapFile {
@@ -240,11 +243,16 @@ impl<'a> PromptBuilder<'a> {
         }
         let workspace_dir = bootstrap::expand_workspace_dir(workspace_dir_config);
         fs::create_dir_all(&workspace_dir).await.map_err(|err| {
-            talos_error::TalosError::internal(format!(
+            let diagnostic = format!(
                 "create prompt workspace dir {}: {}",
                 workspace_dir.display(),
                 err
-            ))
+            );
+            talos_error::TalosError::internal_with_source(
+                "Failed to create the prompt workspace directory; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
 
         let mut files = Vec::new();

@@ -1,3 +1,4 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { Box, Folder, MessageSquare, TrendingUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -21,9 +22,7 @@ export function SettingsProfileSection({
   }
 
   if (profileQuery.error || !profileQuery.data) {
-    const detail = profileQuery.error instanceof Error
-      ? profileQuery.error.message
-      : t("settings:profile.loadError");
+    const detail = userVisibleErrorMessage(profileQuery.error, t("settings:profile.loadError"));
     return <ProfileShell accountTypeLabel={accountTypeLabel} avatarLabel={avatarLabel} connection={connection} message={`${t("settings:profile.loadError")} ${detail}`} />;
   }
 

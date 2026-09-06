@@ -152,11 +152,13 @@ impl TalosService {
         )
         .expect("message queue config must be validated before service assembly");
         let turns = TurnService::new(
-            coordinator.clone(),
-            agent_execution_store.clone(),
-            event_service.clone(),
+            crate::turn::AgentExecutionDriver::new(
+                coordinator.clone(),
+                agent_execution_store.clone(),
+                event_service.clone(),
+                sessions.clone(),
+            ),
             profile_store.clone(),
-            sessions.clone(),
             message_queue.clone(),
             base_config.clone(),
             execution_gate.clone(),
@@ -199,7 +201,10 @@ impl TalosService {
                 config_reload_hook,
             ),
             files,
-            fs: FsService::new(base_config.fs.directory_picker.clone()),
+            fs: FsService::new(
+                base_config.fs.directory_picker.clone(),
+                std::env::var_os("HOME").map(std::path::PathBuf::from),
+            ),
             memory,
             plugins,
             skills,
@@ -363,7 +368,7 @@ impl TalosService {
             .as_deref()
             .is_some_and(|project_id| session.project_id.as_deref() != Some(project_id))
         {
-            return Err(talos_error::TalosError::public(
+            return Err(talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("session '{}' project binding is immutable", session.id),
             ));
@@ -377,7 +382,7 @@ impl TalosService {
         if let Some(current_directory) = request.current_directory.clone() {
             match session.current_directory.as_ref() {
                 Some(bound) if bound != &current_directory => {
-                    return Err(talos_error::TalosError::public(
+                    return Err(talos_error::TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!(
                             "session {} is bound to current_directory {}, but request used {}",
@@ -542,7 +547,7 @@ impl TalosService {
             .await?
             .is_some()
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session `{session_id}` already has an active turn"),
             ));

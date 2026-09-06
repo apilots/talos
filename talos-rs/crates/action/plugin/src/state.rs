@@ -85,28 +85,43 @@ impl PluginStateStore {
         action: impl FnOnce() -> TalosResult<T>,
     ) -> TalosResult<T> {
         talos_fs::create_directory(&self.root, true).map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to create plugin state root `{}`: {err}",
                 self.root.display()
-            ))
+            );
+            err.context(diagnostic)
         })?;
         let path = self.lock_path();
         let lock = talos_fs::std_fs().with_file_lock(&path).map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to lock plugin state for {operation} `{}`: {err}",
                 path.display()
-            ))
+            );
+            TalosError::internal_with_source(
+                "Failed to lock plugin state; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
         let result = action();
         let unlock_result = lock.unlock().map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to unlock plugin state for {operation} `{}`: {err}",
                 path.display()
-            ))
+            );
+            TalosError::internal_with_source(
+                "Failed to unlock plugin state; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         });
         match (result, unlock_result) {
             (Ok(value), Ok(())) => Ok(value),
-            (Err(err), _) => Err(err),
+            (Err(err), Ok(())) => Err(err),
+            (Err(err), Err(unlock_error)) => {
+                talos_logging::report_error(&unlock_error);
+                Err(err)
+            }
             (Ok(_), Err(err)) => Err(err),
         }
     }
@@ -151,7 +166,7 @@ impl PluginStateStore {
         #[cfg(test)]
         if self.fail_next_save_installs.swap(false, Ordering::SeqCst) {
             return Err(TalosError::internal(
-                "injected plugin installs save failure".to_string(),
+                "injected plugin installs save failure",
             ));
         }
         talos_fs::write_json_pretty(&self.installs_path(), installs)
@@ -178,10 +193,11 @@ impl PluginStateStore {
             return Ok(());
         }
         talos_fs::std_fs().remove_directory(&path).map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to remove plugin source cache `{}`: {err}",
                 path.display()
-            ))
+            );
+            err.context(diagnostic)
         })
     }
 }
@@ -191,10 +207,8 @@ fn remove_transaction_root(path: &Path, label: &str) -> TalosResult<()> {
         return Ok(());
     }
     talos_fs::std_fs().remove_directory(path).map_err(|err| {
-        TalosError::internal(format!(
-            "failed to remove {label} dir `{}`: {err}",
-            path.display()
-        ))
+        let diagnostic = format!("failed to remove {label} dir `{}`: {err}", path.display());
+        err.context(diagnostic)
     })
 }
 

@@ -5,9 +5,46 @@ use tokio::sync::oneshot;
 
 use crate::{
     ActiveRunControl, CancellationMode, CancellationPolicy, CleanupFailure, CleanupReport,
-    RunControlScope, RunTaskCompletion, RunTaskError, RunTermination, Settlement, SettlementKind,
+    RunControlScope, RunTaskCompletion, RunTermination, Settlement, SettlementKind,
 };
 use talos_types::AgentTurnRef;
+
+#[tokio::test]
+async fn task_panic_retains_tokio_diagnostics_and_unconfirmed_cleanup() {
+    async fn panic_task(_: crate::Cancellation) -> RunTaskCompletion<()> {
+        panic!("injected Provider panic");
+    }
+    let control = Arc::new(ActiveRunControl::new(AgentTurnRef::new(
+        "session-panic",
+        "turn-panic",
+    )));
+    let task = control.tasks().spawn(panic_task).unwrap();
+    let error = task.await.unwrap_err();
+    assert!(error.is_panic());
+    assert!(error.to_string().contains("injected Provider panic"));
+    let settlement = control
+        .settle(RunTermination::Completed {
+            timeout: Duration::from_secs(1),
+        })
+        .await;
+    assert_eq!(
+        settlement.cleanup,
+        CleanupReport::Unconfirmed {
+            count: 1,
+            failures: vec![CleanupFailure::TaskDropped],
+        }
+    );
+}
+
+#[tokio::test]
+async fn task_business_failure_is_not_a_join_failure() {
+    let control = ActiveRunControl::new(AgentTurnRef::new("session-error", "turn-error"));
+    let task = control
+        .tasks()
+        .spawn(|_| async { RunTaskCompletion::Confirmed(Err::<(), _>("known business rejection")) })
+        .unwrap();
+    assert_eq!(task.await.unwrap(), Err("known business rejection"));
+}
 
 #[tokio::test]
 async fn completed_settlement_waits_for_registered_task() {
@@ -38,7 +75,7 @@ async fn completed_settlement_waits_for_registered_task() {
     assert!(!settlement.is_finished());
     release_tx.send(()).unwrap();
 
-    assert_eq!(run_task.await, Ok(42));
+    assert_eq!(run_task.await.unwrap(), 42);
     assert_eq!(
         settlement.await.unwrap(),
         Settlement {
@@ -70,7 +107,7 @@ async fn cancelled_settlement_notifies_registered_task() {
         })
         .await;
 
-    assert_eq!(run_task.await, Ok("cancelled"));
+    assert_eq!(run_task.await.unwrap(), "cancelled");
     assert_eq!(
         settlement,
         Settlement {
@@ -102,7 +139,7 @@ async fn cancelled_settlement_force_aborts_unfinished_task() {
         })
         .await;
 
-    assert_eq!(run_task.await, Err(RunTaskError::Stopped));
+    assert!(run_task.await.unwrap_err().is_cancelled());
     assert_eq!(
         settlement,
         Settlement {
@@ -160,7 +197,7 @@ async fn session_operation_uses_the_same_control_without_a_fake_turn() {
         })
         .await;
 
-    assert_eq!(task.await, Ok(()));
+    task.await.unwrap();
     assert_eq!(
         settlement,
         Settlement {

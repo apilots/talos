@@ -1,5 +1,16 @@
 # talos-app-protocol Changelog
 
+## 0.4
+
+- ApiError now carries specific English text and required nullable localization.
+- AgentTurnFailed reuses ApiError; retryable is a sibling of error.
+- HTTP no longer recodes missing resources, retry validation, or project deletion
+  failures into route-specific codes. It preserves the same service code and
+  explanation as RPC. Timeline cursor owners emit InvalidCursor/EventCursorExpired
+  directly for all transports; generic request failures remain InvalidRequest.
+- Initialization rejects incompatible protocol versions. Deploy all consumers
+  together and run the SQLx failure-event migration; see ERROR_MODEL.md for rollback.
+
 ## 0.3
 
 - Add app-server parity methods for `session.compact`, `session.clear`, `session.active_turn`, `session.history`, and `turn.retry`.

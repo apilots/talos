@@ -56,15 +56,15 @@ describeIntegration("StdioAppServerClient integration", () => {
         clientRequestId: "ts-sdk-app-server-smoke",
       });
       await waitFor(
-        () => events.some((event) => event.event.payload.type === "turnCompleted"),
+        () => events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "turnCompleted"),
         90_000,
       );
     } finally {
       unsubscribe();
     }
 
-    expect(events.some((event) => event.event.payload.type === "turnStarted")).toBe(true);
-    expect(events.some((event) => event.event.payload.type === "messageBlockDelta")).toBe(true);
+    expect(events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "turnStarted")).toBe(true);
+    expect(events.some((event) => event.event.type === "agent" && event.event.data.payload.type === "messageBlockDelta")).toBe(true);
   }, 120_000);
 });
 

@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use tokio::sync::{oneshot, Notify};
-use tokio::task::AbortHandle;
+use tokio::sync::Notify;
+use tokio::task::{AbortHandle, JoinError, JoinHandle};
 
 use crate::{
     Cancellation, CancellationMode, RunControlScope, RunTermination, Settlement, SettlementKind,
@@ -61,13 +61,6 @@ pub enum SpawnError {
     CapacityExceeded,
 }
 
-/// Failure to receive the output of a registered Run task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunTaskError {
-    /// The task stopped without returning its business output.
-    Stopped,
-}
-
 /// Business output and cleanup confirmation returned by one Run task.
 #[derive(Debug)]
 pub enum RunTaskCompletion<T> {
@@ -78,8 +71,10 @@ pub enum RunTaskCompletion<T> {
 }
 
 /// Awaitable business output for one task owned by `RunTaskGroup`.
+/// Tokio retains panic/cancellation diagnostics; product mapping belongs to
+/// the supervisor, not this lifecycle capability.
 pub struct RunTask<T> {
-    output: oneshot::Receiver<T>,
+    task: JoinHandle<T>,
 }
 
 impl<T> std::fmt::Debug for RunTask<T> {
@@ -89,12 +84,10 @@ impl<T> std::fmt::Debug for RunTask<T> {
 }
 
 impl<T> Future for RunTask<T> {
-    type Output = Result<T, RunTaskError>;
+    type Output = Result<T, JoinError>;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.output)
-            .poll(context)
-            .map(|result| result.map_err(|_| RunTaskError::Stopped))
+        Pin::new(&mut self.task).poll(context)
     }
 }
 
@@ -157,7 +150,6 @@ impl RunTaskGroup {
 
         let cancellation = self.inner.cancellation.clone();
         let group = self.clone();
-        let (output_tx, output_rx) = oneshot::channel();
         let task = tokio::spawn(async move {
             let mut guard = TaskGuard::new(group, id);
             let (output, cleanup) = match factory(cancellation).await {
@@ -168,7 +160,7 @@ impl RunTaskGroup {
                 ),
             };
             guard.complete(cleanup);
-            let _ = output_tx.send(output);
+            output
         });
         state.tasks.insert(
             id,
@@ -186,8 +178,7 @@ impl RunTaskGroup {
             active_tasks = state.tasks.len(),
             "run_task_registered"
         );
-        drop(task);
-        Ok(RunTask { output: output_rx })
+        Ok(RunTask { task })
     }
 
     pub(crate) fn new(scope: RunControlScope, cancellation: Cancellation) -> Self {

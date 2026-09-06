@@ -17,9 +17,12 @@ pub(super) async fn record_turn_usage(
     pool: &SqlitePool,
     update: TurnUsageUpdate,
 ) -> TalosResult<()> {
-    let mut transaction = SqliteWriteTransaction::begin(pool)
-        .await
-        .map_err(|error| TalosError::internal(format!("begin profile usage update: {error}")))?;
+    let mut transaction = SqliteWriteTransaction::begin(pool).await.map_err(|error| {
+        TalosError::internal_with_source(
+            "begin profile usage update; technical details were withheld.",
+            error,
+        )
+    })?;
     let existing = sqlx::query(
         "SELECT user_id, last_request_id, model_provider, model_id, input_tokens, output_tokens, total_tokens, cache_creation_input_tokens, cache_read_input_tokens, usage_available, finalized, timezone FROM profile_turn_usage WHERE usage_kind = 'turn' AND session_id = ? AND turn_id = ?",
     )
@@ -47,7 +50,10 @@ pub(super) async fn record_turn_usage(
                 .map_err(storage_error("discard cancelled profile turn usage"))?;
         }
         return transaction.commit().await.map_err(|error| {
-            TalosError::internal(format!("commit cancelled profile usage discard: {error}"))
+            TalosError::internal_with_source(
+                "commit cancelled profile usage discard; technical details were withheld.",
+                error,
+            )
         });
     }
 
@@ -59,7 +65,10 @@ pub(super) async fn record_turn_usage(
             == update.request_id
         {
             transaction.commit().await.map_err(|error| {
-                TalosError::internal(format!("commit duplicate profile usage: {error}"))
+                TalosError::internal_with_source(
+                    "commit duplicate profile usage; technical details were withheld.",
+                    error,
+                )
             })?;
             return Ok(());
         }
@@ -69,7 +78,10 @@ pub(super) async fn record_turn_usage(
             != 0
         {
             transaction.commit().await.map_err(|error| {
-                TalosError::internal(format!("commit finalized profile replay: {error}"))
+                TalosError::internal_with_source(
+                    "commit finalized profile replay; technical details were withheld.",
+                    error,
+                )
             })?;
             return Ok(());
         }
@@ -135,10 +147,12 @@ pub(super) async fn record_turn_usage(
         .map_err(storage_error("insert profile turn usage"))?;
     }
 
-    transaction
-        .commit()
-        .await
-        .map_err(|error| TalosError::internal(format!("commit profile usage update: {error}")))
+    transaction.commit().await.map_err(|error| {
+        TalosError::internal_with_source(
+            "commit profile usage update; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 pub(super) async fn discard_turn_usage(
@@ -161,7 +175,7 @@ async fn record_model_call_usage(
     update: ModelCallUsageUpdate,
 ) -> TalosResult<()> {
     if update.kind == talos_types::ModelUsageKind::Turn {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "Turn usage requires TurnUsageUpdate".to_string(),
         ));
@@ -208,7 +222,7 @@ async fn record_model_call_usage(
         return if matches {
             Ok(())
         } else {
-            Err(TalosError::public(
+            Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "profile model-call usage context changed for one request".to_string(),
             ))
@@ -252,13 +266,13 @@ pub(super) async fn delete_finalized_before(
     limit: usize,
 ) -> TalosResult<u64> {
     if limit == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "profile usage retention batch size must be > 0".to_string(),
         ));
     }
     let limit = i64::try_from(limit).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "profile usage retention batch size is too large".to_string(),
         )
@@ -306,7 +320,7 @@ fn validate_existing_turn(
     if matches {
         Ok(())
     } else {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "profile turn usage context changed during a logical turn".to_string(),
         ))

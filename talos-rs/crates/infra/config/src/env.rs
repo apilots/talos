@@ -51,11 +51,15 @@ impl EnvSecretStore {
         match std::fs::read_to_string(&self.path) {
             Ok(content) => Ok(parse_dotenv_filtered(&content)),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
-            Err(err) => Err(TalosError::internal(format!(
-                "failed to read env file {}: {}",
-                self.path.display(),
-                err
-            ))),
+            Err(err) => Err({
+                let diagnostic =
+                    format!("failed to read env file {}: {}", self.path.display(), err);
+                TalosError::internal_with_source(
+                    "Failed to read env file; technical details were withheld.",
+                    err,
+                )
+                .context(diagnostic)
+            }),
         }
     }
 
@@ -66,11 +70,7 @@ impl EnvSecretStore {
         match talos_fs::std_fs().write_file_with(&self.path, "", WriteOptions::create_new()) {
             Ok(()) => Ok(()),
             Err(err) if err.is_code(talos_error::ErrorCode::Conflict) => Ok(()),
-            Err(err) => Err(TalosError::internal(format!(
-                "failed to create env file {}: {}",
-                self.path.display(),
-                err
-            ))),
+            Err(err) => Err(err.context(format!("create env file {}", self.path.display()))),
         }
     }
 
@@ -88,10 +88,8 @@ impl EnvSecretStore {
 
     pub fn set(&self, key: &str, value: &str) -> TalosResult<()> {
         if !is_talos_env_key(key) || !is_valid_env_name(key) {
-            return Err(TalosError::internal(format!(
-                "invalid talos env key '{}'",
-                key
-            )));
+            return Err(TalosError::internal("Invalid talos env key.")
+                .context(format!("invalid talos env key '{}'", key)));
         }
         let mut values = self.read_filtered()?;
         values.insert(key.to_string(), value.to_string());
@@ -117,13 +115,7 @@ impl EnvSecretStore {
         }
         talos_fs::std_fs()
             .write_file(&self.path, &output)
-            .map_err(|err| {
-                TalosError::internal(format!(
-                    "failed to write env file {}: {}",
-                    self.path.display(),
-                    err
-                ))
-            })
+            .map_err(|err| err.context(format!("write env file {}", self.path.display())))
     }
 }
 

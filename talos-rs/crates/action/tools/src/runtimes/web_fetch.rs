@@ -35,7 +35,7 @@ pub struct WebFetchResponse {
 
 pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
     if request.max_chars == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "max_chars must be greater than zero".to_string(),
         ));
@@ -47,20 +47,20 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
         .user_agent(DEFAULT_WEB_USER_AGENT)
         .build()
         .map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("build web client: {err}"),
             )
         })?;
     let response = client.get(url.clone()).send().await.map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("fetch web content: {err}"),
         )
     })?;
     let status = response.status();
     if !status.is_success() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("web_fetch received non-success status: {status}"),
         ));
@@ -73,7 +73,7 @@ pub async fn run(request: &WebFetchRequest) -> TalosResult<WebFetchResponse> {
         .and_then(|value| value.to_str().ok())
         .map(|value| value.split(';').next().unwrap_or(value).trim().to_string());
     let body = response.text().await.map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("read web content: {err}"),
         )

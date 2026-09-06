@@ -17,21 +17,31 @@ pub(crate) fn scan_roots(source: &MarketplaceSource, root: &Path) -> Vec<PathBuf
 
 pub(crate) fn ensure_contained_dir(root: &Path, path: &Path) -> TalosResult<()> {
     let root = fs::canonicalize(root).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to canonicalize plugin source root `{}`: {err}",
             root.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to canonicalize plugin source root; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     let path = fs::canonicalize(path).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to canonicalize plugin source path `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to canonicalize plugin source path; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     if path.is_dir() && path.starts_with(&root) {
         return Ok(());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::InvalidRequest,
         format!(
             "plugin source path `{}` escaped root `{}`",
@@ -158,25 +168,37 @@ fn collect_skill_dirs(
 
 fn child_dirs(path: &Path) -> TalosResult<Vec<PathBuf>> {
     let entries = fs::read_dir(path).map_err(|err| {
-        TalosError::internal(format!(
+        let diagnostic = format!(
             "failed to read plugin source path `{}`: {err}",
             path.display()
-        ))
+        );
+        TalosError::internal_with_source(
+            "Failed to read plugin source path; technical details were withheld.",
+            err,
+        )
+        .context(diagnostic)
     })?;
     let mut child_dirs = Vec::new();
     for entry in entries {
         let entry = entry.map_err(|err| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "failed to read plugin source path `{}` entry: {err}",
                 path.display()
-            ))
+            );
+            TalosError::internal_with_source(
+                "Failed to read plugin source path entry; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
         let child_path = entry.path();
         let file_type = entry.file_type().map_err(|err| {
-            TalosError::internal(format!(
-                "failed to inspect `{}`: {err}",
-                child_path.display()
-            ))
+            let diagnostic = format!("failed to inspect `{}`: {err}", child_path.display());
+            TalosError::internal_with_source(
+                "Failed to inspect the plugin file; technical details were withheld.",
+                err,
+            )
+            .context(diagnostic)
         })?;
         if file_type.is_dir() {
             child_dirs.push(child_path);

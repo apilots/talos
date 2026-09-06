@@ -111,7 +111,7 @@ export class DesktopAppServerController {
     bridge.onExit((status) => this.handleExit(status));
     bridge.onStderr((chunk) => {
       if (chunk.trim()) {
-        this.emitRuntimeState("ready", chunk.trim());
+        console.error("App-server diagnostics:", chunk.trim());
       }
     });
     bridge.onServerRequest((request) => this.handleServerRequest(request));
@@ -128,7 +128,7 @@ export class DesktopAppServerController {
   }
 
   private handleEvent(event: AppProtocol.TimelineEvent): void {
-    const subscription = this.subscriptions.get(event.event.identity.sessionId);
+    const subscription = this.subscriptions.get(event.event.data.identity.sessionId);
     if (subscription) {
       subscription.lastEventId = event.eventId;
     }
@@ -140,8 +140,18 @@ export class DesktopAppServerController {
     this.options.onSubscriptionTerminated?.(notification);
   }
 
-  private handleError(error: Error): void {
-    this.emitRuntimeState("error", error.message);
+  private handleError(error: unknown): void {
+    console.error("App-server transport failed:", error);
+    const message = "The app-server event stream failed. Please reconnect.";
+    this.emitRuntimeState("error", message);
+    for (const subscription of [...this.subscriptions.values()]) {
+      this.handleSubscriptionTerminated({
+        subscriptionId: subscription.subscriptionId,
+        sessionId: subscription.sessionId,
+        reason: "interrupted",
+        message,
+      });
+    }
   }
 
   private handleServerRequest(request: AppProtocol.JsonRpcRequest): Promise<unknown> | unknown {
@@ -163,6 +173,8 @@ export class DesktopAppServerController {
     this.reconnecting = this.restartAndReplay().finally(() => {
       this.reconnecting = undefined;
     });
+    // Reconnect reports and terminates subscriptions even without an awaiting request.
+    void this.reconnecting.catch(() => undefined);
   }
 
   private async restartAndReplay(): Promise<void> {
@@ -171,7 +183,7 @@ export class DesktopAppServerController {
       await this.connect();
       await this.replaySubscriptions();
     } catch (error) {
-      this.emitRuntimeState("error", errorMessage(error));
+      this.handleError(error);
       throw error;
     }
   }
@@ -258,8 +270,4 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

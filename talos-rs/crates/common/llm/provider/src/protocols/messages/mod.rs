@@ -226,7 +226,7 @@ fn reasoning_blocks(continuation: Option<ReasoningContinuation>) -> TalosResult<
         return Ok(Vec::new());
     };
 
-    let blocks = match continuation {
+    Ok(match continuation {
         ReasoningContinuation::Text(text) => vec![serde_json::json!({
             "type": "thinking",
             "thinking": text,
@@ -243,14 +243,13 @@ fn reasoning_blocks(continuation: Option<ReasoningContinuation>) -> TalosResult<
                     "type": "redacted_thinking",
                     "data": block.data,
                 })),
-                ReasoningBlock::Summary(_) => Err(TalosError::public(
+                ReasoningBlock::Summary(_) => Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "Messages protocol cannot replay a reasoning summary block".to_string(),
                 )),
             })
             .collect::<TalosResult<Vec<_>>>()?,
-    };
-    Ok(blocks)
+    })
 }
 
 pub fn response_content(
@@ -370,30 +369,31 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{provider_name} stream invalid SSE JSON: {error}"
-                                    ))))
+                                    ); TalosError::internal_with_source("Model response stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
                         };
 
-                        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
                         match event_type {
                             "error" => {
-                                let msg = stream_error_message(&event);
-                                let _ = tx
-                                    .send(Err(TalosError::internal(format!(
-                                        "{provider_name} stream error: {msg}"
-                                    ))))
-                                    .await;
+                                let error = crate::error::stream_response_error(
+                                    event
+                                        .get("error")
+                                        .and_then(|error| error.get("type"))
+                                        .and_then(Value::as_str),
+                                );
+                                let _ = tx.send(Err(error.context(provider_name))).await;
                                 return;
                             }
                             "content_block_delta" => {
                                 if let Some(delta) = event
                                     .get("delta")
                                     .and_then(|d| d.get("text"))
-                                    .and_then(|t| t.as_str())
+                                    .and_then(Value::as_str)
                                 {
                                     let _ = tx
                                         .send(Ok(ChatChunk {
@@ -407,7 +407,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                                 if let Some(reason) = event
                                     .get("delta")
                                     .and_then(|d| d.get("stop_reason"))
-                                    .and_then(|v| v.as_str())
+                                    .and_then(Value::as_str)
                                 {
                                     stop_reason = Some(reason.to_string());
                                 }
@@ -431,7 +431,10 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -482,23 +485,24 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{provider_name} model block stream invalid SSE JSON: {error}"
-                                    ))))
+                                    ); TalosError::internal_with_source("Model response model block stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
                         };
 
-                        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let event_type = event.get("type").and_then(Value::as_str).unwrap_or("");
                         match event_type {
                             "error" => {
-                                let msg = stream_error_message(&event);
-                                let _ = tx
-                                    .send(Err(TalosError::internal(format!(
-                                        "{provider_name} stream error: {msg}"
-                                    ))))
-                                    .await;
+                                let error = crate::error::stream_response_error(
+                                    event
+                                        .get("error")
+                                        .and_then(|error| error.get("type"))
+                                        .and_then(Value::as_str),
+                                );
+                                let _ = tx.send(Err(error.context(provider_name))).await;
                                 return;
                             }
                             "message_start" => match stream_input_usage(&event) {
@@ -542,7 +546,7 @@ pub fn model_blocks(
                                 if let Some(reason) = event
                                     .get("delta")
                                     .and_then(|d| d.get("stop_reason"))
-                                    .and_then(|v| v.as_str())
+                                    .and_then(Value::as_str)
                                 {
                                     stop_reason = Some(reason.to_string());
                                 }
@@ -557,7 +561,7 @@ pub fn model_blocks(
                             "message_stop" => {
                                 if !active_blocks.is_empty() {
                                     let _ = tx
-                                        .send(Err(TalosError::internal(format!(
+                                        .send(Err(TalosError::internal("Model response stream stopped with active content blocks.").context(format!(
                                             "{provider_name} stream stopped with active content blocks"
                                         ))))
                                         .await;
@@ -623,7 +627,10 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -658,14 +665,6 @@ fn block_model_item_id(item_prefix: &str, index: usize, kind: &str) -> String {
     format!("{item_prefix}-block-{index}-{kind}")
 }
 
-fn stream_error_message(event: &Value) -> &str {
-    event
-        .get("error")
-        .and_then(|e| e.get("message"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown error")
-}
-
 async fn send_model_block_event(
     tx: &mpsc::Sender<TalosResult<ModelBlockStreamEvent>>,
     event: ModelBlockStreamEvent,
@@ -683,11 +682,11 @@ async fn start_content_block(
     let block = event.get("content_block");
     let block_type = block
         .and_then(|b| b.get("type"))
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("");
     let provider_item_id = block
         .and_then(|b| b.get("id"))
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .map(str::to_string)
         .or_else(|| Some(format!("content_block:{index}")));
 
@@ -700,12 +699,12 @@ async fn start_content_block(
                     provider_item_id: provider_item_id.clone(),
                     text: block
                         .and_then(|b| b.get("thinking"))
-                        .and_then(|v| v.as_str())
+                        .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
                     signature: block
                         .and_then(|b| b.get("signature"))
-                        .and_then(|v| v.as_str())
+                        .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
                 },
@@ -725,7 +724,7 @@ async fn start_content_block(
                     provider_item_id,
                     data: block
                         .and_then(|b| b.get("data"))
-                        .and_then(|v| v.as_str())
+                        .and_then(Value::as_str)
                         .unwrap_or_default()
                         .to_string(),
                 },
@@ -750,11 +749,11 @@ async fn start_content_block(
         "tool_use" => {
             let call_id = block
                 .and_then(|b| b.get("id"))
-                .and_then(|v| v.as_str())
+                .and_then(Value::as_str)
                 .map(str::to_string);
             let tool_name = block
                 .and_then(|b| b.get("name"))
-                .and_then(|v| v.as_str())
+                .and_then(Value::as_str)
                 .map(str::to_string);
             let model_item_id = block_model_item_id(item_prefix, index, "tool");
             (
@@ -789,7 +788,7 @@ async fn send_content_block_delta(
     let delta = event.get("delta");
     let delta_type = delta
         .and_then(|d| d.get("type"))
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .unwrap_or("");
     let Some(active_block) = active_blocks.get_mut(&index) else {
         return true;
@@ -804,7 +803,7 @@ async fn send_content_block_delta(
             },
         ) => delta
             .and_then(|d| d.get("thinking"))
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .map(|fragment| {
                 text.push_str(fragment);
                 (
@@ -817,7 +816,7 @@ async fn send_content_block_delta(
         ("signature_delta", ActiveMessagesBlock::Reasoning { signature, .. }) => {
             if let Some(fragment) = delta
                 .and_then(|d| d.get("signature"))
-                .and_then(|v| v.as_str())
+                .and_then(Value::as_str)
             {
                 signature.push_str(fragment);
             }
@@ -825,7 +824,7 @@ async fn send_content_block_delta(
         }
         ("text_delta", ActiveMessagesBlock::AssistantText { model_item_id }) => delta
             .and_then(|d| d.get("text"))
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .map(|text| {
                 (
                     model_item_id.clone(),
@@ -836,7 +835,7 @@ async fn send_content_block_delta(
             }),
         ("input_json_delta", ActiveMessagesBlock::ToolCall { model_item_id }) => delta
             .and_then(|d| d.get("partial_json"))
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .map(|partial_json| {
                 (
                     model_item_id.clone(),

@@ -1,7 +1,7 @@
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 
-use talos_agent::{AgentError, AgentErrorKind, AgentHarness, AgentResult};
+use talos_agent::{AgentError, AgentHarness, AgentResult};
 use tokio::sync::RwLock;
 
 /// Coordinator-owned registry of available AgentHarness instances.
@@ -49,10 +49,12 @@ impl AgentRegistry {
     /// Resolve a registered Agent by id.
     pub(crate) async fn get(&self, agent_id: &str) -> AgentResult<Arc<dyn AgentHarness>> {
         let registrations = self.registrations.read().await;
-        registrations
-            .get(agent_id)
-            .cloned()
-            .ok_or_else(|| AgentError::new(AgentErrorKind::AgentNotFound, agent_id.to_string()))
+        registrations.get(agent_id).cloned().ok_or_else(|| {
+            AgentError::new(
+                talos_error::ErrorCode::ResourceNotFound,
+                agent_id.to_string(),
+            )
+        })
     }
 
     /// List Harnesses for Coordinator shutdown.

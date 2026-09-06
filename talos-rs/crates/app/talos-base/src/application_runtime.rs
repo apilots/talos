@@ -73,7 +73,7 @@ pub(crate) async fn build_application_runtime_with_migration_dir(
         .find(|definition| definition.enabled)
         .map(|definition| definition.id.clone())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "no enabled agent definitions".to_string(),
             )

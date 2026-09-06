@@ -14,3 +14,6 @@ talos-sandbox-spi.workspace = true
 [dev-dependencies]
 talos-sandbox-spi = { workspace = true, features = ["provider-contract-tests"] }
 tempfile = "3"
+
+[lints]
+workspace = true

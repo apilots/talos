@@ -66,12 +66,14 @@ pub(super) fn usage_from_aggregate_row(row: &sqlx::sqlite::SqliteRow) -> TalosRe
 }
 
 pub(super) fn storage_error(action: &'static str) -> impl FnOnce(sqlx::Error) -> TalosError {
-    move |error| TalosError::internal(format!("{action}: {error}"))
+    move |error| talos_storage::database_error(action, error)
 }
 
 fn token_value(value: i64, name: &str) -> TalosResult<u32> {
-    u32::try_from(value)
-        .map_err(|_| TalosError::internal(format!("profile {name} is outside the supported range")))
+    u32::try_from(value).map_err(|_| {
+        TalosError::internal("Profile is outside the supported range.")
+            .context(format!("profile {name} is outside the supported range"))
+    })
 }
 
 fn optional_token_value(value: Option<i64>, name: &str) -> TalosResult<Option<u32>> {

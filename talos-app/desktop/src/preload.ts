@@ -6,12 +6,12 @@ import { TALOS_IPC } from "./ipc";
 import type { AppProtocol } from "@talos/sdk-core";
 
 const bridge: TalosDesktopBridge = {
-  connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.InitializeResponse>,
+  connect: () => ipcRenderer.invoke(TALOS_IPC.connect) as Promise<AppProtocol.ApiResponse<AppProtocol.InitializeResponse>>,
   invoke: <T>(
     method: AppProtocol.ClientMethod,
     params: unknown,
     options?: { actorCredentials?: AppProtocol.ActorCredentials | null },
-  ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<T>,
+  ) => ipcRenderer.invoke(TALOS_IPC.invoke, method, params, options) as Promise<AppProtocol.ApiResponse<T>>,
   openExternal: (url: string) => ipcRenderer.invoke(TALOS_IPC.openExternal, url) as Promise<void>,
   onEvent: (handler) => {
     const listener = (_event: IpcRendererEvent, timelineEvent: AppProtocol.TimelineEvent) => {

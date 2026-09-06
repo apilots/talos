@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { evaluate } from "./desktop-smoke-evaluate.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const desktopDir = path.resolve(scriptDir, "..");
@@ -83,7 +84,7 @@ try {
   await cdp.call("Page.enable");
   await waitForExpression(cdp, "Boolean(window.talos)", 30_000);
   await waitForExpression(cdp, "document.title === 'Talos'", 30_000);
-  const serverInfo = await evaluate(cdp, "window.talos.connect().then((response) => response.server_info)");
+  const serverInfo = await evaluate(cdp, "window.talos.connect().then((response) => { if (response.status === 'error') throw response.error; return response.data.server_info; })");
 
   if (serverInfo?.auth_enabled === true) {
     await waitForExpression(
@@ -501,7 +502,10 @@ function installSmokeInvoke(cdp) {
         window.__talosSmokeActorCredentials
           ? { actorCredentials: window.__talosSmokeActorCredentials }
           : undefined
-      );
+      ).then((response) => {
+        if (response.status === "error") throw response.error;
+        return response.data;
+      });
       return true;
     })()`,
   );
@@ -594,7 +598,7 @@ async function waitForActiveTurnState(cdp, sessionId, state, timeoutMs) {
       );
     } catch (error) {
       lastError = error;
-      if (!errorMessage(error).toLowerCase().includes("resource not found")) {
+      if (error.code !== "resourceNotFound") {
         throw error;
       }
       await sleep(300);
@@ -628,7 +632,7 @@ async function waitForCompletedTurnAfter(cdp, sessionId, completedEventSeq, time
       );
     } catch (error) {
       lastError = error;
-      if (!errorMessage(error).toLowerCase().includes("resource not found")) {
+      if (error.code !== "resourceNotFound") {
         throw error;
       }
       await sleep(300);
@@ -810,18 +814,6 @@ async function waitForEvaluate(cdp, expression, timeoutMs) {
     }
   }
   throw new Error(`Timed out evaluating expression: ${expression}\n${errorMessage(lastError)}`);
-}
-
-async function evaluate(cdp, expression) {
-  const result = await cdp.call("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-  });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.text ?? "Runtime.evaluate failed.");
-  }
-  return result.result.value;
 }
 
 async function captureScreenshot(cdp, outputPath) {

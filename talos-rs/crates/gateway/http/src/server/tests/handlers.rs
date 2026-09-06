@@ -267,6 +267,17 @@ async fn test_list_sessions_handler_returns_data_array() {
 #[tokio::test]
 async fn test_get_session_handler_returns_not_found_for_unknown_session() {
     let state = test_state(false).await;
+    let expected = state
+        .gateway
+        .get_session(
+            &crate::server::access::shared_actor(&test_auth()),
+            talos_types::SessionGetRequest {
+                session_id: "unknown-session".to_string(),
+            },
+        )
+        .await
+        .expect_err("unknown session should fail in the service")
+        .to_api_error();
 
     let err = get_session_handler(
         State(state),
@@ -276,7 +287,15 @@ async fn test_get_session_handler_returns_not_found_for_unknown_session() {
     .await
     .expect_err("unknown session should return error");
 
-    assert_eq!(err.into_response().status(), StatusCode::NOT_FOUND);
+    let response = err.into_response();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let body = axum::body::to_bytes(response.into_body(), 16_384)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&body).unwrap(),
+        serde_json::to_value(talos_types::ApiResponse::<()>::error(expected)).unwrap()
+    );
 }
 
 #[tokio::test]

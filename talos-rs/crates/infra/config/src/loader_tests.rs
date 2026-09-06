@@ -1,5 +1,36 @@
 use super::*;
 
+#[test]
+fn config_file_failures_preserve_the_filesystem_cause_and_public_explanation() {
+    let directory = tempfile::tempdir().unwrap();
+    let paths = TalosPaths::from_home(directory.path().join("home"));
+    paths.ensure_base_dirs().unwrap();
+    std::fs::create_dir(&paths.config_file).unwrap();
+    let resource = write_resource_template(directory.path(), "gateway: {}\n");
+    let template = default_config_template_path(resource);
+    let config = Config::default();
+    let yaml = serde_yaml::to_string(&config).unwrap();
+    let failures = [
+        (
+            copy_default_config_template_from_candidates(&paths, vec![template.clone()])
+                .unwrap_err(),
+            talos_fs::copy_file(&template, &paths.config_file).unwrap_err(),
+        ),
+        (
+            save_config(&config, paths.config_file.to_str().unwrap()).unwrap_err(),
+            talos_fs::std_fs()
+                .write_file(&paths.config_file, &yaml)
+                .unwrap_err(),
+        ),
+    ];
+    for (propagated, original) in failures {
+        assert_eq!(propagated.to_api_error(), original.to_api_error());
+        assert!(std::error::Error::source(&propagated)
+            .unwrap()
+            .is::<std::io::Error>());
+    }
+}
+
 fn write_resource_template(root: &Path, content: &str) -> PathBuf {
     let conf_dir = root.join("conf");
     std::fs::create_dir_all(&conf_dir).expect("resource conf dir should be created");

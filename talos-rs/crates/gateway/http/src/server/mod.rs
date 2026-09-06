@@ -2,6 +2,10 @@ mod access;
 mod auth;
 mod auth_session;
 mod errors;
+
+#[cfg(test)]
+#[path = "error_contract_tests.rs"]
+mod error_contract_tests;
 mod events;
 mod files;
 mod fs;
@@ -325,7 +329,7 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Failed to bind to {}:{}: {}", self.host, self.port, e);
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::ServiceUnavailable,
                     e.to_string(),
                 )
@@ -340,7 +344,7 @@ impl HttpServer {
             .await
             .map_err(|e| {
                 error!("Server error: {}", e);
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::ServiceUnavailable,
                     e.to_string(),
                 )

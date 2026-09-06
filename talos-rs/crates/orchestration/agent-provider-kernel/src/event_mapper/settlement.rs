@@ -1,4 +1,4 @@
-use talos_agent::{AgentError, AgentErrorKind, AgentResult};
+use talos_agent::{AgentError, AgentResult};
 use talos_agent_api::{
     AgentAssistantTextPhase, AgentContextCompactionDelta, AgentMessageBlockDeltaContent,
     AgentMessageBlockStatus, AgentMessageStatus,
@@ -80,7 +80,7 @@ impl KernelAgentEventMapper {
                         outcome: (!is_interrupted(error))
                             .then_some(ContextCompactionOutcome::FailedInternalError),
                         metrics: None,
-                        message: Some(error.message.clone()),
+                        message: Some(error.error().to_api_error().message),
                     }),
                 )
                 .await?;
@@ -106,16 +106,14 @@ impl KernelAgentEventMapper {
     pub(crate) async fn settle_failure(&mut self, error: AgentError) -> AgentError {
         match self.finish_failed(&error).await {
             Ok(()) => error,
-            Err(settlement_error) => settlement_error.with_source(format!(
-                "Provider failed before lifecycle settlement: {error}"
-            )),
+            Err(settlement_error) => {
+                talos_logging::report_error(error.error());
+                settlement_error.context("close failed Provider lifecycle")
+            }
         }
     }
 }
 
 fn is_interrupted(error: &AgentError) -> bool {
-    matches!(
-        error.kind,
-        AgentErrorKind::Interrupted | AgentErrorKind::RunFailure(talos_error::ErrorCode::Cancelled)
-    )
+    error.error().is_code(talos_error::ErrorCode::Cancelled)
 }

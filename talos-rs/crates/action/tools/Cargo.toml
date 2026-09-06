@@ -38,3 +38,6 @@ html2text = "0.12"
 
 [dev-dependencies]
 tempfile = "3.8"
+
+[lints]
+workspace = true

@@ -81,7 +81,7 @@ async fn compact_mapped(
         ) => result.map_err(AgentError::from)?,
         () = control.cancellation().requested() => {
             return Err(AgentError::new(
-                talos_agent::AgentErrorKind::Interrupted,
+                talos_error::ErrorCode::Cancelled,
                 "Kernel context compaction was cancelled",
             ));
         }

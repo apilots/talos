@@ -27,7 +27,7 @@ impl MemoryStore {
             .timestamp_opt(batch.occurred_at, 0)
             .single()
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "invalid Dream Memory occurred_at".to_string(),
                 )
@@ -37,7 +37,7 @@ impl MemoryStore {
             .format("%Y-%m-%d")
             .to_string();
         if request.date().to_string() != source_date {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "Dream Memory write date does not match occurred_at".to_string(),
             ));
@@ -52,7 +52,7 @@ impl MemoryStore {
             let current = talos_fs::read_file(&file_path).await?;
             if &DreamMemoryDayRevision::from_content(current.as_deref()) != request.base_revision()
             {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "Dream Memory day revision mismatch".to_string(),
                 ));

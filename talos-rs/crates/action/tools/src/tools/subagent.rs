@@ -292,7 +292,7 @@ impl Tool for ListAgentsTool {
 
 fn control(context: &ToolContext) -> TalosResult<Arc<dyn crate::AgentControl>> {
     context.agent_control().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "subagent control is not configured".to_string(),
         )
@@ -301,13 +301,13 @@ fn control(context: &ToolContext) -> TalosResult<Arc<dyn crate::AgentControl>> {
 
 fn trusted_caller(context: &ToolContext) -> TalosResult<AgentCaller> {
     let turn_id = context.turn_id().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "subagent tool requires an active parent turn".to_string(),
         )
     })?;
     let agent_id = context.agent_id().ok_or_else(|| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "subagent tool requires an active parent agent".to_string(),
         )
@@ -321,19 +321,19 @@ fn trusted_caller(context: &ToolContext) -> TalosResult<AgentCaller> {
 
 fn collaboration_payload(result: CollaborationToolResult) -> TalosResult<ToolOutputPayload> {
     let structured_content = serde_json::to_value(&result).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("serialize subagent tool result: {err}"),
         )
     })?;
     let encoded = serde_json::to_vec(&structured_content).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("encode subagent tool result: {err}"),
         )
     })?;
     if encoded.len() > MAX_COLLABORATION_RESULT_BYTES {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("subagent tool result exceeds the {MAX_COLLABORATION_RESULT_BYTES} byte limit"),
         ));

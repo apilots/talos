@@ -1,15 +1,16 @@
 use super::*;
 use talos_agent::AgentInterruptParams;
-use talos_agent_api::{
-    AgentErrorInfo, AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome,
-};
+use talos_agent_api::{AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome};
 
 impl TurnService {
     pub(crate) async fn canonical_active_turn(
         &self,
         session_id: &str,
     ) -> TalosResult<Option<talos_store::session::AgentActiveTurnRecord>> {
-        self.execution_store.get_agent_active_turn(session_id).await
+        self.execution
+            .execution_store
+            .get_agent_active_turn(session_id)
+            .await
     }
 
     pub(crate) async fn interrupt_canonical_turn(
@@ -19,6 +20,7 @@ impl TurnService {
     ) -> TalosResult<AgentInterruptOutcome> {
         let identity = AgentTurnRef::new(&session.id, turn_id);
         let Some(active) = self
+            .execution
             .execution_store
             .get_agent_active_turn(&identity.session_id)
             .await?
@@ -40,7 +42,12 @@ impl TurnService {
         let cancellation = if active.state == ActiveTurnState::Cancelling {
             None
         } else {
-            match self.execution_store.begin_cancellation(&identity).await {
+            match self
+                .execution
+                .execution_store
+                .begin_cancellation(&identity)
+                .await
+            {
                 Ok(admission) => Some(admission),
                 Err(error) if error.is_code(talos_error::ErrorCode::Conflict) => {
                     return self.completed_or_missing_interrupt(&identity).await;
@@ -49,6 +56,7 @@ impl TurnService {
             }
         };
         let cleanup = match self
+            .execution
             .coordinator
             .interrupt(AgentInterruptParams {
                 agent_id: session.agent_id.clone(),
@@ -63,6 +71,7 @@ impl TurnService {
             Err(error) => {
                 if let Some(cancellation) = cancellation {
                     if let Err(restore_error) = self
+                        .execution
                         .execution_store
                         .restore_cancellation(cancellation)
                         .await
@@ -85,11 +94,10 @@ impl TurnService {
         }
         self.complete_recovered_turn(
             &identity,
-            AgentErrorInfo {
-                code: talos_error::ErrorCode::Cancelled,
-                message: "Agent Turn was interrupted".to_string(),
-                retryable: false,
-            },
+            talos_agent::AgentError::from(TalosError::new(
+                talos_error::ErrorCode::Cancelled,
+                "Agent Turn was interrupted",
+            )),
             cleanup,
             recovery_owner.expect("orphan interrupt holds Session ownership"),
         )
@@ -103,12 +111,13 @@ impl TurnService {
         &self,
         session: &talos_store::session::SessionRecord,
         identity: &AgentTurnRef,
-        failure: AgentErrorInfo,
+        failure: talos_agent::AgentError,
     ) -> TalosResult<AgentInterruptOutcome> {
         let ownership = self
             .execution
             .begin_session_maintenance(&identity.session_id)?;
         let cleanup = match self
+            .execution
             .coordinator
             .interrupt(AgentInterruptParams {
                 agent_id: session.agent_id.clone(),
@@ -129,7 +138,7 @@ impl TurnService {
     async fn complete_recovered_turn(
         &self,
         identity: &AgentTurnRef,
-        failure: AgentErrorInfo,
+        failure: talos_agent::AgentError,
         cleanup: AgentInterruptOutcome,
         ownership: crate::turn::agent_execution::SessionMaintenanceGuard,
     ) -> TalosResult<AgentInterruptOutcome> {
@@ -150,11 +159,14 @@ impl TurnService {
             )
             .await?;
         drop(ownership);
-        let AgentRunSettlement::Finished { event, .. } = settlement else {
+        let AgentRunSettlement::Finished { event, result, .. } = settlement else {
             return Err(TalosError::internal(
                 "terminal recovery returned a waiting settlement",
             ));
         };
+        if let Err(error) = result {
+            talos_logging::report_error(&error);
+        }
         self.finish_turn(&event, None).await?;
         Ok(cleanup)
     }
@@ -172,26 +184,32 @@ impl TurnService {
 
     async fn has_terminal_fact(&self, identity: &AgentTurnRef) -> TalosResult<bool> {
         let tail = self
+            .execution
             .execution_store
             .get_latest_agent_event_seq(&identity.session_id)
             .await?
             .unwrap_or_default();
         let mut terminal = false;
-        crate::timeline::scan_turn_events(self.execution_store.as_ref(), identity, tail, |event| {
-            terminal = matches!(
-                event.payload,
-                CanonicalAgentEventPayload::TurnCompleted(_)
-                    | CanonicalAgentEventPayload::TurnFailed(_)
-            );
-            Ok(())
-        })
+        crate::timeline::scan_turn_events(
+            self.execution.execution_store.as_ref(),
+            identity,
+            tail,
+            |event| {
+                terminal = matches!(
+                    event.payload,
+                    CanonicalAgentEventPayload::TurnCompleted(_)
+                        | CanonicalAgentEventPayload::TurnFailed(_)
+                );
+                Ok(())
+            },
+        )
         .await?;
         Ok(terminal)
     }
 }
 
 fn missing_active_turn(identity: &AgentTurnRef) -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::ResourceNotFound,
         format!(
             "active turn `{}` for session `{}`",

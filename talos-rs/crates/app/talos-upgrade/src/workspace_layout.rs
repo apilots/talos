@@ -78,7 +78,7 @@ fn backup_source(paths: &TalosPaths) -> PathBuf {
 
 fn validate_backup_boundary(prefix: &Path, backup: &Path) -> TalosResult<()> {
     if prefix.starts_with(backup) || backup.starts_with(prefix) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             format!(
                 "workspace prefix {} overlaps upgrade backup {}",
@@ -103,10 +103,11 @@ fn prepare_stable_backup(source: &Path, backup: &Path) -> TalosResult<bool> {
         return Ok(false);
     }
     let parent = backup.parent().ok_or_else(|| {
-        TalosError::internal(format!(
-            "workspace backup has no parent: {}",
-            backup.display()
-        ))
+        TalosError::internal("workspace backup has no parent; technical details were withheld.")
+            .context(format!(
+                "workspace backup has no parent: {}",
+                backup.display()
+            ))
     })?;
     fs::create_dir_all(parent)
         .map_err(|error| io_error("create workspace upgrade backup directory", parent, error))?;
@@ -156,7 +157,7 @@ fn migrate_legacy_users(backup: &Path, prefix: &Path) -> TalosResult<()> {
         }
         let source = entry.path();
         if !source.is_dir() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::Conflict,
                 format!(
                     "legacy users entry is not a directory: {}",
@@ -175,7 +176,7 @@ fn ensure_directory(path: &Path, label: &str) -> TalosResult<()> {
     if path.is_dir() {
         return Ok(());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         ErrorCode::Conflict,
         format!("{label} is not a directory: {}", path.display()),
     ))
@@ -199,10 +200,11 @@ fn reconcile_tree(source: &Path, target: &Path) -> TalosResult<()> {
         return ensure_files_equal(source, target);
     }
     let parent = target.parent().ok_or_else(|| {
-        TalosError::internal(format!(
-            "workspace target has no parent: {}",
-            target.display()
-        ))
+        TalosError::internal("workspace target has no parent; technical details were withheld.")
+            .context(format!(
+                "workspace target has no parent: {}",
+                target.display()
+            ))
     })?;
     fs::create_dir_all(parent)
         .map_err(|error| io_error("create migrated workspace parent", parent, error))?;
@@ -227,7 +229,7 @@ fn ensure_files_equal(source: &Path, target: &Path) -> TalosResult<()> {
 }
 
 fn conflict<T>(source: &Path, target: &Path) -> TalosResult<T> {
-    Err(TalosError::public(
+    Err(TalosError::new(
         ErrorCode::Conflict,
         format!(
             "workspace migration conflict between {} and {}",
@@ -253,7 +255,14 @@ fn sorted_entries(path: &Path) -> TalosResult<Vec<fs::DirEntry>> {
 }
 
 fn io_error(operation: &str, path: &Path, error: std::io::Error) -> TalosError {
-    TalosError::internal(format!("{operation} {}: {error}", path.display()))
+    {
+        let diagnostic = format!("{operation} {}: {error}", path.display());
+        TalosError::internal_with_source(
+            "Upgrade filesystem operation failed; technical details were withheld.",
+            error,
+        )
+        .context(diagnostic)
+    }
 }
 
 #[cfg(test)]

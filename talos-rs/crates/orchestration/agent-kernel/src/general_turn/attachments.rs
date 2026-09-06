@@ -1,5 +1,5 @@
 use talos_config::ModelInputKind;
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_llm_provider::{
     validate_attachment_usage, Attachment, AttachmentKind, ChatMessage, LlmProvider, Role,
 };
@@ -34,17 +34,17 @@ fn prepare_resolved_attachments(
             .any(|(file_id, attachment)| file_id != &attachment.file_id)
     {
         return Err(TalosError::internal(
-            "attachment reader returned incomplete or reordered results".to_string(),
+            "attachment reader returned incomplete or reordered results",
         ));
     }
 
     let mut attachments = Vec::with_capacity(resolved_attachments.len());
     for resolved in resolved_attachments {
         let actual_size = u64::try_from(resolved.bytes.len())
-            .map_err(|_| TalosError::internal("resolved attachment size overflow".to_string()))?;
+            .map_err(|_| TalosError::internal("resolved attachment size overflow"))?;
         if actual_size != resolved.size_bytes {
             return Err(TalosError::internal(
-                "attachment reader returned inconsistent content size".to_string(),
+                "attachment reader returned inconsistent content size",
             ));
         }
         let kind = if resolved.media_type.starts_with("image/") {
@@ -57,8 +57,8 @@ fn prepare_resolved_attachments(
             AttachmentKind::File => ModelInputKind::File,
         };
         if !selected_model_info.model.input.contains(&model_input) {
-            return Err(TalosError::file_error(
-                TalosFileErrorKind::UnsupportedAttachment,
+            return Err(TalosError::new(
+                ErrorCode::UnsupportedAttachment,
                 format!(
                     "model {} does not support {:?} input",
                     selected_model_info.model.id, kind
@@ -136,12 +136,12 @@ fn attach_to_current_user_message(
     if attachments.is_empty() {
         return Ok(());
     }
-    let message = messages.last_mut().ok_or_else(|| {
-        TalosError::internal("prompt omitted the current user message".to_string())
-    })?;
+    let message = messages
+        .last_mut()
+        .ok_or_else(|| TalosError::internal("prompt omitted the current user message"))?;
     if message.role != Role::User || message.content != input {
         return Err(TalosError::internal(
-            "prompt current user message does not match normalized input".to_string(),
+            "prompt current user message does not match normalized input",
         ));
     }
     *message = ChatMessage::user_with_attachments(message.content.clone(), attachments)?;
@@ -159,7 +159,7 @@ pub(super) fn render_prompt_messages(
 }
 
 fn token_overflow() -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::ContextWindowExceeded,
         "attachment token estimate overflow".to_string(),
     )

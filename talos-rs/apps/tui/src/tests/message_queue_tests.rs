@@ -18,7 +18,7 @@ async fn connected_app() -> (TuiApp, Arc<MockGatewayClient>) {
     let (mut app, client) = app_with_client();
     app.initialize_session().await;
     app.session_id = Some("sess-test".to_string());
-    app.ensure_message_queue_subscription().await;
+    app.ensure_session_subscription().await;
     (app, client)
 }
 
@@ -217,7 +217,7 @@ async fn changed_refreshes_and_disconnect_clears_the_projection() {
         .await
         .unwrap();
 
-    app.poll_message_queue_changes().await;
+    app.poll_session_events().await;
     assert_eq!(app.message_queue.revision, 1);
     assert_eq!(app.message_queue.messages.len(), 1);
 
@@ -227,7 +227,7 @@ async fn changed_refreshes_and_disconnect_clears_the_projection() {
         .unwrap()
         .message_queue_subscribers
         .clear();
-    app.poll_message_queue_changes().await;
+    app.poll_session_events().await;
     assert_eq!(
         app.message_queue,
         MessageQueue {
@@ -264,7 +264,7 @@ async fn auto_dispatched_queue_change_connects_the_new_turn_stream() {
         .await
         .unwrap();
 
-    app.poll_message_queue_changes().await;
+    app.poll_session_events().await;
 
     assert_eq!(
         (
@@ -317,11 +317,11 @@ async fn fast_queue_turn_reconciles_history_after_the_previous_stream_finishes()
         .await
         .unwrap();
 
-    app.poll_message_queue_changes().await;
+    app.poll_session_events().await;
     assert!(app.message_queue_turn_reconcile_pending);
 
     app.finish_active_stream("stream completed", false, false);
-    app.poll_message_queue_changes().await;
+    app.poll_session_events().await;
 
     let transcript = app
         .render_runtime

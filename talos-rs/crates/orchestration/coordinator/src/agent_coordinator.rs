@@ -100,7 +100,7 @@ impl AgentCoordinator for CoordinatorImpl {
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or_else(|| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::Timeout,
                         "Agent Coordinator shutdown timed out",
                     )

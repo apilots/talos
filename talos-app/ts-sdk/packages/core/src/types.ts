@@ -4,7 +4,6 @@ export type {
   AgentAssistantTextPhase,
   AgentContextCompaction,
   AgentContextCompactionDelta,
-  AgentErrorInfo,
   AgentEvent,
   AgentEventPayload,
   AgentExecutionSummary,

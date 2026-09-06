@@ -44,7 +44,7 @@ impl PromptTemplate {
 
         for var in &self.required_vars {
             if !context.contains_key(var) {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!(
                         "Missing required variable '{}' for template: {}",

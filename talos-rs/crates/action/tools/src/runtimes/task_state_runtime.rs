@@ -81,7 +81,7 @@ fn todo_status_label(status: TodoStatus) -> &'static str {
 
 fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
     if items.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "todos must contain at least one item",
         ));
@@ -90,19 +90,19 @@ fn validate_todo_items(items: &[TodoItem]) -> TalosResult<()> {
     let mut seen = std::collections::BTreeSet::new();
     for item in items {
         if item.id.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "todo id cannot be empty",
             ));
         }
         if item.content.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "todo content cannot be empty",
             ));
         }
         if !seen.insert(item.id.clone()) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 format!("duplicate todo id `{}`", item.id),
             ));

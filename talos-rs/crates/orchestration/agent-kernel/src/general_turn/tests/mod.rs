@@ -273,7 +273,7 @@ impl DreamMemoryFormationStore for FailingMemoryWriter {
         _scope: &'a MemoryScope,
         _request: talos_memory::DreamMemoryWriteRequest,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = TalosResult<()>> + Send + 'a>> {
-        Box::pin(async { Err(TalosError::internal("memory write failed".to_string())) })
+        Box::pin(async { Err(TalosError::internal("memory write failed")) })
     }
 }
 
@@ -392,7 +392,7 @@ impl KernelMemoryProgressStore for TestMemoryStore {
         ) {
             Ok(_) => Ok(()),
             Err(current) if current >= next_until_seq => Ok(()),
-            Err(current) => Err(TalosError::public(
+            Err(current) => Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("memory cursor conflict: expected {expected_until_seq}, current {current}"),
             )),

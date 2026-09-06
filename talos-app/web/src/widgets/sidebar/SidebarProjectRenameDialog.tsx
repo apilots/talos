@@ -1,4 +1,6 @@
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -18,7 +20,8 @@ export function SidebarProjectRenameDialog({
   onSave,
 }: SidebarProjectRenameDialogProps) {
   const [name, setName] = useState(initialName);
-  const [error, setError] = useState<string | null>(null);
+  useTranslation("errors");
+  const [error, setError] = useState<ReturnType<typeof userVisibleError> | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const trimmedName = name.trim();
   const canSave = trimmedName.length > 0 && trimmedName !== initialName;
@@ -36,7 +39,7 @@ export function SidebarProjectRenameDialog({
     try {
       await onSave(trimmedName);
     } catch (submitError) {
-      setError(errorMessage(submitError));
+      setError(userVisibleError(submitError, "Failed to rename the project."));
     }
   }
 
@@ -59,7 +62,7 @@ export function SidebarProjectRenameDialog({
         />
         {error ? (
           <div className="mt-3 rounded-[var(--radius-control)] border border-danger/20 bg-danger/5 px-3 py-2 text-sm text-danger">
-            {error}
+            {apiErrorMessage(error)}
           </div>
         ) : null}
         <div className="mt-6 flex justify-end gap-3">
@@ -76,12 +79,6 @@ export function SidebarProjectRenameDialog({
   );
 }
 
-function errorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
 
 function DialogHeader({
   detail,

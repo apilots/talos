@@ -118,7 +118,7 @@ impl Tool for ValidationGateTool {
     }
 
     fn validate_input(&self, _input: &Value) -> TalosResult<()> {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "validation gate rejected input".to_string(),
         ))

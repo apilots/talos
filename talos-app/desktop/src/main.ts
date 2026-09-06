@@ -74,7 +74,7 @@ async function createMainWindow(): Promise<BrowserWindow> {
 app.whenReady().then(async () => {
   controller = await createController();
   registerDesktopIpcHandlers(controller);
-  await controller.connect();
+  // The renderer owns initialization so startup failures remain visible through IPC.
   await createMainWindow();
 
   app.on("activate", async () => {

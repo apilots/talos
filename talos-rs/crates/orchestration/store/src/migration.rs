@@ -11,15 +11,22 @@ pub async fn run_migrations(pool: &SqlitePool, migration_dir: &Path) -> TalosRes
     let migrator = sqlx::migrate::Migrator::new(migration_dir)
         .await
         .map_err(|error| {
-            TalosError::internal(format!(
+            let diagnostic = format!(
                 "load store migrations from {}: {error}",
                 migration_dir.display()
-            ))
+            );
+            TalosError::internal_with_source(
+                "Load store migrations; technical details were withheld.",
+                error,
+            )
+            .context(diagnostic)
         })?;
-    migrator
-        .run(pool)
-        .await
-        .map_err(|error| TalosError::internal(format!("apply store migrations: {error}")))
+    migrator.run(pool).await.map_err(|error| {
+        TalosError::internal_with_source(
+            "apply store migrations; technical details were withheld.",
+            error,
+        )
+    })
 }
 
 #[cfg(test)]
@@ -30,3 +37,7 @@ pub(crate) fn test_migrations_dir() -> std::path::PathBuf {
 #[cfg(test)]
 #[path = "migration_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "error_migration_tests.rs"]
+mod error_tests;

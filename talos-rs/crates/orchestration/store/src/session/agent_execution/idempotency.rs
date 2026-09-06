@@ -67,7 +67,7 @@ pub(super) async fn reserve(
     }
 
     if existing.record.request_hash != requested.request_hash {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::IdempotencyConflict,
             "Idempotency-Key was already used with a different request",
         ));
@@ -378,18 +378,20 @@ fn parse_record(row: &Row) -> TalosResult<StoredRecord> {
         "turn_submission" => IdempotentCommand::TurnSubmission,
         "turn_input" => IdempotentCommand::TurnInput,
         command => {
-            return Err(TalosError::internal(format!(
-                "unknown idempotent command: {command}"
-            )))
+            return Err(TalosError::internal(
+                "unknown idempotent command; technical details were withheld.",
+            )
+            .context(format!("unknown idempotent command: {command}")))
         }
     };
     let status = match required_string(row, "status")?.as_str() {
         "reserved" => StoredStatus::Reserved,
         "completed" => StoredStatus::Completed,
         status => {
-            return Err(TalosError::internal(format!(
-                "unknown idempotency status: {status}"
-            )))
+            return Err(TalosError::internal(
+                "unknown idempotency status; technical details were withheld.",
+            )
+            .context(format!("unknown idempotency status: {status}")))
         }
     };
     let outcome = row
@@ -399,9 +401,10 @@ fn parse_record(row: &Row) -> TalosResult<StoredRecord> {
             "accepted" => Ok(TurnCommandStatus::Accepted),
             "failed" => Ok(TurnCommandStatus::Failed),
             "failed_no_first_event" => Ok(TurnCommandStatus::FailedNoFirstEvent),
-            outcome => Err(TalosError::internal(format!(
-                "unknown Turn command outcome: {outcome}"
-            ))),
+            outcome => Err(TalosError::internal(
+                "unknown Turn command outcome; technical details were withheld.",
+            )
+            .context(format!("unknown Turn command outcome: {outcome}"))),
         })
         .transpose()?;
     let lease_id = row
@@ -493,7 +496,10 @@ fn validate_lease(lease: &CommandLease) -> TalosResult<()> {
 
 fn validate_nonempty(name: &str, value: &str) -> TalosResult<()> {
     if value.trim().is_empty() {
-        return Err(TalosError::internal(format!("{name} must not be empty")));
+        return Err(
+            TalosError::internal("A required idempotency field must not be empty.")
+                .context(format!("{name} must not be empty")),
+        );
     }
     Ok(())
 }
@@ -501,10 +507,15 @@ fn validate_nonempty(name: &str, value: &str) -> TalosResult<()> {
 fn required_string(row: &Row, column: &str) -> TalosResult<String> {
     row.get_string(column)
         .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| TalosError::internal(format!("idempotency record is missing {column}")))
+        .ok_or_else(|| {
+            TalosError::internal("idempotency record is missing; technical details were withheld.")
+                .context(format!("idempotency record is missing {column}"))
+        })
 }
 
 fn required_i64(row: &Row, column: &str) -> TalosResult<i64> {
-    row.get_i64(column)
-        .ok_or_else(|| TalosError::internal(format!("idempotency record is missing {column}")))
+    row.get_i64(column).ok_or_else(|| {
+        TalosError::internal("idempotency record is missing; technical details were withheld.")
+            .context(format!("idempotency record is missing {column}"))
+    })
 }

@@ -39,18 +39,20 @@ fn reflection_runs_only_for_successful_end_turn_without_a_successful_memory_tool
 
 #[test]
 fn reflection_parser_accepts_only_noop_upsert_and_remove() {
-    assert!(parse_reflection_update(r#"{"operation":"noop"}"#).is_none());
+    assert!(parse_reflection_update(r#"{"operation":"noop"}"#)
+        .unwrap()
+        .is_none());
     assert!(matches!(
         parse_reflection_update(r#"{"operation":"remove_entry","key":"stale-context"}"#),
-        Some(UserWorkspaceMemoryUpdate::RemoveEntry { key }) if key == "stale-context"
+        Ok(Some(UserWorkspaceMemoryUpdate::RemoveEntry { key })) if key == "stale-context"
     ));
     assert!(parse_reflection_update(
         r#"{"operation":"create_entry","entry":{"key":"x","section":"key_knowledge","title":"X","kind":"fact","summary":"X"}}"#
     )
-    .is_none());
+    .is_err());
     assert!(
         parse_reflection_update(r#"{"operation":"remove_entry","key":"x","unexpected":true}"#)
-            .is_none()
+            .is_err()
     );
 }
 

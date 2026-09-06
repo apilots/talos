@@ -497,7 +497,7 @@ pub trait Gateway: Send + Sync {
 }
 
 fn file_gateway_unavailable() -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::ServiceUnavailable,
         "file API is not implemented by this gateway".to_string(),
     )

@@ -489,7 +489,10 @@ impl TuiApp {
             Err(err) => {
                 self.show_skill_autocomplete = false;
                 self.skill_suggestions.clear();
-                self.push_right_event(format!("skill suggest failed: {}", err));
+                self.push_right_event(format!(
+                    "skill suggest failed: {}",
+                    err.to_api_error().message
+                ));
             }
         }
     }
@@ -539,7 +542,10 @@ impl TuiApp {
         let active_turn = match client.get_active_turn(&session_id).await {
             Ok(active_turn) => active_turn,
             Err(err) => {
-                self.push_system_notice(format!("Failed to read active turn: {err}"));
+                self.push_system_notice(format!(
+                    "Failed to read active turn: {}",
+                    err.to_api_error().message
+                ));
                 self.push_right_event("cancel request failed".to_string());
                 return;
             }
@@ -554,7 +560,10 @@ impl TuiApp {
                 self.show_status_hint("Cancelling current turn...", Duration::from_secs(2));
             }
             Err(err) => {
-                self.push_system_notice(format!("Failed to cancel turn: {}", err));
+                self.push_system_notice(format!(
+                    "Failed to cancel turn: {}",
+                    err.to_api_error().message
+                ));
                 self.push_right_event("cancel request failed".to_string());
             }
         }

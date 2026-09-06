@@ -1,3 +1,4 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import type { ComponentProps, RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -78,9 +79,7 @@ export function ChatSessionTimeline({
         {streamError ? <ChatSessionErrorPanel title={streamError} /> : null}
         {sessionHistoryError ? (
           <ChatSessionErrorPanel
-            detail={sessionHistoryError instanceof Error
-              ? sessionHistoryError.message
-              : t("unknownSessionHistoryError")}
+            detail={userVisibleErrorMessage(sessionHistoryError, t("unknownSessionHistoryError"))}
             title={t("sessionHistoryFailed")}
           />
         ) : null}

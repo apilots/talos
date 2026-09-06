@@ -1,8 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use crate::{
-    AgentCapabilities, AgentErrorKind, AgentInputParams, AgentInterruptParams, AgentRunSettlement,
-};
+use crate::{AgentCapabilities, AgentInputParams, AgentInterruptParams, AgentRunSettlement};
 use talos_agent_api::{
     AgentEvent, AgentEventPayload, AgentMessageBlock, AgentMessageBlockContent,
     AgentMessageBlockStatus, AgentTurnRef, AgentUserContent,
@@ -83,6 +81,19 @@ async fn provider_failure_closes_open_output_before_terminal_settlement() {
         ] if completed.block.status == talos_agent_api::AgentMessageBlockStatus::Failed
             && message.status == talos_agent_api::AgentMessageStatus::Failed
     ));
+    if let AgentRunSettlement::Finished { result, .. } = &settlement {
+        let error = result
+            .as_ref()
+            .expect_err("failed settlement retains its cause");
+        let source = std::error::Error::source(error)
+            .and_then(|source| source.downcast_ref::<std::io::Error>())
+            .expect("original Provider source survives terminal settlement");
+        assert_eq!(source.to_string(), "provider transport disconnected");
+        assert_eq!(
+            error.backtrace().status(),
+            std::backtrace::BacktraceStatus::Captured
+        );
+    }
     assert!(matches!(
         settlement,
         AgentRunSettlement::Finished {
@@ -116,7 +127,10 @@ async fn fresh_rich_input_is_rejected_before_provider_admission() {
         Err(error) => error,
     };
 
-    assert_eq!(error.kind, AgentErrorKind::CapabilityUnsupported);
+    assert_eq!(
+        error.error().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
     assert!(!provider.started.load(Ordering::Acquire));
 }
 
@@ -164,7 +178,10 @@ async fn running_input_requires_dynamic_input_before_delivery() {
         .await
         .expect("interrupted invocation should settle");
 
-    assert_eq!(error.kind, AgentErrorKind::CapabilityUnsupported);
+    assert_eq!(
+        error.error().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
     assert!(!provider.input_received.load(Ordering::Acquire));
 }
 

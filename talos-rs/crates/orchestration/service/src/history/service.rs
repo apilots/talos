@@ -104,12 +104,12 @@ impl SessionHistoryService {
             .event_service
             .get_event(event_seq)
             .await?
-            .filter(|event| event.event.identity.session_id == session_id)
+            .filter(|event| event.event.identity().session_id == session_id)
             .ok_or_else(invalid_history_cursor)?;
         if terminal_required
             && !matches!(
-                event.event.payload,
-                AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
+                event.event.agent_event().map(|event| &event.payload),
+                Some(AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_))
             )
         {
             return Err(invalid_history_cursor());
@@ -155,6 +155,16 @@ impl SessionHistoryService {
         through_event_seq: Option<i64>,
         limit: usize,
     ) -> TalosResult<Vec<(i64, SessionHistoryTurn)>> {
+        let notice_high_water = match through_event_seq {
+            Some(through) => through,
+            None => self
+                .event_service
+                .latest_event_id(session_id)
+                .await?
+                .map(|id| id.event_seq())
+                .transpose()?
+                .unwrap_or_default(),
+        };
         let mut timeline_cursor =
             (after_event_seq > 0).then(|| TimelineEventId::from_seq(after_event_seq));
         let mut reducers = HashMap::new();
@@ -175,7 +185,9 @@ impl SessionHistoryService {
                 if through_event_seq.is_some_and(|through| timeline_event.event_seq > through) {
                     break;
                 }
-                let event = timeline_event.event.clone();
+                let Some(event) = timeline_event.event.agent_event().cloned() else {
+                    continue;
+                };
                 let identity = event.identity.clone();
                 let terminal = matches!(
                     event.payload,
@@ -192,12 +204,14 @@ impl SessionHistoryService {
                     continue;
                 }
                 let reducer = reducers
-                    .remove(&timeline_event.event.identity.turn_id)
+                    .remove(&timeline_event.event.identity().turn_id)
                     .expect("terminal Turn reducer exists");
-                completed.push((
-                    timeline_event.event_seq,
-                    self.reduce_checkpoint(timeline_event, reducer.checkpoint())?,
-                ));
+                let mut turn = self.reduce_checkpoint(timeline_event, reducer.checkpoint())?;
+                turn.notices = self
+                    .event_service
+                    .turn_notices(&turn.identity, notice_high_water)
+                    .await?;
+                completed.push((timeline_event.event_seq, turn));
                 if completed.len() == limit {
                     return Ok(completed);
                 }
@@ -224,9 +238,21 @@ impl SessionHistoryService {
     ) -> TalosResult<SessionHistoryTurn> {
         let checkpoint = self
             .event_service
-            .turn_checkpoint(&terminal.event.identity, terminal.event_seq)
+            .turn_checkpoint(terminal.event.identity(), terminal.event_seq)
             .await?;
-        self.reduce_checkpoint(&terminal, checkpoint)
+        let mut turn = self.reduce_checkpoint(&terminal, checkpoint)?;
+        let high_water = self
+            .event_service
+            .latest_event_id(&turn.identity.session_id)
+            .await?
+            .map(|id| id.event_seq())
+            .transpose()?
+            .unwrap_or_default();
+        turn.notices = self
+            .event_service
+            .turn_notices(&turn.identity, high_water)
+            .await?;
+        Ok(turn)
     }
 
     fn reduce_checkpoint(
@@ -234,7 +260,11 @@ impl SessionHistoryService {
         terminal: &talos_agent_api::TimelineEvent,
         checkpoint: talos_agent::AgentRunCheckpoint,
     ) -> TalosResult<SessionHistoryTurn> {
-        let result = match &terminal.event.payload {
+        let event = terminal
+            .event
+            .agent_event()
+            .ok_or_else(|| TalosError::internal("History completion must be an Agent event."))?;
+        let result = match &event.payload {
             AgentEventPayload::TurnCompleted(completion) => {
                 AgentRunResult::Completed(AgentRunOutput {
                     messages: checkpoint.messages,
@@ -254,10 +284,11 @@ impl SessionHistoryService {
             }
         };
         Ok(SessionHistoryTurn {
-            identity: terminal.event.identity.clone(),
+            identity: terminal.event.identity().clone(),
             result,
+            notices: Vec::new(),
             completed_event_seq: terminal.event_seq,
-            completed_at: terminal.event.occurred_at,
+            completed_at: event.occurred_at,
         })
     }
 }
@@ -295,7 +326,7 @@ fn parse_history_cursor(cursor: &str) -> TalosResult<(i64, i64)> {
 }
 
 fn invalid_history_cursor() -> TalosError {
-    TalosError::public(ErrorCode::InvalidRequest, "invalid Session history cursor")
+    TalosError::new(ErrorCode::InvalidRequest, "invalid Session history cursor")
 }
 
 #[cfg(test)]

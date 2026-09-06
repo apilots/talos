@@ -1,6 +1,6 @@
 use super::{Actor, CreateSessionRequest, ResourceAccessService};
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use talos_error::TalosResult;
 use talos_store::project::{ProjectRecord, ProjectStore};
@@ -299,18 +299,14 @@ impl ProjectStore for RecordingSessionStore {
             .count() as u64)
     }
 
-    async fn create_project(
-        &self,
-        _name: &str,
-        _directory: &PathBuf,
-    ) -> TalosResult<ProjectRecord> {
+    async fn create_project(&self, _name: &str, _directory: &Path) -> TalosResult<ProjectRecord> {
         unreachable!("not used in this test")
     }
 
     async fn create_project_for_owner(
         &self,
         _name: &str,
-        _directory: &PathBuf,
+        _directory: &Path,
         _user_id: &str,
     ) -> TalosResult<ProjectRecord> {
         unreachable!("not used in this test")

@@ -514,13 +514,13 @@ impl ToolRegistry {
                 .get(item.internal_name.as_str())
                 .map(|entry| entry.value().clone())
         }) else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("Tool '{}' not found", invocation.tool_name),
             ));
         };
         if !handler.matches(&invocation) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!(
                     "Tool '{}' invoked with incompatible payload",

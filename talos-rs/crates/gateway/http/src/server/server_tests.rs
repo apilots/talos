@@ -97,7 +97,8 @@ async fn assert_structured_invalid_request(response: axum::response::Response) {
             "status": "error",
             "error": {
                 "code": "invalidRequest",
-                "message": "Invalid request"
+                "message": "The request could not be parsed. Check its JSON, query parameters, and path values.",
+                "localization": null
             }
         })
     );
@@ -429,6 +430,7 @@ impl AgentCoordinator for TestAgentCoordinator {
                 permit: AgentAdmissionPermit::new(async move {
                     settlement_tx
                         .send(Ok(AgentRunSettlement::Finished {
+                            result: Ok(()),
                             event: terminal,
                             messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),
@@ -503,7 +505,7 @@ impl AuthService for FakeAuthService {
 
     async fn verify_access_token(&self, token: &str) -> TalosResult<RequestIdentity> {
         if token == "reject" {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Unauthenticated,
                 "invalid token".to_string(),
             ));

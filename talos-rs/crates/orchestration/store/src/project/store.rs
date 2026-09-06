@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -9,6 +9,7 @@ use talos_types::{ProjectPatch, ProjectStatus};
 use super::ProjectRecord;
 
 #[async_trait]
+/// Persist project records; callers lend paths and implementations own stored copies.
 pub trait ProjectStore: Send + Sync {
     async fn list_projects(&self) -> TalosResult<Vec<ProjectRecord>>;
 
@@ -17,12 +18,12 @@ pub trait ProjectStore: Send + Sync {
     /// Returns the current number of projects owned by one user.
     async fn count_projects_for_owner(&self, user_id: &str) -> TalosResult<u64>;
 
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord>;
+    async fn create_project(&self, name: &str, directory: &Path) -> TalosResult<ProjectRecord>;
 
     async fn create_project_for_owner(
         &self,
         name: &str,
-        directory: &PathBuf,
+        directory: &Path,
         user_id: &str,
     ) -> TalosResult<ProjectRecord>;
 
@@ -97,25 +98,24 @@ impl ProjectStore for StorageProjectStore {
                 &[user_id],
             )
             .await?;
-        let row = rows.first().ok_or_else(|| {
-            TalosError::internal("count projects returned no aggregate row".to_string())
-        })?;
-        let count = row.get_i64("project_count").ok_or_else(|| {
-            TalosError::internal("count projects returned an invalid total".to_string())
-        })?;
-        u64::try_from(count).map_err(|_| {
-            TalosError::internal("count projects returned a negative total".to_string())
-        })
+        let row = rows
+            .first()
+            .ok_or_else(|| TalosError::internal("count projects returned no aggregate row"))?;
+        let count = row
+            .get_i64("project_count")
+            .ok_or_else(|| TalosError::internal("count projects returned an invalid total"))?;
+        u64::try_from(count)
+            .map_err(|_| TalosError::internal("count projects returned a negative total"))
     }
 
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
+    async fn create_project(&self, name: &str, directory: &Path) -> TalosResult<ProjectRecord> {
         self.create_project_for_owner(name, directory, "").await
     }
 
     async fn create_project_for_owner(
         &self,
         name: &str,
-        directory: &PathBuf,
+        directory: &Path,
         user_id: &str,
     ) -> TalosResult<ProjectRecord> {
         let now = chrono::Utc::now().timestamp_millis();
@@ -123,7 +123,7 @@ impl ProjectStore for StorageProjectStore {
             project_id: uuid::Uuid::now_v7().to_string(),
             name: name.to_string(),
             user_id: user_id.to_string(),
-            directory: directory.clone(),
+            directory: directory.to_path_buf(),
             status: ProjectStatus::default(),
             created_at: now,
             updated_at: now,
@@ -179,7 +179,7 @@ impl ProjectStore for StorageProjectStore {
     async fn delete_project(&self, project_id: &str) -> TalosResult<()> {
         let bound_count = self.count_sessions_bound_to_project(project_id).await?;
         if bound_count > 0 {
-            return Err(talos_error::TalosError::public(
+            return Err(talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("project {} still has bound sessions", project_id),
             ));
@@ -201,7 +201,7 @@ impl ProjectStore for StorageProjectStore {
             )
             .await?;
         if deleted == 0 && self.get_project(project_id).await?.is_some() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("project {project_id} still has bound sessions or files"),
             ));

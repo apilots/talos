@@ -8,8 +8,7 @@ pub use control::{
     Settlement, SettlementKind,
 };
 pub use task_group::{
-    CleanupFailure, CleanupReport, RunTask, RunTaskCompletion, RunTaskError, RunTaskGroup,
-    SpawnError,
+    CleanupFailure, CleanupReport, RunTask, RunTaskCompletion, RunTaskGroup, SpawnError,
 };
 
 #[cfg(test)]

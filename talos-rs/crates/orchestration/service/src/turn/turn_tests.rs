@@ -14,7 +14,7 @@ use talos_agent::{
     AgentRunSettlementReceiver, AgentSessionContext,
 };
 use talos_agent_api::{
-    AgentContinuationRef, AgentErrorInfo, AgentEvent as CanonicalAgentEvent,
+    AgentContinuationRef, AgentEvent as CanonicalAgentEvent,
     AgentEventPayload as CanonicalAgentEventPayload, AgentInterruptOutcome, AgentMessage,
     AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
     AgentMessageBlockStarted, AgentMessageBlockStatus, AgentMessageRole, AgentMessageStarted,
@@ -103,10 +103,12 @@ async fn submit_test_start(
 struct RecordingAgentExecution {
     stream_request: Mutex<Option<AgentRunParams>>,
     stream_requests: Mutex<Vec<AgentRunParams>>,
+    stream_request_received: Notify,
     stream_error: Mutex<Option<TalosError>>,
     input_error: Mutex<Option<TalosError>>,
     input_permit_error: Mutex<Option<talos_agent::AgentError>>,
     start_permit_error: Mutex<Option<talos_agent::AgentError>>,
+    panic_start_permit: AtomicBool,
     progress_event: Mutex<Option<CanonicalAgentEventPayload>>,
     hold_input_permit: Mutex<bool>,
     input_permit_started: Arc<Notify>,
@@ -133,10 +135,12 @@ impl Default for RecordingAgentExecution {
         Self {
             stream_request: Mutex::new(None),
             stream_requests: Mutex::new(Vec::new()),
+            stream_request_received: Notify::new(),
             stream_error: Mutex::new(None),
             input_error: Mutex::new(None),
             input_permit_error: Mutex::new(None),
             start_permit_error: Mutex::new(None),
+            panic_start_permit: AtomicBool::new(false),
             progress_event: Mutex::new(None),
             hold_input_permit: Mutex::new(false),
             input_permit_started: Arc::new(Notify::new()),
@@ -248,6 +252,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             .lock()
             .unwrap()
             .push(request.clone());
+        self.execution.stream_request_received.notify_one();
         if let Some(error) = self.execution.stream_error.lock().unwrap().take() {
             return Err(error);
         }
@@ -412,11 +417,12 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 sequence: next_sequence,
                 occurred_at: 1,
                 payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: AgentErrorInfo {
+                    error: talos_error::ApiError {
                         code: talos_error::ErrorCode::InternalError,
                         message: "injected Turn failure".to_string(),
-                        retryable: false,
+                        localization: None,
                     },
+                    retryable: false,
                 }),
             }
         } else {
@@ -433,11 +439,12 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                     sequence: next_sequence,
                     occurred_at: 1,
                     payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
-                        error: AgentErrorInfo {
+                        error: talos_error::ApiError {
                             code: talos_error::ErrorCode::Cancelled,
                             message: "injected cancellation".to_string(),
-                            retryable: false,
+                            localization: None,
                         },
+                        retryable: false,
                     }),
                 }
             } else {
@@ -451,11 +458,22 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                 }
             }
         };
+        let result = match &terminal.payload {
+            CanonicalAgentEventPayload::TurnFailed(failed) => Err(TalosError::new(
+                failed.error.code,
+                failed.error.message.clone(),
+            )),
+            _ => Ok(()),
+        };
         let (progress_tx, progress_rx) = mpsc::channel(progress.len().max(1));
         let (settlement_tx, settlement_rx) = tokio::sync::oneshot::channel();
         let mut settlement_tx = Some(settlement_tx);
         let hold_running_turn = *self.execution.hold_running_turn.lock().unwrap();
         let start_permit_error = self.execution.start_permit_error.lock().unwrap().take();
+        let panic_start_permit = self
+            .execution
+            .panic_start_permit
+            .swap(false, Ordering::SeqCst);
         if hold_running_turn {
             self.execution
                 .active_progress
@@ -472,6 +490,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             admission: AgentAdmission {
                 events: admission,
                 permit: AgentAdmissionPermit::new(async move {
+                    assert!(!panic_start_permit, "injected start permit panic");
                     if let Some(error) = start_permit_error {
                         return Err(error);
                     }
@@ -487,6 +506,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                     settlement_tx
                         .expect("completed test Turn settlement sender")
                         .send(Ok(AgentRunSettlement::Finished {
+                            result,
                             event: terminal,
                             messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),
@@ -568,7 +588,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
 #[tokio::test]
 async fn submit_start_turn_preserves_executor_error_semantics() {
     let agent_execution = Arc::new(RecordingAgentExecution {
-        stream_error: Mutex::new(Some(TalosError::public(
+        stream_error: Mutex::new(Some(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "agent busy".to_string(),
         ))),
@@ -654,11 +674,8 @@ async fn test_service_with_storage(
     });
     (
         TurnService::new(
-            coordinator,
-            store.clone(),
-            event_service.clone(),
+            AgentExecutionDriver::new(coordinator, store.clone(), event_service.clone(), sessions),
             profile_store,
-            sessions,
             message_queue.clone(),
             config,
             Arc::new(tokio::sync::RwLock::new(())),
@@ -868,12 +885,14 @@ async fn create_test_session_record(store: Arc<DatabaseSessionStore>) {
 }
 
 async fn wait_for_stream_requests(executor: &RecordingAgentExecution, expected: usize) {
-    tokio::time::timeout(Duration::from_secs(1), async {
+    // Synchronize with admission, not polling speed or cold stack symbolization.
+    // The timeout is only a deadlock guard for a stalled test fixture.
+    tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             if executor.stream_requests.lock().unwrap().len() >= expected {
                 return;
             }
-            tokio::time::sleep(Duration::from_millis(10)).await;
+            executor.stream_request_received.notified().await;
         }
     })
     .await

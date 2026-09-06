@@ -3,7 +3,7 @@ use talos_error::{TalosError, TalosResult};
 
 use crate::runtimes::fs_read::{normalize_existing_tool_path, resolve_tool_path};
 use crate::runtimes::fs_write::ensure_read_state_is_fresh;
-use crate::runtimes::map_sandbox_file_error;
+use crate::runtimes::map_sandbox_error;
 use crate::ToolContext;
 use talos_tools_sandbox::{FileSystemOperation, RequestedFileSystemAccess};
 
@@ -43,7 +43,7 @@ pub fn requested_file_system_access(
         .as_deref()
         .or(request.file_path.as_deref())
         .ok_or_else(|| {
-            TalosError::public(talos_error::ErrorCode::InvalidRequest, "path is required")
+            TalosError::new(talos_error::ErrorCode::InvalidRequest, "path is required")
         })?;
     let path = normalize_existing_tool_path(&resolve_tool_path(raw_path, context)?)?;
     Ok(vec![RequestedFileSystemAccess::new(
@@ -51,7 +51,7 @@ pub fn requested_file_system_access(
         vec![path],
     )
     .map_err(|error| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             error.to_string(),
         )
@@ -64,7 +64,7 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         .as_deref()
         .or(request.file_path.as_deref())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "path is required".to_string(),
             )
@@ -74,7 +74,7 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         .as_deref()
         .or(request.old_string.as_deref())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "find/old_string is required".to_string(),
             )
@@ -84,14 +84,14 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
         .as_deref()
         .or(request.new_string.as_deref())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 "replace/new_string is required".to_string(),
             )
         })?;
 
     if old_string == new_string {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             "old_string and new_string must differ".to_string(),
         ));
@@ -102,18 +102,18 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
     let original_file = file_system
         .read_to_string(&path)
         .await
-        .map_err(map_sandbox_file_error)?;
+        .map_err(map_sandbox_error)?;
     ensure_read_state_is_fresh(&path, &original_file, context)?;
 
     let replacements = original_file.matches(old_string).count();
     if replacements == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("target text not found in `{}`", path.display()),
         ));
     }
     if replacements > 1 && !request.replace_all {
-        return Err(TalosError::public(talos_error::ErrorCode::ToolExecutionFailed, format!(
+        return Err(TalosError::new(talos_error::ErrorCode::ToolExecutionFailed, format!(
             "target text matched {} times in `{}`; set replace_all=true or provide a more specific old_string",
             replacements,
             path.display()
@@ -129,7 +129,7 @@ pub async fn run(request: &EditFileRequest, context: &ToolContext) -> TalosResul
     file_system
         .write(&path, updated.as_bytes())
         .await
-        .map_err(map_sandbox_file_error)?;
+        .map_err(map_sandbox_error)?;
     context
         .read_file_state()
         .record_mutation_content(path.clone(), &updated);

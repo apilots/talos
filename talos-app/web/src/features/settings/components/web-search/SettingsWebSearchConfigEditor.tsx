@@ -1,3 +1,4 @@
+import { userVisibleErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -30,11 +31,6 @@ const PROVIDERS: Array<{ key: WebSearchProviderKey; label: string }> = [
   { key: "brave", label: "Brave" },
   { key: "tavily", label: "Tavily" },
 ];
-
-function parseErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  return "Request failed.";
-}
 
 function configured(provider: WebSearchProviderRuntimeConfig | undefined): boolean {
   return provider?.api_key === "********";
@@ -74,7 +70,7 @@ export function SettingsWebSearchConfigEditor() {
   if (error) {
     return (
       <Panel className="rounded-[1.4rem] border-border/80 bg-card/82 p-5">
-        <div className="text-sm text-danger">{parseErrorMessage(error)}</div>
+        <div className="text-sm text-danger">{userVisibleErrorMessage(error, "Request failed.")}</div>
       </Panel>
     );
   }
@@ -166,7 +162,6 @@ export function SettingsWebSearchConfigEditor() {
         dirty={isDirty}
         error={mutation.isError ? mutation.error : null}
         onSave={() => draft && mutation.mutate(draft)}
-        parseError={parseErrorMessage}
         pending={mutation.isPending}
         saveLabel={t("webSearchPanel.saveChanges")}
         savingLabel={t("webSearchPanel.saving")}

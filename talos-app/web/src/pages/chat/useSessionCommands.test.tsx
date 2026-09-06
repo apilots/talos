@@ -184,9 +184,9 @@ describe("useSessionCommands", () => {
     });
   });
 
-  it("shows the busy notice when remote compaction wins the command race", async () => {
+  it("preserves the backend reason when remote compaction wins the command race", async () => {
     mocks.compact.mockRejectedValue(new TalosApiError({
-      code: AppProtocol.ErrorCode.ActiveTurnRunning,
+      code: AppProtocol.ErrorCode.ActiveTurnRunning, localization: null,
       message: "Active turn is already running",
     }));
     const { result } = renderHook(() => useSessionCommands({
@@ -198,7 +198,8 @@ describe("useSessionCommands", () => {
     });
     expect(result.current.response).toEqual({
       kind: "compact",
-      message: "Context compacting... Please wait.",
+      error: { code: AppProtocol.ErrorCode.ActiveTurnRunning, localization: null,
+        message: "Active turn is already running" },
       state: "error",
     });
   });
@@ -229,7 +230,7 @@ describe("useSessionCommands", () => {
     await act(async () => result.current.confirmClear());
 
     expect(result.current.clearConfirmationOpen).toBe(true);
-    expect(result.current.clearError).toBe("Chat could not be cleared. Please try again.");
+    expect(result.current.clearError).toBe("clear failed");
     expect(mocks.resetStream).not.toHaveBeenCalled();
   });
 

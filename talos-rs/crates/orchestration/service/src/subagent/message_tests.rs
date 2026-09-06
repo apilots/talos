@@ -65,7 +65,7 @@ async fn send_message_propagates_a_closed_harness_input() {
     let services = test_services().await;
     let parent = create_parent(&services).await;
     let (child, _turn_id) = create_live_running_child(&services, parent.clone()).await;
-    *services.executor.input_error.lock().unwrap() = Some(TalosError::public(
+    *services.executor.input_error.lock().unwrap() = Some(TalosError::new(
         talos_error::ErrorCode::ResourceNotFound,
         "message input closed".to_string(),
     ));

@@ -59,7 +59,7 @@ impl AgentRouter {
             .await?
             .and_then(|agent_id| normalized(Some(agent_id.as_str())).map(str::to_string))
             .ok_or_else(|| {
-                talos_error::TalosError::public(
+                talos_error::TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     "no Agent routing binding matched the Session source",
                 )

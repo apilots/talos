@@ -14,7 +14,9 @@
 //! }
 //! ```
 
+mod error;
 mod sqlite;
+pub use error::database_error;
 
 pub use sqlite::{SqliteStorage, SqliteWriteTransaction};
 
@@ -143,7 +145,10 @@ pub async fn create_storage(config: &StorageConfig) -> TalosResult<SqliteStorage
             )
             .await
         }
-        DatabaseType::Postgres => Err(TalosError::internal(format!(
+        DatabaseType::Postgres => Err(TalosError::internal(
+            "Unsupported database type; technical details were withheld.",
+        )
+        .context(format!(
             "Unsupported database type: {}",
             config.database_type
         ))),

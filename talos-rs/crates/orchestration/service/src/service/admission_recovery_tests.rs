@@ -53,7 +53,7 @@ async fn timeline_recovery_does_not_settle_this_process_admission() {
         Some(crate::timeline::map_timeline_active_turn(active_before))
     );
     assert!(recovered.replay.events.iter().all(|event| !matches!(
-        event.event.payload,
+        event.event.agent_event().unwrap().payload,
         CanonicalAgentEventPayload::TurnFailed(_)
     )));
 

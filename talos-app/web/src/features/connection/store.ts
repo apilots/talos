@@ -1,16 +1,11 @@
 import type { RuntimeMode } from "@/shared/types/ui";
 import type { AccountType } from "./account-type";
+import type { AuthStatus } from "@/shared/types/account";
 
 type UserRole = "user" | "admin";
-type AuthStatus =
-  | "unknown"
-  | "loading"
-  | "authenticated"
-  | "unauthenticated"
-  | "logged_out"
-  | "open";
 
 export interface ConnectionState {
+  authError?: import("@talos/sdk-core").AppProtocol.ApiError;
   authToken: string;
   authStatus: AuthStatus;
   authRole: UserRole;

@@ -43,8 +43,13 @@ impl SubagentService {
             .get_latest_terminal_event(&subagent.session_id)
             .await?
             .ok_or_else(|| missing_turn_state(&subagent.session_id))?;
-        self.build_turn_snapshot(subagent, agent_id, terminal.event.identity.turn_id, None)
-            .await
+        self.build_turn_snapshot(
+            subagent,
+            agent_id,
+            terminal.event.identity().turn_id.clone(),
+            None,
+        )
+        .await
     }
 
     pub(super) async fn snapshot_exact(
@@ -75,7 +80,9 @@ impl SubagentService {
         let mut last_event = None;
         self.timeline
             .scan_turn_events(&identity, |record| {
-                let event = record.event;
+                let Some(event) = record.event.agent_event().cloned() else {
+                    return Ok(());
+                };
                 reducer
                     .apply(event.clone())
                     .map_err(talos_agent::AgentError::into_talos_error)?;
@@ -100,7 +107,7 @@ impl SubagentService {
             .await?
             .map(|record| record.agent_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("subagent {}", subagent.session_id),
                 )
@@ -211,7 +218,7 @@ fn bounded_final_answer(messages: &[AgentMessage], max_bytes: usize) -> (String,
 }
 
 fn missing_turn_state(session_id: &str) -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::Conflict,
         format!("subagent '{session_id}' has no turn state"),
     )

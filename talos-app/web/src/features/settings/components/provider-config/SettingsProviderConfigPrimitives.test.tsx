@@ -65,7 +65,6 @@ describe("SettingsProviderConfigPrimitives", () => {
         dirty
         error={null}
         onSave={onSave}
-        parseError={(error) => String(error)}
         pending={false}
         saveLabel="Save Changes"
         savingLabel="Saving..."
@@ -84,7 +83,6 @@ describe("SettingsProviderConfigPrimitives", () => {
         dirty
         error={null}
         onSave={onSave}
-        parseError={(error) => String(error)}
         pending
         saveLabel="Save Changes"
         savingLabel="Saving..."
@@ -101,7 +99,6 @@ describe("SettingsProviderConfigPrimitives", () => {
         dirty={false}
         error={null}
         onSave={vi.fn()}
-        parseError={(error) => String(error)}
         pending={false}
         saveLabel="Save Changes"
         savingLabel="Saving..."
@@ -118,7 +115,6 @@ describe("SettingsProviderConfigPrimitives", () => {
         dirty={false}
         error={new Error("Save failed")}
         onSave={vi.fn()}
-        parseError={(error) => (error instanceof Error ? error.message : "Request failed")}
         pending={false}
         saveLabel="Save Changes"
         savingLabel="Saving..."

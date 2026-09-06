@@ -239,8 +239,10 @@ impl AgentSession for FakeSession {
                         ),
                     )
                     .await?;
-                Err(AgentError::provider_error(
+                Err(AgentError::from_source(
+                    talos_error::ErrorCode::InternalError,
                     "fake Provider failed with open output",
+                    std::io::Error::other("provider transport disconnected"),
                 ))
             }
             FakeMode::FailAcquisition | FakeMode::UnconfirmedAcquisition => {
@@ -362,7 +364,7 @@ fn completed() -> AgentResult<SessionTurnResult> {
 
 fn interrupted() -> AgentResult<SessionTurnResult> {
     Err(AgentError::new(
-        crate::AgentErrorKind::Interrupted,
+        talos_error::ErrorCode::Cancelled,
         "fake Provider interrupted",
     ))
 }

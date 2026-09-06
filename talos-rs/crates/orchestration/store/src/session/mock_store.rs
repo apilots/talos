@@ -152,7 +152,7 @@ impl SessionStore for MockSessionStore {
         ) {
             Ok(_) => Ok(()),
             Err(current) if current >= next_until_seq => Ok(()),
-            Err(current) => Err(talos_error::TalosError::public(
+            Err(current) => Err(talos_error::TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("memory cursor conflict: expected {expected_until_seq}, current {current}"),
             )),

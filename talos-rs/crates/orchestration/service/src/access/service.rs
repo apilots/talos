@@ -103,13 +103,13 @@ impl ResourceAccessService {
             .load_record(session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
-                    format!("session {session_id}"),
+                    format!("Session {session_id} was not found."),
                 )
             })?;
         if matches!(record.tree_identity, SessionTreeIdentity::Subagent { .. }) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("session '{session_id}' is controlled by its parent agent"),
             ));
@@ -128,9 +128,9 @@ impl ResourceAccessService {
             .patch_session(session, patch)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
-                    format!("session {session_id}"),
+                    format!("Session {session_id} was not found."),
                 )
             })
     }
@@ -192,9 +192,9 @@ impl ResourceAccessService {
             .patch_project(project_id, patch)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
-                    format!("project {}", project_id),
+                    format!("Project {} was not found.", project_id),
                 )
             })?;
         Ok(project)
@@ -216,9 +216,9 @@ impl ResourceAccessService {
         if session.user_id == actor.user_id {
             return Ok(());
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
-            format!("session {}", session.id),
+            format!("Session {} was not found.", session.id),
         ))
     }
 
@@ -226,9 +226,9 @@ impl ResourceAccessService {
         if project.user_id == actor.user_id {
             return Ok(());
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
-            format!("project {}", project.project_id),
+            format!("Project {} was not found.", project.project_id),
         ))
     }
 
@@ -244,9 +244,9 @@ impl ResourceAccessService {
 
     async fn get_project_record(&self, project_id: &str) -> TalosResult<ProjectRecord> {
         self.projects.get_project(project_id).await?.ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
-                format!("project {}", project_id),
+                format!("Project {} was not found.", project_id),
             )
         })
     }

@@ -5,7 +5,10 @@ use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::session::{AgentActiveTurnRecord, AgentEventRecord, AgentExecutionStore};
 use tokio::sync::broadcast;
 
-use super::{mapping::map_timeline_event, TimelineEventId};
+use super::{
+    mapping::{map_timeline_event, map_timeline_record},
+    TimelineEventId,
+};
 
 const MAX_TIMELINE_READ_LIMIT: usize = 10_000;
 
@@ -40,12 +43,12 @@ impl TimelineEventService {
                 let event_seq = event_id.event_seq()?;
                 let cursor_event = self
                     .execution_store
-                    .get_agent_event(event_seq)
+                    .get_timeline_event(event_seq)
                     .await?
                     .ok_or_else(expired_cursor_error)?;
-                if cursor_event.identity.session_id != session_id {
-                    return Err(TalosError::public(
-                        ErrorCode::InvalidRequest,
+                if cursor_event.event.identity().session_id != session_id {
+                    return Err(TalosError::new(
+                        ErrorCode::InvalidCursor,
                         "timeline cursor belongs to another Session",
                     ));
                 }
@@ -54,13 +57,13 @@ impl TimelineEventService {
             None => None,
         };
         self.execution_store
-            .list_agent_events_after(
+            .list_timeline_events_after(
                 session_id,
-                after_event_seq,
+                after_event_seq.unwrap_or_default(),
                 limit.clamp(1, MAX_TIMELINE_READ_LIMIT),
             )
             .await
-            .map(|records| records.into_iter().map(map_timeline_event).collect())
+            .map(|records| records.into_iter().map(map_timeline_record).collect())
     }
 
     /// Reduce canonical facts through an exact durable Turn tail for history or recovery.
@@ -78,7 +81,12 @@ impl TimelineEventService {
             |record| {
                 found_tail = record.event_seq == through_event_seq;
                 reducer
-                    .apply(map_timeline_event(record).event)
+                    .apply(talos_agent_api::AgentEvent {
+                        identity: record.identity,
+                        sequence: record.sequence,
+                        occurred_at: record.occurred_at,
+                        payload: record.payload,
+                    })
                     .map_err(talos_agent::AgentError::into_talos_error)
             },
         )
@@ -110,20 +118,43 @@ impl TimelineEventService {
 
     pub async fn latest_event_id(&self, session_id: &str) -> TalosResult<Option<TimelineEventId>> {
         self.execution_store
-            .get_latest_agent_event_seq(session_id)
+            .get_latest_timeline_event_seq(session_id)
             .await
             .map(|event_seq| event_seq.map(TimelineEventId::from_seq))
     }
 
+    pub(crate) async fn turn_notices(
+        &self,
+        identity: &AgentTurnRef,
+        through_event_seq: i64,
+    ) -> TalosResult<Vec<TimelineEvent>> {
+        self.execution_store
+            .list_turn_notices(identity, through_event_seq)
+            .await
+            .map(|records| records.into_iter().map(map_timeline_record).collect())
+    }
+
     pub(crate) async fn get_event(&self, event_seq: i64) -> TalosResult<Option<TimelineEvent>> {
         self.execution_store
-            .get_agent_event(event_seq)
+            .get_timeline_event(event_seq)
             .await
-            .map(|record| record.map(map_timeline_event))
+            .map(|record| record.map(map_timeline_record))
     }
 
     pub fn subscribe_live_events(&self) -> broadcast::Receiver<TimelineEvent> {
         self.live_tx.subscribe()
+    }
+
+    /// Commit a product notice before publishing it on the existing Session stream.
+    pub(crate) async fn publish_notice(
+        &self,
+        notice: talos_agent_api::TimelineSystemNotice,
+    ) -> TalosResult<TimelineEvent> {
+        let record = self.execution_store.append_timeline_notice(notice).await?;
+        let event = map_timeline_record(record);
+        // No current subscribers is normal; replay retains the committed notice.
+        let _ = self.live_tx.send(event.clone());
+        Ok(event)
     }
 
     pub(crate) async fn get_active_turn(
@@ -176,8 +207,8 @@ impl TimelineEventService {
 }
 
 fn expired_cursor_error() -> TalosError {
-    TalosError::public(
-        ErrorCode::ResourceExpired,
+    TalosError::new(
+        ErrorCode::EventCursorExpired,
         "timeline cursor is not available in canonical Agent history",
     )
 }

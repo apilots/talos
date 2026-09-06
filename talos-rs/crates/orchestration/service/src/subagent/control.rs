@@ -33,7 +33,7 @@ impl SubagentService {
         request: SendSubagentMessageRequest,
     ) -> TalosResult<SendMessageResult> {
         if request.message.trim().is_empty() || request.message.len() > MAX_MESSAGE_BYTES {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("message must contain 1 to {MAX_MESSAGE_BYTES} bytes"),
             ));
@@ -45,13 +45,13 @@ impl SubagentService {
             .canonical_active_turn(&subagent.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     format!("subagent '{}' has no active turn", subagent.session_id),
                 )
             })?;
         if active.state != ActiveTurnState::Running {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("subagent '{}' is not running", subagent.session_id),
             ));
@@ -94,8 +94,8 @@ impl SubagentService {
             match received {
                 Err(_) => return self.snapshot_exact(subagent, &turn_id).await,
                 Ok(Ok(event))
-                    if event.event.identity.session_id == subagent.session_id
-                        && event.event.identity.turn_id == turn_id =>
+                    if event.event.identity().session_id == subagent.session_id
+                        && event.event.identity().turn_id == turn_id =>
                 {
                     snapshot = self.snapshot_exact(subagent.clone(), &turn_id).await?;
                     if Self::is_terminal(&snapshot.outcome) {
@@ -108,15 +108,13 @@ impl SubagentService {
                     if Self::is_terminal(&snapshot.outcome) {
                         return Ok(snapshot);
                     }
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::Conflict,
                         "subagent event stream lagged; retry wait from durable state".to_string(),
                     ));
                 }
                 Ok(Err(broadcast::error::RecvError::Closed)) => {
-                    return Err(TalosError::internal(
-                        "subagent event stream closed".to_string(),
-                    ));
+                    return Err(TalosError::internal("subagent event stream closed"));
                 }
             }
         }
@@ -151,7 +149,7 @@ impl SubagentService {
         request: FollowUpSubagentRequest,
     ) -> TalosResult<SubagentSnapshot> {
         if request.prompt.trim().is_empty() || request.prompt.len() > MAX_FOLLOW_UP_PROMPT_BYTES {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("follow-up prompt must contain 1 to {MAX_FOLLOW_UP_PROMPT_BYTES} bytes"),
             ));
@@ -164,7 +162,7 @@ impl SubagentService {
             .await?
             .is_some()
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!(
                     "subagent '{}' already has an active turn",
@@ -216,10 +214,11 @@ impl SubagentService {
         let mut data = Vec::with_capacity(records.len());
         for record in records {
             let SessionTreeIdentity::Subagent { parent, path, .. } = record.tree_identity else {
-                return Err(TalosError::internal(format!(
-                    "subagent tree contains Primary Session '{}'",
-                    record.id
-                )));
+                return Err(
+                    TalosError::internal("Subagent tree contains Primary Session.").context(
+                        format!("subagent tree contains Primary Session '{}'", record.id),
+                    ),
+                );
             };
             if !visible_root.is_ancestor_of(&path) {
                 continue;
@@ -237,17 +236,20 @@ impl SubagentService {
             );
         }
         if data.len() > MAX_AGENT_TREE_NODES {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("agent tree exceeds the {MAX_AGENT_TREE_NODES} node read limit"),
             ));
         }
         let tree = Self::build_agent_tree(data, &visible_root)?;
         let encoded = serde_json::to_vec(&tree).map_err(|error| {
-            TalosError::internal(format!("failed to serialize agent tree snapshot: {error}"))
+            TalosError::internal_with_source(
+                "failed to serialize agent tree snapshot; technical details were withheld.",
+                error,
+            )
         })?;
         if encoded.len() > MAX_AGENT_TREE_RESPONSE_BYTES {
-            return Err(TalosError::public(talos_error::ErrorCode::InvalidRequest, format!(
+            return Err(TalosError::new(talos_error::ErrorCode::InvalidRequest, format!(
                 "agent tree snapshot exceeds the {MAX_AGENT_TREE_RESPONSE_BYTES} byte response limit"
             )));
         }
@@ -262,7 +264,7 @@ impl SubagentService {
             || caller.turn_id.trim().is_empty()
             || caller.agent_id.trim().is_empty()
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "a trusted caller session, turn, and agent are required".to_string(),
             ));
@@ -272,7 +274,7 @@ impl SubagentService {
             .load_record(&caller.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("caller session {}", caller.session_id),
                 )
@@ -282,13 +284,13 @@ impl SubagentService {
             .canonical_active_turn(&caller.session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     format!("caller session '{}' has no active turn", caller.session_id),
                 )
             })?;
         if active.identity.turn_id != caller.turn_id || active.state != ActiveTurnState::Running {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "turn '{}' is not the active running turn for caller session '{}'",
@@ -297,7 +299,7 @@ impl SubagentService {
             ));
         }
         if record.agent_id != caller.agent_id {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "caller agent '{}' does not own session '{}'",
@@ -329,7 +331,7 @@ impl SubagentService {
         target: &AgentTarget,
     ) -> TalosResult<(talos_store::session::SessionRecord, SubagentRef, String)> {
         let path = target.resolve_descendant(&caller.path)?.ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("subagent {}", target.as_str()),
             )
@@ -339,23 +341,25 @@ impl SubagentService {
             .get_subagent_record(&caller.tree_root_session_id, &path)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("subagent {}", target.as_str()),
                 )
             })?;
         let SessionTreeIdentity::Subagent { parent, .. } = record.tree_identity else {
-            return Err(TalosError::internal(format!(
-                "resolved subagent '{}' has Primary identity",
-                record.id
-            )));
+            return Err(
+                TalosError::internal("Resolved subagent has Primary identity.").context(format!(
+                    "resolved subagent '{}' has Primary identity",
+                    record.id
+                )),
+            );
         };
         let session = self
             .sessions
             .load_record(&record.id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("subagent {}", target.as_str()),
                 )
@@ -374,7 +378,7 @@ impl SubagentService {
 
     fn validate_wait_request(request: &WaitSubagentRequest) -> TalosResult<()> {
         if Duration::from_millis(request.timeout_ms) > MAX_WAIT_DURATION {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "wait timeout exceeds 60000 milliseconds".to_string(),
             ));
@@ -408,15 +412,17 @@ impl SubagentService {
                 Some(parent) => pending_children.entry(parent).or_default().push(node),
                 None => {
                     return Err(TalosError::internal(
-                        "subagent tree unexpectedly contains the root path".to_string(),
+                        "subagent tree unexpectedly contains the root path",
                     ));
                 }
             }
         }
         if let Some((missing_parent, _)) = pending_children.into_iter().next() {
-            return Err(TalosError::internal(format!(
-                "subagent tree is missing parent path '{missing_parent}'"
-            )));
+            return Err(
+                TalosError::internal("Subagent tree is missing parent path.").context(format!(
+                    "subagent tree is missing parent path '{missing_parent}'"
+                )),
+            );
         }
         Self::sort_agent_tree_nodes(&mut root_children);
         Ok(AgentTreeSnapshot {

@@ -1,3 +1,5 @@
+import { deriveProjectName } from "@/shared/types/domain";
+import { apiErrorMessage, userVisibleError } from "@/shared/i18n/apiErrorMessage";
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -18,17 +20,9 @@ interface ProjectDirectoryDialogProps {
 
 const LAST_DIRECTORY_KEY = "talos.projectDirectoryPicker.lastDirectory";
 
-function deriveNameFromPath(path: string) {
-  const normalized = path.trim().replace(/\/+$/, "");
-  return normalized.split("/").filter(Boolean).at(-1) || "project";
-}
-
-function directoryErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
+type DirectoryError =
+  | { kind: "request" | "registration"; cause: ReturnType<typeof userVisibleError> }
+  | { kind: "symlink" };
 
 export function ProjectDirectoryDialog({
   mode,
@@ -40,7 +34,7 @@ export function ProjectDirectoryDialog({
   const { t } = useTranslation(["chat", "common"]);
   const [snapshot, setSnapshot] = useState<FsDirectorySnapshot | null>(null);
   const [pathInput, setPathInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<DirectoryError | null>(null);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [newDirectoryName, setNewDirectoryName] = useState("");
@@ -93,7 +87,7 @@ export function ProjectDirectoryDialog({
       .catch((readError: unknown) => {
         setSnapshot(null);
         setPathInput(lastDirectory ?? "");
-        setError(directoryErrorMessage(readError));
+        setError({ kind: "request", cause: userVisibleError(readError, "Failed to read the directory.") });
       })
       .finally(() => setLoading(false));
   }, [mode, readDirectory]);
@@ -110,7 +104,7 @@ export function ProjectDirectoryDialog({
       setSnapshot(nextSnapshot);
       setPathInput(nextSnapshot.path);
     } catch (loadError) {
-      setError(directoryErrorMessage(loadError));
+      setError({ kind: "request", cause: userVisibleError(loadError, "Failed to load the directory.") });
     } finally {
       setLoading(false);
     }
@@ -118,7 +112,7 @@ export function ProjectDirectoryDialog({
 
   async function enterDirectory(entry: FsDirectoryEntry) {
     if (entry.is_symlink) {
-      setError(t("chat:symlinkNotSupported"));
+      setError({ kind: "symlink" });
       return;
     }
     await loadDirectory(entry.path);
@@ -133,12 +127,12 @@ export function ProjectDirectoryDialog({
     try {
       await onCreateProject({
         directory: snapshot.path,
-        name: deriveNameFromPath(snapshot.path),
+        name: deriveProjectName(snapshot.path),
       });
       window.localStorage.setItem(LAST_DIRECTORY_KEY, snapshot.path);
       onClose();
     } catch (submitError) {
-      setError(directoryErrorMessage(submitError));
+      setError({ kind: "request", cause: userVisibleError(submitError, "Failed to create the project.") });
     } finally {
       setSubmitting(false);
     }
@@ -156,19 +150,24 @@ export function ProjectDirectoryDialog({
       setCreatedDirectoryPath(directoryForRegistration);
       await onCreateProject({
         directory: directoryForRegistration,
-        name: newProjectName.trim() || deriveNameFromPath(directoryForRegistration),
+        name: newProjectName.trim() || deriveProjectName(directoryForRegistration),
       });
       window.localStorage.setItem(LAST_DIRECTORY_KEY, directoryForRegistration);
       onClose();
     } catch (submitError) {
-      const prefix = directoryForRegistration ? t("chat:createdDirectoryRegistrationFailed") : null;
-      setError(prefix ? `${prefix} ${directoryErrorMessage(submitError)}` : directoryErrorMessage(submitError));
+      setError({ kind: directoryForRegistration ? "registration" : "request",
+        cause: userVisibleError(submitError, "Failed to create the project.") });
     } finally {
       setSubmitting(false);
     }
   }
 
   const title = mode === "existing" ? t("chat:useExistingFolder") : t("chat:startFromScratch");
+  const errorMessage = error === null ? null
+    : error.kind === "symlink" ? t("chat:symlinkNotSupported")
+    : error.kind === "registration"
+      ? `${t("chat:createdDirectoryRegistrationFailed")} ${apiErrorMessage(error.cause)}`
+      : apiErrorMessage(error.cause);
 
   return (
     <div className="fixed inset-0 z-[70]">
@@ -191,7 +190,7 @@ export function ProjectDirectoryDialog({
 
           <div className="flex min-h-0 flex-1 flex-col gap-3 bg-card p-4">
             <ProjectDirectoryBrowser
-              error={error}
+              error={errorMessage}
               loading={loading}
               onEnterDirectory={(entry) => void enterDirectory(entry)}
               onLoadDirectory={(path) => void loadDirectory(path)}

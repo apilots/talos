@@ -39,8 +39,12 @@ impl EffectiveWorkspaceResolver {
         });
         talos_fs::write_file(
             &path,
-            &serde_json::to_string_pretty(&payload)
-                .map_err(|err| TalosError::internal(err.to_string()))?,
+            &serde_json::to_string_pretty(&payload).map_err(|err| {
+                TalosError::internal_with_source(
+                    "Failed to serialize the workspace profile; technical details were withheld.",
+                    err,
+                )
+            })?,
         )
         .await
     }

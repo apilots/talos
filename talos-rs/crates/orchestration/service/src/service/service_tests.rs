@@ -81,6 +81,7 @@ struct TestAgentCoordinator {
     cancel_mode: TestCancelMode,
     cancelled_turn_ids: Arc<Mutex<Vec<String>>>,
     compaction_usage: TokenUsage,
+    compaction_error: Option<TalosError>,
 }
 
 #[derive(Clone, Copy)]
@@ -193,7 +194,7 @@ impl AgentCoordinator for TestAgentCoordinator {
             TestCancelMode::CleanupUnconfirmed => {
                 Ok(AgentInterruptOutcome::CleanupUnconfirmed { task_count: 1 })
             }
-            TestCancelMode::MissingLiveTurn => Err(TalosError::public(
+            TestCancelMode::MissingLiveTurn => Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 "active turn for session session-interrupt-live-missing".to_string(),
             )),
@@ -307,13 +308,26 @@ impl AgentCoordinator for TestAgentCoordinator {
                 payload: CanonicalAgentEventPayload::MessageCompleted(completed_message.clone()),
             },
         ];
+        let result = self.compaction_error.clone().map_or(Ok(()), Err);
         let terminal = CanonicalAgentEvent {
             identity,
             sequence: 7,
             occurred_at: 7,
-            payload: CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
-                stop_reason: talos_agent_api::AgentStopReason::EndTurn,
-            }),
+            payload: match &result {
+                Ok(()) => CanonicalAgentEventPayload::TurnCompleted(AgentTurnCompleted {
+                    stop_reason: talos_agent_api::AgentStopReason::EndTurn,
+                }),
+                Err(error) => {
+                    CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
+                        error: talos_error::ApiError {
+                            code: error.error_code(),
+                            message: error.to_api_error().message,
+                            localization: None,
+                        },
+                        retryable: false,
+                    })
+                }
+            },
         };
         let metrics = AgentRunMetrics {
             usage: self.compaction_usage.clone(),
@@ -333,6 +347,7 @@ impl AgentCoordinator for TestAgentCoordinator {
                     drop(progress_tx);
                     settlement_tx
                         .send(Ok(AgentRunSettlement::Finished {
+                            result,
                             event: terminal,
                             messages: vec![completed_message],
                             metrics,
@@ -372,7 +387,7 @@ impl AgentCoordinator for TestExecutionCoordinator {
     async fn start(&self, params: AgentRunParams) -> TalosResult<AgentRunExecution> {
         let admission_gate = match &self.execution.mode {
             TestAgentExecutionMode::StartTimeout => {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::Timeout,
                     "injected Agent start timeout",
                 ));
@@ -503,6 +518,7 @@ async fn test_application(
             cancel_mode: TestCancelMode::Cancelled,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         config,
     )

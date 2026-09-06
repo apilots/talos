@@ -348,7 +348,7 @@ async fn steer_accepts_text_and_files_but_rejects_skills_without_consuming_them(
         .input_error
         .lock()
         .unwrap()
-        .replace(TalosError::public(
+        .replace(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "active turn ended before accepting the message".to_string(),
         ));

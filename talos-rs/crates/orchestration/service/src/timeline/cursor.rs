@@ -17,15 +17,16 @@ impl TimelineEventId {
 
     pub fn event_seq(&self) -> TalosResult<i64> {
         let raw = self.0.strip_prefix(EVENT_ID_PREFIX).ok_or_else(|| {
-            TalosError::public(
-                ErrorCode::InvalidRequest,
+            TalosError::new(
+                ErrorCode::InvalidCursor,
                 format!("invalid timeline event id: {}", self.0),
             )
         })?;
         raw.parse::<i64>().map_err(|error| {
-            TalosError::public(
-                ErrorCode::InvalidRequest,
-                format!("invalid timeline event id {}: {error}", self.0),
+            TalosError::from_source(
+                ErrorCode::InvalidCursor,
+                format!("Invalid timeline event id: {}", self.0),
+                error,
             )
         })
     }

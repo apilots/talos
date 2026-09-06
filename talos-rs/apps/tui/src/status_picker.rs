@@ -66,9 +66,7 @@ impl TuiStatusSnapshot {
             });
         let model_id = model_ref.id.as_str();
         if model_id.trim().is_empty() {
-            return Err(TalosError::internal(
-                "status requires a loaded model".to_string(),
-            ));
+            return Err(TalosError::internal("status requires a loaded model"));
         }
 
         let model_info = app
@@ -76,10 +74,16 @@ impl TuiStatusSnapshot {
             .iter()
             .find(|model| model.provider == model_ref.provider && model.model.id == model_id)
             .ok_or_else(|| {
-                TalosError::internal(format!("status model metadata missing for {model_id}"))
+                TalosError::internal(
+                    "status model metadata missing for; technical details were withheld.",
+                )
+                .context(format!("status model metadata missing for {model_id}"))
             })?;
         if model_info.model.context_window == 0 {
-            return Err(TalosError::internal(format!(
+            return Err(TalosError::internal(
+                "status model context window missing for; technical details were withheld.",
+            )
+            .context(format!(
                 "status model context window missing for {model_id}"
             )));
         }

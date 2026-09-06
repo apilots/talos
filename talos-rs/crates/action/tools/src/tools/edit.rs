@@ -108,7 +108,7 @@ impl Tool for EditTool {
         let request = parse_edit_request(&input)?;
         let result = run(&request, &context).await?;
         let structured = serde_json::to_value(&result).map_err(|err| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("serialize edit response: {}", err),
             )
@@ -128,34 +128,34 @@ impl Tool for EditTool {
 
 fn parse_edit_request(input: &Value) -> TalosResult<EditFileRequest> {
     let request: EditFileRequest = serde_json::from_value(input.clone()).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid edit arguments: {err}"),
         )
     })?;
 
     if request.path.is_none() && request.file_path.is_none() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "path is required".to_string(),
         ));
     }
     let old_string = request.find.as_deref().or(request.old_string.as_deref());
     if old_string.is_none() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "find/old_string is required".to_string(),
         ));
     }
     let new_string = request.replace.as_deref().or(request.new_string.as_deref());
     if new_string.is_none() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "replace/new_string is required".to_string(),
         ));
     }
     if old_string == new_string {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "old_string and new_string must differ".to_string(),
         ));

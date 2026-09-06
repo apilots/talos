@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
 use opendal::Writer;
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_store::file::{FileReadyUpdate, FileRecord, FileStatus};
 use talos_types::{FileUploadRequest, FileUploadResponse};
 
@@ -55,7 +55,7 @@ impl FileService {
             Ok(writer) => writer,
             Err(error) => {
                 return self
-                    .fail_upload(&record, None, opendal_error("create file writer", &error))
+                    .fail_upload(&record, None, opendal_error("create file writer", error))
                     .await
             }
         };
@@ -68,7 +68,10 @@ impl FileService {
                         .fail_upload(
                             &record,
                             Some(&mut writer),
-                            TalosError::internal(format!("read file upload body: {error}")),
+                            TalosError::internal_with_source(
+                                "read file upload body; technical details were withheld.",
+                                error,
+                            ),
                         )
                         .await
                 }
@@ -78,10 +81,7 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::file_error(
-                            TalosFileErrorKind::UploadTooLarge,
-                            "file upload size overflow",
-                        ),
+                        TalosError::new(ErrorCode::UploadTooLarge, "file upload size overflow"),
                     )
                     .await;
             };
@@ -91,8 +91,8 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::file_error(
-                            TalosFileErrorKind::UploadTooLarge,
+                        TalosError::new(
+                            ErrorCode::UploadTooLarge,
                             format!("file upload exceeds {} bytes", self.limits.max_upload_bytes),
                         ),
                     )
@@ -104,7 +104,7 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        opendal_error("write file object", &error),
+                        opendal_error("write file object", error),
                     )
                     .await;
             }
@@ -120,7 +120,7 @@ impl FileService {
                     .fail_upload(
                         &record,
                         Some(&mut writer),
-                        TalosError::file_error(TalosFileErrorKind::UnsupportedMediaType, message),
+                        TalosError::new(ErrorCode::UnsupportedMediaType, message),
                     )
                     .await;
             }
@@ -130,7 +130,7 @@ impl FileService {
                 .fail_upload(
                     &record,
                     Some(&mut writer),
-                    opendal_error("close file object", &error),
+                    opendal_error("close file object", error),
                 )
                 .await;
         }
@@ -151,9 +151,10 @@ impl FileService {
                     .fail_upload(
                         &record,
                         None,
-                        TalosError::internal(format!(
-                            "mark file ready returned no row for {file_id}"
-                        )),
+                        TalosError::internal(
+                            "mark file ready returned no row for; technical details were withheld.",
+                        )
+                        .context(format!("mark file ready returned no row for {file_id}")),
                     )
                     .await
             }
@@ -178,7 +179,10 @@ impl FileService {
         upload_error: TalosError,
     ) -> TalosResult<T> {
         if let Err(cleanup_error) = self.cleanup_upload(record, writer).await {
-            return Err(TalosError::internal(format!(
+            return Err(TalosError::internal(
+                "File upload failed; cleanup failed; technical details were withheld.",
+            )
+            .context(format!(
                 "file upload failed: {upload_error}; cleanup failed: {cleanup_error}"
             )));
         }
@@ -196,7 +200,7 @@ impl FileService {
                 // The filesystem backend without atomic writes does not implement
                 // abort; deleting the object below is its supported cleanup path.
                 if error.kind() != opendal::ErrorKind::Unsupported {
-                    cleanup_error = Some(opendal_error("abort failed file writer", &error));
+                    cleanup_error = Some(opendal_error("abort failed file writer", error));
                 }
             }
         }
@@ -206,7 +210,7 @@ impl FileService {
             .await
         {
             if cleanup_error.is_none() {
-                cleanup_error = Some(opendal_error("delete failed file object", &error));
+                cleanup_error = Some(opendal_error("delete failed file object", error));
             }
         }
         if let Some(error) = cleanup_error {

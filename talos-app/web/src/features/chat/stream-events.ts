@@ -12,8 +12,8 @@ import type {
   TimelineEvent,
 } from "@talos/sdk-core";
 import { LiveTurnProjection } from "./live-turn-projection";
+import { decodeApiError, parseTimelineEvent } from "@talos/sdk-core";
 
-import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useAppStore } from "@/shared/store/app-store";
 import { outputContentToText } from "@/shared/types/domain";
 import type {
@@ -132,9 +132,12 @@ export function buildBlocksFromHistorySnapshot(
       }
     }
 
+    if (turn.result.status === "failed") {
+      ensureTimeline().error = decodeApiError(turn.result.result.failure.error);
+    }
     if (timeline) {
       timeline.metrics = metrics;
-      if (timeline.items.length > 0 || hasMetrics(metrics)) {
+      if (timeline.error || timeline.items.length > 0 || hasMetrics(metrics)) {
         blocks.push(timeline);
       }
     } else if (hasMetrics(metrics)) {
@@ -148,26 +151,37 @@ export function buildBlocksFromHistorySnapshot(
         live: false,
       });
     }
+    for (const envelope of turn.notices) {
+      const { event } = parseTimelineEvent(envelope);
+      if (event.type !== "systemNotice") throw new Error("Invalid history notice.");
+      blocks.push({ id: `notice-${envelope.eventId}`, kind: "notice", notice: event.data.notice, live: false });
+    }
   }
 
   return { blocks, inputItems, messageIds };
 }
 
 export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
-  const { event } = envelope;
-  if (event.identity.sessionId !== sessionId) {
+  const { event: payload } = parseTimelineEvent(envelope);
+  if (payload.data.identity.sessionId !== sessionId) {
     return;
   }
 
   const state = useAppStore.getState();
   const stream = state.streams[sessionId];
-  const sameTurn = stream?.activeTurnId === event.identity.turnId;
   if (
     stream?.lastEventSeq !== undefined &&
     envelope.eventSeq <= stream.lastEventSeq
   ) {
     return;
   }
+  if (payload.type === "systemNotice") {
+    state.upsertNotice(sessionId, envelope.eventId, payload.data.notice);
+    state.setStreamMeta(sessionId, { lastEventId: envelope.eventId, lastEventSeq: envelope.eventSeq });
+    return;
+  }
+  const event = payload.data;
+  const sameTurn = stream?.activeTurnId === event.identity.turnId;
   if (!sameTurn) {
     if (stream?.activeTurnId) {
       state.resetLiveResponse(sessionId);
@@ -193,6 +207,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
 
   switch (event.payload.type) {
     case "turnStarted":
+      state.setStreamError(sessionId, undefined);
       state.setSessionStatus(sessionId, "running");
       return;
     case "messageStarted":
@@ -272,7 +287,7 @@ export function applyStreamEvent(sessionId: string, envelope: TimelineEvent) {
       state.setTimelineLive(sessionId, false);
       state.setPendingUserAction(sessionId, undefined);
       state.setSessionStatus(sessionId, "error");
-      state.setStreamError(sessionId, apiErrorMessage(event.payload.data.error));
+      state.setStreamError(sessionId, event.payload.data.error);
       state.setStreamMeta(sessionId, { isStreaming: false, connectionState: "idle" });
       clearEventAccumulator(sessionId);
       return;
@@ -584,7 +599,8 @@ function blockToChatItem(block: AgentMessageBlock): ChatTimelineItem | undefined
         ...base,
         kind: "system_notice",
         phase: "system",
-        text: block.content.data.message,
+        text: block.content.data.content.type === "text" ? block.content.data.content.data : "",
+        notice: block.content.data,
       };
   }
 }

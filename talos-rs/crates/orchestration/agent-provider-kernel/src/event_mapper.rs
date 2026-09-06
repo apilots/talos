@@ -328,7 +328,7 @@ impl KernelAgentEventMapper {
                 &message,
                 AgentMessageBlockContent::SystemNotice(AgentSystemNotice {
                     level: TalosTimelineNoticeLevel::Warning,
-                    message: message_text,
+                    content: talos_agent_api::SystemNoticeContent::Text(message_text),
                 }),
             )
             .await?;
@@ -410,14 +410,14 @@ fn map_tool_progress_kind(kind: ToolProgressKind) -> TalosToolProgressKind {
 fn warning_message(warning: talos_agent_kernel::KernelWarning) -> String {
     match warning {
         talos_agent_kernel::KernelWarning::PromptBootstrapFileMissing(data) => {
-            format!("Prompt bootstrap file is missing: {}", data.path)
+            format!("Prompt bootstrap file is missing: {:?}", data.file_kind)
         }
         talos_agent_kernel::KernelWarning::PromptBootstrapFileTruncated(data) => format!(
-            "Prompt bootstrap file was truncated: {} ({} of {} characters)",
-            data.path, data.injected_chars, data.raw_chars
+            "Prompt bootstrap file was truncated: {:?} ({} of {} characters)",
+            data.file_kind, data.injected_chars, data.raw_chars
         ),
         talos_agent_kernel::KernelWarning::PromptBootstrapFileDropped(data) => {
-            format!("Prompt bootstrap file was dropped: {}", data.path)
+            format!("Prompt bootstrap file was dropped: {:?}", data.file_kind)
         }
         talos_agent_kernel::KernelWarning::PromptDynamicSectionDropped(data) => format!(
             "Prompt dynamic sections were dropped: {}",

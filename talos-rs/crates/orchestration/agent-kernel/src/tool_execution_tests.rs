@@ -1,4 +1,49 @@
 use super::*;
+
+#[test]
+fn internal_tool_failure_projects_only_reviewed_text_to_model_and_ui() {
+    let error = TalosError::internal_with_source(
+        "The tool output could not be decoded.",
+        std::io::Error::other("SECRET_SQL /private/service.db"),
+    );
+    let outcome = tool_error_outcome(error);
+    let rendered = format!("{outcome:?}");
+    assert!(rendered.contains("The tool output could not be decoded."));
+    assert!(!rendered.contains("SECRET_SQL"));
+}
+
+#[test]
+fn tool_failure_envelopes_preserve_policy_and_default_runtime_semantics() {
+    for (error, expected) in [
+        (
+            TalosError::internal("The tool output could not be decoded."),
+            ToolOutputPayload::Mcp {
+                content: "The tool output could not be decoded.".into(),
+                is_error: true,
+            }
+            .envelope(),
+        ),
+        (
+            TalosError::tool_failure(
+                TalosToolErrorKind::PermissionRejection,
+                "The sandbox denied this tool operation.",
+                Some("sandbox_policy".into()),
+            ),
+            ToolOutputPayload::failure_structured(
+                "The sandbox denied this tool operation.",
+                Some(json!({
+                    "error": "The sandbox denied this tool operation.",
+                    "error_kind": "permission_rejection",
+                    "gate_source": "sandbox_policy",
+                })),
+            )
+            .envelope(),
+        ),
+    ] {
+        let actual = tool_error_outcome(error).envelope();
+        assert_eq!(actual, expected);
+    }
+}
 use crate::{AgentKernelEventPayload, ToolProgressKind, ToolStreamKey};
 use async_trait::async_trait;
 use serde_json::json;
@@ -60,7 +105,7 @@ impl Tool for CleanupUnconfirmedTool {
         _input: Value,
         _context: ToolContext,
     ) -> TalosResult<ToolOutputPayload> {
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::RunCleanupUnconfirmed,
             "request cancellation was not confirmed",
         ))

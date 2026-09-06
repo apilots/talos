@@ -13,7 +13,7 @@ use super::{
     RUN_CANCELLATION_POLICY, RUN_COMPLETION_TIMEOUT,
 };
 use crate::{
-    AgentError, AgentErrorKind, AgentOperationControl, AgentProvider, AgentResult, AgentSession,
+    AgentError, AgentOperationControl, AgentProvider, AgentResult, AgentSession,
     AgentSessionContext,
 };
 
@@ -48,7 +48,7 @@ where
             biased;
             () = operation_control.cancellation().requested() => {
                 Err(AgentError::new(
-                    AgentErrorKind::Interrupted,
+                    talos_error::ErrorCode::Cancelled,
                     "Agent Session acquisition was cancelled",
                 ))
             }
@@ -79,7 +79,7 @@ where
             )
             .await?;
             return Err(AgentError::new(
-                AgentErrorKind::Interrupted,
+                talos_error::ErrorCode::Cancelled,
                 "Agent Session acquisition completed after shutdown began",
             ));
         }
@@ -103,7 +103,7 @@ where
                     )
                     .await?;
                     return Err(AgentError::new(
-                        AgentErrorKind::Interrupted,
+                        talos_error::ErrorCode::Cancelled,
                         "Agent Session acquisition completed after shutdown began",
                     ));
                 }
@@ -208,8 +208,10 @@ where
                     Ok(result) => (
                         match result {
                             Ok(result) => result,
-                            Err(_) => Err(AgentError::provider_error(
+                            Err(error) => Err(AgentError::from_source(
+                                talos_error::ErrorCode::InternalError,
                                 "Agent Session operation task stopped",
+                                error,
                             )),
                         },
                         RunTermination::Completed {
@@ -219,7 +221,7 @@ where
                     ),
                     Err(_) => (
                         Err(AgentError::new(
-                            AgentErrorKind::Timeout,
+                            talos_error::ErrorCode::Timeout,
                             "Agent Session operation timed out",
                         )),
                         RunTermination::Cancelled {

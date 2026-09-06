@@ -1,5 +1,6 @@
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
+import { errorPresentationRule } from "./scripts/error-presentation-rule.mjs";
 
 export default tseslint.config(
   {
@@ -25,6 +26,12 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    files: ["web/src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.{ts,tsx}", "**/__tests__/**", "web/src/shared/i18n/apiErrorMessage.ts"],
+    plugins: { talos: { rules: { "error-presentation": errorPresentationRule } } },
+    rules: { "talos/error-presentation": "error" },
   },
   {
     // shared/store is intentionally excluded here because app-store is the composition point

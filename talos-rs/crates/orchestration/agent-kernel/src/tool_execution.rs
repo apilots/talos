@@ -102,16 +102,30 @@ fn build_tool_context(
         .into_iter()
         .map(|root| {
             let root = std::fs::canonicalize(&root).map_err(|error| {
-                TalosError::internal(format!("resolve sandbox root {}: {error}", root.display()))
+                let diagnostic = format!("resolve sandbox root {}: {error}", root.display());
+                TalosError::internal_with_source(
+                    "Resolve sandbox root; technical details were withheld.",
+                    error,
+                )
+                .context(diagnostic)
             })?;
-            AbsolutePathBuf::new(root)
-                .map_err(|error| TalosError::internal(format!("resolve sandbox root: {error}")))
+            AbsolutePathBuf::new(root).map_err(|error| {
+                TalosError::internal_with_source(
+                    "resolve sandbox root; technical details were withheld.",
+                    error,
+                )
+            })
         })
         .collect::<TalosResult<Vec<_>>>()?;
     let readable_roots = resolve_runtime_readable_roots(&workspace_roots);
     let denied_roots = resolve_runtime_denied_roots()?;
     let sandbox_environment = ToolSandboxEnvironment::local(workspace_roots, denied_roots)
-        .map_err(|error| TalosError::internal(format!("resolve sandbox environment: {error}")))?
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "resolve sandbox environment; technical details were withheld.",
+                error,
+            )
+        })?
         .with_readable_roots(readable_roots);
     let ctx = registry
         .build_context(
@@ -163,22 +177,31 @@ fn resolve_runtime_denied_roots() -> TalosResult<Vec<AbsolutePathBuf>> {
     let env_file = TalosPaths::resolve().env_file;
     let env_file = if env_file.exists() {
         std::fs::canonicalize(&env_file).map_err(|error| {
-            TalosError::internal(format!(
-                "resolve protected env file {}: {error}",
-                env_file.display()
-            ))
+            let diagnostic = format!("resolve protected env file {}: {error}", env_file.display());
+            TalosError::internal_with_source(
+                "Resolve protected env file; technical details were withheld.",
+                error,
+            )
+            .context(diagnostic)
         })?
     } else {
         std::path::absolute(&env_file).map_err(|error| {
-            TalosError::internal(format!(
-                "resolve protected env file {}: {error}",
-                env_file.display()
-            ))
+            let diagnostic = format!("resolve protected env file {}: {error}", env_file.display());
+            TalosError::internal_with_source(
+                "Resolve protected env file; technical details were withheld.",
+                error,
+            )
+            .context(diagnostic)
         })?
     };
     AbsolutePathBuf::new(env_file)
         .map(|path| vec![path])
-        .map_err(|error| TalosError::internal(format!("resolve protected env file: {error}")))
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "resolve protected env file; technical details were withheld.",
+                error,
+            )
+        })
 }
 
 fn resolve_runtime_readable_roots(workspace_roots: &[AbsolutePathBuf]) -> Vec<AbsolutePathBuf> {
@@ -230,14 +253,7 @@ async fn execute_single_tool_call(
             outcome: payload,
         },
         Err(error) => {
-            tracing::error!(
-                session_id = %execution_context.session_id,
-                turn_id = %execution_context.turn_id,
-                tool_name = %call.tool_name,
-                call_id = %call.call_id,
-                error = ?error,
-                "tool execution failed"
-            );
+            talos_logging::report_error(&error);
             ToolExecutionOutput {
                 call_id: call.call_id,
                 tool_name: call.tool_name,
@@ -272,14 +288,14 @@ async fn execute_tool_invocation(
         }
     });
     let run_task = run_task.map_err(|error| match error {
-        SpawnError::Closed => TalosError::public(
+        SpawnError::Closed => TalosError::new(
             talos_error::ErrorCode::Cancelled,
             "Run stopped accepting Tool tasks",
         ),
         SpawnError::CapacityExceeded => TalosError::internal("Run Tool task capacity exceeded"),
     })?;
     run_task.await.map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::Cancelled,
             "Tool task ended without a result",
         )
@@ -290,12 +306,12 @@ fn tool_error_outcome(error: TalosError) -> ToolDispatchOutcome {
     if let Some(diagnostic) = error.tool_failure_diagnostic() {
         structured_tool_failure(
             diagnostic.kind,
-            error.diagnostic_message().to_string(),
+            error.to_api_error().message,
             diagnostic.gate_source.clone(),
         )
     } else {
         ToolDispatchOutcome::executed(ToolOutputPayload::Mcp {
-            content: error.to_string(),
+            content: error.to_api_error().message,
             is_error: true,
         })
     }
@@ -387,7 +403,10 @@ impl ToolExecutor for ParallelToolExecutor {
         let mut outputs = vec![None; calls.len()];
         while let Some(result) = join_set.join_next().await {
             let (index, output) = result.map_err(|error| {
-                TalosError::internal(format!("parallel tool execution task failed: {error}"))
+                TalosError::internal_with_source(
+                    "parallel tool execution task failed; technical details were withheld.",
+                    error,
+                )
             })?;
             outputs[index] = Some(output);
         }
@@ -396,7 +415,10 @@ impl ToolExecutor for ParallelToolExecutor {
             .enumerate()
             .map(|(index, output)| {
                 output.ok_or_else(|| {
-                    TalosError::internal(format!("missing parallel tool output at index {index}"))
+                    TalosError::internal(
+                        "missing parallel tool output at index; technical details were withheld.",
+                    )
+                    .context(format!("missing parallel tool output at index {index}"))
                 })
             })
             .collect()
@@ -518,7 +540,10 @@ impl StreamingToolScheduler {
         let mut completed = Vec::new();
         while let Some(result) = self.running_tasks.try_join_next() {
             let (running_call, output) = result.map_err(|error| {
-                TalosError::internal(format!("streaming tool execution task failed: {error}"))
+                TalosError::internal_with_source(
+                    "streaming tool execution task failed; technical details were withheld.",
+                    error,
+                )
             })?;
             self.mark_completed(&running_call);
             self.halt_if_pending(&output);
@@ -538,7 +563,10 @@ impl StreamingToolScheduler {
             return Ok(None);
         };
         let (running_call, output) = result.map_err(|error| {
-            TalosError::internal(format!("streaming tool execution task failed: {error}"))
+            TalosError::internal_with_source(
+                "streaming tool execution task failed; technical details were withheld.",
+                error,
+            )
         })?;
         self.mark_completed(&running_call);
         self.halt_if_pending(&output);

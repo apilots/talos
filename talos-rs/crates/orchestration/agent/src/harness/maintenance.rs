@@ -15,9 +15,9 @@ use super::settlement::{
 use super::{ActiveOperation, Harness, SessionOperationKind, RUN_COMPLETION_TIMEOUT};
 use crate::{
     event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentContext, AgentError,
-    AgentErrorKind, AgentEventSink, AgentOperationControl, AgentProgressEventReceiver,
-    AgentProvider, AgentResult, AgentRunExecution, AgentRunSettlement, AgentRunSettlementReceiver,
-    AgentSession, AgentSessionContext, SessionCompactionParams,
+    AgentEventSink, AgentOperationControl, AgentProgressEventReceiver, AgentProvider, AgentResult,
+    AgentRunExecution, AgentRunSettlement, AgentRunSettlementReceiver, AgentSession,
+    AgentSessionContext, SessionCompactionParams,
 };
 
 struct CompactionDriver {
@@ -120,7 +120,7 @@ where
             let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
             if remaining.is_zero() {
                 return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out",
                 ));
             }
@@ -132,7 +132,10 @@ where
             )
             .await
             .map_err(|_| {
-                AgentError::new(AgentErrorKind::Timeout, "Agent Harness shutdown timed out")
+                AgentError::new(
+                    talos_error::ErrorCode::Timeout,
+                    "Agent Harness shutdown timed out",
+                )
             })?;
             if !cleanup_confirmed(&settlement) {
                 return Err(cleanup_error(&settlement));
@@ -151,7 +154,7 @@ where
                     .is_err()
             {
                 return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out waiting for active operations",
                 ));
             }
@@ -208,8 +211,13 @@ where
             .map_err(spawn_error)?;
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         let result = match tokio::time::timeout(remaining, task).await {
-            Ok(result) => result
-                .map_err(|_| AgentError::provider_error("Agent Provider shutdown task stopped"))?,
+            Ok(result) => result.map_err(|error| {
+                AgentError::from_source(
+                    talos_error::ErrorCode::InternalError,
+                    "Agent Provider shutdown task stopped",
+                    error,
+                )
+            })?,
             Err(_) => {
                 let settlement = control
                     .settle(RunTermination::Cancelled {
@@ -222,7 +230,7 @@ where
                     return Err(cleanup_error(&settlement));
                 }
                 return Err(AgentError::new(
-                    AgentErrorKind::Timeout,
+                    talos_error::ErrorCode::Timeout,
                     "Agent Harness shutdown timed out",
                 ));
             }
@@ -252,7 +260,7 @@ where
             biased;
             () = control.cancellation().requested() => {
                 let _ = settlement_tx.send(Err(AgentError::new(
-                    AgentErrorKind::Interrupted,
+                    talos_error::ErrorCode::Cancelled,
                     "Agent compaction was cancelled before Provider start",
                 )));
                 self.remove_exact(&identity);
@@ -299,6 +307,16 @@ where
             })
             .await;
         if !cleanup_confirmed(&lifecycle) {
+            match provider_result {
+                Ok(Err(error)) => talos_logging::report_error(error.error()),
+                Err(error) => {
+                    talos_logging::report_error(&talos_error::TalosError::internal_with_source(
+                        "Agent Provider compaction stopped before cleanup confirmation",
+                        error,
+                    ))
+                }
+                Ok(Ok(_)) => {}
+            }
             self.mark_cleanup_pending(&identity, control, &lifecycle);
             let _ = settlement_tx.send(Err(cleanup_error(&lifecycle)));
             return;
@@ -313,8 +331,10 @@ where
                 }
             }
             Ok(Err(error)) => settle_failure(&pipeline, error).await,
-            Err(_) => Err(AgentError::provider_error(
+            Err(error) => Err(AgentError::from_source(
+                talos_error::ErrorCode::InternalError,
                 "Agent Provider compaction task stopped",
+                error,
             )),
         };
         let _ = settlement_tx.send(result);
@@ -418,7 +438,7 @@ where
             }
             Entry::Occupied(_) => {
                 return Err(AgentError::new(
-                    AgentErrorKind::ActiveTurnRunning,
+                    talos_error::ErrorCode::ActiveTurnRunning,
                     format!("session `{session_id}` already has an active Agent operation"),
                 ));
             }

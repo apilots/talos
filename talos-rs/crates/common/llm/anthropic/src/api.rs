@@ -9,7 +9,7 @@ use talos_llm_provider::{
     AttachmentKind, AttachmentUsage, ChatRequest, ChatResponse, ChatStream, LlmProvider,
     ModelBlockStream, PromptCacheSupport, ReasoningEffort,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, info};
 
 /// Anthropic API configuration.
 #[derive(Debug, Clone)]
@@ -183,25 +183,28 @@ impl AnthropicProvider {
             .json(&anthropic_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            error!("Anthropic API error: {} - {}", status, error_text);
-            return Err(TalosError::internal(format!(
-                "Anthropic API error: {} - {}",
-                status, error_text
-            )));
+            return Err(talos_llm_provider::http_response_error(
+                "Anthropic",
+                &response,
+            ));
         }
 
-        let anthropic_resp: messages_protocol::MessagesResponse = response
-            .json()
-            .await
-            .map_err(|e| TalosError::internal(format!("Failed to parse response: {}", e)))?;
+        let anthropic_resp: messages_protocol::MessagesResponse =
+            response.json().await.map_err(|e| {
+                TalosError::internal_with_source(
+                    "Failed to parse response; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         messages_protocol::chat_response(anthropic_resp)
     }
@@ -220,18 +223,19 @@ impl AnthropicProvider {
             .json(&anthropic_req)
             .send()
             .await
-            .map_err(|e| TalosError::internal(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TalosError::internal_with_source(
+                    "HTTP request failed; technical details were withheld.",
+                    e.without_url(),
+                )
+            })?;
 
         let status = response.status();
         if !status.is_success() {
-            let error_text = response
-                .text()
-                .await
-                .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(TalosError::internal(format!(
-                "Anthropic API error: {} - {}",
-                status, error_text
-            )));
+            return Err(talos_llm_provider::http_response_error(
+                "Anthropic",
+                &response,
+            ));
         }
 
         Ok(response)

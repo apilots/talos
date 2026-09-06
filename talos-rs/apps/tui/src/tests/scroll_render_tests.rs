@@ -1,15 +1,6 @@
 use super::*;
 use ratatui::{backend::TestBackend, style::Color, Terminal};
 
-fn interactive_transcript_text(app: &TuiApp) -> String {
-    app.render_runtime
-        .interactive_projection_lines()
-        .into_iter()
-        .map(|line| line.plain_text())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn append_transcript_answer(app: &mut TuiApp, user: &str, answer: &str) {
     app.render_runtime.append_user_input(user);
     app.render_runtime.append_history([

@@ -2,6 +2,8 @@
 
 pub(crate) mod api;
 mod attachment;
+mod error;
+pub use error::http_response_error;
 pub mod protocols;
 mod router;
 

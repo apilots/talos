@@ -127,7 +127,7 @@ impl AgentKernel {
                             }
                             result = &mut run => break result,
                             () = cancellation.requested() => {
-                                break Err(TalosError::public(
+                                break Err(TalosError::new(
                                     ErrorCode::Cancelled,
                                     "Agent Kernel cancellation requested",
                                 ));
@@ -296,7 +296,7 @@ pub enum AgentKernelPendingInput {
 
 fn map_spawn_error(error: SpawnError) -> TalosError {
     match error {
-        SpawnError::Closed => TalosError::public(
+        SpawnError::Closed => TalosError::new(
             ErrorCode::Cancelled,
             "Agent Kernel operation stopped accepting tasks",
         ),

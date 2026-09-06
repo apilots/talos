@@ -64,7 +64,9 @@ export function buildSessionBlocks({
     streamState?.pendingInput,
   );
   const liveBlocks =
-    historyHasActiveMessage && !streamState?.isStreaming ? [] : streamState?.blocks ?? [];
+    historyHasActiveMessage && !streamState?.isStreaming
+      ? (streamState?.blocks ?? []).filter((block) => block.kind === "notice")
+      : streamState?.blocks ?? [];
   const liveBlockIds = new Set(liveBlocks.map((block) => block.id));
   const liveHasPendingInput = Boolean(
     streamState?.pendingInput?.serverMessageId &&

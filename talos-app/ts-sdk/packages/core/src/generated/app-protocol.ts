@@ -2,6 +2,8 @@
 
 export type ProtocolVersion = { major: number, minor: number, };
 
+export const PROTOCOL_VERSION = {"major":0,"minor":4} as const;
+
 export type RequestId = string | number;
 
 export type AppServerErrorCode = -32700 | -32600 | -32601 | -32602 | -32603 | -32001 | -32002;
@@ -121,7 +123,11 @@ export type SessionHistoryRequest = { sessionId: string, cursor: string | null, 
 
 export type SessionHistoryResponse = { data: Array<SessionHistoryTurn>, nextCursor: string | null, };
 
-export type SessionHistoryTurn = { identity: AgentTurnRef, result: AgentRunResult, completedEventSeq: number, completedAt: number, };
+export type SessionHistoryTurn = { identity: AgentTurnRef, result: AgentRunResult,
+/**
+ * Product notices do not alter execution results or Provider continuation state.
+ */
+notices: Array<TimelineEvent>, completedEventSeq: number, completedAt: number, };
 
 export type AgentRunResult = { "status": "completed", "result": AgentRunOutput } | { "status": "failed", "result": AgentRunFailure };
 
@@ -677,7 +683,13 @@ export type OptionalCurrentDirectoryPatch = { "type": "set", path: string, } | {
 
 export type SessionConf = { modelSelection: ModelSelection | null, userPermissionMode: UserPermissionMode | null, };
 
-export type TimelineEvent = { eventId: string, eventSeq: number, persistedAt: number, event: AgentEvent, };
+export type TimelineEvent = { eventId: string, eventSeq: number, persistedAt: number, event: TimelineEventPayload, };
+
+export type TimelineEventPayload = { "type": "agent", "data": AgentEvent } | { "type": "systemNotice", "data": TimelineSystemNotice };
+
+export type TimelineSystemNotice = { identity: AgentTurnRef, occurredAt: number, notice: AgentSystemNotice, };
+
+export type SystemNoticeContent = { "type": "text", "data": string } | { "type": "error", "data": ApiError };
 
 export type AgentEvent = { identity: AgentTurnRef, sequence: number, occurredAt: number, payload: AgentEventPayload, };
 
@@ -709,11 +721,13 @@ context: ContextUsage | null, durationMs: number | null, };
 
 export type AgentTurnCompleted = { stopReason: AgentStopReason, };
 
-export type AgentTurnFailed = { error: AgentErrorInfo, };
+export type AgentTurnFailed = { error: ApiError,
+/**
+ * Runtime-owned retry policy; not part of the reusable public error object.
+ */
+retryable: boolean, };
 
 export type AgentStopReason = "endTurn" | "outputLimit" | "transferUnresolved";
-
-export type AgentErrorInfo = { code: ErrorCode, message: string, retryable: boolean, };
 
 export type AgentMessage = { messageId: string, turnId: string, role: AgentMessageRole, status: AgentMessageStatus, blocks: Array<AgentMessageBlock>, createdAt: number, completedAt: number | null, };
 
@@ -751,7 +765,7 @@ export type AgentExecutionSummary = { text: string, };
 
 export type AgentContextCompaction = { trigger: ContextCompactionTrigger, stage: ContextCompactionStage, outcome: ContextCompactionOutcome | null, metrics: ContextCompactionMetrics | null, message: string | null, };
 
-export type AgentSystemNotice = { level: TalosTimelineNoticeLevel, message: string, };
+export type AgentSystemNotice = { level: TalosTimelineNoticeLevel, content: SystemNoticeContent, };
 
 export type TalosTimelineNoticeLevel = "info" | "warning" | "error";
 
@@ -809,7 +823,9 @@ export const ErrorCode = {
   InternalError: "internalError",
 } as const satisfies Record<string, ErrorCode>;
 
-export type ApiError = { code: ErrorCode, message: string, };
+export type ApiError = { code: ErrorCode, message: string, localization: ErrorLocalization | null, };
+
+export type ErrorLocalization = { "type": "modelNotConfigured", provider: string, model: string, } | { "type": "attachmentCountExceeded", limit: number, actual: number, };
 
 export type ApiResponse<T> = { "status": "success", data: T, } | { "status": "error", error: ApiError, };
 
@@ -891,7 +907,7 @@ export type SubscriptionTerminatedEvent = { reason: SubscriptionTerminatedReason
 
 export type SubscriptionTerminatedReason = "completed" | "interrupted" | "server_shutdown" | "session_deleted" | "lagged" | "slow_consumer";
 
-export type ServerNotification = { "method": "initialized", "params": InitializedNotification } | { "method": "timeline/turn/started", "params": TimelineEventNotification } | { "method": "timeline/message/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/delta", "params": TimelineEventNotification } | { "method": "timeline/message/block/completed", "params": TimelineEventNotification } | { "method": "timeline/message/completed", "params": TimelineEventNotification } | { "method": "timeline/waiting_for_input", "params": TimelineEventNotification } | { "method": "timeline/metrics/updated", "params": TimelineEventNotification } | { "method": "timeline/turn/completed", "params": TimelineEventNotification } | { "method": "timeline/turn/failed", "params": TimelineEventNotification } | { "method": "subscription/terminated", "params": SubscriptionTerminatedNotification } | { "method": "messageQueue/changed", "params": MessageQueueChangedNotification };
+export type ServerNotification = { "method": "initialized", "params": InitializedNotification } | { "method": "timeline/turn/started", "params": TimelineEventNotification } | { "method": "timeline/message/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/started", "params": TimelineEventNotification } | { "method": "timeline/message/block/delta", "params": TimelineEventNotification } | { "method": "timeline/message/block/completed", "params": TimelineEventNotification } | { "method": "timeline/message/completed", "params": TimelineEventNotification } | { "method": "timeline/waiting_for_input", "params": TimelineEventNotification } | { "method": "timeline/metrics/updated", "params": TimelineEventNotification } | { "method": "timeline/turn/completed", "params": TimelineEventNotification } | { "method": "timeline/turn/failed", "params": TimelineEventNotification } | { "method": "timeline/systemNotice", "params": TimelineEventNotification } | { "method": "subscription/terminated", "params": SubscriptionTerminatedNotification } | { "method": "messageQueue/changed", "params": MessageQueueChangedNotification };
 
 export type InitializedNotification = { protocol_version: ProtocolVersion, };
 

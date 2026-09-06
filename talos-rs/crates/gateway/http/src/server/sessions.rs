@@ -44,7 +44,7 @@ pub(super) async fn get_session_handler(
         .gateway
         .get_session(&shared_actor(&actor.0), SessionGetRequest { session_id })
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
 
     Ok(api_success(session))
 }
@@ -66,7 +66,7 @@ pub(super) async fn get_session_history_handler(
             },
         )
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
 
     Ok(api_success(response))
 }
@@ -82,7 +82,7 @@ pub(super) async fn patch_session_handler(
         .gateway
         .patch_session(&shared_actor(&actor.0), request)
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
 
     Ok(api_success(response))
 }
@@ -96,7 +96,7 @@ pub(super) async fn close_session_handler(
         .gateway
         .close_session(&shared_actor(&actor.0), SessionCloseRequest { session_id })
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
 }
 
@@ -109,7 +109,7 @@ pub(super) async fn delete_session_handler(
         .gateway
         .delete_session(&shared_actor(&actor.0), SessionDeleteRequest { session_id })
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success(response))
 }
 
@@ -125,7 +125,7 @@ pub(super) async fn compact_session_handler(
             SessionCompactRequest { session_id },
         )
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success(session))
 }
 
@@ -138,15 +138,6 @@ pub(super) async fn clear_session_handler(
         .gateway
         .clear_session(&shared_actor(&actor.0), SessionClearRequest { session_id })
         .await
-        .map_err(map_session_error)?;
+        .map_err(ApiError::from_talos_error)?;
     Ok(api_success(session))
-}
-
-fn map_session_error(error: talos_error::TalosError) -> ApiError {
-    match error.error_code() {
-        talos_error::ErrorCode::ResourceNotFound => {
-            ApiError::new(talos_error::ErrorCode::SessionNotFound)
-        }
-        _ => ApiError::from_talos_error(error),
-    }
 }

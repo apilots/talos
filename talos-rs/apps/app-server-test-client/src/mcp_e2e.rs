@@ -374,8 +374,8 @@ fn latest_playwright_artifact(extension: &str) -> Result<Option<PathBuf>> {
 
 fn called_mcp_tools_from_events(events: &[TimelineEvent]) -> BTreeSet<String> {
     let mut tools = BTreeSet::new();
-    for event in events {
-        match &event.event.payload {
+    for event in events.iter().filter_map(|event| event.event.agent_event()) {
+        match &event.payload {
             AgentEventPayload::MessageBlockStarted(started) => {
                 if let AgentMessageBlockContent::ToolCall(call) = &started.block.content {
                     if call.name.starts_with("mcp__") {

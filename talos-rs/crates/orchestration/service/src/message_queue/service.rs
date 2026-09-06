@@ -46,7 +46,7 @@ impl MessageQueueReservation {
 impl SessionMessageQueueService {
     pub fn new(max_messages: u32) -> TalosResult<Self> {
         if max_messages == 0 {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::InvalidRequest,
                 "message queue max_messages must be > 0",
             ));
@@ -68,9 +68,9 @@ impl SessionMessageQueueService {
     pub fn add(&self, session_id: &str, input: AgentUserInput) -> TalosResult<MessageQueue> {
         self.with_queue(session_id, QueueAccess::Create, |queue| {
             if queue.messages.len() >= self.inner.max_messages as usize {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     ErrorCode::MessageQueueFull,
-                    format!("message queue is full for session `{session_id}`"),
+                    "The session message queue has reached its configured capacity; remove a queued message before adding another.",
                 ));
             }
 
@@ -357,15 +357,15 @@ fn ensure_not_busy(queue: &SessionMessageQueue, message_id: &str) -> TalosResult
 }
 
 fn queue_busy(diagnostic: impl Into<String>) -> TalosError {
-    TalosError::public(ErrorCode::MessageQueueBusy, diagnostic)
+    TalosError::new(ErrorCode::MessageQueueBusy, diagnostic)
 }
 
 fn queue_conflict(diagnostic: impl Into<String>) -> TalosError {
-    TalosError::public(ErrorCode::Conflict, diagnostic)
+    TalosError::new(ErrorCode::Conflict, diagnostic)
 }
 
 fn message_not_found(session_id: &str, message_id: &str) -> TalosError {
-    TalosError::public(
+    TalosError::new(
         ErrorCode::ResourceNotFound,
         format!("message queue item `{message_id}` was not found in session `{session_id}`"),
     )

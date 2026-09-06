@@ -678,8 +678,10 @@ fn to_value<T: Serialize>(value: T) -> ApplicationResult<ApplicationResponse> {
             started_turn: None,
         })
         .map_err(|error| {
-            tracing::error!(error = %error, "failed to serialize app-server application response");
-            ApiError::new(ErrorCode::InternalError)
+            talos_error_to_api_error(TalosError::internal_with_source(
+                "Failed to encode the app-server application response.",
+                error,
+            ))
         })
 }
 
@@ -688,30 +690,40 @@ fn decode_file_upload_data(data_base64: &str, max_upload_bytes: u64) -> Applicat
         .saturating_add(2)
         .saturating_div(3)
         .saturating_mul(4);
-    let encoded_len =
-        u64::try_from(data_base64.len()).map_err(|_| ApiError::new(ErrorCode::UploadTooLarge))?;
+    let encoded_len = u64::try_from(data_base64.len()).map_err(|error| {
+        talos_error_to_api_error(TalosError::from_source(
+            ErrorCode::UploadTooLarge,
+            "The encoded file upload exceeds the configured size limit.",
+            error,
+        ))
+    })?;
     if encoded_len > max_encoded_len {
-        return Err(ApiError::new(ErrorCode::UploadTooLarge));
+        return Err(talos_error_to_api_error(TalosError::new(
+            ErrorCode::UploadTooLarge,
+            "The encoded file upload exceeds the configured size limit.",
+        )));
     }
 
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(data_base64)
-        .map_err(|_| ApiError::new(ErrorCode::InvalidRequest))?;
+        .map_err(|error| {
+            talos_error_to_api_error(TalosError::from_source(
+                ErrorCode::InvalidRequest,
+                "The file upload is not valid standard Base64.",
+                error,
+            ))
+        })?;
     if decoded.len() as u64 > max_upload_bytes {
-        return Err(ApiError::new(ErrorCode::UploadTooLarge));
+        return Err(talos_error_to_api_error(TalosError::new(
+            ErrorCode::UploadTooLarge,
+            "The decoded file upload exceeds the configured size limit.",
+        )));
     }
     Ok(Bytes::from(decoded))
 }
 
 fn talos_error_to_api_error(error: TalosError) -> ApiError {
-    if error.is_internal() {
-        tracing::error!(
-            context = error.diagnostic_message(),
-            source = ?std::error::Error::source(&error),
-            location = %error.location(),
-            "internal JSON-RPC application error"
-        );
-    }
+    talos_logging::report_error(&error);
     error.to_api_error()
 }
 

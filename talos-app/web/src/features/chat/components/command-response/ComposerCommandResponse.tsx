@@ -1,4 +1,5 @@
 import { Check, TriangleAlert } from "lucide-react";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 import { useTranslation } from "react-i18next";
 
 import type { ContextUsage } from "../contextUsage";
@@ -75,7 +76,7 @@ function CommandResult({ onDismiss, response }: { onDismiss?: () => void; respon
       role={failed ? "alert" : "status"}
       title={title}
     >
-      <div className="px-4 py-3 text-[12px] text-muted">{response.message ?? detail}</div>
+      <div className="px-4 py-3 text-[12px] text-muted">{response.error ? apiErrorMessage(response.error) : detail}</div>
     </CommandResponseSurface>
   );
 }

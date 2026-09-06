@@ -29,17 +29,27 @@ pub(crate) fn materialize_source(
                 talos_fs::std_fs()
                     .remove_directory(&repo_dir)
                     .map_err(|err| {
-                        TalosError::internal(format!(
+                        let diagnostic = format!(
                             "failed to clear plugin source cache `{}`: {err}",
                             repo_dir.display()
-                        ))
+                        );
+                        TalosError::internal_with_source(
+                            "Failed to clear plugin source cache; technical details were withheld.",
+                            err,
+                        )
+                        .context(diagnostic)
                     })?;
             }
             talos_fs::create_directory(&repo_dir, true).map_err(|err| {
-                TalosError::internal(format!(
+                let diagnostic = format!(
                     "failed to create plugin source cache `{}`: {err}",
                     repo_dir.display()
-                ))
+                );
+                TalosError::internal_with_source(
+                    "Failed to create plugin source cache; technical details were withheld.",
+                    err,
+                )
+                .context(diagnostic)
             })?;
 
             run_git(["init"], &repo_dir)?;
@@ -85,7 +95,7 @@ where
     if output.status.success() {
         return Ok(());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::ToolExecutionFailed,
         format!(
             "git {} failed in `{}`: {}",
@@ -109,7 +119,7 @@ where
     if output.status.success() {
         return Ok(String::from_utf8_lossy(&output.stdout).to_string());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::ToolExecutionFailed,
         format!(
             "git {} failed in `{}`: {}",
@@ -126,19 +136,19 @@ fn run_git_command(args: &[String], cwd: &Path) -> TalosResult<Output> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("failed to run git in `{}`: {err}", cwd.display()),
             )
         })?;
     match child.wait_timeout(GIT_COMMAND_TIMEOUT).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("failed to wait for git in `{}`: {err}", cwd.display()),
         )
     })? {
         Some(_) => child.wait_with_output().map_err(|err| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!("failed to collect git output in `{}`: {err}", cwd.display()),
             )
@@ -146,7 +156,7 @@ fn run_git_command(args: &[String], cwd: &Path) -> TalosResult<Output> {
         None => {
             let _ = child.kill();
             let _ = child.wait();
-            Err(TalosError::public(
+            Err(TalosError::new(
                 talos_error::ErrorCode::ToolExecutionFailed,
                 format!(
                     "git {} timed out after {} seconds in `{}`",

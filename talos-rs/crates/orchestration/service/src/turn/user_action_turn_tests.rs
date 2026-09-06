@@ -191,11 +191,12 @@ async fn settle_pending_turn(store: &DatabaseSessionStore) {
                 sequence: events.last().unwrap().sequence.saturating_add(1),
                 occurred_at: 10,
                 payload: CanonicalAgentEventPayload::TurnFailed(AgentTurnFailed {
-                    error: AgentErrorInfo {
+                    error: talos_error::ApiError {
                         code: talos_error::ErrorCode::Cancelled,
                         message: "settled before response".to_string(),
-                        retryable: false,
+                        localization: None,
                     },
+                    retryable: false,
                 }),
             },
             expected_event_seq: active.last_event_seq,

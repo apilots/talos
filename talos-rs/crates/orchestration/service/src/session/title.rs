@@ -60,7 +60,12 @@ impl SessionService {
             user_message,
             assistant_response,
         })
-        .map_err(|error| TalosError::internal(error.to_string()))?;
+        .map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to serialize title-generation input; technical details were withheld.",
+                error,
+            )
+        })?;
         let response = tokio::time::timeout(
             std::time::Duration::from_secs(15),
             inner_model.chat(InnerModelChatParams {

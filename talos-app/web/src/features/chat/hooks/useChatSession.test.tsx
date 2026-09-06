@@ -109,7 +109,7 @@ vi.mock("./useSessionStreaming", () => ({
 describe("useChatSession", () => {
   beforeEach(() => {
     mocks.send.mockReset().mockRejectedValue(new TalosApiError({
-      code: AppProtocol.ErrorCode.ActiveTurnRunning,
+      code: AppProtocol.ErrorCode.ActiveTurnRunning, localization: null,
       message: "Active turn is already running",
     }));
     mocks.createInitialTurnRequest.mockClear();

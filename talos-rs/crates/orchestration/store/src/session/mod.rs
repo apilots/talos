@@ -11,7 +11,7 @@ pub use agent_execution::{
     AgentContinuationBindingStatus, AgentEventCommit, AgentEventRecord, AgentExecutionStore,
     ClaimContinuationParams, CommandLease, CommandReservation, CommitInitialAdmissionParams,
     CommitRunningInputAdmissionParams, CommitTerminalSettlementParams, IdempotencyRecord,
-    IdempotencyReservation, IdempotentCommand,
+    IdempotencyReservation, IdempotentCommand, TimelineEventRecord,
 };
 pub use mock_store::MockSessionStore;
 pub use store::{DatabaseSessionStore, SessionStore};

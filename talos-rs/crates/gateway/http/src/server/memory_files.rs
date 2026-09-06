@@ -127,7 +127,7 @@ fn parse_memory_kinds(value: &str) -> Result<Vec<MemoryKind>, ApiError> {
             "decision" => Ok(MemoryKind::Decision),
             "task" => Ok(MemoryKind::Task),
             "episode" => Ok(MemoryKind::Episode),
-            _ => Err(ApiError::from_talos_error(TalosError::public(
+            _ => Err(ApiError::from_talos_error(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("unknown memory kind: {kind}"),
             ))),

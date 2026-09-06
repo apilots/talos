@@ -4,13 +4,15 @@ use std::sync::Arc;
 use talos_agent_api::AgentEventPayload;
 use talos_error::{TalosError, TalosResult};
 use talos_storage::{Row, Storage};
-use talos_types::talos::{SessionSourceProvider, SessionSourceType, TalosSessionEnvironment};
+use talos_types::talos::TalosSessionEnvironment;
 use talos_types::{AgentPath, ContextUsage, SessionConf, SessionUsage, DEFAULT_SESSION_TITLE};
 
 use super::{
     AccumulateSessionUsageParams, AgentExecutionStore, PatchSessionParams, SessionQuery,
     SessionRecord, SessionSummary, SessionTreeIdentity, SessionTreeScope,
 };
+
+mod record;
 
 #[async_trait]
 pub trait SessionStore: Send + Sync {
@@ -93,156 +95,6 @@ impl DatabaseSessionStore {
         Ok(rows.into_iter().next())
     }
 
-    fn parse_session_record(row: &Row) -> TalosResult<SessionRecord> {
-        let message_count = row
-            .get_i64("message_count")
-            .unwrap_or_default()
-            .try_into()
-            .unwrap_or_default();
-        let id = row.get_string("session_key").unwrap_or_default();
-        let usage = Self::parse_required_json::<SessionUsage>(
-            row.get_string("usage_json"),
-            &id,
-            "usage_json",
-        )?;
-        let source_type = Self::parse_required_enum::<SessionSourceType>(
-            row.get_string("source_type"),
-            &id,
-            "source_type",
-        )?;
-        let source_provider = Self::parse_required_enum::<SessionSourceProvider>(
-            row.get_string("source_provider"),
-            &id,
-            "source_provider",
-        )?;
-        let environment = Self::parse_required_json::<Option<TalosSessionEnvironment>>(
-            row.get_string("environment_json"),
-            &id,
-            "environment_json",
-        )?;
-
-        let parent_session_id =
-            Self::normalized_optional_string(row.get_string("parent_session_id"));
-        let parent_turn_id = Self::normalized_optional_string(row.get_string("parent_turn_id"));
-        let tree_root_session_id =
-            Self::normalized_optional_string(row.get_string("tree_root_session_id"));
-        let agent_path = Self::normalized_optional_string(row.get_string("agent_path"))
-            .map(|path| {
-                path.parse::<AgentPath>().map_err(|error| {
-                    TalosError::internal(format!("session '{id}' has invalid agent path: {error}"))
-                })
-            })
-            .transpose()?;
-        let tree_identity = match (
-            parent_session_id,
-            parent_turn_id,
-            tree_root_session_id,
-            agent_path,
-        ) {
-            (None, None, None, None) => SessionTreeIdentity::Primary,
-            (Some(session_id), Some(turn_id), Some(tree_root_session_id), Some(path)) => {
-                SessionTreeIdentity::Subagent {
-                    parent: talos_types::AgentTurnRef {
-                        session_id,
-                        turn_id,
-                    },
-                    tree_root_session_id,
-                    path,
-                }
-            }
-            _ => {
-                return Err(TalosError::internal(format!(
-                    "session '{id}' has incomplete subagent tree identity"
-                )));
-            }
-        };
-        let conf = Self::parse_required_json::<SessionConf>(
-            row.get_string("conf_json"),
-            &id,
-            "conf_json",
-        )?;
-        let agent_id =
-            Self::normalized_optional_string(row.get_string("agent_id")).ok_or_else(|| {
-                TalosError::internal(format!("session '{id}' is missing its agent binding"))
-            })?;
-
-        let workspace_id = Self::normalized_optional_string(row.get_string("workspace_id"))
-            .ok_or_else(|| {
-                TalosError::internal(format!("session '{id}' is missing its workspace binding"))
-            })?;
-
-        Ok(SessionRecord {
-            id,
-            agent_id,
-            tree_identity,
-            workspace_id,
-            title: row
-                .get_string("title")
-                .filter(|title| !title.trim().is_empty())
-                .unwrap_or_else(|| DEFAULT_SESSION_TITLE.to_string()),
-            user_id: row.get_string("user_id").unwrap_or_default(),
-            source_type,
-            source_provider,
-            channel_id: Self::normalized_optional_string(row.get_string("channel_id")),
-            thread_id: Self::normalized_optional_string(row.get_string("thread_id")),
-            environment,
-            created_at: row
-                .get_i64("created_at")
-                .unwrap_or_default()
-                .try_into()
-                .unwrap_or_default(),
-            last_activity: row
-                .get_i64("last_activity")
-                .unwrap_or_default()
-                .try_into()
-                .unwrap_or_default(),
-            message_count,
-            latest_turn_seq: row
-                .get_i64("latest_turn_seq")
-                .unwrap_or_default()
-                .try_into()
-                .unwrap_or_default(),
-            memory_processed_until_event_seq: row
-                .get_i64("memory_processed_until_event_seq")
-                .unwrap_or_default()
-                .try_into()
-                .unwrap_or_default(),
-            usage,
-            conf,
-            project_id: Self::normalized_optional_string(row.get_string("project_id")),
-            current_directory: Self::normalized_optional_string(
-                row.get_string("current_directory"),
-            )
-            .map(std::path::PathBuf::from),
-        })
-    }
-
-    fn parse_required_json<T: serde::de::DeserializeOwned>(
-        raw: Option<String>,
-        session_id: &str,
-        column: &str,
-    ) -> TalosResult<T> {
-        let raw = raw.ok_or_else(|| {
-            TalosError::internal(format!("session '{session_id}' is missing {column}"))
-        })?;
-        serde_json::from_str(&raw).map_err(|error| {
-            TalosError::internal(format!("parse session '{session_id}' {column}: {error}"))
-        })
-    }
-
-    fn parse_required_enum<T: serde::de::DeserializeOwned>(
-        raw: Option<String>,
-        session_id: &str,
-        column: &str,
-    ) -> TalosResult<T> {
-        let raw = raw.ok_or_else(|| {
-            TalosError::internal(format!("session '{session_id}' is missing {column}"))
-        })?;
-        serde_json::from_value(Value::String(raw)).map_err(|error| {
-            TalosError::internal(format!("parse session '{session_id}' {column}: {error}"))
-        })
-    }
-
     pub(crate) fn normalized_optional_string(value: Option<String>) -> Option<String> {
         value.and_then(|raw| {
             let trimmed = raw.trim();
@@ -255,17 +107,32 @@ impl DatabaseSessionStore {
     }
 
     fn build_conf_json(conf: &SessionConf) -> TalosResult<String> {
-        serde_json::to_string(conf).map_err(|e| talos_error::TalosError::internal(e.to_string()))
+        serde_json::to_string(conf).map_err(|e| {
+            talos_error::TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                e,
+            )
+        })
     }
 
     fn build_environment_json(
         environment: Option<&TalosSessionEnvironment>,
     ) -> TalosResult<String> {
-        serde_json::to_string(&environment).map_err(|error| TalosError::internal(error.to_string()))
+        serde_json::to_string(&environment).map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                error,
+            )
+        })
     }
 
     fn build_usage_json(usage: &SessionUsage) -> TalosResult<String> {
-        serde_json::to_string(usage).map_err(|e| talos_error::TalosError::internal(e.to_string()))
+        serde_json::to_string(usage).map_err(|e| {
+            talos_error::TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                e,
+            )
+        })
     }
 
     fn append_tree_scope(
@@ -541,25 +408,21 @@ impl SessionStore for DatabaseSessionStore {
                 &[user_id],
             )
             .await?;
-        let row = rows.first().ok_or_else(|| {
-            TalosError::internal("summarize sessions returned no aggregate row".to_string())
-        })?;
+        let row = rows
+            .first()
+            .ok_or_else(|| TalosError::internal("summarize sessions returned no aggregate row"))?;
         let session_count = row.get_i64("session_count").ok_or_else(|| {
-            TalosError::internal("summarize sessions returned an invalid session count".to_string())
+            TalosError::internal("summarize sessions returned an invalid session count")
         })?;
         let message_count = row.get_i64("message_count").ok_or_else(|| {
-            TalosError::internal("summarize sessions returned an invalid message count".to_string())
+            TalosError::internal("summarize sessions returned an invalid message count")
         })?;
         Ok(SessionSummary {
             session_count: u64::try_from(session_count).map_err(|_| {
-                TalosError::internal(
-                    "summarize sessions returned a negative session count".to_string(),
-                )
+                TalosError::internal("summarize sessions returned a negative session count")
             })?,
             message_count: u64::try_from(message_count).map_err(|_| {
-                TalosError::internal(
-                    "summarize sessions returned a negative message count".to_string(),
-                )
+                TalosError::internal("summarize sessions returned a negative message count")
             })?,
         })
     }
@@ -596,7 +459,7 @@ impl SessionStore for DatabaseSessionStore {
             .await?;
         if !active.is_empty() {
             transaction.rollback().await?;
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session `{}` already has an active turn", params.session_id),
             ));
@@ -684,7 +547,7 @@ impl SessionStore for DatabaseSessionStore {
             .await?;
         if !active.is_empty() {
             transaction.rollback().await?;
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 "cannot clear a Session with an active Agent Turn",
             ));
@@ -741,8 +604,12 @@ impl SessionStore for DatabaseSessionStore {
         session_id: &str,
         context_usage: &ContextUsage,
     ) -> TalosResult<bool> {
-        let context_usage_json = serde_json::to_string(context_usage)
-            .map_err(|error| TalosError::internal(error.to_string()))?;
+        let context_usage_json = serde_json::to_string(context_usage).map_err(|error| {
+            TalosError::internal_with_source(
+                "Failed to serialize session state; technical details were withheld.",
+                error,
+            )
+        })?;
         let affected = self
             .storage
             .execute(
@@ -760,14 +627,14 @@ impl SessionStore for DatabaseSessionStore {
         next_until_seq: u64,
     ) -> TalosResult<()> {
         if next_until_seq < expected_until_seq {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "memory cursor cannot move backwards".to_string(),
             ));
         }
         if next_until_seq > expected_until_seq {
             let next_event_seq = i64::try_from(next_until_seq).map_err(|_| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "memory cursor exceeds canonical event sequence range",
                 )
@@ -775,7 +642,7 @@ impl SessionStore for DatabaseSessionStore {
             let source = AgentExecutionStore::get_agent_event(self, next_event_seq)
                 .await?
                 .ok_or_else(|| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         "memory cursor source event does not exist",
                     )
@@ -786,7 +653,7 @@ impl SessionStore for DatabaseSessionStore {
                     AgentEventPayload::TurnCompleted(_) | AgentEventPayload::TurnFailed(_)
                 )
             {
-                return Err(TalosError::public(
+                return Err(TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "memory cursor must reference a terminal event from the same Session",
                 ));
@@ -813,7 +680,7 @@ impl SessionStore for DatabaseSessionStore {
             .get_session_record(session_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     session_id.to_string(),
                 )
@@ -822,7 +689,7 @@ impl SessionStore for DatabaseSessionStore {
         if current >= next_until_seq {
             return Ok(());
         }
-        Err(TalosError::public(talos_error::ErrorCode::Conflict, format!(
+        Err(TalosError::new(talos_error::ErrorCode::Conflict, format!(
             "memory cursor conflict for session '{session_id}': expected {expected_until_seq}, current {current}"
         )))
     }

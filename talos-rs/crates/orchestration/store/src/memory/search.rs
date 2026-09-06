@@ -48,7 +48,7 @@ impl MemoryStore {
     ) -> TalosResult<Option<MemoryRecord>> {
         let index_scope = MemoryIndexScope::from_scope(scope)?;
         if memory_id.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "memory_id is required".to_string(),
             ));
@@ -159,7 +159,7 @@ fn validate_search_query(query: &MemorySearchQuery) -> TalosResult<()> {
             .zip(query.until_at)
             .is_some_and(|(since, until)| since > until)
     {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "invalid memory search request".to_string(),
         ));
@@ -227,10 +227,15 @@ fn record_from_row(row: &SqliteRow) -> TalosResult<MemoryRecord> {
         body: row
             .try_get("body")
             .map_err(storage_error("decode memory body"))?,
-        kind: parse_memory_kind(&kind)
-            .ok_or_else(|| TalosError::internal(format!("invalid stored memory kind: {kind}")))?,
+        kind: parse_memory_kind(&kind).ok_or_else(|| {
+            TalosError::internal("invalid stored memory kind; technical details were withheld.")
+                .context(format!("invalid stored memory kind: {kind}"))
+        })?,
         importance: parse_memory_importance(&importance).ok_or_else(|| {
-            TalosError::internal(format!("invalid stored memory importance: {importance}"))
+            TalosError::internal(
+                "invalid stored memory importance; technical details were withheld.",
+            )
+            .context(format!("invalid stored memory importance: {importance}"))
         })?,
         occurred_at: row
             .try_get("occurred_at")
@@ -255,13 +260,16 @@ fn decode_provenance(
             })
         }
         _ => Err(TalosError::internal(
-            "stored Dream Memory provenance is incomplete".to_string(),
+            "stored Dream Memory provenance is incomplete",
         )),
     }
 }
 
 fn invalid_stored_memory(error: talos_memory::DreamMemoryError) -> TalosError {
-    TalosError::internal(format!("invalid stored Dream Memory: {error}"))
+    TalosError::internal_with_source(
+        "invalid stored Dream Memory; technical details were withheld.",
+        error,
+    )
 }
 
 fn optional_u64(row: &SqliteRow, column: &str) -> TalosResult<Option<u64>> {
@@ -269,7 +277,10 @@ fn optional_u64(row: &SqliteRow, column: &str) -> TalosResult<Option<u64>> {
         .map_err(storage_error("decode memory sequence"))?
         .map(|value| {
             u64::try_from(value).map_err(|_| {
-                TalosError::internal(format!("invalid negative memory sequence: {value}"))
+                TalosError::internal(
+                    "invalid negative memory sequence; technical details were withheld.",
+                )
+                .context(format!("invalid negative memory sequence: {value}"))
             })
         })
         .transpose()

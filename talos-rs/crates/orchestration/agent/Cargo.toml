@@ -12,6 +12,7 @@ chrono = { workspace = true }
 serde_json = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-error = { workspace = true }
+talos-logging = { workspace = true }
 talos-config = { workspace = true }
 thiserror = { workspace = true }
 talos-types = { workspace = true }
@@ -19,3 +20,6 @@ talos-run-control = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 uuid = { workspace = true, features = ["v4"] }
 dashmap = "5.4"
+
+[lints]
+workspace = true

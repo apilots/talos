@@ -348,26 +348,22 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{provider_name} responses stream invalid SSE JSON: {error}"
-                                    ))))
+                                    ); TalosError::internal_with_source("Model responses stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
                         };
 
                         if let Some(error) = stream_error(&event) {
-                            let _ = tx
-                                .send(Err(TalosError::internal(format!(
-                                    "{provider_name} responses stream error: {error}"
-                                ))))
-                                .await;
+                            let _ = tx.send(Err(error.context(provider_name))).await;
                             return;
                         }
 
                         match event_type(&event) {
                             "response.output_text.delta" => {
-                                if let Some(delta) = event.get("delta").and_then(|v| v.as_str()) {
+                                if let Some(delta) = event.get("delta").and_then(Value::as_str) {
                                     let _ = tx
                                         .send(Ok(ChatChunk {
                                             delta: delta.to_string(),
@@ -380,7 +376,7 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                                 let reason = event
                                     .get("response")
                                     .and_then(|r| r.get("status"))
-                                    .and_then(|v| v.as_str())
+                                    .and_then(Value::as_str)
                                     .and_then(|status| finish_reason(Some(status)))
                                     .or_else(|| Some("stop".to_string()));
                                 let _ = tx
@@ -397,7 +393,10 @@ pub fn stream(response: reqwest::Response, provider_name: impl Into<String>) -> 
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -462,10 +461,10 @@ pub fn model_blocks(
                             Ok(event) => event,
                             Err(error) => {
                                 let _ = tx
-                                    .send(Err(TalosError::internal(format!(
+                                    .send(Err({ let diagnostic = format!(
                                         "{} responses model block stream invalid SSE JSON: {error}",
                                         options.provider_name
-                                    ))))
+                                    ); TalosError::internal_with_source("Model responses model block stream invalid SSE JSON; technical details were withheld.", error).context(diagnostic) }))
                                     .await;
                                 return;
                             }
@@ -473,10 +472,10 @@ pub fn model_blocks(
 
                         if let Some(error) = stream_error(&event) {
                             let _ = tx
-                                .send(Err(TalosError::internal(format!(
+                                .send(Err({ let diagnostic = format!(
                                     "{} responses stream error: {error}",
                                     options.provider_name
-                                ))))
+                                ); TalosError::internal_with_source("Model responses stream error; technical details were withheld.", error).context(diagnostic) }))
                                 .await;
                             return;
                         }
@@ -548,7 +547,7 @@ pub fn model_blocks(
                                 final_finish_reason = event
                                     .get("response")
                                     .and_then(|r| r.get("status"))
-                                    .and_then(|v| v.as_str())
+                                    .and_then(Value::as_str)
                                     .and_then(|status| finish_reason(Some(status)));
                                 if !complete_open_blocks(&tx, &mut active_blocks).await {
                                     return;
@@ -572,7 +571,10 @@ pub fn model_blocks(
                 }
                 Err(error) => {
                     let _ = tx
-                        .send(Err(TalosError::internal(format!("Stream error: {error}"))))
+                        .send(Err(TalosError::internal_with_source(
+                            "Stream error; technical details were withheld.",
+                            error,
+                        )))
                         .await;
                     return;
                 }
@@ -584,11 +586,11 @@ pub fn model_blocks(
 }
 
 fn item_type(item: &Value) -> &str {
-    item.get("type").and_then(|v| v.as_str()).unwrap_or("")
+    item.get("type").and_then(Value::as_str).unwrap_or("")
 }
 
 fn event_type(event: &Value) -> &str {
-    event.get("type").and_then(|v| v.as_str()).unwrap_or("")
+    event.get("type").and_then(Value::as_str).unwrap_or("")
 }
 
 fn output_index(event: &Value) -> usize {
@@ -610,7 +612,7 @@ fn text_from_message_item(item: &Value) -> Vec<String> {
             if block_type == "output_text" || block_type == "text" {
                 block
                     .get("text")
-                    .and_then(|v| v.as_str())
+                    .and_then(Value::as_str)
                     .map(str::to_string)
             } else {
                 None
@@ -620,13 +622,13 @@ fn text_from_message_item(item: &Value) -> Vec<String> {
 }
 
 fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
-    let provider_item_id = item.get("id").and_then(|v| v.as_str()).map(str::to_string);
+    let provider_item_id = item.get("id").and_then(Value::as_str).map(str::to_string);
     let mut display_text = Vec::new();
     let mut blocks = Vec::new();
 
     if let Some(items) = item.get("summary").and_then(|v| v.as_array()) {
         for block in items {
-            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+            if let Some(text) = block.get("text").and_then(Value::as_str) {
                 display_text.push(text.to_string());
                 blocks.push(ReasoningBlock::Summary(ReasoningSummaryBlock {
                     provider_item_id: provider_item_id.clone(),
@@ -639,7 +641,7 @@ fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
     }
     if let Some(items) = item.get("content").and_then(|v| v.as_array()) {
         for block in items {
-            if let Some(text) = block.get("text").and_then(|v| v.as_str()) {
+            if let Some(text) = block.get("text").and_then(Value::as_str) {
                 display_text.push(text.to_string());
                 blocks.push(ReasoningBlock::Text(ReasoningTextBlock {
                     provider_item_id: provider_item_id.clone(),
@@ -651,7 +653,7 @@ fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
             }
         }
     }
-    if let Some(data) = item.get("encrypted_content").and_then(|v| v.as_str()) {
+    if let Some(data) = item.get("encrypted_content").and_then(Value::as_str) {
         blocks.push(ReasoningBlock::Encrypted(ReasoningEncryptedBlock {
             provider_item_id,
             provider_index: None,
@@ -666,7 +668,7 @@ fn reasoning_from_item(item: &Value) -> (Vec<String>, Vec<ReasoningBlock>) {
 fn function_call(item: &Value) -> FunctionCall {
     let arguments = item
         .get("arguments")
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .and_then(|text| serde_json::from_str::<Value>(text).ok())
         .or_else(|| item.get("arguments").cloned())
         .unwrap_or(Value::Null);
@@ -674,11 +676,9 @@ fn function_call(item: &Value) -> FunctionCall {
     FunctionCall::new(
         item.get("call_id")
             .or_else(|| item.get("id"))
-            .and_then(|v| v.as_str())
+            .and_then(Value::as_str)
             .unwrap_or_default(),
-        item.get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default(),
+        item.get("name").and_then(Value::as_str).unwrap_or_default(),
         arguments,
     )
 }
@@ -691,30 +691,30 @@ fn finish_reason(status: Option<&str>) -> Option<String> {
     }
 }
 
-fn stream_error(event: &Value) -> Option<String> {
+fn stream_error(event: &Value) -> Option<TalosError> {
     match event_type(event) {
-        "error" | "response.failed" | "response.incomplete" => Some(
-            event
-                .get("error")
-                .and_then(|e| e.get("message"))
-                .and_then(|v| v.as_str())
-                .or_else(|| {
-                    event
-                        .get("response")
-                        .and_then(|r| r.get("error"))
-                        .and_then(|e| e.get("message"))
-                        .and_then(|v| v.as_str())
-                })
-                .or_else(|| {
-                    event
-                        .get("response")
-                        .and_then(|r| r.get("incomplete_details"))
-                        .and_then(|d| d.get("reason"))
-                        .and_then(|v| v.as_str())
-                })
-                .unwrap_or("unknown error")
-                .to_string(),
-        ),
+        "error" | "response.failed" | "response.incomplete" => {
+            Some(crate::error::stream_response_error(
+                event
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        event
+                            .get("response")
+                            .and_then(|r| r.get("error"))
+                            .and_then(|e| e.get("code"))
+                            .and_then(Value::as_str)
+                    })
+                    .or_else(|| {
+                        event
+                            .get("response")
+                            .and_then(|r| r.get("incomplete_details"))
+                            .and_then(|d| d.get("reason"))
+                            .and_then(Value::as_str)
+                    }),
+            ))
+        }
         _ => None,
     }
 }
@@ -769,7 +769,7 @@ async fn send_text_delta(
     else {
         return true;
     };
-    let Some(delta) = event.get("delta").and_then(|v| v.as_str()) else {
+    let Some(delta) = event.get("delta").and_then(Value::as_str) else {
         return true;
     };
     send_model_block_event(
@@ -798,7 +798,7 @@ async fn send_reasoning_delta(
     let Some(ActiveResponsesBlock::Reasoning { model_item_id }) = active_blocks.get(&key) else {
         return true;
     };
-    let Some(delta) = event.get("delta").and_then(|v| v.as_str()) else {
+    let Some(delta) = event.get("delta").and_then(Value::as_str) else {
         return true;
     };
     send_model_block_event(
@@ -827,7 +827,7 @@ async fn send_tool_delta(
     let Some(ActiveResponsesBlock::ToolCall { model_item_id }) = active_blocks.get(&key) else {
         return true;
     };
-    let Some(delta) = event.get("delta").and_then(|v| v.as_str()) else {
+    let Some(delta) = event.get("delta").and_then(Value::as_str) else {
         return true;
     };
     send_model_block_event(
@@ -939,12 +939,9 @@ async fn ensure_tool_block(
                 call_id: item
                     .get("call_id")
                     .or_else(|| item.get("id"))
-                    .and_then(|v| v.as_str())
+                    .and_then(Value::as_str)
                     .map(str::to_string),
-                tool_name: item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string),
+                tool_name: item.get("name").and_then(Value::as_str).map(str::to_string),
             }),
         }),
     )
@@ -1003,7 +1000,7 @@ async fn complete_block(
 fn provider_item_id(item: &Value, index: usize) -> Option<String> {
     item.get("id")
         .or_else(|| item.get("call_id"))
-        .and_then(|v| v.as_str())
+        .and_then(Value::as_str)
         .map(str::to_string)
         .or_else(|| Some(format!("output:{index}")))
 }

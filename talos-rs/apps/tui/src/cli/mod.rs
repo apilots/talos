@@ -213,7 +213,17 @@ fn render_event(
     output_text: &mut String,
     output_stream: &mut std::io::Stdout,
 ) -> Result<bool, Box<dyn std::error::Error>> {
-    let event = &envelope.event;
+    let event = match &envelope.event {
+        talos_sdk::TimelineEventPayload::Agent(event) => event,
+        talos_sdk::TimelineEventPayload::SystemNotice(notice) => {
+            eprintln!(
+                "NOTICE {:?}: {}",
+                notice.notice.level,
+                notice.notice.message()
+            );
+            return Ok(false);
+        }
+    };
     match &event.payload {
         AgentEventPayload::MessageBlockStarted(payload) => {
             if let AgentMessageBlockContent::AssistantText(assistant) = &payload.block.content {

@@ -3,6 +3,48 @@ use std::sync::Arc;
 use talos_config::AgentKernelConfig;
 
 #[test]
+fn sandbox_failures_retain_sources_and_exclude_private_details() {
+    use std::error::Error;
+
+    for (source, expected_code, expected_kind) in [
+        (
+            TalosSandboxError::FileSystemOperationFailed {
+                reason: "private-sandbox-sentinel".to_string(),
+            },
+            talos_error::ErrorCode::InternalError,
+            None,
+        ),
+        (
+            TalosSandboxError::FileSystemAccessDenied {
+                operation: "read",
+                path: PathBuf::from("/private-sandbox-sentinel"),
+            },
+            talos_error::ErrorCode::ToolExecutionFailed,
+            Some(talos_error::TalosToolErrorKind::PermissionRejection),
+        ),
+    ] {
+        let error = map_sandbox_error(source.clone());
+        assert_eq!(
+            error
+                .source()
+                .and_then(|source| source.downcast_ref::<TalosSandboxError>()),
+            Some(&source)
+        );
+        assert!(!error
+            .to_api_error()
+            .message
+            .contains("private-sandbox-sentinel"));
+        assert_eq!(error.error_code(), expected_code);
+        assert_eq!(
+            error
+                .tool_failure_diagnostic()
+                .map(|diagnostic| diagnostic.kind),
+            expected_kind
+        );
+    }
+}
+
+#[test]
 fn resolve_base_dir_prefers_explicit_project_root() {
     let config = AgentKernelConfig {
         workspace_dir: "/tmp/talos-workspace".to_string(),

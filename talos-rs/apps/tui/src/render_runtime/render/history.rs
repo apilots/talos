@@ -59,7 +59,7 @@ pub(crate) fn agent_message_to_blocks(message: &AgentMessage) -> Vec<FinalizedTr
                     .unwrap_or("Context compaction completed"),
             ),
             AgentMessageBlockContent::SystemNotice(notice) => {
-                text_block(TranscriptBlockKind::SystemNotice, &notice.message)
+                text_block(TranscriptBlockKind::SystemNotice, notice.message())
             }
             AgentMessageBlockContent::ToolCall(_) => Vec::new(),
         };

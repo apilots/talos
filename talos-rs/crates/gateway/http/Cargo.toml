@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+talos-logging = { workspace = true }
 talos-agent-api = { workspace = true }
 talos-gateway = { path = "../core" }
 talos-service = { workspace = true }
@@ -42,3 +43,6 @@ talos-plugin = { workspace = true }
 talos-store = { workspace = true }
 talos-storage = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use async_trait::async_trait;
 use talos_error::TalosResult;
@@ -44,21 +44,21 @@ impl ProjectStore for MockProjectStore {
             .count() as u64)
     }
 
-    async fn create_project(&self, name: &str, directory: &PathBuf) -> TalosResult<ProjectRecord> {
+    async fn create_project(&self, name: &str, directory: &Path) -> TalosResult<ProjectRecord> {
         self.create_project_for_owner(name, directory, "").await
     }
 
     async fn create_project_for_owner(
         &self,
         name: &str,
-        directory: &PathBuf,
+        directory: &Path,
         user_id: &str,
     ) -> TalosResult<ProjectRecord> {
         Ok(ProjectRecord {
             project_id: "project-mock".to_string(),
             name: name.to_string(),
             user_id: user_id.to_string(),
-            directory: directory.clone(),
+            directory: directory.to_path_buf(),
             status: ProjectStatus::default(),
             created_at: 0,
             updated_at: 0,

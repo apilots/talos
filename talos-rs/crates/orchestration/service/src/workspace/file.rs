@@ -26,12 +26,12 @@ pub(crate) fn ensure_workspace_write_version(
     request: &DocUpdateRequest,
 ) -> TalosResult<()> {
     match (&request.base_version, existing_content) {
-        (ExpectedFileVersion::MustNotExist, Some(_)) => Err(TalosError::public(
+        (ExpectedFileVersion::MustNotExist, Some(_)) => Err(TalosError::new(
             talos_error::ErrorCode::Conflict,
             "target file already exists".to_string(),
         )),
         (ExpectedFileVersion::MustNotExist, None) => Ok(()),
-        (ExpectedFileVersion::Match { .. }, None) => Err(TalosError::public(
+        (ExpectedFileVersion::Match { .. }, None) => Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
             "target file does not exist".to_string(),
         )),
@@ -40,7 +40,7 @@ pub(crate) fn ensure_workspace_write_version(
             if current == *version_token {
                 Ok(())
             } else {
-                Err(TalosError::public(
+                Err(TalosError::new(
                     talos_error::ErrorCode::Conflict,
                     "file version token mismatch".to_string(),
                 ))

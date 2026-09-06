@@ -9,6 +9,7 @@ use crate::router_trait::Router;
 use crate::types::{Binding, MatchRule, RouterConfig};
 
 /// 路由器实现
+#[derive(Default)]
 pub struct RouterImpl {
     bindings: Arc<RwLock<Vec<Binding>>>,
 }
@@ -31,7 +32,7 @@ impl RouterImpl {
                     if let Some(value) = binding_config.rule_value {
                         MatchRule::Peer(value)
                     } else {
-                        return Err(talos_error::TalosError::public(
+                        return Err(talos_error::TalosError::new(
                             talos_error::ErrorCode::InvalidRequest,
                             "Peer rule requires rule_value".to_string(),
                         ));
@@ -41,7 +42,7 @@ impl RouterImpl {
                     if let Some(value) = binding_config.rule_value {
                         MatchRule::Channel(value)
                     } else {
-                        return Err(talos_error::TalosError::public(
+                        return Err(talos_error::TalosError::new(
                             talos_error::ErrorCode::InvalidRequest,
                             "Channel rule requires rule_value".to_string(),
                         ));
@@ -49,7 +50,7 @@ impl RouterImpl {
                 }
                 "default" => MatchRule::Default,
                 _ => {
-                    return Err(talos_error::TalosError::public(
+                    return Err(talos_error::TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!("Invalid rule type: {}", binding_config.rule_type),
                     ));
@@ -89,7 +90,7 @@ impl Router for RouterImpl {
             .filter(|b| self.matches_rule(b, channel, user_id))
             .collect();
 
-        matched.sort_by(|a, b| b.priority.cmp(&a.priority));
+        matched.sort_by_key(|binding| std::cmp::Reverse(binding.priority));
 
         Ok(matched.first().map(|b| b.agent_id.clone()))
     }

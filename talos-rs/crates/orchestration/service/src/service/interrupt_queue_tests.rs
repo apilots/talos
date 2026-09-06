@@ -11,6 +11,7 @@ async fn interrupt_requires_the_current_turn_and_pauses_until_explicit_queue_sta
             cancel_mode: TestCancelMode::Cancelled,
             cancelled_turn_ids: cancelled_turn_ids.clone(),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -106,6 +107,7 @@ async fn interrupt_restores_active_turn_when_harness_rejects_interruption() {
             cancel_mode: TestCancelMode::Rejected,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -160,6 +162,7 @@ async fn unconfirmed_cleanup_survives_interrupt_and_timeline_reconnection() {
             cancel_mode: TestCancelMode::CleanupUnconfirmed,
             cancelled_turn_ids: Arc::new(Mutex::new(Vec::new())),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )
@@ -257,6 +260,7 @@ async fn interrupting_a_waiting_action_commits_one_canonical_terminal_fact() {
             cancel_mode: TestCancelMode::MissingLiveTurn,
             cancelled_turn_ids: cancelled_turn_ids.clone(),
             compaction_usage: TokenUsage::default(),
+            compaction_error: None,
         }),
         configured_test_config(),
     )

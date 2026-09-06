@@ -5,14 +5,14 @@ pub(crate) const DEFAULT_WEB_USER_AGENT: &str = "Talos/0.1 (+https://github.com/
 
 pub(crate) fn parse_http_url(raw: &str) -> TalosResult<Url> {
     let url = Url::parse(raw).map_err(|err| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("invalid web url: {err}"),
         )
     })?;
     match url.scheme() {
         "http" | "https" => Ok(url),
-        other => Err(TalosError::public(
+        other => Err(TalosError::new(
             talos_error::ErrorCode::ToolExecutionFailed,
             format!("unsupported web url scheme: {other}"),
         )),

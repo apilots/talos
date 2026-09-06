@@ -92,7 +92,7 @@ where
         .get(&coverage.covers_until_seq)
         .copied()
         .ok_or_else(|| {
-            talos_error::TalosError::public(
+            talos_error::TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "missing persisted timestamp for Dream Memory session seq {}",
@@ -132,7 +132,12 @@ where
             talos_memory::DreamMemoryWriteRequest::from_snapshot(
                 &snapshot,
                 talos_memory::MemoryAgentId::parse(producer_agent_id.to_string()).map_err(
-                    |error| TalosError::internal(format!("invalid producer Agent id: {error}")),
+                    |error| {
+                        TalosError::internal_with_source(
+                            "invalid producer Agent id; technical details were withheld.",
+                            error,
+                        )
+                    },
                 )?,
                 MemoryWriteBatch {
                     session_id: session_id.to_string(),

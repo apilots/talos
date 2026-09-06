@@ -40,9 +40,9 @@ impl TurnService {
         request: SubmitTurnInputRequest,
     ) -> TalosResult<SubmitTurnInputResponse> {
         if session.id != request.identity.session_id {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 ErrorCode::ResourceNotFound,
-                format!("session {}", request.identity.session_id),
+                format!("Session {} was not found.", request.identity.session_id),
             ));
         }
         validate_client_request_id(request.client_request_id.as_deref())?;
@@ -186,6 +186,7 @@ impl TurnService {
         };
         let now = chrono::Utc::now().timestamp_millis();
         let reservation = self
+            .execution
             .execution_store
             .reserve_command(CommandReservation {
                 session_id: request.identity.session_id.clone(),
@@ -212,7 +213,7 @@ impl TurnService {
             IdempotencyReservation::Completed(record) => Ok(TurnInputReservation::Completed(
                 turn_input_response(record)?,
             )),
-            IdempotencyReservation::InProgress => Err(TalosError::public(
+            IdempotencyReservation::InProgress => Err(TalosError::new(
                 ErrorCode::Conflict,
                 "The idempotent Turn input is still in progress",
             )),
@@ -228,7 +229,7 @@ impl TurnService {
         ) {
             return Ok(());
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             ErrorCode::ResourceNotFound,
             format!(
                 "running turn {} for session {}",
@@ -240,7 +241,7 @@ impl TurnService {
 
 fn validate_client_request_id(client_request_id: Option<&str>) -> TalosResult<()> {
     if client_request_id.is_some_and(|request_id| request_id.trim().is_empty()) {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             ErrorCode::InvalidRequest,
             "clientRequestId must not be empty",
         ));
@@ -253,8 +254,12 @@ fn response_request_id(client_request_id: Option<String>) -> String {
 }
 
 fn turn_input_hash(request: &SubmitTurnInputRequest) -> TalosResult<String> {
-    let bytes =
-        serde_json::to_vec(request).map_err(|error| TalosError::internal(error.to_string()))?;
+    let bytes = serde_json::to_vec(request).map_err(|error| {
+        TalosError::internal_with_source(
+            "Failed to serialize the turn request; technical details were withheld.",
+            error,
+        )
+    })?;
     let digest = Sha256::digest(bytes);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }

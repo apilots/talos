@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import type { ContextCompactionOutcome } from "@/shared/types/protocol";
 import { CommandResponseSurface } from "./CommandResponseSurface";
 import type { ComposerCommandResponseState } from "./command-response.types";
+import { apiErrorMessage } from "@/shared/i18n/apiErrorMessage";
 
 type CompactionResponse = Extract<ComposerCommandResponseState, { kind: "compact" }>;
 
@@ -59,7 +60,7 @@ export function ComposerCompactionResponse({
       title={copy.title}
     >
       <div className="px-4 py-3 text-[12px] leading-5 text-muted">
-        {response.message ?? copy.detail}
+        {response.error ? apiErrorMessage(response.error) : copy.detail}
       </div>
     </CommandResponseSurface>
   );

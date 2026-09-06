@@ -1,12 +1,46 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decodeApiError,
   parseTalosApiErrorBody,
   TalosApiError,
   TalosHttpError,
   unwrapTalosApiResponse,
 } from "../adapters";
 import { ErrorCode } from "../generated/app-protocol";
+
+describe("shared error contract", () => {
+  const valid = {
+    code: ErrorCode.AttachmentLimitExceeded,
+    message: "This request contains 6 attachments; the limit is 4.",
+    localization: { type: "attachmentCountExceeded", limit: 4, actual: 6 },
+  } as const;
+  it("preserves exact parameterized failure through serialization", () => {
+    for (const message of [valid.message, "The request has too many attachments: 6 supplied, 4 allowed."]) {
+      const error = { ...valid, message };
+      expect(decodeApiError(JSON.parse(JSON.stringify(error)))).toEqual(error);
+    }
+  });
+
+  it.each([
+    { ...valid, code: "futureCode" },
+    { ...valid, code: ErrorCode.InternalError },
+    { ...valid, message: "" },
+    { code: valid.code, message: valid.message },
+    { ...valid, localization: { ...valid.localization, type: "futureType" } },
+    { ...valid, localization: { ...valid.localization, actual: Number.MAX_SAFE_INTEGER + 1 } },
+    { ...valid, localization: { ...valid.localization, actual: valid.localization.limit } },
+    { ...valid, localization: { ...valid.localization, limit: -1 } },
+    { ...valid, message: "x".repeat(4097) },
+  ])("rejects invalid payload instead of erasing its cause", (error) => {
+    expect(() => decodeApiError(error)).toThrow("Invalid Talos API response.");
+  });
+
+  it("bounds Unicode scalars rather than UTF-16 code units", () => {
+    const error = { code: ErrorCode.InternalError, message: "😀".repeat(4096), localization: null };
+    expect(decodeApiError(error)).toEqual(error);
+  });
+});
 
 describe("TalosHttpError", () => {
   it("represents non-application HTTP failures", () => {
@@ -18,7 +52,7 @@ describe("TalosHttpError", () => {
       body: JSON.stringify({
         status: "error",
         error: {
-          code: ErrorCode.PathNotFound,
+          code: ErrorCode.PathNotFound, localization: null,
           message: "Path not found",
         },
       }),
@@ -77,7 +111,7 @@ describe("unwrapTalosApiResponse", () => {
       unwrapTalosApiResponse({
         status: "error",
         error: {
-          code: ErrorCode.ActiveTurnRunning,
+          code: ErrorCode.ActiveTurnRunning, localization: null,
           message: "Active turn is already running",
         },
       }),
@@ -87,7 +121,7 @@ describe("unwrapTalosApiResponse", () => {
       unwrapTalosApiResponse({
         status: "error",
         error: {
-          code: ErrorCode.ActiveTurnRunning,
+          code: ErrorCode.ActiveTurnRunning, localization: null,
           message: "Active turn is already running",
         },
       });

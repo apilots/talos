@@ -99,6 +99,7 @@ impl AgentCoordinator for RecordingHandler {
                 permit: AgentAdmissionPermit::new(async move {
                     settlement_tx
                         .send(Ok(AgentRunSettlement::Finished {
+                            result: Ok(()),
                             event: terminal,
                             messages: Vec::new(),
                             metrics: AgentRunMetrics::default(),

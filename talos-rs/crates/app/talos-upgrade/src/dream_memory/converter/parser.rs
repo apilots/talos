@@ -87,7 +87,7 @@ pub(super) fn parse_legacy_entries(
     timezone: TalosTimezone,
 ) -> TalosResult<Vec<DreamMemoryEntry>> {
     let date = NaiveDate::parse_from_str(source_date, "%Y-%m-%d").map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid legacy Dream Memory date: {source_date}"),
         )
@@ -118,7 +118,7 @@ pub(super) fn legacy_partition_start(
     timezone: TalosTimezone,
 ) -> TalosResult<i64> {
     let date = NaiveDate::parse_from_str(source_date, "%Y-%m-%d").map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid legacy Dream Memory date: {source_date}"),
         )
@@ -294,7 +294,12 @@ fn legacy_memory_id(
         title,
         body,
     })
-    .map_err(|error| TalosError::internal(format!("serialize legacy memory id: {error}")))?;
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "serialize legacy memory id; technical details were withheld.",
+            error,
+        )
+    })?;
     let digest = Sha256::digest(bytes);
     let hex = digest
         .iter()
@@ -313,7 +318,7 @@ fn legacy_occurred_at(
         .earliest()
         .map(|value| value.timestamp())
         .ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "invalid legacy memory timestamp".to_string(),
             )
@@ -349,12 +354,12 @@ fn normalize_text(value: &str) -> String {
 }
 
 fn invalid_block(ordinal: usize, field: &str) -> TalosError {
-    TalosError::public(
+    TalosError::new(
         talos_error::ErrorCode::InvalidRequest,
         format!("legacy memory block {} has invalid {field}", ordinal + 1),
     )
 }
 
 fn map_domain_error(error: talos_memory::DreamMemoryError) -> TalosError {
-    TalosError::public(talos_error::ErrorCode::InvalidRequest, error.to_string())
+    TalosError::new(talos_error::ErrorCode::InvalidRequest, error.to_string())
 }

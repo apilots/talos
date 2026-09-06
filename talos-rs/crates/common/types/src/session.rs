@@ -100,7 +100,7 @@ impl SessionConfigOverridePolicy {
         if let Some(model_selection) = conf.model_selection.as_ref() {
             let model_ref = &model_selection.model_ref;
             if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
-                return Err(talos_error::TalosError::public(
+                return Err(talos_error::TalosError::new(
                     talos_error::ErrorCode::InvalidRequest,
                     "session model selection provider and id must not be empty".to_string(),
                 ));
@@ -509,7 +509,7 @@ fn validate_project_directory_with_label(
     label: &str,
 ) -> crate::TalosResult<()> {
     if !directory.is_absolute() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!(
                 "{} must be an absolute path: {}",
@@ -519,13 +519,13 @@ fn validate_project_directory_with_label(
         ));
     }
     if !directory.exists() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("{} does not exist: {}", label, directory.display()),
         ));
     }
     if !directory.is_dir() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("{} is not a directory: {}", label, directory.display()),
         ));

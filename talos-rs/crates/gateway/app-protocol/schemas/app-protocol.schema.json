@@ -155,27 +155,6 @@
       },
       "type": "object"
     },
-    "AgentErrorInfo": {
-      "additionalProperties": false,
-      "description": "Stable, serializable Agent error projection safe for events and history.",
-      "properties": {
-        "code": {
-          "$ref": "#/definitions/ErrorCode"
-        },
-        "message": {
-          "type": "string"
-        },
-        "retryable": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "code",
-        "message",
-        "retryable"
-      ],
-      "type": "object"
-    },
     "AgentEvent": {
       "additionalProperties": false,
       "description": "Canonical append-only fact emitted during one logical Agent Turn.",
@@ -1135,16 +1114,16 @@
       "additionalProperties": false,
       "description": "Typed system notice emitted as part of Agent execution history.",
       "properties": {
+        "content": {
+          "$ref": "#/definitions/SystemNoticeContent"
+        },
         "level": {
           "$ref": "#/definitions/TalosTimelineNoticeLevel"
-        },
-        "message": {
-          "type": "string"
         }
       },
       "required": [
-        "level",
-        "message"
+        "content",
+        "level"
       ],
       "type": "object"
     },
@@ -1332,11 +1311,16 @@
       "description": "Failed terminal metadata for one logical Turn.",
       "properties": {
         "error": {
-          "$ref": "#/definitions/AgentErrorInfo"
+          "$ref": "#/definitions/ApiError"
+        },
+        "retryable": {
+          "description": "Runtime-owned retry policy; not part of the reusable public error object.",
+          "type": "boolean"
         }
       },
       "required": [
-        "error"
+        "error",
+        "retryable"
       ],
       "type": "object"
     },
@@ -1506,6 +1490,33 @@
       },
       "required": [
         "content"
+      ],
+      "type": "object"
+    },
+    "ApiError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ErrorCode"
+        },
+        "localization": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ErrorLocalization"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "localization",
+        "message"
       ],
       "type": "object"
     },
@@ -3630,6 +3641,59 @@
         "internalError"
       ],
       "type": "string"
+    },
+    "ErrorLocalization": {
+      "description": "Exact business explanations with real localized consumers. Extend only when a domain has a stable, parameterized message; never add arbitrary translation keys, diagnostic data, or presentation policy here.",
+      "oneOf": [
+        {
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "modelNotConfigured"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "model",
+            "provider",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actual": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "limit": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "type": {
+              "enum": [
+                "attachmentCountExceeded"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "actual",
+            "limit",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "EventUnsubscribeRequest": {
       "additionalProperties": false,
@@ -5979,6 +6043,24 @@
           "properties": {
             "method": {
               "enum": [
+                "timeline/systemNotice"
+              ],
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/TimelineEventNotification"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
                 "subscription/terminated"
               ],
               "type": "string"
@@ -6211,6 +6293,13 @@
         "identity": {
           "$ref": "#/definitions/AgentTurnRef"
         },
+        "notices": {
+          "description": "Product notices do not alter execution results or Provider continuation state.",
+          "items": {
+            "$ref": "#/definitions/TimelineEvent"
+          },
+          "type": "array"
+        },
         "result": {
           "$ref": "#/definitions/AgentRunResult"
         }
@@ -6219,6 +6308,7 @@
         "completedAt",
         "completedEventSeq",
         "identity",
+        "notices",
         "result"
       ],
       "type": "object"
@@ -7034,6 +7124,47 @@
       ],
       "type": "string"
     },
+    "SystemNoticeContent": {
+      "description": "Notice presentation retains either informational text or the shared error contract. Add variants only for distinct presentation semantics, never domain error categories.",
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/ApiError"
+            },
+            "type": {
+              "enum": [
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TalosContentItem": {
       "description": "Talos content item for rich output blocks.",
       "oneOf": [
@@ -7673,7 +7804,7 @@
       "description": "Persisted product event exposed by Timeline, history, protocols, and SDKs.\n\nService is the only layer allowed to combine Store persistence metadata with the canonical `AgentEvent`. Transport layers may frame this value but must not duplicate its Agent identity, sequence, or timestamp fields.",
       "properties": {
         "event": {
-          "$ref": "#/definitions/AgentEvent"
+          "$ref": "#/definitions/TimelineEventPayload"
         },
         "eventId": {
           "type": "string"
@@ -7710,6 +7841,47 @@
       ],
       "type": "object"
     },
+    "TimelineEventPayload": {
+      "description": "Timeline combines execution facts and product notices in one durable cursor. Notices never enter the Agent reducer or consume an execution sequence number.",
+      "oneOf": [
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/AgentEvent"
+            },
+            "type": {
+              "enum": [
+                "agent"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "data": {
+              "$ref": "#/definitions/TimelineSystemNotice"
+            },
+            "type": {
+              "enum": [
+                "systemNotice"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "data",
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "TimelineReplay": {
       "additionalProperties": false,
       "description": "Stable bounded replay of committed Agent events.",
@@ -7744,6 +7916,28 @@
         "cursorStatus",
         "events",
         "lastEventSeq"
+      ],
+      "type": "object"
+    },
+    "TimelineSystemNotice": {
+      "additionalProperties": false,
+      "description": "A product-owned notice attached to a Turn, independent of its execution lifecycle.",
+      "properties": {
+        "identity": {
+          "$ref": "#/definitions/AgentTurnRef"
+        },
+        "notice": {
+          "$ref": "#/definitions/AgentSystemNotice"
+        },
+        "occurredAt": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "identity",
+        "notice",
+        "occurredAt"
       ],
       "type": "object"
     },

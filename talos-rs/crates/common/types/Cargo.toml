@@ -16,3 +16,6 @@ tokio = { version = "1.0", features = ["sync", "rt"] }
 talos-error = { path = "../../infra/error" }
 talos-config = { path = "../../infra/config" }
 talos-auth = { path = "../../infra/auth" }
+
+[lints]
+workspace = true

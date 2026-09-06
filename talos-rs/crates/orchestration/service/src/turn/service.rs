@@ -5,14 +5,12 @@ use talos_agent_api::{
     ActiveTurnState, AgentEventPayload as CanonicalAgentEventPayload, AgentRunMetrics,
     AgentStopReason, AgentTurnRef, AgentUserContent, AgentUserInput,
 };
-use talos_coordinator::AgentCoordinator;
 use talos_error::{TalosError, TalosResult};
 use talos_store::profile::{
     ModelCallUsageUpdate, ProfileStore, ProfileUsageUpdate, TurnUsageUpdate,
 };
 use talos_store::session::{
-    AgentExecutionStore, CommandLease, CommandReservation, IdempotencyReservation,
-    IdempotentCommand, SessionRecord,
+    CommandLease, CommandReservation, IdempotencyReservation, IdempotentCommand, SessionRecord,
 };
 use talos_types::{
     ModelRef, ModelUsageKind, SessionInfo, StartTurnRequest, StartTurnResponse, TalosConfig,
@@ -22,8 +20,6 @@ use tokio::sync::{oneshot, RwLock};
 use {tracing::error, uuid::Uuid};
 
 use crate::message_queue::MessageQueueReservation;
-use crate::session::SessionService;
-use crate::timeline::TimelineEventService;
 use crate::{InnerModelClient, SessionMessageQueueService, UserWorkspaceMemoryService};
 
 use super::{
@@ -48,10 +44,7 @@ const TURN_SUBMISSION_LEASE_MS: i64 = 30_000;
 #[derive(Clone)]
 pub(crate) struct TurnService {
     execution: AgentExecutionDriver,
-    execution_store: Arc<dyn AgentExecutionStore>,
     profile_store: Arc<dyn ProfileStore>,
-    sessions: Arc<SessionService>,
-    coordinator: Arc<dyn AgentCoordinator>,
     message_queue: SessionMessageQueueService,
     base_config: TalosConfig,
     execution_gate: Arc<RwLock<()>>,
@@ -63,28 +56,17 @@ struct TurnSubmission {
 }
 
 impl TurnService {
+    /// Assemble turn policy around the existing execution driver and its shared dependencies.
     pub fn new(
-        coordinator: Arc<dyn AgentCoordinator>,
-        execution_store: Arc<dyn AgentExecutionStore>,
-        event_service: Arc<TimelineEventService>,
+        execution: AgentExecutionDriver,
         profile_store: Arc<dyn ProfileStore>,
-        sessions: Arc<SessionService>,
         message_queue: SessionMessageQueueService,
         base_config: TalosConfig,
         execution_gate: Arc<RwLock<()>>,
     ) -> Self {
-        let execution = AgentExecutionDriver::new(
-            coordinator.clone(),
-            execution_store.clone(),
-            event_service.clone(),
-            sessions.clone(),
-        );
         Self {
             execution,
-            execution_store,
             profile_store,
-            sessions,
-            coordinator,
             message_queue,
             base_config,
             execution_gate,
@@ -96,13 +78,14 @@ impl TurnService {
         memory: Arc<UserWorkspaceMemoryService>,
         inner_model: Arc<InnerModelClient>,
     ) -> Self {
+        let sessions = self.execution.sessions.clone();
         self.execution = self.execution.with_inner_model(
             inner_model.clone(),
             Arc::new(
                 crate::user_workspace_memory::UserWorkspaceMemoryReflection::new(
                     inner_model,
                     memory,
-                    self.sessions.clone(),
+                    sessions,
                 ),
             ),
         );
@@ -132,12 +115,13 @@ impl TurnService {
     ) -> TalosResult<SessionInfo> {
         let _admission_guard = self.execution_gate.read().await;
         let context = self
+            .execution
             .sessions
             .build_agent_context(&session, identity)
             .await?;
         let usage = self.execution.compact(context).await?;
         let completed_at = chrono::Utc::now();
-        let timezone_name = self.sessions.kernel_timezone();
+        let timezone_name = self.execution.sessions.kernel_timezone();
         let timezone = talos_config::parse_timezone(&timezone_name)?;
         let model_ref = session
             .conf
@@ -165,10 +149,11 @@ impl TurnService {
             }))
             .await?;
         let record = self
+            .execution
             .sessions
             .record_compaction_usage(session, &usage)
             .await?;
-        self.sessions.session_info(&record)
+        self.execution.sessions.session_info(&record)
     }
 
     pub fn validate_start_turn_request(request: &StartTurnRequest) -> TalosResult<()> {
@@ -191,12 +176,13 @@ impl TurnService {
             return Ok(StartTurnReservation::Ready(prepared));
         };
         if key.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "Idempotency-Key must not be empty",
             ));
         }
         let reservation = self
+            .execution
             .execution_store
             .reserve_command(CommandReservation {
                 session_id: request.session_id.clone(),
@@ -226,7 +212,7 @@ impl TurnService {
             IdempotencyReservation::Completed(record) => Ok(StartTurnReservation::Completed(
                 start_response_from_idempotency_record(record)?,
             )),
-            IdempotencyReservation::InProgress => Err(TalosError::public(
+            IdempotencyReservation::InProgress => Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "The idempotent Turn submission is still in progress",
             )),
@@ -312,6 +298,7 @@ impl TurnService {
             );
             let lease_expires_at = now_ms.saturating_add(TURN_SUBMISSION_LEASE_MS);
             match self
+                .execution
                 .execution_store
                 .reserve_command(CommandReservation {
                     session_id: session_id.clone(),
@@ -338,7 +325,7 @@ impl TurnService {
                     return start_response_from_idempotency_record(record);
                 }
                 IdempotencyReservation::InProgress => {
-                    return Err(TalosError::public(
+                    return Err(TalosError::new(
                         talos_error::ErrorCode::Conflict,
                         "The idempotent Turn submission is still in progress",
                     ));
@@ -359,6 +346,7 @@ impl TurnService {
 
         let identity = AgentTurnRef::new(&session_id, &turn_id);
         let context = match self
+            .execution
             .sessions
             .build_agent_context(&session, identity.clone())
             .await
@@ -402,7 +390,12 @@ impl TurnService {
                 return Err(error);
             }
         };
-        self.spawn_turn_completion(profile_context, auto_dispatch_ready, completion);
+        self.spawn_turn_completion(
+            AgentTurnRef::new(&session_id, &turn_id),
+            profile_context,
+            auto_dispatch_ready,
+            completion,
+        );
 
         Ok(StartTurnResponse {
             request_id,
@@ -440,24 +433,25 @@ impl TurnService {
         retry_of_message_id: &str,
     ) -> TalosResult<()> {
         if self.canonical_active_turn(session_id).await?.is_some() {
-            return Err(TalosError::public(talos_error::ErrorCode::ActiveTurnRunning,
+            return Err(TalosError::new(talos_error::ErrorCode::ActiveTurnRunning,
                 "The original turn is still active; reconnect to the existing event stream instead."
                     .to_string(),
             ));
         }
         let terminal = self
+            .execution
             .execution_store
             .get_agent_terminal_event_by_initial_message(session_id, retry_of_message_id)
             .await?
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::RetrySourceMismatch,
                     "retry_of_message_id does not identify the initial message of a terminal turn."
                         .to_string(),
                 )
             })?;
         match terminal.payload {
-            talos_agent_api::AgentEventPayload::TurnCompleted(_) => Err(TalosError::public(
+            talos_agent_api::AgentEventPayload::TurnCompleted(_) => Err(TalosError::new(
                 talos_error::ErrorCode::RetrySourceCompleted,
                 "The original turn has already completed; refresh session history instead."
                     .to_string(),
@@ -480,7 +474,7 @@ impl TurnService {
         if self.canonical_active_turn(session_id).await?.is_none() {
             return Ok(());
         }
-        Err(TalosError::public(talos_error::ErrorCode::ActiveTurnRunning,
+        Err(TalosError::new(talos_error::ErrorCode::ActiveTurnRunning,
             "A turn is already active for this session; reconnect to the existing event stream instead."
                 .to_string(),
         ))
@@ -516,7 +510,12 @@ impl TurnService {
         let Some(command) = command else {
             return;
         };
-        if let Err(error) = self.execution_store.release_command(command).await {
+        if let Err(error) = self
+            .execution
+            .execution_store
+            .release_command(command)
+            .await
+        {
             error!(error = %error, "failed to release uncommitted idempotency lease");
         }
     }
@@ -524,11 +523,12 @@ impl TurnService {
     fn complete_resumed_turn(
         &self,
         session: SessionRecord,
+        identity: AgentTurnRef,
         completion: oneshot::Receiver<TalosResult<AgentRunSettlement>>,
     ) {
         let request_id = format!("req_{}", Uuid::new_v4().simple());
         let profile_context = self.profile_turn_context(&session, request_id);
-        self.spawn_turn_completion(profile_context, None, completion);
+        self.spawn_turn_completion(identity, profile_context, None, completion);
     }
 }
 
@@ -545,5 +545,10 @@ async fn await_admission<T: Send + 'static>(
         result
     })
     .await
-    .map_err(|error| TalosError::internal(format!("Agent admission task stopped: {error}")))?
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "Agent admission task stopped; technical details were withheld.",
+            error,
+        )
+    })?
 }

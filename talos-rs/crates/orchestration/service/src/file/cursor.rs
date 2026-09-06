@@ -15,7 +15,12 @@ pub(super) fn encode(cursor: &FileListCursor) -> TalosResult<String> {
         created_at: cursor.created_at,
         file_id: cursor.file_id.clone(),
     })
-    .map_err(|error| TalosError::internal(format!("encode file cursor: {error}")))?;
+    .map_err(|error| {
+        TalosError::internal_with_source(
+            "encode file cursor; technical details were withheld.",
+            error,
+        )
+    })?;
     Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload))
 }
 
@@ -23,19 +28,19 @@ pub(super) fn decode(cursor: &str) -> TalosResult<FileListCursor> {
     let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(cursor)
         .map_err(|_| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "invalid file cursor".to_string(),
             )
         })?;
     let payload: FileCursorPayload = serde_json::from_slice(&payload).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "invalid file cursor".to_string(),
         )
     })?;
     if payload.file_id.is_empty() {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "invalid file cursor".to_string(),
         ));

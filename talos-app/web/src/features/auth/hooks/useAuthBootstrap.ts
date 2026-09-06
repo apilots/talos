@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
+import { userVisibleError } from "@/shared/i18n/apiErrorMessage";
 
 import {
   clearDesktopCloudSession,
@@ -30,7 +32,7 @@ export function useAuthBootstrap() {
     inflightKeyRef.current = attemptKey;
 
     let canceled = false;
-    setConnection({ authStatus: "loading" });
+    setConnection({ authStatus: "loading", authError: undefined });
 
     void getGatewayHealth()
       .then(async (health) => {
@@ -74,13 +76,19 @@ export function useAuthBootstrap() {
           userId: user.user_id,
         });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (canceled) {
           return;
         }
-        void clearDesktopCloudSession();
-        clearWebAuthToken();
         attemptedKeyRef.current = attemptKey;
+        if (!(error instanceof TalosApiError && error.code === AppProtocol.ErrorCode.Unauthenticated)) {
+          setConnection({ authStatus: "error", authError: userVisibleError(error, "Failed to connect to the backend.") });
+          return;
+        }
+        void clearDesktopCloudSession().catch((cleanupError: unknown) => {
+          setConnection({ authError: userVisibleError(cleanupError, "Failed to clear the desktop login session.") });
+        });
+        clearWebAuthToken();
         setConnection({
           authStatus: "unauthenticated",
           authToken: "",

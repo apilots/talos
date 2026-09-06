@@ -1,4 +1,5 @@
 import type { FileUploadOptions, HttpAdapter, StreamAdapter } from "./adapters";
+import { parseTalosJson, parseTimelineEvent } from "./adapters";
 import type {
   DocUpdateRequest,
   ConfigPath,
@@ -649,7 +650,7 @@ export class TalosClient {
           if (data === "[DONE]") {
             return;
           }
-          const payload = JSON.parse(data) as unknown;
+          const payload = parseTalosJson(data);
           if (event === "messageQueue/changed") {
             options?.onMessageQueueChanged?.(payload as MessageQueueChangedNotification);
             return;
@@ -686,7 +687,7 @@ export class TalosClient {
           sessionId,
           afterEventId,
           (record) => {
-            if (record.event.identity.turnId !== turnId) {
+            if (record.event.data.identity.turnId !== turnId) {
               return;
             }
             onEvent(record);
@@ -735,10 +736,6 @@ function createIdempotencyKey() {
   return `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
-function parseTimelineEvent(value: unknown): TimelineEvent {
-  return value as TimelineEvent;
-}
-
 function normalizeSubscriptionTerminatedEvent(
   value: unknown,
 ): SubscriptionTerminatedEvent | null {
@@ -766,5 +763,5 @@ function normalizeSubscriptionTerminatedEvent(
 }
 
 function isTerminalTimelineEvent(event: TimelineEvent): boolean {
-  return event.event.payload.type === "turnCompleted" || event.event.payload.type === "turnFailed";
+  return event.event.type === "agent" && (event.event.data.payload.type === "turnCompleted" || event.event.data.payload.type === "turnFailed");
 }

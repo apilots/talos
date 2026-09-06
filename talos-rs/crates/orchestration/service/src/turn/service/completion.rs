@@ -32,6 +32,7 @@ impl TurnService {
 
     pub(super) fn spawn_turn_completion(
         &self,
+        identity: AgentTurnRef,
         profile_context: ProfileTurnContext,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
         completion: oneshot::Receiver<TalosResult<AgentRunSettlement>>,
@@ -42,27 +43,63 @@ impl TurnService {
             let settlement = match completion.await {
                 Ok(Ok(settlement)) => settlement,
                 Ok(Err(error)) => {
-                    error!(error = %error, "Agent execution did not commit its settlement");
+                    turn_service
+                        .execution
+                        .report_warning(&identity, error)
+                        .await;
                     return;
                 }
                 Err(error) => {
-                    error!(error = %error, "Agent Timeline writer stopped before completion");
+                    turn_service
+                        .execution
+                        .report_warning(
+                            &identity,
+                            TalosError::internal_with_source(
+                                "Agent Timeline writer stopped before completion",
+                                error,
+                            ),
+                        )
+                        .await;
                     return;
                 }
             };
+            if let AgentRunSettlement::Finished {
+                result: Err(error), ..
+            } = &settlement
+            {
+                talos_logging::report_error(error);
+            }
             let (event, metrics) = match settlement {
                 AgentRunSettlement::WaitingForInput { event, metrics, .. }
                 | AgentRunSettlement::Finished { event, metrics, .. } => (event, metrics),
             };
-            Self::record_profile_turn_usage(
+            if let Err(error) = Self::record_profile_turn_usage(
                 profile_store.as_ref(),
                 &profile_context,
                 &event,
                 &metrics,
             )
-            .await;
+            .await
+            {
+                turn_service
+                    .execution
+                    .report_warning(
+                        &event.identity,
+                        error.context(format!(
+                            "record profile usage for session {} turn {}",
+                            event.identity.session_id, event.identity.turn_id,
+                        )),
+                    )
+                    .await;
+            }
             if let Err(error) = turn_service.finish_turn(&event, auto_dispatch_ready).await {
-                error!(error = %error, "failed to finish committed Agent Turn");
+                turn_service
+                    .execution
+                    .report_warning(
+                        &event.identity,
+                        error.context("finish committed Agent Turn"),
+                    )
+                    .await;
             }
         });
     }
@@ -72,7 +109,7 @@ impl TurnService {
         context: &ProfileTurnContext,
         event: &talos_agent_api::AgentEvent,
         metrics: &AgentRunMetrics,
-    ) {
+    ) -> TalosResult<()> {
         let stop_reason = match &event.payload {
             CanonicalAgentEventPayload::WaitingForInput(_) => {
                 talos_types::talos::StopReason::WaitingUserAction
@@ -80,57 +117,30 @@ impl TurnService {
             CanonicalAgentEventPayload::TurnCompleted(completed) => {
                 profile_stop_reason(completed.stop_reason)
             }
-            _ => return,
+            _ => return Ok(()),
         };
-        let completed_at_ms = match event.occurred_at.checked_mul(1_000) {
-            Some(value) => value,
-            None => {
-                error!(
-                    session_id = %event.identity.session_id,
-                    turn_id = %event.identity.turn_id,
-                    occurred_at = event.occurred_at,
-                    "profile usage timestamp exceeds supported range"
-                );
-                return;
-            }
-        };
+        let completed_at_ms = event.occurred_at.checked_mul(1_000).ok_or_else(|| {
+            TalosError::internal("Profile usage timestamp exceeds the supported range.")
+                .context(event.occurred_at)
+        })?;
         if metrics.usage == talos_types::TokenUsage::default()
             && matches!(
                 event.payload,
                 CanonicalAgentEventPayload::WaitingForInput(_)
             )
         {
-            return;
+            return Ok(());
         }
-        let timezone = match talos_config::parse_timezone(&context.timezone) {
-            Ok(timezone) => timezone,
-            Err(error) => {
-                error!(
-                    session_id = %event.identity.session_id,
-                    turn_id = %event.identity.turn_id,
-                    error = %error,
-                    "profile usage timezone is invalid"
-                );
-                return;
-            }
-        };
-        let usage_date = match chrono::DateTime::from_timestamp_millis(completed_at_ms) {
-            Some(timestamp) => timestamp
-                .with_timezone(&timezone)
-                .date_naive()
-                .format("%Y-%m-%d")
-                .to_string(),
-            None => {
-                error!(
-                    session_id = %event.identity.session_id,
-                    turn_id = %event.identity.turn_id,
-                    completed_at_ms,
-                    "profile usage timestamp is invalid"
-                );
-                return;
-            }
-        };
-        if let Err(error) = profile_store
+        let timezone = talos_config::parse_timezone(&context.timezone)?;
+        let usage_date = chrono::DateTime::from_timestamp_millis(completed_at_ms)
+            .ok_or_else(|| {
+                TalosError::internal("Profile usage timestamp is invalid.").context(completed_at_ms)
+            })?
+            .with_timezone(&timezone)
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        profile_store
             .record_turn_usage(TurnUsageUpdate {
                 user_id: context.user_id.clone(),
                 session_id: event.identity.session_id.clone(),
@@ -145,14 +155,6 @@ impl TurnService {
                 usage_date,
             })
             .await
-        {
-            error!(
-                session_id = %event.identity.session_id,
-                turn_id = %event.identity.turn_id,
-                error = %error,
-                "failed to persist profile turn usage"
-            );
-        }
     }
 
     /// Apply product effects to a committed normal or recovered terminal fact.
@@ -162,20 +164,33 @@ impl TurnService {
         event: &talos_agent_api::AgentEvent,
         auto_dispatch_ready: Option<oneshot::Receiver<()>>,
     ) -> TalosResult<()> {
-        if matches!(event.payload, CanonicalAgentEventPayload::TurnFailed(_)) {
+        let profile_result = if matches!(event.payload, CanonicalAgentEventPayload::TurnFailed(_)) {
             self.profile_store
                 .discard_turn_usage(&event.identity.session_id, &event.identity.turn_id)
-                .await?;
-        }
+                .await
+        } else {
+            Ok(())
+        };
         if let Some(receiver) = auto_dispatch_ready {
             if receiver.await.is_err() {
-                return Ok(());
+                return profile_result;
             }
         }
         if let Some(session_id) = auto_dispatch_session_from_event(event) {
-            self.try_dispatch_next(&session_id).await?;
+            if let Err(error) = self.try_dispatch_next(&session_id).await {
+                // Independent completion effects must not prevent queue progress or lose causes.
+                if let Err(profile_error) = profile_result {
+                    self.execution
+                        .report_warning(
+                            &event.identity,
+                            profile_error.context("discard failed Turn usage"),
+                        )
+                        .await;
+                }
+                return Err(error);
+            }
         }
-        Ok(())
+        profile_result
     }
 }
 

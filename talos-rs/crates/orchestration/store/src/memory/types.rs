@@ -84,13 +84,13 @@ impl MemoryIndexScope {
         let workspace_id = scope.workspace_id.trim();
         let user_id = scope.user_id.trim();
         let workspace_root = scope.workspace_root.to_str().ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "memory workspace_root must be valid UTF-8".to_string(),
             )
         })?;
         if workspace_id.is_empty() || user_id.is_empty() || workspace_root.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "memory workspace_id, user_id, and workspace_root are required".to_string(),
             ));

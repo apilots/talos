@@ -96,7 +96,10 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       onRuntimeState: (state) => lifecycle.push(state),
     });
     const rendererClient = createElectronAppServerClient({
-      invoke: (method, params) => controller?.invoke(method, params) ?? Promise.reject(new Error("controller is closed.")),
+      invoke: async <T>(method: AppProtocol.ClientMethod, params: unknown) => {
+        if (!controller) throw new Error("controller is closed.");
+        return { status: "success", data: await controller.invoke<T>(method, params) };
+      },
       onEvent: (handler) => {
         rendererHandlers.add(handler);
         return () => {
@@ -131,7 +134,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.event.payload.type === "turnCompleted",
+        (event) => event.event.type === "agent" && event.event.data.payload.type === "turnCompleted",
         120_000,
       );
       const lastEventId = requireLastEventId(sdkEvents);
@@ -159,7 +162,7 @@ describeIntegration("DesktopAppServerController app-server crash recovery", () =
       });
       await waitForEvent(
         sdkEvents,
-        (event) => event.eventId !== lastEventId && event.event.payload.type === "turnCompleted",
+        (event) => event.eventId !== lastEventId && event.event.type === "agent" && event.event.data.payload.type === "turnCompleted",
         120_000,
       );
 

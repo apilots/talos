@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AppProtocol } from "@talos/sdk-core";
+import { AppProtocol } from "@talos/sdk-core";
 
 import type { AppServerBridge } from "./app-server-controller";
 import { DesktopAppServerController } from "./app-server-controller";
@@ -12,7 +12,7 @@ class RecoveryBridge implements AppServerBridge {
 
   connect(): Promise<AppProtocol.InitializeResponse> {
     return Promise.resolve({
-      protocol_version: { major: 0, minor: 3 },
+      protocol_version: AppProtocol.PROTOCOL_VERSION,
       server_info: { name: "fake", version: "0.1.5", auth_enabled: false, cloud_auth_url: null },
     });
   }

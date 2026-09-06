@@ -201,7 +201,7 @@ fn messages_from_turn(turn: &SessionHistoryTurn) -> Vec<SessionPromptMessage> {
                         Some(text.text.as_str())
                     }
                     (AgentMessageRole::System, AgentMessageBlockContent::SystemNotice(notice)) => {
-                        Some(notice.message.as_str())
+                        Some(notice.message())
                     }
                     _ => None,
                 })

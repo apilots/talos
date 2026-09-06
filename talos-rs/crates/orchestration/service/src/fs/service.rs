@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use talos_config::{DirectoryPickerConfig, DirectoryPickerRoot};
-use talos_error::{TalosError, TalosFsErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 use talos_fs::FileSystem;
 use talos_types::{
     FsDirectoryCreateResponse, FsDirectoryEntry, FsDirectorySnapshot, FsEntryKind, ProjectStatus,
@@ -13,11 +13,13 @@ use crate::Actor;
 #[derive(Clone)]
 pub(crate) struct FsService {
     config: DirectoryPickerConfig,
+    home: Option<PathBuf>,
 }
 
 impl FsService {
-    pub(crate) fn new(config: DirectoryPickerConfig) -> Self {
-        Self { config }
+    /// Receive the process home from assembly; filesystem operations never read global state.
+    pub(crate) fn new(config: DirectoryPickerConfig, home: Option<PathBuf>) -> Self {
+        Self { config, home }
     }
 
     pub(crate) fn project_status_for_directory(&self, directory: &Path) -> ProjectStatus {
@@ -74,8 +76,8 @@ impl FsService {
         ensure_writable(&parent)?;
         let path = parent.join(name);
         if talos_fs::std_fs().get_file_metadata(&path)?.is_some() {
-            return Err(fs_error(
-                TalosFsErrorKind::AlreadyExists,
+            return Err(TalosError::new(
+                ErrorCode::AlreadyExists,
                 format!("directory already exists: {}", path.display()),
             ));
         }
@@ -87,8 +89,8 @@ impl FsService {
         if self.config.enabled {
             return Ok(());
         }
-        Err(fs_error(
-            TalosFsErrorKind::FsDisabled,
+        Err(TalosError::new(
+            ErrorCode::FsDisabled,
             "directory picker is disabled",
         ))
     }
@@ -96,10 +98,10 @@ impl FsService {
     fn picker_root(&self) -> TalosResult<PathBuf> {
         match self.config.root {
             DirectoryPickerRoot::Home => {
-                let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
-                    TalosError::public(talos_error::ErrorCode::InvalidRequest, "HOME is not set")
+                let home = self.home.as_deref().ok_or_else(|| {
+                    TalosError::new(talos_error::ErrorCode::InvalidRequest, "HOME is not set")
                 })?;
-                talos_fs::canonicalize_path(&home)
+                talos_fs::canonicalize_path(home)
             }
         }
     }
@@ -133,8 +135,8 @@ fn validate_absolute(path: &Path, label: &str) -> TalosResult<()> {
     if path.is_absolute() {
         return Ok(());
     }
-    Err(fs_error(
-        TalosFsErrorKind::InvalidPath,
+    Err(TalosError::new(
+        ErrorCode::InvalidPath,
         format!("{label} must be an absolute path: {}", path.display()),
     ))
 }
@@ -142,8 +144,8 @@ fn validate_absolute(path: &Path, label: &str) -> TalosResult<()> {
 fn reject_symlink(path: &Path) -> TalosResult<()> {
     let metadata = path_metadata_required(path)?;
     if metadata.is_symlink {
-        return Err(fs_error(
-            TalosFsErrorKind::SymlinkNotSupported,
+        return Err(TalosError::new(
+            ErrorCode::SymlinkNotSupported,
             format!("symlink directories are not supported: {}", path.display()),
         ));
     }
@@ -159,8 +161,8 @@ fn ensure_directory(path: &Path) -> TalosResult<()> {
     if metadata.is_dir {
         return Ok(());
     }
-    Err(fs_error(
-        TalosFsErrorKind::NotDirectory,
+    Err(TalosError::new(
+        ErrorCode::NotDirectory,
         format!("path is not a directory: {}", path.display()),
     ))
 }
@@ -188,8 +190,8 @@ fn ensure_under_root(path: &Path, root: &Path) -> TalosResult<()> {
     if is_under_root(path, root) {
         return Ok(());
     }
-    Err(fs_error(
-        TalosFsErrorKind::PathOutsideRoot,
+    Err(TalosError::new(
+        ErrorCode::PathOutsideRoot,
         format!("path is outside picker root: {}", path.display()),
     ))
 }
@@ -201,8 +203,8 @@ fn is_under_root(path: &Path, root: &Path) -> bool {
 fn list_child_directories(path: &Path, show_hidden: bool) -> TalosResult<Vec<FsDirectoryEntry>> {
     let mut entries = Vec::new();
     let Some(directory_entries) = talos_fs::read_directory(path)? else {
-        return Err(fs_error(
-            TalosFsErrorKind::PathNotFound,
+        return Err(TalosError::new(
+            ErrorCode::PathNotFound,
             path.display().to_string(),
         ));
     };
@@ -243,8 +245,8 @@ fn validate_directory_name(name: &str) -> TalosResult<()> {
         || trimmed.contains(std::path::MAIN_SEPARATOR)
         || trimmed.contains('/')
     {
-        return Err(fs_error(
-            TalosFsErrorKind::InvalidName,
+        return Err(TalosError::new(
+            ErrorCode::InvalidName,
             format!("invalid directory name: {name}"),
         ));
     }
@@ -254,11 +256,7 @@ fn validate_directory_name(name: &str) -> TalosResult<()> {
 fn path_metadata_required(path: &Path) -> TalosResult<talos_fs::FileMetadata> {
     talos_fs::std_fs()
         .get_file_metadata(path)?
-        .ok_or_else(|| fs_error(TalosFsErrorKind::PathNotFound, path.display().to_string()))
-}
-
-fn fs_error(kind: TalosFsErrorKind, message: impl Into<String>) -> TalosError {
-    TalosError::fs_error(kind, message)
+        .ok_or_else(|| TalosError::new(ErrorCode::PathNotFound, path.display().to_string()))
 }
 
 #[cfg(test)]

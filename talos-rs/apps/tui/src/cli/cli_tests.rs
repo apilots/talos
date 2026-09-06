@@ -1,10 +1,9 @@
 use super::*;
 use std::collections::{HashMap, HashSet};
 use talos_sdk::{
-    AgentAssistantText, AgentAssistantTextPhase, AgentErrorInfo, AgentEvent, AgentEventPayload,
-    AgentMessageBlock, AgentMessageBlockCompleted, AgentMessageBlockContent,
-    AgentMessageBlockStatus, AgentStopReason, AgentTurnCompleted, AgentTurnFailed, AgentTurnRef,
-    ErrorCode, TimelineEvent,
+    AgentAssistantText, AgentAssistantTextPhase, AgentEvent, AgentEventPayload, AgentMessageBlock,
+    AgentMessageBlockCompleted, AgentMessageBlockContent, AgentMessageBlockStatus, AgentStopReason,
+    AgentTurnCompleted, AgentTurnFailed, AgentTurnRef, ErrorCode, TimelineEvent,
 };
 
 #[test]
@@ -67,11 +66,12 @@ fn render_event_finishes_exec_on_turn_completed() {
 #[test]
 fn render_event_returns_the_canonical_turn_failure() {
     let error = render(AgentEventPayload::TurnFailed(AgentTurnFailed {
-        error: AgentErrorInfo {
+        error: talos_error::ApiError {
             code: ErrorCode::ProviderUnavailable,
             message: "provider request failed".to_string(),
-            retryable: true,
+            localization: None,
         },
+        retryable: true,
     }))
     .expect_err("turn failure should fail exec mode");
 
@@ -94,11 +94,11 @@ fn timeline_event(payload: AgentEventPayload) -> TimelineEvent {
         event_id: "event-1".to_string(),
         event_seq: 1,
         persisted_at: 1,
-        event: AgentEvent {
+        event: talos_sdk::TimelineEventPayload::Agent(AgentEvent {
             identity: AgentTurnRef::new("session-1", "turn-1"),
             sequence: 1,
             occurred_at: 1,
             payload,
-        },
+        }),
     }
 }

@@ -321,6 +321,6 @@ fn timeline_event(event: AgentEvent) -> TimelineEvent {
         event_id: format!("event-{}", event.sequence),
         event_seq: event.sequence as i64,
         persisted_at: event.occurred_at,
-        event,
+        event: talos_agent_api::TimelineEventPayload::Agent(event),
     }
 }

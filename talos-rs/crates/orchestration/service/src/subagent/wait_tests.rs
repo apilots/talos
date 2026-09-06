@@ -178,11 +178,12 @@ async fn failed_outcome_exposes_a_bounded_preview_with_truncation_marker() {
         &child.session_id,
         &turn_id,
         CanonicalAgentEventPayload::TurnFailed(talos_agent_api::AgentTurnFailed {
-            error: talos_agent_api::AgentErrorInfo {
+            error: talos_error::ApiError {
                 code: talos_error::ErrorCode::InternalError,
                 message: "failed ".repeat(400),
-                retryable: false,
+                localization: None,
             },
+            retryable: false,
         }),
     )
     .await;

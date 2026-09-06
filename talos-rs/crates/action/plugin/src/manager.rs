@@ -86,7 +86,7 @@ impl PluginManager {
         let source = source_from_input(request.source)?;
         let existing = self.list_sources(PluginSourceListRequest {})?;
         if existing.sources.iter().any(|item| item.id == source.id) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("plugin source `{}` already exists", source.id.0),
             ));
@@ -153,7 +153,7 @@ impl PluginManager {
             .iter_mut()
             .find(|source| source.id == request.source_id)
         else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("plugin source `{}` not found", request.source_id.0),
             ));
@@ -275,7 +275,7 @@ impl PluginManager {
         if expected_source_commit.is_some()
             && candidate.plugin.source_commit != expected_source_commit
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("plugin `{}` source commit changed", plugin_id.0),
             ));
@@ -293,9 +293,7 @@ impl PluginManager {
             let _ = rollback_install_activation(&self.state, &activation);
             return Err(err);
         }
-        if let Err(err) = commit_install_activation(&activation) {
-            return Err(err);
-        }
+        commit_install_activation(&activation)?;
         let plugin = self.plugin_for_install(&install, enabled);
         Ok(PluginInstallResponse { plugin, install })
     }
@@ -312,7 +310,7 @@ impl PluginManager {
         if request.expected_source_commit.is_some()
             && candidate.plugin.source_commit != request.expected_source_commit
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 format!("plugin install `{}` source commit changed", install.id.0),
             ));
@@ -426,7 +424,7 @@ impl PluginManager {
             .iter()
             .any(|source| source.id == request.source_id)
         {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!(
                     "configured plugin source `{}` cannot be removed",
@@ -543,7 +541,7 @@ impl PluginManager {
                 return Ok(InstallCandidate { plugin, source });
             }
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::ResourceNotFound,
             format!("plugin `{}` not found in marketplace cache", plugin_id.0),
         ))
@@ -559,7 +557,7 @@ impl PluginManager {
             .into_iter()
             .find(|install| &install.id == install_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("plugin install `{}` not found", install_id.0),
                 )
@@ -626,7 +624,7 @@ impl PluginManager {
             .iter_mut()
             .find(|install| &install.id == install_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!("plugin install `{}` not found", install_id.0),
                 )
@@ -684,7 +682,7 @@ impl PluginManager {
 
     fn update_candidate(&self, install: &PluginInstall) -> TalosResult<InstallCandidate> {
         let source_id = install_source_id(install).ok_or_else(|| {
-            TalosError::public(
+            TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("plugin install `{}` has no update source", install.id.0),
             )
@@ -695,7 +693,7 @@ impl PluginManager {
             .into_iter()
             .find(|plugin| plugin.id == install.plugin_id)
             .ok_or_else(|| {
-                TalosError::public(
+                TalosError::new(
                     talos_error::ErrorCode::ResourceNotFound,
                     format!(
                         "plugin `{}` not found in refreshed source",

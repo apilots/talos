@@ -32,6 +32,7 @@ impl TranscriptStore {
         let transcript_lines = self.transcript_lines(block.lines);
         let mut transcript_block = TranscriptBlock::new(id, block.kind, transcript_lines)
             .with_copy_markdown(block.copy_markdown);
+        transcript_block.timeline_event_seq = block.timeline_event_seq;
         if let Some(round_duration_ms) = block.round_duration_ms {
             transcript_block = transcript_block.with_round_duration_ms(round_duration_ms);
         }

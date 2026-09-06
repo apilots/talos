@@ -11,12 +11,17 @@ impl TurnService {
         let Some(reservation) = self.message_queue.reserve_front(session_id)? else {
             return Ok(None);
         };
-        let session = self.sessions.load_record(session_id).await?.ok_or_else(|| {
-            TalosError::public(
-                talos_error::ErrorCode::ResourceNotFound,
-                format!("session {session_id}"),
-            )
-        });
+        let session = self
+            .execution
+            .sessions
+            .load_record(session_id)
+            .await?
+            .ok_or_else(|| {
+                TalosError::new(
+                    talos_error::ErrorCode::ResourceNotFound,
+                    format!("Session {session_id} was not found."),
+                )
+            });
         let session = match session {
             Ok(session) => session,
             Err(error) => {
@@ -36,6 +41,7 @@ impl TurnService {
             return Ok(false);
         }
         let latest_terminal = self
+            .execution
             .execution_store
             .get_latest_agent_terminal_event(session_id)
             .await?;
@@ -55,7 +61,7 @@ impl TurnService {
     ) -> TalosResult<StartTurnResponse> {
         let session_id = session.id.clone();
         if self.canonical_active_turn(&session_id).await?.is_some() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ActiveTurnRunning,
                 format!("session `{session_id}` already has an active turn"),
             ));
@@ -66,7 +72,7 @@ impl TurnService {
                 .message_queue
                 .reserve_front(&session_id)?
                 .ok_or_else(|| {
-                    TalosError::public(
+                    TalosError::new(
                         talos_error::ErrorCode::InvalidRequest,
                         format!("message queue is empty for session `{session_id}`"),
                     )
@@ -141,7 +147,7 @@ impl TurnService {
                 if active.identity.turn_id == turn_id && active.state == ActiveTurnState::Running
         ) {
             self.message_queue.release(reservation)?;
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("active turn `{turn_id}` for session `{session_id}`"),
             ));

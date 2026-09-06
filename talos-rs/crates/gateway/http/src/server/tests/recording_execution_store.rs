@@ -2,13 +2,16 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use talos_agent_api::{AgentContinuationRef, AgentEvent, AgentEventPayload, AgentTurnRef};
+use talos_agent_api::{
+    AgentContinuationRef, AgentEvent, AgentEventPayload, AgentTurnRef, TimelineEventPayload,
+    TimelineSystemNotice,
+};
 use talos_error::{TalosError, TalosResult};
 use talos_store::session::{
     AgentActiveTurnRecord, AgentCancellationAdmission, AgentContinuationBindingRecord,
     AgentEventCommit, AgentEventRecord, AgentExecutionStore, ClaimContinuationParams, CommandLease,
     CommandReservation, CommitInitialAdmissionParams, CommitRunningInputAdmissionParams,
-    CommitTerminalSettlementParams, IdempotencyReservation,
+    CommitTerminalSettlementParams, IdempotencyReservation, TimelineEventRecord,
 };
 
 #[derive(Default)]
@@ -43,6 +46,43 @@ impl RecordingAgentExecutionStore {
 
 #[async_trait]
 impl AgentExecutionStore for RecordingAgentExecutionStore {
+    async fn append_timeline_notice(
+        &self,
+        _notice: TimelineSystemNotice,
+    ) -> TalosResult<TimelineEventRecord> {
+        Err(out_of_scope())
+    }
+
+    async fn list_timeline_events_after(
+        &self,
+        session_id: &str,
+        after_event_seq: i64,
+        limit: usize,
+    ) -> TalosResult<Vec<TimelineEventRecord>> {
+        Ok(self
+            .list_agent_events_after(session_id, Some(after_event_seq), limit)
+            .await?
+            .into_iter()
+            .map(timeline_record)
+            .collect())
+    }
+
+    async fn get_timeline_event(&self, event_seq: i64) -> TalosResult<Option<TimelineEventRecord>> {
+        Ok(self.get_agent_event(event_seq).await?.map(timeline_record))
+    }
+
+    async fn get_latest_timeline_event_seq(&self, session_id: &str) -> TalosResult<Option<i64>> {
+        self.get_latest_agent_event_seq(session_id).await
+    }
+
+    async fn list_turn_notices(
+        &self,
+        _identity: &AgentTurnRef,
+        _through_event_seq: i64,
+    ) -> TalosResult<Vec<TimelineEventRecord>> {
+        Ok(Vec::new())
+    }
+
     async fn reserve_command(
         &self,
         _reservation: CommandReservation,
@@ -255,4 +295,17 @@ impl AgentExecutionStore for RecordingAgentExecutionStore {
 
 fn out_of_scope() -> TalosError {
     TalosError::internal("canonical execution mutation is outside this HTTP test fixture")
+}
+
+fn timeline_record(record: AgentEventRecord) -> TimelineEventRecord {
+    TimelineEventRecord {
+        event_seq: record.event_seq,
+        persisted_at: record.persisted_at,
+        event: TimelineEventPayload::Agent(AgentEvent {
+            identity: record.identity,
+            sequence: record.sequence,
+            occurred_at: record.occurred_at,
+            payload: record.payload,
+        }),
+    }
 }

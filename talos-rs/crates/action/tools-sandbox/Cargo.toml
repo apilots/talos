@@ -28,3 +28,6 @@ talos-linux-sandbox.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 talos-windows-sandbox.workspace = true
+
+[lints]
+workspace = true

@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use talos_agent_api::{AgentEventPayload, AgentInterruptOutcome, AgentTurnStarted};
 use talos_run_control::{
-    ActiveRunControl, CancellationMode, RunTaskCompletion, RunTaskError, RunTermination,
-    SettlementKind,
+    ActiveRunControl, CancellationMode, RunTaskCompletion, RunTermination, SettlementKind,
 };
 use tokio::sync::{oneshot, watch};
 
@@ -16,10 +15,9 @@ use super::{
 };
 use crate::{
     event_sink::AgentEventPipeline, AgentAdmission, AgentAdmissionPermit, AgentError,
-    AgentErrorKind, AgentEventSink, AgentInterruptParams, AgentOperationControl,
-    AgentProgressEventReceiver, AgentProvider, AgentResult, AgentRunExecution, AgentRunParams,
-    AgentRunSettlement, AgentRunSettlementReceiver, AgentSession, SessionTurnInputReceiver,
-    SessionTurnParams,
+    AgentEventSink, AgentInterruptParams, AgentOperationControl, AgentProgressEventReceiver,
+    AgentProvider, AgentResult, AgentRunExecution, AgentRunParams, AgentRunSettlement,
+    AgentRunSettlementReceiver, AgentSession, SessionTurnInputReceiver, SessionTurnParams,
 };
 
 impl<P> Harness<P>
@@ -169,7 +167,7 @@ where
             biased;
             () = control.cancellation().requested() => {
                 let result = settle_failure(&pipeline, AgentError::new(
-                    AgentErrorKind::Interrupted,
+                    talos_error::ErrorCode::Cancelled,
                     "Agent run was cancelled before Provider start",
                 )).await;
                 let _ = settlement_tx.send(result);
@@ -208,10 +206,10 @@ where
         let session = match self.session(session_context, &control).await {
             Ok(session) => session.session,
             Err(error) => {
-                let result = if matches!(
-                    error.kind,
-                    AgentErrorKind::RunFailure(talos_error::ErrorCode::RunCleanupUnconfirmed)
-                ) {
+                let result = if error
+                    .error()
+                    .is_code(talos_error::ErrorCode::RunCleanupUnconfirmed)
+                {
                     Err(error)
                 } else {
                     settle_failure(&pipeline, error).await
@@ -280,6 +278,16 @@ where
         pipeline.wait_until_unreserved().await;
         let input_error = input_failure_rx.borrow().clone();
         if !cleanup_confirmed(&lifecycle) {
+            match provider_result {
+                Ok(Err(error)) => talos_logging::report_error(error.error()),
+                Err(error) => {
+                    talos_logging::report_error(&talos_error::TalosError::internal_with_source(
+                        "Agent Provider task stopped before cleanup confirmation",
+                        error,
+                    ))
+                }
+                Ok(Ok(_)) => {}
+            }
             self.mark_cleanup_pending(&identity, control, &lifecycle);
             let _ = settlement_tx.send(Err(cleanup_error(&lifecycle)));
             return;
@@ -294,7 +302,10 @@ where
         ) {
             settle_failure(
                 &pipeline,
-                AgentError::new(AgentErrorKind::Interrupted, "Agent run was interrupted"),
+                AgentError::new(
+                    talos_error::ErrorCode::Cancelled,
+                    "Agent run was interrupted",
+                ),
             )
             .await
         } else if let Some(error) = input_error {
@@ -306,10 +317,14 @@ where
                     Err(error) => settle_failure(&pipeline, error).await,
                 },
                 Ok(Err(error)) => settle_failure(&pipeline, error).await,
-                Err(RunTaskError::Stopped) => {
+                Err(error) => {
                     settle_failure(
                         &pipeline,
-                        AgentError::provider_error("Agent Provider task stopped"),
+                        AgentError::from_source(
+                            talos_error::ErrorCode::InternalError,
+                            "Agent Provider task stopped",
+                            error,
+                        ),
                     )
                     .await
                 }

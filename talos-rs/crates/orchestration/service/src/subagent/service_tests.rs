@@ -93,7 +93,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
             .unwrap()
             .push(request.clone());
         if std::mem::take(&mut *self.execution.fail_next.lock().unwrap()) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "start failed".to_string(),
             ));
@@ -170,6 +170,7 @@ impl AgentCoordinator for RecordingExecutionCoordinator {
                     settlement_tx
                         .expect("completed test Turn settlement sender")
                         .send(Ok(AgentRunSettlement::Finished {
+                            result: Ok(()),
                             event: terminal,
                             messages: vec![assistant],
                             metrics: AgentRunMetrics::default(),
@@ -236,7 +237,7 @@ impl AgentCoordinator for RecordingAgentCoordinator {
 
     async fn ensure_agent(&self, agent_id: &str) -> TalosResult<()> {
         if self.rejected_agent_id.lock().unwrap().as_deref() == Some(agent_id) {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ResourceNotFound,
                 format!("agent {agent_id}"),
             ));
@@ -335,11 +336,13 @@ async fn test_services_uninitialized() -> TestServices {
         delegate: recording_coordinator.clone(),
     });
     let turns = Arc::new(TurnService::new(
-        coordinator,
-        store.clone(),
-        event_service.clone(),
+        crate::turn::AgentExecutionDriver::new(
+            coordinator,
+            store.clone(),
+            event_service.clone(),
+            sessions.clone(),
+        ),
         profile_store,
-        sessions.clone(),
         SessionMessageQueueService::new(10).expect("queue service should initialize"),
         config,
         Arc::new(tokio::sync::RwLock::new(())),

@@ -205,7 +205,7 @@ pub fn default_timezone() -> String {
 
 pub fn parse_timezone(input: &str) -> TalosResult<TalosTimezone> {
     input.trim().parse::<TalosTimezone>().map_err(|err| {
-        talos_error::TalosError::public(
+        talos_error::TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("invalid timezone `{}`: {}", input.trim(), err),
         )

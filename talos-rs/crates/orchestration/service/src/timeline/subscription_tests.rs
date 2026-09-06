@@ -52,6 +52,64 @@ fn user_message(identity: &AgentTurnRef) -> AgentMessage {
 }
 
 #[tokio::test]
+async fn live_subscription_recovers_a_notice_published_after_a_newer_agent_fact() {
+    let (store, events, subscriptions) = fixture().await;
+    let identity = AgentTurnRef::new("session-1", "turn-1");
+    let commit =
+        commit_test_running_turn(store.as_ref(), identity.clone(), user_message(&identity)).await;
+    let mut subscription = subscriptions
+        .subscribe(TimelineSubscribeCommand {
+            session_id: identity.session_id.clone(),
+            turn_id: None,
+            after_event_id: Some(TimelineEventId::from_seq(commit.active_turn.last_event_seq)),
+            replay_limit: 1,
+            close_when_idle: false,
+            close_on_terminal: false,
+        })
+        .await
+        .unwrap();
+    let notice = store
+        .append_timeline_notice(talos_agent_api::TimelineSystemNotice {
+            identity: identity.clone(),
+            occurred_at: 11,
+            notice: talos_agent_api::AgentSystemNotice {
+                level: talos_types::TalosTimelineNoticeLevel::Warning,
+                content: talos_agent_api::SystemNoticeContent::Text(
+                    "Usage is delayed.".to_string(),
+                ),
+            },
+        })
+        .await
+        .unwrap();
+    let progress = store
+        .commit_progress_event(
+            AgentEvent {
+                identity,
+                sequence: commit.events.last().unwrap().sequence + 1,
+                occurred_at: 12,
+                payload: AgentEventPayload::MetricsUpdated(Default::default()),
+            },
+            commit.active_turn.last_event_seq,
+        )
+        .await
+        .unwrap();
+    let expected = vec![notice.event_seq, progress.active_turn.last_event_seq];
+    events.publish_committed(progress.events);
+    let mut received = Vec::new();
+    for _ in 0..2 {
+        let message = tokio::time::timeout(Duration::from_secs(2), subscription.events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let TimelineSubscriptionMessage::Event(event) = message else {
+            panic!("expected durable fact");
+        };
+        received.push(event.event_seq);
+    }
+    assert_eq!(received, expected);
+}
+
+#[tokio::test]
 async fn replay_returns_canonical_events_and_an_active_turn_projection() {
     let (store, _events, subscriptions) = fixture().await;
     let identity = AgentTurnRef::new("session-1", "turn-1");
@@ -181,7 +239,10 @@ async fn subscription_drains_sparse_turn_pages_before_live_handoff() {
             actual.event_id,
             TimelineEventId::from_seq(expected.event_seq).to_string()
         );
-        assert_eq!(actual.event.identity, second_identity);
+        assert_eq!(
+            actual.event.agent_event().unwrap().identity,
+            second_identity
+        );
     }
 
     let terminal = store
@@ -215,8 +276,8 @@ async fn subscription_drains_sparse_turn_pages_before_live_handoff() {
         message,
         TimelineSubscriptionMessage::Event(event)
             if event.event_seq == terminal_id
-                && event.event.identity == second_identity
-                && matches!(event.event.payload, AgentEventPayload::TurnCompleted(_))
+                && event.event.agent_event().unwrap().identity == second_identity
+                && matches!(event.event.agent_event().unwrap().payload, AgentEventPayload::TurnCompleted(_))
     ));
 }
 
@@ -271,7 +332,7 @@ async fn subscription_after_high_water_receives_one_terminal_then_closes() {
     assert!(matches!(
         event,
         TimelineSubscriptionMessage::Event(event)
-            if matches!(event.event.payload, AgentEventPayload::TurnCompleted(_))
+            if matches!(event.event.agent_event().unwrap().payload, AgentEventPayload::TurnCompleted(_))
     ));
     let closed = subscription
         .events

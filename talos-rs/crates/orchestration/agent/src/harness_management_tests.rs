@@ -2,8 +2,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use crate::{
-    AgentErrorKind, AgentInputParams, AgentInterruptParams, AgentRunSettlement,
-    AgentRunSettlementReceiver,
+    AgentInputParams, AgentInterruptParams, AgentRunSettlement, AgentRunSettlementReceiver,
 };
 use talos_agent_api::{AgentEvent, AgentEventPayload, AgentInterruptOutcome, AgentTurnRef};
 
@@ -64,7 +63,10 @@ async fn rejected_input_keeps_its_cause_after_provider_cleanup() {
         .consume()
         .await
         .expect_err("Provider rejection should be reported to the delivery owner");
-    assert_eq!(delivery_error.kind, AgentErrorKind::InputRejected);
+    assert_eq!(
+        delivery_error.error().error_code(),
+        talos_error::ErrorCode::InvalidRequest
+    );
 
     assert!(matches!(
         settlement.recv().await.expect("settle rejected input"),
@@ -190,8 +192,9 @@ async fn session_maintenance_conflicts_with_a_live_turn() {
             .clear_session(session_params())
             .await
             .expect_err("clear must conflict with live Turn")
-            .kind,
-        AgentErrorKind::ActiveTurnRunning
+            .error()
+            .error_code(),
+        talos_error::ErrorCode::ActiveTurnRunning
     );
     provider.release.notify_waiters();
     settlement.recv().await.expect("settle run");
@@ -237,8 +240,14 @@ async fn failed_session_acquisition_retains_unconfirmed_resources() {
         .unwrap();
     execution.admission.permit.consume().await.unwrap();
     assert_eq!(
-        execution.settlement.recv().await.unwrap_err().kind,
-        AgentErrorKind::RunFailure(talos_error::ErrorCode::RunCleanupUnconfirmed)
+        execution
+            .settlement
+            .recv()
+            .await
+            .unwrap_err()
+            .error()
+            .error_code(),
+        talos_error::ErrorCode::RunCleanupUnconfirmed
     );
 
     assert_eq!(

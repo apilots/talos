@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use talos_error::{TalosError, TalosFileErrorKind, TalosResult};
+use talos_error::{ErrorCode, TalosError, TalosResult};
 pub use talos_types::{ModelRef, ModelSpeed, ReasoningEffort};
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -172,8 +172,8 @@ pub trait LlmProvider: Send + Sync {
                 item_tokens: Vec::new(),
             });
         }
-        Err(TalosError::file_error(
-            TalosFileErrorKind::UnsupportedAttachment,
+        Err(TalosError::new(
+            ErrorCode::UnsupportedAttachment,
             "model attachments are unsupported",
         ))
     }
@@ -202,7 +202,10 @@ pub trait LlmProvider: Send + Sync {
 
     /// Provider-neutral model block stream.
     async fn stream_model_blocks(&self, _request: ChatRequest) -> TalosResult<ModelBlockStream> {
-        Err(TalosError::internal(format!(
+        Err(TalosError::internal(
+            "The configured provider must implement stream_model_blocks directly.",
+        )
+        .context(format!(
             "{} provider must implement stream_model_blocks directly",
             self.name()
         )))
@@ -331,7 +334,7 @@ impl ChatMessage {
         attachments: Vec<Attachment>,
     ) -> TalosResult<Self> {
         if attachments.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "attached user message must include at least one attachment".to_string(),
             ));
@@ -400,13 +403,13 @@ impl ChatMessage {
             return Ok(());
         };
         if attachments.is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "attachments must be omitted instead of empty".to_string(),
             ));
         }
         if self.role != Role::User {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 "only user messages may contain attachments".to_string(),
             ));
@@ -561,16 +564,12 @@ pub enum ModelBlockKind {
 /// it into its own assistant text phase before emitting kernel stream events.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum ModelOutputPhase {
+    #[default]
     Unknown,
     Commentary,
     FinalAnswer,
-}
-
-impl Default for ModelOutputPhase {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -701,7 +700,10 @@ impl SseLineDecoder {
                 line_bytes.pop();
             }
             lines.push(String::from_utf8(line_bytes).map_err(|err| {
-                TalosError::internal(format!("SSE line is not valid UTF-8: {err}"))
+                TalosError::internal_with_source(
+                    "SSE line is not valid UTF-8; technical details were withheld.",
+                    err,
+                )
             }));
         }
         lines

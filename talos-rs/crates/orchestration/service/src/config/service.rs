@@ -62,14 +62,14 @@ impl ConfigService {
 
     fn model_info_for_ref(&self, model_ref: &ModelRef) -> TalosResult<ModelInfo> {
         if model_ref.provider.trim().is_empty() || model_ref.id.trim().is_empty() {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ProviderUnavailable,
                 format!("{}:{}", model_ref.provider, model_ref.id),
             ));
         }
         let llm = self.config_store.load_llm_raw()?;
         let Some(provider) = provider_config_for_llm(&llm, &model_ref.provider) else {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::ProviderUnavailable,
                 format!("{}:{}", model_ref.provider, model_ref.id),
             ));
@@ -84,7 +84,7 @@ impl ConfigService {
                 model.clone(),
             ));
         }
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::ProviderUnavailable,
             format!("{}:{}", model_ref.provider, model_ref.id),
         ))
@@ -129,7 +129,7 @@ impl ConfigService {
 
     pub fn delete_config(&self, request: ConfigDeleteRequest) -> TalosResult<ConfigDeleteResponse> {
         Self::validate_delete_path(&request.path)?;
-        Err(TalosError::public(
+        Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             "config delete is not supported for llm".to_string(),
         ))
@@ -150,7 +150,7 @@ impl ConfigService {
 
     async fn reject_nonterminal_turns(&self) -> TalosResult<()> {
         if self.session_store.has_nonterminal_turns().await? {
-            return Err(TalosError::public(
+            return Err(TalosError::new(
                 talos_error::ErrorCode::Conflict,
                 "configuration cannot reload while an Agent Turn is non-terminal",
             ));
@@ -171,7 +171,7 @@ impl ConfigService {
     fn validate_delete_path(path: &str) -> TalosResult<()> {
         match path {
             "" | "llm" | "webSearch" => Ok(()),
-            other => Err(TalosError::public(
+            other => Err(TalosError::new(
                 talos_error::ErrorCode::InvalidRequest,
                 format!("unsupported config path: {}", other),
             )),
@@ -194,7 +194,7 @@ fn validate_web_search_provider_config(
         validate_web_search_base_url(provider_name, base_url)?;
     }
     if provider.timeout_ms == 0 {
-        return Err(TalosError::public(
+        return Err(TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("web search provider `{provider_name}` timeout_ms must be greater than 0"),
         ));
@@ -211,7 +211,7 @@ fn validate_web_search_base_url(provider_name: &str, base_url: &str) -> TalosRes
         .and_then(|(_, authority_and_path)| authority_and_path.chars().next())
         .is_some_and(|first| !matches!(first, '/' | '?' | '#'));
     let parsed = url::Url::parse(base_url).map_err(|_| {
-        TalosError::public(
+        TalosError::new(
             talos_error::ErrorCode::InvalidRequest,
             format!("web search provider `{provider_name}` base_url must be a valid HTTP(S) URL"),
         )
@@ -224,7 +224,7 @@ fn validate_web_search_base_url(provider_name: &str, base_url: &str) -> TalosRes
     {
         return Ok(());
     }
-    Err(TalosError::public(
+    Err(TalosError::new(
         talos_error::ErrorCode::InvalidRequest,
         format!("web search provider `{provider_name}` base_url must be a valid HTTP(S) URL"),
     ))

@@ -6,6 +6,7 @@ import { createJSONStorage } from "zustand/middleware";
 
 import { useAppStore } from "@/shared/store/app-store";
 import { useAuthBootstrap } from "./useAuthBootstrap";
+import { AppProtocol, TalosApiError } from "@talos/sdk-core";
 
 const getGatewayHealthMock = vi.fn();
 const getCurrentUserMock = vi.fn();
@@ -32,7 +33,7 @@ describe("useAuthBootstrap", () => {
     getCurrentUserMock.mockReset();
     getCurrentUserWithTokenMock.mockReset();
     readDesktopCloudSessionMock.mockReset();
-    clearDesktopCloudSessionMock.mockReset();
+    clearDesktopCloudSessionMock.mockReset().mockResolvedValue(undefined);
     const storage = new Map<string, string>();
     useAppStore.persist.setOptions({
       storage: createJSONStorage(() => ({
@@ -151,7 +152,9 @@ describe("useAuthBootstrap", () => {
   it("marks the connection unauthenticated when bearer verification fails", async () => {
     getGatewayHealthMock.mockResolvedValue({ auth_enabled: true });
     readDesktopCloudSessionMock.mockResolvedValue(null);
-    getCurrentUserMock.mockRejectedValue(new Error("401 Unauthorized"));
+    getCurrentUserMock.mockRejectedValue(new TalosApiError({
+      code: AppProtocol.ErrorCode.Unauthenticated, message: "The login session expired.", localization: null,
+    }));
 
     renderHook(() => useAuthBootstrap());
 
@@ -174,5 +177,14 @@ describe("useAuthBootstrap", () => {
     expect(readDesktopCloudSessionMock).not.toHaveBeenCalled();
     expect(getCurrentUserWithTokenMock).not.toHaveBeenCalled();
     expect(useAppStore.getState().connection.authStatus).toBe("logged_out");
+  });
+
+  it("shows backend failure without clearing credentials or redirecting to login", async () => {
+    getGatewayHealthMock.mockRejectedValue(new Error("Backend startup failed."));
+    renderHook(() => useAuthBootstrap());
+    await waitFor(() => expect(useAppStore.getState().connection).toMatchObject({
+      authStatus: "error", authError: { code: "internalError", message: "Backend startup failed.", localization: null },
+    }));
+    expect(clearDesktopCloudSessionMock).not.toHaveBeenCalled();
   });
 });
